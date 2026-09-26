@@ -53,6 +53,7 @@ const GTM = (goal: Record<string, unknown>) => ({
     { from: 'Outbound reps', to: 'New ARR', direction: 'positive', provenance: 'inferred' },
     { from: 'Self-serve conversion', to: 'New ARR', direction: 'positive', provenance: 'inferred' },
   ],
+  identities: [],
   unknowns: [],
 });
 
@@ -60,8 +61,8 @@ const GTM = (goal: Record<string, unknown>) => ({
 // by `buildCandidateSchema`. The live-schema guard below is what caught its absence,
 // which is the one part of that guard this change can vouch for. The goal's current
 // level (`baseline_*`, #1840) is required the same way; neither brief states one.
-const WITH_DEADLINE = GTM({ metric: 'New ARR', operator: '>=', target_stated: true, value: 3000000, unit: 'GBP', horizon_months: 18, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit' });
-const NO_DEADLINE = GTM({ metric: 'New ARR', operator: '>=', target_stated: true, value: 3000000, unit: 'GBP', horizon_months: null, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit' });
+const WITH_DEADLINE = GTM({ metric: 'New ARR', operator: '>=', target_stated: true, value: 3000000, unit: 'GBP', horizon_months: 18, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null });
+const NO_DEADLINE = GTM({ metric: 'New ARR', operator: '>=', target_stated: true, value: 3000000, unit: 'GBP', horizon_months: null, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null });
 
 /**
  * ⭐ THE FIXTURE MUST BE ONE THE REAL SCHEMA WOULD ACCEPT. A test in this area once

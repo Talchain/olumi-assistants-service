@@ -96,6 +96,12 @@ export interface CandidateModel {
     baseline_known?: boolean;
     baseline_value?: number | null;
     baseline_provenance?: string;
+    /**
+     * Whether the goal metric is one part or the whole (C46: "£20k MRR" — Pro MRR or total
+     * MRR?). Optional because the banked contract has no such field: absent or `null` means
+     * the drafter saw no part-or-whole reading, exactly what an older candidate meant.
+     */
+    scope?: GoalScopeDeclaration | null;
   };
   readonly constraints: readonly CandidateConstraint[];
   readonly options: readonly {
@@ -138,6 +144,56 @@ export interface CandidateModel {
   readonly risks: readonly { label: string; provenance: string }[];
   readonly outcomes: readonly { label: string; provenance: string }[];
   readonly links: readonly CandidateLink[];
+  /**
+   * Quantities the drafter DECLARES to be other quantities multiplied together (C46). Never
+   * inferred from a label. Optional because the banked contract has no such field: absent
+   * means none was declared, exactly what an older candidate meant.
+   */
+  readonly identities?: readonly CandidateIdentity[];
+}
+
+/**
+ * The drafter's declaration of what the goal metric covers when it could be one part or the
+ * whole. `modelled` is the scope the model measures, `alternative` the other reading, and
+ * `stated_in_brief` is true only when the brief itself says which.
+ */
+export interface GoalScopeDeclaration {
+  readonly modelled: string;
+  readonly alternative: string;
+  readonly stated_in_brief: boolean;
+}
+
+/** "`outcome` is `factors` multiplied together" — a definition the drafter states, by exact label. */
+export interface CandidateIdentity {
+  readonly outcome: string;
+  readonly operation: string;
+  readonly factors: readonly string[];
+  readonly provenance: string;
+}
+
+/**
+ * ⛔ C46 — THE TYPED MARK FOR A PRODUCT THE ANALYSIS CAN ONLY ADD UP.
+ *
+ * The analyse path is a linear SCM (`node = intercept + Σ parent × strength`, #70 5841215337),
+ * so a declared product is always approximated. When an option can push two of its inputs in
+ * opposite directions, even the SIGN of the effect is not provable over the plausible range
+ * (£49 → £59: −1,360 at 100 subscribers, +640 at 300; the linear model says −960 at both), and
+ * the ruling (#70 5841314428) is that no leader or decision-grade claim may rest on it:
+ * `sign_not_provable`. When every option moves the inputs the same way, the direction holds
+ * over the non-negative range and only the size is approximate: `sign_stable_provisional`.
+ *
+ * ⚠ CARRIED IN CONSTRUCTION ONLY. NodeV3 declares no field for it and the leader permission
+ * is written only in `run-analysis.ts`, so this mark cannot yet reach
+ * `analysis_state.leader_claim` — a named handoff, not an omission.
+ */
+export type NonlinearIdentityVerdict = 'sign_not_provable' | 'sign_stable_provisional';
+export interface NonlinearIdentityMark {
+  readonly outcome_id: string;
+  readonly operation: 'product';
+  readonly factor_ids: readonly string[];
+  readonly verdict: NonlinearIdentityVerdict;
+  /** Options that can move the inputs apart, by node id, in model order. Empty when stable. */
+  readonly options_not_sign_stable: readonly string[];
 }
 
 export interface WidenerAdditions {
@@ -241,6 +297,8 @@ export interface AdmittedModel {
   readonly withheld: readonly { from: string; to: string; reason: string; detail: string }[];
   /** Factors the model called controllable that no option changes — held as context (demoteUnreachedLevers). */
   readonly treated_as_context?: readonly string[];
+  /** Declared products that options move (`markProductIdentities`); each is also a `loss` entry. */
+  readonly nonlinear_identities?: readonly NonlinearIdentityMark[];
 }
 
 /** Shorten to the label budget at a word boundary, never mid-word. */
@@ -594,6 +652,168 @@ export function findMechanismPath(
   return null;
 }
 
+/**
+ * ⛔ C46 — "£20k MRR" IS NEVER SILENTLY PRO MRR (#70 5841314428: "scope … must be clarified
+ * or explicitly named before analysis; never silently pick one"). MEASURED on Paul's captured
+ * brief: the goal came back as bare "MRR" while every path into it was Pro price and Pro
+ * subscribers, and the scope question lived only in prose.
+ *
+ * Returns the scope to NAME and ASK about, or null: no declaration, a scope the brief itself
+ * stated, or a declaration with nothing to name. Read only from the drafter's declaration —
+ * never from the metric's wording.
+ */
+function unstatedGoalScope(goal: CandidateModel['goal']): { modelled: string; alternative: string } | null {
+  const s = goal.scope;
+  if (s === null || s === undefined || typeof s !== 'object' || s.stated_in_brief !== false) return null;
+  const modelled = typeof s.modelled === 'string' ? s.modelled.trim() : '';
+  const alternative = typeof s.alternative === 'string' ? s.alternative.trim() : '';
+  return modelled === '' || alternative === '' ? null : { modelled, alternative };
+}
+
+/** `"A"`, `"A" and "B"`, `"A", "B" and "C"` — words, never ids. */
+const quotedList = (items: readonly string[]): string => {
+  const q = items.map((s) => `"${s}"`);
+  return q.length <= 1 ? (q[0] ?? '') : `${q.slice(0, -1).join(', ')} and ${q[q.length - 1]}`;
+};
+
+/**
+ * ⛔ C46 STAGE 1 — CHECK A DECLARED PRODUCT, THEN ASK WHETHER ITS SIGN IS PROVABLE.
+ *
+ * DETECTION IS THE DRAFTER'S DECLARATION, CHECKED STRUCTURALLY, NEVER A LABEL READ. A
+ * declaration is used only when: the operation is `product`; the outcome and every factor
+ * resolve to quantities (goal / outcome / factor) in the admitted model; there are at least two
+ * distinct factors, none of them the outcome; and every factor FEEDS the outcome through the
+ * admitted links. Anything else is rejected and said (`nonlinear_identity_rejected`), and
+ * nothing about it is assumed. A product whose outcome does not reach the goal does not bear on
+ * the comparison and is not marked.
+ *
+ * THE SIGN TEST. For each option, its levers are the nodes it acts on (every edge out of it
+ * except a held status quo's repair edges). The sign of every simple causal path from a lever
+ * to each input is taken over the admitted links (never through the outcome itself; a lever
+ * that IS an input moves it +). Then:
+ *  · one input moved (or none): the product moves with that input — stable;
+ *  · two or more inputs moved by ONE lever, every path sign equal: they move together, and on
+ *    non-negative quantities the product moves the same way — stable;
+ *  · otherwise — opposite signs, a mixed input, or inputs moved by two separate levers whose
+ *    relative direction the structure does not state — NOT provable (conservative).
+ * Any option not provable makes the verdict `sign_not_provable`; otherwise, if any option moves
+ * an input, `sign_stable_provisional`. If no option moves an input, the comparison does not
+ * rest on the product and nothing is marked.
+ */
+function markProductIdentities(
+  declared: readonly CandidateIdentity[],
+  resolve: (label: string) => string | undefined,
+  nodes: readonly AdmittedNode[],
+  edges: readonly { from: string; to: string; effect_direction?: string; origin?: string }[],
+  goalId: string | undefined,
+): { marks: NonlinearIdentityMark[]; loss: RepairEntry[] } {
+  const marks: NonlinearIdentityMark[] = [];
+  const loss: RepairEntry[] = [];
+  if (declared.length === 0) return { marks, loss };
+  const kindOf = new Map(nodes.map((n) => [n.id, n.kind]));
+  const labelOf = (id: string): string => nodes.find((n) => n.id === id)?.label ?? id;
+  const QUANTITY = new Set<CandidateNodeKind>(['goal', 'outcome', 'factor']);
+  const INPUT = new Set<CandidateNodeKind>(['outcome', 'factor']);
+
+  // Causal links only: an option's edges are its LEVERS, the decision's are topology.
+  const causal = new Map<string, { to: string; sign: 1 | -1 }[]>();
+  for (const e of edges) {
+    const k = kindOf.get(e.from);
+    if (k === 'decision' || k === 'option') continue;
+    causal.set(e.from, [...(causal.get(e.from) ?? []), { to: e.to, sign: e.effect_direction === 'negative' ? -1 : 1 }]);
+  }
+  const reaches = (from: string, to: string): boolean => findMechanismPath(edges, from, to) !== null;
+  /** Signs of every simple causal path from → to, never passing through `avoid`. Over budget ⇒ both. */
+  const pathSigns = (from: string, to: string, avoid: string): Set<number> => {
+    if (from === to) return new Set([1]);
+    const signs = new Set<number>();
+    let budget = 20_000;
+    const seen = new Set([from]);
+    const walk = (at: string, sign: number): void => {
+      if (signs.size === 2 || --budget <= 0) return;
+      if (at === to) { signs.add(sign); return; }
+      for (const next of causal.get(at) ?? []) {
+        if (seen.has(next.to) || next.to === avoid) continue;
+        seen.add(next.to);
+        walk(next.to, sign * next.sign);
+        seen.delete(next.to);
+      }
+    };
+    walk(from, 1);
+    return budget <= 0 ? new Set([1, -1]) : signs;
+  };
+
+  for (const d of declared) {
+    const outcomeId = resolve(d.outcome);
+    const factors = Array.isArray(d.factors) ? d.factors : [];
+    const reject = (why: string): void => {
+      loss.push({
+        field_path: `nodes[${outcomeId ?? slugId(String(d.outcome))}].nonlinear_identity_rejected`,
+        before: { outcome: d.outcome, operation: d.operation, factors: [...factors] },
+        after: null,
+        reason:
+          `Olumi read "${d.outcome}" as ${quotedList(factors)} multiplied together, but ${why}, so that ` +
+          'was not used and nothing about it is assumed.',
+        severity: 'warn',
+      } as RepairEntry);
+    };
+    if (d.operation !== 'product') { reject(`"${String(d.operation)}" is not a relationship Olumi can check`); continue; }
+    if (outcomeId === undefined) { reject(`"${d.outcome}" is not in the model`); continue; }
+    if (!QUANTITY.has(kindOf.get(outcomeId)!)) { reject(`"${d.outcome}" is not a quantity in the model`); continue; }
+    const factorIds: string[] = [];
+    let why: string | null = null;
+    for (const f of factors) {
+      const id = resolve(f);
+      if (id === undefined) { why = `"${f}" is not in the model`; break; }
+      if (!INPUT.has(kindOf.get(id)!)) { why = `"${f}" is not a quantity in the model`; break; }
+      if (id === outcomeId) { why = `"${f}" cannot be multiplied into itself`; break; }
+      if (!reaches(id, outcomeId)) { why = `"${f}" does not feed into "${d.outcome}" in the model`; break; }
+      if (!factorIds.includes(id)) factorIds.push(id);
+    }
+    if (why === null && factorIds.length < 2) why = 'a product needs at least two different quantities';
+    if (why !== null) { reject(why); continue; }
+    if (goalId === undefined || (outcomeId !== goalId && !reaches(outcomeId, goalId))) continue;
+
+    const notStable: string[] = [];
+    let movedAny = false;
+    for (const o of nodes) {
+      if (o.kind !== 'option') continue;
+      const levers = [...new Set(edges.filter((e) => e.from === o.id && e.origin !== REPAIR_AUTHORED_ORIGIN).map((e) => e.to))];
+      const reaching = levers
+        .map((l) => factorIds.map((f) => pathSigns(l, f, outcomeId)))
+        .filter((perInput) => perInput.some((s) => s.size > 0));
+      if (reaching.length === 0) continue;
+      movedAny = true;
+      const moved = factorIds.filter((_, i) => reaching.some((perInput) => perInput[i]!.size > 0));
+      if (moved.length < 2) continue;
+      const provable = reaching.length === 1 && new Set(reaching[0]!.flatMap((s) => [...s])).size === 1;
+      if (!provable) notStable.push(o.id);
+    }
+    if (!movedAny) continue;
+
+    const verdict: NonlinearIdentityVerdict = notStable.length > 0 ? 'sign_not_provable' : 'sign_stable_provisional';
+    const outcomeLabel = labelOf(outcomeId);
+    const inputs = quotedList(factorIds.map(labelOf));
+    marks.push({ outcome_id: outcomeId, operation: 'product', factor_ids: factorIds, verdict, options_not_sign_stable: notStable });
+    loss.push({
+      field_path: `nodes[${outcomeId}].nonlinear_identity`,
+      before: { operation: 'product', factor_ids: factorIds },
+      after: { verdict, options_not_sign_stable: notStable },
+      reason: verdict === 'sign_not_provable'
+        ? `"${outcomeLabel}" is ${inputs} multiplied together, but Olumi's analysis cannot yet multiply quantities: ` +
+          `it adds up each effect separately. ${quotedList(notStable.map(labelOf))} can push ${inputs} in opposite ` +
+          `directions, so whether "${outcomeLabel}" rises or falls depends on how large each change is — and ` +
+          'adding the effects up can get even that direction wrong. So this model cannot yet show which option does ' +
+          `better on "${labelOf(goalId)}": treat its figures as a rough approximation, not a decision.`
+        : `"${outcomeLabel}" is ${inputs} multiplied together, and Olumi's analysis adds effects up rather than ` +
+          `multiplying them, so its figures for "${outcomeLabel}" are an approximation. Every option that changes ` +
+          'them moves them the same way, so the direction of the result holds, but treat its size as provisional.',
+      severity: verdict === 'sign_not_provable' ? 'warn' : 'info',
+    } as RepairEntry);
+  }
+  return { marks, loss };
+}
+
 export function admitCandidateModel(
   model: CandidateModel,
   widened: WidenerAdditions = {},
@@ -637,10 +857,22 @@ export function admitCandidateModel(
   const capFor = (label: string): number | undefined => capByLabel.get(label);
   const loss: RepairEntry[] = [];
 
+  /**
+   * ⭐ AN UNSTATED SCOPE IS NAMED IN THE GOAL ITSELF (C46; `unstatedGoalScope`). Only the
+   * DISPLAYED name changes: the entity label, which every id and link resolves by, stays the
+   * drafter's metric, so the goal keeps its id and every link still lands on it. A metric that
+   * already carries the modelled scope is left exactly as it is.
+   */
+  const goalScope = unstatedGoalScope(model.goal);
+  const goalDisplay = goalScope !== null && !canonicalLabel(model.goal.metric).includes(canonicalLabel(goalScope.modelled))
+    ? `${model.goal.metric} (${goalScope.modelled})`
+    : model.goal.metric;
+
   // Fixed traversal order => deterministic ids.
-  const entities: { label: string; kind: CandidateNodeKind; provenance: string; node?: Partial<AdmittedNode> }[] = [
+  const entities: { label: string; display?: string; kind: CandidateNodeKind; provenance: string; node?: Partial<AdmittedNode> }[] = [
     {
       label: model.goal.metric,
+      ...(goalDisplay !== model.goal.metric ? { display: goalDisplay } : {}),
       kind: 'goal',
       provenance: model.goal.provenance,
       node: (() => {
@@ -927,16 +1159,18 @@ export function admitCandidateModel(
     // A factor with NO baseline value gets no observed_state at all — an absent
     // value is the honest record; a zero would be a measurement. (An ESTIMATED
     // value is kept, stamped as Olumi's: `estimatedObservedState`.)
-    const label = shortLabel(e.label);
-    if (label !== e.label) {
+    // `display` differs from `label` only for a goal whose unstated scope is named (C46).
+    const full = e.display ?? e.label;
+    const label = shortLabel(full);
+    if (label !== full) {
       loss.push({
         code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE,
         layer: 'cee',
         field_path: `nodes[${id}].label`,
-        before: e.label,
+        before: full,
         after: label,
         reason:
-          `The label was ${e.label.length} characters. Any structural edit composes two labels into ` +
+          `The label was ${full.length} characters. Any structural edit composes two labels into ` +
           `a summary capped at 80, so a label over ${MAX_LABEL} makes the model uneditable. The full ` +
           'text is preserved on the node description and here.',
         severity: 'info',
@@ -946,10 +1180,23 @@ export function admitCandidateModel(
       id,
       kind: e.kind,
       label,
-      ...(label !== e.label ? { description: e.label } : {}),
+      ...(label !== full ? { description: full } : {}),
       provenance: displayProvenanceFor(e.provenance),
       ...(e.node ?? {}),
     });
+  }
+
+  // The scope choice, recorded with both readings; its reason IS the question the build asks.
+  if (goalScope !== null) {
+    loss.push({
+      field_path: `nodes[${ids.get(model.goal.metric)!}].goal_scope`,
+      before: { metric: model.goal.metric, modelled: goalScope.modelled, alternative: goalScope.alternative },
+      after: goalDisplay,
+      reason:
+        `The brief does not say whether your "${model.goal.metric}" goal covers ${goalScope.modelled} or ` +
+        `${goalScope.alternative}, so the model measures it for ${goalScope.modelled}. Which did you mean?`,
+      severity: 'warn',
+    } as RepairEntry);
   }
 
   const allLinks: CandidateLink[] = [...model.links, ...(widened.proposed_links ?? [])];
@@ -1530,11 +1777,31 @@ export function admitCandidateModel(
     } as RepairEntry);
   }
 
+  // C46: declared products, checked against the FINAL admitted structure (`markProductIdentities`).
+  // An exact label first, then the same words ignoring case and spacing — never a fuzzy guess.
+  const resolveEntity = (label: string): string | undefined => {
+    if (typeof label !== 'string') return undefined;
+    const exact = ids.get(label);
+    if (exact !== undefined) return exact;
+    const wanted = canonicalLabel(label);
+    for (const [l, id] of ids) if (canonicalLabel(l) === wanted) return id;
+    return undefined;
+  };
+  const products = markProductIdentities(
+    Array.isArray(model.identities) ? model.identities : [],
+    resolveEntity,
+    levers.nodes,
+    finalEdges,
+    goalForReach?.id,
+  );
+  loss.push(...products.loss);
+
   return {
     nodes: levers.nodes,
     inference_classes,
     edges: finalEdges,
     ...(levers.demoted.length > 0 ? { treated_as_context: levers.demoted } : {}),
+    ...(products.marks.length > 0 ? { nonlinear_identities: products.marks } : {}),
     goal_constraints: constraintResult.constraints,
     loss,
     // `withheld` is a list of LINKS by contract; a withheld NODE is reported

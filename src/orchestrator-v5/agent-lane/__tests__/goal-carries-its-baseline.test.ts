@@ -30,7 +30,7 @@ function pricing(goal: Partial<CandidateModel['goal']> = {}): CandidateModel {
   return {
     goal: {
       metric: 'Monthly recurring revenue', operator: '>=', target_stated: true, value: 20000, unit: 'GBP', horizon_months: null, provenance: 'explicit',
-      baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', ...goal,
+      baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null, ...goal,
     },
     constraints: [],
     options: [
@@ -44,6 +44,7 @@ function pricing(goal: Partial<CandidateModel['goal']> = {}): CandidateModel {
     ],
     risks: [], outcomes: [],
     links: [{ from: 'Pro plan price', to: 'Monthly recurring revenue', direction: 'positive', provenance: 'inferred' }],
+    identities: [],
   } as unknown as CandidateModel;
 }
 
