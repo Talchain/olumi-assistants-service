@@ -29,13 +29,13 @@ import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchai
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 import { readIsBaseline } from '../../cee/baseline-identity.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
-import { isPercentScaledUnit, unitPinnedScaleFrame } from '../../cee/draft/records/unit-scale-class.js';
+import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import { sizeLink, type LinkSizing, type MagnitudeNode } from '../../cee/magnitude/link-effect.js';
 import {
   admitCandidateConstraints,
-  canonicaliseLimitUnit,
+  percentLevelFrame,
   type CandidateConstraint,
   type AdmittedConstraint,
 } from './admit-constraint.js';
@@ -2395,8 +2395,8 @@ function admitOnce(
   const limitedLevelFrames = new Map<string, number>();
   for (const c of model.constraints) {
     if (inferenceClassFor(c.provenance) !== 'brief_stated') continue;
-    const frame = unitPinnedScaleFrame(c.unit, c.value);
-    if (frame === undefined || canonicaliseLimitUnit(c.value, c.unit, { scale_frame: frame }).unit !== '%') continue;
+    const frame = percentLevelFrame(c.value, c.unit);
+    if (frame === undefined) continue;
     const id = nodeIdForMetric(c.metric);
     if (id !== undefined) limitedLevelFrames.set(id, frame);
   }
@@ -2617,6 +2617,15 @@ function admitOnce(
   for (const bundle of interventionsByOption.values()) {
     for (const [factorId, level] of Object.entries(bundle)) optionLevelsById.set(factorId, [...(optionLevelsById.get(factorId) ?? []), level.value]);
   }
+  // A node a LEVEL limit in "%" names is a percentage level (`MagnitudeNode.percent_level`): the limit's own unit, read
+  // by the one canonicaliser the limit is admitted with — never the node unit's wording (served Run 1: "% of Pro
+  // subscribers per month" left churn with no domain, so its links kept ±0.5 and no option was decision-grade).
+  const percentLevelIds = new Set<string>();
+  for (const c of model.constraints) {
+    if (c.frame !== 'level' || percentLevelFrame(c.value, c.unit) === undefined) continue;
+    const id = nodeIdForMetric(c.metric);
+    if (id !== undefined) percentLevelIds.add(id);
+  }
   const magnitudeNodeById = new Map<string, MagnitudeNode>(nodes.map((n) => [n.id, {
     label: n.label,
     kind: n.kind,
@@ -2626,6 +2635,7 @@ function admitOnce(
     goal_threshold_unit: n.goal_threshold_unit,
     unit: unitById.get(n.id) ?? null,
     option_levels: optionLevelsById.get(n.id) ?? [],
+    ...(percentLevelIds.has(n.id) ? { percent_level: true } : {}),
   }]));
   const sizing = new Map<string, LinkSizing>();
   for (const l of resolvable) {

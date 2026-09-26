@@ -451,6 +451,10 @@ async function applyApprovedFactorValues(
       || (typeof node.scale_frame === 'number' && node.scale_frame > 1)) return refuseFrame('frame_not_applicable', i);
     (node as Record<string, unknown>).observed_state = { ...os, value: raw / f.cap, raw_value: raw, cap: f.cap, declared_scale: 'unit_interval' };
   }
+  // ⭐ A RANGE MOVES OLUMI'S LINKS TOO (MG #70 5849581652): the level a frame sets is a level like any other, so the
+  // Olumi-sized links on that factor are re-derived on it — the same contract the value writer applies (#2033), and the
+  // one the scope guard below re-derives over the values and frames together.
+  for (const id of framedIds) working = frameDefaultedLinks(working, id).graph;
   const graph = projectGraphForPersistence(working);
   const touched = [...new Set([...values.map(v => v.factorId), ...frames.map(f => f.factorId)])];
   if (!isEditableGraph(graph) || !factorValuesPostimageIsScoped(before, graph, touched)) {
@@ -559,7 +563,12 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     valueConfirmations = applied.confirmations;
   }
   const valuesChanged = values.length + frames.length > 0 && !isDeepStrictEqual(levelBase, before);
-  const candidate = applyOptionInterventionBatch({ ...common, expectedGraphHash: levelBaseHash, persistedGraph: levelBase, targets });
+  // ⭐ A VALUES-ONLY APPROVAL IS ONE COMMIT TOO (Canonical #70 5850018984): Olumi's starting point is usually values
+  // with no level, and wrote each value as its own commit. With no level to prepare, the values (and their ranges)
+  // are the whole plan: the same writer, adoption authority, scope guard, ONE append and ONE read-back.
+  const candidate = targets.length === 0 && values.length + frames.length > 0
+    ? ({ kind: 'unchanged' } as const)
+    : applyOptionInterventionBatch({ ...common, expectedGraphHash: levelBaseHash, persistedGraph: levelBase, targets });
   if (candidate.kind === 'refused') return candidate;
   if (candidate.kind === 'unchanged' && !valuesChanged) return candidate;
   // Every level already held (a compound whose values alone change): the values commit on their own, still ONE append.

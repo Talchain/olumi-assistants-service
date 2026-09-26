@@ -801,7 +801,7 @@ export function createAgentCapabilities(
    * cannot tell that a run happened this turn, or that it was the automatic
    * first pass. No `trigger` ⇒ the user asked for the run.
    */
-  onAnalysis?:(payload: { scenario_id: string; status: number; analysis_state?: unknown; analysis_ready?: unknown; blocks?: unknown[]; trigger?: 'auto_first_pass' }) => void,
+  onAnalysis?:(payload: { scenario_id: string; status: number; analysis_state?: unknown; analysis_ready?: unknown; blocks?: unknown[]; trigger?: 'auto_first_pass'; run_delta?: unknown }) => void,
   /**
    * ⭐ THE AUTOMATIC FIRST ANALYSIS (Paul, 5812069638), injected by the route so the run, its turn
    * deadline and its write accounting stay the route's. Absent → no automatic run (a unit test, or a
@@ -4198,7 +4198,9 @@ export function createAgentCapabilities(
       const ready = (r.json.analysis_ready ?? {}) as Record<string, unknown>;
       const blocks = (r.json.blocks as { type: string }[] | undefined) ?? [];
       const result = blocks.find((b) => b.type === 'analysis_result');
-      onAnalysis?.({ scenario_id: ctx.scenario_id, status: r.status, analysis_state: r.json.analysis_state, analysis_ready: r.json.analysis_ready, blocks });
+      // The run turn's own run-over-run block rides with its result; the route shows it only beside this run.
+      onAnalysis?.({ scenario_id: ctx.scenario_id, status: r.status, analysis_state: r.json.analysis_state, analysis_ready: r.json.analysis_ready, blocks,
+        ...(r.json.run_delta !== undefined ? { run_delta: r.json.run_delta } : {}) });
       const permissions = claimPermissionsFrom(r.json.analysis_state, r.json.analysis_ready, { requested: true });
       // ⛔ C46 (d): only a run that produced a result and withheld its leader is read against the model
       // (one graph read); a named leader means the Run's own stamp found no product in the way.
