@@ -30,6 +30,7 @@
 
 import { REPAIR_CODES, type RepairEntry } from '@talchain/schemas';
 import { classifyUnitScaleClass, UNIT_SCALE_CLASS_TOKENS } from '../../cee/draft/records/unit-scale-class.js';
+import { isCurrencyUnit, sameUnit } from '../../utils/currency-alphabet.js';
 
 export type CandidateOperator = '>=' | '<=' | '>' | '<';
 export type CanonicalOperator = '>=' | '<=';
@@ -96,8 +97,8 @@ export interface AdmittedConstraint {
 const PERCENT_HEADS: readonly string[] = [...(UNIT_SCALE_CLASS_TOKENS.find(([cls]) => cls === 'percent')?.[1] ?? [])]
   .sort((a, b) => b.length - a.length);
 const PERIOD_TAIL = /^(?:(?:per|a|an|each|\/)\s*(?:month|year|annum|quarter|week|day)|monthly|annually|annual|yearly|quarterly|weekly|daily|p\.?a\.?)?$/;
-const MAGNITUDE_UNIT = /^(£|gbp|\$|usd|€|eur)\s*(k|m)$/;
-const CURRENCY_FAMILY: Readonly<Record<string, string>> = { '£': 'gbp', gbp: 'gbp', $: 'usd', usd: 'usd', '€': 'eur', eur: 'eur' };
+/** A unit that ends in a magnitude suffix; whether its head is a currency is asked of the ONE vocabulary below. */
+const MAGNITUDE_SUFFIX = /^(.*?)\s*([km])$/i;
 
 /**
  * ⛔⛔ THE TARGET NODE DECIDES, NOT THE LIMIT'S UNIT ALONE (#1934 review 5841434798).
@@ -134,13 +135,23 @@ function isPercentWithPeriod(unit: string): boolean {
 
 /**
  * True only when the node's level IS the percentage ÷ 100 — the one scale PLoT's `"%"` rung lands on. A frame of
- * exactly 100 (`cap`, else the estimate's `scale_frame`), or an unframed level that is already a proportion in
- * [0, 1) (the served churn shape: 0.07; PLoT's own `"%"` rule reads a sub-1 value as a fraction too).
+ * exactly 100 (`cap`, else the estimate's `scale_frame` — the served agent-lane churn estimate, `{value 0.07,
+ * raw_value 7}` + `scale_frame 100`), or an unframed, UNITLESS level already in [0, 1).
+ *
+ * ⛔ An unframed level in a PERCENT spelling is not provably a proportion (review 5841746528): `0.8 "percent per
+ * month"` may be 0.8% or 80%. Read as a proportion it would turn PLoT's fail-closed `inferred_value` into a
+ * decision-grade `unit_percent` threshold on a node at 0.8. It stays verbatim, so PLoT flags it.
  */
 function levelIsPercentOver100(target: LimitTargetScale): boolean {
   if (target.cap !== undefined) return target.cap === 100;
   if (target.scale_frame !== undefined) return target.scale_frame === 100;
-  return target.raw_value === undefined && typeof target.value === 'number' && target.value >= 0 && target.value < 1;
+  return (
+    target.unit === undefined &&
+    target.raw_value === undefined &&
+    typeof target.value === 'number' &&
+    target.value >= 0 &&
+    target.value < 1
+  );
 }
 
 export function canonicaliseLimitUnit(value: number, unit: string | undefined, target?: LimitTargetScale): UnitCanonical {
@@ -148,29 +159,35 @@ export function canonicaliseLimitUnit(value: number, unit: string | undefined, t
   const verbatim: UnitCanonical = { value, unit };
 
   if (isPercentWithPeriod(unit) && Math.abs(value) >= 1 && Math.abs(value) <= 100) {
-    const relabel = (to: string): UnitCanonical => ({
-      value,
-      unit: to,
-      provenance_unit_relabelled: { rule: 'agent_lane_limit_unit_v1', pre_normalisation_value: value, pre_normalisation_unit: unit },
-    });
+    // A rewrite onto the spelling the limit already has is no rewrite: nothing to stamp.
+    const relabel = (to: string): UnitCanonical =>
+      to === unit
+        ? verbatim
+        : {
+            value,
+            unit: to,
+            provenance_unit_relabelled: { rule: 'agent_lane_limit_unit_v1', pre_normalisation_value: value, pre_normalisation_unit: unit },
+          };
     if (target === undefined) return verbatim;
     const nodeUnit = target.unit;
     // A node that is not a plain percent (a count, "percentage points") is not the limit's scale: PLoT refuses it.
     if (nodeUnit !== undefined && !isPercentWithPeriod(nodeUnit)) return verbatim;
     // The same spelling on a capped node: PLoT already reconciles it against the cap.
     if (target.cap !== undefined && nodeUnit !== undefined && norm(nodeUnit) === norm(unit)) return verbatim;
-    if (levelIsPercentOver100(target)) return unit === '%' ? verbatim : relabel('%');
+    if (levelIsPercentOver100(target)) return relabel('%');
     // A capped node in a spelling PLoT does NOT read as `"%"`: adopt that spelling, so the limit reaches
     // `explicit_cap [0,cap]` and reconciles. A `"%"`-token node has no such spelling — PLoT ignores its cap.
     if (target.cap !== undefined && nodeUnit !== undefined && !PERCENT_HEADS.includes(norm(nodeUnit))) return relabel(nodeUnit);
     return verbatim;
   }
 
-  const m = MAGNITUDE_UNIT.exec(norm(unit));
+  // The currency vocabulary is the estate's one list (`utils/currency-alphabet.ts`), never a private copy: the head must
+  // be a recognised currency, and the node must be in the BARE currency of the SAME one (`sameUnit`: £ ≡ GBP). The
+  // node's own spelling is emitted, so PLoT reads a single unit.
+  const m = MAGNITUDE_SUFFIX.exec(unit.trim());
   const currencyNode = target?.unit;
-  // Only onto a node in the BARE currency of the same family, in the node's own spelling: PLoT then reads one unit.
-  if (m !== null && currencyNode !== undefined && CURRENCY_FAMILY[norm(currencyNode)] === CURRENCY_FAMILY[m[1]]) {
-    const scaled = Number(`${value}e${m[2] === 'k' ? 3 : 6}`);
+  if (m !== null && currencyNode !== undefined && isCurrencyUnit(m[1]) && isCurrencyUnit(currencyNode) && sameUnit(currencyNode, m[1])) {
+    const scaled = Number(`${value}e${m[2].toLowerCase() === 'k' ? 3 : 6}`);
     if (Number.isFinite(scaled)) {
       return {
         value: scaled,

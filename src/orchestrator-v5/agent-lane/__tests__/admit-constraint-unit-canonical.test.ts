@@ -183,6 +183,8 @@ describe('the rewrite is decided by the TARGET NODE\'s scale, never by the limit
   for (const [why, target] of [
     ['a "%" node capped at 20 (as "%" the cap is ignored; no spelling reconciles, so PLoT must refuse it)', { unit: '%', cap: 20, value: 0.35, raw_value: 7 }],
     ['a capless node whose level is a RAW 7 (not a proportion)', { unit: 'percent per month', value: 7 }],
+    ['a capless, UNITLESS node whose level is a raw 7 (not a proportion)', { value: 7 }],
+    ['a capless 0.07 in a PERCENT spelling (0.07% or 7%? not provable — review 5841746528)', { unit: 'percent per month', value: 0.07 }],
     ['an estimate framed on 20 (level = raw/20)', { unit: '%', value: 0.35, raw_value: 7, scale_frame: 20 }],
     ['a level carrying a separate raw figure but no frame (not provably a proportion)', { unit: '%', value: 0.35, raw_value: 7 }],
     ['a node that is not a percent at all', { unit: 'customers', cap: 1000, value: 0.2, raw_value: 200 }],
@@ -217,7 +219,6 @@ describe('the rewrite is decided by the TARGET NODE\'s scale, never by the limit
   for (const [why, target] of [
     ['a node capped at exactly 100', { unit: '%', cap: 100, value: 0.07, raw_value: 7 }],
     ['an estimate framed on 100', { unit: '%', value: 0.07, raw_value: 7, scale_frame: 100 }],
-    ['a capless PROPORTION in the same unit (the served churn shape)', { unit: 'percent per month', value: 0.07 }],
     ['a capless proportion with no unit', { value: 0.07 }],
   ] as const) {
     it(`CONTROL: "percent per month" 10 is "%" on ${why}`, () => {
@@ -256,9 +257,10 @@ describe('admitCandidateModel hands each limit its target node', () => {
       .toMatchObject({ unit: 'percent per month', value: 10 });
   });
 
-  it('the served shape — a proportion baseline (0.07) with no usable range — admits the limit as "%"', () => {
-    expect(admittedLimit({ unit: 'percent per month', baseline_value: 0.07, plausible_max: 0.2 }, { value: 10, unit: 'percent per month' }))
-      .toMatchObject({ unit: '%', value: 10 });
+  it('a percent-spelled baseline below 1 with no usable range stays verbatim (0.8 "percent per month" is 0.8% or 80%: PLoT must flag it)', () => {
+    const c = admittedLimit({ unit: 'percent per month', baseline_value: 0.8, plausible_max: 1 }, { value: 1, unit: 'percent per month' });
+    expect(c).toMatchObject({ unit: 'percent per month', value: 1 });
+    expect(stampKeys(c)).toEqual([]);
   });
 
   it('an AI ESTIMATE framed on 100 (scale_frame, no cap) admits the limit as "%" — the node frame reaches the rewrite', () => {
