@@ -209,7 +209,8 @@ describe('⛔ an orphaned goal is NOT repaired with a sign nobody stated (#63 57
     const reg = (bodies[0] as { graph: { edges: { to: string }[] } }).graph;
     expect(reg.edges.filter((e) => e.to === goal.id)).toEqual([]);
     expect(out.withheld).toContainEqual({ from: outcome.id, to: goal.id, reason: 'no_authored_direction' });
-    expect(out.open_questions).toEqual([QUESTION]);
+    // The fixture's stated 3-month deadline is asked first (construction-goal-losses-are-said.test.ts).
+    expect(out.open_questions).toEqual(['Does "Productivity change" get there within 3 months? The model holds no deadline yet, so no result answers that.', QUESTION]);
   });
 
   it('CONTRAST: an outcome -> goal link with a STATED direction still reaches the goal, with that sign', () => {

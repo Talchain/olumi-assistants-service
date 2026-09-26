@@ -33,6 +33,8 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
   const CLAIMING = 'Your starting assumptions were applied before this run. In the current model, the result turns on Capacity.';
   // A BLOCKED Run: HTTP 200, no analysis_result, Olumi's own explanation (the real recoverable shape).
   let blocked = false;
+  // The inner run turn FAILS (served 319dde1, Canvas 01:42:15Z: `scenario_read_failed` → 500) while the readback says stale/graph_changed.
+  let failed = false;
   const BLOCKED_WORDS = 'I can\'t run the analysis yet: no option has a path to the goal.';
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
@@ -53,8 +55,9 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
     process.env.AGENT_LANE_PREVIEW = 'false';
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
-    app.post('/orchestrate/v2/turn', async () => {
+    app.post('/orchestrate/v2/turn', async (_req, reply) => {
       runs += 1;
+      if (failed) return reply.code(500).send({ error: 'INTERNAL_ERROR', details: { retryable: true, reason: 'handler_invocation_failed', stage: 'analyse' } });
       if (blocked) {
         return { response_version: 2, assistant_text: BLOCKED_WORDS, suggested_actions: [], insights: [], graph_hash: 'h1',
           blocks: [], analysis_ready: { status: 'blocked', options: [], blockers: [{ code: 'NO_PATH_TO_GOAL' }] } };
@@ -66,13 +69,15 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
       graph: { nodes: [{ id: 'g', kind: 'goal', label: 'Velocity' }, { id: 'f', kind: 'factor', label: 'Capacity' }], edges: [{ from: 'f', to: 'g' }] },
       graph_hash: 'h1',
       // The canonical verdict the interpreter must be GIVEN (Paul's case: a guardrail the engine could not score).
-      analysis_state: { run_state: { kind: 'complete_current' }, leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } },
+      analysis_state: failed
+        ? { run_state: { kind: 'complete_stale', cause: 'graph_changed' }, requires_rerun: true, leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } }
+        : { run_state: { kind: 'complete_current' }, leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } },
     }));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { modelBodies = []; runs = 0; interp = 'ok'; blocked = false; });
+  beforeEach(() => { modelBodies = []; runs = 0; interp = 'ok'; blocked = false; failed = false; });
 
   it('RED: a typed Run chip → the analysis runs once, and exactly ONE model call interprets it with tool_choice none', async () => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
@@ -244,5 +249,32 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
     expect(b._diagnostic_trace.fast_path).toBe('run');
     expect(b.assistant_text).toContain(CLAIMING);
     expect(b.assistant_text).not.toContain('Nothing was saved this turn');
+  });
+
+  it('RED (served 319dde1, 01:42Z): the run itself FAILS → ONE plain, true sentence and NO model call — never an invented cause ("the saved graph has changed")', async () => {
+    failed = true;
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
+    } });
+    expect(r.statusCode).toBe(200);
+    const b = r.json() as { assistant_text: string; _agent: { tool_calls: { name: string; ok: boolean; refusal?: string }[] } };
+    expect(modelBodies, 'a failed run is not interpreted by a model').toEqual([]);
+    expect(b.assistant_text, b.assistant_text).toMatch(/couldn\u2019t run the analysis/);
+    expect(b.assistant_text).toMatch(/Nothing in your model changed/);
+    expect(b.assistant_text, 'no invented cause').not.toMatch(/graph has changed|historical|stale/i);
+    expect(b._agent.tool_calls).toEqual([expect.objectContaining({ name: 'run_analysis', ok: false, refusal: 'run_failed' })]);
+  });
+
+  it('the Agent\'s own run_analysis call that fails is told plainly what to say — and not to give a reason', async () => {
+    failed = true;
+    const { createAgentCapabilities } = await import('../runtime/agent-capabilities.js');
+    const { ProposalStore } = await import('../proposal.js');
+    const caps = createAgentCapabilities(async (path) => {
+      if (path === '/orchestrate/v2/turn') return { status: 500, json: { error: 'INTERNAL_ERROR' } };
+      return { status: 200, json: {} };
+    }, new ProposalStore());
+    const res = await caps.runAnalysis({ scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r' }, { reason: 'asked' });
+    expect(res).toEqual(expect.objectContaining({ ok: false, ran: false, refusal: 'run_failed' }));
+    expect(String(res.detail)).toMatch(/do not give any other reason/);
   });
 });

@@ -24,6 +24,8 @@ import {
 } from '../coaching/fragile-link-challenge.js';
 import { buildNoFlaggedLinkCard } from '../coaching/no-flagged-link-card.js';
 import { buildLimitUncheckedCard, leaderWithheldForALimit } from '../coaching/limit-unchecked-card.js';
+import { graphBoundToHash, soleLimitNodeLabel } from '../coaching/bound-graph.js';
+import { edgeAuthorshipIn } from '../coaching/edge-strength-authorship.js';
 import { WITHHELD_NEAR_TIE } from '../compose/analysis-state-v1.js';
 import { summaryAsksUserToRepairALimit } from '../coaching/constraint-gap-disclosure.js';
 
@@ -43,6 +45,11 @@ export interface RunTurnCoachingFinal {
   graphHash?: string;
   analysisState?: unknown;
   analysisResult?: unknown;
+  /**
+   * The readback's own graph (the same `readBackState` read as the fields above). A card reads a
+   * fact from it ONLY after `coaching/bound-graph.ts` proves its analysis-affecting hash is `graphHash`.
+   */
+  graph?: unknown;
 }
 
 export interface RunTurnCoachingResult {
@@ -219,6 +226,8 @@ export function runTurnCoaching(
   if (summaryAsksUserToRepairALimit(bound.analysisResult.summary)) {
     return { blocks: upstream, eligibility: { eligible: false, reason: 'limit_repair_pending' } };
   }
+  // The run's own graph, only when its analysis-affecting hash is the bound run's.
+  const boundGraph = graphBoundToHash(final.graph, bound.graphHash);
   // (3)–(5) grounding, claim policy, copy — the producer's gates.
   const input: FragileLinkChallengeInput = {
     analysisResult: bound.analysisResult,
@@ -229,6 +238,7 @@ export function runTurnCoaching(
     // `fresh`) and the hash binding above held — the strictest faithful verdict here.
     freshness: 'fresh',
     optionLabels: optionLabelsFromReady(captured.analysis_ready),
+    edgeAuthorship: edgeAuthorshipIn(boundGraph),
   };
   // (2c) ONE next action, TYPED: when the READBACK's leader claim is withheld for
   // a limit, the limit is the decisive caveat — the limit card is the turn's one
@@ -237,7 +247,8 @@ export function runTurnCoaching(
   // confinement.ts), so the prose gate above is blind there. A refused limit card
   // fails CLOSED (no card), never back to a link card.
   if (leaderWithheldForALimit(final.analysisState)) {
-    const limit = buildLimitUncheckedCard(input);
+    const limitLabel = boundGraph !== null ? soleLimitNodeLabel(boundGraph) ?? undefined : undefined;
+    const limit = buildLimitUncheckedCard(input, limitLabel);
     if (limit.block === null) return { blocks: upstream, eligibility: { eligible: false, reason: limit.reason } };
     return { blocks: dedupeByBlockId([...upstream, limit.block]), eligibility: { eligible: true } };
   }

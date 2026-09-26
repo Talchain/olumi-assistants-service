@@ -92,7 +92,17 @@ async function canonicalEntities(raw: unknown): Promise<Record<string, unknown>[
 }
 
 const goalOf = (g: Graph) => g.nodes.find((n) => n.kind === 'goal')!;
-const questions = (out: Record<string, unknown>) => (out.open_questions as string[] | undefined) ?? [];
+/** The deadline question staging #1939 asks first for Paul's "within 12 months" (exact sentence, by the goal's metric). */
+const deadlineQuestion = (metric: string) =>
+  `Does "${metric}" get there within 12 months? The model holds no deadline yet, so no result answers that.`;
+const allQuestions = (out: Record<string, unknown>) => (out.open_questions as string[] | undefined) ?? [];
+/** Every open question except the deadline one (#1939), which this brief's 12-month horizon always adds. */
+const questions = (out: Record<string, unknown>) => {
+  const all = allQuestions(out);
+  const deadline = all.filter((q) => /^Does ".*" get there within 12 months\? The model holds no deadline yet, so no result answers that\.$/.test(q));
+  expect(deadline, JSON.stringify(all)).toHaveLength(1);
+  return all.filter((q) => !deadline.includes(q));
+};
 const notRepresented = (out: Record<string, unknown>) => (out.not_represented as string[] | undefined) ?? [];
 const scopeLoss = (m: ReturnType<typeof admitCandidateModel>) => m.loss.filter((l) => /\.goal_scope$/.test(l.field_path));
 const SCOPE_ASSUMPTION =
@@ -147,6 +157,8 @@ describe('an unstated scope is named in the goal and asked, never silently picke
   it('RED: the question is asked ONCE, first, in the existing open_questions channel, beside the drafter’s own', async () => {
     const { out } = await build(pricing('MRR', AMBIGUOUS, ['How price-sensitive are current Pro subscribers?']));
     expect(questions(out)).toEqual([SCOPE_QUESTION, 'How price-sensitive are current Pro subscribers?']);
+    // Merged with staging #1939: the scope question leads, the deadline question second, then the drafter's.
+    expect(allQuestions(out)).toEqual([SCOPE_QUESTION, deadlineQuestion('MRR'), 'How price-sensitive are current Pro subscribers?']);
   });
 
   it('RED: admission records the choice as a warning on the goal, with both readings', () => {
@@ -164,7 +176,7 @@ describe('an unstated scope is named in the goal and asked, never silently picke
       const { graph, out } = await build(pricing(metric, AMBIGUOUS));
       expect(goalOf(graph).label, metric).toBe(metric);
       expect(goalOf(graph).description, metric).toBeUndefined();
-      expect(out, metric).not.toHaveProperty('open_questions');
+      expect(questions(out), metric).toEqual([]);
       expect(scopeLoss(admitCandidateModel(pricing(metric, AMBIGUOUS) as unknown as CandidateModel)), metric).toEqual([]);
     }
   });
@@ -200,7 +212,7 @@ describe('an unstated scope is named in the goal and asked, never silently picke
   it('CONTROL (a): a complement word that is PART of the modelled scope still states it ("plans other than Pro")', async () => {
     const others: Scope = { modelled: 'plans other than Pro', alternative: 'all plans together', stated_in_brief: false };
     const { out } = await build(pricing('MRR from plans other than Pro', others));
-    expect(out).not.toHaveProperty('open_questions');
+    expect(questions(out)).toEqual([]);
     expect(scopeLoss(admitCandidateModel(pricing('MRR from plans other than Pro', others) as unknown as CandidateModel))).toEqual([]);
     // …and a metric that names the complement of THAT scope ("Pro MRR") is asked.
     expect(questions((await build(pricing('Pro MRR', others))).out)).toHaveLength(1);
@@ -223,14 +235,14 @@ describe('controls: a stated scope, or no scope question at all, changes nothing
   it('CONTROL: "total MRR" stated in the brief: no question, no rename, no ledger entry', async () => {
     const { graph, out } = await build(pricing('Total MRR', STATED_TOTAL));
     expect(goalOf(graph).label).toBe('Total MRR');
-    expect(out).not.toHaveProperty('open_questions');
+    expect(questions(out)).toEqual([]);
     expect(scopeLoss(admitCandidateModel(pricing('Total MRR', STATED_TOTAL) as unknown as CandidateModel))).toEqual([]);
   });
 
   it('CONTROL: scope null (a metric with no part-or-whole reading): no question, no rename', async () => {
     const { graph, out } = await build(pricing('MRR', null));
     expect(goalOf(graph).label).toBe('MRR');
-    expect(out).not.toHaveProperty('open_questions');
+    expect(questions(out)).toEqual([]);
   });
 });
 

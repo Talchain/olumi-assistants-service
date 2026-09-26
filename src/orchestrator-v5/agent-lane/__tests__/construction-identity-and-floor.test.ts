@@ -177,7 +177,8 @@ describe('⛔ identity is the FULL stated text and the stated direction (Panel p
     expect(registered(dp.paths)).toBe(1);
     const left = out.left_out_to_stay_compact as { kind: string; label: string }[] | undefined;
     expect(left?.map((x) => x.label).sort()).toEqual(Array.from({ length: 13 }, (_, i) => `Secondary factor ${i + 2}`).sort());
-    expect(out.open_questions).toEqual(['Does team morale matter here?']);
+    // The stated 6-month deadline is asked first (construction-goal-losses-are-said.test.ts), then what the retry parked.
+    expect(out.open_questions).toEqual(['Does "Velocity" get there within 6 months? The model holds no deadline yet, so no result answers that.', 'Does team morale matter here?']);
     expect((out.not_represented as string[]).join(' ')).toMatch(/13 item\(s\) from the first draft were left out/);
   });
 
@@ -189,7 +190,7 @@ describe('⛔ identity is the FULL stated text and the stated direction (Panel p
     const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn) as Record<string, unknown>;
     expect(s.calls, 'vacuity: no retry — this is the common path').toHaveLength(1);
     expect(out.ok, JSON.stringify(out)).toBe(true);
-    expect(out.open_questions).toEqual(['Is the bottleneck coordination or capacity?', 'What does onboarding cost the current team?']);
+    expect(out.open_questions).toEqual(['Does "Velocity" get there within 6 months? The model holds no deadline yet, so no result answers that.', 'Is the bottleneck coordination or capacity?', 'What does onboarding cost the current team?']);
   });
 
   it('CONTRAST: a first model within the limit reports nothing left out', async () => {

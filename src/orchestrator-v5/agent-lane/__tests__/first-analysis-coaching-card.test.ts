@@ -19,11 +19,15 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { CoachingBlockSchema } from '@talchain/schemas/boundary';
 import { READY_GRAPH, BLOCKED_GRAPH } from './fixtures/first-analysis-graphs.js';
 import { runTurnCoaching } from '../analysis-coaching-pass-through.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 
 type Turn = { graph_hash: string; analysis_state: Record<string, unknown>; analysis_ready: unknown; analysis_result: Record<string, unknown> };
 const fixture = JSON.parse(readFileSync(new URL('../../coaching/__tests__/fixtures/c19-8428207-B.run-turns.trimmed.json', import.meta.url), 'utf8')) as { turns: Record<string, Turn> };
 const T2 = fixture.turns.t2!;
 const COMPUTED_AT = (T2.analysis_state.run_state as { computed_at: string }).computed_at;
+// Paul's served first pass (1a298d6d, CEE bdd43f4) and its WHOLE draft graph, byte-identical: one limit node.
+const PAUL_T1 = (JSON.parse(readFileSync(new URL('../../coaching/__tests__/fixtures/cbd15f83-bdd43f4-paul.run-turns.trimmed.json', import.meta.url), 'utf8')) as { turns: Record<string, Turn> }).turns.t1!;
+const PAUL_GRAPH = (JSON.parse(readFileSync(new URL('../../coaching/__tests__/fixtures/cbd15f83-bdd43f4-paul.draft-graph.json', import.meta.url), 'utf8')) as { graph: Record<string, unknown> }).graph;
 
 interface Scenario { registered: boolean; graph: typeof READY_GRAPH; ran: boolean; inProcessRuns: number; injectRuns: number }
 const scenarios = new Map<string, Scenario>();
@@ -33,8 +37,13 @@ const st = (sid: string): Scenario => {
   return s;
 };
 
-/** Knobs, reset per test. `stale`: the readback after the run no longer shows it as current. */
-let knobs: { graph: typeof READY_GRAPH; readbackAfterRun: 'current' | 'stale' } = { graph: READY_GRAPH, readbackAfterRun: 'current' };
+/**
+ * Knobs, reset per test. `stale`: the readback after the run no longer shows it as current.
+ * `bound`: the run answers from THAT served turn, and the readback after it returns THAT turn's own graph
+ * (whose analysis-affecting hash is the turn's graph_hash), as `assist.v1.scenario-graph.ts` computes it.
+ */
+let knobs: { graph: typeof READY_GRAPH; readbackAfterRun: 'current' | 'stale'; bound?: { turn: Turn; graph: Record<string, unknown> } } = { graph: READY_GRAPH, readbackAfterRun: 'current' };
+const runTurnOf = (): Turn => knobs.bound?.turn ?? T2;
 
 const { runStub } = vi.hoisted(() => ({ runStub: { impl: null as null | ((a: unknown) => Promise<unknown>) } }));
 vi.mock('../../handlers/chip-click-dispatch.js', async (importOriginal) => {
@@ -85,7 +94,11 @@ function installFetch() {
 /** The served B t2 readback once a run exists; before that, the built model with no analysis. */
 function readbackOf(s: Scenario): Record<string, unknown> {
   if (!s.registered) return { graph: { nodes: [], edges: [] }, graph_hash: 'empty' };
-  if (!s.ran) return { graph: s.graph, graph_hash: T2.graph_hash, analysis_state: { run_state: { kind: 'never_run' }, leader_claim: { permitted: false, withheld_reason: 'no_analysis' } } };
+  if (!s.ran) return { graph: s.graph, graph_hash: runTurnOf().graph_hash, analysis_state: { run_state: { kind: 'never_run' }, leader_claim: { permitted: false, withheld_reason: 'no_analysis' } } };
+  if (knobs.bound) {
+    const b = knobs.bound.turn;
+    return { graph: knobs.bound.graph, graph_hash: b.graph_hash, analysis_state: b.analysis_state, analysis_result: b.analysis_result, analysis_ready: b.analysis_ready };
+  }
   if (knobs.readbackAfterRun === 'stale') {
     return { graph: s.graph, graph_hash: T2.graph_hash, analysis_state: { ...T2.analysis_state, run_state: { kind: 'complete_stale', computed_at: COMPUTED_AT, cause: 'graph_changed' }, usable_for_chips: false } };
   }
@@ -101,7 +114,7 @@ async function buildApp(): Promise<FastifyInstance> {
     const s = st((req.params as { id: string }).id);
     s.registered = true;
     s.graph = knobs.graph;
-    return { registered: true, graph_hash: T2.graph_hash, model_version: { version_id: '00000000-0000-4000-8000-000000000001', version_number: 1 } };
+    return { registered: true, graph_hash: runTurnOf().graph_hash, model_version: { version_id: '00000000-0000-4000-8000-000000000001', version_number: 1 } };
   });
   a.post('/assist/v1/scenarios/:id/versions', async () => ({ versions: [], next_cursor: null }));
   a.post('/orchestrate/v2/turn', async (req) => {
@@ -126,8 +139,8 @@ function installRunStub() {
     s.inProcessRuns += 1;
     s.ran = true;
     return {
-      outcome: 'ok', commitPerformed: true, graph: null, mayNameLeadingOption: false, analysisReady: T2.analysis_ready,
-      response: { response_version: 2, assistant_text: 'Ran.', suggested_actions: [], insights: [], stage_indicator: 'analyse', blocks: [T2.analysis_result] },
+      outcome: 'ok', commitPerformed: true, graph: null, mayNameLeadingOption: false, analysisReady: runTurnOf().analysis_ready,
+      response: { response_version: 2, assistant_text: 'Ran.', suggested_actions: [], insights: [], stage_indicator: 'analyse', blocks: [runTurnOf().analysis_result] },
     };
   };
 }
@@ -203,6 +216,27 @@ describe('the automatic first analysis shows the fragile-link coaching card', ()
     expect((r.blocks ?? []).filter((b) => b.type === 'analysis_result')).toHaveLength(1);
     expect(r._diagnostic_trace.coaching).toEqual({ eligible: true });
     expect(r._diagnostic_trace.first_analysis).toMatchObject({ coaching_blocks: 1 });
+  });
+
+  it('SEAM: the route hands the readback\'s own graph to the card → one limit node on the run\'s graph is NAMED on the served card', async () => {
+    knobs.bound = { turn: PAUL_T1, graph: PAUL_GRAPH };
+    // Present controls: the readback graph IS the run's graph (production hash), and it has ONE limit node.
+    expect(computeAnalysisAffectingGraphHash(PAUL_GRAPH as never)).toBe(PAUL_T1.graph_hash);
+    expect((PAUL_GRAPH.goal_constraints as Array<{ node_id: string }>).map((c) => c.node_id)).toEqual(['monthly_churn']);
+    const r = await buildTurn(app);
+    expect(st(SID).inProcessRuns, 'control: the automatic first analysis ran').toBe(1);
+    const cards = coachingOf(r);
+    expect(cards).toHaveLength(1);
+    const card = cards[0]!;
+    expect(CoachingBlockSchema.safeParse(card).success).toBe(true);
+    const computedAt = (PAUL_T1.analysis_state.run_state as { computed_at: string }).computed_at;
+    // Reverting agent-v1-turn.ts's `graph: readbackGraph` turns this RED: the card falls back to the generic words.
+    expect(card.signal_id).toBe(`coach:limit_unchecked:${PAUL_T1.graph_hash}:${computedAt}:auto_first_pass:named`);
+    expect(String(card.body)).toContain('your limit on “Monthly churn”');
+    expect(String(card.action_prompt)).toContain('my limit on “Monthly churn”');
+    expect(card.action_label).toBe('What this means for my limit');
+    expect(card.graph_hash_at_generation).toBe(r.graph_hash);
+    expect(r._diagnostic_trace.coaching).toEqual({ eligible: true });
   });
 
   it('RED: an explicit Run on the same model → its OWN card (explicit copy, a different block_id)', async () => {

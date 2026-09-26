@@ -729,6 +729,8 @@ function structuralIssue(
     // (B4) — the element the blocker is about, by id, when the validator knows it.
     ...(violation.option_id ? { option_id: violation.option_id } : {}),
     ...(violation.option_label ? { option_label: violation.option_label } : {}),
+    ...(violation.factor_id ? { factor_id: violation.factor_id } : {}),
+    ...(violation.factor_label ? { factor_label: violation.factor_label } : {}),
   };
 }
 

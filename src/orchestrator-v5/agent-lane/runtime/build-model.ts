@@ -784,13 +784,24 @@ export async function buildModelFromBrief(
    * mentioned.
    */
   const parked = (candidate as { unknowns?: unknown }).unknowns;
-  const openQuestions = [
-    // ⛔ C46: the goal's unstated scope (`admit-model.ts` records the question as the reason of
-    // its `goal_scope` entry). First, because the ruling requires it clarified or named before
-    // analysis; asked here, in the channel the Agent already reads, never only in prose.
-    ...admitted.loss.filter((l) => /\.goal_scope$/.test(l.field_path)).map((l) => l.reason),
-    ...(Array.isArray(parked) ? parked.filter((q): q is string => typeof q === 'string' && q.trim() !== '') : []),
-  ];
+  const openQuestions = Array.isArray(parked) ? parked.filter((q): q is string => typeof q === 'string' && q.trim() !== '') : [];
+  /**
+   * ⛔ A DEADLINE THE MODEL CANNOT HOLD IS ASKED WHERE THE USER ALWAYS SEES IT. GraphV3 has no carrier for
+   * `horizon_months`, so admission records the loss in `not_represented` — but only the Agent's model reads
+   * that, and on served CEE `85ce874` (MG fidelity scorecard, 26 Sep) Paul's "£20k MRR within 12 months"
+   * reply never mentioned the deadline. `open_questions` is appended to the reply by the server every time
+   * (`write-outcome.ts` `openQuestionsLine`), so the deadline goes FIRST there, ahead of the five-question cap.
+   */
+  const horizon = candidate.goal?.horizon_months;
+  if (typeof horizon === 'number' && Number.isFinite(horizon) && horizon > 0) {
+    openQuestions.unshift(`Does "${candidate.goal.metric}" get there within ${horizon} months? The model holds no deadline yet, so no result answers that.`);
+  }
+  // ⛔ C46: the goal's unstated scope (`admit-model.ts` records the question as the reason of
+  // its `goal_scope` entry). First, because the ruling requires it clarified or named before
+  // analysis; asked here, in the channel the Agent already reads, never only in prose. Ahead of the
+  // deadline question (merge of staging #1939): both lead the parked questions, so neither is cut by
+  // the five-question cap.
+  openQuestions.unshift(...admitted.loss.filter((l) => /\.goal_scope$/.test(l.field_path)).map((l) => l.reason));
 
   const graph = {
     nodes: admitted.nodes,

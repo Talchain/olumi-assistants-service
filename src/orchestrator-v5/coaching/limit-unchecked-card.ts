@@ -25,9 +25,15 @@
  * denies only in `evaluated_infeasible`, `unevaluated` or `identity_unresolved`
  * (`MAY_NAME_LEADING_OPTION`, orchestrator/context/constraint-feasibility.ts;
  * `not_applicable`, the state with no ratified limit, permits). So "at least
- * one limit was not checked or not met" is true in every state it fires on,
- * and the words name no limit, threshold or number: the card receives no
- * graph, so it could not bind one by identity.
+ * one limit was not checked or not met" is true in every state it fires on.
+ * Olumi's own words name no threshold or number. They name THE limit only when the
+ * caller proved the graph is the run's own (`coaching/bound-graph.ts`: hash
+ * bound) and the model's limits sit on exactly one node, joined by
+ * `goal_constraints[].node_id` → that node's label; otherwise the generic
+ * words ship. The label is the user's own, quoted verbatim: when the user's
+ * label carries a figure the copy gates pass ("Churn ≤ 4%"), the card quotes
+ * that figure inside the quotes and adds none of its own. A named card carries `:named` in its signal_id, so one block_id
+ * never names two bodies.
  *
  * The prose summary is NOT an input. The automatic first pass replaces it
  * wholesale (compose/unrequested-analysis-confinement.ts), which is why the
@@ -65,7 +71,7 @@ export const LIMIT_UNCHECKED_SIGNAL_ID_PREFIX = 'coach:limit_unchecked:';
 
 /** The card's block contract, as data (the shared bounds live on RUN_TURN_COACHING_CONTRACT). */
 export const LIMIT_UNCHECKED_CARD_CONTRACT = Object.freeze({
-  signal_id: `${LIMIT_UNCHECKED_SIGNAL_ID_PREFIX}<graph_hash>:<run computed_at>:<effective trigger>`,
+  signal_id: `${LIMIT_UNCHECKED_SIGNAL_ID_PREFIX}<graph_hash>:<run computed_at>:<effective trigger>[:named]`,
   block_id: 'deterministicBlockId(signal_id)',
   reads: "readback analysis_state.leader_claim: permitted === false && withheld_reason === 'constraint_verdict_withheld'",
   target_refs: '[]',
@@ -83,17 +89,36 @@ export function leaderWithheldForALimit(analysisState: unknown): boolean {
   return claim?.permitted === false && claim.withheld_reason === WITHHELD_CONSTRAINT_VERDICT;
 }
 
-/** The card's words, fixed per effective trigger (so one block_id always carries one body). */
-export function composeLimitUncheckedCard(firstPass: boolean): FragileLinkChallengeCopy {
+/**
+ * The card's words, fixed per effective trigger and per named limit (so one block_id always
+ * carries one body). `limitLabel` is the one limit node's label from a hash-bound graph, or
+ * absent for the generic words.
+ */
+export function composeLimitUncheckedCard(firstPass: boolean, limitLabel?: string): FragileLinkChallengeCopy {
+  if (limitLabel !== undefined) {
+    const finding = `could not confirm that the options stay within your limit on “${limitLabel}”: it was not `
+      + 'checked or not met. That is one reason no option is put forward yet.';
+    return {
+      title: 'Check your limit before relying on this',
+      body: firstPass ? `${FIRST_PASS_PREFIX}it ${finding}` : `This analysis ${finding}`,
+      action_label: 'What this means for my limit',
+      action_prompt:
+        `Olumi could not confirm the options stay within my limit on “${limitLabel}”: it was not checked or was not `
+        + 'met, which is one reason no option is put forward yet. Explain what that means for how far I can rely on '
+        + 'this analysis. '
+        + 'Don\'t change the model or re-run anything yet.',
+    };
+  }
   const finding = 'could not confirm that the options stay within the limits on the model: at least one was not '
-    + 'checked or not met. That is why no option is put forward yet.';
+    + 'checked or not met. That is one reason no option is put forward yet.';
   return {
     title: 'Check the limits before relying on this',
     body: firstPass ? `${FIRST_PASS_PREFIX}it ${finding}` : `This analysis ${finding}`,
     action_label: 'What this means for my limits',
     action_prompt:
       'Olumi could not confirm the options stay within the limits on my model: at least one was not checked or was '
-      + 'not met, so no option is put forward yet. Explain what that means for how far I can rely on this analysis. '
+      + 'not met, which is one reason no option is put forward yet. Explain what that means for how far I can rely '
+      + 'on this analysis. '
       + 'Don\'t change the model or re-run anything yet.',
   };
 }
@@ -107,7 +132,11 @@ export type LimitUncheckedCardDecision =
  * already established that the leader is withheld for a limit
  * ({@link leaderWithheldForALimit}); this builder repeats only the identity gate.
  */
-export function buildLimitUncheckedCard(input: FragileLinkChallengeInput): LimitUncheckedCardDecision {
+export function buildLimitUncheckedCard(
+  input: FragileLinkChallengeInput,
+  /** The one limit node's label from a HASH-BOUND graph (`coaching/bound-graph.ts`); absent → generic words. */
+  limitLabel?: string,
+): LimitUncheckedCardDecision {
   // (0) identity, repeated so the builder is total on its own.
   const result = readRecord(input.analysisResult);
   if (result === null || result.type !== 'analysis_result' || result.computed_against_hash !== input.graphHash) {
@@ -118,10 +147,15 @@ export function buildLimitUncheckedCard(input: FragileLinkChallengeInput): Limit
   const enrichment = readRecord(result.enrichment);
   const effectiveTrigger: RunTurnTrigger =
     input.trigger === 'auto_first_pass' || isAutomaticRun(enrichment) ? 'auto_first_pass' : 'explicit_run';
-  const copy = composeLimitUncheckedCard(effectiveTrigger === 'auto_first_pass');
+  // A label the copy gates refuse (a raw decimal, an id-shaped token, leader words, too long) is dropped for
+  // the generic words — the card still ships; it never falls back to a link card. The gates pass a whole
+  // number or percentage in the user's own label ("Churn ≤ 4%"): the user's figure, quoted, never Olumi's.
+  const named = limitLabel !== undefined ? composeLimitUncheckedCard(effectiveTrigger === 'auto_first_pass', limitLabel) : null;
+  const useNamed = named !== null && copyPasses(named);
+  const copy = useNamed ? named : composeLimitUncheckedCard(effectiveTrigger === 'auto_first_pass');
   if (!copyPasses(copy)) return { block: null, reason: 'copy_gate' };
 
-  const signalId = `${LIMIT_UNCHECKED_SIGNAL_ID_PREFIX}${input.graphHash}:${input.computedAt}:${effectiveTrigger}`;
+  const signalId = `${LIMIT_UNCHECKED_SIGNAL_ID_PREFIX}${input.graphHash}:${input.computedAt}:${effectiveTrigger}${useNamed ? ':named' : ''}`;
   const parsed = CoachingBlockSchema.safeParse({
     type: 'coaching',
     coaching_kind: RUN_TURN_COACHING_CONTRACT.block.coaching_kind,
