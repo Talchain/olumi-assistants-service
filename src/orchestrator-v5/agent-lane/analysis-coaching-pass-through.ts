@@ -26,6 +26,7 @@ import { buildNoFlaggedLinkCard } from '../coaching/no-flagged-link-card.js';
 import { buildLimitUncheckedCard, leaderWithheldForALimit } from '../coaching/limit-unchecked-card.js';
 import { everyLimitProvedUnanchored, graphBoundToHash, limitNodeLabels } from '../coaching/bound-graph.js';
 import { buildNearTieCard } from '../coaching/near-tie-card.js';
+import { buildEstimatedLimitCard } from '../coaching/estimated-limit-card.js';
 import { edgeAuthorshipIn } from '../coaching/edge-strength-authorship.js';
 import { WITHHELD_NEAR_TIE } from '../compose/analysis-state-v1.js';
 import { summaryAsksUserToRepairALimit } from '../coaching/constraint-gap-disclosure.js';
@@ -54,6 +55,7 @@ export interface RunTurnCoachingFinal {
   /**
    * The selected run's own constraint verdict state, from the SAME graph read (`readBackState`
    * `constraintVerdictState`, CEE #1958: bound to the fact `analysisResult` came from). `null` = not recorded.
+   * Never derived here from `withheld_reason`.
    */
   constraintVerdictState?: string | null;
 }
@@ -261,6 +263,12 @@ export function runTurnCoaching(
     if (limit.block === null) return { blocks: upstream, eligibility: { eligible: false, reason: limit.reason } };
     return { blocks: dedupeByBlockId([...upstream, limit.block]), eligibility: { eligible: true } };
   }
+  // (2c') A limit the run DID check, but only against Olumi's own estimate of its level (AI Quality
+  // 5842174563): the verdict rests on an assumption the user never saw named, so it outranks a link card.
+  // Reads the READBACK's typed verdict state (`analysis_constraint_verdict_state` on the graph read, carried as
+  // `final.constraintVerdictState`, Canonical 5842397050); absent → this leg is inert.
+  const estimate = buildEstimatedLimitCard(input, final.constraintVerdictState, boundGraph);
+  if (estimate.block !== null) return { blocks: dedupeByBlockId([...upstream, estimate.block]), eligibility: { eligible: true } };
   const built = buildFragileLinkChallenge(input);
   const chosen = built.block === null && built.reason === 'no_groundable_fragile_edge'
     ? buildNoFlaggedLinkCard(input)

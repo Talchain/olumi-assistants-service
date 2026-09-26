@@ -815,3 +815,61 @@ test('NEAR TIE — with exactly two options the card says "the two options"',()=
  const out=runTurnCoaching({...statelessCapture(c.captured),analysis_ready:ready},final);
  assert.match(runTurnCards(out.blocks)[0]!.body,/^On Olumi's estimates the two options come out close/);
 });
+
+// ── LIMIT CHECKED AGAINST OLUMI'S ESTIMATE (R&C PR-7; AI Quality 5842174563, carrier Canonical 5842184546) ──
+// DERIVED (labelled): Canonical will carry `analysis_constraint_verdict_state` on the graph read after the freeze
+// (5842397050), as `final.constraintVerdictState`; no served turn carries it yet. Paul's served first pass + his WHOLE served graph (monthly_churn:
+// observed_state {source 'cee_inference', raw_value 7, unit 'percent per month'}), with the verdict set.
+const EST_CARD = 'coach:limit_estimate:';
+const estCase = (verdict: unknown, claim: Record<string, unknown> = {permitted:false,withheld_reason:'unrequested_analysis_withheld'}, graph: Record<string, unknown> = PAUL_GRAPH) => {
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const state={...(c.final.analysisState as Record<string, unknown>),leader_claim:claim};
+ const {captured,final}=graph===PAUL_GRAPH?{captured:statelessCapture(c.captured),final:{...c.final,graph}}:rebind(c,graph);
+ return runTurnCoaching(captured,{...final,analysisState:state,...(verdict===undefined?{}:{constraintVerdictState:verdict})});
+};
+const estCards = (out: {blocks: readonly {signal_id: string}[]}) => out.blocks.filter((b)=>b.signal_id.startsWith(EST_CARD));
+test('ESTIMATED LIMIT — a limit checked (evaluated_feasible) against Olumi\'s estimate of its level → ONE card naming that estimate, outranking the link card',()=>{
+ // Present controls: the node's level IS Olumi's estimate, and without the verdict this run shows a LINK card.
+ const node=(PAUL_GRAPH.nodes as Record<string, any>[]).find((n)=>n.id==='monthly_churn')!;
+ assert.equal(node.observed_state.source,'cee_inference'); assert.equal(node.observed_state.raw_value,7);
+ assert.ok(runTurnCards(estCase(undefined).blocks)[0]!.signal_id.startsWith('coach:fragile_link:'));
+ const out=estCase('evaluated_feasible');
+ assert.deepEqual(out.eligibility,{eligible:true});
+ const cards=runTurnCards(out.blocks as any);
+ assert.equal(cards.length,0,'the estimate card is not a link/limit/tie card');
+ const est=estCards(out) as any[];
+ assert.equal(est.length,1);
+ assert.equal(CoachingBlockSchema.safeParse(est[0]).success,true);
+ assert.equal(est[0].signal_id,`${EST_CARD}449b882e043ae3e3:2026-09-25T17:27:54.315Z:auto_first_pass`);
+ assert.equal(est[0].body,"Your limit on “Monthly churn” was checked against Olumi's estimate that it is about 7 percent per month today, not a figure you gave. If you know the real figure, it is worth saying.");
+ assert.deepEqual(est[0].target_refs,[{kind:'factor',id:'monthly_churn',label:'Monthly churn'}]);
+ assert.match(est[0].action_prompt,/Ask me what the real figure is and what it rests on\. Don't change the model or re-run anything yet\.$/);
+ // The only number said is the node's own level — never the limit's value (10) nor anything invented.
+ for (const t of [est[0].title,est[0].body,est[0].action_label,est[0].action_prompt]) assert.doesNotMatch(String(t).split('7 percent per month').join(''),/\d/);
+});
+test('ESTIMATED LIMIT — only on the typed evaluated_feasible verdict; never derived from withheld_reason',()=>{
+ for (const v of [undefined,null,'unevaluated','identity_unresolved','not_applicable','evaluated_infeasible','EVALUATED_FEASIBLE',true]) {
+  assert.equal(estCards(estCase(v)).length,0,String(v));
+ }
+ // A limit-withheld claim keeps the LIMIT card first (limit first), whatever the verdict field says.
+ const out=estCase('evaluated_feasible',{permitted:false,withheld_reason:'constraint_verdict_withheld'});
+ assert.ok(runTurnCards(out.blocks as any)[0]!.signal_id.startsWith(LIMIT_CARD));
+ assert.equal(estCards(out).length,0);
+});
+test('ESTIMATED LIMIT — the level must be Olumi\'s, from ONE limit node, on the run\'s own graph',()=>{
+ const g=(mut: (g: Record<string, any>)=>void) => { const x=structuredClone(PAUL_GRAPH) as Record<string, any>; mut(x); return x; };
+ const cases: [string, Record<string, any>][] = [
+  ['the user\'s own level',g((x)=>{x.nodes.find((n: any)=>n.id==='monthly_churn').observed_state.source='user';})],
+  ['no raw_value',g((x)=>{delete x.nodes.find((n: any)=>n.id==='monthly_churn').observed_state.raw_value;})],
+  ['no unit',g((x)=>{delete x.nodes.find((n: any)=>n.id==='monthly_churn').observed_state.unit;})],
+  ['two estimated limit nodes',g((x)=>{x.goal_constraints=[...x.goal_constraints,{...x.goal_constraints[0],constraint_id:'agent-lane:pro_subscribers:>=',node_id:'pro_subscribers',operator:'>='}]; x.nodes.find((n: any)=>n.id==='pro_subscribers').observed_state={source:'cee_inference',raw_value:250,unit:'subscribers',value:0.25};})],
+ ];
+ for (const [why,graph] of cases) assert.equal(estCards(estCase('evaluated_feasible',undefined,graph)).length,0,why);
+ // Another turn's graph (not hash-bound) → no card.
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const state={...(c.final.analysisState as Record<string, unknown>),leader_claim:{permitted:false,withheld_reason:'unrequested_analysis_withheld'}};
+ assert.equal(estCards(runTurnCoaching(statelessCapture(c.captured),{...c.final,graph:PRICING_T2_GRAPH,analysisState:state,constraintVerdictState:'evaluated_feasible'})).length,0);
+ // The verdict is read from the carried field ONLY: the same value inside analysis_state speaks nothing.
+ const inState={...(c.final.analysisState as Record<string, unknown>),leader_claim:{permitted:false,withheld_reason:'unrequested_analysis_withheld'},constraint_verdict_state:'evaluated_feasible'};
+ assert.equal(estCards(runTurnCoaching(statelessCapture(c.captured),{...c.final,graph:PAUL_GRAPH,analysisState:inState})).length,0);
+});
