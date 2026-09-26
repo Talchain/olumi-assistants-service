@@ -24,7 +24,9 @@ import { ModelVersionMutationReceiptV1LocalSchema } from '../../model-management
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440000';
 const MUTATION_ID = 'cb1dd25d-36c3-4beb-aadf-5a016b2bce25';
 const VERSION_ID = 'c0813c01-1111-4111-8111-111111111111';
-const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'r' };
+// The band is the user's, typed this turn: a link is proposed only with it (#70 5845493088).
+const SAID = 'Price rises strongly push churn up.';
+const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'r', user_text: SAID, user_turn_text: SAID };
 
 /** A marker that exists ONLY inside the receipt's committed graph. */
 const GRAPH_MARKER = 'RECEIPT_GRAPH_MUST_NOT_REACH_THE_MODEL_CONTEXT';
@@ -80,7 +82,7 @@ async function authoriseTwice(receipt: 'valid' | 'none' | 'malformed') {
   const p = fakeProduct(receipt);
   const caps = createAgentCapabilities(p.d, new ProposalStore());
   const prop = await caps.proposeModelChange(ctx, {
-    from_label: 'Pro plan price', to_label: 'Monthly churn', direction: 'positive', rationale: 'price rises push churn',
+    from_label: 'Pro plan price', to_label: 'Monthly churn', direction: 'positive', strength: 'strong', rationale: 'price rises push churn',
   });
   const first = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
   const retry = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });

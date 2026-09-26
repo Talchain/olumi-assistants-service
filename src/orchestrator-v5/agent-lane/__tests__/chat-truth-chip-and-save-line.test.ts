@@ -170,7 +170,9 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
     expect(pence.ok, JSON.stringify(pence)).toBe(true);
     expect(chipsFor(store, [{ name: 'propose_option_interventions', result: pence }])[0]!.label).toBe('Use as starting option levels');
     const s2 = capsOver();
-    const link = await s2.caps.proposeModelChange(ctx, { from_label: 'Recruitment fee', to_label: 'Annual PA salary', direction: 'positive', rationale: 'x' });
+    // A link is proposed only with the band the user typed THIS turn (#70 5845493088).
+    const linkSaid = 'The recruitment fee moderately raises the PA salary.';
+    const link = await s2.caps.proposeModelChange({ ...ctx, user_turn_text: linkSaid }, { from_label: 'Recruitment fee', to_label: 'Annual PA salary', direction: 'positive', strength: 'moderate', rationale: 'x' });
     expect(link.ok, JSON.stringify(link)).toBe(true);
     expect(chipsFor(s2.store, [{ name: 'propose_model_change', result: link }])[0]!.label).toBe('Make this change');
     const valued = { ...PA_GRAPH, nodes: PA_GRAPH.nodes.map((n) => (n.id === 'fac_fee' ? { ...n, observed_state: { value: 0.2, raw_value: 4000, cap: 20000, unit: 'GBP' } } : n)) };

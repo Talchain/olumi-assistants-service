@@ -1508,8 +1508,31 @@ export function createAgentCapabilities(
       if (g.edges.some((e) => e.from === from.id && e.to === to.id)) {
         return { ok: false, mutated: false, refusal: 'already_present', detail: 'That link is already in the model.' };
       }
+      /**
+       * ⛔ A NEW LINK CARRIES ONLY THE BAND THE USER TYPED THIS TURN (Delivery Lead #70 5845493088, agreed by Canonical
+       * 5845487856: "The Agent proposes a link only with the band the user typed THIS turn … With no band it asks 'how
+       * strong…?'. The user_specified stamp is then TRUE."). The link writer stamps every link it adds `user_specified`
+       * (`structural-add-edge.ts`), so the strength sent with it is recorded as the user's own estimate. Before this, an
+       * approval sent a fixed 0.5 and Olumi's placeholder read as the user's figure.
+       *
+       * The band must be named in THIS turn's typed words by the one matcher `propose_link_strength` uses
+       * (`bandTheUserWrote` — the same band words, negations and question rules, never a second copy), and it is sent as
+       * that band's midpoint (`bandMidpoint`). Checked after the refusals above, so the user is never asked how strong a
+       * link that cannot be added is.
+       */
+      const band = isInfluenceBand(args?.strength) ? args.strength : undefined;
+      if (band === undefined || !bandTheUserWrote(band, ctx.user_turn_text)) {
+        const ask = 'ask them "how strong is that effect: weak, moderate, strong or very strong?" and never offer a band as theirs.';
+        return { ok: false, mutated: false, refusal: 'strength_not_stated',
+          detail: band === undefined
+            ? `${args?.strength === undefined ? 'No strength was given' : 'The strength given is not one of weak, moderate, strong or very strong'}, so nothing was prepared. `
+              + `If the user named one of those bands for this link in this message, call again with it as strength; otherwise ${ask}`
+            : `The user has not called the link from "${from.label}" to "${to.label}" ${band} in this message, in their own words, so nothing was prepared: `
+              + `it would be recorded as their estimate. Instead, ${ask}` };
+      }
+      const magnitude = bandMidpoint(band);
       const operations: ProposalOperation[] = [
-        { op: 'add_edge', path: `${from.id}::${to.id}`, value: { effect_direction: args.direction } },
+        { op: 'add_edge', path: `${from.id}::${to.id}`, value: { effect_direction: args.direction, magnitude } },
       ];
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
@@ -1518,7 +1541,7 @@ export function createAgentCapabilities(
         operations,
         provenance: { authored_by: 'model_proposed', basis: args.rationale },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Connect "${from.label}" to "${to.label}" (${args.direction})`,
+        public_label: `Connect "${from.label}" to "${to.label}" (${args.direction}) as ${band}, your own estimate`,
       });
       proposals.put(proposal);
       return {
@@ -1526,7 +1549,8 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        note: 'Nothing has changed. Show this to the user and ask them to approve it before calling authorise_change.',
+        link: { from: from.label, to: to.label, direction: args.direction, band, strength: magnitude },
+        note: `Nothing has changed. Tell the user the link will be recorded as ${band}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and ask them to approve it before calling authorise_change.`,
       };
     },
 
@@ -3292,7 +3316,15 @@ export function createAgentCapabilities(
 
       const op = ops[0];
       const [fromId, toId] = op.path.split('::');
-      const direction = (op.value as { effect_direction: 'positive' | 'negative' }).effect_direction;
+      const { effect_direction: direction, magnitude: storedMagnitude } = op.value as { effect_direction: 'positive' | 'negative'; magnitude?: unknown };
+      /**
+       * ⭐ THE STRENGTH SENT IS THE USER'S BAND (#70 5845493088): `proposeModelChange` stores the midpoint of the band the
+       * user typed, and the writer stamps it `user_specified` — now true. ⚠ A proposal restored from the durable carrier
+       * that was made BEFORE that rule carries no magnitude: it keeps the projection default 0.5 and its disclosure
+       * (`placeholder_strength`), so nothing restored breaks.
+       */
+      const usersStrength = typeof storedMagnitude === 'number' && Number.isFinite(storedMagnitude) && storedMagnitude > 0 && storedMagnitude <= 1
+        ? storedMagnitude : undefined;
       /**
        * ⭐ THE OPERATION IDENTITY IS DERIVED, NOT MINTED.
        *
@@ -3323,11 +3355,11 @@ export function createAgentCapabilities(
           kind: 'structural_add_edge',
           from: fromId,
           to: toId,
-          // ⚠ REPRESENTATION LOSS, RECORDED IN THE RESULT. The wire REQUIRES a
-          // magnitude and forbids `unknown`, so a direction-only authorisation
-          // cannot be expressed. This number is the projection default, not the
-          // user's claim, and the Agent is told so explicitly below.
-          magnitude: 0.5,
+          // The midpoint of the band the user typed (`proposeModelChange`). ⚠ A proposal
+          // restored from before that rule has none, and the wire REQUIRES a magnitude and
+          // forbids `unknown`: it sends the projection default, not the user's claim, and
+          // the result says so below.
+          magnitude: usersStrength ?? 0.5,
           effect_direction: direction,
           base_graph_hash: decision.proposal.base_graph_identity_hash,
         },
@@ -3353,15 +3385,19 @@ export function createAgentCapabilities(
         ok: true, mutated: true, applied: true,
         receipts: edgeReceipts,
         ...(edgeReceipt.unreadable ? { receipt_unreadable: true } : {}),
-        // Olumi discloses this to the user deterministically; see disclosure.ts.
-        placeholder_strength: true,
         proposal_id: decision.proposal.proposal_id,
         operation_id: operationId,
         revision_before: confirmation.revision_before,
         revision_after: confirmation.revision_after,
-        not_represented:
-          'The direction was recorded. No strength was stated by the user, so the model carries a ' +
-          'placeholder strength that is not a measurement — say so if you describe the change.',
+        ...(usersStrength !== undefined
+          ? { detail: `Recorded with the strength the user stated, as their own estimate: ${decision.proposal.public_label}.` }
+          : {
+            // Olumi discloses this to the user deterministically; see disclosure.ts.
+            placeholder_strength: true,
+            not_represented:
+              'The direction was recorded. No strength was stated by the user, so the model carries a ' +
+              'placeholder strength that is not a measurement — say so if you describe the change.',
+          }),
       };
     },
 

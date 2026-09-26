@@ -72,8 +72,8 @@ describe('K3 at the route — a typed "yes" applies the change, runs nothing, an
 
   /** One Agent turn that proposes a link; returns the proposal id from its approve chip. */
   async function propose(): Promise<string> {
-    script = [fnCall('propose_model_change', { from_label: 'Team size', to_label: 'Velocity', direction: 'positive', rationale: 'It moves velocity.' }, 'p1')];
-    const t1 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Should team size drive velocity?' } });
+    script = [fnCall('propose_model_change', { from_label: 'Team size', to_label: 'Velocity', direction: 'positive', strength: 'strong', rationale: 'It moves velocity.' }, 'p1')];
+    const t1 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Team size strongly drives velocity, so connect them.' } });
     const approve = (t1.json() as { suggested_actions: Chip[] }).suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
     expect(approve, 'the control: a real proposal was offered').toBeDefined();
     return approve!.id.slice('agent-approve-proposal:'.length);
