@@ -51,7 +51,7 @@ import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
-import { narrateWriteOutcome, notAdoptedLine, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
+import { narrateWriteOutcome, notAdoptedLine, staleResultLine, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
@@ -1833,14 +1833,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // (B) A write landed on this turn → say whether the model can run now, from the readback's one verdict.
     const wroteThisTurn = fastPath !== 'run'
       && result.tool_results.some((r) => (r as { mutated?: unknown; applied?: unknown } | undefined)?.mutated === true || (r as { applied?: unknown } | undefined)?.applied === true);
-    const readinessLine = wroteThisTurn ? postWriteReadinessLine(readbackGraph, analysisReady) : null;
+    // An authorised revision says what it did to the result on screen, from this turn's typed readback (R&C 5842738466).
+    const staleLine = wroteThisTurn ? staleResultLine(analysisState, analysisReady) : null;
+    const postWriteReadiness = wroteThisTurn ? postWriteReadinessLine(readbackGraph, analysisReady) : null;
+    // "Run it again" already says a run is permitted; the readiness sentence would repeat it.
+    const readinessLine = staleLine !== null && (analysisReady as { may_run?: unknown } | undefined)?.may_run === true ? null : postWriteReadiness;
     const composed = composeDirectAnswerResponse({
       // ⛔ A proposal id is a binding for authorise_change, never text a user reads or
       // types (display-ids.ts). Applied here, before the answer row is written, so a
       // replay returns exactly what the user first saw.
       // Olumi's own status, plus what any proposal this turn LEFT OUT — both deterministic (#1800).
       assistant_text: withoutProposalIds(withWriteOutcome(withDisclosures(narration.text, owed),
-        [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), readinessLine].filter((x): x is string => x !== null && x !== '').join(' ') || null)),
+        [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), staleLine, readinessLine].filter((x): x is string => x !== null && x !== '').join(' ') || null)),
       stage: 'frame',
       answerKind: 'substantive',
       // One click approves the ONE proposal just offered — the same words as typing "yes".
