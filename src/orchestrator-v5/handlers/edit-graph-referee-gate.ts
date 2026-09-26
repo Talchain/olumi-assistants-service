@@ -315,8 +315,147 @@ export const GM_STALE_ASSISTANT_TEXT =
 
 /** rejected — integrity/safety failure. provisional_doctrine_v0. */
 export const GM_REJECTED_ASSISTANT_TEXT =
-  "I couldn't take that change forward, so the model is unchanged. Tell me " +
-  'a different way you would like to change it and I will try again.';
+  'I put a change together from that and it did not fit the model as it ' +
+  'stands, so the model is unchanged. I can try a different version, or ' +
+  'talk through what I would suggest instead.';
+
+/**
+ * ⭐⭐⭐ WHY THE REJECTED ARM STOPPED BEING MUTE.
+ *
+ * Witnessed on a real staging session, 16 Sep 2026. The user had a three-turn
+ * discussion in which Olumi AGREED, twice, that a morale risk belonged in the
+ * model. Then:
+ *
+ *   USER: "Update the model to reflect all of this, then."
+ *   OLUMI: "I couldn't take that change forward, so the model is unchanged.
+ *           Tell me a different way you would like to change it..."
+ *   USER: "What's one update based on this discussion that you recommend we
+ *          make now?"
+ *   OLUMI: (BYTE-IDENTICAL SAME SENTENCE)
+ *
+ * ⛔ THE SILENCE WAS A LOSS, NOT AN ABSENCE. At the moment that sentence is
+ * chosen, `publicReason` — carrying `blocker_code` AND `blocker_readable` — is
+ * already computed and sits on the SAME returned object. This file's own test
+ * asserts both on one decision, one line apart. The reason was emitted to the
+ * wire's machine block, to telemetry and to the log, and forbidden only from
+ * the prose the user reads.
+ *
+ * ⛔ AND THE SECOND HALF WAS STRUCTURAL: `suggestedActions: []` on this arm is
+ * REPLACED WHOLESALE downstream, not merged, so a rejected turn deleted the
+ * chips the edit lane had already built. No reason and no onward path is why
+ * the same sentence could answer two different requests.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * ⭐ EVERY STRING BELOW IS ABOUT *MY ATTEMPT*, NEVER ABOUT THE USER'S REQUEST.
+ *
+ * This is the load-bearing constraint, not a style choice. The same sentence
+ * has to be true on an EDIT turn and on an ADVICE turn, because this arm cannot
+ * tell them apart — `EditGmEvaluationInput` carries no intent field. Telling
+ * someone who asked "what do you recommend?" that "the node you asked to rename
+ * does not exist" is a false statement about a request they never made.
+ * "The part I tried to change is not in the model" is true either way, and on
+ * an advice turn it also DISCLOSES that a mutation was attempted unasked —
+ * visible failure in place of confident silence.
+ *
+ * `blocker_readable` is deliberately NOT passed through: it is diagnostic prose
+ * carrying em dashes, backticks and internal vocabulary ("failed schema
+ * validation", "top-level `options`"), which this lane's copy rules forbid.
+ * The CODE is the stable join; the sentence is written here.
+ *
+ * Unmapped codes fall back to {@link GM_REJECTED_ASSISTANT_TEXT}, which is
+ * still truthful and still carries the onward chip.
+ */
+export const GM_REJECTED_COPY_BY_BLOCKER_CODE: Readonly<Record<string, string>> =
+  Object.freeze({
+    ENTITY_NOT_FOUND:
+      'The part I tried to change is not in the model, so the model is ' +
+      'unchanged. I can try again on something that is there, or talk ' +
+      'through what I would suggest instead.',
+    // ⛔⛔ THIS COPY CLAIMED A DUPLICATE *NAME* AND OFFERED A RENAME. BOTH WERE
+    // FALSE, and independent review caught it.
+    //
+    // The check is `graphHasNodeId(currentGraph, env.payload.node.id)`
+    // (referee.ts:151). It compares the node ID, which is derived from the
+    // operation path SEPARATELY from the displayed label. So adding "Team
+    // morale" at an id that already exists produced a confident claim that the
+    // NAME was taken — which may simply not be true — and prescribed a remedy
+    // (rename it) that could not have worked, because changing a label leaves
+    // the id untouched and the collision intact.
+    //
+    // ⭐ That is precisely the failure this map exists to prevent: a sentence
+    // asserting something about the user's model that the check never
+    // established. I wrote the guard and then walked into it one constant
+    // later. It now states only what the check proves — that the addition
+    // clashed with something already there — and prescribes nothing.
+    //
+    // ⚠ `OPTION_ID_COLLISION` IS DELIBERATELY ABSENT. It resolves to
+    // `verdict: 'held'` (referee.ts:360), never `rejected`, so an entry for it
+    // here could never fire: a hand-maintained mirror that would read green
+    // forever and quietly imply coverage this arm does not have.
+    ENTITY_ID_COLLISION:
+      'What I tried to add clashes with something already in the model, so ' +
+      'the model is unchanged. I can talk through what I would suggest instead.',
+    READINESS_DOWNGRADE:
+      'That change would have left the model less ready to analyse than it ' +
+      'is now, so the model is unchanged. I can try a version that keeps it ' +
+      'analysable, or talk through what I would suggest instead.',
+    ADD_OPTION_APPLY_UNWIRED:
+      'I could not connect that option to anything the analysis measures, so ' +
+      'the model is unchanged. Tell me which factor it changes, or I can talk ' +
+      'through what I would suggest instead.',
+    OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE:
+      'That change left the options on the board disagreeing with the ones ' +
+      'the analysis uses, so the model is unchanged. I can try a different ' +
+      'version, or talk through what I would suggest instead.',
+    GRAPH_OPTIONS_MALFORMED:
+      'I could not read the current options well enough to change them ' +
+      'safely, so the model is unchanged. I can talk through what I would ' +
+      'suggest instead.',
+    CURRENT_GRAPH_UNREADABLE:
+      'I could not read the current model well enough to change it safely, ' +
+      'so the model is unchanged. I can talk through what I would suggest ' +
+      'instead.',
+  });
+
+/**
+ * ⛔ THE ONWARD CHIP IS DEFERRED, AND THE REASON IS A CONTRACT I WILL NOT
+ * WEAKEN UNREVIEWED.
+ *
+ * This arm originally shipped with one chip ("What would you suggest?") so a
+ * refused turn had a route. `structural-edit-batch-atomicity.test.ts:182` then
+ * went red: `expect(decision.suggestedActions).toEqual([])`, under the name
+ * "whole batch rejected, zero pendings, NO CHIP TO CONFIRM".
+ *
+ * What I established before deciding: the harm that guard exists to prevent is
+ * a PENDING the user can confirm, which would apply a batch containing an
+ * impossible operation — its sibling at :185 says exactly that. Resumption is
+ * gated on `input.pendingActions` (deterministic-short-confirm.ts:497), not on
+ * chips, and this arm leaves `pendingActions: null`. So a non-applying chip
+ * cannot cause that harm, and `toEqual([])` is a PROXY for the invariant
+ * rather than the invariant itself — exact when written, because at the time
+ * any chip on this arm would have been a confirm chip.
+ *
+ * ⚠ THAT IS AN ARGUMENT FOR CHANGING THE ASSERTION, AND I AM NOT MAKING IT
+ * ALONE AT 04:00 AS THE AUTHOR OF THE CHANGE IT BLOCKS. Narrowing another
+ * lane's atomicity guard to fit my own diff is the exact shape that should
+ * attract the most suspicion, whatever the reasoning looks like from inside.
+ *
+ * So the CAUSE ships now and the route does not. The prose still offers one
+ * ("I can talk through what I would suggest instead"), which the user can take
+ * by typing; only the affordance is missing. The chip returns through a
+ * reviewed change that reconciles the atomicity contract deliberately.
+ */
+
+/**
+ * Pick the user-facing cause for a rejected batch. Falls back loudly rather
+ * than inventing: an unmapped code keeps the generic sentence, which is true.
+ */
+export function selectRejectedAssistantText(blockerCode: unknown): string {
+  return typeof blockerCode === 'string'
+    && Object.prototype.hasOwnProperty.call(GM_REJECTED_COPY_BY_BLOCKER_CODE, blockerCode)
+    ? (GM_REJECTED_COPY_BY_BLOCKER_CODE[blockerCode] as string)
+    : GM_REJECTED_ASSISTANT_TEXT;
+}
 
 /** clarify_required — well-formed but non-mutating/ambiguous. provisional_doctrine_v0. */
 export const GM_CLARIFY_ASSISTANT_TEXT =
@@ -1216,7 +1355,13 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
       return {
         governing,
         blockApply: true,
-        assistantText: GM_REJECTED_ASSISTANT_TEXT,
+        // The reason was ALREADY on `publicReason` at this line and was going
+        // only to the machine block, telemetry and the log. It now reaches the
+        // person, phrased about my own attempt rather than their request.
+        assistantText: selectRejectedAssistantText(
+          (publicReason as { blocker_code?: unknown } | null)?.blocker_code,
+        ),
+        // Deliberately still `[]` — see the deferral note above the copy map.
         suggestedActions: [],
         pendingActions: null,
         publicReason,
