@@ -858,6 +858,25 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
     expect(said(out)).toBe(1);
   });
 
+  it('RED (row 2h, a swap): the retry levels £64, makes £54 indistinct AND adds a distinct option — as many options registered, but not £54: refused', async () => {
+    // By identity, never by count: the retry registers four options, as the first draft did, and covers strictly more.
+    const first = with54And64();
+    const base = with54And64({ interventions: [{ ...PRICE_54, value: 59 }] }, LEVELLED(64, 0.5));
+    const retry = { ...base, options: [...base.options, { label: '£69 with AI release', provenance: 'ai_proposed', is_status_quo: null, ...LEVELLED(69, 0.8) } as unknown as Opt] } as typeof base;
+    expect(gapsOnRegistered(retry)).toHaveLength(1);
+    expect(withheldBy(retry)).toEqual(['Test £59 with AI release', '£54 with AI release']);
+    const retryAdmitted = admitCandidateModel(prepareProvisionalCandidate(retry).candidate, {});
+    expect(assessConstructionSize(retryAdmitted).within).toBe(true);
+    expect(retryAdmitted.nodes.filter((n) => n.kind === 'option').map((n) => n.id)).toEqual(['keep_current_pricing', '59_with_ai_release', '64_with_ai_release', '69_with_ai_release']);
+    const { out, graph } = await construct(first, retry);
+    expect([out.ok, out.size_retried]).toEqual([true, false]);
+    expect(optionIds(graph!)).toEqual(FOUR);
+    expect(levelsById(graph!)['54_with_ai_release']).toEqual({ pro_plan_price: 0.27 });
+    expect(blocking(graph!)).toEqual(ASK_54_64_AI);
+    expect(withheldOptions(out)).toEqual(ONLY_TEST_WITHHELD);
+    expect(out.left_out_to_stay_compact).toBeUndefined();
+  });
+
   it('RED (row 2i, the verifier\'s P2-E): ONE gap, genuinely levelled while £54 is re-priced like the user\'s £59 — refused; £54 stays registered', async () => {
     const retry = with54(true, LEVELLED(59, 1));
     // Vacuity: £54's own gap is closed in the retry (0 < 1), so no count reads it as a gap; only its withholding is left.
