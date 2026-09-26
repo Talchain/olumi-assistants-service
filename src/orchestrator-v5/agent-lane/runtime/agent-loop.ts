@@ -18,6 +18,7 @@
  */
 
 import { toolsFor, dispatchTool, type AgentCapabilities, type AgentToolContext, type AgentLaneMode, type ToolResult } from './agent-tools.js';
+import { isProposingTool, proposalsAwaitingApproval, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL } from '../approval-chips.js';
 import { config } from '../../../config/index.js';
 import { log } from '../../../utils/telemetry.js';
 import {
@@ -291,7 +292,11 @@ export async function runAgentTurn(
             ok: false, mutated: false, refusal: WITHHELD_ON_CHIP_TURN,
             detail: 'Not from a suggestion button: approving a change and running the analysis each have their own control. Nothing was changed.',
           }
-        : await dispatchTool(String(call.name), String(call.arguments ?? '{}'), input.ctx, caps, mode);
+        // ⛔ One approval carries one change: a second proposal while this turn's first awaits the user's yes is
+        // refused before it is stored, so the turn always ends with its one control (`ONE_CHANGE_PER_APPROVAL`).
+        : isProposingTool(String(call.name)) && proposalsAwaitingApproval(toolCalls).size > 0
+          ? { ok: false, mutated: false, refusal: ONE_CHANGE_PER_APPROVAL, detail: ONE_CHANGE_PER_APPROVAL_DETAIL }
+          : await dispatchTool(String(call.name), String(call.arguments ?? '{}'), input.ctx, caps, mode);
       // ⛔ A TOOL'S OWN PROVIDER CALL IS NOT OVERHEAD.
       //
       // `build_model_from_brief` is dispatched as a tool and makes its own

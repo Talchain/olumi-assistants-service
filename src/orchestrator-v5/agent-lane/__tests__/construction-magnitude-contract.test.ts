@@ -46,7 +46,7 @@ function t3(aiToChurn: Size, aiToChurnProvenance: Prov = 'inferred') {
       metric: 'MRR', operator: '>=', target_stated: true, value: 20000, unit: 'GBP/month', horizon_months: 12, provenance: 'explicit',
       baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null,
     },
-    constraints: [{ metric: 'Monthly churn', operator: '<', value: 10, unit: '%', provenance: 'explicit' }],
+    constraints: [{ metric: 'Monthly churn', operator: '<', value: 10, unit: '%', provenance: 'explicit', frame: 'level' }],
     options: [
       { label: 'Carry on as now', provenance: 'inferred', changes: [], interventions: [], is_status_quo: true },
       { label: 'Release AI at £49', provenance: 'inferred', changes: [], is_status_quo: null, interventions: [

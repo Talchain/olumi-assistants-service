@@ -76,7 +76,7 @@ type Identity = { outcome: string; operation: string; factors: string[]; provena
 const link = (from: string, to: string, direction: Dir) => ({ from, to, direction, provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
 const goal = { metric: 'MRR', operator: '>=', target_stated: true, value: 20000, unit: 'GBP', horizon_months: 12, provenance: 'explicit',
   baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null };
-const CHURN_LIMIT = { metric: 'Monthly churn', operator: '<=', value: 10, unit: '%', provenance: 'explicit' };
+const CHURN_LIMIT = { metric: 'Monthly churn', operator: '<=', value: 10, unit: '%', provenance: 'explicit', frame: 'level' };
 const MRR_IS_PRICE_TIMES_SUBSCRIBERS: Identity = { outcome: 'MRR', operation: 'product', factors: ['Pro plan price', 'Pro subscribers'], provenance: 'inferred' };
 
 /**

@@ -295,14 +295,14 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
   });
 
-  it('9. CONSENT: TWO proposals pending, so the chip rule offers no chip → still NOT shaped; text byte-identical', async () => {
+  it('9. CONSENT: a SECOND proposal in the turn is refused (one change per approval), so ONE chip is offered → still NOT shaped; text byte-identical', async () => {
     const proposed = await askedTurn(PROPOSAL_REPLY, '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a12', [
       proposeLink('Price-release alignment', 'Pro conversion rate'),
       proposeLink('Perceived Pro value', 'Pro subscriber base'),
     ], PROPOSING) as Offered;
-    expect(proposed._agent.tool_calls, 'the control: both proposals were made').toMatchObject([{ name: 'propose_model_change', ok: true }, { name: 'propose_model_change', ok: true }]);
+    expect(proposed._agent.tool_calls, 'the control: the first is proposed, the second refused before it is stored').toMatchObject([{ name: 'propose_model_change', ok: true }, { name: 'propose_model_change', ok: false, refusal: 'one_change_per_approval' }]);
     expect(carriesResult(proposed), 'the control: over a current result').toBe(true);
-    expect(await offersApprove(proposed), 'the control: two pending, so no approve chip').toBe(false);
+    expect(await offersApprove(proposed), 'the control: ONE pending, so its approve chip').toBe(true);
     expect('_answer_shape' in proposed, 'a turn asking for approval in words is not shaped either').toBe(false);
     expect(proposed.assistant_text).toBe(PROPOSAL_REPLY);
   });

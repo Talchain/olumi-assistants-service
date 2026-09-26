@@ -36,7 +36,7 @@ const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id
 const GTM = (goal: Record<string, unknown>) => ({
   goal,
   constraints: [
-    { metric: 'Go-to-market budget', operator: '<=', value: 900000, unit: 'GBP', provenance: 'explicit' },
+    { metric: 'Go-to-market budget', operator: '<=', value: 900000, unit: 'GBP', provenance: 'explicit', frame: 'level' },
   ],
   options: [
     { label: 'Expand outbound sales', provenance: 'explicit', is_status_quo: null, changes: [],

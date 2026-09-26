@@ -73,6 +73,9 @@ function candidateFromServed(g: SGraph, opts: { olumi?: 'ai_proposed' | 'inferre
     constraints: (g.goal_constraints ?? []).map((c) => ({
       metric: c.label, operator: c.operator, value: c.provenance_unit_relabelled?.pre_normalisation_value ?? c.value,
       unit: c.provenance_unit_relabelled?.pre_normalisation_unit ?? c.unit, provenance: c.provenance === 'explicit' ? 'explicit' : 'ai_proposed',
+      // The served builds predate the required `frame` (#1919) and stamped none. Every served limit here is
+      // "Monthly churn <= 10 % per month": a LEVEL the churn rate must stay under, never a change from today.
+      frame: (c as { value_frame?: 'level' | 'delta' }).value_frame ?? 'level',
     })),
     options: g.nodes.filter((n) => n.kind === 'option').map((o) => {
       const levels = Object.entries(o.interventions ?? {});
@@ -175,6 +178,18 @@ const BASE = (() => {
   try { return JSON.parse(readFileSync(BASE_FIXTURE, 'utf8')) as { head: string; graphs: Record<string, string> }; } catch { return null; }
 })();
 const baseGraph = (key: string): SGraph => JSON.parse(BASE!.graphs[key]!) as SGraph;
+/**
+ * Base (cb1778b) predates the limit frame (#1919): admission now stamps each limit's `value_frame` right
+ * after `provenance` (`admit-constraint.ts`). Every served limit here is a level, so what registers is
+ * base's bytes plus exactly that one key per limit — nothing else may move.
+ */
+const framedBase = (g: SGraph): SGraph => ({
+  ...g,
+  ...(g.goal_constraints === undefined ? {} : {
+    goal_constraints: g.goal_constraints.map((c) => Object.fromEntries(Object.entries(c).flatMap(([k, v]) =>
+      (k === 'provenance' ? [[k, v], ['value_frame', 'level']] : [[k, v]]))) as SConstraint),
+  }),
+});
 const optionIds = (g: SGraph) => g.nodes.filter((n) => n.kind === 'option').map((n) => n.id);
 const questions = (out: Record<string, unknown>) => (out.open_questions ?? []) as string[];
 const statusLine = (out: Record<string, unknown>) =>
@@ -235,7 +250,7 @@ describe.each([
     const { graph } = await build(draft());
     const base = baseGraph(key);
     expect(optionIds(base)).toContain(TEST_ID);
-    expect(JSON.stringify(graph)).toBe(JSON.stringify(withoutOption(base, TEST_ID)));
+    expect(JSON.stringify(graph)).toBe(JSON.stringify(framedBase(withoutOption(base, TEST_ID))));
   });
 
   it('RED: the Olumi-added test option is not registered — no node, no edge', async () => {
@@ -308,7 +323,7 @@ describe('controls — what the rule must never touch', () => {
     expect(optionIds(graph)).toContain(olumiId);
     expect(graph.nodes).toEqual(run.brief.draft_graph.nodes);
     expect(graph.edges).toEqual(run.brief.draft_graph.edges);
-    expect(JSON.stringify(graph)).toBe(BASE!.graphs[key]);
+    expect(JSON.stringify(graph)).toBe(JSON.stringify(framedBase(baseGraph(key))));
     expect(out).not.toHaveProperty('options_withheld');
     expect(questions(out).filter((q) => q.startsWith('I left out ') || q.startsWith('What makes '))).toEqual([]);
   });
