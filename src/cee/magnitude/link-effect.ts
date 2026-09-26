@@ -127,6 +127,20 @@ export function knownBaseline(node: MagnitudeNode): number | undefined {
   return finite(os.value) ? os.value : undefined;
 }
 
+/**
+ * The level the model HOLDS for a target, whoever set it — Olumi's estimate included. Only ever used to SIZE a
+ * placeholder to the target's frame (PR1b), never to judge a stated size (that is `knownBaseline`).
+ */
+export function heldBaseline(node: MagnitudeNode): number | undefined {
+  const os = node.observed_state;
+  if (os === undefined) return undefined;
+  if (finite(os.baseline)) return os.baseline;
+  return finite(os.value) ? os.value : undefined;
+}
+
+/** A source no option moves (a mediator) may still range over its whole normalised frame: the conservative swing. */
+export const FULL_RANGE_SWING: Swing = { lo: -1, hi: 1 };
+
 /** The source's model swing: the normalised change from where it stands to each level an option sets. */
 export interface Swing { readonly lo: number; readonly hi: number }
 
@@ -354,6 +368,16 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
     ? { baseline, domain, swing, frame: targetFrame as number }
     : null;
   const today = (c: NonNullable<typeof check>): string => levelWords(c.baseline, target, c.frame);
+  /**
+   * ⭐ PR1b (#70 5848092404, served CEE 4202cda). D6 SIZES a placeholder; it asserts nothing about the target. So it
+   * needs only SOME baseline on a bounded target — Olumi's own estimate included — and a swing: the options' own, or the
+   * source's FULL normalised range when no option moves it (a mediator, the served norm into churn). D4, which judges a
+   * STATED size, stays known-baseline only (`check` above).
+   */
+  const held = baseline ?? heldBaseline(target);
+  const sizeCheck = check ?? (held !== undefined && domain !== null && withinDomain({ lo: held, hi: held }, domain)
+    ? { baseline: held, domain, swing: swing ?? FULL_RANGE_SWING, frame: targetFrame as number }
+    : null);
 
   let problem: LinkSizeProblem | undefined;
   if (stated && beta === null) problem = 'unconvertible';
@@ -386,7 +410,7 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
 
   // D6. A placeholder is sized to the frame only where D4 can run; at a bound with no room on the side the link
   // pushes towards, none can be, and today's projection is kept (and asked about).
-  const placeholder = check === null ? null : frameAwarePlaceholder(sign, check.baseline, check.domain, check.swing);
+  const placeholder = sizeCheck === null ? null : frameAwarePlaceholder(sign, sizeCheck.baseline, sizeCheck.domain, sizeCheck.swing);
   const sized = placeholder !== null && Number.isFinite(placeholder) && placeholder !== 0;
   const standIn = sized ? `a placeholder sized to keep "${target.label}" within its range` : 'a placeholder';
 
@@ -398,7 +422,7 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
     if (problem === 'not_representable') {
       return `Olumi estimated that ${statement}, ${NOT_REPRESENTABLE}, so it was not used: ${standIn} stands in for it. ${HOW_MUCH(source, target)}`;
     }
-    if (check === null) return undefined;
+    if (sizeCheck === null) return undefined;
     if (problem === 'unconvertible') {
       return `${who} ${statement}, but that could not be read on the ranges the two are measured on, so ${standIn} stands in for it. `
         + HOW_MUCH(source, target);
