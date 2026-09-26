@@ -731,8 +731,13 @@ const METRIC_NOUN_STOPWORDS = new Set<string>([
  * accepts (`[£$€]`) — "4M dollars" is the same explicit signal as "$4M".
  * Derived from that alphabet, not an open list: a currency this file cannot
  * capture as a symbol is not one it can compare.
+ *
+ * EXPORTED, NOT COPIED (#70 5845579390 item 1): `orchestrator-v5/agent-lane/
+ * stated-by-user.ts` reads "12,000 dollars" as a USD amount through this fold
+ * and `CURRENCY_SYMBOL_TO_CODE`, so a figure the user wrote in dollars is never
+ * grounded as their GBP figure. One word vocabulary, two readers.
  */
-const CURRENCY_WORDS: Readonly<Record<string, string>> = {
+export const CURRENCY_WORDS: Readonly<Record<string, string>> = {
   dollar: "$", dollars: "$", usd: "$",
   pound: "£", pounds: "£", gbp: "£",
   euro: "€", euros: "€", eur: "€",

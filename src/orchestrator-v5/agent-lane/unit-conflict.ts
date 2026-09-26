@@ -14,9 +14,18 @@
 import { unitFamilyOf, type UnitFamily } from '../routing/value-unit-resolution.js';
 
 export function unitPhraseFamily(unit: unknown): UnitFamily | null {
+  const lead = unitLeadToken(unit);
+  return lead === null ? null : unitFamilyOf(lead);
+}
+
+/**
+ * The token a unit phrase is classified by: "GBP per month" → "gbp", "£/month" → "£". Exported so the currency CODE
+ * of a unit (`stated-by-user.ts`) is read from the same token its family is, and the two can never disagree.
+ */
+export function unitLeadToken(unit: unknown): string | null {
   if (typeof unit !== 'string') return null;
   const lead = unit.trim().toLowerCase().split(/[\s/]+/)[0];
-  return lead === undefined || lead === '' ? null : unitFamilyOf(lead);
+  return lead === undefined || lead === '' ? null : lead;
 }
 
 export function unitsConflict(stated: unknown, factorUnit: unknown): { stated: UnitFamily; factor: UnitFamily } | null {

@@ -175,9 +175,13 @@ const REVIEWED: Readonly<Record<string, string>> = {
 
   // ── NOT VOCABULARIES: the detector's own false positives, each read ───────
   "cee/factor-extraction/index.ts":
-    "no currency list. The window catches two unrelated quoted tokens; the amount pattern's " +
-    "currency class is the inline regex `[£$€]` and its magnitudes come from the canonical " +
-    "alphabet.",
+    "the amount pattern's currency class is the inline regex `[£$€]` and its magnitudes come " +
+    "from the canonical alphabet. It carries TWO quoted lists the window sees: an UNUSED " +
+    "private `_CURRENCY_MAP` (3 entries, agreeing with the canonical map), and `CURRENCY_WORDS`, " +
+    "a WORD -> symbol fold (dollar(s)/pound(s)/euro(s)/usd/gbp/eur -> $/£/€) whose symbols are " +
+    "resolved to codes through the canonical map. `CURRENCY_WORDS` is EXPORTED (#70 5845579390 " +
+    "item 1) so `orchestrator-v5/agent-lane/stated-by-user.ts` reads \"12,000 dollars\" as USD " +
+    "through this one word vocabulary instead of spelling a second.",
   "orchestrator-v5/context/cqe/rules.ts":
     "`normaliseCurrencyUnit` maps £/gbp/grand/quid->GBP, $/usd->USD, €/eur->EUR. A genuine " +
     "symbol->code sibling, private to the module; its regex source " +
