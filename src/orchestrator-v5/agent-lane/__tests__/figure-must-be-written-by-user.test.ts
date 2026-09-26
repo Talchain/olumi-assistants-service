@@ -125,26 +125,29 @@ describe('propose_new_option sends only levels the user wrote', () => {
     void r;
   });
 
-  it('CONTRAST: a price the user wrote (£59) is sent as the level, with its figure', async () => {
+  // £57, not £59: Paul's stored graph already has "Raise to £59 at Release" at exactly 0.295, and an option
+  // with the same levels as an existing one is refused (#1990). These rows test WHOSE figure is sent, so they
+  // use a price no option holds.
+  it('CONTRAST: a price the user wrote (£57) is sent as the level, with its figure', async () => {
     const { caps, sent } = setup();
-    await caps.proposeNewOption(ctxSaying('Add an option: raise to £59 with a win-back offer.'), {
-      label: 'Raise to £59 with a win-back offer',
-      acts_on: [{ factor_label: 'Pro plan price', direction: 'positive', level: { value: 59, unit: '£' } }],
+    await caps.proposeNewOption(ctxSaying('Add an option: raise to £57 with a win-back offer.'), {
+      label: 'Raise to £57 with a win-back offer',
+      acts_on: [{ factor_label: 'Pro plan price', direction: 'positive', level: { value: 57, unit: '£' } }],
       rationale: 'x',
     } as never);
     const price = levelSent(sent, 'pro_plan_price');
-    expect(price?.value).toBeCloseTo(59 / 200, 10);
-    expect(price?.raw_value).toBe(59);
+    expect(price?.value).toBeCloseTo(57 / 200, 10);
+    expect(price?.raw_value).toBe(57);
   });
 
-  it('RED (B2): "Yes, let\'s add an option at £59, that\'s the price we\'d test." → £59 is the user\'s level, never lost', async () => {
+  it('RED (B2): "Yes, let\'s add an option at £57, that\'s the price we\'d test." → £57 is the user\'s level, never lost', async () => {
     const { caps, sent } = setup();
-    await caps.proposeNewOption(ctxSaying(userWordsOf([], 'Yes, let\'s add an option at £59, that\'s the price we\'d test.')), {
-      label: 'Test £59 before rollout',
-      acts_on: [{ factor_label: 'Pro plan price', direction: 'positive', level: { value: 59, unit: '£' } }],
+    await caps.proposeNewOption(ctxSaying(userWordsOf([], 'Yes, let\'s add an option at £57, that\'s the price we\'d test.')), {
+      label: 'Test £57 before rollout',
+      acts_on: [{ factor_label: 'Pro plan price', direction: 'positive', level: { value: 57, unit: '£' } }],
       rationale: 'x',
     } as never);
-    expect(levelSent(sent, 'pro_plan_price')?.raw_value, JSON.stringify(sent[0]?.body)).toBe(59);
+    expect(levelSent(sent, 'pro_plan_price')?.raw_value, JSON.stringify(sent[0]?.body)).toBe(57);
   });
 
   it('RED: a price the user never wrote (£64 against "£59") is sent unset', async () => {
