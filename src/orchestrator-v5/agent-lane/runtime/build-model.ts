@@ -34,7 +34,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { admitCandidateModel, carryWithheldOptions, findMechanismPath, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
+import { admitCandidateModel, carryWithheldOptions, findMechanismPath, productIdentityOpenQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -86,7 +86,17 @@ export function buildCandidateSchema(): Record<string, unknown> {
       baseline_known: { type: 'boolean', description: 'True only when the brief states the goal metric\u2019s CURRENT level.' },
       baseline_value: { anyOf: [{ type: 'number' }, { type: 'null' }], description: 'The goal metric\u2019s current level in the goal unit, exactly as the brief states it; null when the brief does not. Never an estimate, never the target.' },
       baseline_provenance: provenance,
-    }, ['metric', 'operator', 'target_stated', 'value', 'unit', 'horizon_months', 'provenance', 'baseline_known', 'baseline_value', 'baseline_provenance']),
+      // ⛔ C46: "£20k MRR" — the Pro plan's or all plans'? REQUIRED so strict output must say
+      // "no such question" (null) rather than omit it. `admit-model.ts` records an unstated scope on
+      // the goal as Olumi's assumption and the build asks which was meant (#70 5841314428: never
+      // silently pick one).
+      scope: { anyOf: [{ type: 'null' }, obj({
+        modelled: { type: 'string', description: 'The part or whole the model measures, in words, e.g. "the Pro plan only".' },
+        alternative: { type: 'string', description: 'The other reading the goal could have, e.g. "all plans together".' },
+        stated_in_brief: { type: 'boolean', description: 'True only when the brief itself says which.' },
+      }, ['modelled', 'alternative', 'stated_in_brief'])], description:
+        'Null unless the goal metric could mean one part (a plan, product, segment or region) or the whole.' },
+    }, ['metric', 'operator', 'target_stated', 'value', 'unit', 'horizon_months', 'provenance', 'baseline_known', 'baseline_value', 'baseline_provenance', 'scope']),
     constraints: { type: 'array', items: obj({
       metric: { type: 'string' }, operator: { type: 'string', enum: ['>=', '<=', '>', '<'] },
       value: { type: 'number' }, unit: { type: 'string' }, provenance,
@@ -145,8 +155,23 @@ export function buildCandidateSchema(): Record<string, unknown> {
         'The direction read from the brief or from causal reasoning you can state in one line. "unknown" only when you genuinely cannot say \u2014 then ask which way it runs in `unknowns`; an unknown link is withheld and is not a path.' },
       provenance,
     }, ['from', 'to', 'direction', 'provenance']) },
+    /**
+     * ⛔ C46: a product the analysis can only ADD UP must be DECLARED, never read off a label.
+     * The analyse path is a linear SCM, so "Pro MRR = price × subscribers" is approximated, and
+     * where an option pushes the inputs apart even the sign can flip (#70 5841215337). The
+     * drafter states the definition; `admit-model.ts` checks it against the admitted links and
+     * marks whether its sign is provable. REQUIRED so "none" is an empty list, never an omission.
+     */
+    identities: { type: 'array', description:
+      'Quantities in this model that are, BY DEFINITION, other quantities in this model multiplied together. Empty when none.',
+      items: obj({
+        outcome: { type: 'string', description: 'The EXACT label of the quantity that is the product.' },
+        operation: { type: 'string', enum: ['product'] },
+        factors: { type: 'array', items: { type: 'string' }, description: 'The EXACT labels of every quantity multiplied.' },
+        provenance,
+      }, ['outcome', 'operation', 'factors', 'provenance']) },
     unknowns: { type: 'array', items: { type: 'string' } },
-  }, ['goal', 'constraints', 'options', 'factors', 'risks', 'outcomes', 'links', 'unknowns']);
+  }, ['goal', 'constraints', 'options', 'factors', 'risks', 'outcomes', 'links', 'identities', 'unknowns']);
 }
 
 export const BUILD_INSTRUCTIONS = [
@@ -195,6 +220,10 @@ export const BUILD_INSTRUCTIONS = [
    * available wrong answers, because it reads as a deliberate choice they made.
    */
   'A GOAL TARGET THE BRIEF DOES NOT STATE MUST BE LEFT UNSTATED. If the user named a number to reach \u2014 "to 40%", "by \u00a33m", "under 4 weeks" \u2014 set `target_stated: true` and put that number in `goal.value`. If they only named a DIRECTION \u2014 "increase productivity", "cut churn", "improve velocity" \u2014 then set `target_stated: false` and `goal.value: null`. Never substitute 0, never invent a plausible target, and never treat the absence of a number as a target of zero: a direction with no number is a complete and ordinary goal, and the analysis compares options against it perfectly well. Getting this wrong tells the user they asked for something they did not ask for.',
+  // ⛔ C46 (#70 5841314428): "£20k MRR" silently became Pro MRR on Paul's captured brief.
+  'NEVER PICK THE SCOPE OF THE GOAL SILENTLY. When the goal metric could mean one part or the whole — the brief says "MRR" or "revenue" and the decision is about one plan, product, segment or region — set `goal.scope`: `modelled` is what your model actually measures (e.g. "the Pro plan only"), `alternative` is the other reading (e.g. "all plans together"), and `stated_in_brief` is true only when the brief itself says which. Keep `goal.metric` in the user’s own words: Olumi states the modelled scope as its own assumption and asks the user which they meant from `goal.scope`. When the goal metric has no part-or-whole reading, `goal.scope` is null.',
+  // ⛔ C46 (#70 5841215337): the analysis adds effects up, so a product is approximated and its sign can flip.
+  'DECLARE A PRODUCT ONLY WHERE ONE HOLDS BY DEFINITION. When a quantity you keep is, by definition, other quantities you keep multiplied together — a plan’s revenue is its price times its paying subscribers; a cost is headcount times cost per head — add one entry to `identities`: `outcome` is that quantity’s EXACT label, `operation` "product", and `factors` the EXACT labels of every quantity multiplied. Still state each factor’s own link toward the outcome in `links`. Only a definition, never a correlation or a guess. `identities` is empty when none holds.',
   'THE GOAL METRIC MUST BE THE TERMINAL NODE. Every option needs a causal path that ends at the goal metric you named in `goal.metric`. Use that EXACT label as the endpoint of the final link \u2014 do not invent a near-synonym outcome like "X Improvement" for a goal called "X change", because a separate synonym leaves the goal disconnected and the model cannot be analysed at all.',
   'EVERY LIMIT MUST NAME A NODE THE ANALYSIS CAN CHECK. Each `constraints[].metric` must be the EXACT label of a factor or outcome you keep in this model \u2014 a limit whose metric names no node is withheld from the model, and the analysis cannot check it. If the user limits a total such as cost, budget or spend, keep that total in the model as a factor the options set or an outcome their factors feed, wired toward the goal like every other factor, and use its exact label as the metric. Keep the direction the user stated: a budget, cost or spend cap is an upper bound ("<=") and a floor such as a minimum margin is a lower bound (">="); never add the opposite bound to the same limit.',
   // ⛔ THE LINK CONTRACT (#63 ruling 5793252993). There is NO default-positive
@@ -339,6 +368,18 @@ export function retrySchemaPinningGoal(goal: CandidateModel['goal']): Record<str
       ? { type: 'number', enum: [goal.baseline_value] }
       : { type: 'null' },
     baseline_provenance: { type: 'string', enum: [goal.baseline_provenance ?? goal.provenance] },
+    // C46: the scope is part of the goal, so a compaction cannot switch readings or drop the
+    // question. An absent scope (a candidate from before the field) pins to "none" (null).
+    scope: goal.scope === null || goal.scope === undefined || typeof goal.scope !== 'object'
+      ? { type: 'null' }
+      : {
+          type: 'object', additionalProperties: false, required: ['modelled', 'alternative', 'stated_in_brief'],
+          properties: {
+            modelled: { type: 'string', enum: [goal.scope.modelled] },
+            alternative: { type: 'string', enum: [goal.scope.alternative] },
+            stated_in_brief: { type: 'boolean', enum: [goal.scope.stated_in_brief] },
+          },
+        },
   };
   return schema;
 }
@@ -795,6 +836,10 @@ export async function buildModelFromBrief(
    */
   const parked = (candidate as { unknowns?: unknown }).unknowns;
   const openQuestions = Array.isArray(parked) ? parked.filter((q): q is string => typeof q === 'string' && q.trim() !== '') : [];
+  // ⛔ C46: a declared product whose sign this model cannot prove is ASKED where the user always sees it,
+  // not only said in `not_represented` (which only the Agent's model reads). After the scope and deadline
+  // questions, ahead of the drafter's own; nothing for a stable product or a linear model.
+  openQuestions.unshift(...productIdentityOpenQuestions(admitted));
   /**
    * ⛔ AN OPTION WITHHELD AS INDISTINCT IS SAID WHERE THE USER ALWAYS SEES IT (DL #70 5842400604: "never a
    * silent duplicate"). `not_represented` reaches only the Agent's model; `open_questions` is appended to the
@@ -817,6 +862,12 @@ export async function buildModelFromBrief(
   if (typeof horizon === 'number' && Number.isFinite(horizon) && horizon > 0) {
     openQuestions.unshift(`Does "${candidate.goal.metric}" get there within ${horizon} months? The model holds no deadline yet, so no result answers that.`);
   }
+  // ⛔ C46: the goal's unstated scope (`admit-model.ts` records the question as the reason of
+  // its `goal_scope` entry). First, because the ruling requires it clarified or named before
+  // analysis; asked here, in the channel the Agent already reads, never only in prose. Ahead of the
+  // deadline question (merge of staging #1939): both lead the parked questions, so neither is cut by
+  // the five-question cap.
+  openQuestions.unshift(...admitted.loss.filter((l) => /\.goal_scope$/.test(l.field_path)).map((l) => l.reason));
 
   const graph = {
     nodes: admitted.nodes,
@@ -973,7 +1024,20 @@ export async function buildModelFromBrief(
     // B1/B2 (review 5822711266), machine-readable beside the sentences below.
     ...(preparation.additions_without_total.length > 0 ? { additions_without_total: preparation.additions_without_total } : {}),
     ...(preparation.provenance_demoted.length > 0 ? { provenance_demoted: preparation.provenance_demoted } : {}),
+    // ⛔ C46, machine-readable beside its sentence below. `sign_not_provable` means no leader or
+    // decision-grade claim may rest on this model (#70 5841314428). This is construction's report; the
+    // leader permission is stamped by `run_analysis` from the node's persisted declaration
+    // (`nonlinearIdentityLeaderWithhold`), re-judged on the graph each Run analyses.
+    ...(admitted.nonlinear_identities !== undefined ? { nonlinear_identities: admitted.nonlinear_identities } : {}),
     not_represented: [
+      // ⛔ C46: the goal's unstated scope, as Olumi's assumption (the `goal_scope` entry's `after`), FIRST.
+      // Said here and never written on the goal node: `get_canonical_state` shows a node's description as
+      // its `full_label`, so the assumption would read back as the user's metric (re-verification of
+      // d2362e9d, item e). Its question is asked first in `open_questions`, above.
+      ...admitted.loss
+        .filter((l) => /\.goal_scope$/.test(l.field_path))
+        .map((l) => l.after)
+        .filter((a): a is string => typeof a === 'string'),
       ...unattachedLimitLines(candidate, admitted.loss),
       ...preparation.additions_without_total.map(sayAdditionWithoutTotal),
       ...preparation.provenance_demoted.map((d) =>
@@ -1005,9 +1069,11 @@ export async function buildModelFromBrief(
         // were kept in ONE value space (#69 5835137365) — each changes what a number means, so it is said.
         // `observed_state.baseline`: a goal's current level that could not be carried
         // (`admit-model.ts`) — the user is told why, and what would let it count.
+        // `nonlinear_identity[_rejected]` (C46): a declared product the analysis can only add
+        // up — the missing capability in plain English — or a declaration that did not hold.
         // `loop_withheld` / `loop_kept`: a loop the model could not hold (`admit-model.ts`,
         // `breakLoops`) — which link was left out, or that the user's own loop was kept.
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|loop_withheld|loop_kept)$|\.observed_state\.baseline$/.test(l.field_path))
+        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|loop_withheld|loop_kept)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };

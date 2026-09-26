@@ -48,6 +48,7 @@ import type {
 
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import {
+  collectLeaderEstimatedTargetIds,
   deriveConstraintVerdict,
   readRatifiedConstraints,
   projectClaimSafety,
@@ -68,6 +69,11 @@ import {
   applyIntakeToLeaderPermission,
 } from '../../../orchestrator/context/intake-option-reconciliation.js';
 import { buildIntakeOptionDisclosure } from '../../coaching/intake-option-disclosure.js';
+// ⛔ C46 stage 1 (b): a leader on a product the analysis only adds up (MRR = price × subscribers).
+import {
+  applyNonlinearIdentityToLeaderPermission,
+  nonlinearIdentityLeaderWithhold,
+} from '../../agent-lane/admit-model.js';
 // D-ask-1 extended to CEE-inferred FACTOR values: the analysis says whose
 // numbers it ran on. See inferred-value-disclosure.ts for the measurement.
 import {
@@ -1736,10 +1742,33 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     //
     // Pinned by `__tests__/run-analysis-derived-constraint-target.test.ts`,
     // which executes this handler and reads the verdict off the persisted fact.
+    // ⛔ The leader's result on a limit whose target it SETS at a level that is not the user's own is that level
+    // restated, not a check (AI Quality, #70 5844226031): read off the options PLoT received, and passed as the FIFTH
+    // argument — the fourth stays deliberately omitted (see above).
+    // WIRE, not graph (review 5844327116): a status quo the gate HELD sets the target on the wire only.
+    const leaderEstimatedTargetIds = collectLeaderEstimatedTargetIds(
+      graphForAnalysis,
+      ratifiedConstraints,
+      leadingOptionId ?? null,
+      { options: submittedOptions, held: gate.held },
+    );
+    if (leaderEstimatedTargetIds.size > 0) {
+      log.info(
+        {
+          event: 'run_analysis.limit_rests_on_olumi_estimate',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          constraint_ids: [...leaderEstimatedTargetIds],
+        },
+        'run_analysis: a limit on a quantity the leading option sets at Olumi\'s estimate is not counted as checked',
+      );
+    }
     const constraintVerdict = deriveConstraintVerdict(
       response as Record<string, unknown>,
       ratifiedConstraints,
       leadingOptionId ?? null,
+      undefined,
+      leaderEstimatedTargetIds,
     );
     // ⚠ NO TELEMETRY EVENT FOR THE UNMEASURED-TARGET PARTITION, AND THAT IS A
     // DISCLOSED GAP RATHER THAN AN OVERSIGHT — the same call, for the same
@@ -1916,7 +1945,40 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // never disagree about which factors are unset.
       unsetOptionEffectFactorIds: unsetOptionEffectFactorIds(unsetOptionEffects),
     };
-    const headline = buildAnalysisResultHeadline(headlineInput);
+    // ⛔ C46 STAGE 1 (b) — THE LEADER PLoT RANKED FIRST, ON A PRODUCT THIS ENGINE ONLY ADDS UP.
+    //
+    // The goal node's persisted declaration (`cee-v3.ts` NodeV3 `nonlinear_identity`) is re-judged by
+    // construction's own sign test on the graph this Run analysed (`nonlinearIdentityLeaderWithhold`):
+    // when the leader, BY ID, is not proven against an option this run compared, no leader may be named
+    // (ruling #70 5841314428). The linear engine's own interval is never the proof (AI Quality #70
+    // 5842580505). No carrier ⇒ `null`, so every linear brief and every graph persisted before the
+    // carrier runs byte-identical.
+    //
+    // ⚠ TWO SEAMS, ONE FINDING, THE INTAKE PRECEDENT'S SHAPE (ROADMAP 2.579): the headline is withheld
+    // HERE, in the same response, and the persisted permission is folded at the one stamp below. Gating
+    // only the stamp would ship "{X} currently leads" beside a fact that says no leader may be named —
+    // the G-CEE-1 contradiction. `headline !== null` stays the leader permission for every tail below.
+    const nonlinearIdentityWithhold = leadingOptionId === null
+      ? null
+      : nonlinearIdentityLeaderWithhold(snapshot.graph, leadingOptionId, {
+        comparedOptionIds: [...analysedOptionIds],
+        goalId: snapshot.goal_node_id,
+      });
+    if (nonlinearIdentityWithhold !== null) {
+      // Ids and counts only — no labels, no figures.
+      log.info(
+        {
+          event: 'cee.nonlinear_identity.leader_withheld',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          leading_option_id: leadingOptionId,
+          outcome_node_id: nonlinearIdentityWithhold.outcome_id,
+          unproven_against_count: nonlinearIdentityWithhold.against.length,
+        },
+        'run_analysis: leader withheld — its sign on a multiplied goal is not proven',
+      );
+    }
+    const headline = nonlinearIdentityWithhold !== null ? null : buildAnalysisResultHeadline(headlineInput);
     // ⛔ THE GOAL FRAME THE HEADLINE WAS COMPOSED UNDER (R&C round 1, F1). The
     // objective-contradiction tail below must not say "against your goal" where
     // this headline has withdrawn it, nor assert attainment while the frame is
@@ -2288,9 +2350,15 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // nothing true to say about the constraint evidence — see
         // `applyIntakeToLeaderPermission` for the full statement of that
         // residual.
-        constraint_verdict: applyIntakeToLeaderPermission(
-          projectClaimSafety(constraintVerdict),
-          intakeReconciliation,
+        // ⛔ C46 stage 1 (b): a THIRD remove-only conjunct, the intake precedent's shape — it can only
+        // take the permission away, and leaves `constraint_verdict_state` untouched (its REASON is chosen
+        // at compose, where the constraint code keeps precedence: AI Quality option (i), #70 5842615260).
+        constraint_verdict: applyNonlinearIdentityToLeaderPermission(
+          applyIntakeToLeaderPermission(
+            projectClaimSafety(constraintVerdict),
+            intakeReconciliation,
+          ),
+          nonlinearIdentityWithhold,
         ),
       },
     };

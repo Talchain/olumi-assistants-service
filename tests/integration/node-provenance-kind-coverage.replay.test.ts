@@ -623,6 +623,10 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "label",
       "label_authored",
       "label_placeholder",
+      // C46 stage 1 (#70 5841833807) — THE VALUE-BEARING DECISION: `nonlinear_identity` is NOT value-bearing and
+      // must NOT join `carriesValue`. It names WHICH nodes multiply (`operation: 'product'`, `factor_ids`) and
+      // whose reading that is (`stated_in_brief`) — a statement about the model's form, never a magnitude.
+      "nonlinear_identity",
       "observed_state",
       "prior",
       "provenance",
