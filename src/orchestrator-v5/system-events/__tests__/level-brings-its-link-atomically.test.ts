@@ -85,6 +85,28 @@ describe('a level brings its link — ONE atomic commit (DL #70 5847137399)', ()
     expect(optionInterventionPostimageIsScoped(g, c.graph, target)).toBe(false);
   });
 
+  it('the scope guard pins the link\'s SOURCE: a link stamped as someone else\'s than its level is out of scope (Canvas N, #2007)', () => {
+    const g = graph();
+    const c = applyOptionInterventionEdit(input(g));
+    if (c.kind !== 'candidate') throw new Error(JSON.stringify(c));
+    const restamped = clone(c.graph);
+    const link = restamped.edges.find((x) => x.from === 'option' && x.to === 'price') as { provenance?: { source?: string } };
+    link.provenance = { source: 'cee_hypothesis' };
+    expect(optionInterventionPostimageIsScoped(g, c.graph, target, { from: 'option', to: 'price' }), 'premise: the real postimage is in scope').toBe(true);
+    expect(optionInterventionPostimageIsScoped(g, restamped, target, { from: 'option', to: 'price' })).toBe(false);
+  });
+
+  it('the scope guard pins NEW-CONTAINER purity: an option with no levels before may gain only the declared cell (Canvas N, #2007)', () => {
+    const g = graph();
+    expect((g.nodes.find((n) => n.id === 'option') as { interventions?: unknown }).interventions, 'premise: no container before').toBeUndefined();
+    const c = applyOptionInterventionEdit(input(g));
+    if (c.kind !== 'candidate') throw new Error(JSON.stringify(c));
+    const invented = clone(c.graph);
+    const cells = (invented.nodes.find((n) => n.id === 'option') as { interventions: Record<string, unknown> }).interventions;
+    cells.churn = { ...(cells.price as Record<string, unknown>), target_match: { node_id: 'churn', match_type: 'exact_id', confidence: 'high' } };
+    expect(optionInterventionPostimageIsScoped(g, invented, target, { from: 'option', to: 'price' })).toBe(false);
+  });
+
   it('CONTRAST: an already-linked pair is unchanged — ONE operation, no edge added', () => {
     const c = applyOptionInterventionEdit(input(graph(), { factorId: 'churn', modelValue: 0.05 }));
     expect(c.kind, JSON.stringify(c)).toBe('candidate');
