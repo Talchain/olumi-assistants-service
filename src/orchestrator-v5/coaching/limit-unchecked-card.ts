@@ -26,11 +26,13 @@
  * (`MAY_NAME_LEADING_OPTION`, orchestrator/context/constraint-feasibility.ts;
  * `not_applicable`, the state with no ratified limit, permits). So "at least
  * one limit was not checked or not met" is true in every state it fires on.
- * The words name no threshold or number. They name THE limit only when the
+ * Olumi's own words name no threshold or number. They name THE limit only when the
  * caller proved the graph is the run's own (`coaching/bound-graph.ts`: hash
  * bound) and the model's limits sit on exactly one node, joined by
  * `goal_constraints[].node_id` → that node's label; otherwise the generic
- * words ship. A named card carries `:named` in its signal_id, so one block_id
+ * words ship. The label is the user's own, quoted verbatim: when the user's
+ * label carries a figure the copy gates pass ("Churn ≤ 4%"), the card quotes
+ * that figure inside the quotes and adds none of its own. A named card carries `:named` in its signal_id, so one block_id
  * never names two bodies.
  *
  * The prose summary is NOT an input. The automatic first pass replaces it
@@ -143,8 +145,9 @@ export function buildLimitUncheckedCard(
   const enrichment = readRecord(result.enrichment);
   const effectiveTrigger: RunTurnTrigger =
     input.trigger === 'auto_first_pass' || isAutomaticRun(enrichment) ? 'auto_first_pass' : 'explicit_run';
-  // A label the copy gates refuse (a number, an id-shaped token, leader words, too long) is dropped for the
-  // generic words — the card still ships; it never falls back to a link card.
+  // A label the copy gates refuse (a raw decimal, an id-shaped token, leader words, too long) is dropped for
+  // the generic words — the card still ships; it never falls back to a link card. The gates pass a whole
+  // number or percentage in the user's own label ("Churn ≤ 4%"): the user's figure, quoted, never Olumi's.
   const named = limitLabel !== undefined ? composeLimitUncheckedCard(effectiveTrigger === 'auto_first_pass', limitLabel) : null;
   const useNamed = named !== null && copyPasses(named);
   const copy = useNamed ? named : composeLimitUncheckedCard(effectiveTrigger === 'auto_first_pass');

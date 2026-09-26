@@ -49,8 +49,6 @@ export interface RunTurnCoachingFinal {
    * fact from it ONLY after `coaching/bound-graph.ts` proves its analysis-affecting hash is `graphHash`.
    */
   graph?: unknown;
-  /** The readback's `analysis_ready` (same read). Carried for the run-turn cards; optional. */
-  analysisReady?: unknown;
 }
 
 export interface RunTurnCoachingResult {

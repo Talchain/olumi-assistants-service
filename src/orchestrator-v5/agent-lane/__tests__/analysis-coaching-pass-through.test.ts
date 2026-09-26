@@ -340,6 +340,19 @@ test('NAMED LIMIT — the name is the NODE\'s label (joined by node_id), never t
  assert.match(card.body,/“Monthly churn”/);
  assert.doesNotMatch(card.body,/Churn ceiling I typed/);
 });
+test('NAMED LIMIT — a user\'s own figure in the label ("Churn ≤ 4%") is quoted verbatim; the card adds no figure of its own',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
+ const node=g.nodes.find((n: {id: string})=>n.id==='monthly_churn'); node.label='Churn ≤ 4%';
+ const {captured,final}=rebind(c,g);
+ const card=runTurnCards(runTurnCoaching(captured,final).blocks)[0]!;
+ assert.ok(card.signal_id.endsWith(':auto_first_pass:named'));
+ for (const words of [card.body, card.action_prompt??'']) {
+  assert.match(words,/“Churn ≤ 4%”/);
+  // Every digit sits inside the user's quoted label.
+  assert.doesNotMatch(words.split('“Churn ≤ 4%”').join(''),/\d/);
+ }
+});
 test('NAMED LIMIT — a node label the copy gates refuse (a raw decimal) ships the generic words, still ONE limit card',()=>{
  const c=runTurnCase('paul','t1','auto_first_pass');
  const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
