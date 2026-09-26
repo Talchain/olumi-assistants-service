@@ -451,6 +451,32 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect((newOption()?.interventions ?? {})['fac_price'], 'the user\'s £54').toEqual(expect.objectContaining({ raw_value: 54 }));
   }, 120_000);
 
+  it('[q1] RED (served F4, DL 5843303596; needs Canonical\'s builder): an option on a factor the model LACKS → ONE held change adds the factor AND the option → one click → both present, the factor reaching the goal', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    script = [
+      () => fnCall('propose_new_option', {
+        label: 'Keep £49 and add a paid AI add-on', acts_on: [{ factor_label: 'AI add-on price', direction: 'positive' }],
+        new_factors: [{ label: 'AI add-on price', affects: [{ label: 'Revenue', direction: 'positive' }] }], rationale: 'The user asked for it.',
+      }),
+      () => say('I would add the option and the add-on price factor it needs, in one change. Shall I add them?'),
+    ];
+    const t1 = await turn({ message: 'Add an option: keep £49 and add a paid AI add-on. The add-on raises revenue.' });
+    const approve = approveChipOf(t1);
+    expect(approve?.id, JSON.stringify(t1._agent.tool_calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    expect(inner.filter((b) => (b['chip'] as { intent?: string } | undefined)?.intent === 'add_option'), 'ONE typed change').toHaveLength(1);
+    const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    const g = graphNow();
+    const opt = g.nodes.find((x) => x.kind === 'option' && x.label === 'Keep £49 and add a paid AI add-on');
+    const fac = g.nodes.find((x) => x.kind === 'factor' && x.label === 'AI add-on price');
+    expect(opt, JSON.stringify(g.nodes)).toBeDefined();
+    expect(fac, JSON.stringify(g.nodes)).toBeDefined();
+    expect(g.edges.some((e) => e.from === 'dec_x' && e.to === opt!.id), 'linked from the decision').toBe(true);
+    expect(g.edges.some((e) => e.from === opt!.id && e.to === fac!.id), 'the option acts on the new factor').toBe(true);
+    expect(g.edges.some((e) => e.from === fac!.id && e.to === 'goal_x'), 'the new factor reaches the goal').toBe(true);
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/Also added the factor "AI add-on price", which changes Revenue/);
+    expect(t2.assistant_text, 'the factor is never reported as an option').not.toMatch(/Added "AI add-on price"/);
+  }, 120_000);
+
   it('[p3] RED: a factor with no range at all — the user\'s £54 cannot be stored on one, so the level is left UNSET (never a bare 54) and the Agent is told why', async () => {
     graphOf.set(SCENARIO, seedGraph(1, 1, 'none'));
     let proposed = '';

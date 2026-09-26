@@ -150,7 +150,10 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'get_canonical_state returned. Give a level ONLY for a figure the user stated, in their own units; never invent one. '
       + 'A factor with no stated level is added with no level, and you say plainly what is still needed. '
       + 'When the user asks for SEVERAL options (up to 4), put them ALL in `options` in ONE call: they become ONE change the '
-      + 'user approves once, and it lands whole or not at all. Once a call has prepared a change, never call it again in the '
+      + 'user approves once, and it lands whole or not at all. If an option changes something the model has NO factor for, '
+      + 'add that factor in the SAME change with `new_factors` (never link the option to an unrelated factor instead), and name '
+      + 'it in `acts_on`. Only for something the user asked the option to change; what it changes and which way come from the '
+      + 'user\u2019s words, or where it is plain from the option itself \u2014 if unclear, ask. Once a call has prepared a change, never call it again in the '
       + 'same reply. A call that was REFUSED prepared nothing: you may call it once more in the same reply, corrected as the '
       + 'refusal says.',
     parameters: obj({
@@ -163,6 +166,21 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           label: { type: 'string', description: 'The option in the user\u2019s own words.' },
           acts_on: ACTS_ON,
         }, ['label', 'acts_on']),
+      },
+      new_factors: {
+        type: 'array',
+        description: 'Factors the model does NOT have that these options change, added in this same change. Each is named in an option\u2019s acts_on.',
+        items: obj({
+          label: { type: 'string', description: 'The factor in the user\u2019s words (e.g. "AI add-on price").' },
+          affects: {
+            type: 'array',
+            description: 'What this factor changes that the model already has (the goal, an outcome, a risk, or a factor no option sets), and which way. At least one.',
+            items: obj({
+              label: { type: 'string', description: 'A label exactly as get_canonical_state gives it.' },
+              direction: { type: 'string', enum: ['positive', 'negative'], description: 'Whether raising this factor raises (positive) or lowers (negative) it. From the user; never guessed.' },
+            }, ['label', 'direction']),
+          },
+        }, ['label', 'affects']),
       },
       rationale: { type: 'string', description: 'Why this option is worth comparing, in the user\u2019s terms.' },
     }, ['rationale']),
@@ -323,6 +341,8 @@ export interface AgentCapabilities {
     label?: string; acts_on?: { factor_label: string; direction: 'positive' | 'negative' }[]; rationale: string;
     /** Several options as ONE change (F4): each `{label, acts_on}`, up to 4. */
     options?: { label: string; acts_on: { factor_label: string; direction: 'positive' | 'negative' }[] }[];
+    /** Factors the model lacks, added in the SAME change (`planNewFactors`): each named in an option's acts_on. */
+    new_factors?: readonly { label: string; affects: readonly { label: string; direction?: 'positive' | 'negative' }[] }[];
   }): Promise<ToolResult>;
   proposeOptionInterventions(ctx: AgentToolContext, args: {
     interventions: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean }[];
