@@ -160,6 +160,21 @@ describe('a level limit on a non-root node is checked against that node\'s curre
     expect(carried(ESTIMATE, [{ metric: 'MRR', value: 20000, unit: '£' }]).ids.size).toBe(0);
   });
 
+  it('CONTROL: a "%" limit on a non-root GOAL carries nothing, by kind or by id (#1840 owns the goal\'s baseline)', () => {
+    const graph = {
+      nodes: [
+        { id: 'g', kind: 'goal', label: 'Churn', scale_frame: 100, observed_state: { value: 0.07 } },
+        { id: 'f', kind: 'factor', label: 'Price' },
+      ],
+      edges: [{ from: 'f', to: 'g' }],
+    };
+    const limits = [{ node_id: 'g', operator: '<=', value: 10, unit: '%', value_frame: 'level' }];
+    expect(levelLimitBaselineNodeIds(graph, limits).size).toBe(0);
+    const asOutcome = { ...graph, nodes: graph.nodes.map((n) => (n.id === 'g' ? { ...n, kind: 'outcome' } : n)) };
+    expect(levelLimitBaselineNodeIds(asOutcome, limits), 'PRESENT control: the same node as an outcome carries').toEqual(new Set(['g']));
+    expect(levelLimitBaselineNodeIds(asOutcome, limits, 'g').size, 'the goal id alone excludes it').toBe(0);
+  });
+
   it('FILL-ONLY: an existing baseline, whoever wrote it, is never overwritten', () => {
     const m = admitCandidateModel(candidate(ESTIMATE, [{ value: 10, unit: '%', frame: 'level' }]));
     const nodes = m.nodes.map((n) => (n.label === CHURN ? { ...n, observed_state: { ...n.observed_state!, baseline: 0.05 } } : n));
