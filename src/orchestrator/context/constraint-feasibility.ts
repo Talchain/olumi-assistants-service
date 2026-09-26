@@ -1325,7 +1325,7 @@ export function readConstraintVerdictStateFromResult(
 }
 
 /** Narrow an unknown to a contract state, or `null`. Derived from the enum. */
-function asVerdictState(value: unknown): ConstraintVerdictState | null {
+export function asVerdictState(value: unknown): ConstraintVerdictState | null {
   if (typeof value !== 'string') return null;
   return Object.prototype.hasOwnProperty.call(MAY_NAME_LEADING_OPTION, value)
     ? (value as ConstraintVerdictState)

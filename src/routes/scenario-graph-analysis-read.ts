@@ -347,7 +347,11 @@ export async function readScenarioAnalysis(
     return {
       analysis_state: analysisState,
       analysis_result: boundResult,
-      ...(fact !== null ? { analysis_constraint_verdict_state: readConstraintVerdictStateFromResult(fact.result) } : {}),
+      // Gated on the DELIVERED block, not only the fact: a run-binding that withholds
+      // `analysis_result` withholds this too, so it ships exactly when that block does.
+      ...(fact !== null && boundResult !== null
+        ? { analysis_constraint_verdict_state: readConstraintVerdictStateFromResult(fact.result) }
+        : {}),
     };
   } catch (err) {
     // ADDITIVE MEANS ADDITIVE: the graph read stands whatever happens here.

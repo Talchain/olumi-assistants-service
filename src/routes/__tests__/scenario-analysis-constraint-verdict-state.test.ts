@@ -34,6 +34,17 @@ vi.mock('../../orchestrator-v5/session/index.js', async (importOriginal) => ({
     readAnalysisInvalidatedAt,
   }),
 }));
+const { binding } = vi.hoisted(() => ({ binding: { withhold: false } }));
+vi.mock('../../orchestrator-v5/compose/analysis-state-v1.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../orchestrator-v5/compose/analysis-state-v1.js')>();
+  return {
+    ...actual,
+    // The WITHHELD_RUN_IDENTITY_CONFLICT arm drops the block (review 5843407874 note 1). Not reachable
+    // through the store today, so it is forced here: the key must follow the DELIVERED block.
+    projectAnalysisBlocksForRunBinding: ((blocks, state) =>
+      binding.withhold ? [] : actual.projectAnalysisBlocksForRunBinding(blocks, state)) as typeof actual.projectAnalysisBlocksForRunBinding,
+  };
+});
 vi.mock('../../utils/telemetry.js', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
   emit: vi.fn(),
@@ -88,6 +99,7 @@ async function reloadWith(fact: ReturnType<typeof runFact>, graph: GraphStateIng
 
 beforeEach(() => {
   vi.clearAllMocks();
+  binding.withhold = false;
   readAnalysisInvalidatedAt.mockResolvedValue(null);
 });
 
@@ -127,6 +139,16 @@ describe('the reload carries the run\'s own constraint verdict state', () => {
   });
 });
 
+describe('the key follows the DELIVERED block, not the selected fact', () => {
+  it('⭐ a run-binding that withholds analysis_result withholds the verdict state too', async () => {
+    binding.withhold = true;
+    const read = await reloadWith(runFact({ kind: 'typed', state: 'evaluated_infeasible' }), GRAPH, 'cvs-bound-withheld');
+    expect(read.analysis_state?.run_state.kind, 'premise: the fact is fresh').toBe('complete_current');
+    expect(read.analysis_result, 'premise: the binding withheld the block').toBeNull();
+    expect('analysis_constraint_verdict_state' in read).toBe(false);
+  });
+});
+
 describe('the Agent lane\'s read-back carries it to the turn', () => {
   const dispatchWith = (json: Record<string, unknown>) =>
     vi.fn(async () => ({ status: 200, json: { graph: GRAPH, graph_hash: HASH, ...json } }));
@@ -140,5 +162,10 @@ describe('the Agent lane\'s read-back carries it to the turn', () => {
     expect((await readBackState(dispatchWith({ analysis_constraint_verdict_state: null }) as never, SCENARIO)).constraintVerdictState).toBeNull();
     expect((await readBackState(dispatchWith({}) as never, SCENARIO)).constraintVerdictState).toBeUndefined();
     expect((await readBackState(dispatchWith({ analysis_constraint_verdict_state: 42 }) as never, SCENARIO)).constraintVerdictState).toBeUndefined();
+  });
+
+  it('⭐ a string that is not a contract state is not carried (review 5843407874 note 2)', async () => {
+    expect((await readBackState(dispatchWith({ analysis_constraint_verdict_state: 'foo' }) as never, SCENARIO)).constraintVerdictState).toBeUndefined();
+    expect((await readBackState(dispatchWith({ analysis_constraint_verdict_state: 'evaluated_feasible' }) as never, SCENARIO)).constraintVerdictState).toBe('evaluated_feasible');
   });
 });

@@ -39,6 +39,7 @@ import { BOARD_EDIT_PREFIX, HistoryStore, historyFromDurableTurns, needsDurableS
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
 import { log } from '../utils/telemetry.js';
+import { asVerdictState } from '../orchestrator/context/constraint-feasibility.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
@@ -696,8 +697,10 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
       if (typeof after.json.analysis_result === 'object' && after.json.analysis_result !== null) analysisResult = after.json.analysis_result;
       // The selected run's own constraint verdict state, bound to the SAME fact as
       // `analysis_result` by the graph read (R&C #70 5842182272). `null` = not recorded.
+      // Narrowed through the contract's own enum: a string that is not a state is not carried.
       const cvs = after.json.analysis_constraint_verdict_state;
-      if (cvs === null || typeof cvs === 'string') constraintVerdictState = cvs;
+      if (cvs === null) constraintVerdictState = null;
+      else if (asVerdictState(cvs) !== null) constraintVerdictState = asVerdictState(cvs);
       /**
        * ⭐ READINESS FROM THE MOMENT THE MODEL EXISTS, not from the moment
        * someone runs an analysis.
