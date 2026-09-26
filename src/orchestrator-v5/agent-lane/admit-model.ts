@@ -189,7 +189,7 @@ const levelSourceFor = (provenance: string): ConstructedLevelSource =>
  * `>` and `>=` are both "maximise": the sense is the same, only whether equality
  * counts differs, and that is not a sense. The strictness consequence (a goal fit
  * that would count equality as met) is handled where the goal fit is written —
- * see `scoresTheRightTail` in `admitCandidateModel`.
+ * see `scoredInSense` in `admitCandidateModel`.
  */
 export function attestedGoalDirection(
   goal: Pick<CandidateModel['goal'], 'operator' | 'provenance'>,
@@ -825,8 +825,9 @@ export function admitCandidateModel(
          * `{ value: B, baseline: B, unit?, source, raw_value, cap }`, B on the
          * threshold's OWN cap. `value` repeats `baseline` because ISL requires it
          * (see that limb). Admission is the shared rule (`admitGoalBaseline`),
-         * never restated: a level above the target is a decrease the `>=` frame
-         * would invert, and is withheld and said, not written.
+         * never restated: on a `>=` goal a level above the target is a decrease that
+         * frame would invert, and is withheld and said, not written; on the user's
+         * `<=` goal it is the ordinary "bring it down" case (`scoredInSense` below).
          *
          * Stated in the brief → `brief_extraction`; anything else → Olumi's
          * (`cee_inference`). No current level → nothing, and nothing is derived
@@ -844,21 +845,28 @@ export function admitCandidateModel(
           } as RepairEntry);
         };
         /**
-         * ⛔ ONLY "AT LEAST" IS SCORED CORRECTLY TODAY. The user's SENSE is now carried
-         * (`goal_direction`, stamped on this node for the user's own goal, and sent as
-         * PLoT's request-level `goal_direction`), but the level consumer's goal fit is
-         * not shown to honour it for `minimise`, and strictness is not carried at all:
-         * it scores P(level >= threshold) whatever the brief said (ISL
-         * `robustness_analyzer_v2.py`, `compared >= threshold`). So a baseline is
-         * written ONLY for `>=`, unchanged by the sense stamp:
-         *  · `<=` / `<` ("keep churn at or below 5%; 4% now") would be scored on the
-         *    WRONG tail;
-         *  · `>` ("grow MRR above £20k; £20k now") would count equality as met — a
-         *    held status quo would score 100% on a goal it has not reached.
-         * Withheld, and said with the shortest truthful repair, until the comparator
-         * is carried and honoured end to end. The target itself is kept as before.
+         * ⭐ A BASELINE IS WRITTEN ONLY WHERE THE ENGINE SCORES THE GOAL AS STATED.
+         * ISL's level goal fit is `compared >= threshold`, or `compared <= threshold`
+         * when the request says `minimise` (ISL 3c4ab84 `robustness_analyzer_v2.py`;
+         * AI Quality measured the exact complement on the wire, #69 5841701921). So:
+         *  · `>=` — scored as stated. Written, as before.
+         *  · `<=` on the USER'S goal — its sense is stamped here (`goalSense`,
+         *    `minimise`) and `run_analysis` sends it as PLoT's request-level
+         *    `goal_direction`, so it is scored on the lower tail. Written, and
+         *    admitted in THAT frame: a level above the target is the ordinary
+         *    "bring it down" case, not an inversion (`direction: 'minimise'`).
+         *  · `<=` on a goal that is NOT the user's — no sense is attested, so nothing
+         *    tells the engine which tail; the `>=` tail would be scored. Withheld.
+         *  · `>` / `<` — strictness is carried nowhere, and ISL counts equality as
+         *    met in both senses: a held status quo exactly AT the threshold would
+         *    score 100% on a goal it has not reached. Withheld, with the repair.
+         * Every withholding is said with the shortest truthful repair. The target
+         * itself is kept in every case.
          */
-        const scoresTheRightTail = model.goal.operator === '>=';
+        const scoredInSense: 'maximise' | 'minimise' | undefined =
+          model.goal.operator === '>=' ? 'maximise'
+            : model.goal.operator === '<=' && statedGoalDirection === 'minimise' ? 'minimise'
+              : undefined;
         /**
          * ⛔ AND ONLY A LEVEL THE BRIEF STATES (review 5824085993; RC ruling 5824518762,
          * fix (a)). An estimate of the goal's current level would set the chance of
@@ -879,8 +887,8 @@ export function admitCandidateModel(
             `said. Tell me the current level of "${model.goal.metric}" and the chance of reaching it can be shown.`,
           );
         } else if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw)) {
-          const admission = scoresTheRightTail
-            ? admitGoalBaseline({ rawTarget: raw, rawBaseline: baselineRaw, cap: resolved.cap })
+          const admission = scoredInSense !== undefined
+            ? admitGoalBaseline({ rawTarget: raw, rawBaseline: baselineRaw, cap: resolved.cap, direction: scoredInSense })
             : null;
           if (admission === null && model.goal.operator === '>') {
             withheld(
@@ -889,12 +897,25 @@ export function admitCandidateModel(
               `current level (${baselineRaw}) was not used for that, and no chance of meeting the goal will be ` +
               `shown. If reaching ${raw} is enough, say the goal is "at least ${raw}" and it can be shown.`,
             );
+          } else if (admission === null && model.goal.operator === '<') {
+            withheld(
+              `"${model.goal.metric}" is a goal to stay below ${raw}, and the chance of meeting it cannot be ` +
+              `calculated exactly yet: a level of exactly ${raw} would be counted as success. So its current ` +
+              `level (${baselineRaw}) was not used for that, and no chance of meeting the goal will be shown. ` +
+              `If ${raw} itself is acceptable, say the goal is "at most ${raw}" and it can be shown.`,
+            );
+          } else if (admission === null && model.goal.operator !== '<=') {
+            // Outside the schema's four operators (an older or hand-built candidate): no sense to score in.
+            withheld(
+              `The current level of "${model.goal.metric}" (${baselineRaw}) was not used, because the goal does ` +
+              'not say which way it points, so no chance of meeting it will be shown. The target is kept.',
+            );
           } else if (admission === null) {
             withheld(
-              `"${model.goal.metric}" is a goal to stay ${model.goal.operator === '<' ? 'below' : 'at or below'} ${raw}, and the chance of meeting a ` +
-              'goal of that kind cannot be calculated correctly yet, so its current level ' +
-              `(${baselineRaw}) was not used for that. The options can still be compared on everything ` +
-              'else; no chance of meeting the goal will be shown.',
+              `"${model.goal.metric}" reads as a goal to stay at or below ${raw}, but that direction is Olumi's ` +
+              `reading, not something you stated, so its current level (${baselineRaw}) was not used to work out ` +
+              'the chance of meeting it. The options can still be compared on everything else; no chance of ' +
+              'meeting the goal will be shown.',
             );
           } else if (admission.admitted) {
             // Only the user's stated level reaches here (see `estimated` above).
@@ -1042,7 +1063,7 @@ export function admitCandidateModel(
   // floor from a ceiling" is false — `goal_direction` tells it — so the loss is not
   // recorded. What the stamp still does not carry is strictness (`>` vs `>=`), and its
   // only computed consequence, a goal fit that counts equality as met, is already
-  // withheld and said at the goal's baseline (`scoresTheRightTail` above).
+  // withheld and said at the goal's baseline (`scoredInSense` above).
   if (typeof model.goal.operator === 'string' && model.goal.operator.length > 0 && statedGoalDirection === undefined) {
     loss.push({
       code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE,

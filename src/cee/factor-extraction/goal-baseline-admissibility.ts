@@ -18,6 +18,16 @@
  * meaningful "hold the line". Real decrease support is rowed as 2.367 and runs
  * the whole way through the contract and ISL.
  *
+ * ⭐ RULE 1 IS THE MAXIMISE FRAME'S RULE. A caller that has ATTESTED a minimise
+ * sense AND forwards it to the engine as the request-level `goal_direction`
+ * passes `direction: 'minimise'`, and rule 1 is not asked: ISL (3c4ab84,
+ * `robustness_analyzer_v2.py`) scores `compared <= level_threshold` under
+ * `minimise`, so a stated level ABOVE the target is the ordinary "bring it
+ * down" case, not an inversion (AI Quality measured the complement on the wire,
+ * #69 5841701921). Only the agent-lane construction passes it today, and only
+ * for the user's own `<=` goal (`admit-model.ts`). Every other caller passes
+ * nothing and gets rule 1 exactly as before. Rule 2 is asked in both senses.
+ *
  * ── RULE 2: `baseline_off_cap_scale` ──────────────────────────────────────
  * A DIFFERENT QUESTION FROM RULE 1, named apart deliberately (trap 21). Rule 1
  * asks *"can the `>=` frame express this pair?"*; rule 2 asks *"is this number
@@ -87,8 +97,16 @@ export function admitGoalBaseline(args: {
   readonly rawTarget: number;
   readonly rawBaseline: number;
   readonly cap: number;
+  /**
+   * The sense the goal will be SCORED in. Absent means `'maximise'` — the frame
+   * every caller had before this field, so an omitted value changes nothing.
+   * Pass `'minimise'` ONLY when that sense is attested and forwarded to the
+   * engine with this baseline; see RULE 1 above.
+   */
+  readonly direction?: 'maximise' | 'minimise';
 }): GoalBaselineAdmission {
   const { rawTarget, rawBaseline, cap } = args;
+  const direction = args.direction ?? 'maximise';
 
   if (
     !Number.isFinite(rawTarget) ||
@@ -99,7 +117,7 @@ export function admitGoalBaseline(args: {
     return { admitted: false, reason: 'baseline_off_cap_scale' };
   }
 
-  if (statedLevelExceedsTarget(rawTarget, rawBaseline)) {
+  if (direction === 'maximise' && statedLevelExceedsTarget(rawTarget, rawBaseline)) {
     return { admitted: false, reason: 'direction_unsupported' };
   }
 

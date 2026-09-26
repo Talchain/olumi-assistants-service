@@ -270,6 +270,25 @@ describe('the stated goal direction reaches the PLoT /v2/run body', () => {
     });
   }
 
+  // ── THE LIFT: a stated "at or below" goal carries its current level AND its sense ─
+  // AI Quality's acceptance row (#69 5841701921): a `<=` goal with a baseline must be
+  // scored on the LOWER tail. At CEE's seam that means both halves reach PLoT in one
+  // request: the goal node's `observed_state.baseline` and the request's minimise.
+  it('RED (lift): a "<=" goal with a stated current level sends observed_state.baseline AND goal_direction=minimise to PLoT', async () => {
+    const { registered, body, directionEvents } = await plotBodyFor(candidate({
+      metric: 'Monthly churn rate', operator: '<=', value: 10, unit: '%', provenance: 'explicit',
+      baseline_known: true, baseline_value: 12, baseline_provenance: 'explicit',
+    }));
+    expect(goalIn(registered, 'monthly_churn_rate')).toMatchObject({
+      goal_direction: 'minimise',
+      observed_state: { value: 0.12, baseline: 0.12, unit: '%', source: 'brief_extraction', raw_value: 12, cap: 100 },
+    });
+    expect(body.goal_node_id).toBe('monthly_churn_rate');
+    expect(body.goal_direction).toBe('minimise');
+    expect(goalIn(body.graph, 'monthly_churn_rate')?.observed_state).toMatchObject({ baseline: 0.12, raw_value: 12, source: 'brief_extraction' });
+    expect(directionEvents.map((e) => [e.event, e.goal_direction])).toEqual([['cee.goal_direction.attested', 'minimise']]);
+  });
+
   // ── AN INFERRED GOAL IS NOT THE USER'S: nothing attested, label fallback only ─
   for (const provenance of ['inferred', 'ai_proposed'] as const) {
     it(`an ${provenance} goal is not stamped and sends nothing attested (label names no direction ⇒ no key)`, async () => {
