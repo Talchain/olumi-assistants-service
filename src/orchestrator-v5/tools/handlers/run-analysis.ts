@@ -121,6 +121,7 @@ import {
   unprovablePercentFrameIds,
   withholdUnprovablePercentFrames,
 } from './level-limit-baseline.js';
+import { carryStatedLevelSpread, statedLevelNodeIds } from './stated-level-spread.js';
 import {
   AnalysisNotReadyError,
   readinessQuestions,
@@ -928,8 +929,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     }
     // A level limit on a factor is read on that factor's OWN scale: its cap carried as `goal_threshold_cap` on this
     // wire copy only, where the limit is spelled in the factor's own unit (`limitTargetCaps`, `level-limit-baseline.ts`).
-    const wireGraph = carryLimitTargetCaps(baselineGraph, snapshot.goal_constraints);
-    if (wireGraph !== baselineGraph) {
+    const cappedGraph = carryLimitTargetCaps(baselineGraph, snapshot.goal_constraints);
+    if (cappedGraph !== baselineGraph) {
       log.info(
         {
           event: 'run_analysis.limit_target_cap_carried',
@@ -938,6 +939,19 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           node_ids: [...limitTargetCaps(baselineGraph, snapshot.goal_constraints).keys()],
         },
         'run_analysis carried a level-limited factor\'s own cap as goal_threshold_cap (wire copy only; no magnitudes)',
+      );
+    }
+    // A level the USER stated is sent as stated, not at PLoT's default ±0.1 spread (`stated-level-spread.ts`).
+    const wireGraph = carryStatedLevelSpread(cappedGraph);
+    if (wireGraph !== cappedGraph) {
+      log.info(
+        {
+          event: 'run_analysis.stated_level_spread_carried',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          node_ids: [...statedLevelNodeIds(cappedGraph)],
+        },
+        'run_analysis sent user-stated factor levels at the minimum spread (wire copy only; no magnitudes)',
       );
     }
     const plotPayload: Record<string, unknown> = {
