@@ -236,6 +236,27 @@ function quotable(x: number): number {
   return Number(x.toPrecision(15));
 }
 
+/**
+ * ⛔ THIS WRITE COMMITTED, THEN THE MODEL MOVED ON — "COULD NOT BE CONFIRMED", NEVER "NOT SAVED" (round-2 review of
+ * fix/agent-never-shows-instructions-or-codes, blocker 2's class). Called only once the read-back does NOT hold the
+ * change. Proof that THIS write committed comes only from its own response: its committed post-state (`draft_graph`,
+ * which a refused edit omits) holds the change, or it reports a revision other than the approved one AND the model has
+ * since moved past that revision. A refusal answers 200 with the revision it found, unmoved, and no post-state — so it
+ * stays "Not saved". Used by every `authoriseChange` branch that decides landed-ness from the read-back.
+ */
+function committedThenMoved(
+  res: { status: number; json: Record<string, unknown> },
+  approvedRevision: string,
+  after: { graph_hash: string } | null,
+  committedPostStateHolds: (draft: { edges?: unknown }) => boolean,
+): boolean {
+  if (res.status !== 200 || after === null) return false;
+  const draft = res.json.draft_graph;
+  if (draft !== null && typeof draft === 'object' && committedPostStateHolds(draft as { edges?: unknown })) return true;
+  const reported = typeof res.json.graph_hash === 'string' ? res.json.graph_hash : '';
+  return reported !== '' && approvedRevision !== '' && reported !== approvedRevision && after.graph_hash !== '' && after.graph_hash !== reported;
+}
+
 function committedLevelOf(json: Record<string, unknown>, optionId: string, factorId: string): number | undefined {
   const nodes = ((json.draft_graph ?? {}) as { nodes?: unknown }).nodes;
   if (!Array.isArray(nodes)) return undefined;
@@ -928,11 +949,18 @@ export function createAgentCapabilities(
     }
     approvalAppliedThisRequest = true;
     const { summary, unreadable } = receiptSummaryOf(r.json);
+    /**
+     * ⛔ EVERY LABEL IS QUOTED (round-2 review of fix/agent-never-shows-instructions-or-codes, blocker 3). This follow-up
+     * is shown verbatim on the one-click path, through the boundary that withholds anything addressed to the Agent
+     * (`withoutAgentDirections`). A label is the user's data: quoted, it can never read as an instruction or a code —
+     * unquoted, "Size of the user base", `cost_per_hire` or the id fallback below dropped both sentences.
+     */
+    const quoted = (label: string): string => `"${label}"`;
     const sentences = optionIds.map((id) => {
       const node = after!.nodes.find((x) => x.id === id) as { label?: unknown; interventions?: unknown } | undefined;
       const factorIds = after!.edges.filter((e) => e.from === id).map((e) => e.to)
         .filter((to) => after!.nodes.some((x) => x.id === to && x.kind === 'factor'));
-      const labelOf = (fid: string): string => String(after!.nodes.find((x) => x.id === fid)?.label ?? fid);
+      const labelOf = (fid: string): string => quoted(String(after!.nodes.find((x) => x.id === fid)?.label ?? fid));
       const unlevelled = factorIds.filter((fid) => !hasLevel(node, fid)).map(labelOf);
       // Whose each level is, from what was COMMITTED: Olumi's estimates are said as that (C2), never as the user's.
       const estimated = factorIds.filter((fid) => ((node?.interventions ?? {}) as Record<string, { source?: unknown } | undefined>)[fid]?.source === 'cee_hypothesis').map(labelOf);
@@ -943,7 +971,7 @@ export function createAgentCapabilities(
     for (const fid of addedFactorIds) {
       const f = after!.nodes.find((x) => x.id === fid);
       if (f === undefined) continue;
-      const changes = after!.edges.filter((e) => e.from === fid).map((e) => String(after!.nodes.find((x) => x.id === e.to)?.label ?? e.to));
+      const changes = after!.edges.filter((e) => e.from === fid).map((e) => quoted(String(after!.nodes.find((x) => x.id === e.to)?.label ?? e.to)));
       sentences.push(`Also added the factor "${String(f.label ?? fid)}", which changes ${changes.join(', ')}; how strongly is Olumi's estimate. `
         + 'Its current value is not set yet; tell me what it is today and I\'ll record it.');
     }
@@ -1217,9 +1245,18 @@ export function createAgentCapabilities(
       const check = await readGraph(ctx.scenario_id);
       const held = check?.nodes.find((n) => n.id === optionId)?.interventions?.[factorId] as { value?: unknown } | number | undefined;
       const heldValue = typeof held === 'number' ? held : (held as { value?: unknown } | undefined)?.value;
-      if (check === null || check.graph_hash !== carried) { levelStop = 'the model changed while the option levels were being recorded'; break; }
-      if (heldValue !== v) { levelStop = `the level for ${o.path} was not recorded`; break; }
+      /**
+       * ⛔ HELD EXACTLY IS RECORDED; THE REVISION ONLY DECIDES WHETHER THE CHAIN GOES ON (round-2 review of
+       * fix/agent-never-shows-instructions-or-codes, blocker 2's class). This checked the revision FIRST, so when another
+       * writer had moved the model a level the model holds exactly as approved was counted as not recorded, and the
+       * user read that it was not saved. The rule is the link writer's: the read-back holding exactly the approved level
+       * is landed. A moved model still gives no revision to carry, so no FURTHER level is written on a guess.
+       */
+      if (check === null) { levelStop = 'the model changed while the option levels were being recorded'; break; }
+      const moved = check.graph_hash !== carried;
+      if (heldValue !== v) { levelStop = moved ? 'the model changed while the option levels were being recorded' : `the level for ${o.path} was not recorded`; break; }
       levelsRecorded += 1;
+      if (moved && i < levelOps.length - 1) { levelStop = 'the model changed while the option levels were being recorded'; break; }
     }
 
     const all = levelStop === null && levelsRecorded === levelOps.length;
@@ -2210,17 +2247,34 @@ export function createAgentCapabilities(
           event: { kind: 'edge_strength_edit', from: fromId, to: toId, intent: v.intent, direction_intent: v.direction_intent, magnitude: v.magnitude, expected: v.expected },
         });
         const after = await readGraph(ctx.scenario_id);
-        const e = after?.edges.find((x) => x.from === fromId && x.to === toId);
         const dir = v.direction_intent === 'preserve' ? v.expected.effect_direction : v.direction_intent;
         const want = dir === 'negative' ? -v.magnitude : v.magnitude;
-        const got = (e?.strength as { mean?: unknown } | undefined)?.mean;
-        const src = (e?.provenance !== null && typeof e?.provenance === 'object') ? (e.provenance as { source?: unknown }).source : undefined;
-        const landed = res.status === 200 && typeof got === 'number' && Math.abs(got - want) < 1e-9 && src === 'user_specified'
-          && (typeof res.json.graph_hash !== 'string' || res.json.graph_hash === after?.graph_hash);
+        /** The link as it was approved: exactly this strength, stamped as the user's — in whichever graph holds it. */
+        const holdsApproved = (edges: unknown): boolean => {
+          const x = (Array.isArray(edges) ? edges as { from?: unknown; to?: unknown; strength?: unknown; provenance?: unknown }[] : [])
+            .find((y) => y?.from === fromId && y?.to === toId);
+          const mean = x?.strength !== null && typeof x?.strength === 'object' ? (x.strength as { mean?: unknown }).mean : undefined;
+          const source = x?.provenance !== null && typeof x?.provenance === 'object' ? (x.provenance as { source?: unknown }).source : undefined;
+          return typeof mean === 'number' && Math.abs(mean - want) < 1e-9 && source === 'user_specified';
+        };
+        /**
+         * ⛔ LANDED IS WHAT THE MODEL HOLDS, NOT WHETHER TWO REVISIONS ARE EQUAL (round-2 review of
+         * fix/agent-never-shows-instructions-or-codes, blocker 2 — probed through this capability). `landed` also demanded
+         * that this response's revision EQUAL the read-back's, so a link write that landed and was followed by any other
+         * write before the read-back came back `not_applied`, `mutated: false` — "Not saved: none of it was applied." —
+         * while the link held exactly the approved 0.825 stamped as the user's, and the approval was left unapplied.
+         * The read-back holding exactly what was approved is landed; a commit the model no longer shows is "could not be
+         * confirmed" (`committedThenMoved`); only a response that shows nothing committed is "Not saved".
+         */
+        const landed = res.status === 200 && after !== null && holdsApproved(after.edges);
         if (after === null && res.status === 200) {
           // The write may have landed; the read-back failed. Never "as it was" when Olumi cannot see (review of #1950).
           return { ok: false, mutated: false, applied: false, refusal: 'not_confirmed', proposal_id: decision.proposal.proposal_id,
             detail: 'Olumi could not read the model back to confirm whether the link was recorded. Tell the user plainly that it could not be confirmed, and offer to check again.' };
+        }
+        if (!landed && committedThenMoved(res, before.graph_hash, after, (draft) => holdsApproved(draft.edges))) {
+          return { ok: false, mutated: true, applied: false, refusal: 'not_verified', proposal_id: decision.proposal.proposal_id,
+            detail: 'The link was saved, but the model changed again straight afterwards and no longer shows it as approved, so what it now holds could not be confirmed. Read the model again before saying what it holds; do not describe the link as recorded.' };
         }
         if (!landed) {
           return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: decision.proposal.proposal_id,
@@ -3343,6 +3397,28 @@ export function createAgentCapabilities(
         edgeExistsAfter: (after?.edges ?? []).some((e) => e.from === fromId && e.to === toId),
         system_message: String(res.json.assistant_text ?? ''),
       });
+      /**
+       * ⛔ A LINK THIS WRITE ADDED IS NEVER "NOT SAVED" FOR WHAT HAPPENED AFTER IT (round-2 review of
+       * fix/agent-never-shows-instructions-or-codes, blocker 2's class). Landed-ness here is the read-back alone, so a
+       * failed read-back, or a link another writer removed straight after this write committed it, read "Not saved: none
+       * of it was applied." Same rule as the link-strength branch.
+       */
+      if (!confirmation.applied && after === null && res.status === 200) {
+        return {
+          ok: false, mutated: false, applied: false, refusal: 'not_confirmed', proposal_id: decision.proposal.proposal_id,
+          detail: 'Olumi could not read the model back to confirm whether the link was added. Tell the user plainly that it could not be confirmed, and offer to check again.',
+          http: res.status, operation_id: operationId,
+        };
+      }
+      const hasTheLink = (edges: unknown): boolean => Array.isArray(edges)
+        && (edges as { from?: unknown; to?: unknown }[]).some((e) => e?.from === fromId && e?.to === toId);
+      if (!confirmation.applied && committedThenMoved(res, before.graph_hash, after, (draft) => hasTheLink(draft.edges))) {
+        return {
+          ok: false, mutated: true, applied: false, refusal: 'not_verified', proposal_id: decision.proposal.proposal_id,
+          detail: 'The link was added, but the model changed again straight afterwards and no longer shows it, so what it now holds could not be confirmed. Read the model again before saying what it holds; do not describe the link as added.',
+          http: res.status, operation_id: operationId,
+        };
+      }
       if (!confirmation.applied) {
         return {
           ok: false, mutated: false, applied: false, refusal: 'not_applied',

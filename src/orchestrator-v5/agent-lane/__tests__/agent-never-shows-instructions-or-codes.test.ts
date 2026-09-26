@@ -72,6 +72,11 @@ describe('a link-strength approval through the REAL route: the user reads what w
   let mean = 0.5;
   let source = 'cee_hypothesis';
   let rev = 1;
+  /** Another writer, AFTER the link write has answered and BEFORE the Agent reads the model back (round-2 blocker 2). */
+  let afterWrite: (() => void) | undefined;
+  /** The link writer's own honest refusal: 200, nothing written, the revision unmoved. */
+  let refuseWrite = false;
+  let linkWrites = 0;
   let script: ((body: Record<string, unknown>) => unknown)[] = [];
   let modelCalls = 0;
   const fnCall = (name: string, args: Record<string, unknown>) => ({ output: [{ type: 'function_call', name, call_id: `c${modelCalls}`, arguments: JSON.stringify(args) }] });
@@ -105,14 +110,21 @@ describe('a link-strength approval through the REAL route: the user reads what w
     // The product's link-strength writer, only as far as its contract states it: sets ±magnitude, stamps it the user's.
     app.post('/orchestrate/v2/turn', async (req) => {
       const ev = (req.body as { event?: Record<string, unknown> }).event ?? {};
-      if (ev['kind'] === 'edge_strength_edit') { mean = Number(ev['magnitude']); source = 'user_specified'; rev += 1; }
+      if (ev['kind'] === 'edge_strength_edit') {
+        linkWrites += 1;
+        if (refuseWrite) return { assistant_text: "I couldn't save that change, so I haven't changed anything.", graph_hash: `h${rev}` };
+        mean = Number(ev['magnitude']); source = 'user_specified'; rev += 1;
+        const answered = { assistant_text: 'Updated.', graph_hash: `h${rev}` };
+        afterWrite?.();
+        return answered;
+      }
       return { assistant_text: 'Updated.', graph_hash: `h${rev}` };
     });
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 180_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { mean = 0.5; source = 'cee_hypothesis'; rev = 1; script = []; forcedAuthorise = undefined; nextScenario(); });
+  beforeEach(() => { mean = 0.5; source = 'cee_hypothesis'; rev = 1; afterWrite = undefined; refuseWrite = false; linkWrites = 0; script = []; forcedAuthorise = undefined; nextScenario(); });
 
   const turn = async (payload: Record<string, unknown>): Promise<Body> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, ...payload } });
@@ -144,6 +156,47 @@ describe('a link-strength approval through the REAL route: the user reads what w
     // What was recorded is still said, to the user, once.
     expect(t2.assistant_text, t2.assistant_text).toMatch(/"Pro plan price" → "MRR" as strong \(0\.825 on Olumi's 0–1 scale\), as your own estimate/);
     expect(t2.assistant_text.match(/own estimate/g), 'said once, not twice').toHaveLength(1);
+  }, 120_000);
+
+  /**
+   * ⛔ ROUND-2 REVIEW, BLOCKER 2 — A FALSE "NOT SAVED" ON THIS SAME SEAM. The link write answers 200 with its own
+   * revision; another writer moves the model before the Agent reads it back. The link now holds exactly what the user
+   * approved, stamped as theirs, yet `landed` also demanded that the two revisions be EQUAL, so the user read "Not
+   * saved: none of it was applied." and the approval was left unapplied.
+   */
+  const RECORDED = 'Recorded "Pro plan price" → "MRR" as strong (0.825 on Olumi\'s 0–1 scale), as your own estimate.';
+  it('[f2-race] RED: the link write lands, another writer then moves the model, and the link holds exactly the approved strength and source → Saved, the recorded link said, the approval applied', async () => {
+    const { approve } = await proposeStrong();
+    afterWrite = () => { rev += 1; };
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(t2._diagnostic_trace.fast_path).toBe('approve');
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    expect(t2.assistant_text, t2.assistant_text).toContain(RECORDED);
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/^Saved\b|\bSaved\./);
+    expect(t2.assistant_text, t2.assistant_text).not.toMatch(/Not saved|none of it was applied|could not be confirmed/);
+    // Marked applied: the same click again recovers the first result and writes nothing twice.
+    afterWrite = undefined;
+    const t3 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(t3.assistant_text, t3.assistant_text).toMatch(/That change was already saved; nothing was written again\./);
+    expect(linkWrites, 'written once').toBe(1);
+  }, 120_000);
+
+  it('[f2-race-moved] RED: the link write lands, then another writer changes THAT link before the read-back → "could not be confirmed" with mutated:true — never "Not saved"', async () => {
+    const { approve } = await proposeStrong();
+    afterWrite = () => { mean = 0.3; source = 'cee_hypothesis'; rev += 1; };
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: false, mutated: true, refusal: 'not_verified' })]);
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/could not be confirmed/);
+    expect(t2.assistant_text, t2.assistant_text).not.toMatch(/Not saved|none of it was applied|\bSaved\./);
+    expect(t2.assistant_text, 'nothing is described as recorded').not.toContain(RECORDED);
+  }, 120_000);
+
+  it('CONTRAST (passes at base): the link writer refuses (200, nothing written, revision unmoved) → still "Not saved", mutated:false', async () => {
+    const { approve } = await proposeStrong();
+    refuseWrite = true;
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: false, mutated: false, refusal: 'not_applied' })]);
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/Not saved: none of it was applied\./);
   }, 120_000);
 
   it('CONTROL: the same approval typed as words (the Agent path) → the Agent still READS the guidance the user never sees', async () => {
@@ -181,6 +234,19 @@ describe('the boundary guard, on the capability\'s OWN words (not the author\'s)
     expect(served.text).not.toMatch(AGENT_DIRECTED);
     expect(served.dropped.length).toBeGreaterThan(0);
     expect(withoutAgentDirections!(SERVED_D3_FOLLOW_UP)).toEqual({ text: SERVED_D3_FOLLOW_UP, dropped: [] });
+  });
+
+  it('RED (round-2 review, non-blocking 2): a quoted label holding ". " is never split — the sentence is kept whole, byte for byte', async () => {
+    const { withoutAgentDirections } = await import('../write-outcome.js');
+    const text = 'Recorded "Acme Inc. price" → "net_mrr" as strong (0.825 on Olumi\'s 0–1 scale), as your own estimate.';
+    expect(withoutAgentDirections(text)).toEqual({ text, dropped: [] });
+  });
+
+  it('CONTRAST: an instruction to the Agent after a quoted label holding ". " is still dropped, and only it', async () => {
+    const { withoutAgentDirections } = await import('../write-outcome.js');
+    const kept = 'Recorded "Acme Inc. price" → "MRR" as strong, as your own estimate.';
+    expect(withoutAgentDirections(`${kept} Offer to run the analysis again so they can see what it changes.`))
+      .toEqual({ text: kept, dropped: ['Offer to run the analysis again so they can see what it changes.'] });
   });
 
   it('RED: the model-facing notes and details the REAL link-strength capability returns are all caught by the guard', async () => {
@@ -275,7 +341,7 @@ describe('every code a write tool returns reads as plain words — never the cod
       { part: 'values', ok: true, recorded_count: 1, requested_count: 1, receipts: [{ version: 2 }] },
       { part: 'option_levels', ok: false, recorded_count: 0, requested_count: 2, reason: 'a_code_nobody_has_worded' },
     ] });
-    expect(part, part).toMatch(/^Saved 1 of 1 starting values as version 2\. Not saved: 0 of 2 option levels/);
+    expect(part, part).toMatch(/^Saved 1 of 1 starting values as version 2\. Not saved: none of the 2 option levels/);
     expect(part, part).not.toMatch(/a_code_nobody_has_worded|a code nobody has worded/);
   });
 

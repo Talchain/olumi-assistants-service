@@ -80,7 +80,49 @@ describe('the write-status line is composed from the tool results', () => {
     expect(n.text).not.toMatch(/Saved all values and option levels/);
     expect(n.text).toBe('Tech Lead now leads.');
     // The part's reason in words, never its code (fix/agent-never-shows-instructions-or-codes; was "(unresolved effect relationship)").
-    expect(n.status).toBe('Saved 1 of 1 starting values as version 2. Not saved: 0 of 2 option levels (the option does not act on that factor, so no level could be set for it).');
+    // ⛔ And the count says what did NOT land (round-2 review): "Not saved: 0 of 2" read as "none of the 2 were not saved".
+    expect(n.status).toBe('Saved 1 of 1 starting values as version 2. Not saved: none of the 2 option levels (the option does not act on that factor, so no level could be set for it).');
+  });
+
+  /**
+   * ⛔ WHAT LANDED AND WHAT DID NOT, EACH COUNTED UNDER ITS OWN WORD (round-2 review of
+   * fix/agent-never-shows-instructions-or-codes, blocker 1). `recorded_count` is what LANDED, so printing it under
+   * "Not saved:" told the user the opposite of what happened. The input is the exact shape `applyCompound` returns when
+   * its third level stops (`agent-capabilities.ts`, parts): 2 of the 3 levels WERE saved and 1 was not — the user read
+   * "Not saved: 2 of 3 option levels."
+   */
+  describe('a part that landed only in part says how many were saved AND how many were not', () => {
+    const status = (parts: Record<string, unknown>[]) =>
+      narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: false, mutated: true, applied: false, refusal: 'partially_applied', parts } as never]).status;
+
+    it('RED (the reviewer\'s input, verbatim): values 4 of 4, levels 2 of 3 → "Saved 2 of 3 option levels; 1 was not saved."', () => {
+      expect(status([
+        { part: 'values', ok: true, recorded_count: 4, requested_count: 4 },
+        { part: 'option_levels', ok: false, recorded_count: 2, requested_count: 3 },
+      ])).toBe('Saved 4 of 4 starting values. Saved 2 of 3 option levels; 1 was not saved.');
+    });
+
+    it('RED: 1 of 4 landed → "3 were not saved" (the missing count, pluralised), never "Not saved: 1 of 4"', () => {
+      expect(status([{ part: 'option_levels', ok: false, recorded_count: 1, requested_count: 4 }]))
+        .toBe('Saved 1 of 4 option levels; 3 were not saved.');
+    });
+
+    it('RED: 0 of 1 landed → "Not saved: the option level." (no count the user could misread)', () => {
+      expect(status([{ part: 'option_levels', ok: false, recorded_count: 0, requested_count: 1 }]))
+        .toBe('Not saved: the option level.');
+    });
+
+    it('RED: a part name nobody has worded is never shown as a code', () => {
+      const s = String(status([{ part: 'some_new_part', ok: false, recorded_count: 0, requested_count: 2 }]));
+      expect(s).toBe('Not saved: none of the 2 changes.');
+    });
+
+    it('CONTRAST (passes at base): every part landed → "Saved N of N" for each, unchanged', () => {
+      expect(narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: true, mutated: true, applied: true, parts: [
+        { part: 'values', ok: true, recorded_count: 3, requested_count: 3 },
+        { part: 'option_levels', ok: true, recorded_count: 2, requested_count: 2 },
+      ] } as never]).status).toBe('Saved 3 of 3 starting values. Saved 2 of 2 option levels.');
+    });
   });
 
   it('already applied → says so, with the original version, and that nothing was written again', () => {

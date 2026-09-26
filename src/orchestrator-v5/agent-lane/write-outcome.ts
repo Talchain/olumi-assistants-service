@@ -129,47 +129,77 @@ const AGENT_IMPERATIVE = /^(?:[-•*>\s]*)(?:Offer\b|Say (?:so|that|it|plainly)\
 const AGENT_ID = /\bnever the id\b|\bproposal[ _]id\b/i;
 const CODE_TOKEN = /\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/;
 const QUOTED = /"[^"]*"|“[^”]*”/g;
+/** A quoted span, held aside while the sentence is judged: private-use delimiters no label or rule can contain. */
+const HELD_SPAN = /(\d+)/g;
 
+/**
+ * ⛔ A LABEL IS THE USER'S DATA, NEVER AN INSTRUCTION (round-2 review of this fix, blocker 3). The rules above ran over
+ * UNQUOTED factor labels in the held add-option's follow-up, so "Size of the user base" (reads as "the user"), a
+ * snake_case label such as `cost_per_hire`, or the id the producer falls back to dropped BOTH of its sentences, and one
+ * click showed only "Saved." — losing what was added and the C2 disclosure that a level is Olumi's estimate. So every
+ * producer quotes each label (`agent-capabilities.ts`), and here every quoted span is held aside BEFORE the text is
+ * split into sentences (a label holding ". " — "Acme Inc. price" — split mid-label and left a fragment, review
+ * non-blocking 2) and before any rule runs. Only the words OUTSIDE a label can make a sentence the Agent's.
+ */
 export function withoutAgentDirections(text: string): { readonly text: string; readonly dropped: readonly string[] } {
   const dropped: string[] = [];
   const kept = text
     .split('\n')
     .map((line) => {
-      const sentences = line.split(/(?<=[.!?])\s+/);
+      const spans: string[] = [];
+      const masked = line.replace(QUOTED, (span) => { spans.push(span); return `${spans.length - 1}`; });
+      const unmask = (s: string): string => s.replace(HELD_SPAN, (_held, i: string) => spans[Number(i)] ?? '');
+      const sentences = masked.split(/(?<=[.!?])\s+/);
       const keep = sentences.filter((s) => {
-        const bare = s.replace(QUOTED, '""');
-        const agents = AGENT_READER.test(bare) || AGENT_IMPERATIVE.test(s.trim()) || AGENT_ID.test(bare) || CODE_TOKEN.test(bare);
-        if (agents) dropped.push(s.trim());
+        const agents = AGENT_READER.test(s) || AGENT_IMPERATIVE.test(s.trim()) || AGENT_ID.test(s) || CODE_TOKEN.test(s);
+        if (agents) dropped.push(unmask(s).trim());
         return !agents;
       });
-      return keep.length === sentences.length ? line : keep.join(' ');
+      return keep.length === sentences.length ? line : unmask(keep.join(' '));
     })
     .join('\n')
     .trim();
   return { text: dropped.length === 0 ? text : kept, dropped };
 }
 
-const PART_NAMES: Record<string, string> = { values: 'starting values', option_levels: 'option levels' };
+/** Each part a compound approval reports, named for the user (one, many). A part nobody has named is "a change". */
+const PART_NAMES: Record<string, readonly [string, string]> = {
+  values: ['starting value', 'starting values'],
+  option_levels: ['option level', 'option levels'],
+};
+const UNNAMED_PART: readonly [string, string] = ['change', 'changes'];
 
 /**
  * A compound approval (#1712) reports each part: what was recorded, out of how
  * many, and with which receipts. State exactly that — "Saved 6 of 6 starting
- * values as version 2. Not saved: 0 of 2 option levels (…)." — never a vague
- * "part of it".
+ * values as version 2. Saved 1 of 2 option levels; 1 was not saved (…)." — never
+ * a vague "part of it".
+ *
+ * ⛔ EACH COUNT UNDER ITS OWN WORD (round-2 review of fix/agent-never-shows-instructions-or-codes, blocker 1).
+ * `recorded_count` is what LANDED. It was printed under "Not saved:", so a starting point whose third level stopped
+ * read "Not saved: 2 of 3 option levels" when 2 of the 3 WERE saved and 1 was not — and on the one-click path this
+ * line is all the user reads. What landed is said as saved, what did not as not saved, each with its own count.
  */
 function partsLine(r: ToolResult): string | null {
   const parts = Array.isArray(r.parts) ? (r.parts as ToolResult[]) : null;
   if (parts === null || parts.length === 0) return null;
   const bits = parts.map((p) => {
-    const what = PART_NAMES[String(p.part)] ?? String(p.part ?? 'change');
+    const [one, many] = PART_NAMES[String(p.part)] ?? UNNAMED_PART;
     const rec = typeof p.recorded_count === 'number' ? p.recorded_count : null;
     const req = typeof p.requested_count === 'number' ? p.requested_count : null;
-    const count = rec !== null && req !== null ? `${rec} of ${req} ` : '';
-    if (p.ok === true) return `Saved ${count}${what}${versionPhrase(versionsOf(p))}.`;
-    // A reason nobody has worded is left out rather than shown as a code; the count already says what did not land.
+    const versions = versionPhrase(versionsOf(p));
+    if (p.ok === true) return `Saved ${rec !== null && req !== null ? `${rec} of ${req} ` : ''}${many}${versions}.`;
+    // A reason nobody has worded is left out rather than shown as a code.
     const words = REFUSAL_WORDS[String(p.reason ?? p.refusal ?? '')];
     const why = words !== undefined ? ` (${words})` : '';
-    return `Not saved: ${count}${what}${why}.`;
+    if (rec === null || req === null) return `Not saved: ${many}${why}.`;
+    const missing = req - rec;
+    if (rec > 0) {
+      return missing > 0
+        ? `Saved ${rec} of ${req} ${many}${versions}; ${missing} ${missing === 1 ? 'was' : 'were'} not saved${why}.`
+        : `Saved ${rec} of ${req} ${many}${versions}.`;
+    }
+    return req === 1 ? `Not saved: the ${one}${why}.` : `Not saved: none of the ${req} ${many}${why}.`;
   });
   // A part the chain never reached is still not saved — say so.
   if (r.ok !== true && r.refusal === 'partially_applied' && parts.every((p) => p.part !== 'option_levels') && parts.some((p) => p.part === 'values')) {
