@@ -874,6 +874,82 @@ test('ESTIMATED LIMIT — the level must be Olumi\'s, from ONE limit node, on th
  const inState={...(c.final.analysisState as Record<string, unknown>),leader_claim:{permitted:false,withheld_reason:'unrequested_analysis_withheld'},constraint_verdict_state:'evaluated_feasible'};
  assert.equal(estCards(runTurnCoaching(statelessCapture(c.captured),{...c.final,graph:PAUL_GRAPH,analysisState:inState})).length,0);
 });
+// ── THE OPTION THAT COMES OUT AHEAD PROBABLY BREAKS A LIMIT (R&C PR-8; AI Quality 5842498806, predicate CEE #1960) ──
+// DERIVED (labelled): no served turn yet carries a SCORED limit (churn is held until after Paul's test, 5842549943) or
+// the carried risks (ask 5842617884). Paul's served first pass + his WHOLE served graph, with the leader claim permitted,
+// the verdict `evaluated_feasible`, and ONE risk on his own churn row (P 0.3, the ruling's own example).
+const RISK_CARD = 'coach:limit_risk:';
+const CHURN_RISK = {constraint_id:'agent-lane:monthly_churn:<=',label:'Monthly churn',source_quote:null,probability:0.3};
+const riskCase = (o: {verdict?: unknown; claim?: unknown; risks?: unknown; graph?: Record<string, unknown>} = {}) => {
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const claim='claim' in o ? o.claim : {permitted:true,separation:'separated'};
+ const state={...(c.final.analysisState as Record<string, unknown>),leader_claim:claim};
+ const graph=o.graph??PAUL_GRAPH;
+ const {captured,final}=graph===PAUL_GRAPH?{captured:statelessCapture(c.captured),final:{...c.final,graph}}:rebind(c,graph);
+ return runTurnCoaching(captured,{...final,analysisState:state,
+  constraintVerdictState:'verdict' in o?o.verdict:'evaluated_feasible',leaderLimitRisks:'risks' in o?o.risks:[CHURN_RISK]});
+};
+const riskCards = (out: {blocks: readonly {signal_id: string}[]}) => out.blocks.filter((b)=>b.signal_id.startsWith(RISK_CARD)) as any[];
+const NEVER_CLAIMS_FIT = /\bmeets?\b|\bkeeps?\b|\bwithin\b|\bunder\b/i;
+test('LEADER LIMIT RISK — a named option that probably breaks the user\'s own limit → ONE card naming the limit and the user\'s figure, outranking the estimate and link cards',()=>{
+ // Present controls: the carried risk's id IS the graph's churn row, and without the risks this run shows the ESTIMATE card.
+ assert.deepEqual((PAUL_GRAPH.goal_constraints as {constraint_id: string}[]).map(r=>r.constraint_id),[CHURN_RISK.constraint_id]);
+ assert.equal(estCards(riskCase({risks:undefined})).length,1);
+ const out=riskCase();
+ assert.deepEqual(out.eligibility,{eligible:true});
+ const risk=riskCards(out);
+ assert.equal(risk.length,1);
+ assert.equal(estCards(out).length,0,'the risk card outranks the estimate card');
+ assert.equal(runTurnCards(out.blocks as any).length,0,'and every link/limit/tie card');
+ assert.equal(CoachingBlockSchema.safeParse(risk[0]).success,true);
+ assert.ok(risk[0].signal_id.startsWith(`${RISK_CARD}449b882e043ae3e3:2026-09-25T17:27:54.315Z:`));
+ assert.equal(risk[0].body,"On Olumi's estimates, the option that comes out ahead is more likely than not to break your limit on “Monthly churn” (10 percent per month). Worth deciding how firm it is before acting on this result.");
+ assert.equal(risk[0].action_label,'Decide how firm my limit is');
+ assert.equal(risk[0].action_prompt,"On Olumi's estimates, the option that comes out ahead is more likely than not to break my limit on “Monthly churn” (10 percent per month). Ask me how firm that limit is, and what I would give up to hold to it. Don't change the model or re-run anything yet.");
+ // Never a fit claim; the only number is the user's own figure (no probability quoted).
+ for (const t of [risk[0].title,risk[0].body,risk[0].action_label,risk[0].action_prompt]) {
+  assert.doesNotMatch(String(t),NEVER_CLAIMS_FIT);
+  assert.doesNotMatch(String(t).split('10 percent per month').join(''),/\d/);
+ }
+});
+test('LEADER LIMIT RISK — only on evaluated_feasible, a PERMITTED leader and a well-formed, non-empty carried list',()=>{
+ for (const v of [undefined,null,'unevaluated','identity_unresolved','not_applicable','evaluated_infeasible','EVALUATED_FEASIBLE',true]) {
+  assert.equal(riskCards(riskCase({verdict:v})).length,0,`verdict ${String(v)}`);
+ }
+ for (const claim of [{permitted:false,withheld_reason:'unrequested_analysis_withheld'},{permitted:'true'},undefined,null]) {
+  assert.equal(riskCards(riskCase({claim})).length,0,`claim ${JSON.stringify(claim)}`);
+ }
+ for (const risks of [undefined,null,[],{},[{}],[{constraint_id:CHURN_RISK.constraint_id}],[{...CHURN_RISK,probability:'0.3'}],[{...CHURN_RISK,probability:Number.NaN}],[CHURN_RISK,null]]) {
+  assert.equal(riskCards(riskCase({risks})).length,0,`risks ${JSON.stringify(risks)}`);
+ }
+ // The threshold is the predicate's, never re-applied here: whatever the ONE predicate returned is the evidence.
+ assert.equal(riskCards(riskCase({risks:[{...CHURN_RISK,probability:0.49}]})).length,1);
+ // A limit-withheld claim keeps the LIMIT card (the leader is not named, so there is no leader to warn about).
+ const withheld=riskCase({claim:{permitted:false,withheld_reason:'constraint_verdict_withheld'}});
+ assert.ok(runTurnCards(withheld.blocks as any)[0]!.signal_id.startsWith(LIMIT_CARD));
+ assert.equal(riskCards(withheld).length,0);
+});
+test('LEADER LIMIT RISK — limits are named only by identity on the run\'s own graph; otherwise the card speaks without a name',()=>{
+ const generic="On Olumi's estimates, the option that comes out ahead is more likely than not to break at least one of your limits. Worth deciding how firm they are before acting on this result.";
+ // A risk id the graph does not carry → no name, still the risk.
+ const unknownId=riskCards(riskCase({risks:[{...CHURN_RISK,constraint_id:'gc-not-on-this-graph'}]}));
+ assert.equal(unknownId.length,1); assert.equal(unknownId[0].body,generic);
+ // Another turn's graph (not hash-bound) → no name.
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const state={...(c.final.analysisState as Record<string, unknown>),leader_claim:{permitted:true}};
+ const unbound=riskCards(runTurnCoaching(statelessCapture(c.captured),{...c.final,graph:PRICING_T2_GRAPH,analysisState:state,constraintVerdictState:'evaluated_feasible',leaderLimitRisks:[CHURN_RISK]}));
+ assert.equal(unbound.length,1); assert.equal(unbound[0].body,generic);
+ // Two risks on two limit nodes → both named, each with the user's own figure, in the carried order.
+ const two=structuredClone(PAUL_GRAPH) as Record<string, any>;
+ two.goal_constraints=[...two.goal_constraints,{...two.goal_constraints[0],constraint_id:'agent-lane:pro_subscribers:>=',node_id:'pro_subscribers',operator:'>=',value:200,unit:'subscribers',label:'Pro subscribers'}];
+ const both=riskCards(riskCase({graph:two,risks:[CHURN_RISK,{...CHURN_RISK,constraint_id:'agent-lane:pro_subscribers:>=',label:'Pro subscribers',probability:0.2}]}));
+ assert.equal(both.length,1);
+ assert.equal(both[0].body,"On Olumi's estimates, the option that comes out ahead is more likely than not to break each of your limits on “Monthly churn” (10 percent per month) and “Pro subscribers” (200 subscribers). Worth deciding how firm they are before acting on this result.");
+ assert.equal(both[0].action_label,'Decide how firm my limits are');
+ // The long prompt drops its trade-off clause to fit, never the figures or the no-write ask.
+ assert.equal(both[0].action_prompt,"On Olumi's estimates, the option that comes out ahead is more likely than not to break each of my limits on “Monthly churn” (10 percent per month) and “Pro subscribers” (200 subscribers). Ask me how firm each one is. Don't change the model or re-run anything yet.");
+ for (const t of [both[0].title,both[0].body,both[0].action_label,both[0].action_prompt]) assert.doesNotMatch(String(t),NEVER_CLAIMS_FIT);
+});
 test('sayLevel — EVERY key of the canonical currency map: an all-letter key follows the figure, every other key prefixes it (#1948 AI Quality nit 5842591105)',()=>{
  const keys=Object.keys(CURRENCY_SYMBOL_TO_CODE);
  assert.ok(keys.length>=10,'control: the canonical map is the one read');
