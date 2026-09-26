@@ -1403,8 +1403,13 @@ export function nonlinearIdentityLeaderClaimCause(input: {
    *
    * A persisted fact binds the graph it analysed by that hash ALONE: `RunAnalysisResultSchema`
    * (@talchain/schemas 0.59.0) keeps `graph_hash_at_run` and no graph, and PLoT's envelope in
-   * `enrichment` echoes none. So `graph` decides only when the two are equal — it then IS the analysed
-   * graph on every field the analysis reads. Otherwise (edited since the run, a legacy fact with no
+   * `enrichment` echoes none. So `graph` decides only when the two are equal — it then agrees with the
+   * analysed graph on every field the analysis-affecting projection hashes (`context/graph-hash.ts`
+   * `projectNode` / `projectEdge`), which since H1a includes the carrier (`nonlinear_identity`).
+   * ⚠ NOT on every field THIS sign test reads: two of its inputs are outside that projection and so
+   * are NOT bound by the equality — an edge's `origin` (a repair-authored option link is not a lever)
+   * and an option's nested `data.is_baseline` (the node-level `is_baseline` IS hashed). Labels are not
+   * hashed either; they only word the sentence. Otherwise (edited since the run, a legacy fact with no
    * hash, a graph that could not be hashed) the analysed graph is out of reach and NOTHING NEW is
    * withheld: no cause, and the fact's own constraint token stands.
    */
