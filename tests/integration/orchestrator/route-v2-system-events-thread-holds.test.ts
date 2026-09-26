@@ -15,10 +15,9 @@
  * pending read returning a real GM hold minted by the real gate.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
-import { RunAnalysisHandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 import type { FreshnessDerivation } from '../../../src/orchestrator-v5/context/freshness.js';
@@ -208,49 +207,6 @@ const { SESSION_READ_WINDOW_DEFAULT } = await import('../../../src/orchestrator-
 
 const SCENARIO_ID = '66666666-6666-4666-8666-666666666666';
 const TURN_ID_BASE = '77777777-7777-4777-8777-77777777777';
-const RUN_ROW_ID = 'row-run-analysis';
-const RUN_FACT_ROW_ID = 'fact-row-run-analysis';
-const RUN_AT = '2026-09-24T09:00:00.000Z';
-
-
-/** One successful run, stamped with the hash of the graph it analysed. */
-function runFact(graphHashAtRun: string): HandlerFact {
-  return RunAnalysisHandlerFactSchema.parse({
-    fact_type: 'run_analysis',
-    fact_version: 1,
-    noop: false,
-    result: {
-      scenario_id: SCENARIO_ID,
-      computed_at: RUN_AT,
-      graph_hash_at_run: graphHashAtRun,
-      leading_option_id: 'o-launch',
-      summary: 'Launch now leads on the analysed model.',
-      win_probabilities: { 'o-launch': 1 },
-      constraint_verdict: { may_name_leading_option: true, constraint_verdict_state: 'evaluated_feasible' },
-      enrichment: { analysis_status: 'completed', robustness: { level: 'strong', near_tie: { is_tie: false } } },
-    },
-  }) as HandlerFact;
-}
-
-/** Newer rows that carry no analysis — value ops and Agent turns. Newest first. */
-function newerRows(count: number): StoredRow[] {
-  return Array.from({ length: count }, (_, i) => ({
-    id: `row-newer-${count - 1 - i}`,
-    turn_id: `turn-newer-${count - 1 - i}`,
-    created_at: new Date(Date.parse(RUN_AT) + (count - i) * 60_000).toISOString(),
-    facts: [],
-  }));
-}
-
-function runRow(graphHashAtRun: string): StoredRow {
-  return {
-    id: RUN_ROW_ID,
-    turn_id: 'turn-run-analysis',
-    created_at: RUN_AT,
-    facts: [{ fact: runFact(graphHashAtRun), fact_row_id: RUN_FACT_ROW_ID, fact_created_at: RUN_AT }],
-  };
-}
-
 
 const PRE_HASH = computeAnalysisAffectingGraphHash(buildPersistedGraph() as never)!;
 
@@ -289,6 +245,9 @@ let app: FastifyInstance;
 
 
 const { evaluateEditGraphMutations } = await import('../../../src/orchestrator-v5/handlers/edit-graph-referee-gate.js');
+const { buildHoldMutationLapseNotice } = await import('../../../src/orchestrator-v5/handlers/hold-thread-through.js');
+const telemetryModule = await import('../../../src/utils/telemetry.js');
+const { buildProposalPendingAction } = await import('../../../src/orchestrator-v5/coaching/proposal-continuation.js');
 
 /** A real GM hold, minted by the real gate on the persisted graph: add a new factor
  *  (STRUCTURAL_APPLY_HELD). Every writer below leaves it valid. */
@@ -385,7 +344,14 @@ describe('every mutating system-event writer threads live holds THROUGH the muta
   it('structural_delete LAPSES a hold it invalidates — WITH a notice, never silently', async () => {
     const hold = holdOnDeletedOption();
     priorPendings = [hold];
+    const emitSpy = vi.spyOn(telemetryModule, 'emit');
     const { status, body } = await send('structural_delete', '5');
+    // The retirement is TRACED at this seam, like the edit and draft seams.
+    expect(
+      emitSpy.mock.calls.some((c) => c[0] === 'v5.pending_action.invalidated' && (c[1] as Record<string, unknown>)?.site === 'system_event_dispatch'),
+      'a lapse left no v5.pending_action.invalidated trace',
+    ).toBe(true);
+    emitSpy.mockRestore();
     expect(status).toBe(200);
     expect(committedPendings().some((p) => p.chip_id === hold.chip_id)).toBe(false);
     const base = await (async () => {
@@ -394,7 +360,9 @@ describe('every mutating system-event writer threads live holds THROUGH the muta
       return (await send('structural_delete', '6')).body.assistant_text as string;
     })();
     expect(body.assistant_text, 'the lapse must be said').not.toBe(base);
-    expect(String(body.assistant_text).length).toBeGreaterThan(base.length);
+    // The EXACT sentence, on the wire AND in the stored row (review 5841968747).
+    const sentence = buildHoldMutationLapseNotice(hold as never);
+    expect(body.assistant_text).toContain(sentence);
   });
 
   it('goal_target_edit (it passed NO priors: a total wipe) now carries the live hold, re-pinned', async () => {
@@ -414,6 +382,41 @@ describe('every mutating system-event writer threads live holds THROUGH the muta
     const carried = committedPendings().filter((p) => p.chip_id === hold.chip_id);
     expect(carried, 'goal_target_edit dropped a live consent hold').toHaveLength(1);
     expect(carried[0]!.preconditions.graph_hash).toBe(body.graph_hash);
+  });
+
+  it('⭐ a CONCEPT offer whose word sits inside an existing label is LAPSED WITH its notice, never silently (review 5841968747)', async () => {
+    // "budget" is a substring of "Marketing budget". With no applied-ops record the
+    // thread-through used the DRAFT oracle, read the label as fulfilment, and retired
+    // the offer with no notice.
+    const concept = buildProposalPendingAction({
+      scenario_id: SCENARIO_ID, concept: 'budget', preferred_kind: 'factor',
+      emitted_at_iso: new Date().toISOString(), graph_hash: PRE_HASH,
+    } as never);
+    priorPendings = [concept];
+    const { status, body } = await send('factor_value_edit', '9');
+    expect(status).toBe(200);
+    const sentence = buildHoldMutationLapseNotice(concept);
+    expect(body.assistant_text).toContain(sentence);
+    const stored = String((appendMock.mock.calls.at(-1)?.[0] as Record<string, unknown>)?.assistantMessage ?? '');
+    expect(stored, 'the stored copy is the wire copy').toContain(sentence);
+  });
+
+  it('a REFUSED value edit (above the scale) keeps the live hold — the refusal writes no graph', async () => {
+    const hold = liveHold();
+    priorPendings = [hold];
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: { kind: 'system_event', turn_id: `${TURN_ID_BASE}a`, scenario_id: SCENARIO_ID, stage: 'analyse',
+        event: { kind: 'factor_value_edit', target_id: 'f-budget', value: 1.5, raw_value: 150000, unit: '£' } },
+    });
+    const body = JSON.parse(res.body) as Record<string, any>;
+    expect(res.statusCode, JSON.stringify(body).slice(0, 300)).toBe(200);
+    expect(appendMock, 'premise: the refusal committed a turn row').toHaveBeenCalledTimes(1);
+    const write = appendMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(write.graph ?? null, 'premise: the refusal wrote no graph').toBeNull();
+    const carried = committedPendings().filter((p) => p.chip_id === hold.chip_id);
+    expect(carried, 'a refused value edit wiped a live consent hold').toHaveLength(1);
   });
 
   it('CONTROL: a label-only rename (hash unchanged) carries the hold untouched', async () => {

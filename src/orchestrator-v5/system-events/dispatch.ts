@@ -36,7 +36,12 @@ import { HandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestra
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { config } from '../../config/index.js';
 import { log } from '../../utils/telemetry.js';
-import { threadHoldsThroughMutatingCommit } from '../handlers/hold-thread-through.js';
+import {
+  appendLapseNotice,
+  emitHoldLapseTelemetry,
+  threadHoldsThroughMutatingCommit,
+} from '../handlers/hold-thread-through.js';
+import type { PatchOperation as AppliedPatchOperation } from '../../orchestrator/types.js';
 import type { PendingAction } from '../session/pending-action.js';
 import {
   GraphStaleWriteError,
@@ -1289,6 +1294,14 @@ export async function dispatchSystemEvent(
 function threadHoldsThroughSystemEventMutation(input: {
   readonly priorPendingActions: readonly PendingAction[] | undefined;
   readonly mutatedGraph: unknown;
+  /**
+   * The ops THIS write applied. NEVER null: null selects the DRAFT-path
+   * fulfilment oracle, under which a concept that merely appears inside an
+   * existing label counts as "fulfilled" and its offer retires with no notice
+   * (#1947 review 5841968747). Value, strength and goal edits add no node or
+   * edge, so they pass `[]`.
+   */
+  readonly appliedOperations: readonly AppliedPatchOperation[];
   readonly scenarioId: string;
   readonly turnId: string;
   readonly requestId: string;
@@ -1308,10 +1321,18 @@ function threadHoldsThroughSystemEventMutation(input: {
     priorPendingActions: input.priorPendingActions,
     graphAfterCommit: input.mutatedGraph,
     graphHashAfterCommit: hashAfter,
+    appliedOperations: input.appliedOperations,
     nowMs: Date.now(),
     scenarioId: input.scenarioId,
     turnId: input.turnId,
     requestId: input.requestId,
+  });
+  // The retirement is traced like every other seam's (frozen event name).
+  emitHoldLapseTelemetry(result.lapsed, {
+    requestId: input.requestId,
+    scenarioId: input.scenarioId,
+    turnId: input.turnId,
+    site: 'system_event_dispatch',
   });
   return { threaded: result.threaded, notice: result.notice };
 }
@@ -1320,7 +1341,7 @@ function threadHoldsThroughSystemEventMutation(input: {
 function withHoldNotice(response: OlumiResponse, notice: string | null): OlumiResponse {
   return notice === null
     ? response
-    : { ...response, assistant_text: `${response.assistant_text}\n\n${notice}` };
+    : { ...response, assistant_text: appendLapseNotice(response.assistant_text, notice) };
 }
 
 /**
@@ -1542,6 +1563,7 @@ async function dispatchEdgeStrengthEdit(
     const holds = threadHoldsThroughSystemEventMutation({
       priorPendingActions,
       mutatedGraph: result.mutatedGraph,
+      appliedOperations: [],
       scenarioId: payload.scenario_id,
       turnId: payload.turn_id,
       requestId,
@@ -1992,6 +2014,7 @@ async function dispatchStructuralDelete(
     const holds = threadHoldsThroughSystemEventMutation({
       priorPendingActions,
       mutatedGraph: result.mutatedGraph,
+      appliedOperations: result.appliedOperations,
       scenarioId: payload.scenario_id,
       turnId: payload.turn_id,
       requestId,
@@ -2322,6 +2345,11 @@ async function dispatchFactorValueEdit(
   // here. The turn IS committed (the transcript should record that the user
   // tried and was refused) but NO graph is written, so `scenarios.graph` is
   // untouched and `graph_hash` does not move. Never a silent clamp, never a 500.
+  // The prior row's pendings, read ONCE for both paths below. The refusal path
+  // writes no graph, so it threads them PLAINLY (the hash does not move); before
+  // this it passed none, and an above-cap value silently wiped every live hold
+  // (#1947 review, non-blocking 1).
+  const factorPriorPendings = await readPriorPendingsForMutation(payload.scenario_id, requestId, event.kind);
   if (result.kind === 'refused') {
     try {
       await commitDirectAnswer(result.response, {
@@ -2333,6 +2361,7 @@ async function dispatchFactorValueEdit(
         llm_calls_used: 0,
         duration_ms: Date.now() - startedAt,
         handler_facts: [],
+        ...(factorPriorPendings !== undefined ? { priorPendingActions: factorPriorPendings } : {}),
         // The consented "extend the scale" chip's backing pending. Supplied
         // EXPLICITLY (not left to commit.ts's chip-derivation default) because
         // this pending carries structured `{value, unit, cap}` that no chip can
@@ -2376,10 +2405,11 @@ async function dispatchFactorValueEdit(
   let committedResponse: OlumiResponse = result.response;
   try {
     const cas = computeExpectedGraphCasHashes(result.baseGraph);
-    const mutationPriorPendings = await readPriorPendingsForMutation(payload.scenario_id, requestId, event.kind);
+    const mutationPriorPendings = factorPriorPendings;
     const holds = threadHoldsThroughSystemEventMutation({
       priorPendingActions: mutationPriorPendings,
       mutatedGraph: result.mutatedGraph,
+      appliedOperations: [],
       scenarioId: payload.scenario_id,
       turnId: payload.turn_id,
       requestId,
@@ -3118,6 +3148,7 @@ async function dispatchStructuralRename(
     const holds = threadHoldsThroughSystemEventMutation({
       priorPendingActions,
       mutatedGraph: result.mutatedGraph,
+      appliedOperations: result.appliedOperations,
       scenarioId: payload.scenario_id,
       turnId: payload.turn_id,
       requestId,
@@ -3493,6 +3524,7 @@ async function dispatchStructuralAdd(
     const holds = threadHoldsThroughSystemEventMutation({
       priorPendingActions,
       mutatedGraph: result.mutatedGraph,
+      appliedOperations: result.appliedOperations,
       scenarioId: payload.scenario_id,
       turnId: payload.turn_id,
       requestId,
@@ -3859,6 +3891,7 @@ async function dispatchStructuralAddEdge(
     const holds = threadHoldsThroughSystemEventMutation({
       priorPendingActions,
       mutatedGraph: result.mutatedGraph,
+      appliedOperations: result.appliedOperations,
       scenarioId: payload.scenario_id,
       turnId: payload.turn_id,
       requestId,
@@ -4161,6 +4194,7 @@ async function dispatchGoalTargetEdit(
     const holds = threadHoldsThroughSystemEventMutation({
       priorPendingActions: mutationPriorPendings,
       mutatedGraph: result.mutatedGraph,
+      appliedOperations: [],
       scenarioId: payload.scenario_id,
       turnId: payload.turn_id,
       requestId,
