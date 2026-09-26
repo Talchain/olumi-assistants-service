@@ -21,9 +21,9 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 
 import { buildAddOptionsTransaction } from '../add-option-transaction.js';
-import { dispatchAddOptionTransaction } from '../../handlers/add-option-dispatch.js';
+import { buildConfiguredNotice, buildLinkedUnvaluedNotice, dispatchAddOptionTransaction } from '../../handlers/add-option-dispatch.js';
 import { assessHeldBatchAgainstGraph } from '../../handlers/edit-graph-referee-gate.js';
-import { readGmHeldResume } from '../../handlers/gm-held-execute.js';
+import { executeGmHeldResume, readGmHeldResume } from '../../handlers/gm-held-execute.js';
 import { applyPatchOperations } from '../../../orchestrator/patch-applier.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import { checkPersistedGraphInvariants } from '../../persisted-graph-invariants.js';
@@ -248,5 +248,64 @@ describe('CONTROL — a batch without new_factors is unchanged', () => {
     const ops = opsOf(r);
     expect(ops.filter((o) => o.op === 'add_node')).toHaveLength(1);
     expect(ops.some((o) => o.value?.defaulted === true)).toBe(false);
+  });
+});
+
+// ─── Review 5844092217 ─────────────────────────────────────────────────────
+
+const hold = (spec: Json) => dispatchAddOptionTransaction({
+  parameters: spec, currentGraph: STORED, currentGraphHash: HASH, freshness: 'none',
+  mode: 'live', scenarioId: 's', turnId: 't', requestId: 'r', stage: 'decide',
+} as never) as Json;
+
+describe('B1 — a held change the user approves ALWAYS lands (the class, not the instance)', () => {
+  it('a repeated affects target is refused before any hold (parameters_invalid; the dispatcher does not hold)', () => {
+    const spec = structuredClone(F4) as Json;
+    spec.new_factors[0].affects = [
+      { node_id: 'mrr', effect_direction: 'positive' },
+      { node_id: 'mrr', effect_direction: 'negative' },
+    ];
+    expect(buildAddOptionsTransaction(spec, STORED as never)).toMatchObject({ matched: false, reason: 'parameters_invalid' });
+    expect(hold(spec).kind).not.toBe('held');
+  });
+
+  const variants: Array<[string, (s: Json) => void]> = [
+    ['F4, add-on unset', () => {}],
+    ['F4, add-on valued', (s) => { s.interventions[1].value = 0.2; }],
+    ['a negative link', (s) => { s.new_factors[0].affects = [{ node_id: 'monthly_churn_rate', effect_direction: 'negative' }]; }],
+    ['a given factor_id', (s) => { s.new_factors[0].factor_id = 'ai_addon'; }],
+    ['two options, only the second sets the new factor', (s) => {
+      const second = { label: 'Raise to £59 with the add-on', interventions: [{ factor_id: 'pro_plan_price', value: 0.295 }, { factor_key: 'addon', value: null }] };
+      const first = { label: 'Raise to £54', interventions: [{ factor_id: 'pro_plan_price', value: 0.27 }] };
+      delete s.label; delete s.interventions;
+      s.options = [first, second];
+    }],
+  ];
+  it.each(variants)('%s → held, then EXECUTED by the real confirm path', (_name, mutate) => {
+    const spec = structuredClone(F4) as Json;
+    mutate(spec);
+    const out = hold(spec);
+    expect(out.kind).toBe('held');
+    const read = readGmHeldResume(out.pendingActions[0]) as Json;
+    const executed = executeGmHeldResume({
+      operations: read.operations, ...(read.envelopeCap !== undefined ? { envelopeCap: read.envelopeCap } : {}),
+      currentGraph: STORED, currentGraphHash: HASH, freshness: 'none', hasExistingAnalysis: false,
+      scenarioId: 's', turnId: 't-confirm', requestId: 'r-confirm',
+    }) as Json;
+    expect(executed.status).toBe('executed');
+  });
+});
+
+describe('B2 — "ready to analyse" is never said beside "I don\'t have those numbers"', () => {
+  it('⭐ F4 with the add-on unset: the linked-unvalued notice, and NOT the configured affirmation', () => {
+    const text = String(hold(structuredClone(F4)).response.assistant_text);
+    expect(text).toContain(buildLinkedUnvaluedNotice(F4.label, ['Paid AI add-on']));
+    expect(text).not.toContain(buildConfiguredNotice(F4.label));
+  });
+
+  it('CONTRAST — every link valued: the configured affirmation is said', () => {
+    const spec = structuredClone(F4) as Json;
+    spec.interventions[1].value = 0.2;
+    expect(String(hold(spec).response.assistant_text)).toContain(buildConfiguredNotice(F4.label));
   });
 });

@@ -135,7 +135,7 @@ function joinQuoted(labels: readonly string[]): string {
 }
 
 /** Positive completeness disclosure — the option lands analysable. */
-function buildConfiguredNotice(label: string): string {
+export function buildConfiguredNotice(label: string): string {
   return (
     `'${label}' comes with its effect values, so once you apply this it is ` +
     `configured and the analysis can run.`
@@ -342,10 +342,19 @@ export function dispatchAddOptionTransaction(
   // gate's structural heads-up fires exactly when there are no factor links,
   // which is precisely `configured === false` here (one factor edge per value),
   // so relying on it never drops the disclosure.
+  //
+  // ⛔ "READY TO ANALYSE" NEEDS EVERY LINK VALUED, NOT ONE (review 5844092217 B2). `configured` means "at
+  // least one effect value", so a MIXED option — one factor valued, another linked with no size (the F4
+  // add-on: price set, the new factor unset) — was told "it is configured and the analysis can run" in
+  // the same turn as "I don't have those numbers". The affirmation now needs NO linked-unvalued factor;
+  // the linked-unvalued notice below says what is missing. `configured` itself (the outcome field
+  // route-v2 reads) is unchanged.
+  const readyToAnalyse = (p: (typeof proposals)[number]): boolean =>
+    p.configured && p.linkedUnvaluedFactorIds.length === 0;
   const multi = proposals.length > 1;
-  const configuredLabels = proposals.filter((p) => p.configured).map((p) => p.optionLabel);
+  const configuredLabels = proposals.filter(readyToAnalyse).map((p) => p.optionLabel);
   const disclosure = !multi
-    ? configured
+    ? readyToAnalyse(first)
       ? buildConfiguredNotice(optionLabel)
       : null
     : configuredLabels.length > 0

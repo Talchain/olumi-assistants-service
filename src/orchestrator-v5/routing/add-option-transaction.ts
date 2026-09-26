@@ -404,7 +404,10 @@ const NewFactorSpecSchema = z
     label: z.string().min(1),
     affects: z
       .array(z.object({ node_id: z.string().min(1), effect_direction: z.enum(['positive', 'negative']) }).strict())
-      .min(1),
+      .min(1)
+      // ⛔ One link per target (review 5844092217 B1): a repeated `node_id` emitted two `add_edge`s to the
+      // same pair — HELD, then "Edge already exists" at apply, so the user's "yes" landed nothing.
+      .refine((a) => new Set(a.map((x) => x.node_id)).size === a.length, { message: 'duplicate affects target' }),
   })
   .strict();
 const NewFactorsSchema = z
