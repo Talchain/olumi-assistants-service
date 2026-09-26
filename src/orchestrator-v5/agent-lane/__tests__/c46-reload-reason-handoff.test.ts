@@ -62,6 +62,19 @@ import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { AUTO_RUN_POST_CONSTRUCTION_INITIATOR, RUN_PROVENANCE_ENRICHMENT_KEY } from '../../context/run-initiator.js';
 import { leaderWithheldForALimit } from '../../coaching/limit-unchecked-card.js';
+import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
+import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
+import { normaliseGraphNodeKindField } from '../../graph-registration/normalise-node-kind.js';
+import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
+import { applyStructuralRename } from '../../system-events/structural-rename.js';
+import { applyStructuralAdd } from '../../system-events/structural-add.js';
+import { applyStructuralAddEdge } from '../../system-events/structural-add-edge.js';
+import { applyStructuralDelete } from '../../system-events/structural-delete.js';
+import { applyEdgeStrengthEdit } from '../../system-events/edge-strength-edit.js';
+import { applyGoalTargetEdit } from '../../system-events/goal-target-edit.js';
+import { applyOptionInterventionEdit } from '../../system-events/option-intervention-edit.js';
+import { applyPatchOperations } from '../../../orchestrator/patch-applier.js';
+import { GraphV3 } from '../../../schemas/cee-v3.js';
 import {
   WITHHELD_CONSTRAINT_VERDICT,
   WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN,
@@ -440,5 +453,104 @@ describe('H1a: the analysis hash covers the C46 carrier — a graph that lost it
     // A present-`undefined` carrier (the key survives in memory, never in JSON) is the same graph.
     const presentUndefined = { ...graph, nodes: graph.nodes.map((n) => ({ ...n, nonlinear_identity: undefined })) };
     expect(computeAnalysisAffectingGraphHash(presentUndefined as never)).toBe('680e4200b50c20dc');
+  });
+});
+
+/**
+ * ⛔ H1a′ — THE CARRIER SURVIVES EVERY CEE WRITER A SAVED MODEL PASSES THROUGH (verification of 8b4684ef, item 4).
+ *
+ * WHY: with H1a a lost carrier reads the run out of date — honest — but a RE-RUN on the carrier-less graph finds no
+ * product and names a leader: the C46 withhold would lapse silently after an ordinary save. So every server writer a
+ * saved model goes through must keep `nonlinear_identity` byte for byte. Each row runs the REAL writer on the REAL
+ * constructed pricing graph, then the persisted-form projection (`projectGraphForPersistence`, which `commitDirectAnswer`
+ * and the register route run on the way to `scenarios.graph`), and binds the carrier BY NODE ID to the exact
+ * declaration construction wrote. Every writer must actually WRITE (`mutated` / `candidate`), so no row passes on a
+ * refusal. The UI's own round trip (DecisionGuideAI `buildRegistrationGraph` spreads node `data`) is outside this repo.
+ */
+describe("H1a′: every CEE writer a saved model passes through keeps the C46 carrier", () => {
+  const CARRIER = { operation: 'product', factor_ids: ['pro_plan_price', 'pro_subscribers'], stated_in_brief: false };
+  const carriersOf = (g: unknown): Record<string, unknown> => Object.fromEntries(
+    ((g as Graph | null)?.nodes ?? []).filter((n) => n.nonlinear_identity !== undefined).map((n) => [n.id as string, n.nonlinear_identity]),
+  );
+  const hashOf = (g: unknown): string => {
+    const h = computeAnalysisAffectingGraphHash(g as never);
+    if (h === null) throw new Error('the constructed graph must hash');
+    return h;
+  };
+  const turn = { kind: 'system_event', scenario_id: SCENARIO, turn_id: '46464646-4646-4646-8646-464646464648', stage: 'analyse' };
+  const payloadFor = (event: Record<string, unknown>) => ({ ...turn, event }) as never;
+
+  /** Each writer as the dispatcher drives it: the persisted graph in, the graph it hands the commit out. */
+  const WRITERS: ReadonlyArray<readonly [string, (g: Graph) => Promise<{ kind: string; graph: unknown }>]> = [
+    ['register route ingress (kind normaliser + GraphStateIngressSchema)', async (g) => {
+      const n = normaliseGraphNodeKindField(g);
+      const parsed = n.ok ? GraphStateIngressSchema.safeParse(n.graph) : null;
+      return parsed?.success === true ? { kind: 'mutated', graph: parsed.data } : { kind: 'refused', graph: null };
+    }],
+    ['turn-path parse (cee-v3 GraphV3)', async (g) => {
+      const parsed = GraphV3.safeParse(g);
+      return parsed.success ? { kind: 'mutated', graph: parsed.data } : { kind: 'refused', graph: null };
+    }],
+    ['patch applier update_node on the carrier\'s own node', async (g) => ({
+      kind: 'mutated', graph: applyPatchOperations(GraphV3.parse(g), [{ op: 'update_node', path: 'mrr', value: { label: 'Monthly recurring revenue' } } as never]),
+    })],
+    ['factor_value_edit (set_factor_value) on a product factor', async (g) => {
+      const event = { kind: 'factor_value_edit', target_id: 'pro_subscribers', value: 400, raw_value: 400, unit: 'subscribers', field: 'value' };
+      const r = await applyFactorValueEdit({ payload: payloadFor(event), event: event as never, requestId: 'req-c46-w1', persistedGraph: g, priorFacts: [] } as never);
+      return { kind: r.kind, graph: r.kind === 'mutated' ? r.mutatedGraph : null };
+    }],
+    ['structural_rename of the carrier\'s own node', async (g) => {
+      const event = { kind: 'structural_rename', node_id: 'mrr', label: 'Monthly recurring revenue', expected_label: 'MRR', base_graph_hash: hashOf(g) };
+      const r = applyStructuralRename({ payload: payloadFor(event), event: event as never, requestId: 'req-c46-w2', persistedGraph: g });
+      return { kind: r.kind, graph: r.kind === 'mutated' ? r.mutatedGraph : null };
+    }],
+    ['structural_add of a factor', async (g) => {
+      const event = { kind: 'structural_add', node_id: 'fac_seasonality', node_kind: 'factor', label: 'Seasonality', base_graph_hash: hashOf(g) };
+      const r = applyStructuralAdd({ payload: payloadFor(event), event: event as never, requestId: 'req-c46-w3', persistedGraph: g });
+      return { kind: r.kind, graph: r.kind === 'mutated' ? r.mutatedGraph : null };
+    }],
+    ['structural_add_edge', async (g) => {
+      const event = { kind: 'structural_add_edge', from: 'monthly_churn', to: 'mrr', magnitude: 0.3, effect_direction: 'negative', base_graph_hash: hashOf(g) };
+      const r = applyStructuralAddEdge({ payload: payloadFor(event), event: event as never, requestId: 'req-c46-w4', persistedGraph: g });
+      return { kind: r.kind, graph: r.kind === 'mutated' ? r.mutatedGraph : null };
+    }],
+    ['structural_delete of a node outside the product', async (g) => {
+      const event = { kind: 'structural_delete', removed_node_ids: ['monthly_churn'], removed_edges: [], base_graph_hash: hashOf(g) };
+      const r = applyStructuralDelete({ payload: payloadFor(event), event: event as never, requestId: 'req-c46-w5', persistedGraph: g });
+      return { kind: r.kind, graph: r.kind === 'mutated' ? r.mutatedGraph : null };
+    }],
+    ['edge_strength_edit on a link into the carrier\'s node', async (g) => {
+      const e = g.edges.find((x) => x.from === 'pro_subscribers' && x.to === 'mrr')!;
+      const event = { kind: 'edge_strength_edit', from: e.from, to: e.to, magnitude: 0.7, direction_intent: 'preserve',
+        expected: { mean: (e.strength as { mean: number }).mean, effect_direction: e.effect_direction }, intent: 'set' };
+      const r = await applyEdgeStrengthEdit({ payload: payloadFor(event), event: event as never, requestId: 'req-c46-w6', persistedGraph: g });
+      return { kind: r.kind, graph: r.kind === 'mutated' ? r.mutatedGraph : null };
+    }],
+    ['goal_target_edit on the carrier\'s own node', async (g) => {
+      const event = { kind: 'goal_target_edit', goal_node_id: 'mrr', constraint_type: 'at_least', raw_value: 25000, unit: '£', base_graph_hash: hashOf(g) };
+      const r = await applyGoalTargetEdit({ payload: payloadFor(event), event: event as never, requestId: 'req-c46-w7', persistedGraph: g, priorFacts: [] });
+      return { kind: r.kind, graph: r.kind === 'mutated' ? r.mutatedGraph : null };
+    }],
+    ['option_intervention_edit on a product factor', async (g) => {
+      const persisted = projectGraphForPersistence(g);
+      const r = applyOptionInterventionEdit({ persistedGraph: persisted, optionId: 'raise_pro_to_59', factorId: 'pro_plan_price', modelValue: 0.3,
+        expectedGraphHash: hashOf(persisted), scenarioId: SCENARIO, turnId: 'turn-c46-w8', requestId: 'req-c46-w8', freshness: 'none', hasExistingAnalysis: false } as never);
+      return { kind: r.kind, graph: r.kind === 'candidate' ? (r as { graph: unknown }).graph : null };
+    }],
+  ];
+
+  it('PREMISE + CONTROL: construction wrote exactly one declaration, and the check sees a lost one', async () => {
+    const graph = await build(PRODUCT);
+    expect(carriersOf(projectGraphForPersistence(structuredClone(graph)))).toEqual({ mrr: CARRIER });
+    const lost = structuredClone(graph);
+    for (const n of lost.nodes) delete n.nonlinear_identity;
+    expect(carriersOf(projectGraphForPersistence(lost)), 'the check is not vacuous: a graph without it reads empty').toEqual({});
+  });
+
+  it.each(WRITERS.map(([name, write]) => [name, write] as const))('%s: writes, and the persisted form keeps the carrier by id', async (_name, write) => {
+    const graph = await build(PRODUCT);
+    const out = await write(structuredClone(graph));
+    expect(['mutated', 'candidate'], `the writer must WRITE here, not refuse (got ${out.kind})`).toContain(out.kind);
+    expect(carriersOf(projectGraphForPersistence(structuredClone(out.graph)))).toEqual({ mrr: CARRIER });
   });
 });
