@@ -347,6 +347,10 @@ test('STATED THRESHOLD — said back only when the user stated it, in a level fr
  assert.equal(statedThreshold(row),'10% per month');
  assert.equal(statedThreshold({...row,constraint_id:'gc-1f2e',unit:'%',value:5}),'5%');
  assert.equal(statedThreshold({...row,operator:'>=',value:400000,unit:'£'}),'£400,000');
+ // Prefix symbols come from the canonical currency map: '¥' and 'A$' prefix too; the all-letter 'CHF' follows.
+ assert.equal(statedThreshold({...row,operator:'>=',value:500,unit:'¥'}),'¥500');
+ assert.equal(statedThreshold({...row,operator:'>=',value:5,unit:'A$'}),'A$5');
+ assert.equal(statedThreshold({...row,operator:'>=',value:500,unit:'CHF'}),'500 CHF');
  assert.equal(statedThreshold({...row,unit:'hours'}),'10 hours');
  assert.equal(statedThreshold({...row,unit:undefined}),'10');
  assert.equal(statedThreshold({...row,value_frame:'level'}),'10% per month');
