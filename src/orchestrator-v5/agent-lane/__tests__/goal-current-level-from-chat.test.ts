@@ -50,9 +50,12 @@ const goalOf = (g: Graph): Node => g.nodes.find((n) => n.id === GOAL)!;
  * A scenario store that behaves like the read and register routes: the read returns the stored graph and its
  * revision; a register whose `expected_graph_hash` is not the current revision is refused `GRAPH_STALE` and
  * writes nothing; a register that lands moves the revision and mints a version. `beforeRegister` lets a
- * test land another writer between the approval's read and the write.
+ * test land another writer between the approval's read and the write; `afterRegister` lands one straight after it.
  */
-function scenarioStore(initial: Graph, opts: { beforeRegister?: (s: { bump: () => void }) => void } = {}) {
+function scenarioStore(initial: Graph, opts: {
+  beforeRegister?: (s: { bump: () => void }) => void;
+  afterRegister?: (s: { overwrite: (g: Graph) => void }) => void;
+} = {}) {
   let graph = clone(initial);
   let rev = 0;
   const hash = () => `h${rev}`;
@@ -72,7 +75,9 @@ function scenarioStore(initial: Graph, opts: { beforeRegister?: (s: { bump: () =
       }
       graph = b.graph;
       rev += 1;
-      return { status: 200, json: { graph_hash: hash(), model_version: { version_number: rev + 1, version_id: `v${rev}`, mutation_id: `m${rev}` } } };
+      const answer = { status: 200, json: { graph_hash: hash(), model_version: { version_number: rev + 1, version_id: `v${rev}`, mutation_id: `m${rev}` } } };
+      opts.afterRegister?.({ overwrite: (g) => { graph = g; rev += 1; } });
+      return answer;
     }
     return { status: 500, json: {} };
   };
@@ -238,6 +243,13 @@ describe('CONTROLS — refused with a plain reason, nothing proposed, nothing wr
     }
   });
 
+  it('a goal whose target is on another frame (delta) has no level to set a baseline against', async () => {
+    const g = clone(paulGraph);
+    goalOf(g).goal_threshold_frame = 'delta';
+    const r = await refusedAndInert(T2, g);
+    expect(r.refusal).toBe('no_target');
+  });
+
   it('a goal with no stated target on the level frame has nothing to measure against', async () => {
     const g = clone(paulGraph);
     const goal = goalOf(g);
@@ -299,6 +311,16 @@ describe('CONTROLS — the approval is the write, and only onto the model the us
     expect(r.mutated).toBe(false);
     expect(r.refusal).toBe('superseded');
     expect(goalOf(s.graph())).not.toHaveProperty('observed_state');
+  });
+
+  it('saved, then changed by another writer straight afterwards → never reported as applied (confirmed from state)', async () => {
+    const s = setup(paulGraph, { afterRegister: ({ overwrite }) => overwrite(clone(paulGraph)) });
+    const proposed = await s.call(TOOL, T2) as ToolResult & { proposal_id: string };
+    const r = await s.call('authorise_change', { proposal_id: proposed.proposal_id });
+    expect(r.applied, JSON.stringify(r)).not.toBe(true);
+    expect(r.ok).toBe(false);
+    expect(r.mutated).toBe(true);
+    expect(r.refusal).toBe('not_verified');
   });
 
   it('read-only preview: the tool is not declared and dispatch refuses it', async () => {
