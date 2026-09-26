@@ -48,7 +48,7 @@ import {
   resolveMagnitude,
 } from "../../utils/magnitude-alphabet.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
-import { readUnit, type AmountKind } from "../provenance/stated-amounts.js";
+import { readCurrencyUnitWithQualifiers, readUnit, type AmountKind } from "../provenance/stated-amounts.js";
 import {
   classifyValueSource,
   reflectsAHumanAct,
@@ -1346,7 +1346,7 @@ function collectSourceBoundInterventionCandidates(
       continue;
     }
 
-    const { kind, currencyCode, multiplier } = readUnit(declaredUnit);
+    const { kind, currencyCode, multiplier } = readCurrencyUnitWithQualifiers(declaredUnit);
     out.push({
       nodeId: factorId,
       label,
@@ -1387,7 +1387,8 @@ function collectCandidates(graph: Record<string, unknown>): Candidate[] {
       // quantity gets "found" in a model that never carried it.
       for (const carrier of valueCarriers(node)) {
         const declaredUnit = typeof carrier.unit === "string" ? carrier.unit : null;
-        const { kind, currencyCode, multiplier } = readUnit(declaredUnit);
+        // C47 — a currency inside a composite unit (`GBP MRR`) is still that currency.
+        const { kind, currencyCode, multiplier } = readCurrencyUnitWithQualifiers(declaredUnit);
         for (const v of carrier.values) {
           out.push({
             nodeId,
