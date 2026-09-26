@@ -30,6 +30,8 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_new_option: { label: 'Add this option', message: 'Yes, add that option.' },
   // A link's strength recorded as the user's own (challenge → authorised revision): one button, carried like the rest.
   propose_link_strength: { label: 'Record this link', message: 'Yes, record that.' },
+  // A removal of links and options (the product's `structural_delete`): one button, carried like the rest.
+  propose_removal: { label: 'Approve this removal', message: 'Yes, remove that.' },
 };
 
 export const AMEND_CHIP: SuggestedAction = {

@@ -206,9 +206,18 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
       + `but not yet linked to ${missing.join(', ')}. Approving the same change again will try only the missing ${missing.length === 1 ? 'link' : 'links'}; `
       + 'if the model has changed since, you will be asked to confirm again.';
   }
+  /**
+   * ⛔ A WRITE OLUMI COULD NOT CONFIRM FROM THE MODEL IS NEITHER SAVED NOR UNSAVED — said so, never as a code. The
+   * generic line below read "Partly saved: the change was refused (not_confirmed)." for a removal whose read-back
+   * still held its target (and "Not saved: … (not_confirmed)" for a link whose read-back failed): a raw code, and a
+   * verdict nobody had.
+   */
+  if (r.refusal === 'not_confirmed') {
+    return 'Could not be confirmed: Olumi could not see from the model whether this change was saved — ask me to check the model before relying on it.';
+  }
   const code = String(r.refusal ?? '');
   const mutated = r.mutated === true;
-  return `${mutated ? 'Partly saved' : 'Not saved'}: ${REFUSAL_WORDS[code] ?? `the change was refused (${code || 'unknown reason'})`}.`;
+  return `${mutated ? 'Partly saved' : 'Not saved'}:${REFUSAL_WORDS[code] ?? `the change was refused (${code || 'unknown reason'})`}.`;
 }
 
 export interface WriteOutcomeNarration {
