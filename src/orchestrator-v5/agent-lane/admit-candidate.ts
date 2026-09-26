@@ -48,7 +48,7 @@ import {
   REPAIR_CODES,
   type RepairEntry,
 } from '@talchain/schemas';
-import type { LinkSizing, MagnitudeAuthor } from '../../cee/magnitude/link-effect.js';
+import type { LinkSizing, MagnitudeAuthor, NaturalEffect } from '../../cee/magnitude/link-effect.js';
 
 /**
  * A magnitude the model did not author, expressed as a projection default.
@@ -103,8 +103,11 @@ export interface AdmittedEdge {
   strength: { mean: number; std: number };
   exists_probability: number;
   effect_direction?: 'positive' | 'negative' | 'unknown';
-  /** `magnitude` (D9): who sized it. Absent on an edge that keeps today's projection unchanged. */
-  provenance?: { source: string; reasoning?: string; magnitude?: MagnitudeAuthor };
+  /**
+   * `magnitude` (D9): who sized it. `natural_effect`: the size it carries in natural units, with the β it was written
+   * for (`strength_mean`, the staleness key). Both absent on an edge that keeps today's projection unchanged.
+   */
+  provenance?: { source: string; reasoning?: string; magnitude?: MagnitudeAuthor; natural_effect?: NaturalEffect };
   /** CIL flag — true when the magnitude is a projection default, not authored. */
   defaulted?: boolean;
 }
@@ -249,7 +252,11 @@ export function admitCandidateLinks(
         strength: { mean: sized.mean, std },
         exists_probability: existenceStated ? (link.existence_probability as number) : DEFAULT_EXISTS_PROBABILITY,
         effect_direction: link.direction,
-        provenance: { source: link.provenance_source ?? provenanceSourceFor(link.provenance), magnitude: sized.magnitude! },
+        provenance: {
+          source: link.provenance_source ?? provenanceSourceFor(link.provenance),
+          magnitude: sized.magnitude!,
+          ...(sized.natural_effect !== undefined ? { natural_effect: sized.natural_effect } : {}),
+        },
       };
       projected_fields[key] = projected;
       if (projected.length > 0) edge.defaulted = true;

@@ -198,6 +198,20 @@ export interface LinkStatement {
   readonly user_stated: boolean;
 }
 
+/**
+ * ⭐ THE NATURAL SIZE ON THE EDGE (`provenance.natural_effect`). `amount` of the target (in `unit`) per
+ * `per_source_change` of the source (in `source_unit`), as ADMITTED: the placeholder's own value when Olumi's
+ * placeholder stands in. `strength_mean` is the signed β it was written for — the staleness key: a reader says the
+ * natural phrase ONLY while the edge's mean still equals it, so a copy left behind by a later edit never speaks.
+ */
+export interface NaturalEffect {
+  readonly amount: number;
+  readonly unit: string;
+  readonly per_source_change: number;
+  readonly source_unit: string;
+  readonly strength_mean: number;
+}
+
 /** Why a stated size is not what the edge carries, or why it is asked about. */
 export type LinkSizeProblem = 'out_of_domain' | 'not_representable' | 'unconvertible' | 'sign_conflict';
 
@@ -215,6 +229,11 @@ export interface LinkSizing {
   readonly statement?: string;
   /** The stated size read on the two frames (β), when it converted. */
   readonly stated_strength?: number;
+  /**
+   * The size the edge CARRIES, said in natural units (contract #70 5845713522 + R&C 5845818897), for the canvas band.
+   * Present only when the edge is sized (`estimate`, `user_stated`, `placeholder`) and both frames resolve.
+   */
+  readonly natural_effect?: NaturalEffect;
   readonly problem?: LinkSizeProblem;
   /** Asked where the user always sees it (`open_questions`). */
   readonly question?: string;
@@ -259,6 +278,45 @@ function statementWords(
   return `${cause} ${amount < 0 ? 'lowers' : 'raises'} "${target.label}" by ${amountWords(amount, target, targetFrame)}`;
 }
 
+const round6 = (x: number): number => Number(x.toPrecision(6));
+
+/** The unit words the natural size is said in: points for a percentage level, "switch" for a yes/no. */
+const targetUnitWords = (t: MagnitudeNode, frame: number | undefined): string =>
+  isPercentLevel(t, frame) ? 'percentage points' : (unitOf(t) ?? '');
+const sourceUnitWords = (s: MagnitudeNode, frame: number | undefined): string =>
+  isSwitch(s, frame) ? 'switch' : (unitOf(s) ?? '');
+
+/**
+ * The natural size of a strength β the edge carries. A stated size keeps its own `per_source_change`; a placeholder
+ * is said per the farthest option move of the source (its swing end with the larger reach). `undefined` when either
+ * frame does not resolve, or no source change is known to say it per.
+ */
+export function naturalEffectOf(
+  beta: number, source: MagnitudeNode, target: MagnitudeNode, statedPer: number | undefined,
+): NaturalEffect | undefined {
+  const targetFrame = resolveMagnitudeFrame(target);
+  const sourceFrame = resolveMagnitudeFrame(source);
+  if (targetFrame === undefined || sourceFrame === undefined || !finite(beta)) return undefined;
+  let per = statedPer;
+  if (per === undefined) {
+    const swing = sourceSwing(source);
+    if (swing === null) return undefined;
+    const d = Math.abs(swing.hi) >= Math.abs(swing.lo) ? swing.hi : swing.lo;
+    per = d * sourceFrame;
+  }
+  if (!finite(per) || per === 0) return undefined;
+  // D2 inverted: amount / F_T = β · (per / F_S).
+  const amount = beta * targetFrame * (per / sourceFrame);
+  if (!finite(amount)) return undefined;
+  return {
+    amount: round6(amount),
+    unit: targetUnitWords(target, targetFrame),
+    per_source_change: round6(per),
+    source_unit: sourceUnitWords(source, sourceFrame),
+    strength_mean: beta,
+  };
+}
+
 const HOW_MUCH = (s: MagnitudeNode, t: MagnitudeNode): string => `How much does "${s.label}" change "${t.label}"?`;
 const NOT_REPRESENTABLE = 'which is more than the analysis can represent on the ranges these two are measured on';
 
@@ -279,6 +337,11 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
   const beta = stated ? convertLinkEffect(amount, per, targetFrame, sourceFrame) : null;
   const statement = stated ? statementWords(amount, per, source, target, sourceFrame, targetFrame) : undefined;
   const who = link.user_stated ? 'You said' : 'Olumi estimated that';
+  // The natural size of what the edge CARRIES; never of an estimate set aside (the placeholder's own is said instead).
+  const natural = (b: number, statedPer: number | undefined): { natural_effect?: NaturalEffect } => {
+    const n = naturalEffectOf(b, source, target, statedPer);
+    return n === undefined ? {} : { natural_effect: n };
+  };
 
   const baseline = knownBaseline(target);
   const domain = targetFrame === undefined ? null : levelDomain(unitOf(target), targetFrame);
@@ -306,11 +369,12 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
           : undefined;
       return {
         outcome: 'user_stated', mean: beta, std: sigma, magnitude: 'user_stated', statement, stated_strength: beta,
+        ...natural(beta, per as number),
         ...(issue !== undefined ? { problem: issue, question: question! } : {}),
       };
     }
     if (issue === undefined) {
-      return { outcome: 'estimate', mean: beta, std: sigma, magnitude: 'olumi_estimate', statement, stated_strength: beta };
+      return { outcome: 'estimate', mean: beta, std: sigma, magnitude: 'olumi_estimate', statement, stated_strength: beta, ...natural(beta, per as number) };
     }
     // D5 / D8: Olumi's estimate is set aside — never clamped to the boundary.
     problem = issue;
@@ -349,7 +413,7 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
   };
 
   if (sized) {
-    return { outcome: 'placeholder', mean: placeholder, std: Math.abs(placeholder) / 2, magnitude: 'olumi_placeholder', ...said };
+    return { outcome: 'placeholder', mean: placeholder, std: Math.abs(placeholder) / 2, magnitude: 'olumi_placeholder', ...said, ...natural(placeholder, undefined) };
   }
   return { outcome: 'unchanged', mean: sign * STRENGTH_DEFAULT_SIGNATURE.mean, std: STRENGTH_DEFAULT_SIGNATURE.std, ...said };
 }
