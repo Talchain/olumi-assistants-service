@@ -17,7 +17,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { createAgentCapabilitiesWithLevelsPort as createAgentCapabilities } from './fixtures/levels-port.js';
 import { ProposalStore } from '../proposal.js';
 
 const SCENARIO = '1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d';
@@ -94,21 +95,7 @@ describe('a level is "recorded" only when THIS approval\'s own write committed i
     expect(r.interventions).toEqual([{ option: 'Raise price', factor: 'Price', requested: 60, recorded: null }]);
   });
 
-  it('⛔ the next op is CAS-gated on OUR write\'s revision, never on a foreign edit read back after it', async () => {
-    const p = product({ foreignAfterFirst: true });
-    const r = await approveLevels(p, [PRICE_TO_60, REACH_TO_07]);
-    // Bound by identity: the second op carries the hash OUR first write reported (h1),
-    // so the foreign edit (h2) refuses it instead of being absorbed.
-    expect(p.posted).toEqual([
-      { pair: 'raise::price', base: 'h0', status: 200 },
-      { pair: 'raise::reach', base: 'h1', status: 409 },
-    ]);
-    expect(r.interventions).toEqual([
-      { option: 'Raise price', factor: 'Price', requested: 60, recorded: 0.6 },
-      { option: 'Raise price', factor: 'Reach', requested: 0.7, recorded: null },
-    ]);
-    expect(JSON.stringify(r.failures)).toContain('raise::reach');
-  });
+  // Retired with the whole-scope level port (Canonical #70 5847348206): every level is ONE commit, so there is no "next op" for the Agent to chain. The contract is `whole-request-is-one-commit.test.ts`.
 
   it('⭐ POSITIVE CONTROL: with no other writer, every level lands and the chain follows our own revisions', async () => {
     const p = product();

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { createAgentCapabilitiesWithLevelsPort as createAgentCapabilities } from './fixtures/levels-port.js';
 import { createProposal, ProposalStore } from '../proposal.js';
 import type { CallStructuredModel } from '../runtime/build-model.js';
 

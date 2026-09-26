@@ -116,7 +116,7 @@ import { readinessViewOf, withoutCantRunOpening } from '../readiness-view.js';
 import { pickGoalThresholdTrio } from '../../../utils/goal-threshold-trio.js';
 import { type InfluenceBand } from '../../format/influence-bands.js';
 import { edgeBandFromMagnitude, EDGE_STRENGTH_MIDPOINTS } from '../../format/edge-strength-bands.js';
-import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approved-adoption-context.js';
+import { runWithApprovedAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
 import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, figureTheUserWrote } from '../stated-by-user.js';
@@ -263,15 +263,6 @@ function committedThenMoved(
   return reported !== '' && approvedRevision !== '' && reported !== approvedRevision && after.graph_hash !== '' && after.graph_hash !== reported;
 }
 
-function committedLevelOf(json: Record<string, unknown>, optionId: string, factorId: string): number | undefined {
-  const nodes = ((json.draft_graph ?? {}) as { nodes?: unknown }).nodes;
-  if (!Array.isArray(nodes)) return undefined;
-  const option = nodes.find((n) => (n as { id?: unknown } | null)?.id === optionId) as { interventions?: Record<string, unknown> } | undefined;
-  const iv = option?.interventions?.[factorId];
-  const value = typeof iv === 'number' ? iv : (iv as { value?: unknown } | undefined)?.value;
-  return typeof value === 'number' ? value : undefined;
-}
-
 /** Marks a compound starting point, so a newer one can replace it before approval. */
 const STARTING_POINT_BASIS = 'a starting point \u2014 values and what each option sets \u2014 for the user to adopt or correct in one approval';
 
@@ -309,15 +300,6 @@ function valueOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'mo
  */
 function levelOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'model_proposed' | 'user_stated' {
   return valueOpAuthor(op, proposal);
-}
-
-/** One level write, inside its adoption identity when the level is Olumi's (`approved-adoption-context.ts`). */
-function writeLevelAs<T>(
-  author: 'model_proposed' | 'user_stated',
-  adoption: { scenarioId: string; proposalId: string; optionId: string; factorId: string; modelValue: number },
-  write: () => Promise<T>,
-): Promise<T> {
-  return author === 'model_proposed' ? runWithApprovedLevelAdoption(adoption, write) : write();
 }
 
 /**
@@ -739,6 +721,12 @@ function ambiguousClause(ambiguous: readonly AmbiguousTarget[]): string {
   return ` (left out, more than one entity is called this, so the user must say which: ${ambiguous.map((a) => `"${a.requested}"`).join('; ')})`;
 }
 
+/** The level a read model holds for one option on one factor (a bare number or `{ value }`), else undefined. */
+function heldLevelOf(g: GraphRead, optionId: string, factorId: string): unknown {
+  const held = g.nodes.find((n) => n.id === optionId)?.interventions?.[factorId] as { value?: unknown } | number | undefined;
+  return typeof held === 'number' ? held : held?.value;
+}
+
 export function createAgentCapabilities(
   dispatch: InternalDispatch,
   proposals: ProposalStore,
@@ -1068,6 +1056,26 @@ export function createAgentCapabilities(
     }
     const valueOps = parent.operations.filter((o) => o.op === 'set_factor_value');
     const levelOps = parent.operations.filter((o) => o.op === 'set_option_intervention');
+    const linkOps = parent.operations.filter(isLevelLink);
+    const pairOf = (path: string): { option_id: string; factor_id: string } => {
+      const [option_id, factor_id] = path.split('::');
+      return { option_id: option_id ?? '', factor_id: factor_id ?? '' };
+    };
+    const levelInputs = levelOps.map((o) => ({
+      ...pairOf(o.path),
+      value: ((o.value ?? {}) as { normalised?: unknown }).normalised,
+      author: levelOpAuthor(o, parent) === 'user_stated' ? 'user_specified' as const : 'model_proposed' as const,
+    }));
+    // ⛔ THE LINKS AND LEVELS ARE ONE COMMIT OR NONE — so what would stop them is checked BEFORE anything is written.
+    if (levelOps.length + linkOps.length > 0) {
+      if (opts.commitOptionLevels === undefined) {
+        return notApplied('levels_writer_unavailable', 'The option levels could not be written as one change, so nothing was written.');
+      }
+      const unstored = levelInputs.find((l) => typeof l.value !== 'number');
+      if (unstored !== undefined) {
+        return notApplied('no_level_on_proposal', `No level was stored on the proposal for ${unstored.option_id}::${unstored.factor_id}. Nothing was written.`);
+      }
+    }
 
     // (2) Values, in memory, through the product's own inspector path.
     let working: unknown = approvedRead.raw;
@@ -1238,80 +1246,53 @@ export function createAgentCapabilities(
       carried = next;
     }
 
-    // (2b) ⭐ The links the levels need (a level on a factor its option did not yet act on), each CAS-gated on the
-    // revision our OWN previous write produced — the product's `structural_add_edge`; option → factor takes the
-    // topology strength. A link that does not land stops the chain: no level is written on a factor it could not reach.
+    // (3) ⭐ THE LINKS AND LEVELS AS ONE COMMIT (Canonical #70 5847348206): the product's N-ary level writer commits the
+    // whole approved scope on the revision our values write produced (or the approved one) — any pair refused means
+    // none committed. The link a level needs is written first INSIDE that commit, so no level lands on an unlinked factor.
     let levelsRecorded = 0;
     let levelStop: string | null = null;
-    const linkOps = parent.operations.filter(isLevelLink);
-    // ⛔ A link that LANDED is a change to the model even when a later level is refused (Canonical #2004 B1).
     const linksAdded: string[] = [];
     const labelOf = (id: string): string => approvedRead.nodes.find((n) => n.id === id)?.label ?? id;
-    for (let i = 0; i < linkOps.length; i += 1) {
-      const [fromId, toId] = linkOps[i]!.path.split('::');
-      const r = await dispatch('/orchestrate/v2/turn', {
-        kind: 'system_event',
-        turn_id: authorisationTurnId(`${parent.proposal_id}#link${i}`),
+    const pairWords = (p: { option_id: string; factor_id: string }): string => `${labelOf(p.option_id)} \u2192 ${labelOf(p.factor_id)}`;
+    if (levelInputs.length + linkOps.length > 0) {
+      const links = linkOps.map((o) => pairOf(o.path));
+      const levels = levelInputs.map((l) => ({ ...l, value: l.value as number }));
+      const res = await opts.commitOptionLevels!({
         scenario_id: ctx.scenario_id,
-        stage: 'frame',
-        event: { kind: 'structural_add_edge', from: fromId, to: toId, magnitude: 0.5, effect_direction: 'positive', base_graph_hash: carried },
+        base_graph_hash: carried,
+        turn_id: authorisationTurnId(`${parent.proposal_id}#levels`),
+        links,
+        levels,
       });
-      const next = r.json.graph_hash;
-      if (r.status !== 200 || typeof next !== 'string' || next.length === 0) {
-        levelStop = 'a link one of the levels needs could not be added, so no level was written';
-        break;
+      if (res.status === 'unconfirmed') {
+        // ⛔ The commit was attempted and could not be read back: neither saved nor refused (#1995's `not_confirmed`).
+        return {
+          ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id,
+          refusal: 'not_confirmed', receipts,
+          detail: 'The links and option levels were sent as one change, but Olumi could not read the model back to confirm them. Say exactly that; never say they were saved or not saved.',
+        };
+      } else if (res.status === 'stale') {
+        levelStop = 'the model changed after this was approved, so no link or option level was written';
+      } else if (res.status === 'refused') {
+        levelStop = `${res.pair !== undefined ? `the level for ${pairWords(res.pair)} was refused` : 'the option levels were refused'}, so no link or option level was written`;
+      } else {
+        if (res.receipt !== null) receipts.push({ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' });
+        carried = res.graph_hash;
+        // ⛔ LANDED = WHAT THE MODEL HOLDS (#1995): every approved link and level, read back — never the revision alone.
+        const check = await readGraph(ctx.scenario_id);
+        const holds = check !== null
+          && levels.every((l) => heldLevelOf(check, l.option_id, l.factor_id) === l.value)
+          && links.every((k) => check.edges.some((e) => e.from === k.option_id && e.to === k.factor_id));
+        if (!holds) {
+          return {
+            ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id,
+            refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
+            detail: 'The links and option levels were sent as one change, but reading the model back did not show all of them. Say exactly that; never say they were saved or not saved.',
+          };
+        }
+        levelsRecorded = levels.length;
+        linksAdded.push(...links.map(pairWords));
       }
-      const rc = receiptSummaryOf(r.json);
-      if (rc.summary !== null) receipts.push(rc.summary);
-      carried = next;
-      linksAdded.push(`${labelOf(fromId!)} \u2192 ${labelOf(toId!)}`);
-    }
-
-    // (3) Levels, each CAS-gated on the revision our OWN previous write produced.
-    for (let i = 0; levelStop === null && i < levelOps.length; i += 1) {
-      const o = levelOps[i];
-      const [optionId, factorId] = o.path.split('::');
-      const v = ((o.value ?? {}) as { normalised?: number }).normalised;
-      if (typeof v !== 'number') { levelStop = `no level was stored on the proposal for ${o.path}`; break; }
-      const r = await writeLevelAs(
-        levelOpAuthor(o, parent),
-        { scenarioId: ctx.scenario_id, proposalId: parent.proposal_id, optionId, factorId, modelValue: v },
-        () => dispatch('/orchestrate/v2/turn', {
-          kind: 'system_event',
-          turn_id: authorisationTurnId(`${parent.proposal_id}#level${i}`),
-          scenario_id: ctx.scenario_id,
-          stage: 'frame',
-          event: { kind: 'option_intervention_edit', option_id: optionId, factor_id: factorId, value: v, base_graph_hash: carried },
-        }),
-      );
-      if (r.status !== 200) { levelStop = `the level for ${o.path} was refused (http ${r.status})`; break; }
-      const rc = receiptSummaryOf(r.json);
-      if (rc.summary !== null) receipts.push(rc.summary);
-      const next = r.json.graph_hash;
-      if (typeof next === 'string' && next.length > 0) {
-        carried = next;
-        levelsRecorded += 1;
-        continue;
-      }
-      // A 200 with no revision committed nothing. It is either a verified no-op
-      // (the model already holds exactly this level) or a refusal. A read tells
-      // them apart — it VERIFIES, it never adopts: a revision other than the
-      // carried one means someone else changed the model, and we stop.
-      const check = await readGraph(ctx.scenario_id);
-      const held = check?.nodes.find((n) => n.id === optionId)?.interventions?.[factorId] as { value?: unknown } | number | undefined;
-      const heldValue = typeof held === 'number' ? held : (held as { value?: unknown } | undefined)?.value;
-      /**
-       * ⛔ HELD EXACTLY IS RECORDED; THE REVISION ONLY DECIDES WHETHER THE CHAIN GOES ON (round-2 review of
-       * fix/agent-never-shows-instructions-or-codes, blocker 2's class). This checked the revision FIRST, so when another
-       * writer had moved the model a level the model holds exactly as approved was counted as not recorded, and the
-       * user read that it was not saved. The rule is the link writer's: the read-back holding exactly the approved level
-       * is landed. A moved model still gives no revision to carry, so no FURTHER level is written on a guess.
-       */
-      if (check === null) { levelStop = 'the model changed while the option levels were being recorded'; break; }
-      const moved = check.graph_hash !== carried;
-      if (heldValue !== v) { levelStop = moved ? 'the model changed while the option levels were being recorded' : `the level for ${o.path} was not recorded`; break; }
-      levelsRecorded += 1;
-      if (moved && i < levelOps.length - 1) { levelStop = 'the model changed while the option levels were being recorded'; break; }
     }
 
     const all = levelStop === null && levelsRecorded === levelOps.length;
@@ -2535,6 +2516,23 @@ export function createAgentCapabilities(
         const applied: { option: string; factor: string; requested: number; recorded: number | null }[] = [];
         const failures: { path: string; detail: string }[] = [];
         const receipts: ReceiptSummary[] = [];
+        // ⛔ EVERY LEVEL IS ONE COMMIT OR NONE (Canonical #70 5847348206), so what would stop it is checked BEFORE any write.
+        const levelInputs = ops.map((o) => {
+          const [option_id, factor_id] = o.path.split('::');
+          return {
+            path: o.path, option_id: option_id ?? '', factor_id: factor_id ?? '',
+            value: ((o.value ?? {}) as { normalised?: unknown }).normalised,
+            author: levelOpAuthor(o, decision.proposal) === 'user_stated' ? 'user_specified' as const : 'model_proposed' as const,
+          };
+        });
+        if (opts.commitOptionLevels === undefined || levelInputs.some((l) => typeof l.value !== 'number')) {
+          return {
+            ok: false, mutated: false, applied: false, proposal_id: decision.proposal.proposal_id, refusal: 'not_applied',
+            detail: opts.commitOptionLevels === undefined
+              ? 'The option levels could not be written as one change, so nothing was written.'
+              : 'A level was missing from the stored proposal, so nothing was written.',
+          };
+        }
         /**
          * ⭐ ATTACH ANY DERIVED FRAME FIRST, in one write, before the levels.
          * The factor must carry its range before a level is recorded against
@@ -2692,62 +2690,41 @@ export function createAgentCapabilities(
         const ownLevel = new Map<string, number>();
         /** Levels whose COMMITTED value is known exactly (the write's own `draft_graph`), not just the value sent. */
         const ownLevelExact = new Set<string>();
-        for (let i = 0; i < ops.length; i += 1) {
-          const o = ops[i];
-          const [optionId, factorId] = o.path.split('::');
-          const v = ((o.value ?? {}) as { normalised?: number }).normalised;
-          if (typeof v !== 'number') { failures.push({ path: o.path, detail: 'no value stored on the proposal' }); continue; }
-          const r = await writeLevelAs(
-            levelOpAuthor(o, decision.proposal),
-            { scenarioId: ctx.scenario_id, proposalId: decision.proposal.proposal_id, optionId, factorId, modelValue: v },
-            () => dispatch('/orchestrate/v2/turn', {
-              kind: 'system_event',
-              turn_id: authorisationTurnId(`${decision.proposal.proposal_id}#${i}`),
-              scenario_id: ctx.scenario_id,
-              stage: 'frame',
-              event: { kind: 'option_intervention_edit', option_id: optionId, factor_id: factorId, value: v, base_graph_hash: baseHash },
-            }),
-          );
-          const rc = receiptSummaryOf(r.json);
-          if (rc.unreadable) failures.push({ path: o.path, detail: 'a receipt arrived but could not be read' });
-          if (r.status !== 200) {
-            failures.push({ path: o.path, detail: `http ${r.status}` });
-            // ⛔⛔ DO NOT ADVANCE THE BASE AFTER A REFUSED EDIT.
-            //
-            // This used to re-read the graph and reassign `baseHash`
-            // UNCONDITIONALLY, which made the claim at the head of this block —
-            // "a moved graph refuses the WHOLE authorisation, not half of it" —
-            // false for every multi-op proposal. A stale base survived exactly
-            // ONE iteration: op 0 was refused at the row, then `baseHash` became
-            // the CONCURRENT writer's hash and ops 1..N passed the
-            // `base_graph_hash` gate, landing on a model the user never approved
-            // while the result still reported the approval as applied.
-            //
-            // A refusal means the graph moved because someone ELSE wrote. Keeping
-            // the approved base means every remaining op is refused too, which is
-            // the whole-or-nothing property this authorisation is supposed to
-            // have. Advancing after a SUCCESS is different and still correct: the
-            // graph moved because WE moved it, within this same authorisation.
-            continue;
+        /**
+         * ⭐ EVERY LEVEL OF THE APPROVAL AS ONE COMMIT (Canonical #70 5847348206): the product's N-ary level writer, CAS'd
+         * on the approved revision (or the one our range write produced) — any pair refused means none committed. Its one
+         * committed revision is OUR revision for every level; the read-back below still decides what the model holds.
+         */
+        const res = await opts.commitOptionLevels({
+          scenario_id: ctx.scenario_id,
+          base_graph_hash: baseHash,
+          turn_id: authorisationTurnId(`${decision.proposal.proposal_id}#levels`),
+          links: [],
+          levels: levelInputs.map((l) => ({ option_id: l.option_id, factor_id: l.factor_id, value: l.value as number, author: l.author })),
+        });
+        if (res.status === 'unconfirmed') {
+          return {
+            ok: false, mutated: true, applied: false, proposal_id: decision.proposal.proposal_id, refusal: 'not_confirmed',
+            detail: 'The option levels were sent as one change, but Olumi could not read the model back to confirm them. Say exactly that; never say they were saved or not saved.',
+          };
+        }
+        if (res.status === 'committed') {
+          baseHash = res.graph_hash;
+          for (const l of levelInputs) {
+            ownLevelWrite.add(l.path);
+            // The level the commit stored, when the writer reports it — else what was sent, and never called exact.
+            // Each level exactly as the verified read-back of the commit holds it (#2007 `committed_levels`).
+            const stored = res.committed_levels.find((c) => c.option_id === l.option_id && c.factor_id === l.factor_id)?.value;
+            ownLevel.set(l.path, stored ?? (l.value as number));
+            if (stored !== undefined) ownLevelExact.add(l.path);
           }
-          // ⭐ ADVANCE ONLY TO THE REVISION *OUR* WRITE REPORTS COMMITTING. A re-read here
-          // adopted whatever the model held by then — including another writer's edit
-          // landing just after ours — and the next op then passed CAS on a model the user
-          // never approved (the #1712 shape `applyCompound` already refuses). The served
-          // committed response carries its own persisted `graph_hash`; a 200 without one
-          // is the writer's verified no-op, which moved nothing, so the base stays put.
-          const committedHash = typeof r.json.graph_hash === 'string' && r.json.graph_hash.length > 0 ? r.json.graph_hash : null;
-          if (committedHash === null) {
-            failures.push({ path: o.path, detail: 'not recorded by this approval: the write reported no committed revision' });
-            continue;
-          }
-          baseHash = committedHash;
-          ownLevelWrite.add(o.path);
-          const committedLevel = committedLevelOf(r.json, optionId!, factorId!);
-          ownLevel.set(o.path, committedLevel ?? v);
-          if (committedLevel !== undefined) ownLevelExact.add(o.path);
-          // A receipt is reported only beside its own committed write.
-          if (rc.summary !== null) receipts.push(rc.summary);
+          if (res.receipt !== null) receipts.push({ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' });
+        } else {
+          const labelIn = (id: string): string => before.nodes.find((n) => n.id === id)?.label ?? id;
+          const why = res.status === 'stale'
+            ? 'the model changed after this was approved, so none of the levels was written'
+            : `${res.pair !== undefined ? `the level for ${labelIn(res.pair.option_id)} on ${labelIn(res.pair.factor_id)} was refused` : 'the levels were refused'}, so none of them was written`;
+          for (const l of levelInputs) failures.push({ path: l.path, detail: why });
         }
 
         const afterSet = await readGraph(ctx.scenario_id);

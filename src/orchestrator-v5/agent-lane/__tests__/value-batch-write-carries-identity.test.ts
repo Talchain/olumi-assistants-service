@@ -11,7 +11,8 @@
  * the body sends one.
  */
 import { describe, it, expect } from 'vitest';
-import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { createAgentCapabilitiesWithLevelsPort as createAgentCapabilities } from './fixtures/levels-port.js';
 import { ProposalStore } from '../proposal.js';
 
 const SCENARIO = '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b';
