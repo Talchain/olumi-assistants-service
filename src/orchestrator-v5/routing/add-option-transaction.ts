@@ -276,15 +276,22 @@ function deriveOptionId(label: string, graph: AddOptionGraphView): string {
 /**
  * A canonical structural edge (topology, not a causal belief): the shared
  * `STRUCTURAL_EDGE_DEFAULTS` (strength 1.0 / exists 1.0 / positive) plus a
- * truthful `user_specified` provenance. Full canonical value because the
- * confirm-side apply does not run `enforceStructuralEdgeDefaults`.
+ * truthful provenance — `user_specified` unless the link carries an Olumi
+ * level (`cee_hypothesis`, DL #70 5845538501). Never `defaulted`: that flag
+ * means a causal strength this system chose, and this edge has none. Full
+ * canonical value because the confirm-side apply does not run
+ * `enforceStructuralEdgeDefaults`.
  */
-export function structuralEdgeValue(from: string, to: string): Record<string, unknown> {
+export function structuralEdgeValue(
+  from: string,
+  to: string,
+  source: 'user_specified' | 'cee_hypothesis' = 'user_specified',
+): Record<string, unknown> {
   return {
     from,
     to,
     ...STRUCTURAL_EDGE_DEFAULTS,
-    provenance: { source: 'user_specified' as const },
+    provenance: { source },
   };
 }
 
@@ -381,7 +388,8 @@ export function buildAddOptionTransaction(
       (iv): PatchOperation => ({
         op: 'add_edge',
         path: `${optionId}::${iv.factor_id}`,
-        value: structuralEdgeValue(optionId, iv.factor_id),
+        // The link says whose level it carries: an Olumi level's link is Olumi's.
+        value: structuralEdgeValue(optionId, iv.factor_id, iv.source ?? 'user_specified'),
       }),
     ),
   ];
