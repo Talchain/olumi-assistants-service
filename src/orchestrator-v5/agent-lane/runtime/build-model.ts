@@ -626,7 +626,8 @@ export function findCoverageGaps(
  * re-admits the draft "as if the drafter had never drafted it", so readiness never asks a value question about it:
  * its option × factor pairs, and a baseline only it acts on, are no gap. Re-read off the drafter's own candidate
  * without it — for the first draft, and for the retry only where the first draft did not register it (a retry that
- * makes a registered option indistinct keeps its gaps: COMBINED row 2g). Counted, the served dead start's own "Test
+ * makes a registered option indistinct keeps its gaps in the count: COMBINED row 2g; asked only about gaps, it is
+ * refused outright at adoption, `keepsEveryRegisteredOption`: rows 2h/2i). Counted, the served dead start's own "Test
  * £59 with AI release" (level-less: the very shape #1967 withholds) spent the one retry, and was listed to it as
  * issues, to level an option the user never sees (`construction-no-identical-options.test.ts`: "no retry is spent", and COMBINED row 2).
  */
@@ -995,13 +996,19 @@ export async function buildModelFromBrief(
         const retryPrepared = prepareProvisionalCandidate(retryRaw);
         const retryCandidate = retryPrepared.candidate;
         const retryAdmitted = admitCandidateModel(retryCandidate, {});
-        // ⛔ Leave out only what the FIRST draft never registered: withholding a registered option never closes its gaps (adversarial verify of 843c0960).
+        // ⛔ Leave out only what the FIRST draft never registered: withholding a registered option never closes its gaps in the count (adversarial verify of 843c0960).
         const firstGone = new Set((admitted.options_withheld ?? []).map((w) => canonicalLabel(w.option)));
         const firstRegistered = new Set(firstCandidate.options.map((o) => canonicalLabel(o.label)).filter((l) => !firstGone.has(l)));
         const retryPreparation = gapsOnRegisteredOptions(retryPrepared, retryRaw, {
           options_withheld: (retryAdmitted.options_withheld ?? []).filter((w) => !firstRegistered.has(canonicalLabel(w.option))),
         });
         const retrySize = assessConstructionSize(retryAdmitted);
+        // ⛔ COVERAGE ALONE NEVER COSTS A REGISTERED OPTION (adversarial verify of 58a22db8, P2-A/P2-E: COMBINED rows 2h/2i).
+        // The count above stays honest, the registered model need not: a retry that levels £64 AND makes Olumi's
+        // registered £54 indistinct still covers 1 < 2 (or levels £54's own gap while re-pricing it like the user's £59,
+        // 0 < 1), and admission withholds £54. So a retry asked only about gaps must register every option the first did.
+        const kept = new Set(retryAdmitted.nodes.map(nodeIdentity));
+        const keepsEveryRegisteredOption = admitted.nodes.filter((n) => n.kind === 'option').every((n) => kept.has(nodeIdentity(n)));
         // ⚠ ADOPT ONLY WHAT IS ACTUALLY SMALLER, on BOTH dimensions. A retry that
         // trades 4 nodes for 11 links is not a compaction, and taking it on faith
         // would let a second model call make the problem worse.
@@ -1019,15 +1026,15 @@ export async function buildModelFromBrief(
           keepsUserMaterial && keepsEveryUserNumber(firstCandidate, candidate, retryRaw) && retryPreparation.mechanism_issues.length === 0 &&
           // ⛔ Coverage is repaired where a level is defensible, so a retry may leave a
           // gap — but it must never cover LESS, and when coverage is the only reason
-          // for the retry it must cover strictly MORE (c22). A loop asked within the limit is a reason
-          // of its own (#1956), adopted on its other merits.
+          // for the retry it must cover strictly MORE (c22) and register every option the first draft did. A
+          // loop asked within the limit is a reason of its own (#1956), adopted on its other merits.
           gapCount(retryPreparation) <= gapCount(preparation) &&
-          (needsSizeRetry || preparation.mechanism_issues.length > 0 || loopsAsked.length > 0 || gapCount(retryPreparation) < gapCount(preparation)) &&
+          (needsSizeRetry || preparation.mechanism_issues.length > 0 || loopsAsked.length > 0
+            || (gapCount(retryPreparation) < gapCount(preparation) && keepsEveryRegisteredOption)) &&
           (asked.length === 0 || retainsRiskHypotheses(candidate, retryCandidate, needsSizeRetry)) &&
           // A compaction may shed what the model added, never what a kept option does; a repair may not shed an action.
           (needsSizeRetry ? compactionKeepsWhatOptionsDo(candidate, retryCandidate) : keepsEveryAction(candidate, retryCandidate))
         ) {
-          const kept = new Set(retryAdmitted.nodes.map(nodeIdentity));
           carriedWithheld = carryWithheldOptions(admitted, retryAdmitted);
           leftOut = admitted.nodes
             .filter((n) => !kept.has(nodeIdentity(n)))
