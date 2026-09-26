@@ -298,15 +298,20 @@ describe('⛔ a band is recorded as the user\'s only when the user named it (AI 
     expect(bandTheUserWrote('strong', null)).toBe(false);
   });
 
-  it('RED (#2003 follow-up): the canvas pill says "Slight" for the lowest band, so "slight" names it', () => {
-    // Named: the word on the canvas pill, and its adverb.
+  it('RED (#2003 follow-up): the canvas pill says "Slight" for the lowest band, so "slight" in the band position names it', () => {
+    // Named: the pill's word, ending its clause or before a link noun.
     expect(bandTheUserWrote('weak', 'Make that link slight.')).toBe(true);
     expect(bandTheUserWrote('weak', 'It only has a slight effect on churn.')).toBe(true);
-    expect(bandTheUserWrote('weak', 'Price slightly affects churn.')).toBe(true);
-    // Not named: an intensifier on a comparison, a comparative, a denial, a question, and another band.
-    expect(bandTheUserWrote('weak', 'It is slightly stronger than you think.')).toBe(false);
-    expect(bandTheUserWrote('weak', 'Churn moves slightly more than that.')).toBe(false);
-    expect(bandTheUserWrote('weak', 'The slighter effect is on churn.')).toBe(false);
+    expect(bandTheUserWrote('weak', 'It is slight.')).toBe(true);
+    expect(bandTheUserWrote('weak', 'The link is slight, not strong.')).toBe(true);
+    // Not named (R&C #2008 B1): a degree adverb on a CHANGE, a relative comparison, a slight change to something else.
+    for (const text of [
+      'Reduce it slightly.', 'Lower it slightly please.', 'That link is slightly too strong.',
+      'It is slightly worse than you think.', 'The effect is slightly above moderate.', 'It is slightly different from what you modelled.',
+      'Make a slight cut to that link.', 'A slight change would do.', 'It is slightly stronger than you think.',
+      'Churn moves slightly more than that.', 'The slighter effect is on churn.', 'Price slightly affects churn.',
+    ]) expect(bandTheUserWrote('weak', text), text).toBe(false);
+    // Denial, question and another band: the function's own rules, unchanged.
     expect(bandTheUserWrote('weak', 'It is not slight.')).toBe(false);
     expect(bandTheUserWrote('weak', 'Is it slight?')).toBe(false);
     expect(bandTheUserWrote('moderate', 'Make that link slight.')).toBe(false);

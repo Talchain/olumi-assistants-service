@@ -75,9 +75,11 @@ const BAND_WORDS: Record<string, RegExp> = {
   'very strong': /\bvery\s+strong(?:ly)?\b/gi,
   strong: /\bstrong(?:ly)?\b/gi,
   moderate: /\bmoderate(?:ly)?\b/gi,
-  // "slight" is the canvas pill's own word for this band (#2003 follow-up). "slightly" counts only when it does
-  // not intensify a comparison: "slightly stronger" / "slightly more" never name the lowest band.
-  weak: /\b(?:weak(?:ly)?|barely|slight(?:ly(?!\s+(?:more|less|\w+er)\b))?)\b/gi,
+  // "slight" is the canvas pill's own word for this band (#2003 follow-up), counted ONLY in the band position:
+  // ending its clause, or before a link noun. "slightly" is dropped: degree adverbs mostly modify a relative CHANGE
+  // ("lower it slightly", "slightly too strong"), and a closed list cannot bound that (R&C #2008 B1). A miss only
+  // makes the Agent ask which band; a false hit would stamp a band the user never named as theirs.
+  weak: /\b(?:weak(?:ly)?|barely|slight(?=\s*(?:$|[.,;:!?)])|\s+(?:effect|link|influence|impact|relationship|connection)\b))\b/gi,
 };
 const NEGATOR = new RegExp(
   "(?:^|[^\\w'\\u2019])(?:not|never|no|nor|neither|hardly|cannot|without|doubts?|doubtful|\\w+n['\\u2019]t"
