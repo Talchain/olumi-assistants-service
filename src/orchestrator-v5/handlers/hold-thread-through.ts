@@ -422,7 +422,7 @@ export function emitHoldLapseTelemetry(
     readonly requestId: string;
     readonly scenarioId: string;
     readonly turnId: string;
-    readonly site: 'edit_graph_dispatch' | 'draft_graph_dispatch' | 'system_event_dispatch';
+    readonly site: 'edit_graph_dispatch' | 'draft_graph_dispatch' | 'system_event_dispatch' | 'graph_registration';
   },
 ): void {
   for (const l of lapsed) {
