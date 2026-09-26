@@ -525,7 +525,9 @@ export interface SemanticQualitySignals {
    * `semanticQualitySufficient` refuses a leader while
    * `material_parameters_user_stated === 0`, and `SEMANTIC_REASON` already tells
    * the user the refusal can be lifted by setting "a value on a factor one of the
-   * options changes, or somewhere on the chain from there to your goal". That
+   * options changes, or on another factor on the chain from there to your goal"
+   * (reworded 26 Sep from "…or somewhere on the chain…": an outcome's or risk's
+   * level on that chain never reaches the ordering, so naming it over-promised). That
    * sentence describes a SET the consumer cannot compute: materiality is
    * reachability over the comparison's substrate ({@link comparisonSubstrate}),
    * and nothing downstream has it. This publishes it.
@@ -1111,7 +1113,7 @@ const SEMANTIC_REASON: Readonly<
   user_stated_not_material: {
     code: 'USER_STATED_PARAMETERS_NOT_MATERIAL',
     message:
-      'The values you have set sit outside what this comparison turns on, so every estimate behind it is still Olumi’s. Figures can be shown as provisional, but no option can be called the leader until you have set a value on a factor one of the options changes, or somewhere on the chain from there to your goal.',
+      'The values you have set sit outside what this comparison turns on, so every estimate behind it is still Olumi’s. Figures can be shown as provisional, but no option can be called the leader until you have set a value on a factor one of the options changes, or on another factor on the chain from there to your goal.',
   },
   material_user_stated: {
     code: 'CONFIDENCE_PARAMETERS_PARTLY_USER_STATED',

@@ -709,6 +709,15 @@ describe('the floor is MATERIALITY, not "somebody typed one number somewhere"', 
     expect(semanticQualitySufficient(signals)).toBe(false);
     expect(resolveAnalysisAdmission(graph).permitted_analysis_mode).toBe('quantified_provisional');
     expect(semanticVerdictCause(signals)).toBe('user_stated_not_material');
+
+    // And the remedy it names must be one that CAN lift it. The old sentence said
+    // "…or somewhere on the chain from there to your goal" — which, read by this very
+    // user, points at `out_csat`, the value that just failed to lift it.
+    const message = resolveAnalysisAdmission(graph).reasons.find(
+      (r) => r.field === 'semantic_quality_sufficient',
+    )?.message;
+    expect(message).toContain('or on another factor on the chain from there to your goal');
+    expect(message).not.toContain('somewhere on the chain');
   });
 
   it('the same for a RISK: a user figure on a risk never licenses the leader', () => {
@@ -1007,8 +1016,8 @@ describe('semantic_signals is enough to hold a stricter opinion without a second
  * ⭐ WHICH PARAMETER WOULD LIFT THE FLOOR — the ids, not just the count.
  *
  * `SEMANTIC_REASON` already tells the user the refusal lifts once they "set a
- * value on a factor one of the options changes, or somewhere on the chain from
- * there to your goal". That sentence describes a SET, and until this field
+ * value on a factor one of the options changes, or on another factor on the chain
+ * from there to your goal". That sentence describes a SET, and until this field
  * nothing but this module could compute it: materiality is reachability over
  * `comparisonSubstrate`, and only the COUNTS crossed the wire. A consumer that
  * mirrored the reachability would be a second authority on one question (trap
