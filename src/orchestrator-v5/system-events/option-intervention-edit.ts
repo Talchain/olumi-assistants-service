@@ -71,6 +71,7 @@ import { APPROVED_LEVEL_ADOPTION_SOURCE, approvedLevelSourceFor, runWithApproved
 import { structuralEdgeValue } from '../routing/add-option-transaction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { applyFactorValueEdit, type FactorValueEditResult } from './factor-value-edit.js';
+import { frameDefaultedLinks } from '../../cee/magnitude/frame-defaulted-links.js';
 
 /**
  * Internal preparation for an explicit option→factor edit. This is NOT a wire
@@ -346,8 +347,9 @@ type ValueHandlerFact = Extract<FactorValueEditResult, { kind: 'mutated' }>['han
 
 /**
  * ⛔ ONLY THE DECLARED FACTORS' VALUES MAY CHANGE: on each declared factor, the members the canonical value writer owns
- * (`observed_state`, and the node's own `display_value`, `provenance` and `scale_frame` it restates with the value) —
- * and nothing else anywhere in the graph: no other member, node, edge, option or top-level field.
+ * (`observed_state`, and the node's own `display_value`, `provenance` and `scale_frame` it restates with the value), and
+ * the magnitude contract's own re-sizing of Olumi's links on it — nothing else anywhere in the graph: no other member,
+ * node, edge, size, option or top-level field.
  */
 const VALUE_WRITER_OWNED_NODE_MEMBERS = ['observed_state', 'display_value', 'provenance', 'scale_frame'] as const;
 export function factorValuesPostimageIsScoped(before: unknown, after: unknown, factorIds: readonly string[]): boolean {
@@ -365,6 +367,23 @@ export function factorValuesPostimageIsScoped(before: unknown, after: unknown, f
       else delete node[member];
     }
   }
+  /**
+   * ⭐ OLUMI'S OWN LINKS FOLLOW THE LEVEL (MG #70 5849417275; #2033). The value writer re-sizes the Olumi-sized links on
+   * a factor whose level moves. Each link after must be the link before (the writer left it) or EXACTLY the magnitude
+   * contract's own re-derivation (`frameDefaultedLinks`) over the declared factors, on the levels the graph now holds.
+   * That contract touches only Olumi's sizes, so a user's link, any other size and any link off these factors refuse.
+   */
+  if (restored.edges.length !== before.edges.length) return false;
+  let rederived: unknown = { ...structuredClone(after), edges: structuredClone(before.edges) };
+  for (const id of factorIds) rederived = frameDefaultedLinks(rederived, id).graph;
+  const resized = (rederived as EditableGraph).edges;
+  for (let i = 0; i < restored.edges.length; i += 1) {
+    const now = restored.edges[i]!;
+    const was = before.edges[i]!;
+    if (now.from !== was.from || now.to !== was.to) return false;
+    if (!isDeepStrictEqual(now, was) && !isDeepStrictEqual(now, resized[i])) return false;
+  }
+  restored.edges = structuredClone(before.edges);
   return isDeepStrictEqual(restored, before);
 }
 
