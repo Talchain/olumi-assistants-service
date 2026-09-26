@@ -625,9 +625,10 @@ export function findCoverageGaps(
  * Admission withholds an option Olumi added that another option covers (`options_withheld`, `admit-model.ts`) and
  * re-admits the draft "as if the drafter had never drafted it", so readiness never asks a value question about it:
  * its option × factor pairs, and a baseline only it acts on, are no gap. Re-read off the drafter's own candidate
- * without it — for the first draft and for the retry alike. Counted, the served dead start's own "Test £59 with AI
- * release" (level-less: the very shape #1967 withholds) spent the one retry, and was listed to it as issues, to level
- * an option the user never sees (`construction-no-identical-options.test.ts`: "no retry is spent", and COMBINED row 2).
+ * without it — for the first draft, and for the retry only where the first draft did not register it (a retry that
+ * makes a registered option indistinct keeps its gaps: COMBINED row 2g). Counted, the served dead start's own "Test
+ * £59 with AI release" (level-less: the very shape #1967 withholds) spent the one retry, and was listed to it as
+ * issues, to level an option the user never sees (`construction-no-identical-options.test.ts`: "no retry is spent", and COMBINED row 2).
  */
 function gapsOnRegisteredOptions<P extends ReturnType<typeof prepareProvisionalCandidate>>(
   p: P,
@@ -994,7 +995,12 @@ export async function buildModelFromBrief(
         const retryPrepared = prepareProvisionalCandidate(retryRaw);
         const retryCandidate = retryPrepared.candidate;
         const retryAdmitted = admitCandidateModel(retryCandidate, {});
-        const retryPreparation = gapsOnRegisteredOptions(retryPrepared, retryRaw, retryAdmitted);
+        // ⛔ Leave out only what the FIRST draft never registered: withholding a registered option never closes its gaps (adversarial verify of 843c0960).
+        const firstGone = new Set((admitted.options_withheld ?? []).map((w) => canonicalLabel(w.option)));
+        const firstRegistered = new Set(firstCandidate.options.map((o) => canonicalLabel(o.label)).filter((l) => !firstGone.has(l)));
+        const retryPreparation = gapsOnRegisteredOptions(retryPrepared, retryRaw, {
+          options_withheld: (retryAdmitted.options_withheld ?? []).filter((w) => !firstRegistered.has(canonicalLabel(w.option))),
+        });
         const retrySize = assessConstructionSize(retryAdmitted);
         // ⚠ ADOPT ONLY WHAT IS ACTUALLY SMALLER, on BOTH dimensions. A retry that
         // trades 4 nodes for 11 links is not a compaction, and taking it on faith

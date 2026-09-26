@@ -691,6 +691,91 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
     expect([out.ok, out.refusal, out.retried]).toEqual([false, 'model_too_large', true]);
     expect(graph).toBeNull();
   });
+
+  /**
+   * ⛔ THE RETRY SIDE NEVER CLOSES A GAP BY WITHHOLDING AN OPTION THE FIRST DRAFT REGISTERED (adversarial verify of
+   * 843c0960, blocking). Within the limit, Olumi's "£54 with AI release" (its price level set, AI availability open) is
+   * registered and distinct, and its one gap is the only reason for the retry. A retry that makes £54 indistinct, so the
+   * retry's own admission withholds it, has not covered more: it is refused and £54 stays registered at its level. The
+   * duplicate the FIRST draft already withheld is still left out of the retry's gaps — the first draft never registered it.
+   */
+  const GAP_54 = '£54 with AI release -> AI feature availability: give the level this option sets in interventions (the user\'s number if stated, '
+    + 'otherwise an ai_proposed estimate in the factor\'s unit and plausible_max frame); keep it only in changes if no defensible level exists';
+  const PRICE_54 = { factor_label: 'Pro plan price', value: 54, value_kind: 'absolute', unit: '£ per month', provenance: 'ai_proposed' };
+  type Opt = CandidateModel['options'][number];
+  /** Within the limit: `padded(0, withTest)` (the user's option gap-free) plus Olumi's £54, AI availability open unless `o54` sets it. */
+  const with54 = (withTest: boolean, o54: Partial<Opt> = {}) => {
+    const base = padded(0, withTest);
+    const opt = { label: '£54 with AI release', provenance: 'ai_proposed', changes: ['AI feature availability'], is_status_quo: null, interventions: [PRICE_54], ...o54 } as unknown as Opt;
+    return { ...base, options: [...base.options, opt] } as typeof base;
+  };
+  const LEVELLED_54 = { changes: [], interventions: [PRICE_54, { factor_label: 'AI feature availability', value: 0.5, value_kind: 'absolute', unit: '', provenance: 'ai_proposed' }] } as unknown as Partial<Opt>;
+  const ONLY_TEST_WITHHELD = [{ option: 'Test £59 with AI release', like: '£59 with AI release', reason: 'option_indistinct' }];
+
+  it('PRECONDITION (row 2e): within the limit, "£54 with AI release" is registered and distinct, and the one gap asked is £54\'s', async () => {
+    for (const withTest of [true, false]) {
+      const prep = prepareProvisionalCandidate(with54(withTest));
+      const admitted = admitCandidateModel(prep.candidate, {});
+      expect(assessConstructionSize(admitted).within).toBe(true);
+      expect((admitted.options_withheld ?? []).map((w) => w.option)).toEqual(withTest ? ['Test £59 with AI release'] : []);
+      expect(prep.mechanism_issues).toEqual([]);
+    }
+    const { reqs } = await construct(with54(true), with54(true));
+    expect(reqs).toHaveLength(2);
+    expect(issues(reqs[1]!.input)).toEqual([GAP_54]);
+  });
+
+  it('CONTROL (row 2e, no progress): a retry that echoes the first draft is refused — the first draft registers, £54 at its price level', async () => {
+    const { out, graph } = await construct(with54(true), with54(true));
+    expect([out.ok, out.size_retried]).toEqual([true, false]);
+    expect(optionIds(graph!)).toEqual(['keep_current_pricing', '59_with_ai_release', '54_with_ai_release']);
+    expect(levelsById(graph!)['54_with_ai_release']).toEqual({ pro_plan_price: 0.27 });
+    expect(withheldOptions(out)).toEqual(ONLY_TEST_WITHHELD);
+  });
+
+  it('CONTROL (row 2e, compliant): a retry that levels £54 -> AI feature availability is adopted — no duplicate in either draft', async () => {
+    const { out, graph, reqs } = await construct(with54(false), with54(false, LEVELLED_54));
+    expect(reqs).toHaveLength(2);
+    expect(issues(reqs[1]!.input)).toEqual([GAP_54]);
+    expect([out.ok, out.size_retried]).toEqual([true, false]);
+    expect(optionIds(graph!)).toEqual(['keep_current_pricing', '59_with_ai_release', '54_with_ai_release']);
+    expect(levelsById(graph!)['54_with_ai_release']).toEqual({ pro_plan_price: 0.27, ai_feature_availability: 0.5 });
+    expect(withheldOptions(out) ?? []).toEqual([]);
+  });
+
+  it('CONTROL (row 2f, the other side): the FIRST draft already withheld the duplicate — the compliant retry that copies it as drafted is adopted', async () => {
+    // The duplicate is withheld by both admissions. The first draft never registered it, so the retry side still leaves
+    // its pairs out: 0 < 1. Counted, 2 < 1 fails and £54 never gets the level the retry gave it.
+    const { out, graph, reqs } = await construct(with54(true), with54(true, LEVELLED_54));
+    expect(reqs).toHaveLength(2);
+    expect(issues(reqs[1]!.input)).toEqual([GAP_54]);
+    expect([out.ok, out.size_retried]).toEqual([true, false]);
+    expect(optionIds(graph!)).toEqual(['keep_current_pricing', '59_with_ai_release', '54_with_ai_release']);
+    expect(levelsById(graph!)['54_with_ai_release']).toEqual({ pro_plan_price: 0.27, ai_feature_availability: 0.5 });
+    expect(graph!.nodes.some((n) => n.id === TEST_ID)).toBe(false);
+    expect(withheldOptions(out)).toEqual(ONLY_TEST_WITHHELD);
+    expect(said(out)).toBe(1);
+  });
+
+  it.each([
+    ['A: re-prices £54 at the user\'s £59, AI availability still open', { interventions: [{ ...PRICE_54, value: 59 }] }],
+    ['B: moves £54\'s price level into changes — it levels nothing', { changes: ['AI feature availability', 'Pro plan price'], interventions: [] }],
+    ['C: levels AI availability like the user\'s option and drops its own price level', { changes: ['Pro plan price'], interventions: [{ factor_label: 'AI feature availability', value: 1, value_kind: 'absolute', unit: '', provenance: 'ai_proposed' }] }],
+  ])('RED (row 2g, probe %s): making the REGISTERED £54 withheld closes no gap — refused; £54 stays registered at its level', async (_probe, o54) => {
+    const retry = with54(true, o54 as unknown as Partial<Opt>);
+    // Vacuity: the retry's own admission withholds £54, so excluding it on the retry side would read 0 gaps (0 < 1).
+    expect((admitCandidateModel(prepareProvisionalCandidate(retry).candidate, {}).options_withheld ?? []).map((w) => w.option))
+      .toEqual(['Test £59 with AI release', '£54 with AI release']);
+    const { out, graph, reqs } = await construct(with54(true), retry);
+    expect(reqs).toHaveLength(2);
+    expect(issues(reqs[1]!.input)).toEqual([GAP_54]);
+    expect([out.ok, out.size_retried]).toEqual([true, false]);
+    expect(optionIds(graph!)).toEqual(['keep_current_pricing', '59_with_ai_release', '54_with_ai_release']);
+    expect(levelsById(graph!)['54_with_ai_release']).toEqual({ pro_plan_price: 0.27 });
+    expect(withheldOptions(out)).toEqual(ONLY_TEST_WITHHELD);
+    expect(questions(out).filter((q) => q.startsWith('I left out "£54 with AI release"'))).toEqual([]);
+    expect(said(out)).toBe(1);
+  });
 });
 
 describe('the construction contract names the shape (one sentence)', () => {
