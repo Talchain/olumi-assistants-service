@@ -1561,7 +1561,7 @@ export function createAgentCapabilities(
         provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: confirm
-          ? `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}, as your own estimate (strength kept at ${Math.abs(mean)})`
+          ? `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}, as your own estimate (strength kept at ${quotable(Math.abs(mean))} on Olumi's 0\u20131 scale)`
           : `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)} (${magnitude} on Olumi's 0\u20131 scale), as your own estimate${wanted !== current ? `, pushing ${wanted === 'positive' ? 'up' : 'down'}` : ''}`,
       });
       proposals.put(proposal);
@@ -1570,8 +1570,8 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        link: { from: from.label, to: to.label, was: { band: linkBandWord(currentBand), strength: Math.abs(mean), direction: current },
-          becomes: { band: linkBandWord(band), strength: magnitude, direction: wanted }, keeps_current_strength: confirm },
+        link: { from: from.label, to: to.label, was: { band: linkBandWord(currentBand), strength: quotable(Math.abs(mean)), direction: current },
+          becomes: { band: linkBandWord(band), strength: quotable(magnitude), direction: wanted }, keeps_current_strength: confirm },
         note: confirm
           ? 'Nothing has changed yet. The link already sits in that band, so its strength is kept and only recorded as the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree.'
           : `Nothing has changed yet. Tell the user it will be recorded as ${linkBandWord(band)}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree.`,
