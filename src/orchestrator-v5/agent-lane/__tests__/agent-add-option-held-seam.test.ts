@@ -110,12 +110,16 @@ type Body = { assistant_text: string; suggested_actions: Chip[]; _diagnostic_tra
  * Interventions are in the STORED object shape ({ value, raw_value, unit }): the analysis hash — the hold's pin —
  * projects `.value`, so a bare-number intervention would be invisible to it (measured).
  */
-const seedGraph = (factorCount = 1, decisions = 1) => {
+const seedGraph = (factorCount = 1, decisions = 1, priceFrame: 'cap' | 'scale_frame' | 'none' = 'cap') => {
   const e = (from: string, to: string, mean = 1) => ({ from, to, strength: { mean, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const });
   // Price is a lever the decision sets: `category: 'controllable'` (the readiness authority blocks an option that
   // leaves a controllable factor unset — and only then).
   const factors = Array.from({ length: factorCount }, (_, i) => ({ id: i === 0 ? 'fac_price' : `fac_${i}`, kind: 'factor', label: i === 0 ? 'Price' : `Factor ${i}`,
-    ...(i === 0 ? { category: 'controllable' } : {}), observed_state: { value: 0.245, raw_value: 49, unit: 'GBP', cap: 200 } }));
+    ...(i === 0 ? { category: 'controllable' } : {}),
+    // How Price carries its range: a declared cap (a baseline was stated), the declared `scale_frame` carrier (a
+    // model built with no baseline, `admit-model.ts`), or none at all.
+    ...(i !== 0 || priceFrame === 'cap' ? { observed_state: { value: 0.245, raw_value: 49, unit: 'GBP', cap: 200 } }
+      : priceFrame === 'scale_frame' ? { scale_frame: 200 } : { observed_state: { value: 0.5 } }) }));
   const decs = Array.from({ length: decisions }, (_, i) => ({ id: i === 0 ? 'dec_x' : `dec_${i}`, kind: 'decision', label: i === 0 ? 'Choose a price' : `Other decision ${i}` }));
   return {
     nodes: [
@@ -352,6 +356,40 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
     expect(t2._agent.tool_calls[0], JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ name: 'authorise_change', ok: false, mutated: true, refusal: 'not_verified' }));
     expect(t2.assistant_text, t2.assistant_text).not.toMatch(/\bAdded\b/);
+  }, 120_000);
+
+  it('[p1] RED (independent review 00:16Z): a factor whose range is its declared scale_frame — the user\'s £54 is stored on THAT range (0.27, figure kept), never as a bare 54', async () => {
+    graphOf.set(SCENARIO, seedGraph(1, 1, 'scale_frame'));
+    const approve = approveChipOf(await proposeOptionC(54))!;
+    await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    const iv = (newOption()?.interventions ?? {})['fac_price'] as { value?: number; raw_value?: number } | undefined;
+    expect(iv?.value, JSON.stringify(iv)).toBeCloseTo(0.27, 6);
+    expect(iv?.raw_value).toBe(54);
+  }, 120_000);
+
+  it('[p2] RED: a figure outside the factor\'s range (£250 on 0–£200) is refused in plain words — nothing is prepared, nothing is sent, no button', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const t1 = await proposeOptionC(250);
+    const c = t1._agent.tool_calls.find((x) => x.name === 'propose_new_option');
+    expect(c, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, refusal: 'level_out_of_range' }));
+    expect(inner.filter((b) => (b['chip'] as { intent?: string } | undefined)?.intent === 'add_option'), 'nothing sent').toEqual([]);
+    expect(approveChipOf(t1)).toBeUndefined();
+    expect(await heldOnLatestRow()).toEqual([]);
+  }, 120_000);
+
+  it('[p3] RED: a factor with no range at all — the user\'s £54 cannot be stored on one, so the level is left UNSET (never a bare 54) and the Agent is told why', async () => {
+    graphOf.set(SCENARIO, seedGraph(1, 1, 'none'));
+    let proposed = '';
+    script = [
+      () => fnCall('propose_new_option', { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }], rationale: 'The user asked for it.' }),
+      (body) => { proposed = JSON.stringify(body['input']); return say('I would add it; the price level needs a range first. Shall I add it?'); },
+    ];
+    const t1 = await turn({ message: 'Add an option: test £54 at release.' });
+    expect(proposed, proposed.slice(-1200)).toMatch(/levels_not_set/);
+    const approve = approveChipOf(t1)!;
+    await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(graphNow().edges.some((e) => e.from === 'dec_x' && e.to === newOption()!.id), 'still linked from the decision').toBe(true);
+    expect(JSON.stringify(newOption()!.interventions ?? {}), 'no number stored without a range').not.toMatch(/\d/);
   }, 120_000);
 
   it('two options asked for in one turn → the FIRST is held and offered (one button), the second is refused in plain words — never zero buttons', async () => {

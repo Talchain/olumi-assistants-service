@@ -3131,9 +3131,13 @@ export function createAgentCapabilities(
         };
       }
       /**
-       * ⭐ A LEVEL IS WRITTEN ONLY WHEN THE USER STATED IT — never invented to make the model runnable. It is
-       * given in the factor's own units and stored as the product stores it: against the factor's declared
-       * scale when it has one (value = figure ÷ scale, with the figure kept), as the figure otherwise.
+       * ⭐ A LEVEL IS WRITTEN ONLY WHEN THE USER STATED IT — never invented to make the model runnable — and
+       * ONLY ON THE RANGE THE LANE'S LEVEL WRITER USES (`levelFrameOf`: the declared cap, else the declared
+       * `scale_frame`; independent review of #1933, 00:16Z). A figure on that range is stored as figure ÷ range,
+       * with the figure kept. A figure outside it is refused with nothing sent (`proposeOptionInterventions`
+       * refuses it too). A figure above 1 on a factor with NO range is left unset and said so: the lane's
+       * writer derives a range and attaches it to the factor, which this one-change transaction cannot do, and
+       * a bare figure beside levels stored as fractions would put one factor on two scales.
        */
       const rawNodes = ((g.raw as { nodes?: unknown }).nodes as { id: string; kind?: string; label?: string; description?: string; observed_state?: { cap?: unknown; unit?: unknown } }[] | undefined) ?? [];
       const norm = (v: unknown): string => String(v ?? '').trim().toLowerCase();
@@ -3144,15 +3148,37 @@ export function createAgentCapabilities(
         const f = rawNodes.find((x) => x.kind === 'factor' && (norm(x.label) === norm(a.factor_label) || norm(x.description) === norm(a.factor_label)));
         if (f !== undefined) levelById.set(f.id, { value: v, ...(typeof a.level?.unit === 'string' && a.level.unit.trim() !== '' ? { unit: a.level.unit.trim() } : {}) });
       }
+      const outOfRange: { factor: string; value: number; range: number }[] = [];
+      const levelsNotSet: { factor: string; value: number; reason: string }[] = [];
       const interventions = plan.actsOn.map((f) => {
         const lvl = levelById.get(f.id);
         if (lvl === undefined) return { factor_id: f.id, value: null };
-        const os = rawNodes.find((x) => x.id === f.id)?.observed_state;
-        const cap = typeof os?.cap === 'number' && Number.isFinite(os.cap) && os.cap > 0 ? os.cap : undefined;
-        if (cap === undefined) return { factor_id: f.id, value: lvl.value };
-        const unit = lvl.unit ?? (typeof os?.unit === 'string' ? os.unit : undefined);
-        return { factor_id: f.id, value: lvl.value / cap, raw_value: lvl.value, ...(unit !== undefined ? { unit } : {}) };
+        const factor = g.nodes.find((x) => x.id === f.id);
+        const frame = levelFrameOf(factor);
+        if (frame !== null) {
+          const v = lvl.value / frame;
+          if (!(v >= 0 && v <= 1)) {
+            outOfRange.push({ factor: f.label, value: lvl.value, range: frame });
+            return { factor_id: f.id, value: null };
+          }
+          const os = (factor?.observed_state ?? {}) as { unit?: unknown };
+          const unit = lvl.unit ?? (typeof os.unit === 'string' && os.unit !== '' ? os.unit : undefined);
+          return { factor_id: f.id, value: v, raw_value: lvl.value, ...(unit !== undefined ? { unit } : {}) };
+        }
+        if (lvl.value >= 0 && lvl.value <= 1) return { factor_id: f.id, value: lvl.value };
+        levelsNotSet.push({ factor: f.label, value: lvl.value,
+          reason: `The model has no range for ${f.label} to read ${lvl.value} against, so this change leaves that level unset. `
+            + `Once the option is added, propose that level with propose_option_interventions, which records a range for ${f.label}.` });
+        return { factor_id: f.id, value: null };
       });
+      if (outOfRange.length > 0) {
+        const o = outOfRange[0]!;
+        return {
+          ok: false, mutated: false, refusal: 'level_out_of_range', out_of_range: outOfRange,
+          detail: `${o.value} is outside the model's range for ${o.factor} (0 to ${o.range}). Nothing was prepared. `
+            + 'Ask the user for a figure within that range, in the same units, or whether that range itself is wrong.',
+        };
+      }
       const parameters = { parent_decision_id: decision.id, label: plan.label, option_id: plan.optionId, interventions };
       // The product's own transaction, run here purely: a spec it would not build is never sent.
       const built = buildAddOptionTransaction(parameters, { nodes: g.nodes as never, edges: g.edges as never });
@@ -3196,8 +3222,9 @@ export function createAgentCapabilities(
         held_message: typeof heldChip!.message === 'string' ? heldChip!.message : '',
         base_revision: g.graph_hash,
         option: { label: plan.label, linked_from: String(decision.label ?? ''), acts_on: plan.actsOn.map((a) => a.label) },
+        ...(levelsNotSet.length > 0 ? { levels_not_set: levelsNotSet } : {}),
         levels: plan.actsOn.map((f) => {
-          const lvl = levelById.get(f.id);
+          const lvl = levelsNotSet.some((x) => x.factor === f.label) ? undefined : levelById.get(f.id);
           return lvl !== undefined
             ? { factor: f.label, value: lvl.value, ...(lvl.unit !== undefined ? { unit: lvl.unit } : {}), stated_by: 'user' }
             : { factor: f.label, value: null, still_needed: true };
