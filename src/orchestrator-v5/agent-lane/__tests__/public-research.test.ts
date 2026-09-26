@@ -107,6 +107,11 @@ describe('what the user reads', () => {
     expect(said).toContain('Nothing in your model was changed.');
   });
 
+  it('every source is a link the chat renders: no `]` or line break in a title, `(`/`)` encoded in a URL (UI safeRichText)', () => {
+    const said = researchReplyText(Q, { status: 'cited_finding', text: 'x [1]', sources: [{ url: 'https://en.wikipedia.org/wiki/Churn_(business)', title: 'Churn [business]\nrate' }] });
+    expect(said).toContain('1. [Churn business rate](https://en.wikipedia.org/wiki/Churn_%28business%29)');
+  });
+
   it('a failure describes no finding and never says one exists', () => {
     const said = researchReplyText(Q, { status: 'no_cited_finding' });
     expect(said).toContain('That is not evidence that none exists.');

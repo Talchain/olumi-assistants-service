@@ -11,6 +11,7 @@
  * turn's own verified identity before any tool runs. That is why this is a
  * server-side loop and not an MCP surface OpenAI calls from outside.
  */
+import { sendableQuery } from './public-research.js';
 
 /**
  * ⭐ THE CANVAS'S WORD FOR THE LOWEST BAND IS "Slight" (Canvas #70 5847910497). The `strength` enum keeps the wire value
@@ -343,6 +344,19 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       },
     }, ['goal_label', 'value', 'unit', 'goal_is', 'user_stated']),
   },
+  {
+    type: 'function',
+    name: 'offer_public_research',
+    description:
+      'Offer to search the public web when the user wants outside evidence the model does not hold (a benchmark, a ' +
+      'market figure, published research). This searches NOTHING: Olumi shows the user a control with exactly your ' +
+      'query, and the search runs only if they press it, as a separate step with the sources shown. Write the query in ' +
+      'plain public words; leave out the user\u2019s own figures, names and model details unless they asked you to search ' +
+      'for them. Never say you have searched, and never describe results you do not have.',
+    parameters: obj({
+      query: { type: 'string', description: 'The exact public search question, one line, at most 200 characters.' },
+    }, ['query']),
+  },
 ];
 
 export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
@@ -479,6 +493,16 @@ export async function dispatchTool(
       return caps.proposeStartingPoint(ctx, args as never);
     case 'propose_goal_current_level':
       return caps.proposeGoalCurrentLevel(ctx, args as never);
+    case 'offer_public_research': {
+      // Pure: nothing is searched here. The route turns the query into the one control that can send it.
+      const query = sendableQuery(args.query);
+      return query === null
+        ? { ok: false, mutated: false, refusal: 'query_not_sendable',
+          detail: 'That query cannot be offered: write it as one line of at most 200 characters. Nothing was searched.' }
+        : { ok: true, mutated: false, offered_query: query,
+          detail: 'The user now sees a control that searches the web for exactly this query. Nothing has been searched yet: '
+            + 'tell them what the search would look for and that it runs only if they press it.' };
+    }
     default:
       // An unknown tool is never silently ignored: the Agent is told plainly.
       return { ok: false, mutated: false, refusal: 'unknown_tool', tool: name };

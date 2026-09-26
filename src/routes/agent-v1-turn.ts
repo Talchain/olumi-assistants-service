@@ -28,6 +28,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
 import { OPENAI_ONLY, assertProviderAllowed, providerLedgerTruncated, recordProviderUsage, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
+import { approvedQueryOf, readResearchResponse, researchChipFor, researchReplyText, researchRequestBody, type ResearchOutcome } from '../orchestrator-v5/agent-lane/runtime/public-research.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
@@ -997,6 +998,28 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
   });
 
   /**
+   * ⭐ THE ONE PUBLIC RESEARCH REQUEST (R1, `public-research.ts`): the approved query only, native web search required
+   * and bounded. Same provider policy and usage ledger as every Agent call; no retry — a failed search is said, and a
+   * second paid call is never started on the user's behalf. Returns the native response for the reader.
+   */
+  const callResearch = async (query: string): Promise<unknown> => {
+    const model = budgetFor('gpt-5.6-terra', 'conversation').model;
+    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callResearch', { model, purpose: 'public_research' });
+    const r = await fetch(OPENAI_RESPONSES_URL, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`, 'content-type': 'application/json' },
+      body: JSON.stringify(researchRequestBody(query, model)),
+    });
+    if (!r.ok) {
+      const text = await r.text();
+      throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
+    }
+    const j = (await r.json()) as { usage?: unknown };
+    recordProviderUsage(usageHandle, j.usage);
+    return j;
+  };
+
+  /**
    * Structured construction call. Separate from `callModel` because it is a
    * different contract: strict `json_schema` output and its own measured budget
    * (see BANKED_BUDGETS role 'whole'), not the conversation budget.
@@ -1504,7 +1527,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * status the user reads is composed from the result (`write-outcome`). Zero model
      * calls, no implicit analysis. Words alone never take this path.
      */
-    let fastPath: 'approve' | 'run' | undefined;
+    let fastPath: 'approve' | 'run' | 'research' | undefined;
     /** Whether the Run fast path made its one interpreting model call (a failed run makes none). */
     let runInterpreted = false;
     let result: AgentTurnResult | undefined;
@@ -1648,6 +1671,41 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         hops: 1,
         stopped_reason: 'answered',
         timing: { total_ms: ms, provider_ms: runInterpreted ? providerMs : 0, tool_ms: Math.max(0, ms - (runInterpreted ? providerMs : 0)), overhead_ms: 0, tool_provider_ms: 0, provider_calls: runInterpreted ? 1 : 0, tool_calls: 1, hops: 1 },
+      };
+    }
+    /**
+     * ⭐ PUBLIC RESEARCH, ON THE USER'S CLICK ONLY (R1). The chip showed the exact query and its id is bound to it
+     * (`approvedQueryOf`), so the click IS the disclosure decision: that query, and nothing else, goes to ONE native
+     * web search. No model is changed and no tool can act. The reply is Olumi's own text over the reader's outcome:
+     * the finding with the sources the search consulted, or a plain failure that describes no finding.
+     */
+    const researchQuery = result === undefined && approvedProposal === undefined
+      ? approvedQueryOf((body['chip'] as { id?: unknown } | null | undefined)?.id, message) : null;
+    if (researchQuery !== null) {
+      const fastStartedAt = Date.now();
+      let outcome: ResearchOutcome;
+      let providerCalls = 0;
+      try {
+        providerCalls = 1;
+        outcome = readResearchResponse(await callResearch(researchQuery));
+      } catch (err) {
+        log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: public research call failed — nothing is shown as found');
+        outcome = { status: 'response_not_complete' };
+      }
+      fastPath = 'research';
+      const text = researchReplyText(researchQuery, outcome);
+      const ms = Date.now() - fastStartedAt;
+      result = {
+        assistant_text: text,
+        items: [...(history ?? []), { role: 'user', content: [{ type: 'input_text', text: message }] },
+          { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }],
+        tool_calls: [{ name: 'public_research', ok: outcome.status === 'cited_finding', mutated: false }],
+        tool_results: [{ ok: outcome.status === 'cited_finding', mutated: false, status: outcome.status,
+          ...(outcome.status === 'cited_finding' ? { sources: outcome.sources } : {}) }],
+        mutated: false,
+        hops: 0,
+        stopped_reason: 'answered',
+        timing: { total_ms: ms, provider_ms: ms, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: providerCalls, tool_calls: 1, hops: 0 },
       };
     }
     if (result === undefined) try {
@@ -1826,6 +1884,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...(offerRun ? [RUN_OFFER_CHIP] : []),
       ...(runBlocked || firstAnalysisBlocked || approvalLeftBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
       ...(offerRebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []),
+      // The research control for each query the Agent offered THIS turn: the only way a query is ever sent.
+      ...[...new Map(result.tool_results.flatMap((r) => {
+        const chip = researchChipFor(String((r as { offered_query?: unknown } | undefined)?.offered_query ?? ''));
+        return chip === null ? [] : [[chip.id, chip] as const];
+      })).values()],
     ];
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
     rememberApprove(approveKey, offeredNow);
@@ -1904,7 +1967,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // A Run writes nothing: its interpretation is never passed through the WRITE narrator, whose
     // completion-claim stripper would delete a sentence and append a false write-status line
     // (finding 3 on #1786, 5807230197).
-    const narration = fastPath === 'run'
+    const narration = fastPath === 'run' || fastPath === 'research'
       ? { text, status: null as string | null, stripped: [] as string[] }
       : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null });
     // (B) A write landed on this turn → say whether the model can run now, from the readback's one verdict.

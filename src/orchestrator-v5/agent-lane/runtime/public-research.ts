@@ -88,7 +88,8 @@ const record = (x: unknown): Record<string, unknown> | null => (x !== null && ty
 
 /** A clickable http(s) link, fragment dropped — link validation only, never a fetch. */
 function sourceUrl(value: unknown): string | null {
-  if (typeof value !== 'string' || value === '' || /[\u0000- ]/u.test(value)) return null;
+  // No space or control character anywhere (code points up to U+0020).
+  if (typeof value !== 'string' || value === '' || [...value].some((ch) => (ch.codePointAt(0) ?? 0) <= 0x20)) return null;
   try {
     const u = new URL(value);
     if (!['https:', 'http:'].includes(u.protocol) || u.username !== '' || u.password !== '' || u.hostname === '') return null;
@@ -180,7 +181,9 @@ const FAILURE_WORDS: Record<ResearchFailure, string> = {
 export function researchReplyText(query: string, outcome: ResearchOutcome): string {
   const asked = `I searched the web for “${query}”.`;
   if (outcome.status !== 'cited_finding') return `${asked} ${FAILURE_WORDS[outcome.status]}`;
-  const list = outcome.sources.map((s, i) => `${i + 1}. [${s.title.replace(/[[\]]/gu, '')}](${s.url})`).join('\n');
+  // The chat renders ONLY `[title](url)` as a link (UI `safeRichText.ts`, AI Conversation 5849915005): a title with `]`
+  // or a line break, or a URL with `)`, falls back to literal markdown — so both are made safe here.
+  const list = outcome.sources.map((s, i) => `${i + 1}. [${s.title.replace(/[[\]\r\n]+/gu, ' ').replace(/\s+/gu, ' ').trim()}](${s.url.replace(/\(/gu, '%28').replace(/\)/gu, '%29')})`).join('\n');
   return `${asked}\n\n${outcome.text}\n\n**Sources**\n${list}\n\n`
     + 'Each number points to the page a statement came from; it does not prove the statement. Nothing in your model was changed. '
     + 'If this should change an assumption, say which and I will propose it for your approval.';
