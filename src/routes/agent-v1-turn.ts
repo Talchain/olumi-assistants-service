@@ -58,7 +58,9 @@ import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, typedApprovalOf } from
 import { CarriedProposals, carrierForAnswerRow, offeredApproveChipOnRow, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compose/derive-pending-actions.js';
-import { isPendingActionExpired } from '../orchestrator-v5/session/pending-action.js';
+import { isPendingActionExpired, PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from '../orchestrator-v5/session/pending-action.js';
+import { computeSurvivingPriorPendingsDetailed } from '../orchestrator-v5/commit.js';
+import { GM_HELD_HANDLER_ID } from '../orchestrator-v5/handlers/edit-graph-referee-gate.js';
 import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
@@ -353,7 +355,7 @@ const AGENT_INSTRUCTIONS = [
    * ordering is sensitive to, and let the user change it and see how much it matters.
    */
   'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one. Name a leading option ONLY when the result you are reporting carries `claim_permissions.leader_may_be_named: true`; an earlier analysis read from get_canonical_state carries no such permission, so never name a leader from it. Otherwise do not name, rank or hint at one, and do not quote win percentages as a ranking, whatever else the result contains \u2014 say in plain words why no option can be put forward yet. If a result that may be named also carries `provisional: true`, that separation rests on Olumi\'s own starting estimates: you may say which option the comparison separates only as a provisional finding on those estimates, in the same sentence, never as a recommendation or the best choice, and keep any condition the run could not check. When `leader_may_be_named` is false, the finding you lead with is why no option can be put forward \u2014 not which option the comparison favours. Do not say, even hedged or \u201con current assumptions\u201d, that any option leads, is favoured, scores or comes out highest, strongest or best, is ahead, or wins in any share of runs; describe robustness and sensitivity without saying which option they favour. When the result reports sensitivity, name the one assumption the ordering is most sensitive to, say whether it comes from the user or is Olumi\u2019s estimate (or that its source is not recorded), and offer to change it. When the result is fragile or a near tie, say that this uncertainty is itself the finding. When the run says a limit cannot be checked in this model yet, say so plainly and do not suggest any step, input or model change to make it checkable.',
-  'When the user picks one of the options you suggested, or asks for one to be added, call propose_new_option with their label, the factors it would change and which way it pushes each — then authorise_change once they confirm. It adds the option and its links ONLY: say plainly that it cannot be compared until it states what it does to each factor, and offer propose_option_interventions for that. Never invent the direction; if you are not sure which way it pushes a factor, ask.',
+  'When the user picks one of the options you suggested, or asks for one to be added, call propose_new_option with their label, the factors it would change and which way it pushes each, and — ONLY for a figure the user stated — the level it sets each factor to; it is linked from the decision automatically. Then call authorise_change once they confirm. A factor with no stated level is added with no level: say plainly which, and ask for the figure. Never invent a level or a direction; if you are not sure, ask.',
   /*
    * \u26d4 NO AUTOMATIC RUN AFTER A REVISION (Codex 5810763729, 24 Sep). This
    * instruction used to end "after it applies, run_analysis in the same turn and
@@ -1169,6 +1171,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const approvedProposal = typedApprovalOf(body);
     const requestHash = agentTurnRequestHash(scenarioId, userId, message, approvedProposal !== undefined ? `approve:${approvedProposal}` : undefined);
     /** The response a replay returns: the ORIGINAL words, on today's state, with no model call. */
+    /** The `gmh_` handles of the product's held add-options still live on the latest answer row (C52). A failed read is none. */
+    const liveHeldRefs = async (sid: string): Promise<string[]> => {
+      if (typeof store.readMostRecentPendingActions !== 'function') return [];
+      try {
+        return (await store.readMostRecentPendingActions(sid))
+          .filter((pa) => pa.action.kind === 'apply_proposed_change'
+            && (pa.action as { inline_patch?: { handler_id?: unknown } }).inline_patch?.handler_id === GM_HELD_HANDLER_ID
+            && !isPendingActionExpired(pa, Date.now()))
+          .map((pa) => pa.chip_id);
+      } catch {
+        return [];
+      }
+    };
     const replayed = async (prior: CommittedTurnRecord) => {
       const state = await readBackState(dispatch, scenarioId);
       const remembered = turnId !== undefined ? offeredActions.get(`${scenarioId}:${turnId}`) ?? [] : [];
@@ -1192,7 +1207,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         stage: 'frame',
         answerKind: 'substantive',
         suggested_actions: stillValidOffers(offered, {
-          outstandingProposalIds: ((id) => new Set(id !== undefined ? [id] : []))(executableWaitingProposal(scenarioId, userId, state.graphHash)),
+          outstandingProposalIds: new Set([
+            ...((id) => (id !== undefined ? [id] : []))(executableWaitingProposal(scenarioId, userId, state.graphHash)),
+            ...(await liveHeldRefs(scenarioId)),
+          ]),
           analysisReady: state.analysisReady,
           analysisState: state.analysisState,
           // `draft_graph` is read back only when the graph has content.
@@ -1355,7 +1373,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const capabilities = createAgentCapabilities(
       countingDispatch, proposals, callStructured, mode,
       (payload) => { lastRun = { ...payload, trigger: payload.trigger ?? 'explicit_run' }; },
-      { firstAnalysis: (input) => runFirstAnalysis({ ...input, deadlineAt: firstAnalysisDeadlineAt }) },
+      {
+        firstAnalysis: (input) => runFirstAnalysis({ ...input, deadlineAt: firstAnalysisDeadlineAt }),
+        // The held add-option (C52) is confirmed against the store's LATEST answer row — the row route-v2 reads.
+        ...(typeof store.readMostRecentPendingActions === 'function'
+          ? { readPendingActions: (sid: string) => store.readMostRecentPendingActions!(sid) }
+          : {}),
+      },
     );
     // A session whose in-process history holds no user message (a restart, a
     // deploy, an eviction — or only a board-edit note appended since) is seeded
@@ -1706,10 +1730,41 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       currentGraphHash: graphHash,
       emittedAtIso,
     });
-    const durablePending = [
-      ...(offerRun ? derivePendingActionsFromFinalizedChips([RUN_OFFER_CHIP], { scenario_id: scenarioId, emitted_at_iso: emittedAtIso, ...(graphHash !== undefined ? { graph_hash: graphHash } : {}) }) : []),
+    /**
+     * ⛔ THIS ROW MUST CARRY THE PRODUCT'S HELD ADD-OPTION FORWARD (C52). Pending actions are read from the
+     * LATEST answer row only (`supabase-store.ts` readMostRecentPendingActions: `.limit(1)`), and this row is
+     * written AFTER route-v2's row that minted the hold — so a row that carries only the Agent's own items drops
+     * the hold, and the user's approval then finds nothing to confirm. Read at the END of the turn, after every
+     * inner write: a hold this turn confirmed is already consumed and is not carried. Holds go first; the row
+     * holds at most PENDING_ACTIONS_PER_TURN_CAP (a DB CHECK). A failed read carries none, loudly.
+     */
+    let liveHolds: readonly PendingAction[] = [];
+    if (typeof store.readMostRecentPendingActions === 'function') {
+      try {
+        const held = (await store.readMostRecentPendingActions(scenarioId)).filter((pa) => pa.action.kind === 'apply_proposed_change'
+          && (pa.action as { inline_patch?: { handler_id?: unknown } }).inline_patch?.handler_id === GM_HELD_HANDLER_ID);
+        /*
+         * ⛔ CARRIED BY THE PRODUCT'S OWN SURVIVAL RULE, never copied verbatim (Canonical, #70 5841421182,
+         * condition 2): a hold whose pinned model has moved (this turn's write, or anyone's) could only be refused,
+         * so it is not carried to be offered as a dead button; the turn count runs down once per answer row; the
+         * wall clock bounds it. Same function, same order, as every route-v2 commit (`commit.ts`).
+         */
+        liveHolds = computeSurvivingPriorPendingsDetailed(held, [], [], graphHash, Date.now()).survivors;
+      } catch (err) {
+        log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: live held proposals could not be read — this answer row carries none');
+      }
+    }
+    const pendingCandidates = [
+      ...liveHolds,
       ...(approvalCarrier !== undefined ? [approvalCarrier] : []),
+      ...(offerRun ? derivePendingActionsFromFinalizedChips([RUN_OFFER_CHIP], { scenario_id: scenarioId, emitted_at_iso: emittedAtIso, ...(graphHash !== undefined ? { graph_hash: graphHash } : {}) }) : []),
     ];
+    // The row holds at most PENDING_ACTIONS_PER_TURN_CAP (a DB CHECK). Holds go first; what does not fit is said, never silent.
+    if (pendingCandidates.length > PENDING_ACTIONS_PER_TURN_CAP) {
+      log.warn({ scenario_id: scenarioId, dropped: pendingCandidates.slice(PENDING_ACTIONS_PER_TURN_CAP).map((pa) => pa.action.kind) },
+        'agent-lane: pending actions over the per-row cap — the lowest-priority items are not carried');
+    }
+    const durablePending = pendingCandidates.slice(0, PENDING_ACTIONS_PER_TURN_CAP);
 
     const lastRunBlocks = Array.isArray(lastRun?.blocks) ? lastRun.blocks : [];
     const runBound = bindRunBlocksToReadback(lastRunBlocks, { graphHash, analysisState, analysisResult });
@@ -1719,7 +1774,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * without it the first pass is blank. Only the blocks the contract BUILDS are added: the run's own
      * blocks stay under `bindRunBlocksToReadback`'s rule above.
      */
-    const runCoaching = runTurnCoaching(lastRun, { scenarioId, graphHash, analysisState, analysisResult });
+    const runCoaching = runTurnCoaching(lastRun, { scenarioId, graphHash, analysisState, analysisResult, graph: readbackGraph });
     const coachingBound = [...runBound, ...runCoaching.blocks.filter((b) => !lastRunBlocks.includes(b))];
     const coachingBlocks: unknown[] = coachingBound.length === 0
       ? []
