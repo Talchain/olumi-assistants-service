@@ -904,7 +904,10 @@ export function createAgentCapabilities(
         .filter((to) => after!.nodes.some((x) => x.id === to && x.kind === 'factor'));
       const labelOf = (fid: string): string => String(after!.nodes.find((x) => x.id === fid)?.label ?? fid);
       const unlevelled = factorIds.filter((fid) => !hasLevel(node, fid)).map(labelOf);
+      // Whose each level is, from what was COMMITTED: Olumi's estimates are said as that (C2), never as the user's.
+      const estimated = factorIds.filter((fid) => ((node?.interventions ?? {}) as Record<string, { source?: unknown } | undefined>)[fid]?.source === 'cee_hypothesis').map(labelOf);
       return `Added "${String(node?.label ?? id)}", linked from the decision and acting on ${factorIds.map(labelOf).join(', ')}.`
+        + (estimated.length > 0 ? ` Its level for ${estimated.join(', ')} is Olumi's estimate, for you to correct.` : '')
         + (unlevelled.length > 0 ? ` It does not yet set a level for ${unlevelled.join(', ')}; tell me the figure for each and I'll set it.` : '');
     });
     for (const fid of addedFactorIds) {
@@ -3444,7 +3447,7 @@ export function createAgentCapabilities(
       }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      type Asked = { factor_label?: unknown; direction?: unknown; level?: { value?: unknown; unit?: unknown } | null };
+      type Asked = { factor_label?: unknown; direction?: unknown; level?: { value?: unknown; unit?: unknown; estimate?: unknown; basis?: unknown } | null };
       const askedOf = (xs: unknown): Asked[] => (Array.isArray(xs) ? xs.map((x) => (x ?? {}) as Asked) : []);
       /**
        * ⭐ SEVERAL OPTIONS, ONE CHANGE (F4; Canonical's typed transaction #1940, contract #70 5841655730). "Add A
@@ -3533,14 +3536,17 @@ export function createAgentCapabilities(
       const unitMismatch: { option: string; factor: string; value: number; unit: string; factor_unit: string }[] = [];
       const levelsNotSet: { option: string; factor: string; value: number; reason: string }[] = [];
       const entries = plans.map(({ spec, plan }) => {
-        const levelById = new Map<string, { value: number; unit?: string }>();
+        type Lvl = { value: number; unit?: string; estimate?: string; by?: 'user' | 'olumi' };
+        const levelById = new Map<string, Lvl>();
         for (const a of spec.acts_on) {
           const v = a.level?.value;
           if (typeof v !== 'number' || !Number.isFinite(v)) continue;
           const f = rawNodes.find((x) => x.kind === 'factor' && (norm(x.label) === norm(a.factor_label) || norm(x.description) === norm(a.factor_label)));
-          if (f !== undefined) levelById.set(f.id, { value: v, ...(typeof a.level?.unit === 'string' && a.level.unit.trim() !== '' ? { unit: a.level.unit.trim() } : {}) });
+          // Olumi's own suggested figure, with its basis (ChatGPT 5839692762 A: an EXPLICIT hypothesis, never silent).
+          const basis = a.level?.estimate === true && typeof a.level?.basis === 'string' && a.level.basis.trim() !== '' ? a.level.basis.trim() : undefined;
+          if (f !== undefined) levelById.set(f.id, { value: v, ...(typeof a.level?.unit === 'string' && a.level.unit.trim() !== '' ? { unit: a.level.unit.trim() } : {}), ...(basis !== undefined ? { estimate: basis } : {}) });
         }
-        const set = new Map<string, { value: number; unit?: string }>();
+        const set = new Map<string, Lvl>();
         const interventions = plan.actsOn.map((f) => {
           const lvl = levelById.get(f.id);
           if (lvl === undefined) return { factor_id: f.id, value: null };
@@ -3551,12 +3557,18 @@ export function createAgentCapabilities(
             unitMismatch.push({ option: plan.label, factor: f.label, value: lvl.value, unit: String(lvl.unit), factor_unit: String(factorUnit) });
             return { factor_id: f.id, value: null };
           }
-          // ⛔ Every level here is stored as the user's, so it must be a figure the user wrote (`stated-by-user.ts`:
-          // a 0 sent to mean "not set" was stored as the user's 0% churn).
-          if (!figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, ctx.user_text)) {
+          /**
+           * ⛔ WHOSE LEVEL: the user's only when they wrote the figure (`stated-by-user.ts`: a 0 sent to mean "not set"
+           * was stored as the user's 0% churn). Otherwise it is Olumi's ESTIMATE only when the Agent said so, with a
+           * basis, and it is recorded and shown as that (`cee_hypothesis`, C2). Anything else is left unset and said.
+           */
+          const byUser = figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, ctx.user_text);
+          if (!byUser && lvl.estimate === undefined) {
             levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: notWrittenReason(lvl.value, f.label) });
             return { factor_id: f.id, value: null };
           }
+          lvl.by = byUser ? 'user' : 'olumi';
+          const stamp = byUser ? {} : { source: 'cee_hypothesis' as const };
           const frame = levelFrameOf(factor);
           if (frame !== null) {
             const v = lvl.value / frame;
@@ -3567,9 +3579,9 @@ export function createAgentCapabilities(
             const os = (factor?.observed_state ?? {}) as { unit?: unknown };
             const unit = lvl.unit ?? (typeof os.unit === 'string' && os.unit !== '' ? os.unit : undefined);
             set.set(f.id, lvl);
-            return { factor_id: f.id, value: v, raw_value: lvl.value, ...(unit !== undefined ? { unit } : {}) };
+            return { factor_id: f.id, value: v, raw_value: lvl.value, ...(unit !== undefined ? { unit } : {}), ...stamp };
           }
-          if (lvl.value >= 0 && lvl.value <= 1) { set.set(f.id, lvl); return { factor_id: f.id, value: lvl.value }; }
+          if (lvl.value >= 0 && lvl.value <= 1) { set.set(f.id, lvl); return { factor_id: f.id, value: lvl.value, ...stamp }; }
           levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
             reason: `The model has no range for ${f.label} to read ${lvl.value} against, so this change leaves that level unset. `
               + `Once the option is added, propose that level with propose_option_interventions, which records a range for ${f.label}.` });
@@ -3666,7 +3678,8 @@ export function createAgentCapabilities(
         levels: plan.actsOn.map((f) => {
           const lvl = set.get(f.id);
           return lvl !== undefined
-            ? { factor: f.label, value: lvl.value, ...(lvl.unit !== undefined ? { unit: lvl.unit } : {}), stated_by: 'user' }
+            ? { factor: f.label, value: lvl.value, ...(lvl.unit !== undefined ? { unit: lvl.unit } : {}),
+              ...(lvl.by === 'olumi' ? { stated_by: 'olumi_estimate', basis: lvl.estimate } : { stated_by: 'user' }) }
             : { factor: f.label, value: null, still_needed: true };
         }),
       }));
@@ -3693,7 +3706,8 @@ export function createAgentCapabilities(
         } : {}),
         note:
           `Nothing has changed yet. Show the user ${described.length === 1 ? 'the option' : `all ${described.length} options, as ONE change they approve once`}, `
-          + 'that each is linked from the decision, what it acts on and each level — saying plainly which have no level yet — never the id, '
+          + 'that each is linked from the decision, what it acts on and each level — saying plainly which have no level yet, and which '
+          + 'levels are Olumi\u2019s estimates (stated_by olumi_estimate), with why, for the user to correct — never the id, '
           + 'and call authorise_change with this proposal_id once they agree.',
       };
     },
