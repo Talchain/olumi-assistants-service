@@ -42,6 +42,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { dispatchTool, type ToolResult } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
 import { canonicaliseLimitUnit } from '../admit-constraint.js';
+import { userWordsOf } from '../stated-by-user.js';
 import { USER_EDIT_SOURCE } from '../../../orchestrator/canonicalise-value-ops.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { AnalysisNotReadyError } from '../../tools/handlers/analysis-ready-core.js';
@@ -57,7 +58,12 @@ const GOAL = 'mrr';
 const CAP = 25000;
 const SCENARIO = '550e8400-e29b-41d4-a716-4466554400c9';
 const OWNER = '0f8a1b2c-3d4e-4f50-9a6b-7c8d9e0f1a2b';
-const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'req-goal-real-route' };
+/**
+ * What the user TYPED in this conversation, bound as the route binds it (`ctx.user_text`, #1978): a figure is the
+ * user's only when written here. These rows are about units; `goal-current-level-grounded.test.ts` owns grounding.
+ */
+const SAID = userWordsOf(['Our current MRR is £12,000.'], 'Sorry, it is £13,000 now.');
+const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'req-goal-real-route', user_text: SAID };
 
 type Node = { id: string; kind: string; label: string; observed_state?: Record<string, unknown> } & Record<string, unknown>;
 type Graph = { nodes: Node[]; edges: unknown[]; goal_constraints?: unknown[] } & Record<string, unknown>;

@@ -24,6 +24,7 @@ import { ProposalStore } from '../proposal.js';
 import { approvalChipIdFor, approvalChipsFor } from '../approval-chips.js';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { USER_EDIT_SOURCE } from '../../../orchestrator/canonicalise-value-ops.js';
+import { userWordsOf } from '../stated-by-user.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 import { mergeInterventionSourceObjects } from '../../../orchestrator/tools/analysis-ready-helper.js';
@@ -37,7 +38,12 @@ const TOOL = 'propose_goal_current_level';
 const GOAL = 'mrr';
 const CAP = 25000;
 const SCENARIO = '550e8400-e29b-41d4-a716-4466554400c8';
-const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'req-goal-level' };
+/**
+ * What the user TYPED (served T2), bound as the route binds it (`ctx.user_text`, #1978): the figure is recorded as the
+ * user's only when it is written here. `goal-current-level-grounded.test.ts` owns the rows where it is not.
+ */
+const SAID = 'Our current MRR is £12,000.';
+const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'req-goal-level', user_text: SAID };
 
 type Node = { id: string; kind: string; label: string; observed_state?: Record<string, unknown>; interventions?: unknown } & Record<string, unknown>;
 type Graph = { nodes: Node[]; edges: { from: string; to: string }[]; goal_constraints?: unknown[] } & Record<string, unknown>;
@@ -84,11 +90,11 @@ function scenarioStore(initial: Graph, opts: {
   return { dispatch, registers, graph: () => graph };
 }
 
-function setup(initial: Graph = paulGraph, opts: Parameters<typeof scenarioStore>[1] = {}) {
+function setup(initial: Graph = paulGraph, opts: Parameters<typeof scenarioStore>[1] = {}, said: string = SAID) {
   const store = scenarioStore(initial, opts);
   const proposals = new ProposalStore();
   const caps: AgentCapabilities = createAgentCapabilities(store.dispatch, proposals);
-  const call = (name: string, args: Record<string, unknown>): Promise<ToolResult> => dispatchTool(name, JSON.stringify(args), ctx, caps);
+  const call = (name: string, args: Record<string, unknown>): Promise<ToolResult> => dispatchTool(name, JSON.stringify(args), { ...ctx, user_text: said }, caps);
   return { ...store, proposals, caps, call };
 }
 
@@ -280,9 +286,8 @@ describe('CONTROLS — the brief path\'s operator and scale rules hold on this p
     ['at_most', '<=', 12000, 'stay at or below'],
     ['below', '<', 12000, 'stay below'],
     ['at_least', '>=', 24000, 'already above the target'],
-    ['at_least', '>=', -5, 'outside the range'],
   ])('goal_is %s (%s), level %d → refused with the brief path\'s own sentence (%s)', async (goal_is, operator, value, phrase) => {
-    const s = setup();
+    const s = setup(paulGraph, {}, `Our current MRR is £${value}.`);
     const r = await s.call(TOOL, { ...T2, goal_is, value }) as ToolResult & { refusal?: string; detail?: string };
     expect(r.ok, JSON.stringify(r)).toBe(false);
     expect(r.refusal).toBe('not_admitted');
@@ -293,8 +298,22 @@ describe('CONTROLS — the brief path\'s operator and scale rules hold on this p
     expect(s.registers).toEqual([]);
   });
 
+  /**
+   * A negative level ("outside the range", -5) can no longer reach admission: the scanner reads no signed figure
+   * (`stated-amounts.ts`, "signed values"), so -5 is never a figure the user wrote — refused before admission, under-claiming.
+   */
+  it('a negative level (-5) is never read as a figure the user wrote → refused before admission, nothing prepared', async () => {
+    for (const said of ['Our current MRR is -£5.', 'Our current MRR is £-5.', 'MRR is -5 GBP.']) {
+      const s = setup(paulGraph, {}, said);
+      const r = await s.call(TOOL, { ...T2, value: -5 }) as ToolResult & { refusal?: string };
+      expect(r.ok, said).toBe(false);
+      expect(r.refusal, said).toBe('figure_not_in_users_words');
+      expect(s.proposals.outstanding(SCENARIO, null)).toEqual([]);
+    }
+  });
+
   it('CONTROL: equality under "at least" is a meaningful hold-the-line and is proposed (not refused)', async () => {
-    const s = setup();
+    const s = setup(paulGraph, {}, 'We are at £20,000 MRR today.');
     const r = await s.call(TOOL, { ...T2, value: 20000 });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(buildSentence('>=', 20000)).toBeUndefined();
@@ -340,7 +359,7 @@ describe('CONTROLS — the approval is the write, and only onto the model the us
   });
 
   it('a different figure over a recorded one says what it replaces', async () => {
-    const s = setup();
+    const s = setup(paulGraph, {}, userWordsOf([SAID], 'Sorry, it is £13,000 now.'));
     const first = await s.call(TOOL, T2) as ToolResult & { proposal_id: string };
     await s.call('authorise_change', { proposal_id: first.proposal_id });
     const revised = await s.call(TOOL, { ...T2, value: 13000 }) as ToolResult & { public_label?: string; replaces?: number };

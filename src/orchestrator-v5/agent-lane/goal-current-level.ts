@@ -24,7 +24,9 @@
  *   · IS IT THE GOAL? `goal_label` must name the goal node itself — a figure for a factor or another
  *     metric is never written to the goal.
  *   · IS IT THE USER'S? `user_stated: true`, or refused — Olumi's estimate never sets the chance of reaching
- *     the user's target (the brief path withholds an estimate for the same reason).
+ *     the user's target (the brief path withholds an estimate for the same reason). And the flag is only the
+ *     Agent's claim: it stands only on a figure the user WROTE (`figureTheUserWrote`, #1978's rule, read on the
+ *     figure as recorded — see "IN THE USER'S OWN WORDS?" below).
  *   · IS IT IN THE GOAL'S OWN UNIT? (`readStatedGoalLevel`, below). "12%" for a GBP goal would pass the scale
  *     rule (12 / 25000 is inside [0, 1]), so the unit check is the one that refuses it — and on this path it
  *     FAILS CLOSED, because the figure feeds the headline chance of reaching the target.
@@ -35,6 +37,7 @@
 import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import { sameUnit } from '../../utils/currency-alphabet.js';
 import { admitStatedGoalLevel } from './admit-model.js';
+import { figureTheUserWrote } from './stated-by-user.js';
 import { canonicaliseLimitUnit } from './admit-constraint.js';
 import { unitPhraseFamily, unitPhraseHead, unitPhraseTail, unitsConflict } from './unit-conflict.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
@@ -285,6 +288,22 @@ export async function proposeGoalCurrentLevel(
   if (!stated.ok) return refuse(stated.refusal, stated.detail);
   const raw = stated.raw;
   const statedUnit = typeof args?.unit === 'string' ? args.unit.trim() : '';
+
+  /**
+   * ── IN THE USER'S OWN WORDS? (Runtime's seam review of #1985, 5845078745; the #1978 class)
+   * `user_stated` is the Agent's self-report — the flag that stored a served 0% churn as the user's (#70 5843805457).
+   * It stands only when the figure AS RECORDED (a stated k/m suffix already scaled, so "£12k" grounds 12 £k but
+   * never a bare 12) is written in what the user TYPED in this conversation (`ctx.user_text`, bound by the route:
+   * composer messages only), in the goal's own kind of unit. Otherwise nothing is prepared, and the Agent asks.
+   */
+  if (!figureTheUserWrote(raw, goalUnit ?? statedUnit, ctx.user_text)) {
+    return refuse(
+      'figure_not_in_users_words',
+      `${value}${statedUnit !== '' ? ` ${statedUnit}` : ''} is not a figure the user wrote in this conversation, so it is ` +
+      `never recorded as their current level of "${goal.label}". Nothing was prepared. Say so plainly, and ask the user ` +
+      `for today's figure for "${goal.label}" in their own words.`,
+    );
+  }
 
   // ── HOW THE USER PUT THE TARGET (not persisted: stated by the Agent from the user's words, never defaulted).
   const operator = typeof args?.goal_is === 'string' ? OPERATOR_OF[args.goal_is] : undefined;

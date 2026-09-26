@@ -249,13 +249,15 @@ const REVIEWED: Readonly<Record<string, string>> = {
   // ── (through the constant) onto the goal's `observed_state`, and names the literal in prose.
   //
   // HOW THE VALUE REACHES THE STAMP: the user types their current level in chat; the Agent passes that
-  // figure with `user_stated: true` (refused without it — `not_the_users_figure`); the proposer stores ONE
+  // figure with `user_stated: true` (refused without it — `not_the_users_figure`), and that claim stands only
+  // when the figure is written in what the user TYPED this conversation (`figureTheUserWrote`, #1978's rule;
+  // refused otherwise — `figure_not_in_users_words`, `goal-current-level-grounded.test.ts`); the proposer stores ONE
   // exact held proposal and writes nothing; only the user's explicit approval of THAT stored proposal
   // (`authorise_change`, content-hashed and bound to the approved revision) writes it. Two consents, and
   // NEVER the brief: nothing here reads brief text, and the brief path keeps `brief_extraction`
   // (`admit-model.ts`). Executed in `agent-lane/__tests__/goal-current-level-from-chat.test.ts`.
   "orchestrator-v5/agent-lane/goal-current-level.ts":
-    "a stamp site — USER_EDIT_SOURCE on the goal's current level ONLY after the user stated it in chat (user_stated required) AND approved the exact held proposal (authorise_change); never read from the brief",
+    "a stamp site — USER_EDIT_SOURCE on the goal's current level ONLY after the user stated it in chat (user_stated required, and the figure present in the user's own typed words) AND approved the exact held proposal (authorise_change); never read from the brief",
   "orchestrator-v5/admission/analysis-admission.ts":
     "comment only, and NOT a writer — the literal appears once in censusConfidenceParameters' docblock naming the control the ratified arm differs from; the module is a pure counter with no write path (proven on a deep-frozen graph across four arms) and derives no authorship rule of its own, delegating every authorship decision to earnsAuthorshipCredit. ⚠ Unlike the reader entries above its failure direction is NOT safe — a permissive mis-read would license comparative_leader — so the delegation, not the direction, is what makes it sound",
 };
