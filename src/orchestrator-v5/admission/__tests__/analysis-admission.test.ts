@@ -655,7 +655,8 @@ describe('instrument', () => {
  *
  * ⭐ THE FIXTURE IS A REAL CAPTURE, MUTATED BY ONE STAMP — deliberately NOT a
  * graph written here. `live-4day-week.cold-read.json` carries exactly one
- * user-stated confidence parameter (`out_csat`, `brief_extraction`), and its
+ * user-stated confidence parameter (`out_csat`, `brief_extraction` — since 26 Sep
+ * known NOT to reach the ordering, see arm A), and its
  * topology — three options intervening on two factors, three exogenous roots
  * they do not touch — is the product's own, not the author's model of it.
  */
@@ -672,16 +673,66 @@ function nodeOf(graph: Record<string, unknown>, id: string): Record<string, unkn
   return found;
 }
 
+/**
+ * Paul's own served draft (`cbd15f83`, CEE `bdd43f4`) — the licensing twin. Its status-quo
+ * option `keep_49_price` sets nothing, so the £49 he stated is that option's LEVEL: the
+ * one kind of baseline that decides which option leads under every rule (#70 5845508243).
+ */
+const PAUL_DRAFT = 'src/orchestrator-v5/coaching/__tests__/fixtures/cbd15f83-bdd43f4-paul.draft-graph.json';
+
+function paulDraft(): Record<string, unknown> {
+  const parsed = JSON.parse(readFileSync(PAUL_DRAFT, 'utf8')) as { graph: unknown };
+  return JSON.parse(JSON.stringify(parsed.graph)) as Record<string, unknown>;
+}
+
 describe('the floor is MATERIALITY, not "somebody typed one number somewhere"', () => {
-  it('arm A — the ONE user-stated parameter IS material: comparative_leader', () => {
+  it('arm A — the ONE user-stated parameter never reaches the ordering: quantified_provisional', () => {
+    // ⚠⚠ RE-RECORDED 26 Sep 2026, and the old pin is kept visible (trap 14). It read
+    // `comparative_leader`: `out_csat` sits on the chain from an intervention to the
+    // goal, so it was taken as a parameter the comparison rests on. SERVED, it is not —
+    // engine-direct PLoT `b09c0f2` + ISL `2795a8c` on THIS capture, `out_csat` 0.87 vs
+    // 0.30: every option's win-% byte-identical; CONTROL on the same run, one option's
+    // level moved → the wins moved (#70 5845505012). An outcome's level reaches the
+    // engine through no parameter uncertainty, so this real draft was naming a leader
+    // on a figure the ranking never reads.
     const graph = workedCapture();
     const signals = censusConfidenceParameters(graph);
 
-    // PRECONDITIONS PINNED IN-TEST. Without these the verdict below could hold
-    // for a reason that has nothing to do with materiality — and the whole point
-    // of the pair is that both arms sit in the SAME 1-of-N cell.
+    // PRECONDITIONS PINNED IN-TEST: the SAME 1-of-N cell as before, so the new verdict
+    // is the reachability rule's doing and not a different population.
     expect(signals.confidence_parameters_user_stated, 'the 1-of-N cell').toBe(1);
     expect(nodeOf(graph, 'out_csat').observed_state).toMatchObject({
+      source: 'brief_extraction',
+    });
+
+    expect(signals.material_parameters_user_stated).toBe(0);
+    expect(semanticQualitySufficient(signals)).toBe(false);
+    expect(resolveAnalysisAdmission(graph).permitted_analysis_mode).toBe('quantified_provisional');
+    expect(semanticVerdictCause(signals)).toBe('user_stated_not_material');
+  });
+
+  it('the same for a RISK: a user figure on a risk never licenses the leader', () => {
+    // Same served reason as arm A: PLoT sends no parameter uncertainty for a `risk`, so
+    // its level never reaches the ordering. CONTROL in-test: the whole-model census
+    // does see the stamp.
+    const graph = workedCapture();
+    delete (nodeOf(graph, 'out_csat') as { observed_state?: unknown }).observed_state;
+    nodeOf(graph, 'risk_productivity_drop').observed_state = { value: 0.2, source: 'user' };
+    const signals = censusConfidenceParameters(graph);
+
+    expect(signals.confidence_parameters_user_stated, 'the stamp is read').toBe(1);
+    expect(signals.material_parameters_user_stated).toBe(0);
+    expect(resolveAnalysisAdmission(graph).permitted_analysis_mode).toBe('quantified_provisional');
+  });
+
+  it("arm A' — the opposite twin, on Paul's own draft: his stated price IS an option's level", () => {
+    const graph = paulDraft();
+    const signals = censusConfidenceParameters(graph);
+
+    // PRECONDITIONS: one user figure, on the factor two options set and the status quo
+    // leaves alone.
+    expect(signals.confidence_parameters_user_stated, 'one user figure').toBe(1);
+    expect(nodeOf(graph, 'pro_plan_price').observed_state).toMatchObject({
       source: 'brief_extraction',
     });
 
@@ -803,8 +854,12 @@ describe('goal_target_stated', () => {
     // is a precondition for a GOAL-ATTAINMENT claim ("100% of simulated
     // scenarios"), not for a RANKING claim ("Option A leads"). Folding it into
     // this one predicate would put two questions under one name — this estate's
-    // signature defect. Arm A reaches comparative_leader with no target stated.
-    const graph = workedCapture();
+    // signature defect. Paul's draft, its target removed, reaches comparative_leader
+    // with no target stated. (Re-recorded 26 Sep from the worked capture, which no
+    // longer reaches comparative_leader at all — see arm A.)
+    const graph = paulDraft();
+    const goal = nodeOf(graph, 'mrr');
+    for (const key of Object.keys(goal)) if (key.startsWith('goal_threshold')) delete goal[key];
     const verdict = resolveAnalysisAdmission(graph);
     expect(verdict.semantic_signals.goal_target_stated).toBe(false);
     expect(verdict.permitted_analysis_mode).toBe('comparative_leader');
@@ -932,8 +987,9 @@ describe('semantic_signals is enough to hold a stricter opinion without a second
     // Both are `cee_inference` in this capture — the user has set neither, and a
     // consumer requiring THAT stricter bar can see so without asking again.
     expect(signals.intervened_factor_baselines_user_stated).toBe(0);
-    // …while the floor this module ships is still met, by `out_csat`.
-    expect(semanticQualitySufficient(signals)).toBe(true);
+    // …and the floor is NOT met: `out_csat`, the capture's one user figure, never
+    // reaches the ordering (re-recorded 26 Sep; it read `true` — see arm A).
+    expect(semanticQualitySufficient(signals)).toBe(false);
   });
 
   it('the material population is a strict subset of the whole-model one', () => {
@@ -975,8 +1031,10 @@ describe('semantic_signals is enough to hold a stricter opinion without a second
  *     is intervened and therefore material; `observed_state.source:
  *     'cee_inference'`, so the number is Olumi's. MUST be offered.
  *   · `out_csat` — on the chain `fac_4day_adoption -> out_csat ->
- *     goal_4day_success`, so material; `source: 'brief_extraction'`, the ONE
- *     parameter this capture credits to the user. MUST NOT be offered.
+ *     goal_4day_success`, so material by reachability; `source: 'brief_extraction'`,
+ *     the ONE user figure in this capture. MUST NOT be offered — since 26 Sep because
+ *     an outcome's level never reaches the ordering (served, #70 5845505012), before
+ *     that because the user had authored it.
  *   · `fac_productivity` — reaches the goal but is downstream of no
  *     intervention, so not material. MUST NOT be offered.
  *
@@ -991,7 +1049,7 @@ describe('the refusal names WHICH parameters are still Olumi’s', () => {
 
     // PRECONDITIONS PINNED IN-TEST, so this cannot pass because the fixture
     // quietly stopped reproducing the 1-of-N cell (CLAUDE.md trap 13b).
-    expect(signals.material_parameters_user_stated, 'the 1-of-N cell').toBe(1);
+    expect(signals.confidence_parameters_user_stated, 'the 1-of-N cell').toBe(1);
     expect(nodeOf(graph, 'fac_4day_adoption').observed_state).toMatchObject({
       source: 'cee_inference',
     });
@@ -1003,7 +1061,10 @@ describe('the refusal names WHICH parameters are still Olumi’s', () => {
 
     // Bound by IDENTITY, never by a count another member could satisfy.
     expect(offered).toContain('fac_4day_adoption');
-    expect(offered, 'the user already authored this one').not.toContain('out_csat');
+    // Re-recorded 26 Sep: excluded no longer on authorship but on reachability — its
+    // level never reaches the ordering (arm A), so setting it would unlock nothing. The
+    // authorship exclusion is pinned by the next test.
+    expect(offered, 'its level never reaches the ordering').not.toContain('out_csat');
     expect(offered, 'an exogenous root moves both arms equally').not.toContain(
       'fac_productivity',
     );
