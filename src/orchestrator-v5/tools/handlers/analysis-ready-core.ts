@@ -645,6 +645,7 @@ function resolveRunAdmissionTerms(
     will_scaffold_options: false,
     option_count: 0,
     scaffolded_option_ids: [],
+    excluded_option_ids: [],
   };
   // ONE assessment, shared by the strict verdict and the exclusion projection.
   // Not primarily for speed (~4.7%): two independent assessments of one graph
