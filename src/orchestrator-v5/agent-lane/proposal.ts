@@ -66,7 +66,13 @@ export interface ProposalOperation {
      * number against a range the model already published and disclosed, which
      * is a different act from choosing one at the point of writing.
      */
-    | 'set_option_intervention';
+    | 'set_option_intervention'
+    /**
+     * ⭐ SET THE GOAL'S SUCCESS TARGET THE USER STATED — `path` is the goal's id, `value` is
+     * `{constraint_type, raw_value, unit}` exactly as the `goal_target_edit` event carries them.
+     * Written only through the product's typed target writer (`goal_target_edit` → `add_constraint`).
+     */
+    | 'set_goal_target';
   /** Node id, or `from::to` for an edge. */
   readonly path: string;
   readonly value?: unknown;

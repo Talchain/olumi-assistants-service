@@ -208,6 +208,11 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
   }
   const code = String(r.refusal ?? '');
   const mutated = r.mutated === true;
+  /**
+   * ⛔ A WRITE THAT WAS SENT BUT COULD NOT BE READ BACK IS NEITHER SAVED NOR REFUSED. The product may have stored it,
+   * so "Not saved" (or "Partly saved … refused") would be a claim Olumi cannot make. Say exactly what is known.
+   */
+  if (code === 'not_confirmed') return 'This change could not be confirmed: it was sent, but reading your model back did not show it. Ask me to check the model.';
   return `${mutated ? 'Partly saved' : 'Not saved'}: ${REFUSAL_WORDS[code] ?? `the change was refused (${code || 'unknown reason'})`}.`;
 }
 
