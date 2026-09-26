@@ -25,8 +25,9 @@
  *     metric is never written to the goal.
  *   · IS IT THE USER'S? `user_stated: true`, or refused — Olumi's estimate never sets the chance of reaching
  *     the user's target (the brief path withholds an estimate for the same reason). And the flag is only the
- *     Agent's claim: it stands only on a figure the user WROTE (`figureTheUserWrote`, #1978's rule, read on the
- *     figure as recorded — see "IN THE USER'S OWN WORDS?" below).
+ *     Agent's claim: it stands only on a figure the user WROTE, in the currency and frame they wrote it in
+ *     (`figureTheUserWrote`, #1978's rule, AND the brief path's `isAmountStatedInBrief`, both read on the figure as
+ *     recorded — see "IN THE USER'S OWN WORDS?" below).
  *   · IS IT IN THE GOAL'S OWN UNIT? (`readStatedGoalLevel`, below). "12%" for a GBP goal would pass the scale
  *     rule (12 / 25000 is inside [0, 1]), so the unit check is the one that refuses it — and on this path it
  *     FAILS CLOSED, because the figure feeds the headline chance of reaching the target.
@@ -38,6 +39,7 @@ import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import { sameUnit } from '../../utils/currency-alphabet.js';
 import { admitStatedGoalLevel } from './admit-model.js';
 import { figureTheUserWrote } from './stated-by-user.js';
+import { isAmountStatedInBrief } from '../../cee/provenance/stated-amounts.js';
 import { canonicaliseLimitUnit } from './admit-constraint.js';
 import { unitPhraseFamily, unitPhraseHead, unitPhraseTail, unitsConflict } from './unit-conflict.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
@@ -295,13 +297,28 @@ export async function proposeGoalCurrentLevel(
    * It stands only when the figure AS RECORDED (a stated k/m suffix already scaled, so "£12k" grounds 12 £k but
    * never a bare 12) is written in what the user TYPED in this conversation (`ctx.user_text`, bound by the route:
    * composer messages only), in the goal's own kind of unit. Otherwise nothing is prepared, and the Agent asks.
+   *
+   * ⛔ IN THE CURRENCY AND FRAME THE USER WROTE IT IN (verify of f41c3c30, DEFECT_FOUND B1/B2). `figureTheUserWrote`
+   * checks a written amount's KIND, never its currency, and a bare number grounds any unit — so "$12,000", "12,000 USD"
+   * or "12,000 subscribers" was recorded as the user's £12,000 MRR. It also reads "3%" as 0.03 (a share kept as 0–1),
+   * so on a goal measured in "%" a typed 3% was recorded as 0.03%. The figure must ALSO pass the brief path's own rule,
+   * `isAmountStatedInBrief` (`stated-amounts.ts`): a money figure needs an amount written in the SAME currency, a
+   * percentage one written as a percentage, at the same magnitude — never a fraction of it, never a bare number. The
+   * three-argument form: `raw` is already the figure in its unit, so there is no cap to de-normalise by.
+   *
+   * THE UNIT IS THE ONE THE FIGURE IS RECORDED IN, after any suffix was scaled: the goal's unit head (the M-rung is
+   * given `{ unit: goalHead }` and emits exactly that unit), because `readUnit` reads a qualified phrase ("GBP MRR",
+   * "£ per month") as plain, and plain refuses every written currency. With no goal unit, the Agent's own unit — the
+   * one `raw` is in. Never the unit before scaling: "£k" would read the scaled 12000 as £12m.
    */
-  if (!figureTheUserWrote(raw, goalUnit ?? statedUnit, ctx.user_text)) {
+  const recordedIn = goalUnit !== undefined ? (unitPhraseHead(goalUnit) ?? goalUnit) : statedUnit;
+  if (!figureTheUserWrote(raw, goalUnit ?? statedUnit, ctx.user_text) || !isAmountStatedInBrief(raw, recordedIn, ctx.user_text)) {
     return refuse(
       'figure_not_in_users_words',
       `${value}${statedUnit !== '' ? ` ${statedUnit}` : ''} is not a figure the user wrote in this conversation, so it is ` +
       `never recorded as their current level of "${goal.label}". Nothing was prepared. Say so plainly, and ask the user ` +
-      `for today's figure for "${goal.label}" in their own words.`,
+      `for today's figure for "${goal.label}" in their own words.` +
+      (unitPhraseFamily(goalUnit) === 'percent' ? ' A percentage is passed as the user wrote it: 3% is 3, never 0.03.' : ''),
     );
   }
 

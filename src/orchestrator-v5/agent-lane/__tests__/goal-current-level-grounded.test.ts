@@ -50,8 +50,23 @@ const ctxSaying = (user_text: string | undefined) => ({
   scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'req-goal-grounded', ...(user_text !== undefined ? { user_text } : {}),
 });
 
-function setup() {
-  let graph = clone(paulGraph);
+/**
+ * A goal measured in "%": the served shape of `leader-gate-v6.json`'s "Qualified-lead growth" (target 25 "%", cap 100,
+ * frame `level`), transplanted onto the fixture's goal node — only the goal's own fields change.
+ */
+const PCT_CAP = 100;
+function percentGoalGraph(): Graph {
+  const g = clone(paulGraph);
+  g.nodes = g.nodes.map((n) => (n.id === GOAL
+    ? { ...n, label: 'Qualified-lead growth', goal_threshold: 0.25, goal_threshold_raw: 25, goal_threshold_unit: '%', goal_threshold_cap: PCT_CAP }
+    : n));
+  return g;
+}
+const PCT = { goal_label: 'Qualified-lead growth', goal_is: 'at_least', user_stated: true };
+const TYPED_3_PCT = 'Our qualified-lead growth is 3% today.';
+
+function setup(start: Graph = paulGraph) {
+  let graph = clone(start);
   let rev = 0;
   const registers: unknown[] = [];
   const dispatch: InternalDispatch = async (path, body) => {
@@ -76,8 +91,10 @@ function setup() {
 }
 
 /** Refused as not the user's figure: nothing prepared, nothing registered, the goal unchanged, and the ask is said. */
-async function refusedAsNotWritten(args: Record<string, unknown>, userText: string | undefined): Promise<Proposed> {
-  const s = setup();
+async function refusedAsNotWritten(
+  args: Record<string, unknown>, userText: string | undefined, start: Graph = paulGraph, label = 'MRR',
+): Promise<Proposed> {
+  const s = setup(start);
   const r = await s.call(TOOL, args, userText);
   expect(r.ok, JSON.stringify(r)).toBe(false);
   expect(r.mutated).toBe(false);
@@ -85,16 +102,18 @@ async function refusedAsNotWritten(args: Record<string, unknown>, userText: stri
   expect(r).not.toHaveProperty('proposal_id');
   expect(s.proposals.outstanding(SCENARIO, null)).toEqual([]);
   expect(s.registers).toEqual([]);
-  expect(goalOf(s.graph())).toStrictEqual(goalOf(paulGraph));
-  expect(r.detail).toContain('"MRR"');
+  expect(goalOf(s.graph())).toStrictEqual(goalOf(start));
+  expect(r.detail).toContain(`"${label}"`);
   expect(r.detail).toContain('Nothing was prepared');
   expect(r.detail).toContain('ask the user');
   return r;
 }
 
 /** Proposed as the user's figure, and on approval recorded with the user's stamp at `raw`. */
-async function proposedAndRecorded(args: Record<string, unknown>, userText: string | undefined, raw: number) {
-  const s = setup();
+async function proposedAndRecorded(
+  args: Record<string, unknown>, userText: string | undefined, raw: number, start: Graph = paulGraph, cap = CAP,
+) {
+  const s = setup(start);
   const r = await s.call(TOOL, args, userText);
   expect(r.ok, JSON.stringify(r)).toBe(true);
   expect(typeof r.proposal_id).toBe('string');
@@ -102,7 +121,7 @@ async function proposedAndRecorded(args: Record<string, unknown>, userText: stri
   expect(r.current_level?.value).toBe(raw);
   const applied = await s.call('authorise_change', { proposal_id: r.proposal_id }, userText);
   expect(applied.ok, JSON.stringify(applied)).toBe(true);
-  expect(goalOf(s.graph()).observed_state).toMatchObject({ raw_value: raw, baseline: raw / CAP, source: USER_EDIT_SOURCE });
+  expect(goalOf(s.graph()).observed_state).toMatchObject({ raw_value: raw, baseline: raw / cap, source: USER_EDIT_SOURCE });
   return { s, r };
 }
 
@@ -136,6 +155,42 @@ describe('RED — the Agent says user_stated: true, but the user never wrote the
   });
 });
 
+/**
+ * ⛔ THE FIGURE IS THE USER'S ONLY IN THE CURRENCY AND FRAME THEY WROTE IT IN (verify of f41c3c30, DEFECT_FOUND B1/B2).
+ * `figureTheUserWrote` checks a written amount's KIND, never its currency, and reads "3%" as 0.03 too; so a user's
+ * "$12,000" was recorded as their £12,000, and their "3%" as 0.03%. The goal path now also holds the figure to the brief
+ * path's own rule (`isAmountStatedInBrief`: the same currency code, a percentage as written, never a bare number for
+ * money), read in the unit the figure is recorded in.
+ */
+describe('RED — another currency typed, the Agent passes {12000, GBP} → never recorded as the user\'s £12,000 (B1)', () => {
+  it.each([
+    ['$12,000', 'Our MRR is $12,000.'],
+    ['12,000 USD', 'Our MRR is 12,000 USD.'],
+    ['€12k', 'Our MRR is €12k.'],
+    ['12,000 dollars', 'MRR is 12,000 dollars'],
+    ['USD 12,000', 'MRR: USD 12,000'],
+  ])('the user typed %s → refused, nothing prepared, and asked for', async (_typed, said) => {
+    await refusedAsNotWritten(T2, said);
+  });
+});
+
+describe('RED — a number the user wrote about something else never grounds a money figure (B1: a bare number grounded any unit)', () => {
+  it('"12,000 subscribers", then "record our current MRR" → never £12,000 MRR', async () => {
+    await refusedAsNotWritten(T2, 'We have 12,000 subscribers.\nRecord our current MRR please.');
+  });
+
+  it('"within 16 months" → never £16 MRR', async () => {
+    await refusedAsNotWritten({ ...T2, value: 16 }, 'We want £20,000 MRR within 16 months.');
+  });
+});
+
+describe('RED — a percent goal: the user typed "3%", the Agent passes 0.03 → never recorded as 0.03% (B2)', () => {
+  it.each([['%'], ['percent']])('{0.03, %j} → refused, nothing prepared, and asked for', async (unit) => {
+    const r = await refusedAsNotWritten({ ...PCT, value: 0.03, unit }, TYPED_3_PCT, percentGoalGraph(), 'Qualified-lead growth');
+    expect(r.detail).toContain('3% is 3, never 0.03');
+  });
+});
+
 describe('CONTROLS — a figure the user typed is proposed, and recorded as theirs', () => {
   it('"our MRR is £12,000 today" → proposed, and recorded as raw 12000 with the user\'s stamp', async () => {
     await proposedAndRecorded(T2, 'our MRR is £12,000 today', 12000);
@@ -148,6 +203,31 @@ describe('CONTROLS — a figure the user typed is proposed, and recorded as thei
 
   it('"£12k" typed, the Agent passes the figure in full ({12000, GBP}) → proposed', async () => {
     await proposedAndRecorded(T2, 'Our MRR is £12k right now.', 12000);
+  });
+
+  it('"3%" typed on a percent goal, the Agent passes {3, "%"} → proposed, and recorded as raw 3 in the goal\'s own unit', async () => {
+    const { r } = await proposedAndRecorded({ ...PCT, value: 3, unit: '%' }, TYPED_3_PCT, 3, percentGoalGraph(), PCT_CAP);
+    expect(r.current_level).toStrictEqual({ value: 3, unit: '%' });
+  });
+});
+
+/**
+ * NAMED RESIDUAL — UNDER-CLAIMING, the brief path's own (pinned so a change is a decision, not drift). The scanner
+ * (`findStatedAmounts`) reads a currency only BEFORE the number and a percentage only as "%". So a figure written with
+ * the currency after it, with none, or as "percent" is not proven to be in the goal's unit: it is refused and asked
+ * for — never recorded in a unit the user may not have meant. A brief written the same way is not grounded either.
+ */
+describe('NAMED RESIDUAL — refused and asked for, never recorded in a unit the user did not write', () => {
+  it.each([
+    ['12000 GBP (the code after the number)', 'MRR is 12000 GBP.'],
+    ['12,000£ (the symbol after the number)', 'MRR is 12,000£'],
+    ['12k (no currency)', 'MRR is 12k right now'],
+  ])('%s → refused', async (_typed, said) => {
+    await refusedAsNotWritten(T2, said);
+  });
+
+  it('"3 percent" (the word, not the sign) on a percent goal → refused', async () => {
+    await refusedAsNotWritten({ ...PCT, value: 3, unit: '%' }, 'Qualified-lead growth is 3 percent.', percentGoalGraph(), 'Qualified-lead growth');
   });
 });
 
