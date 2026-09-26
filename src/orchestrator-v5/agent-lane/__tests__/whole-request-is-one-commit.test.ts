@@ -34,8 +34,8 @@ const NODES: Node[] = [
 const EDGES = [edge('hire_two', 'team_size'), edge('team_size', 'velocity')];
 
 /** The product behind the port: the whole scope commits at once or not at all; any per-event write is recorded as a violation. */
-function product(opts: { refuseLevelOf?: string } = {}) {
-  let edges: Edge[] = EDGES.map((e) => ({ ...e }));
+function product(opts: { refuseLevelOf?: string; trialLinked?: boolean; claimsWithoutWriting?: boolean } = {}) {
+  let edges: Edge[] = [...EDGES, ...(opts.trialLinked === true ? [edge('internal_trial', 'team_size')] : [])].map((e) => ({ ...e }));
   let nodes: Node[] = NODES.map((n) => ({ ...n }));
   let rev = 0;
   const commits: string[] = [];
@@ -60,6 +60,11 @@ function product(opts: { refuseLevelOf?: string } = {}) {
       if (opts.refuseLevelOf === l.option_id || !nextEdges.some((e) => e.from === l.option_id && e.to === l.factor_id)) {
         return { status: 'refused', reason: 'unresolved_effect_relationship', pair: { option_id: l.option_id, factor_id: l.factor_id } };
       }
+    }
+    // A writer that reports a commit its model does not hold: the Agent's read-back is the second check.
+    if (opts.claimsWithoutWriting === true) {
+      rev += 1;
+      return { status: 'committed', graph_hash: `h${rev}`, receipt: null, already_applied: false, committed_levels: input.levels.map((l) => ({ option_id: l.option_id, factor_id: l.factor_id, value: l.value })) };
     }
     edges = nextEdges;
     nodes = nodes.map((n) => {
@@ -124,6 +129,29 @@ describe('the approved scope commits WHOLE or NOT AT ALL, as ONE commit (A compl
     expect(out.mutated).toBe(false);
     expect(p.perEvent).toEqual([]);
     expect(p.state()).toEqual(before);
+  });
+
+  it('LEVELS ONLY (no link needed): the second level is refused → NOTHING committed, in ONE call (Canvas #2010 N2)', async () => {
+    const p = product({ trialLinked: true, refuseLevelOf: 'internal_trial' });
+    const before = p.state();
+    const caps = createAgentCapabilities(p.d, new ProposalStore(), undefined, 'full', undefined, { commitOptionLevels: p.commitOptionLevels });
+    const r = await caps.proposeOptionInterventions(ctx, TWO_LEVELS);
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+    expect(out.ok).toBe(false);
+    expect(p.state(), 'the model is exactly as it was').toEqual(before);
+    expect(p.calls, 'the whole scope in ONE call').toHaveLength(1);
+    expect(p.calls[0]!.links).toEqual([]);
+    expect(p.calls[0]!.levels.map((l) => l.option_id)).toEqual(['hire_two', 'internal_trial']);
+    expect(p.perEvent).toEqual([]);
+  });
+
+  it('the writer reports committed but the model read back does not hold it → not_verified, never "saved" (Canvas #2010 N1)', async () => {
+    const p = product({ claimsWithoutWriting: true });
+    const caps = createAgentCapabilities(p.d, new ProposalStore(), undefined, 'full', undefined, { commitOptionLevels: p.commitOptionLevels });
+    const r = await caps.proposeOptionInterventions(ctx, TWO_LEVELS);
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+    expect(out).toEqual(expect.objectContaining({ ok: false, mutated: true, applied: false, refusal: 'not_verified' }));
   });
 
   it('a retry of the same approval writes nothing again, and the reload still agrees', async () => {
