@@ -54,7 +54,7 @@ import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { getSessionStore } from '../session/index.js';
 import { TurnFenceRejectedError } from '../session/turn-fence.js';
 import { createHash } from 'node:crypto';
-import { executeOptionInterventionBatch, executeOptionInterventionEdit } from './option-intervention-edit.js';
+import { executeOptionInterventionBatch, executeOptionInterventionEdit, type ApprovedFactorFrame, type ApprovedFactorValue } from './option-intervention-edit.js';
 import { runWithApprovedLevelAdoptions } from '../agent-lane/approved-adoption-context.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
@@ -232,7 +232,7 @@ export interface DispatchSystemEventResult {
   readonly commitPerformed: boolean;
   readonly commitSkippedReason?: SystemEventCommitSkipReason;
   /** A refused option-level batch: why, and which target (all or nothing — nothing was written). */
-  readonly refusal?: { readonly reason: string; readonly index?: number };
+  readonly refusal?: { readonly reason: string; readonly index?: number; readonly valueIndex?: number; readonly frameIndex?: number };
   /** A committed option-level write: the commit's own verified version receipt (null: guest / no version). */
   readonly committedVersion?: { readonly version: number; readonly version_id: string; readonly mutation_id: string; readonly source_turn_id: string | null } | null;
   /**
@@ -2761,6 +2761,10 @@ export async function dispatchOptionLevelsBatch(
     readonly base_graph_hash: string;
     /** The links the approved proposal declared (`from::to`); a different set writes nothing. */
     readonly expectedLinks?: readonly string[];
+    /** A compound approval's factor values, in the user's units: written in the SAME commit as the levels. */
+    readonly values?: readonly ApprovedFactorValue[];
+    /** The ranges it attaches to factors holding a bare amount: the SAME commit too. */
+    readonly frames?: readonly ApprovedFactorFrame[];
   },
   requestId: string,
 ): Promise<DispatchSystemEventResult> {
@@ -2802,12 +2806,15 @@ export async function dispatchOptionLevelsBatch(
   };
   // The single event keeps its own entry (itself the one-target form of the batch core); a batch — or a single
   // level whose approved links are declared — goes through the batch entry.
-  const only = batch.targets.length === 1 && batch.expectedLinks === undefined ? batch.targets[0]! : undefined;
+  const only = batch.targets.length === 1 && batch.expectedLinks === undefined
+    && (batch.values ?? []).length + (batch.frames ?? []).length === 0 ? batch.targets[0]! : undefined;
   const outcome: Awaited<ReturnType<typeof executeOptionInterventionBatch>> = only !== undefined
     ? await executeOptionInterventionEdit({ ...common, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue },
       getSessionStore())
     : await executeOptionInterventionBatch({ ...common, targets: batch.targets,
-      ...(batch.expectedLinks !== undefined ? { expectedLinks: batch.expectedLinks } : {}) }, getSessionStore());
+      ...(batch.expectedLinks !== undefined ? { expectedLinks: batch.expectedLinks } : {}),
+      ...(batch.values !== undefined && batch.values.length > 0 ? { values: batch.values } : {}),
+      ...(batch.frames !== undefined && batch.frames.length > 0 ? { frames: batch.frames } : {}) }, getSessionStore());
 
   if (outcome.kind === 'committed') {
     // ⚠ THE GRAPH FIELD IS A VALIDATED VIEW, AND IT IS NOT THE AUTHORITY.
@@ -2996,7 +3003,9 @@ export async function dispatchOptionLevelsBatch(
       response: buildAcknowledgementResponse(payload),
       commitPerformed: false,
       commitSkippedReason: 'refused_no_write',
-      refusal: { reason: outcome.reason, ...(outcome.index !== undefined ? { index: outcome.index } : {}) },
+      refusal: { reason: outcome.reason, ...(outcome.index !== undefined ? { index: outcome.index } : {}),
+        ...(outcome.valueIndex !== undefined ? { valueIndex: outcome.valueIndex } : {}),
+        ...(outcome.frameIndex !== undefined ? { frameIndex: outcome.frameIndex } : {}) },
       graph: null,
     };
   }
@@ -3041,6 +3050,19 @@ export type CommitOptionLevelsInput = {
     readonly unit?: string;
     readonly cap?: number;
   }[];
+  /**
+   * ⭐ A compound approval's factor values (Canonical #70 5849037691), in the user's own units: applied by the canonical
+   * value writer and committed in the SAME append as the links and levels. A refused value refuses everything.
+   */
+  readonly values?: readonly {
+    readonly factor_id: string;
+    readonly value: number;
+    readonly unit?: string;
+    /** Whose value: an Olumi value is stamped as the user's assumption by the writer's adoption authority. */
+    readonly author: 'user_specified' | 'model_proposed';
+  }[];
+  /** Ranges for factors holding a bare amount and no range ("a range taken from your figure"), in the SAME commit. */
+  readonly frames?: readonly { readonly factor_id: string; readonly cap: number }[];
 };
 export type CommitOptionLevelsResult =
   | { readonly status: 'committed'; readonly graph_hash: string;
@@ -3053,7 +3075,9 @@ export type CommitOptionLevelsResult =
        */
       readonly committed_levels: readonly { readonly option_id: string; readonly factor_id: string; readonly value: number }[] }
   | { readonly status: 'stale' }
-  | { readonly status: 'refused'; readonly reason: string; readonly pair?: { readonly option_id: string; readonly factor_id: string } }
+  | { readonly status: 'refused'; readonly reason: string; readonly pair?: { readonly option_id: string; readonly factor_id: string };
+      /** The approved value, or range, that was refused (the whole approval is refused with it). */
+      readonly value?: { readonly factor_id: string }; readonly frame?: { readonly factor_id: string } }
   /** The commit was attempted and could not be read back: say it could not be confirmed, never "not saved". */
   | { readonly status: 'unconfirmed' };
 
@@ -3072,17 +3096,26 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
   // Digested in `computeRequestHash`'s format over every link, level and the base revision (informational;
   // the idempotency key is (scenario_id, turn_id)).
   const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
-    kind: 'system_event', event: { kind: 'option_levels_batch', links: input.links, levels: input.levels, base_graph_hash: input.base_graph_hash } }))
+    kind: 'system_event', event: { kind: 'option_levels_batch', links: input.links, levels: input.levels,
+      ...(input.values !== undefined && input.values.length > 0 ? { values: input.values } : {}),
+      ...(input.frames !== undefined && input.frames.length > 0 ? { frames: input.frames } : {}), base_graph_hash: input.base_graph_hash } }))
     .digest('hex').slice(0, 32)}`;
   const payload = { scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame' as const, requestHash };
   const r = await runWithApprovedLevelAdoptions(adoptions, () => dispatchOptionLevelsBatch(payload, {
     targets, base_graph_hash: input.base_graph_hash, expectedLinks: input.links.map(l => `${l.option_id}::${l.factor_id}`),
+    ...(input.values !== undefined && input.values.length > 0 ? { values: input.values.map(v => ({ factorId: v.factor_id, value: v.value,
+      ...(v.unit !== undefined ? { unit: v.unit } : {}), ...(v.author === 'model_proposed' ? { adopted: true } : {}) })) } : {}),
+    ...(input.frames !== undefined && input.frames.length > 0 ? { frames: input.frames.map(f => ({ factorId: f.factor_id, cap: f.cap })) } : {}),
   }, requestId));
   if (r.graphConflict !== undefined) return { status: 'stale' };
   if (r.commitSkippedReason === 'refused_no_write') {
     const at = r.refusal?.index !== undefined ? input.levels[r.refusal.index] : undefined;
+    const value = r.refusal?.valueIndex !== undefined ? input.values?.[r.refusal.valueIndex] : undefined;
+    const frame = r.refusal?.frameIndex !== undefined ? input.frames?.[r.refusal.frameIndex] : undefined;
     return { status: 'refused', reason: r.refusal?.reason ?? 'refused',
-      ...(at !== undefined ? { pair: { option_id: at.option_id, factor_id: at.factor_id } } : {}) };
+      ...(at !== undefined ? { pair: { option_id: at.option_id, factor_id: at.factor_id } } : {}),
+      ...(value !== undefined ? { value: { factor_id: value.factor_id } } : {}),
+      ...(frame !== undefined ? { frame: { factor_id: frame.factor_id } } : {}) };
   }
   const committedLevels = input.levels.map(l => ({ option_id: l.option_id, factor_id: l.factor_id, value: l.value }));
   if (r.commitSkippedReason === 'verified_no_op') {
