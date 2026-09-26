@@ -49,6 +49,10 @@
  * card's ask ("give the real figure") cannot change its check. When ANY option intervenes
  * on the limit's node, read by the one structural authority
  * (`collectInterventionControlledFactorIds`, every shape unioned), there is no card.
+ * Read from BOTH carriers (#1983 review B1′): the bound graph's option nodes AND the bound
+ * run's own `analysis_ready.options`, because the graph a card holds may carry no option
+ * interventions (`bound-graph.ts` `everyLimitProvedUnanchored` reads the run's options for
+ * the same reason). Either one naming the node silences the card.
  *
  * Pure: no clock, no LLM, no telemetry.
  */
@@ -179,6 +183,8 @@ export function buildEstimatedLimitCard(
   input: FragileLinkChallengeInput,
   verdictState: unknown,
   boundGraph: Record<string, unknown> | null,
+  /** The bound run's `analysis_ready.options` (their interventions); unknown shape → no ids. */
+  runOptions: unknown,
 ): EstimatedLimitCardDecision {
   const result = readRecord(input.analysisResult);
   if (result === null || result.type !== 'analysis_result' || result.computed_against_hash !== input.graphHash) {
@@ -188,7 +194,10 @@ export function buildEstimatedLimitCard(
   const limit = estimatedLimitIn(boundGraph);
   if (limit === null) return { block: null, reason: 'not_checked_against_an_estimate' };
   // An option that sets this factor was checked at its own level, never today's (see above).
-  if (collectInterventionControlledFactorIds(boundGraph).has(limit.nodeId)) {
+  if (
+    collectInterventionControlledFactorIds(boundGraph).has(limit.nodeId)
+    || collectInterventionControlledFactorIds({ options: runOptions }).has(limit.nodeId)
+  ) {
     return { block: null, reason: 'limit_target_set_by_an_option' };
   }
 

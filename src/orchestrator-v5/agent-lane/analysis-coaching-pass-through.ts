@@ -281,7 +281,7 @@ export function runTurnCoaching(
   // 5842174563): the verdict rests on an assumption the user never saw named, so it outranks a link card.
   // Reads the READBACK's typed verdict state (`analysis_constraint_verdict_state` on the graph read, carried as
   // `final.constraintVerdictState`, Canonical 5842397050); absent → this leg is inert.
-  const estimate = buildEstimatedLimitCard(input, final.constraintVerdictState, boundGraph);
+  const estimate = buildEstimatedLimitCard(input, final.constraintVerdictState, boundGraph, record(captured.analysis_ready)?.options);
   if (estimate.block !== null) return { blocks: dedupeByBlockId([...upstream, estimate.block]), eligibility: { eligible: true } };
   const built = buildFragileLinkChallenge(input);
   const chosen = built.block === null && built.reason === 'no_groundable_fragile_edge'

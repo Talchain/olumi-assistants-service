@@ -1019,6 +1019,30 @@ test('ESTIMATED LIMIT — B1: the option read is the ONE structural authority (e
  const other=priceLimited((x)=>{noOptionSetsPrice(x); x.nodes.find((n: any)=>n.id==='raise_to_59_at_release').interventions['Pro plan price']={value:0.3,source:'brief_extraction'};});
  assert.equal(estCards(estCase('evaluated_feasible',undefined,other)).length,1,'a label is not an id');
 });
+// B1′ (AI Quality 5845889883): the graph a card holds may carry NO option interventions; the bound run's own
+// analysis_ready.options does (the trimmed fixture keeps only ids and labels, so each row adds them explicitly).
+const estCaseReady = (graph: Record<string, unknown>, mutOptions: (o: Record<string, any>[]) => Record<string, any>[]) => {
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const state={...(c.final.analysisState as Record<string, unknown>),leader_claim:{permitted:false,withheld_reason:'unrequested_analysis_withheld'}};
+ const {captured,final}=rebind(c,graph);
+ const ready=captured.analysis_ready as {options: Record<string, any>[]};
+ const withReady={...captured,analysis_ready:{...ready,options:mutOptions(structuredClone(ready.options))}} as CapturedAnalysis;
+ return runTurnCoaching(withReady,{...final,analysisState:state,constraintVerdictState:'evaluated_feasible'});
+};
+test('ESTIMATED LIMIT — B1′: an option that sets the limited factor ONLY in the bound run\'s analysis_ready.options (graph option nodes carry none) → no card',()=>{
+ const free=priceLimited(noOptionSetsPrice);
+ // Present controls: no graph option names the price, the run's options carry no interventions, and the card speaks.
+ assert.deepEqual(optionsSetting(free,'pro_plan_price'),[]);
+ const ids=(runTurnCase('paul','t1','auto_first_pass').captured.analysis_ready as {options: {option_id: string}[]}).options.map((o)=>o.option_id);
+ assert.ok(ids.includes('raise_to_59_at_release'),JSON.stringify(ids));
+ assert.equal(estCards(estCaseReady(free,(o)=>o)).length,1);
+ // RED: the run's own option raise_to_59 sets the price → no card.
+ const setsPrice=(o: Record<string, any>[])=>o.map((x)=>x.option_id==='raise_to_59_at_release'?{...x,interventions:{pro_plan_price:59}}:x);
+ assert.equal(estCards(estCaseReady(free,setsPrice)).length,0);
+ // CONTRAST: the run's option sets ANOTHER factor → the card still speaks.
+ const setsOther=(o: Record<string, any>[])=>o.map((x)=>x.option_id==='raise_to_59_at_release'?{...x,interventions:{monthly_churn:0.05}}:x);
+ assert.equal(estCards(estCaseReady(free,setsOther)).length,1);
+});
 // ── THE OPTION THAT COMES OUT AHEAD PROBABLY BREAKS A LIMIT (R&C PR-8; AI Quality 5842498806, predicate CEE #1960) ──
 // DERIVED (labelled): no served turn yet carries a SCORED limit (churn is held until after Paul's test, 5842549943) or
 // the carried risks (ask 5842617884). Paul's served first pass + his WHOLE served graph, with the leader claim permitted,
