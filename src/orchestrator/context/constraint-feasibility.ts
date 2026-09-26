@@ -1088,6 +1088,90 @@ export function deriveConstraintVerdict(
 }
 
 // ===========================================================================
+// THE LEADER PROBABLY BREAKS A LIMIT IT IS ALLOWED TO BE NAMED UNDER
+// ===========================================================================
+
+/**
+ * Below this, a scored and ratified limit is more likely BROKEN than met by the leading option (AI Quality claim-permission
+ * ruling, #70 5842498806, accepted by Delivery Lead 5842513799).
+ */
+export const LEADER_LIMIT_RISK_THRESHOLD = 0.5;
+
+/** One ratified limit the leading option is more likely than not to break, on a producer-certified score. */
+export interface LeaderLimitRisk {
+  readonly constraint_id: string;
+  readonly label: string | null;
+  readonly source_quote: string | null;
+  /** P(the LEADING option meets this limit), read from the leader's own per-option score. */
+  readonly probability: number;
+}
+
+/**
+ * ⛔ THE ONE PREDICATE for "the leader may be named, but it probably breaks the user's limit" — consumed by the reply
+ * (OpenAI Runtime) and the card (R&C), never re-derived (#70 5842539827).
+ *
+ * WHY. `deriveConstraintVerdict` returns `evaluated_infeasible` only at P ≤ {@link HARD_VIOLATION_FLOOR} (a "does not
+ * satisfy" claim is definitional there). From just above that floor to 0.99 it is `evaluated_feasible`: the leader is
+ * permitted and `constraint-gap-disclosure` says nothing. A leader that meets the limit with P = 0.3 was therefore named
+ * with the limit unmentioned — silent. The ruling: while a ratified limit is scored and the leader's P < 0.5, the leader
+ * may be named ONLY if the same reply/card names the limit and says it is more likely than not to be broken on these
+ * estimates; never "meets", "keeps … under" or "within".
+ *
+ * RETURNED ONLY ON EVIDENCE, each conjunct identity-bound to the ratified `constraint_id` (the #1943 rules, reused):
+ *   · the limit is RATIFIED (only `ratified` is iterated — PLoT's synthesised goal constraint condemns nothing);
+ *   · its `constraint_results` entry is PRODUCER-CERTIFIED: the marker parses under the contract and
+ *     `decision_grade === true` (a clamped, defaulted or unit-mismatched score licenses neither a compliance nor a
+ *     breach claim — those are `unevaluated`, whose own disclosure already speaks);
+ *   · the LEADER carries its own finite per-option score for it (`findWinnerEntry` → `constraint_probabilities`);
+ *   · that score is < {@link LEADER_LIMIT_RISK_THRESHOLD}.
+ * No leader, no matching entry, or no certified score ⇒ `[]` — this predicate never invents a risk.
+ *
+ * It does not read the verdict state: callers gate on `evaluated_feasible` (under `unevaluated` the limit copy already
+ * speaks; under `evaluated_infeasible` the leader is withheld). Pure; graph order.
+ */
+export function deriveLeaderLimitRisks(
+  envelope: Record<string, unknown>,
+  leadingOptionId: string | null | undefined,
+  ratified: readonly RatifiedConstraint[],
+): LeaderLimitRisk[] {
+  if (typeof leadingOptionId !== 'string' || leadingOptionId.length === 0) return [];
+  const entry = findWinnerEntry(envelope, leadingOptionId);
+  if (entry === null) return [];
+  const leaderProbability = new Map(readConstraintSatisfactionProbs(entry).map((p) => [p.id, p.probability] as const));
+  const certified = collectProducerCertifiedConstraintIds(envelope);
+  const out: LeaderLimitRisk[] = [];
+  for (const c of ratified) {
+    const probability = leaderProbability.get(c.constraint_id);
+    if (probability === undefined || !certified.has(c.constraint_id)) continue;
+    if (probability < LEADER_LIMIT_RISK_THRESHOLD) {
+      out.push({ constraint_id: c.constraint_id, label: c.label, source_quote: c.source_quote ?? null, probability });
+    }
+  }
+  return out;
+}
+
+/**
+ * The constraint ids whose `constraint_results` entry the PRODUCER certifies: the marker parses under
+ * `EnrichmentScaleProvenanceSchema` AND `decision_grade === true`. The positive twin of
+ * {@link collectProducerNotDecisionGradeConstraintIds} — same parse, same rule — for a caller that needs PROOF of
+ * certification rather than proof of its absence (a ratified id with no entry at all is in neither set). Pure.
+ */
+function collectProducerCertifiedConstraintIds(envelope: Record<string, unknown>): Set<string> {
+  const out = new Set<string>();
+  const results = envelope.constraint_results;
+  if (!Array.isArray(results)) return out;
+  for (const entry of results) {
+    if (entry === null || typeof entry !== 'object') continue;
+    const obj = entry as Record<string, unknown>;
+    const id = readString(obj.constraint_id);
+    if (id === null) continue;
+    const marker = EnrichmentScaleProvenanceSchema.safeParse(obj.scale_provenance);
+    if (marker.success && marker.data.decision_grade === true) out.add(id);
+  }
+  return out;
+}
+
+// ===========================================================================
 // T1 — PERSISTING the verdict alongside the analysis facts
 // ===========================================================================
 
