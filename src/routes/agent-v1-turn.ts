@@ -71,7 +71,7 @@ import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-g
 import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runDeltaBoundToReadback, runTurnCoaching, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
-import { breakEvenFor, breakEvenLine } from '../orchestrator-v5/agent-lane/break-even.js';
+import { breakEvenFor, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
 import {
   bindRunBlocksToReadback,
   firstAnalysisDeadline,
@@ -2106,7 +2106,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       && (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
       ? breakEvenFor(readbackGraph) : null;
     if (breakEven !== null && typeof wireBody.assistant_text === 'string') {
-      wireBody = { ...wireBody, assistant_text: `${wireBody.assistant_text}\n\n${breakEvenLine(breakEven)}` };
+      wireBody = { ...wireBody, assistant_text: withBreakEvenAnswer(wireBody.assistant_text, breakEven) };
     }
     /**
      * ⭐ HEADLINE FIRST ON AN ANALYSIS REPLY — see `withAnalysisAnswerShape`. HERE, and nowhere earlier:

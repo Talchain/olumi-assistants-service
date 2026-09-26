@@ -11,7 +11,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { breakEvenFor, breakEvenLine } from '../break-even.js';
+import { breakEvenFor, breakEvenLine, withBreakEvenAnswer } from '../break-even.js';
 import { deriveEmittedGoalDirection } from '../../goal-target/goal-direction.js';
 
 const served = JSON.parse(readFileSync(new URL('./fixtures/served-f8-run-graph-d6b09c0.json', import.meta.url), 'utf8')) as { nodes: Record<string, unknown>[]; edges: unknown[] };
@@ -93,5 +93,20 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
   it('RED (MG P4): a volume that is not a count (a % rate) is never multiplied by a price', () => {
     expect(breakEvenFor(graph((ns) => { (node(ns, 'pro_paying_subscribers').observed_state as Record<string, unknown>).unit = '%'; }))).toBeNull();
     expect(breakEvenFor(graph((ns) => { (node(ns, 'pro_paying_subscribers').observed_state as Record<string, unknown>).unit = ''; }))).toBeNull();
+  });
+
+  /** The served build-turn reply on `6ff7bc9` (#70 5851078813), verbatim up to the parked questions. */
+  const SERVED_FIRST = 'Not yet\u2014the provisional first pass cannot establish which choice improves MRR.\n\n- I modelled your target as **\u00a320k Pro-plan MRR** and churn at **10% or less**; confirm if \u00a320k means all-plan MRR instead.\n\nI saved the model I drafted. The figures above are not recorded until you approve them. Questions this model does not answer yet: Which did you mean? Ask me for the other 11. The analysis can run now.';
+
+  it('RED (served 6ff7bc9): the arithmetic follows the model\'s lead, before the bullets, the save line and the questions', () => {
+    const para = breakEvenLine(breakEvenFor(graph())!);
+    const said = withBreakEvenAnswer(SERVED_FIRST, breakEvenFor(graph())!);
+    expect(said.startsWith(`Not yet\u2014the provisional first pass cannot establish which choice improves MRR.\n\n${para}\n\n- I modelled`)).toBe(true);
+    expect(said.indexOf(para)).toBeLessThan(said.indexOf('Questions this model does not answer yet'));
+  });
+
+  it('CONTRAST: a one-paragraph reply gets the arithmetic at the end, and nothing is lost', () => {
+    const para = breakEvenLine(breakEvenFor(graph())!);
+    expect(withBreakEvenAnswer('No option can be put forward on MRR yet.', breakEvenFor(graph())!)).toBe(`No option can be put forward on MRR yet.\n\n${para}`);
   });
 });
