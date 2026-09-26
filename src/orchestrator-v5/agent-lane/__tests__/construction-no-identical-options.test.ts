@@ -24,7 +24,6 @@ import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { narrateWriteOutcome } from '../write-outcome.js';
 import { assessConstructionSize, COMPACT_LIMITS } from '../construction-size-gate.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
-import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { resolveRunAdmission, NO_COMPARISON_NEXT_STEP } from '../../tools/handlers/analysis-ready-core.js';
 import { labelMatchesBaseline } from '../../../cee/transforms/analysis-ready.js';
 
