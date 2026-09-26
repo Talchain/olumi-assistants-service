@@ -625,6 +625,26 @@ export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown
   return `The analysis didn’t run this time${why}. Nothing in the model was changed — ask me what it still needs.`;
 }
 
+/**
+ * ⛔ WHAT THE USER READS WHEN THE MODEL'S FINAL ANSWER WAS CUT SHORT (AIX-001; R&C #2009 B1/B2): composed from the
+ * turn's own outcome, never from the partial text (which is not shown and not kept, so nothing can "continue").
+ * After a run: the run's own sentence. A turn that changed the model says so. Otherwise: shorter questions.
+ */
+export function unfinishedAnswerText(result: {
+  readonly tool_calls: readonly { readonly name: string }[];
+  readonly tool_results: readonly unknown[];
+  readonly mutated: boolean;
+}): string {
+  for (let i = result.tool_calls.length - 1; i >= 0; i -= 1) {
+    if (result.tool_calls[i]!.name === 'run_analysis') {
+      return interpretationUnavailableText((result.tool_results[i] ?? {}) as Record<string, unknown>);
+    }
+  }
+  return result.mutated
+    ? 'Your model was updated, but my reply ran too long and was cut short, so I have not shown it. Ask me what changed.'
+    : 'My answer ran too long and was cut short, so I have not shown it. Try asking about one part at a time.';
+}
+
 export function typedRunOf(body: Record<string, unknown>): boolean {
   const chip = body['chip'] as { action_type?: unknown; id?: unknown } | null | undefined;
   // The Agent's own Run offer is recognised by its id too, in case a client echoes only the id.
@@ -1647,16 +1667,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     histories.set(sessionId, [...result.items]);
 
     // A hop limit is never returned as an empty answer.
-    // ⛔ AN UNFINISHED ANSWER IS ANSWERED FROM THE TURN'S OWN OUTCOME (AIX-001): after a run, the run's own
-    // explanation-unavailable sentence (no second model call, no second run); otherwise the hop-limit sentence.
-    const runThisTurn = ((): Record<string, unknown> | undefined => {
-      for (let i = result.tool_calls.length - 1; i >= 0; i -= 1) {
-        if (result.tool_calls[i]!.name === 'run_analysis') return result.tool_results[i] as Record<string, unknown> | undefined;
-      }
-      return undefined;
-    })();
     const text = result.stopped_reason === 'incomplete'
-      ? (runThisTurn !== undefined ? interpretationUnavailableText(runThisTurn) : 'I was not able to finish that within this turn. Ask me again and I will continue.')
+      ? unfinishedAnswerText(result)
       : result.stopped_reason === 'hop_limit' && result.assistant_text.length === 0
         ? 'I was not able to finish that within this turn. Ask me again and I will continue.'
         : result.assistant_text;

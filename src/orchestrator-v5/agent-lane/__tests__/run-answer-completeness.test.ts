@@ -62,6 +62,8 @@ describe('AI Experience: analysis explanation completion, both Run entry points'
   let providerReplies: Body[] = [];
   let runs = 0;
   let terminalCase: TerminalCase = 'completed';
+  /** Runtime #2009 (R&C B1): the model answers directly, with no tool call, and its answer is cut short. */
+  let directIncomplete = false;
   let scenarioId = randomUUID();
   let fallback: string;
 
@@ -76,7 +78,10 @@ describe('AI Experience: analysis explanation completion, both Run entry points'
       const body = JSON.parse(String(init?.body ?? '{}')) as Body;
       modelBodies.push(body);
       let envelope: Body;
-      if (body.tool_choice !== 'none' && runOutput(body) === undefined) {
+      if (directIncomplete) {
+        envelope = { id: 'resp_direct_synthetic', status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' },
+          output: [{ type: 'message', role: 'assistant', status: 'incomplete', content: [{ type: 'output_text', text: 'The biggest driver is' }] }] };
+      } else if (body.tool_choice !== 'none' && runOutput(body) === undefined) {
         // Only free-text Run needs the routing request. This is a scripted tool choice,
         // not a claim about how a real model will route the message.
         envelope = {
@@ -127,7 +132,7 @@ describe('AI Experience: analysis explanation completion, both Run entry points'
   });
   beforeEach(() => {
     modelBodies = []; providerReplies = []; runs = 0;
-    terminalCase = 'completed'; scenarioId = randomUUID();
+    terminalCase = 'completed'; scenarioId = randomUUID(); directIncomplete = false;
   });
 
   async function exercise(entry: Entry) {
@@ -185,4 +190,16 @@ describe('AI Experience: analysis explanation completion, both Run entry points'
       });
     }
   }
+
+  it('Runtime #2009 (R&C B1): a direct answer cut short, with no run, never promises to "continue" — it was not kept', async () => {
+    directIncomplete = true;
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: scenarioId, message: 'What drives the result most?' } });
+    const body = response.json() as Body;
+    expect(response.statusCode).toBe(200);
+    expect(runs).toBe(0);
+    expect(modelBodies).toHaveLength(1);
+    expect(body.assistant_text).toBe('My answer ran too long and was cut short, so I have not shown it. Try asking about one part at a time.');
+    expect(String(body.assistant_text)).not.toMatch(/continue/i);
+    expect(String(body.assistant_text)).not.toContain('The biggest driver is');
+  });
 });
