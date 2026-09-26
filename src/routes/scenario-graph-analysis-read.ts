@@ -111,6 +111,10 @@ import {
 } from '../orchestrator-v5/compose/unrequested-analysis-confinement.js';
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
+import {
+  readConstraintVerdictStateFromResult,
+  type ConstraintVerdictState,
+} from '../orchestrator/context/constraint-feasibility.js';
 import { deriveAnalysisFreshness, selectRunAnalysisFact } from '../orchestrator-v5/context/freshness.js';
 import { isScenarioAnalysisReasoningAuthority } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
@@ -131,6 +135,14 @@ export interface ScenarioAnalysisRead {
    * currentness claim. `null` never means "the analysis is empty".
    */
   readonly analysis_result: OlumiResponse['blocks'][number] | null;
+  /**
+   * The SELECTED fact's own constraint verdict state (R&C #70 5842182272), read by
+   * the canonical reader from the SAME fact `analysis_result` is built from, so it
+   * is present EXACTLY when that block is (the same freshness gate) and absent
+   * otherwise. `null` = the fact records no verdict ("not recorded", never a
+   * guess). Carried beside `analysis_state` because `AnalysisStateV1` is strict.
+   */
+  readonly analysis_constraint_verdict_state?: ConstraintVerdictState | null;
 }
 
 const NOT_ANSWERED: ScenarioAnalysisRead = Object.freeze({
@@ -332,7 +344,15 @@ export async function readScenarioAnalysis(
     const boundResult = analysisResult !== null && analysisState !== null
       ? projectAnalysisBlocksForRunBinding([analysisResult], analysisState)[0] ?? null
       : analysisResult;
-    return { analysis_state: analysisState, analysis_result: boundResult };
+    return {
+      analysis_state: analysisState,
+      analysis_result: boundResult,
+      // Gated on the DELIVERED block, not only the fact: a run-binding that withholds
+      // `analysis_result` withholds this too, so it ships exactly when that block does.
+      ...(fact !== null && boundResult !== null
+        ? { analysis_constraint_verdict_state: readConstraintVerdictStateFromResult(fact.result) }
+        : {}),
+    };
   } catch (err) {
     // ADDITIVE MEANS ADDITIVE: the graph read stands whatever happens here.
     log.warn(
