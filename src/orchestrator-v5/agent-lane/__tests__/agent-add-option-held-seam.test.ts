@@ -29,7 +29,7 @@ let n = 0;
 let SCENARIO = '';
 const nextScenario = () => { n += 1; SCENARIO = `5a0d1c2b-3a4f-4e5d-8c6b-7a8f9e0d2c${String(n).padStart(2, '0')}`; };
 
-type Row = { id: string; scenario_id: string; turn_id: string; request_hash: string; assistant_message: string | null; user_message: string | null; llm_calls_used: number; turn_class: string; handler_id: string | null; pending_actions: unknown[]; created_at: string };
+type Row = { id: string; scenario_id: string; turn_id: string; request_hash: string; assistant_message: string | null; user_message: string | null; llm_calls_used: number; turn_class: string; handler_id: string | null; pending_actions: unknown[]; handler_facts: unknown[]; created_at: string };
 const rows = new Map<string, Row>();
 const order: string[] = [];
 let graphOf = new Map<string, unknown>();
@@ -58,7 +58,7 @@ const store = {
     return row === undefined ? null : { ...row, pending_actions: await parsedPending(row, sid) };
   }),
   readMostRecentPendingActions: vi.fn(async (sid: string) => parsedPending(latestRow(sid), sid)),
-  append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; turn_class?: string; handler_id?: string | null; pending_actions?: unknown[]; graph?: unknown }) => {
+  append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; turn_class?: string; handler_id?: string | null; pending_actions?: unknown[]; graph?: unknown; handler_facts?: unknown[] }) => {
     const k = `${w.scenario_id}:${w.turn_id}`;
     if (!rows.has(k)) {
       tick += 1;
@@ -66,6 +66,8 @@ const store = {
         assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used ?? 0,
         turn_class: w.turn_class ?? 'direct_answer', handler_id: w.handler_id ?? null,
         pending_actions: jsonbOrder(JSON.parse(JSON.stringify(w.pending_actions ?? []))) as unknown[],
+        // Stored with the turn, as `append_turn_atomic` does, so a writer's own read-back of its fact is served.
+        handler_facts: jsonbOrder(JSON.parse(JSON.stringify(w.handler_facts ?? []))) as unknown[],
         created_at: new Date(Date.UTC(2026, 8, 26, 0, 0, tick)).toISOString() });
       order.push(k);
       if (w.graph !== undefined && w.graph !== null) graphOf.set(w.scenario_id, jsonbOrder(JSON.parse(JSON.stringify(w.graph))));
@@ -74,7 +76,9 @@ const store = {
   }),
   readRecent: vi.fn(async (sid: string) => [...order].reverse().map((k) => rows.get(k)!).filter((r) => r.scenario_id === sid && !r.turn_id.endsWith(':claim'))),
   readFactsFor: vi.fn(async () => []),
-  readFactsWithTurnFor: vi.fn(async () => []),
+  // The production shape (`supabase-store.ts` readFactsWithTurnFor): each stored fact with the id of the turn row it rode on.
+  readFactsWithTurnFor: vi.fn(async (ids: readonly string[]) => [...rows.values()].filter((r) => ids.includes(r.id))
+    .flatMap((r) => r.handler_facts.map((fact) => ({ turn_id: r.id, fact })))),
   readScenarioRunAnalysisFactsFor: vi.fn(async () => ({ facts: [], total_count: 0 })),
   invalidateScoped: vi.fn(async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] })),
   invalidateAll: vi.fn(async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] })),
@@ -628,6 +632,36 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(labels).toContain('Test £54 at release');
     expect(labels).not.toContain('Test £59 at release');
     expect(graphNow().edges.some((e) => e.from === 'dec_x' && e.to === newOption()!.id), 'linked from the decision').toBe(true);
+  }, 120_000);
+
+  it('[q6] RED (DL #70 5846924842, served BF5): the user gives a level for an option NOT linked to Price → ONE proposal carries the link and the level → one click → the REAL product adds the link and records the level (never "once approved, I can record…")', async () => {
+    const g = seedGraph();
+    g.nodes.push({ id: 'opt_c', kind: 'option', label: 'Cohort test' } as never);
+    g.edges.push({ from: 'dec_x', to: 'opt_c', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' });
+    graphOf.set(SCENARIO, g);
+    let toolOutput: { ok?: boolean; adds_links_note?: string; not_linked?: unknown } = {};
+    script = [
+      () => fnCall('propose_option_interventions', { interventions: [{ option_label: 'Cohort test', factor_label: 'Price', value: 54, basis: 'the user said £54', user_stated: true }] }),
+      (body) => {
+        const out = (body['input'] as { type?: string; output?: string }[]).find((i) => i.type === 'function_call_output');
+        toolOutput = JSON.parse(String(out?.output ?? '{}')) as typeof toolOutput;
+        return say('This links Cohort test to Price and records £54. Approve?');
+      },
+    ];
+    const t1 = await turn({ message: 'The cohort test is £54 on Pro plan price.' });
+    expect(toolOutput.ok, JSON.stringify(toolOutput)).toBe(true);
+    expect(toolOutput.not_linked).toBeUndefined();
+    expect(toolOutput.adds_links_note).toMatch(/also adds that link/);
+    const approve = approveChipOf(t1);
+    expect(approve, 'ONE approve chip').toBeDefined();
+    const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    // What the user reads: the level is saved — never "Not saved" for a level the model now holds.
+    expect(String(t2.assistant_text), String(t2.assistant_text)).not.toMatch(/Not saved|Partly saved|could not/i);
+    const after = graphNow();
+    expect(after.edges.some((e) => e.from === 'opt_c' && e.to === 'fac_price'), 'the link was added').toBe(true);
+    const lvl = after.nodes.find((x) => x.id === 'opt_c')?.interventions?.['fac_price'] as { raw_value?: unknown; value?: unknown } | undefined;
+    expect(lvl, JSON.stringify(after.nodes.find((x) => x.id === 'opt_c'))).toBeDefined();
+    expect(Number(lvl!.value)).toBeCloseTo(54 / 200, 6);
   }, 120_000);
 
   it('[p3] RED: a factor with no range at all — the user\'s £54 cannot be stored on one, so the level is left UNSET (never a bare 54) and the Agent is told why', async () => {
