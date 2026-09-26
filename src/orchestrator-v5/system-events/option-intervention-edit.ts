@@ -71,6 +71,7 @@ import { APPROVED_LEVEL_ADOPTION_SOURCE, approvedLevelSourceFor, runWithApproved
 import { structuralEdgeValue } from '../routing/add-option-transaction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { applyFactorValueEdit, type FactorValueEditResult } from './factor-value-edit.js';
+import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
 
 /**
  * Internal preparation for an explicit option→factor edit. This is NOT a wire
@@ -346,8 +347,9 @@ type ValueHandlerFact = Extract<FactorValueEditResult, { kind: 'mutated' }>['han
 
 /**
  * ⛔ ONLY THE DECLARED FACTORS' VALUES MAY CHANGE: on each declared factor, the members the canonical value writer owns
- * (`observed_state`, and the node's own `display_value`, `provenance` and `scale_frame` it restates with the value) —
- * and nothing else anywhere in the graph: no other member, node, edge, option or top-level field.
+ * (`observed_state`, and the node's own `display_value`, `provenance` and `scale_frame` it restates with the value), and
+ * the magnitude contract's own re-sizing of Olumi's links on it — nothing else anywhere in the graph: no other member,
+ * node, edge, size, option or top-level field.
  */
 const VALUE_WRITER_OWNED_NODE_MEMBERS = ['observed_state', 'display_value', 'provenance', 'scale_frame'] as const;
 export function factorValuesPostimageIsScoped(before: unknown, after: unknown, factorIds: readonly string[]): boolean {
@@ -365,7 +367,42 @@ export function factorValuesPostimageIsScoped(before: unknown, after: unknown, f
       else delete node[member];
     }
   }
+  /**
+   * ⭐ OLUMI'S OWN LINKS FOLLOW THE LEVEL (MG #70 5849417275; #2033). The value writer re-sizes the Olumi-sized links on
+   * a factor whose level moves. Each link after must be the link before (the writer left it) or EXACTLY the magnitude
+   * contract's own re-derivation (`frameDefaultedLinks`) over the declared factors, on the levels the graph now holds.
+   * That contract touches only Olumi's sizes, so a user's link, any other size and any link off these factors refuse.
+   */
+  if (restored.edges.length !== before.edges.length) return false;
+  let rederived: unknown = { ...structuredClone(after), edges: structuredClone(before.edges) };
+  for (const id of factorIds) rederived = frameDefaultedLinks(rederived, id).graph;
+  const resized = (rederived as EditableGraph).edges;
+  for (let i = 0; i < restored.edges.length; i += 1) {
+    const now = restored.edges[i]!;
+    const was = before.edges[i]!;
+    if (now.from !== was.from || now.to !== was.to) return false;
+    if (!isDeepStrictEqual(now, was) && !isDeepStrictEqual(now, resized[i])) return false;
+  }
+  restored.edges = structuredClone(before.edges);
   return isDeepStrictEqual(restored, before);
+}
+
+/**
+ * ⭐ WHICH OF OLUMI'S LINKS THIS COMMIT RE-SIZED (P1-a, DL #70 5850069309; shape AI Quality 5850079041): exactly the
+ * links that changed AND equal the magnitude contract's own re-derivation (`frameDefaultedLinks`) over the declared
+ * factors — the same comparison the scope guard admits, never a bare graph diff, so a user's link can never appear.
+ */
+export function linksResizedByContract(before: unknown, after: unknown, factorIds: readonly string[]): { from: string; to: string }[] {
+  if (!isEditableGraph(before) || !isEditableGraph(after) || before.edges.length !== after.edges.length) return [];
+  let rederived: unknown = { ...structuredClone(after), edges: structuredClone(before.edges) };
+  for (const id of factorIds) rederived = frameDefaultedLinks(rederived, id).graph;
+  const resized = (rederived as EditableGraph).edges;
+  const out: { from: string; to: string }[] = [];
+  for (let i = 0; i < after.edges.length; i += 1) {
+    const now = after.edges[i]!;
+    if (!isDeepStrictEqual(now, before.edges[i]) && isDeepStrictEqual(now, resized[i])) out.push({ from: now.from, to: now.to });
+  }
+  return out;
 }
 
 /**
@@ -379,7 +416,8 @@ async function applyApprovedFactorValues(
   frames: readonly ApprovedFactorFrame[],
   ctx: { readonly scenarioId: string; readonly turnId: string; readonly requestId: string; readonly stage: OlumiResponse['stage_indicator'] },
 ): Promise<
-  | { readonly kind: 'applied'; readonly graph: EditableGraph; readonly handlerFacts: readonly ValueHandlerFact[]; readonly confirmations: readonly string[] }
+  | { readonly kind: 'applied'; readonly graph: EditableGraph; readonly handlerFacts: readonly ValueHandlerFact[]; readonly confirmations: readonly string[];
+      readonly linksResized: readonly { from: string; to: string }[] }
   | { readonly kind: 'refused'; readonly reason: string; readonly valueIndex?: number; readonly frameIndex?: number }
 > {
   const refuse = (reason: string, valueIndex: number) => ({ kind: 'refused' as const, reason, valueIndex });
@@ -432,12 +470,16 @@ async function applyApprovedFactorValues(
       || (typeof node.scale_frame === 'number' && node.scale_frame > 1)) return refuseFrame('frame_not_applicable', i);
     (node as Record<string, unknown>).observed_state = { ...os, value: raw / f.cap, raw_value: raw, cap: f.cap, declared_scale: 'unit_interval' };
   }
+  // ⭐ A RANGE MOVES OLUMI'S LINKS TOO (MG #70 5849581652): the level a frame sets is a level like any other, so the
+  // Olumi-sized links on that factor are re-derived on it — the same contract the value writer applies (#2033), and the
+  // one the scope guard below re-derives over the values and frames together.
+  for (const id of framedIds) working = frameDefaultedLinks(working, id).graph;
   const graph = projectGraphForPersistence(working);
   const touched = [...new Set([...values.map(v => v.factorId), ...frames.map(f => f.factorId)])];
   if (!isEditableGraph(graph) || !factorValuesPostimageIsScoped(before, graph, touched)) {
     return refuse('value_scope_mismatch', Math.max(0, values.length - 1));
   }
-  return { kind: 'applied', graph, handlerFacts, confirmations };
+  return { kind: 'applied', graph, handlerFacts, confirmations, linksResized: linksResizedByContract(before, graph, touched) };
 }
 
 export type OptionInterventionExecutionInput = Omit<OptionInterventionTransactionInput, 'persistedGraph' | 'source'> & {
@@ -489,7 +531,9 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   | { readonly kind: 'committed'; readonly response: OlumiResponse; readonly graph: unknown;
       readonly analysisGraphHash: string; readonly persistedRowId: string;
       /** The commit's own version receipt, verified to describe THIS turn and postimage (null: guest / no version). */
-      readonly modelVersionReceipt?: Awaited<ReturnType<typeof commitDirectAnswer>>['modelVersionReceipt'] }
+      readonly modelVersionReceipt?: Awaited<ReturnType<typeof commitDirectAnswer>>['modelVersionReceipt'];
+      /** Olumi's own links this commit re-sized to fit a new level (P1-a); empty when none. */
+      readonly linksResized?: readonly { from: string; to: string }[] }
   | { readonly kind: 'unchanged' }
   | { readonly kind: 'refused'; readonly reason: string; readonly index?: number; readonly valueIndex?: number; readonly frameIndex?: number }
   | { readonly kind: 'unverified'; readonly reason: string; readonly commitAttempted: boolean }
@@ -520,6 +564,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   let levelBaseHash = input.expectedGraphHash;
   let valueFacts: readonly ValueHandlerFact[] = [];
   let valueConfirmations: readonly string[] = [];
+  let linksResized: readonly { from: string; to: string }[] = [];
   if (values.length + frames.length > 0) {
     if (!isEditableGraph(before) || !isDeepStrictEqual(projectGraphForPersistence(before), before)) {
       return { kind: 'refused', reason: 'canonical_graph_unavailable' };
@@ -538,9 +583,15 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     levelBaseHash = appliedHash;
     valueFacts = applied.handlerFacts;
     valueConfirmations = applied.confirmations;
+    linksResized = applied.linksResized;
   }
   const valuesChanged = values.length + frames.length > 0 && !isDeepStrictEqual(levelBase, before);
-  const candidate = applyOptionInterventionBatch({ ...common, expectedGraphHash: levelBaseHash, persistedGraph: levelBase, targets });
+  // ⭐ A VALUES-ONLY APPROVAL IS ONE COMMIT TOO (Canonical #70 5850018984): Olumi's starting point is usually values
+  // with no level, and wrote each value as its own commit. With no level to prepare, the values (and their ranges)
+  // are the whole plan: the same writer, adoption authority, scope guard, ONE append and ONE read-back.
+  const candidate = targets.length === 0 && values.length + frames.length > 0
+    ? ({ kind: 'unchanged' } as const)
+    : applyOptionInterventionBatch({ ...common, expectedGraphHash: levelBaseHash, persistedGraph: levelBase, targets });
   if (candidate.kind === 'refused') return candidate;
   if (candidate.kind === 'unchanged' && !valuesChanged) return candidate;
   // Every level already held (a compound whose values alone change): the values commit on their own, still ONE append.
@@ -559,7 +610,10 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     appliedOperations: plan.operations, nowMs: Date.now(),
     scenarioId: input.scenarioId, turnId: input.turnId, requestId: input.requestId });
   const linked = new Set(plan.operations.filter(o => o.op === 'add_edge').map(o => o.path));
-  const acknowledgment = [...valueConfirmations, ...plan.targetsWritten.map(t => formatOptionEffectWriteAck({ optionLabel: labelOf(t.optionId),
+  // P1-a: one line naming Olumi's own links this commit re-sized, labels read from the committed graph.
+  const resizedLine = groupResizedLinks(linksResized, [...values.map(v => v.factorId), ...frames.map(f => f.factorId)], labelOf)
+    .map(resizedLinksSentence);
+  const acknowledgment = [...valueConfirmations, ...resizedLine, ...plan.targetsWritten.map(t => formatOptionEffectWriteAck({ optionLabel: labelOf(t.optionId),
     factorLabel: labelOf(t.factorId), committedValue: t.modelValue })
     + (linked.has(`${t.optionId}::${t.factorId}`) ? ` ${labelOf(t.optionId)} is now linked to ${labelOf(t.factorId)}, in the same change.` : ''))]
     .join(' ');
@@ -624,7 +678,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     }
     return { kind: 'committed', response: committed.response, graph: reloaded,
       analysisGraphHash: plan.analysisGraphHash, persistedRowId: committed.persisted_row_id,
-      modelVersionReceipt: receipt };
+      modelVersionReceipt: receipt, linksResized };
   } catch {
     return { kind: 'unverified', reason: 'canonical_readback_failed', commitAttempted: true };
   }

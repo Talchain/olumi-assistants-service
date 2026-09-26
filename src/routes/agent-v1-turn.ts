@@ -70,7 +70,7 @@ import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
-import { runTurnCoaching, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
+import { runDeltaBoundToReadback, runTurnCoaching, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
 import {
   bindRunBlocksToReadback,
   firstAnalysisDeadline,
@@ -1981,6 +1981,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     const runCoaching = runTurnCoaching(lastRun, { scenarioId, graphHash, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks });
     const coachingBound = [...runBound, ...runCoaching.blocks.filter((b) => !lastRunBlocks.includes(b))];
+    // What changed since the last run: the run turn's own block and refusal reason, only beside that same run.
+    const runDelta = runDeltaBoundToReadback(lastRun, { scenarioId, graphHash, analysisState, analysisResult });
     const coachingBlocks: unknown[] = coachingBound.length === 0
       ? []
       : sanitiseOlumiResponseForEgress(
@@ -2047,6 +2049,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...(analysisState !== undefined ? { analysis_state: analysisState } : {}),
       ...(draftGraph !== undefined ? { draft_graph: draftGraph } : {}),
     } as OlumiResponse & Record<string, unknown>;
+    // What changed since the last run — the run turn's own block, or why it has none — only beside that same run.
+    wireBody = withRunDelta(wireBody, runDelta);
     /**
      * ⛔ THE LEADER FOLLOWS THE TYPED PERMISSION, AT THE WIRE (Paul: "do NOT hard-code no leader").
      * The Agent is told to name a leader only when `leader_may_be_named`; this is the deterministic
@@ -2245,6 +2249,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(stateFacts.rescaled.length > 0
           || stateFacts.ranges_added.length > 0
           || (stateFacts.ranges_not_attached ?? []).length > 0
+          || (stateFacts.links_resized ?? []).length > 0
           || stateFacts.current_state_unknown === true
           ? { state_facts: stateFacts }
           : {}),

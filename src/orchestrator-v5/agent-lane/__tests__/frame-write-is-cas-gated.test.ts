@@ -269,9 +269,10 @@ describe('every register call in this module asserts a base', () => {
     });
   });
 
-  it('⭐ and there are exactly THREE of them — a fourth must be judged, not inherited', () => {
-    // Bounds the claim above: it cannot pass by finding fewer calls than exist.
-    expect(SRC.split('graph/register`, {').length - 1).toBe(3);
+  it('⭐ and there are exactly TWO of them — a third must be judged, not inherited', () => {
+    // Bounds the claim above: it cannot pass by finding fewer calls than exist. The compound's value write was the third;
+    // it now rides the one port commit (Canonical #70 5849037691), so it is no whole-graph write at all.
+    expect(SRC.split('graph/register`, {').length - 1).toBe(2);
   });
 });
 
@@ -474,7 +475,7 @@ describe('every graph/register in this module sends the WHOLE graph', () => {
 
   it('⛔ no register call sends a bare { nodes, edges } without spreading the read graph', () => {
     const calls = SRC.split('graph/register`, {').slice(1);
-    expect(calls.length, 'the split must find the register calls').toBe(3);
+    expect(calls.length, 'the split must find the register calls').toBe(2);
     for (const [i, call] of calls.entries()) {
       // ⚠ Bounded by the call's OWN closing `});`, not a fixed character window.
       // My first version sliced 400 chars and the docblock I had just added pushed

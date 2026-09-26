@@ -29,6 +29,7 @@
  * path whose whole point is that we do not know what happened.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 
@@ -377,7 +378,7 @@ describe('the Agent\'s in-process batch door — ONE user operation → ONE atom
     expect((await call(TWO, NEW_LINK)).status).toBe('committed');
     const retry = await call(TWO, [], 'ffffffff-ffff-4fff-8fff-ffffffffffff');
     expect(retry).toEqual({ status: 'committed', graph_hash: currentHash(), receipt: null, already_applied: true,
-      committed_levels: TWO.map(l => ({ option_id: l.option_id, factor_id: l.factor_id, value: l.value })) });
+      committed_levels: TWO.map(l => ({ option_id: l.option_id, factor_id: l.factor_id, value: l.value })), links_resized: [] });
     expect(rows.size).toBe(1);
   });
 
@@ -490,6 +491,128 @@ describe('the Agent\'s in-process batch door — ONE user operation → ONE atom
       expect(JSON.stringify(persisted)).toBe(before);
     });
 
+    it('RED (Canonical #70 5850018984): a VALUES-ONLY approval (Olumi\'s starting point) is ONE commit — every value, one row, one receipt', async () => {
+      const r = await callWith([{ factor_id: 'factor', value: 60, unit: '%', author: 'model_proposed' },
+        { factor_id: 'amount_factor', value: 10, unit: 'seats', author: 'model_proposed' }], [], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccca5',
+      [{ factor_id: 'amount_factor', cap: 100 }]);
+      expect(r, JSON.stringify(r)).toMatchObject({ status: 'committed', already_applied: false, committed_levels: [] });
+      expect(rows.size, 'every value of the approval: ONE append').toBe(1);
+      expect(factorOs('factor')).toMatchObject({ value: 0.6, raw_value: 60, source: 'user_assumption' });
+      expect(factorOs('amount_factor')).toMatchObject({ value: 0.1, raw_value: 10, cap: 100, source: 'user_assumption' });
+      expect(([...rows.values()][0]!.write.handler_facts as { fact_type: string }[]).map(f => f.fact_type)).toEqual(['set_factor_value', 'set_factor_value']);
+    });
+
+    it('RED (DL 5850026671, served F1s shape): Olumi\'s 3 starting values on the served graph → ONE commit, and churn\'s links follow its level', async () => {
+      const served = JSON.parse(readFileSync('tests/fixtures/magnitude/c-run1-served-graphs.json', 'utf-8')).run1_step01;
+      persisted = projectGraphForPersistence(structuredClone(served));
+      const START = [
+        { factor_id: 'monthly_churn', value: 5, unit: '% of Pro subscribers per month', author: 'model_proposed' as const },
+        { factor_id: 'active_pro_subscribers', value: 250, unit: 'Pro subscribers', author: 'model_proposed' as const },
+        { factor_id: 'new_pro_subscriber_acquisition', value: 30, unit: 'new Pro subscribers per month', author: 'model_proposed' as const },
+      ];
+      const r = await callWith(START, [], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccc10');
+      expect(r, JSON.stringify(r)).toMatchObject({ status: 'committed', already_applied: false });
+      expect(rows.size, 'the served 3 commits are ONE').toBe(1);
+      expect(([...rows.values()][0]!.write.handler_facts as { fact_type: string }[]).filter(f => f.fact_type === 'set_factor_value')).toHaveLength(3);
+      for (const v of START) expect(factorOs(v.factor_id), v.factor_id).toMatchObject({ raw_value: v.value, source: 'user_assumption' });
+      const into = (from: string) => (graphNow().edges as { from: string; to: string; strength: { mean: number } }[]).find(e => e.from === from && e.to === 'monthly_churn')!;
+      expect(into('price_sensitivity').strength.mean).toBe(0.0125);
+      // A retry of the same approval adds no version.
+      const retry = await callWith(START, [], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccc11');
+      expect(retry, JSON.stringify(retry)).toMatchObject({ status: 'committed', already_applied: true, receipt: null });
+      expect(rows.size).toBe(1);
+    });
+
+    describe('⭐ P1-a (DL #70 5850069309, shape AI Quality 5850079041): the receipt names Olumi\'s links a value re-sized', () => {
+      const CHURN_TO = (value: number) => [{ factor_id: 'monthly_churn', value, unit: '% of Pro subscribers per month', author: 'user_specified' as const }];
+      // The ONE row's own conversation text: the receipt the user reads, as the commit persisted it.
+      const said = () => String([...rows.values()][0]!.write.assistantMessage);
+      const INTO_CHURN = [{ from: 'ai_feature_availability', to: 'monthly_churn' }, { from: 'price_sensitivity', to: 'monthly_churn' }];
+      const byPair = (l: readonly { from: string; to: string }[]) => [...l].map(x => ({ from: x.from, to: x.to })).sort((a, b) => a.from.localeCompare(b.from));
+
+      it('RED (served 201724Z, churn 7 → 12): BOTH links into churn are named — on the door result AND in the ONE receipt', async () => {
+        const served = JSON.parse(readFileSync('tests/fixtures/magnitude/c-run1-served-graphs.json', 'utf-8')).run1_step01;
+        persisted = projectGraphForPersistence(structuredClone(served));
+        expect((await callWith(CHURN_TO(7), [], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccc20')).status).toBe('committed');
+        rows.clear();
+        const r = await callWith(CHURN_TO(12), [], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccc21');
+        expect(r, JSON.stringify(r)).toMatchObject({ status: 'committed', already_applied: false });
+        if (r.status !== 'committed') return;
+        expect(byPair((r.links_resized ?? []).filter(l => l.to === 'monthly_churn'))).toEqual(INTO_CHURN);
+        // Every pair named is one the committed graph actually re-sized, and no pair is named twice.
+        expect(new Set((r.links_resized ?? []).map(l => `${l.from}::${l.to}`)).size).toBe((r.links_resized ?? []).length);
+        expect(said()).toContain('Olumi also re-sized its own placeholder links into "Monthly churn" so they fit the new level');
+        expect(said()).toContain('"Price sensitivity"');
+        expect(said()).toContain('"AI feature availability"');
+        expect(said()).toContain('They are Olumi\'s placeholders, not measurements.');
+      });
+
+      it('CONTRAST: a value on a factor with NO Olumi-sized link → an empty list and NO re-size line', async () => {
+        const r = await callWith([{ factor_id: 'factor', value: 60, unit: '%', author: 'user_specified' }], [], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccc22');
+        expect(r, JSON.stringify(r)).toMatchObject({ status: 'committed', already_applied: false, links_resized: [] });
+        expect(said()).not.toContain('re-sized');
+      });
+
+      it('CONTROL: a link the USER sized is never named (and never moved) — only Olumi\'s own link into churn is', async () => {
+        const served = JSON.parse(readFileSync('tests/fixtures/magnitude/c-run1-served-graphs.json', 'utf-8')).run1_step01;
+        const users = served.edges.find((e: { from: string; to: string }) => e.from === 'price_sensitivity' && e.to === 'monthly_churn');
+        users.provenance = { source: 'user_specified' };
+        persisted = projectGraphForPersistence(structuredClone(served));
+        const usersBefore = structuredClone((persisted as { edges: { from: string; to: string }[] }).edges.find(e => e.from === 'price_sensitivity' && e.to === 'monthly_churn'));
+        const r = await callWith(CHURN_TO(12), [], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccc23');
+        expect(r, JSON.stringify(r)).toMatchObject({ status: 'committed', already_applied: false });
+        if (r.status !== 'committed') return;
+        expect(byPair((r.links_resized ?? []).filter(l => l.to === 'monthly_churn'))).toEqual([{ from: 'ai_feature_availability', to: 'monthly_churn' }]);
+        expect(said()).toContain('("AI feature availability")');
+        expect(said()).not.toContain('"Price sensitivity"');
+        expect((graphNow().edges as { from: string; to: string }[]).find(e => e.from === 'price_sensitivity' && e.to === 'monthly_churn')).toStrictEqual(usersBefore);
+      });
+
+      it('a retry re-sizes nothing: already applied, an empty list', async () => {
+        const served = JSON.parse(readFileSync('tests/fixtures/magnitude/c-run1-served-graphs.json', 'utf-8')).run1_step01;
+        persisted = projectGraphForPersistence(structuredClone(served));
+        expect((await callWith(CHURN_TO(12), [], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccc24')).status).toBe('committed');
+        const retry = await callWith(CHURN_TO(12), [], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccc25');
+        expect(retry, JSON.stringify(retry)).toMatchObject({ status: 'committed', already_applied: true, receipt: null, links_resized: [] });
+      });
+    });
+
+    it('served F1s shape with ONE value refused → NONE of the starting values is written (persisted byte-identical)', async () => {
+      const served = JSON.parse(readFileSync('tests/fixtures/magnitude/c-run1-served-graphs.json', 'utf-8')).run1_step01;
+      persisted = projectGraphForPersistence(structuredClone(served));
+      const before = JSON.stringify(persisted);
+      const r = await callWith([
+        { factor_id: 'monthly_churn', value: 5, unit: '% of Pro subscribers per month', author: 'model_proposed' },
+        { factor_id: 'raise_to_59_at_release', value: 3, author: 'model_proposed' },
+      ], [], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccc12');
+      expect(r).toEqual({ status: 'refused', reason: 'value_target_not_factor', value: { factor_id: 'raise_to_59_at_release' } });
+      expect(rows.size).toBe(0);
+      expect(JSON.stringify(persisted)).toBe(before);
+    });
+
+    it('a values-only approval with ONE value refused → nothing written, the other value included (persisted byte-identical)', async () => {
+      const before = JSON.stringify(persisted);
+      const r = await callWith([{ factor_id: 'factor', value: 60, unit: '%', author: 'model_proposed' }, { factor_id: 'option', value: 3, author: 'model_proposed' }], [], [],
+        'cccccccc-cccc-4ccc-8ccc-cccccccccca6');
+      expect(r).toEqual({ status: 'refused', reason: 'value_target_not_factor', value: { factor_id: 'option' } });
+      expect(rows.size).toBe(0);
+      expect(JSON.stringify(persisted)).toBe(before);
+    });
+
+    it('a retry of a committed values-only approval writes nothing more — already applied', async () => {
+      const V = [{ factor_id: 'factor', value: 60, unit: '%', author: 'model_proposed' as const }];
+      expect((await callWith(V, [], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccca7')).status).toBe('committed');
+      const retry = await callWith(V, [], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccca8');
+      expect(retry, JSON.stringify(retry)).toMatchObject({ status: 'committed', already_applied: true, receipt: null });
+      expect(rows.size).toBe(1);
+    });
+
+    it('an EMPTY approval (no level, no value, no range) is still refused — nothing to write', async () => {
+      const r = await callWith([], [], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccca9');
+      expect(r).toMatchObject({ status: 'refused', reason: 'no_targets' });
+      expect(rows.size).toBe(0);
+    });
+
     it('a stale base → stale, and the value is not applied (the persisted model is byte-identical)', async () => {
       const before = JSON.stringify(persisted);
       const r = await commitOptionLevelsInProcess({ scenario_id: SCENARIO_ID, turn_id: 'abababab-abab-4bab-8bab-abababababac',
@@ -560,6 +683,38 @@ describe('the Agent\'s in-process batch door — ONE user operation → ONE atom
         'cccccccc-cccc-4ccc-8ccc-cccccccccca1', [{ factor_id: 'amount_factor', cap: 100 }]);
       expect(r.status, JSON.stringify(r)).toBe('committed');
       expect(factorOs('amount_factor'), JSON.stringify(factorOs('amount_factor'))).toMatchObject({ value: 0.1, raw_value: 10, cap: 100, source: 'user_assumption' });
+    });
+
+    it('RED (MG 5849417275, served F1 starting point): Olumi\'s churn 5% + a level → ONE commit, and the 2 links into churn follow the level', async () => {
+      const served = JSON.parse(readFileSync('tests/fixtures/magnitude/c-run1-served-graphs.json', 'utf-8')).run1_step01;
+      persisted = projectGraphForPersistence(structuredClone(served));
+      const r = await callWith([{ factor_id: 'monthly_churn', value: 5, unit: '% of Pro subscribers per month', author: 'model_proposed' }],
+        [{ option_id: 'keep_current_setup', factor_id: 'pro_plan_price', value: 0.245, author: 'user_specified' }], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccca3');
+      expect(r, JSON.stringify(r)).toMatchObject({ status: 'committed', already_applied: false });
+      expect(rows.size, 'the value, its links\' re-size and the level: ONE append').toBe(1);
+      expect(factorOs('monthly_churn')).toMatchObject({ value: 0.05, raw_value: 5, source: 'user_assumption' });
+      const into = (from: string) => (graphNow().edges as { from: string; to: string; strength: { mean: number }; provenance?: { magnitude?: string } }[])
+        .find(e => e.from === from && e.to === 'monthly_churn')!;
+      expect([into('price_sensitivity').strength.mean, into('ai_feature_availability').strength.mean]).toEqual([0.0125, -0.0125]);
+      expect(into('price_sensitivity').provenance?.magnitude).toBe('olumi_placeholder');
+    });
+
+    it('RED (MG 5849581652): a RANGE moves Olumi\'s links like a value does — churn\'s bare 5 on a range of 100 → the 2 links into churn ±0.0125', async () => {
+      const served = JSON.parse(readFileSync('tests/fixtures/magnitude/c-run1-served-graphs.json', 'utf-8')).run1_step01;
+      // The served graph, with churn holding a bare 5 and no range of its own (the shape a frame is for).
+      const churn = served.nodes.find((n: { id: string }) => n.id === 'monthly_churn');
+      delete churn.scale_frame;
+      churn.observed_state = { value: 5, unit: '% of Pro subscribers per month', source: 'brief_extraction' };
+      persisted = projectGraphForPersistence(structuredClone(served));
+      const r = await callWith([], [{ option_id: 'keep_current_setup', factor_id: 'pro_plan_price', value: 0.245, author: 'user_specified' }], [],
+        'cccccccc-cccc-4ccc-8ccc-cccccccccca4', [{ factor_id: 'monthly_churn', cap: 100 }]);
+      expect(r, JSON.stringify(r)).toMatchObject({ status: 'committed', already_applied: false });
+      expect(rows.size).toBe(1);
+      expect(factorOs('monthly_churn')).toMatchObject({ value: 0.05, raw_value: 5, cap: 100 });
+      const into = (from: string) => (graphNow().edges as { from: string; to: string; strength: { mean: number }; provenance?: { magnitude?: string } }[])
+        .find(e => e.from === from && e.to === 'monthly_churn')!;
+      expect([into('price_sensitivity').strength.mean, into('ai_feature_availability').strength.mean]).toEqual([0.0125, -0.0125]);
+      expect(into('ai_feature_availability').provenance?.magnitude).toBe('olumi_placeholder');
     });
 
     it('a retry of the committed compound writes nothing more — already applied', async () => {

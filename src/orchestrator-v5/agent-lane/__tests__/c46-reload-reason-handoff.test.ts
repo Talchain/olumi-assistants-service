@@ -78,6 +78,7 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import {
   WITHHELD_CONSTRAINT_VERDICT,
   WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN,
+  WITHHELD_RUN_OUT_OF_DATE,
   WITHHELD_UNREQUESTED_ANALYSIS,
 } from '../../compose/analysis-state-v1.js';
 
@@ -271,9 +272,12 @@ describe('C46 on the production reload — the stamp reaches it; the REASON wait
  * These two rows pass without H1 as well (EXECUTED): the route presents no fact once the run is out of date. They
  * GUARD the rule — a route that judged its historical fact on the edited graph would name the product here.
  *
- * ⚠ That reply's reason, `constraint_verdict_withheld`, is the base read route's for EVERY out-of-date run (no fact ⇒
- * `mayNameLeadingOption: false` ⇒ the constraint token), not a C46 claim. It is pinned here as today's value, by
- * identity with the linear control; whether an out-of-date run should carry a limit reason at all is Canonical's.
+ * ⚠ That reply's reason WAS `constraint_verdict_withheld` for EVERY out-of-date run (no fact ⇒ `mayNameLeadingOption:
+ * false` ⇒ the constraint token), pinned here as "today's value … whether an out-of-date run should carry a limit reason
+ * at all is Canonical's". P1-d (AI Quality #70 5850056041, DL 5850069309) answered it on a served run: the canvas read it
+ * as `· Goal only` and the Agent said a limit was not met, on a run whose limit verdict PERMITTED its leader. The reply
+ * is now `analysis_out_of_date` (`compose/__tests__/leader-claim-out-of-date.test.ts`), still identical to the linear
+ * control's, and neither reads as withheld for a limit.
  */
 describe('Runtime\'s row on the reload: after an edit, the graph the run analysed is out of reach — nothing new is withheld', () => {
   /** The user deletes "Pro subscribers": its node, every link touching it, and the product it made MRR. */
@@ -302,7 +306,7 @@ describe('Runtime\'s row on the reload: after an edit, the graph the run analyse
     edited.edges = edited.edges.filter((e) => e.from !== 'non_pro_mrr' && e.to !== 'non_pro_mrr');
     return reload(edited, fact);
   }
-  const STALE_REPLY = { permitted: false, withheld_reason: WITHHELD_CONSTRAINT_VERDICT };
+  const STALE_REPLY = { permitted: false, withheld_reason: WITHHELD_RUN_OUT_OF_DATE };
 
   it('PREMISE: before the edit the reload judges the graph the run analysed — the product is the reason', async () => {
     const graph = await build(PRODUCT);
@@ -326,6 +330,8 @@ describe('Runtime\'s row on the reload: after an edit, the graph the run analyse
     expect(control.analysis_state?.run_state).toMatchObject({ kind: 'complete_stale', cause: 'graph_changed' });
     expect(read.analysis_state?.leader_claim, 'the same reply as the linear brief\'s out-of-date run').toEqual(control.analysis_state?.leader_claim);
     expect(leaderWithheldForALimit(read.analysis_state)).toBe(leaderWithheldForALimit(control.analysis_state));
+    // P1-d: an out-of-date run, whose limit verdict permitted (the linear control's), is never "withheld for a limit".
+    expect(leaderWithheldForALimit(control.analysis_state), 'P1-d: out of date is not a limit').toBe(false);
   });
 
   it('GUARD (discriminating): the edit KEEPS the product — still a graph the run never analysed; the same out-of-date reply, never the product', async () => {

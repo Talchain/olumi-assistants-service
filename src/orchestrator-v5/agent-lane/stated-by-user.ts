@@ -71,6 +71,31 @@ const sameWord = (a: string, b: string): boolean => {
 };
 
 /**
+ * ⛔ A LINK IS THE USER'S ONLY WHEN THEY NAMED WHAT IT ACTS ON (AI Conversation #70 5849012990 U3; DL 5849023213 (2)).
+ * Served on 79c299a: the user typed two option names, and the Agent's links from one of them to "AI feature
+ * availability" and a new "Paid AI add-on price" — neither named, neither with a level — were stored as the user's.
+ *
+ * THE RULE, read with the model's OWN labels — no word list. The factor is named when THIS turn's typed words hold its
+ * whole label, or one of its words that is its own: not a word of an option's name (the user typed "Keep £49 and add a paid AI add-on" to
+ * name the option, so its "paid" and "add" name no factor), and not a word another quantity's label shares ("monthly"
+ * in Monthly churn and Monthly new Pro subscribers names neither). Earlier turns do not count: words in the brief are
+ * not a claim that THIS option acts on that factor. Every miss under-claims: the link is recorded as Olumi's, and said.
+ */
+export function factorTheUserNamed(
+  factorLabel: string,
+  turnText: string | null | undefined,
+  scope: { readonly options: readonly string[]; readonly others: readonly string[] },
+): boolean {
+  if (typeof turnText !== 'string' || turnText.trim() === '') return false;
+  const phrase = (t: string): string => ` ${t.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w !== '').join(' ')} `;
+  if (phrase(factorLabel).trim() !== '' && phrase(turnText).includes(phrase(factorLabel))) return true;
+  const shared = [...scope.options, ...scope.others].flatMap(wordsOf);
+  const own = wordsOf(factorLabel).filter((w) => !shared.some((s) => sameWord(w, s)));
+  const typed = wordsOf(turnText);
+  return own.some((w) => typed.some((t) => sameWord(w, t)));
+}
+
+/**
  * ⛔ A FIGURE IS THE USER'S FOR AN ENTITY ONLY WHERE THEY WROTE IT ABOUT THAT ENTITY (ChatGPT #70 5845853364: numeric
  * grounding binds figure + entity + unit + source context, not the same numeral anywhere in the conversation).
  * "Our MRR is £12,000." grounds £12,000 for MRR, never for the Pro plan price; `figureTheUserWrote` alone accepted it

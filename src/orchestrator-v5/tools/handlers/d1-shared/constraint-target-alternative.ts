@@ -92,7 +92,9 @@ export interface TargetAlternativeOption {
  * The real order, mirrored below exactly:
  *   1. the node's own `goal_threshold_frame === 'delta'`  -> attested
  *   2. EVERY option intervenes on it                      -> pinned
- *   3. it has a directed (non-bidirected) incoming edge    -> UNANCHORED
+ *   3. it has a directed (non-bidirected) incoming edge    -> UNANCHORED, unless the limit is
+ *      LEVEL-framed and there are options to compare (PLoT `e2755cfe`/`30d7a60b`, 26 Sep:
+ *      `observed_baseline_level` anchors it on its baseline) -> not a refusal proof (P1-c)
  *   4. it is a root carrying a finite observed value       -> anchored
  *
  * ⚠ ROOT IS DERIVED FROM THE CALCULATION GRAPH, NOT FROM UI LINKS. PLoT
@@ -124,6 +126,11 @@ function sampleFrameIsAnchored(
     readonly edges?: readonly TargetAlternativeEdge[];
     readonly options?: readonly TargetAlternativeOption[];
   },
+  /**
+   * The CONSTRAINT's own `value_frame`, as PLoT's `resolveConstraintSampleFrameAnchor` takes it. Opens limb 3's
+   * level exception only; a caller with no constraint in hand gets exactly the three-limb verdict.
+   */
+  valueFrame?: unknown,
 ): boolean {
   // 1. The node itself attests a delta frame.
   if (node.goal_threshold_frame === 'delta') return true;
@@ -158,7 +165,14 @@ function sampleFrameIsAnchored(
     if (edge.to !== nodeId) continue;
     const fromKind = typeof edge.from === 'string' ? kindById.get(edge.from) : undefined;
     if (fromKind !== undefined && strippedKinds.has(fromKind)) continue;
-    return false;
+    // ⭐ A LEVEL LIMIT IS NOT REFUSED HERE (P1-c, served 26 Sep). PLoT `e2755cfe` / `30d7a60b` (staging
+    // `1f6ad52`, `constraint-reliability.ts` `isObservedBaselineLevelTarget`) anchors a level-framed limit on a
+    // non-root target on its observed baseline, when there are options to compare. Whether it then scores
+    // turns on a figure the user can give (the baseline) and on forwarding this module cannot see, so a
+    // non-root target is no longer PROOF of refusal for such a limit. Saying "worked out from other parts"
+    // there was the false cause on the served first pass: churn had no baseline yet, and was checked two
+    // turns later on the same links.
+    return valueFrame === 'level' && Array.isArray(input.options) && input.options.length > 0;
   }
 
   // 4. A root carrying a finite observed value anchors on its own level. The
@@ -259,7 +273,7 @@ export function collectUnanchoredConstraintTargetIds(
     const node = byId.get(nodeId);
     // Absent target ⇒ we could not look ⇒ NOT proved unanchored.
     if (node === undefined) continue;
-    if (!sampleFrameIsAnchored(nodeId, node, { nodes, edges, options })) out.add(constraintId);
+    if (!sampleFrameIsAnchored(nodeId, node, { nodes, edges, options }, obj.value_frame)) out.add(constraintId);
   }
   return out;
 }

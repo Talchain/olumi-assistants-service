@@ -59,6 +59,13 @@ export interface MagnitudeNode {
   /** The unit the drafter gave this quantity, for a node whose graph fields carry none. */
   readonly unit?: string | null;
   readonly option_levels: readonly number[];
+  /**
+   * ⭐ A LEVEL LIMIT IN "%" NAMES THIS NODE (joined verdict #2, DL #70 5849144218; served Run 1, CEE 3fdd9c3). The
+   * user limits its value in percent, so its quantity is a percentage LEVEL whatever its own unit's wording says —
+   * served: "% of Pro subscribers per month", which `isPercentWithPeriod` rightly does not read as a level on words
+   * alone. Set from the admitted limit (a structured field), never from the wording. See `levelDomain`.
+   */
+  readonly percent_level?: boolean;
 }
 
 const finite = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
@@ -103,15 +110,19 @@ const UNIT_INTERVAL: LevelDomain = { lo: 0, hi: 1 };
  *  · a percentage LEVEL (`isPercentWithPeriod`) on a pinned 100 frame (or already a proportion) → [0, 1];
  *  · a currency amount (the estate's one currency vocabulary) → [0, ∞);
  *  · anything else already on frame 1 (a fraction) → [0, 1];
- *  · percentage points, basis points, a "% change" or an unrecognised unit → unbounded (never questioned).
+ *  · percentage points, basis points, a "% change" or an unrecognised unit → unbounded (never questioned);
+ *  · `percentLevel` (a level limit in "%" names the node, `MagnitudeNode.percent_level`): a percent-class unit whose
+ *    wording alone does not read as a level ("% of Pro subscribers per month") is read as one → [0, 1].
  *
  * ⚠ A COUNT READS AS UNBOUNDED HERE. The design puts counts on [0, ∞), but the estate has no count vocabulary
  * and the design forbids an inline list, so a count is left unchecked rather than guessed. The PR says so.
  */
-export function levelDomain(unit: string | undefined, frame: number): LevelDomain | null {
+export function levelDomain(unit: string | undefined, frame: number, percentLevel = false): LevelDomain | null {
   const cls = classifyUnitScaleClass(unit);
   if (cls === 'percentage_points' || cls === 'basis_points') return null;
-  if (cls === 'percent') return unit !== undefined && isPercentWithPeriod(unit) && (frame === 100 || frame === 1) ? UNIT_INTERVAL : null;
+  if (cls === 'percent') {
+    return unit !== undefined && (isPercentWithPeriod(unit) || percentLevel) && (frame === 100 || frame === 1) ? UNIT_INTERVAL : null;
+  }
   if (unit !== undefined && readCurrencyUnitWithQualifiers(unit).kind === 'currency') return { lo: 0, hi: Infinity };
   return frame === 1 ? UNIT_INTERVAL : null;
 }
@@ -258,7 +269,8 @@ export interface LinkSizing {
 
 const fmt = (x: number): string => String(Number(x.toPrecision(6)));
 
-function isSwitch(node: MagnitudeNode, frame: number | undefined): boolean {
+/** A 0/1 switch: frame 1, and the level held and every option level are exactly 0 or 1. */
+export function isSwitch(node: MagnitudeNode, frame: number | undefined): boolean {
   if (frame !== 1) return false;
   const os = node.observed_state ?? {};
   const levels = [...(finite(os.value) ? [os.value] : []), ...node.option_levels.filter(finite)];
@@ -288,10 +300,12 @@ function statementWords(
   amount: number, perSourceChange: number, source: MagnitudeNode, target: MagnitudeNode,
   sourceFrame: number | undefined, targetFrame: number | undefined,
 ): string {
-  const unit = unitOf(source);
+  // The source's change is said by the SAME rule as the target's (`amountWords`): a percentage LEVEL moves in points.
+  // Served (audit MAG-4/UF-2, bf-20260926T202507Z): "raising "Monthly churn" by 1 % lowers "MRR" …" beside "… raises
+  // "Monthly churn" by 1.5 points" in one reply. "1 %" reads as a relative change (6% → 6.06%), not the point meant.
   const cause = isSwitch(source, sourceFrame) && perSourceChange === 1
     ? `switching on "${source.label}"`
-    : `${perSourceChange > 0 ? 'raising' : 'lowering'} "${source.label}" by ${fmt(Math.abs(perSourceChange))}${unit === undefined ? '' : ` ${unit}`}`;
+    : `${perSourceChange > 0 ? 'raising' : 'lowering'} "${source.label}" by ${amountWords(perSourceChange, source, sourceFrame)}`;
   return `${cause} ${amount < 0 ? 'lowers' : 'raises'} "${target.label}" by ${amountWords(amount, target, targetFrame)}`;
 }
 
@@ -362,7 +376,10 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
   };
 
   const baseline = knownBaseline(target);
-  const domain = targetFrame === undefined ? null : levelDomain(unitOf(target), targetFrame);
+  // A percentage level by its limit — unless an option sets it below zero: a quantity that goes negative is a change,
+  // not a level (typed numbers decide it, never the unit's words).
+  const percentLevel = target.percent_level === true && target.option_levels.every((v) => v >= 0);
+  const domain = targetFrame === undefined ? null : levelDomain(unitOf(target), targetFrame, percentLevel);
   const swing = sourceSwing(source);
   const check = baseline !== undefined && domain !== null && swing !== null && withinDomain({ lo: baseline, hi: baseline }, domain)
     ? { baseline, domain, swing, frame: targetFrame as number }

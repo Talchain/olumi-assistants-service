@@ -71,7 +71,9 @@ describe('a level is the user\'s, Olumi\'s disclosed estimate, or unset — neve
     const { caps, sent } = setup();
     await caps.proposeNewOption(ctxSaying(ADD_ALL), { ...suggested({ value: 64, unit: '£', estimate: true, basis: 'a step above the £59 option' }), label: 'Test £54 at release' } as never);
     expect(priceLevelSent(sent)?.value, JSON.stringify(sent[0]?.body)).toBeNull();
-    expect(priceLevelSent(sent)).not.toHaveProperty('source');
+    // No level and no figure. On a level-less link `source` names who made the LINK (U3 part 2, DL 5849023213 (2)):
+    // this turn's words do not name Pro plan price, so the link is Olumi's.
+    expect(priceLevelSent(sent)).toEqual({ factor_id: 'pro_plan_price', value: null, source: 'cee_hypothesis' });
   });
 
   it('CONTRAST: a bare number in the name is not a price ("Hire 2 developers" never blocks an estimate of 64 on a £ factor)', async () => {

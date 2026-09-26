@@ -23,6 +23,16 @@ export const SLIGHT_IS_WEAK =
   ' The canvas calls the lowest band Slight: when the user calls a link slight, that IS `weak` \u2014 pass `weak`, and never ask '
   + 'whether slight means weak. When you ask the user for a band, use the canvas\u2019s words: slight, moderate, strong or very strong.';
 
+/**
+ * ⛔ A LEVEL'S LINK IS NOT A STRENGTH TO ASK ABOUT (AI Conversation #70 5849437163 U2b, served c35801a): the user gave
+ * "it lowers Monthly churn to 6%" for an option not yet linked to churn; the model left that level out and asked "how
+ * strong is that effect" — the band question that belongs to a CAUSAL link between factors. A level on an unlinked
+ * factor brings its own option → factor link in the same change (`link_for_level`, no strength), so it is sent as is.
+ */
+export const LEVEL_BRINGS_ITS_LINK =
+  ' A level on a factor the option is not linked to yet brings that link with it, in the same change: the link only says the '
+  + 'option acts on that factor, so never ask how strong it is — send the level the user gave.';
+
 export interface AgentToolContext {
   /** Bound from the request, never from model output. */
   readonly scenario_id: string;
@@ -255,7 +265,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'not just itself. Give the value in the factor\u2019s own units, as the user would say it ' +
       '(\u00a354, not 0.27). This changes nothing: it records an exact proposal and returns its id for ' +
       'authorise_change; show the user what it sets first, never the id. Propose only what the user\u2019s words support; if an option\u2019s level is ' +
-      'not stated, offer one as an assumption and say so, exactly as with propose_assumptions.',
+      'not stated, offer one as an assumption and say so, exactly as with propose_assumptions.' + LEVEL_BRINGS_ITS_LINK,
     parameters: obj({
       interventions: {
         type: 'array',
@@ -287,7 +297,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'of propose_assumptions + propose_option_interventions whenever both are needed: two separate ' +
       'proposals cannot both be applied from one approval, because applying the first changes the model ' +
       'the second was made against. This changes nothing on its own. Every figure is the user’s ' +
-      'assumption to adopt or correct, NEVER a measurement — say so. Values in the factor’s own units.',
+      'assumption to adopt or correct, NEVER a measurement — say so. Values in the factor’s own units.' + LEVEL_BRINGS_ITS_LINK,
     parameters: obj({
       assumptions: {
         type: 'array',
