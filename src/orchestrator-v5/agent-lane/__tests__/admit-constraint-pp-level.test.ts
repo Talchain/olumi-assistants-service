@@ -125,6 +125,14 @@ describe('F-C: a LEVEL limit in percentage points is a percent', () => {
     expect(canonicaliseLimitUnit(10, 'ppm', scaleOf(RUN2, 'monthly_churn'), 'level').unit).toBe('ppm');
   });
 
+  // MG's review probe (CEE #2057, 5850936126), pinned here so a later loosening of the tail is caught.
+  it('a points spelling with a non-period tail stays verbatim on a LEVEL; a period tail is a percent', () => {
+    const s = scaleOf(RUN2, 'monthly_churn');
+    expect(canonicaliseLimitUnit(10, 'percentage points of revenue', s, 'level').unit).toBe('percentage points of revenue');
+    expect(canonicaliseLimitUnit(10, 'pp change', s, 'level').unit).toBe('pp change');
+    expect(canonicaliseLimitUnit(10, 'percentage points per month', s, 'level').unit).toBe('%');
+  });
+
   it('percentLevelFrame is the same rule: a level in points pins 100, a delta does not', () => {
     expect(percentLevelFrame(10, 'percentage points', 'level')).toBe(100);
     expect(percentLevelFrame(10, 'pp', 'level')).toBe(100);
