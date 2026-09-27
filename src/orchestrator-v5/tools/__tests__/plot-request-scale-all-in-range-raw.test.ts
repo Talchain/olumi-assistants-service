@@ -17,3 +17,24 @@ describe('an all-in-range request carrying a raw value is demoted', () => {
     expect(out.perOption[0]!.monthly_churn).toBe(2.5);
   });
 });
+
+/** Shape probe (the input class, not the served example): every row names the wire value PLoT will read. */
+describe('probe — percent levels on a framed churn node, alone and beside other levers', () => {
+  const flag = { id: 'grandfathered', kind: 'factor', label: 'Grandfathered', observed_state: { value: 0, raw_value: 0, unit: '0/1' } };
+  const map = () => buildFactorScaleMap([churn, flag]);
+  const lvl = (raw: number) => ({ value: raw / 100, raw_value: raw, unit: '%' });
+  const rows: Array<[string, Array<Record<string, unknown>>, Array<Record<string, number>>]> = [
+    ['0.8% alone', [{ monthly_churn: lvl(0.8) }], [{ monthly_churn: 0.008 }]],
+    ['1% alone (base sent 1 = 100%)', [{ monthly_churn: lvl(1) }], [{ monthly_churn: 0.01 }]],
+    ['0% alone', [{ monthly_churn: lvl(0) }], [{ monthly_churn: 0 }]],
+    ['0.8% and 0.5% on two options', [{ monthly_churn: lvl(0.8) }, { monthly_churn: lvl(0.5) }], [{ monthly_churn: 0.008 }, { monthly_churn: 0.005 }]],
+    ['0.8% beside 3% (out of range → the request is raw)', [{ monthly_churn: lvl(0.8) }, { monthly_churn: lvl(3) }], [{ monthly_churn: 0.8 }, { monthly_churn: 3 }]],
+    ['2.5% alone (raw)', [{ monthly_churn: lvl(2.5) }], [{ monthly_churn: 2.5 }]],
+  ];
+  for (const [name, input, want] of rows) {
+    it(name, () => {
+      const out = projectRequestInterventionsToWireScale(input as never, map());
+      want.forEach((w, i) => { for (const [k, v] of Object.entries(w)) expect(out.perOption[i]![k]).toBeCloseTo(v, 10); });
+    });
+  }
+});
