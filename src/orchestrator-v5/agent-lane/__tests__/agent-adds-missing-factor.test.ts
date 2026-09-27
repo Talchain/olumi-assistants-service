@@ -178,13 +178,15 @@ describe('A1 — propose_new_option sends a new SWITCH switched on, in the same 
     expect(params, JSON.stringify(r)).toBeDefined();
     expect(params!['new_factors']).toEqual([{ key: 'ai_add_on_offered', label: 'AI add-on offered',
       affects: [{ node_id: 'monthly_recurring_revenue_mrr', effect_direction: 'positive' }], kind: 'switch' }]);
-    expect(params!['interventions']).toEqual([{ factor_key: 'ai_add_on_offered', value: 1, source: 'cee_hypothesis' }]);
+    // ⛔ AIQ (c) (#70 5859422189; DL CHANGES_REQUIRED on #2132 @510bfa00): the ON level is structural, never Olumi's
+    // estimate — no `source`, so it is stored as every non-estimate level is (the builder's `user_specified`).
+    expect(params!['interventions']).toEqual([{ factor_key: 'ai_add_on_offered', value: 1 }]);
   });
 
   it('RED: a level of exactly 1 is on and is sent; any other figure for a switch is refused with nothing sent', async () => {
     const on = setup();
     await on.caps.proposeNewOption(ctx, call({ value: 1 }) as never);
-    expect((paramsOf(on.sent)!['interventions'] as unknown[])[0]).toEqual({ factor_key: 'ai_add_on_offered', value: 1, source: 'cee_hypothesis' });
+    expect((paramsOf(on.sent)!['interventions'] as unknown[])[0]).toEqual({ factor_key: 'ai_add_on_offered', value: 1 });
     for (const value of [100, 50, 0, 0.5]) {
       const { caps, sent } = setup();
       const r = await caps.proposeNewOption(ctx, call({ value, unit: '%' }) as never) as { refusal?: string; detail?: string };
@@ -222,11 +224,32 @@ describe('A1 — propose_new_option sends a new SWITCH switched on, in the same 
   });
 
   it('CONTRAST: a bare 1 (no unit, no estimate) is on and is sent — as is a level that says estimate: false', async () => {
-    for (const level of [{ value: 1 }, { value: 1, estimate: false }, { value: 1, unit: '' }, { value: 1, estimate: true, basis: 'the option turns it on' }]) {
+    for (const level of [undefined, { value: 1 }, { value: 1, estimate: false }, { value: 1, unit: '' }, { value: 1, estimate: true, basis: 'the option turns it on' }]) {
       const { caps, sent } = setup();
       const r = await caps.proposeNewOption(ctx, call(level) as never);
-      expect(paramsOf(sent)?.['interventions'], JSON.stringify(r)).toEqual([{ factor_key: 'ai_add_on_offered', value: 1, source: 'cee_hypothesis' }]);
+      expect(paramsOf(sent)?.['interventions'], JSON.stringify(r)).toEqual([{ factor_key: 'ai_add_on_offered', value: 1 }]);
     }
+  });
+
+  /**
+   * ⛔ AIQ CONDITION (c) (#70 5859422189; DL CHANGES_REQUIRED on #2132 @510bfa00): on a new switch's accepted
+   * `{ 1, estimate: true }`, the STORED on-level carries no estimate stamp. The on-state is structural — the option turns
+   * the switch on — never Olumi's estimate: `cee_hypothesis` there marked the option as resting on Olumi's figure, which
+   * can make results provisional and withhold a leader over a structural 1. Only the today-0 is Olumi's (`cee_inference`,
+   * written by the confirm: agent-add-option-held-seam). It is stored exactly as a 1 the user's own words name is.
+   */
+  it('RED (AIQ c): the ON level carries no estimate stamp, whether or not the user\'s words name the switch — both store identically', async () => {
+    const named = { ...ctx, user_turn_text: 'Add the AI add-on offered as an option.' };
+    const stored: string[] = [];
+    for (const [c, level] of [[ctx, { value: 1, estimate: true, basis: 'the option turns it on' }], [named, { value: 1, estimate: true, basis: 'the option turns it on' }], [named, { value: 1 }]] as const) {
+      const { caps, sent } = setup();
+      const r = await caps.proposeNewOption(c as never, call(level) as never);
+      const iv = (paramsOf(sent)?.['interventions'] as Record<string, unknown>[] | undefined)?.[0];
+      expect(iv, JSON.stringify(r)).toBeDefined();
+      expect(iv, 'the on-state is structural, never Olumi\'s estimate').not.toHaveProperty('source');
+      stored.push(JSON.stringify(iv));
+    }
+    expect(new Set(stored).size, stored.join(' | ')).toBe(1);
   });
 
   it('RED: an unknown kind is refused before anything is sent — never read as switch or graded', async () => {
@@ -311,7 +334,7 @@ describe('A1 — propose_new_option sends a new SWITCH switched on, in the same 
     expect(options?.map((o) => o.label), JSON.stringify(r)).toEqual(['Keep £49 and offer a paid AI add-on', 'Push AI adoption at the current price']);
     // Pro plan price is linked once in EACH option; the switch is on (1) in the one that names it.
     expect(options!.map((o) => o.interventions.filter((i) => i.factor_id === 'pro_plan_price').length)).toEqual([1, 1]);
-    expect(options![0]!.interventions.filter((i) => i.factor_key === 'ai_add_on_offered')).toEqual([{ factor_key: 'ai_add_on_offered', value: 1, source: 'cee_hypothesis' }]);
+    expect(options![0]!.interventions.filter((i) => i.factor_key === 'ai_add_on_offered')).toEqual([{ factor_key: 'ai_add_on_offered', value: 1 }]);
   });
 
   /**
@@ -344,10 +367,20 @@ describe('A1 — propose_new_option sends a new SWITCH switched on, in the same 
     const options = optionsSent(sent);
     expect(options?.map((o) => o.label), JSON.stringify(r)).toEqual(['Keep £49 and offer a paid AI add-on', 'Keep £49 and offer an annual plan']);
     expect(options!.map((o) => o.interventions.filter((i) => i.factor_key !== undefined))).toEqual([
-      [{ factor_key: 'ai_add_on_offered', value: 1, source: 'cee_hypothesis' }],
-      [{ factor_key: 'annual_plan_offered', value: 1, source: 'cee_hypothesis' }],
+      [{ factor_key: 'ai_add_on_offered', value: 1 }],
+      [{ factor_key: 'annual_plan_offered', value: 1 }],
     ]);
     expect((paramsOf(sent)!['new_factors'] as { kind?: string }[]).map((f) => f.kind)).toEqual(['switch', 'switch']);
+  });
+
+  it('CONTRAST (served shape): a bare 1 for each switch sends the same levels, byte for byte, as { value: 1, estimate: true }', async () => {
+    const estimate = setup();
+    await estimate.caps.proposeNewOption(ctx, twoSwitchOptions({ value: 1, estimate: true, basis: 'the option turns it on' }) as never);
+    const bare = setup();
+    await bare.caps.proposeNewOption(ctx, twoSwitchOptions({ value: 1 }) as never);
+    const levels = (sent: { body: unknown }[]) => JSON.stringify(optionsSent(sent)?.map((o) => o.interventions.filter((i) => i.factor_key !== undefined)));
+    expect(levels(estimate.sent)).toBe(levels(bare.sent));
+    expect(levels(bare.sent)).not.toContain('source');
   });
 
   it.each([

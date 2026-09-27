@@ -904,6 +904,12 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
   })();
   const GRANDFATHER = '£59 for new Pro customers; grandfather existing customers';
   const SWITCH_FAC = 'fac_existing_customers_grandfathered';
+  /**
+   * ⛔ AIQ (c) (#70 5859422189; DL on #2132 @510bfa00): what an option COMMITS for a new switch it turns on — 1, and
+   * never Olumi's estimate (`cee_hypothesis`): the on-state is structural. Every accepted form (no level, a bare 1,
+   * `{ 1, estimate: true }`) is bound to this ONE object, so they are stored identically.
+   */
+  const ON_LEVEL = (id: string) => ({ value: 1, source: 'user_specified', target_match: { node_id: id, match_type: 'exact_id', confidence: 'high' } });
   const proposeGrandfathering = (kind: 'switch' | undefined) => {
     script = [
       () => fnCall('propose_new_option', {
@@ -936,7 +942,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const factor = g.nodes.find((x) => x.id === SWITCH_FAC)!;
     expect(factor.observed_state).toEqual({ value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' });
     const option = g.nodes.find((x) => x.kind === 'option' && x.label === GRANDFATHER)!;
-    expect(option.interventions[SWITCH_FAC].value).toBe(1);
+    expect(option.interventions[SWITCH_FAC]).toEqual(ON_LEVEL(SWITCH_FAC));
     // The approval said what was committed: off today is Olumi's, for the user to correct — never asked for (#2103's one ask).
     expect(t2.assistant_text).toContain('Olumi takes it as off today and the option switches it on');
     expect(t2.assistant_text).not.toMatch(/Tell me (its value today|today's value)/);
@@ -1014,7 +1020,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
     const g = graphNow() as unknown as { nodes: Record<string, any>[] };
     expect(g.nodes.find((x) => x.id === SWITCH_FAC)!.observed_state).toEqual({ value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' });
-    expect(g.nodes.find((x) => x.kind === 'option' && x.label === GRANDFATHER)!.interventions[SWITCH_FAC].value).toBe(1);
+    expect(g.nodes.find((x) => x.kind === 'option' && x.label === GRANDFATHER)!.interventions[SWITCH_FAC]).toEqual(ON_LEVEL(SWITCH_FAC));
     expect(routerCalls).toEqual([]);
   }, 120_000);
 
@@ -1066,8 +1072,11 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     for (const id of [SWITCH_FAC, ANNUAL_FAC]) {
       expect(g.nodes.find((x) => x.id === id)?.observed_state, id).toEqual({ value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' });
     }
-    expect(g.nodes.find((x) => x.kind === 'option' && x.label === GRANDFATHER)!.interventions[SWITCH_FAC].value).toBe(1);
-    expect(g.nodes.find((x) => x.kind === 'option' && x.label === ANNUAL_OPT)!.interventions[ANNUAL_FAC].value).toBe(1);
+    // ⛔ AIQ (c) (#70 5859422189): the accepted { 1, estimate: true } is STORED as the structural on-level — no estimate
+    // stamp, exactly as a bare 1 is (the CONTRAST row above) — and the approval never calls it Olumi's estimate.
+    expect(g.nodes.find((x) => x.kind === 'option' && x.label === GRANDFATHER)!.interventions[SWITCH_FAC]).toEqual(ON_LEVEL(SWITCH_FAC));
+    expect(g.nodes.find((x) => x.kind === 'option' && x.label === ANNUAL_OPT)!.interventions[ANNUAL_FAC]).toEqual(ON_LEVEL(ANNUAL_FAC));
+    expect(t2.assistant_text).not.toMatch(/Its level for [^.]*is Olumi.s estimate/);
     expect(routerCalls).toEqual([]);
   }, 120_000);
 

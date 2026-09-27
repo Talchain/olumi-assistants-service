@@ -4300,7 +4300,18 @@ export function createAgentCapabilities(
               reason: `"${a.label}" is new in this change and has no range yet, so its level is not set here. Once it is added, propose that level with propose_option_interventions.` });
           }
         }
-        const added = plan.newActsOn.map((a) => ({ factor_key: a.key, value: isNewSwitch(a.key) ? 1 : null, ...linkAuthor(a.label) }));
+        /**
+         * ⛔ A NEW SWITCH'S ON-LEVEL IS STRUCTURAL, NEVER OLUMI'S ESTIMATE (AIQ condition (c), #70 5859422189; DL on #2132
+         * @510bfa00). The option turns the switch on: that 1 is what "switch" means, whoever's word it is — a bare 1, no
+         * level, or `{ 1, estimate: true }` alike — so it carries no `source` and is stored as every non-estimate level is
+         * (the builder's `user_specified`), exactly as a 1 the user's own words name. `cee_hypothesis` there marked the
+         * option as resting on Olumi's figure, which can make results provisional and withhold a leader over a structural
+         * 1. Only its today-0 is Olumi's (`cee_inference`, `stampNewSwitchFactors`). A GRADED new factor carries no level,
+         * so its link keeps the link-author rule (`linkAuthor`, U3).
+         */
+        const added = plan.newActsOn.map((a) => (isNewSwitch(a.key)
+          ? { factor_key: a.key, value: 1 }
+          : { factor_key: a.key, value: null, ...linkAuthor(a.label) }));
         return { plan, set, entry: { label: plan.label, option_id: plan.optionId, interventions: [...interventions, ...added] } };
       });
       if (switchLevelConflicts.length > 0) {
