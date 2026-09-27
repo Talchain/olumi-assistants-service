@@ -74,7 +74,7 @@ describe('2.579 wiring — the handler actually consumes the intake axis', () =>
     // gates prose while the structured surfaces still name the leader inside
     // the same HTTP response.
     expect(source).toContain('applyIntakeToLeaderPermission(');
-    expect(source).toContain('projectClaimSafety(constraintVerdict)');
+    expect(source).toContain('projectClaimSafety(constraintVerdict, { estimateOnlyRecorded: true })');
     const stamp = source.slice(source.indexOf('constraint_verdict:'));
     expect(stamp.slice(0, 200)).toContain('applyIntakeToLeaderPermission');
   });

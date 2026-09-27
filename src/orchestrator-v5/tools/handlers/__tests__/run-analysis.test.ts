@@ -259,7 +259,7 @@ describe('run_analysis handler — happy path', () => {
     //    healthy run.
     expect(fact.result.constraint_verdict).toEqual({
       may_name_leading_option: true,
-      constraint_verdict_state: 'not_applicable',
+      constraint_verdict_state: 'not_applicable', estimate_only_constraint_ids: [],
     });
     expect(readMayNameLeadingOptionFromResult(fact.result)).toBe(true);
   });

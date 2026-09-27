@@ -171,7 +171,7 @@ describe('H2 — the finaliser names the product cause only when the caller that
     const graph = await build(PRODUCT);
     const fact = await runOn(graph);
     expect(fact.result.leading_option_id).toBe('raise_pro_to_59');
-    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: false, constraint_verdict_state: 'not_applicable' });
+    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: false, constraint_verdict_state: 'not_applicable', estimate_only_constraint_ids: [] });
     expect(deriveDecisionContextGraphHash(graph)).toBe(fact.result.graph_hash_at_run);
   });
 

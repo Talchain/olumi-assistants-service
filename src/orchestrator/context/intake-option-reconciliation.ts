@@ -502,8 +502,8 @@ export function applyIntakeToLeaderPermission(
   intake: IntakeOptionReconciliation,
 ): PersistedClaimSafety {
   if (intake.mayNameLeadingOption) return persisted;
-  return {
-    may_name_leading_option: false,
-    constraint_verdict_state: persisted.constraint_verdict_state,
-  };
+  // Remove-only, and a SPREAD (RULING 4): rebuilding the object dropped every member but the two named ones, so an
+  // intake withhold erased `estimate_only_constraint_ids` from the persisted verdict. The nonlinear conjunct
+  // (`applyNonlinearIdentityToLeaderPermission`) already spreads.
+  return { ...persisted, may_name_leading_option: false };
 }

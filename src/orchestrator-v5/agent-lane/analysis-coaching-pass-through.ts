@@ -22,7 +22,7 @@ import {
   type RunTurnTrigger,
 } from '../coaching/fragile-link-challenge.js';
 import { buildNoFlaggedLinkCard } from '../coaching/no-flagged-link-card.js';
-import { buildLimitUncheckedCard, everyOptionBreaksALimit, leaderWithheldForALimit } from '../coaching/limit-unchecked-card.js';
+import { buildLimitUncheckedCard, everyOptionBreaksALimit, everyRatifiedLimitRestsOnAnAssumedLevel, leaderWithheldForALimit } from '../coaching/limit-unchecked-card.js';
 import { buildUntestedOptionCard } from '../coaching/untested-option-card.js';
 import { everyLimitProvedUnanchored, graphBoundToHash, limitNodeLabels } from '../coaching/bound-graph.js';
 import { buildNearTieCard } from '../coaching/near-tie-card.js';
@@ -68,6 +68,11 @@ export interface RunTurnCoachingFinal {
    * `constraint_results`, so the predicate cannot run here. Absent → the leader-limit-risk leg is inert.
    */
   leaderLimitRisks?: unknown;
+  /**
+   * RULING 4 — the readback's rule-(d) ids (`analysis_constraint_estimate_only_ids`, same fact as
+   * `constraintVerdictState`). `null`/absent = not recorded → the limit card never takes its assumed-figure arm.
+   */
+  constraintEstimateOnlyIds?: readonly string[] | null;
 }
 
 export interface RunTurnCoachingResult {
@@ -320,7 +325,10 @@ export function runTurnCoaching(
     // The cause, only on proof from the SAME bound graph and the bound run's own options.
     const provedUnanchored = everyOption === null && boundGraph !== null
       && everyLimitProvedUnanchored(boundGraph, record(captured.analysis_ready)?.options);
-    const limit = buildLimitUncheckedCard(input, limitLabels, provedUnanchored, final.constraintVerdictState, everyOption);
+    // RULING 4: the assumed-figure arm reads the readback's rule-(d) ids and the SAME bound graph's ratified ids.
+    const assumedOnly = everyOption === null && boundGraph !== null
+      && everyRatifiedLimitRestsOnAnAssumedLevel(boundGraph, final.constraintVerdictState, final.constraintEstimateOnlyIds);
+    const limit = buildLimitUncheckedCard(input, limitLabels, provedUnanchored, final.constraintVerdictState, everyOption, assumedOnly);
     if (limit.block === null) return { blocks: upstream, eligibility: { eligible: false, reason: limit.reason } };
     return { blocks: dedupeByBlockId([...upstream, limit.block]), eligibility: { eligible: true } };
   }

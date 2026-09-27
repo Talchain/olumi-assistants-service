@@ -618,6 +618,10 @@ export default async function route(app: FastifyInstance) {
         ...(analysis.analysis_leader_limit_risks !== undefined
           ? { analysis_leader_limit_risks: analysis.analysis_leader_limit_risks }
           : {}),
+        // RULING 4 — the selected fact's rule-(d) ids; same fact, same gates as the state above.
+        ...(analysis.analysis_constraint_estimate_only_ids !== undefined
+          ? { analysis_constraint_estimate_only_ids: analysis.analysis_constraint_estimate_only_ids }
+          : {}),
         /**
          * ⭐ MAY A RUN BE ADMITTED RIGHT NOW — the question `analysis_state`
          * does not answer. It reports whether a FACT HAS LANDED for this graph;

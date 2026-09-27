@@ -1458,8 +1458,9 @@ export interface PersistedClaimSafety {
   /**
    * {@link ConstraintVerdict.estimateOnlyConstraintIds} (schemas 0.60.0). PRESENT only when the caller supplied the
    * rule-(d) set to {@link deriveConstraintVerdict} (then `[]` means "recorded, none"); ABSENT means "not recorded".
+   * A mutable `string[]` on purpose: the contract's inferred type, which the drift bolt below checks both ways.
    */
-  readonly estimate_only_constraint_ids?: readonly string[];
+  readonly estimate_only_constraint_ids?: string[];
 }
 
 /**
@@ -1685,4 +1686,17 @@ export function legacyReadMayName_DO_NOT_USE(enrichment: unknown): boolean {
   if (stamp === null || typeof stamp !== 'object' || Array.isArray(stamp)) return false;
   const value = (stamp as Record<string, unknown>).may_name_leading_option;
   return value === true;
+}
+
+/**
+ * ⭐ RULING 4 — read the persisted rule-(d) ids off a run_analysis fact's `result` (schemas 0.60.0
+ * `constraint_verdict.estimate_only_constraint_ids`). `null` = NOT RECORDED (a fact from before 0.60.0, the interim
+ * stamp, or a malformed member), never `[]`: absence and "none" are different claims (census verdict `distinct`).
+ * Only a clean array of non-empty strings is carried.
+ */
+export function readEstimateOnlyConstraintIdsFromResult(result: unknown): readonly string[] | null {
+  const verdictField = (result as { constraint_verdict?: { estimate_only_constraint_ids?: unknown } } | null | undefined)
+    ?.constraint_verdict?.estimate_only_constraint_ids;
+  if (!Array.isArray(verdictField)) return null;
+  return verdictField.every((id) => typeof id === 'string' && id.length > 0) ? [...(verdictField as string[])] : null;
 }

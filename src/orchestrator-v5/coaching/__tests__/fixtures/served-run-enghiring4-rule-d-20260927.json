@@ -1,0 +1,1591 @@
+{
+ "_source": "MG construction-sweep enghiring-4 S3_run (explicit Run), CEE 3c4d9cc, 27 Sep ~02:17Z, verbatim wire fields. Rule (d) traced by AIQ #70 5851938306: the leader sets annual salary spend at Olumi estimate (cee_hypothesis).",
+ "graph_hash": "5bef31ebf04251e2",
+ "analysis_state": {
+  "run_state": {
+   "kind": "complete_current",
+   "computed_at": "2026-09-27T02:17:34.601Z"
+  },
+  "readiness": {
+   "status": "ready",
+   "blockers": []
+  },
+  "leader_claim": {
+   "permitted": false,
+   "withheld_reason": "constraint_verdict_withheld",
+   "separation": "near_tie"
+  },
+  "robustness": {
+   "aggregate_level": "very_low"
+  },
+  "usable_for_prose": true,
+  "usable_for_chips": true,
+  "usable_for_followup": true,
+  "requires_rerun": false,
+  "blocked_unusable": false,
+  "contradictions": []
+ },
+ "analysis_result": {
+  "type": "analysis_result",
+  "summary": "Ran analysis on your current scenario. 'Continue as now' was analysed as no change — the factors it compares against were held at the values your model records today. One limit on your model could not be checked: “Annual salary spend”. This model could not check it yet, so it was not part of the comparison. It stays on the model. I supplied the value behind this, because your brief did not state it. It is mine rather than yours. Changing it changes what this model implies.",
+  "leading_option_id": null,
+  "win_probabilities": {
+   "Continue as now": 0.3080000000000057,
+   "Two senior engineers": 0.3282500000000072,
+   "Four junior engineers": 0.36375000000001034
+  },
+  "enrichment": {
+   "option_comparison": [
+    {
+     "id": "two_senior_engineers",
+     "label": "Two senior engineers",
+     "status": "computed",
+     "outcome": {
+      "p10": -0.2286475220646574,
+      "p50": -0.032932292472823574,
+      "p90": 0.07552049168065797,
+      "std": 0.13182978762327802,
+      "mean": -0.059271466163526416,
+      "n_samples": 10000,
+      "validity_ratio": 1,
+      "n_valid_samples": 10000,
+      "percentiles_source": "samples"
+     },
+     "downside": {
+      "p05": -0.29568660485044923,
+      "cvar_10": -0.3196147480402126,
+      "expected_regret": 0.031569265062192105
+     },
+     "option_id": "two_senior_engineers",
+     "option_label": "Two senior engineers",
+     "win_probability": 0.3282500000000072,
+     "constraint_margins": [
+      {
+       "constraint_id": "agent-lane:annual_salary_spend:<="
+      }
+     ],
+     "constraint_probabilities": {
+      "agent-lane:annual_salary_spend:<=": 1
+     },
+     "probability_of_joint_goal": 1,
+     "constraints_decision_grade": true
+    },
+    {
+     "id": "four_junior_engineers",
+     "label": "Four junior engineers",
+     "status": "computed",
+     "outcome": {
+      "p10": -0.22383300738290104,
+      "p50": -0.028695361801336618,
+      "p90": 0.07582872003521396,
+      "std": 0.1327058561977567,
+      "mean": -0.0568288004608414,
+      "n_samples": 10000,
+      "validity_ratio": 1,
+      "n_valid_samples": 10000,
+      "percentiles_source": "samples"
+     },
+     "downside": {
+      "p05": -0.2956860196895309,
+      "cvar_10": -0.32394792611341494,
+      "expected_regret": 0.029126599359507076
+     },
+     "option_id": "four_junior_engineers",
+     "option_label": "Four junior engineers",
+     "win_probability": 0.36375000000001034,
+     "constraint_margins": [
+      {
+       "constraint_id": "agent-lane:annual_salary_spend:<="
+      }
+     ],
+     "constraint_probabilities": {
+      "agent-lane:annual_salary_spend:<=": 1
+     },
+     "probability_of_joint_goal": 1,
+     "constraints_decision_grade": true
+    },
+    {
+     "id": "continue_as_now",
+     "label": "Continue as now",
+     "status": "computed",
+     "outcome": {
+      "p10": -0.20099923679153486,
+      "p50": -0.03584195190085676,
+      "p90": 0.061257313374095006,
+      "std": 0.11766744485934381,
+      "mean": -0.05491304862442573,
+      "n_samples": 10000,
+      "validity_ratio": 1,
+      "n_valid_samples": 10000,
+      "percentiles_source": "samples"
+     },
+     "downside": {
+      "p05": -0.2673017243262538,
+      "cvar_10": -0.29017053963084255,
+      "expected_regret": 0.027210847523091417
+     },
+     "option_id": "continue_as_now",
+     "option_label": "Continue as now",
+     "win_probability": 0.3080000000000057,
+     "constraint_margins": [
+      {
+       "constraint_id": "agent-lane:annual_salary_spend:<="
+      }
+     ],
+     "constraint_probabilities": {
+      "agent-lane:annual_salary_spend:<=": 1
+     },
+     "probability_of_joint_goal": 1,
+     "constraints_decision_grade": true
+    }
+   ],
+   "factor_sensitivity": [
+    {
+     "source": "graph",
+     "direction": "negative",
+     "factor_id": "senior_hiring_delay_risk",
+     "confidence": 0.5809,
+     "elasticity": 1,
+     "evpi_method": "heuristic",
+     "driver_label": "biggest",
+     "factor_label": "Senior hiring delay risk",
+     "value_source": "user_assumption",
+     "evidence_hint": true,
+     "influence_rank": 1,
+     "rank_flip_rate": 0.5,
+     "importance_rank": 1,
+     "influence_score": 1,
+     "importance_basis": "graph_structural",
+     "confidence_source": "plot_unified_from_isl_bootstrap",
+     "sensitivity_score": -0.25,
+     "flip_risk_category": "isolated",
+     "value_of_information": 0.12,
+     "attribution_stability": "low",
+     "confidence_components": {
+      "sampling_stability": 0.25,
+      "structural_certainty": 0.8
+     },
+     "confidence_provenance": {
+      "input_quality": "standard",
+      "is_provisional": true,
+      "formula_version": "plot_unified_v3",
+      "calibration_status": "provisional_pending_pilot_calibration",
+      "computation_source": "plot_unified_from_isl_bootstrap"
+     },
+     "evpi_percentage_points": 0.4
+    },
+    {
+     "source": "graph",
+     "direction": "negative",
+     "factor_id": "junior_coaching_load",
+     "confidence": 0.58005,
+     "elasticity": 1,
+     "evpi_method": "heuristic",
+     "driver_label": "strong",
+     "factor_label": "Junior coaching load",
+     "value_source": "cee_inference",
+     "evidence_hint": false,
+     "influence_rank": 2,
+     "rank_flip_rate": 0.45,
+     "importance_rank": 2,
+     "influence_score": 1,
+     "importance_basis": "graph_structural",
+     "confidence_source": "plot_unified_from_isl_bootstrap",
+     "sensitivity_score": -0.25,
+     "flip_risk_category": "negligible",
+     "value_of_information": 0,
+     "attribution_stability": "low",
+     "confidence_components": {
+      "sampling_stability": 0.25,
+      "structural_certainty": 0.8
+     },
+     "confidence_provenance": {
+      "input_quality": "standard",
+      "is_provisional": true,
+      "formula_version": "plot_unified_v3",
+      "calibration_status": "provisional_pending_pilot_calibration",
+      "computation_source": "plot_unified_from_isl_bootstrap"
+     },
+     "value_extraction_type": "inferred",
+     "evpi_percentage_points": 0
+    },
+    {
+     "source": "graph",
+     "direction": "negative",
+     "factor_id": "budget_overrun_risk",
+     "confidence": 0.5799000000000001,
+     "elasticity": 1,
+     "evpi_method": "heuristic",
+     "driver_label": "strong",
+     "factor_label": "Budget overrun risk",
+     "value_source": "user_assumption",
+     "evidence_hint": true,
+     "influence_rank": 3,
+     "rank_flip_rate": 0.5,
+     "importance_rank": 3,
+     "influence_score": 1,
+     "importance_basis": "graph_structural",
+     "confidence_source": "plot_unified_from_isl_bootstrap",
+     "sensitivity_score": -0.25,
+     "flip_risk_category": "isolated",
+     "value_of_information": 0.186,
+     "attribution_stability": "low",
+     "confidence_components": {
+      "sampling_stability": 0.25,
+      "structural_certainty": 0.8
+     },
+     "confidence_provenance": {
+      "input_quality": "standard",
+      "is_provisional": true,
+      "formula_version": "plot_unified_v3",
+      "calibration_status": "provisional_pending_pilot_calibration",
+      "computation_source": "plot_unified_from_isl_bootstrap"
+     },
+     "evpi_percentage_points": 0.7
+    },
+    {
+     "source": "graph",
+     "direction": "positive",
+     "factor_id": "senior_engineers_hired",
+     "confidence": 0.3,
+     "elasticity": 0,
+     "zero_reason": "intervention_override",
+     "driver_label": "strong",
+     "factor_label": "Senior engineers hired",
+     "influence_rank": 4,
+     "rank_flip_rate": 0.35,
+     "importance_rank": 4,
+     "influence_score": 0.5,
+     "importance_basis": "graph_structural",
+     "confidence_source": "plot_unified_from_isl_bootstrap",
+     "sensitivity_score": 0,
+     "flip_risk_category": "isolated",
+     "value_of_information": 0,
+     "attribution_stability": "negligible",
+     "confidence_components": {
+      "sampling_stability": 0,
+      "structural_certainty": 0.5
+     },
+     "confidence_provenance": {
+      "input_quality": "standard",
+      "is_provisional": true,
+      "formula_version": "plot_unified_v3",
+      "calibration_status": "provisional_pending_pilot_calibration",
+      "computation_source": "plot_unified_from_isl_bootstrap"
+     },
+     "range_derivation_source": "default"
+    },
+    {
+     "source": "graph",
+     "direction": "negative",
+     "factor_id": "annual_salary_spend",
+     "confidence": 0.3,
+     "elasticity": 0,
+     "zero_reason": "intervention_override",
+     "driver_label": "strong",
+     "factor_label": "Annual salary spend",
+     "influence_rank": 5,
+     "rank_flip_rate": 0.3,
+     "importance_rank": 5,
+     "influence_score": 0.5,
+     "importance_basis": "graph_structural",
+     "confidence_source": "plot_unified_from_isl_bootstrap",
+     "sensitivity_score": 0,
+     "flip_risk_category": "isolated",
+     "value_of_information": 0,
+     "attribution_stability": "negligible",
+     "confidence_components": {
+      "sampling_stability": 0,
+      "structural_certainty": 0.5
+     },
+     "confidence_provenance": {
+      "input_quality": "standard",
+      "is_provisional": true,
+      "formula_version": "plot_unified_v3",
+      "calibration_status": "provisional_pending_pilot_calibration",
+      "computation_source": "plot_unified_from_isl_bootstrap"
+     },
+     "range_derivation_source": "default"
+    },
+    {
+     "source": "graph",
+     "direction": "positive",
+     "factor_id": "junior_engineers_hired",
+     "confidence": 0.39435,
+     "elasticity": 0,
+     "zero_reason": "intervention_override",
+     "driver_label": "moderate",
+     "factor_label": "Junior engineers hired",
+     "influence_rank": 6,
+     "rank_flip_rate": 0.4,
+     "importance_rank": 6,
+     "influence_score": 0.25,
+     "importance_basis": "graph_structural",
+     "confidence_source": "plot_unified_from_isl_bootstrap",
+     "sensitivity_score": 0,
+     "flip_risk_category": "negligible",
+     "value_of_information": 0,
+     "attribution_stability": "low",
+     "confidence_components": {
+      "sampling_stability": 0.25,
+      "structural_certainty": 0.5
+     },
+     "confidence_provenance": {
+      "input_quality": "standard",
+      "is_provisional": true,
+      "formula_version": "plot_unified_v3",
+      "calibration_status": "provisional_pending_pilot_calibration",
+      "computation_source": "plot_unified_from_isl_bootstrap"
+     },
+     "range_derivation_source": "default"
+    }
+   ],
+   "robustness": {
+    "level": "very_low",
+    "near_tie": {
+     "gap": 0.03550000000000314,
+     "is_tie": true,
+     "threshold": 0.1
+    },
+    "is_robust": false,
+    "confidence": 0.36375000000001034,
+    "robust_edges": [
+     {
+      "to_id": "junior_coaching_load",
+      "edge_id": "junior_engineers_hired->junior_coaching_load",
+      "from_id": "junior_engineers_hired",
+      "to_label": "Junior coaching load",
+      "from_label": "Junior engineers hired",
+      "alternative_winner_id": null,
+      "alternative_winner_label": null
+     }
+    ],
+    "fragile_edges": [
+     {
+      "to_id": "budget_overrun_risk",
+      "edge_id": "annual_salary_spend->budget_overrun_risk",
+      "from_id": "annual_salary_spend",
+      "visible": true,
+      "severity": "warning",
+      "to_label": "Budget overrun risk",
+      "from_label": "Annual salary spend",
+      "switch_probability": 0.418,
+      "alternative_winner_id": "two_senior_engineers",
+      "alternative_winner_label": "Two senior engineers",
+      "marginal_switch_probability": 0.31
+     },
+     {
+      "to_id": "platform_delivery_capacity",
+      "edge_id": "budget_overrun_risk->platform_delivery_capacity",
+      "from_id": "budget_overrun_risk",
+      "visible": true,
+      "severity": "warning",
+      "to_label": "Platform delivery capacity",
+      "from_label": "Budget overrun risk",
+      "switch_probability": 0.3976,
+      "alternative_winner_id": "continue_as_now",
+      "alternative_winner_label": "Continue as now",
+      "marginal_switch_probability": 0.23
+     },
+     {
+      "to_id": "platform_delivery_capacity",
+      "edge_id": "senior_engineers_hired->platform_delivery_capacity",
+      "from_id": "senior_engineers_hired",
+      "visible": true,
+      "severity": "warning",
+      "to_label": "Platform delivery capacity",
+      "from_label": "Senior engineers hired",
+      "switch_probability": 0.3708,
+      "alternative_winner_id": "continue_as_now",
+      "alternative_winner_label": "Continue as now",
+      "marginal_switch_probability": 0.35
+     },
+     {
+      "to_id": "ship_the_new_platform_by_q3",
+      "edge_id": "platform_delivery_capacity->ship_the_new_platform_by_q3",
+      "from_id": "platform_delivery_capacity",
+      "visible": true,
+      "severity": "warning",
+      "to_label": "ship the new platform by Q3",
+      "from_label": "Platform delivery capacity",
+      "switch_probability": 0.3336,
+      "alternative_winner_id": "two_senior_engineers",
+      "alternative_winner_label": "Two senior engineers",
+      "marginal_switch_probability": 0
+     },
+     {
+      "to_id": "platform_delivery_capacity",
+      "edge_id": "senior_hiring_delay_risk->platform_delivery_capacity",
+      "from_id": "senior_hiring_delay_risk",
+      "visible": true,
+      "severity": "warning",
+      "to_label": "Platform delivery capacity",
+      "from_label": "Senior hiring delay risk",
+      "switch_probability": 0.3332,
+      "alternative_winner_id": "continue_as_now",
+      "alternative_winner_label": "Continue as now",
+      "marginal_switch_probability": 0.2
+     }
+    ],
+    "display_verdict": "fragile",
+    "confidence_basis": "recommendation_stability_uncalibrated",
+    "display_verdict_reason": "small changes to your assumptions could change which option is most likely to achieve your goal",
+    "recommended_option_compliance": "compliant",
+    "recommended_option_compliance_reason": "this option met every limit you set, in all the scenarios we tested"
+   },
+   "option_comparison_status": "computed",
+   "conditional_probabilities": [],
+   "edge_e_values": [
+    {
+     "to_id": "platform_delivery_capacity",
+     "e_value": 1.28,
+     "edge_id": "senior_engineers_hired::platform_delivery_capacity",
+     "from_id": "senior_engineers_hired",
+     "to_label": "Platform delivery capacity",
+     "flip_mean": 0.64,
+     "stability": {
+      "n_seeds": 10,
+      "band_max": 0.933666,
+      "band_min": 0.68541,
+      "band_width": 0.248256,
+      "band_median": 0.883967,
+      "n_seeds_flipped": 6,
+      "seed_flip_means": [
+       null,
+       0.68541,
+       null,
+       0.867693,
+       null,
+       0.900241,
+       0.916162,
+       0.77209,
+       null,
+       0.933666
+      ]
+     },
+     "from_label": "Senior engineers hired",
+     "current_mean": 0.5,
+     "flip_direction": "increase"
+    },
+    {
+     "to_id": "platform_delivery_capacity",
+     "e_value": 1.26,
+     "edge_id": "junior_engineers_hired::platform_delivery_capacity",
+     "from_id": "junior_engineers_hired",
+     "to_label": "Platform delivery capacity",
+     "flip_mean": 0.63,
+     "stability": {
+      "n_seeds": 10,
+      "band_max": 0.931243,
+      "band_min": -1e-06,
+      "band_width": 0.931244,
+      "band_median": 0.594285,
+      "n_seeds_flipped": 7,
+      "seed_flip_means": [
+       0.594285,
+       -1e-06,
+       0.931243,
+       0.483346,
+       null,
+       null,
+       0.656133,
+       0.707545,
+       0.299385,
+       null
+      ]
+     },
+     "from_label": "Junior engineers hired",
+     "current_mean": 0.5,
+     "flip_direction": "increase"
+    },
+    {
+     "to_id": "senior_hiring_delay_risk",
+     "e_value": 1,
+     "edge_id": "senior_engineers_hired::senior_hiring_delay_risk",
+     "from_id": "senior_engineers_hired",
+     "to_label": "Senior hiring delay risk",
+     "flip_mean": 0.15,
+     "stability": {
+      "n_seeds": 10,
+      "band_max": 0.192391,
+      "band_min": -0.395484,
+      "band_width": 0.587875,
+      "band_median": -0.079869,
+      "n_seeds_flipped": 4,
+      "seed_flip_means": [
+       -0.395484,
+       null,
+       null,
+       0.012264,
+       null,
+       -0.172003,
+       null,
+       0.192391,
+       null,
+       null
+      ]
+     },
+     "from_label": "Senior engineers hired",
+     "current_mean": 0.5,
+     "flip_direction": "decrease"
+    },
+    {
+     "to_id": "platform_delivery_capacity",
+     "e_value": 1,
+     "edge_id": "senior_hiring_delay_risk::platform_delivery_capacity",
+     "from_id": "senior_hiring_delay_risk",
+     "to_label": "Platform delivery capacity",
+     "flip_mean": -0.15,
+     "stability": {
+      "n_seeds": 10,
+      "band_max": 0.253056,
+      "band_min": -0.448504,
+      "band_width": 0.70156,
+      "band_median": -0.012093,
+      "n_seeds_flipped": 3,
+      "seed_flip_means": [
+       0.253056,
+       null,
+       null,
+       -0.012093,
+       null,
+       null,
+       null,
+       -0.448504,
+       null,
+       null
+      ]
+     },
+     "from_label": "Senior hiring delay risk",
+     "current_mean": -0.5,
+     "flip_direction": "increase"
+    },
+    {
+     "to_id": "junior_coaching_load",
+     "e_value": 1,
+     "edge_id": "junior_engineers_hired::junior_coaching_load",
+     "from_id": "junior_engineers_hired",
+     "to_label": "Junior coaching load",
+     "flip_mean": 0.424999,
+     "stability": {
+      "n_seeds": 10,
+      "band_max": 0.926061,
+      "band_min": -0.484309,
+      "band_width": 1.41037,
+      "band_median": 0.066179,
+      "n_seeds_flipped": 3,
+      "seed_flip_means": [
+       null,
+       null,
+       -0.484309,
+       null,
+       null,
+       0.066179,
+       null,
+       0.926061,
+       null,
+       null
+      ]
+     },
+     "from_label": "Junior engineers hired",
+     "current_mean": 0.75,
+     "flip_direction": "decrease"
+    },
+    {
+     "to_id": "platform_delivery_capacity",
+     "e_value": 1,
+     "edge_id": "junior_coaching_load::platform_delivery_capacity",
+     "from_id": "junior_coaching_load",
+     "to_label": "Platform delivery capacity",
+     "flip_mean": -0.283333,
+     "stability": {
+      "n_seeds": 10,
+      "band_max": 0.753579,
+      "band_min": -0.848279,
+      "band_width": 1.601858,
+      "band_median": -0.319274,
+      "n_seeds_flipped": 6,
+      "seed_flip_means": [
+       0.274167,
+       -0.585348,
+       null,
+       -0.848279,
+       null,
+       -0.0532,
+       null,
+       -0.74928,
+       null,
+       0.753579
+      ]
+     },
+     "from_label": "Junior coaching load",
+     "current_mean": -0.5,
+     "flip_direction": "increase"
+    },
+    {
+     "to_id": "budget_overrun_risk",
+     "e_value": 1,
+     "edge_id": "annual_salary_spend::budget_overrun_risk",
+     "from_id": "annual_salary_spend",
+     "to_label": "Budget overrun risk",
+     "flip_mean": 0.340909,
+     "stability": {
+      "n_seeds": 10,
+      "band_max": 0.792986,
+      "band_min": -0.008464,
+      "band_width": 0.80145,
+      "band_median": 0.68329,
+      "n_seeds_flipped": 7,
+      "seed_flip_means": [
+       0.68329,
+       null,
+       0.687987,
+       0.732635,
+       null,
+       0.792986,
+       0.671084,
+       0.664376,
+       null,
+       -0.008464
+      ]
+     },
+     "from_label": "Annual salary spend",
+     "current_mean": 0.5,
+     "flip_direction": "decrease"
+    },
+    {
+     "to_id": "platform_delivery_capacity",
+     "e_value": 1,
+     "edge_id": "budget_overrun_risk::platform_delivery_capacity",
+     "from_id": "budget_overrun_risk",
+     "to_label": "Platform delivery capacity",
+     "flip_mean": -0.340909,
+     "stability": {
+      "n_seeds": 10,
+      "band_max": 0.006111,
+      "band_min": -0.665651,
+      "band_width": 0.671762,
+      "band_median": -0.512629,
+      "n_seeds_flipped": 7,
+      "seed_flip_means": [
+       -0.334835,
+       -0.461456,
+       -0.512629,
+       -0.665651,
+       null,
+       -0.537778,
+       -0.56302,
+       null,
+       null,
+       0.006111
+      ]
+     },
+     "from_label": "Budget overrun risk",
+     "current_mean": -0.5,
+     "flip_direction": "increase"
+    },
+    {
+     "to_id": "ship_the_new_platform_by_q3",
+     "e_value": 1,
+     "edge_id": "platform_delivery_capacity::ship_the_new_platform_by_q3",
+     "from_id": "platform_delivery_capacity",
+     "to_label": "ship the new platform by Q3",
+     "flip_mean": -1e-06,
+     "stability": {
+      "n_seeds": 10,
+      "band_max": -1e-06,
+      "band_min": -1e-06,
+      "band_width": 0,
+      "band_median": -1e-06,
+      "n_seeds_flipped": 10,
+      "seed_flip_means": [
+       -1e-06,
+       -1e-06,
+       -1e-06,
+       -1e-06,
+       -1e-06,
+       -1e-06,
+       -1e-06,
+       -1e-06,
+       -1e-06,
+       -1e-06
+      ]
+     },
+     "from_label": "Platform delivery capacity",
+     "current_mean": 0.5,
+     "flip_direction": "decrease"
+    }
+   ],
+   "inference_warnings": [
+    {
+     "code": "GOAL_DIRECTION_UNATTESTED",
+     "field": "goal_direction",
+     "message": "No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team's stated aim: if the goal is a quantity to reduce, or the aim is to land near a target rather than as high as possible, this ranking answers a different question. Send goal_direction to rank against the stated objective.",
+     "severity": "warning"
+    }
+   ],
+   "confidence_tier": "needs_work",
+   "flip_thresholds": [
+    {
+     "unit": "engineers",
+     "direction": "increase",
+     "factor_id": "senior_engineers_hired",
+     "flip_value": 1.156,
+     "flip_reason": "found",
+     "probes_used": 0,
+     "value_scale": "display",
+     "factor_label": "Senior engineers hired",
+     "flip_display": "1.156 engineers",
+     "current_value": 0,
+     "current_display": "0 engineers",
+     "iterations_used": 0,
+     "alternative_winner_id": "four_junior_engineers",
+     "alternative_winner_label": "Four junior engineers"
+    },
+    {
+     "unit": "engineers",
+     "direction": "increase",
+     "factor_id": "junior_engineers_hired",
+     "flip_value": 2.1,
+     "flip_reason": "found",
+     "probes_used": 0,
+     "value_scale": "display",
+     "factor_label": "Junior engineers hired",
+     "flip_display": "2.1 engineers",
+     "current_value": 0,
+     "current_display": "0 engineers",
+     "iterations_used": 0,
+     "alternative_winner_id": "two_senior_engineers",
+     "alternative_winner_label": "Two senior engineers"
+    },
+    {
+     "unit": "GBP/year",
+     "factor_id": "annual_salary_spend",
+     "flip_value": null,
+     "flip_reason": "structurally_invariant",
+     "probes_used": 0,
+     "value_scale": "display",
+     "factor_label": "Annual salary spend",
+     "current_value": 0,
+     "current_display": "0 GBP/year",
+     "iterations_used": 0,
+     "no_flip_in_range": true,
+     "alternative_winner_id": null,
+     "alternative_winner_label": null
+    }
+   ],
+   "decision_brief": {
+    "options": [
+     {
+      "label": "Continue as now",
+      "option_id": "continue_as_now",
+      "win_probability": 0.3080000000000057
+     },
+     {
+      "label": "Four junior engineers",
+      "option_id": "four_junior_engineers",
+      "win_probability": 0.36375000000001034
+     },
+     {
+      "label": "Two senior engineers",
+      "option_id": "two_senior_engineers",
+      "win_probability": 0.3282500000000072
+     }
+    ],
+    "version": "1",
+    "brief_id": "b6e84a47-788e-4220-bdd7-9920aae2ae2c",
+    "warnings": [
+     {
+      "code": "INFLUENTIAL_EXTERNALS",
+      "message": "External factors Senior hiring delay risk significantly affect your outcome but are inherently uncertain. How might you bound these?",
+      "severity": "warning"
+     },
+     {
+      "code": "M2_UNAVAILABLE",
+      "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+      "severity": "warning"
+     }
+    ],
+    "created_at": "2026-09-27T02:17:40.013Z",
+    "robustness": "fragile",
+    "top_drivers": [
+     {
+      "direction": "negative",
+      "sensitivity": 1,
+      "factor_label": "Senior hiring delay risk"
+     },
+     {
+      "direction": "negative",
+      "sensitivity": 1,
+      "factor_label": "Junior coaching load"
+     },
+     {
+      "direction": "negative",
+      "sensitivity": 1,
+      "factor_label": "Budget overrun risk"
+     }
+    ],
+    "warning_codes": [
+     "GOAL_DIRECTION_UNATTESTED"
+    ],
+    "key_assumptions": [
+     "Budget overrun risk",
+     "Junior coaching load",
+     "Senior hiring delay risk"
+    ],
+    "analysis_summary": {
+     "goal_fit": 1,
+     "robustness_band": "fragile"
+    },
+    "what_would_change": [
+     "Budget overrun risk → Platform delivery capacity",
+     "Platform delivery capacity → ship the new platform by Q3",
+     "Senior hiring delay risk → Platform delivery capacity"
+    ],
+    "defaulted_assumptions": []
+   },
+   "factor_evppi": [
+    {
+     "evppi": 5.4e-05,
+     "units": "outcome",
+     "method": "regression_evppi_v1",
+     "status": "below_resolution",
+     "evppi_raw": 5.4e-05,
+     "factor_id": "budget_overrun_risk",
+     "n_samples": 10000,
+     "clamped_low": false,
+     "noise_floor": 0.000157,
+     "clamped_high": false,
+     "regression_degree": 4,
+     "correlation_active": false,
+     "baseline_max_expected_utility": -0.054913,
+     "conditional_max_expected_utility": -0.054859
+    },
+    {
+     "evppi": 2.4e-05,
+     "units": "outcome",
+     "method": "regression_evppi_v1",
+     "status": "below_resolution",
+     "evppi_raw": 2.4e-05,
+     "factor_id": "senior_hiring_delay_risk",
+     "n_samples": 10000,
+     "clamped_low": false,
+     "noise_floor": 8.9e-05,
+     "clamped_high": false,
+     "regression_degree": 4,
+     "correlation_active": false,
+     "baseline_max_expected_utility": -0.054913,
+     "conditional_max_expected_utility": -0.054889
+    },
+    {
+     "evppi": 1.8e-05,
+     "units": "outcome",
+     "method": "regression_evppi_v1",
+     "status": "below_resolution",
+     "evppi_raw": 1.8e-05,
+     "factor_id": "junior_coaching_load",
+     "n_samples": 10000,
+     "clamped_low": false,
+     "noise_floor": 0.000191,
+     "clamped_high": false,
+     "regression_degree": 4,
+     "correlation_active": false,
+     "baseline_max_expected_utility": -0.054913,
+     "conditional_max_expected_utility": -0.054895
+    }
+   ],
+   "decision_evpi": 0.027210847523091417,
+   "p_win_sensitivity": [
+    {
+     "method": "p_win_delta_at_mean_v1",
+     "status": "below_resolution",
+     "clamped": false,
+     "factor_id": "senior_engineers_hired",
+     "n_samples": 2000,
+     "metric_type": "p_joint_goal",
+     "noise_floor": 0.03099,
+     "p_win_delta": 0,
+     "current_metric": 1,
+     "perfect_metric": 1,
+     "labelling_doctrine": "provisional_doctrine_v0",
+     "noise_floor_method": "z95_worst_case_bernoulli_diff",
+     "p_win_delta_percentage_points": 0
+    },
+    {
+     "method": "p_win_delta_at_mean_v1",
+     "status": "below_resolution",
+     "clamped": false,
+     "factor_id": "junior_engineers_hired",
+     "n_samples": 2000,
+     "metric_type": "p_joint_goal",
+     "noise_floor": 0.03099,
+     "p_win_delta": 0,
+     "current_metric": 1,
+     "perfect_metric": 1,
+     "labelling_doctrine": "provisional_doctrine_v0",
+     "noise_floor_method": "z95_worst_case_bernoulli_diff",
+     "p_win_delta_percentage_points": 0
+    },
+    {
+     "method": "p_win_delta_at_mean_v1",
+     "status": "below_resolution",
+     "clamped": false,
+     "factor_id": "annual_salary_spend",
+     "n_samples": 2000,
+     "metric_type": "p_joint_goal",
+     "noise_floor": 0.03099,
+     "p_win_delta": 0,
+     "current_metric": 1,
+     "perfect_metric": 1,
+     "labelling_doctrine": "provisional_doctrine_v0",
+     "noise_floor_method": "z95_worst_case_bernoulli_diff",
+     "p_win_delta_percentage_points": 0
+    },
+    {
+     "method": "p_win_delta_at_mean_v1",
+     "status": "below_resolution",
+     "clamped": false,
+     "factor_id": "senior_hiring_delay_risk",
+     "n_samples": 2000,
+     "metric_type": "p_joint_goal",
+     "noise_floor": 0.03099,
+     "p_win_delta": 0,
+     "current_metric": 1,
+     "perfect_metric": 1,
+     "labelling_doctrine": "provisional_doctrine_v0",
+     "noise_floor_method": "z95_worst_case_bernoulli_diff",
+     "p_win_delta_percentage_points": 0
+    },
+    {
+     "method": "p_win_delta_at_mean_v1",
+     "status": "below_resolution",
+     "clamped": false,
+     "factor_id": "junior_coaching_load",
+     "n_samples": 2000,
+     "metric_type": "p_joint_goal",
+     "noise_floor": 0.03099,
+     "p_win_delta": 0,
+     "current_metric": 1,
+     "perfect_metric": 1,
+     "labelling_doctrine": "provisional_doctrine_v0",
+     "noise_floor_method": "z95_worst_case_bernoulli_diff",
+     "p_win_delta_percentage_points": 0
+    },
+    {
+     "method": "p_win_delta_at_mean_v1",
+     "status": "below_resolution",
+     "clamped": false,
+     "factor_id": "budget_overrun_risk",
+     "n_samples": 2000,
+     "metric_type": "p_joint_goal",
+     "noise_floor": 0.03099,
+     "p_win_delta": 0,
+     "current_metric": 1,
+     "perfect_metric": 1,
+     "labelling_doctrine": "provisional_doctrine_v0",
+     "noise_floor_method": "z95_worst_case_bernoulli_diff",
+     "p_win_delta_percentage_points": 0
+    }
+   ],
+   "conditional_winners": [
+    {
+     "factor_id": "senior_engineers_hired",
+     "factor_label": "Senior engineers hired",
+     "split_value": 0.0032162862369680646,
+     "split_unit": "engineers",
+     "low_bucket": {
+      "win_probability": 0.4088
+     },
+     "high_bucket": {
+      "win_probability": 0.5014
+     },
+     "winner_flips": true
+    },
+    {
+     "factor_id": "junior_engineers_hired",
+     "factor_label": "Junior engineers hired",
+     "split_value": 0.0059595459577376775,
+     "split_unit": "engineers",
+     "low_bucket": {
+      "win_probability": 0.4374
+     },
+     "high_bucket": {
+      "win_probability": 0.435
+     },
+     "winner_flips": true
+    }
+   ]
+  },
+  "computed_against_hash": "5bef31ebf04251e2"
+ },
+ "analysis_ready": {
+  "options": [
+   {
+    "option_id": "two_senior_engineers",
+    "label": "Two senior engineers",
+    "status": "ready",
+    "interventions": {
+     "annual_salary_spend": 0.22,
+     "senior_engineers_hired": 0.1
+    },
+    "is_baseline": false,
+    "intervention_details": {
+     "annual_salary_spend": {
+      "display_value": "£220k/year",
+      "normalised_value": 0.22,
+      "raw_value": 220000,
+      "unit": "GBP/year"
+     },
+     "senior_engineers_hired": {
+      "display_value": "2 engineers",
+      "normalised_value": 0.1,
+      "raw_value": 2,
+      "unit": "engineers"
+     }
+    },
+    "status_reason": "2 intervention(s) ready for analysis"
+   },
+   {
+    "option_id": "four_junior_engineers",
+    "label": "Four junior engineers",
+    "status": "ready",
+    "interventions": {
+     "annual_salary_spend": 0.22,
+     "junior_engineers_hired": 0.13333333333333333
+    },
+    "is_baseline": false,
+    "intervention_details": {
+     "annual_salary_spend": {
+      "display_value": "£220k/year",
+      "normalised_value": 0.22,
+      "raw_value": 220000,
+      "unit": "GBP/year"
+     },
+     "junior_engineers_hired": {
+      "display_value": "4 engineers",
+      "normalised_value": 0.13333333333333333,
+      "raw_value": 4,
+      "unit": "engineers"
+     }
+    },
+    "status_reason": "2 intervention(s) ready for analysis"
+   },
+   {
+    "option_id": "continue_as_now",
+    "label": "Continue as now",
+    "status": "ready",
+    "interventions": {},
+    "is_baseline": true,
+    "status_reason": "Baseline: every factor holds at its observed value, so no effect values are needed"
+   }
+  ],
+  "goal_node_id": "ship_the_new_platform_by_q3",
+  "status": "ready",
+  "bias_findings": [],
+  "may_run": true,
+  "analysis_admission": {
+   "structurally_analysable": true,
+   "missing_important_inputs": [],
+   "semantic_quality_sufficient": false,
+   "permitted_analysis_mode": "quantified_provisional",
+   "reasons": [
+    {
+     "field": "structurally_analysable",
+     "code": "READY_TO_COMPARE",
+     "message": "Analysis can run on this model as it stands."
+    },
+    {
+     "field": "semantic_quality_sufficient",
+     "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+     "message": "Every estimate this comparison rests on is Olumi’s, not yours. Figures, and which option they favour, can be shown only as provisional, and no result can be called stable or robust until you have set at least one of them."
+    },
+    {
+     "field": "permitted_analysis_mode",
+     "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+     "message": "Every estimate this comparison rests on is Olumi’s, not yours. Figures, and which option they favour, can be shown only as provisional, and no result can be called stable or robust until you have set at least one of them."
+    }
+   ],
+   "graph_hash": "5bef31ebf04251e2e872b430f2f38b95b01fbfdcdde1b2cf29ec22a039cbf34d",
+   "semantic_signals": {
+    "confidence_parameters_total": 17,
+    "confidence_parameters_user_stated": 0,
+    "confidence_parameters_machine_authored": 15,
+    "confidence_parameters_unattributed": 2,
+    "material_parameters_total": 15,
+    "material_parameters_user_stated": 0,
+    "intervened_factor_baselines_total": 3,
+    "intervened_factor_baselines_user_stated": 0,
+    "material_parameters_awaiting_user_node_ids": [
+     "senior_engineers_hired",
+     "junior_engineers_hired",
+     "annual_salary_spend",
+     "senior_hiring_delay_risk",
+     "junior_coaching_load",
+     "budget_overrun_risk"
+    ],
+    "goal_target_stated": false
+   }
+  },
+  "freshness": "fresh",
+  "freshness_reason": "agent_readback_run_state_current",
+  "graph_hash_at_run": "5bef31ebf04251e2",
+  "current_graph_hash": "5bef31ebf04251e2",
+  "computed_at": "2026-09-27T02:17:34.601Z",
+  "run_delta_absence_reason": "unrequested_run_in_pair"
+ },
+ "draft_graph": {
+  "nodes": [
+   {
+    "id": "decision_ship_the_new_platform_by_q3",
+    "kind": "decision",
+    "label": "Decision: ship the new platform…",
+    "provenance": "ai_inferred",
+    "description": "Decision: ship the new platform by Q3"
+   },
+   {
+    "id": "ship_the_new_platform_by_q3",
+    "kind": "goal",
+    "label": "ship the new platform by Q3",
+    "provenance": "from_brief",
+    "goal_threshold_unit": "calendar date",
+    "goal_threshold_frame": "level"
+   },
+   {
+    "id": "two_senior_engineers",
+    "kind": "option",
+    "label": "Two senior engineers",
+    "provenance": "from_brief",
+    "interventions": {
+     "annual_salary_spend": {
+      "value": 0.22,
+      "source": "cee_hypothesis"
+     },
+     "senior_engineers_hired": {
+      "value": 0.1,
+      "source": "cee_hypothesis"
+     }
+    }
+   },
+   {
+    "id": "four_junior_engineers",
+    "kind": "option",
+    "label": "Four junior engineers",
+    "provenance": "from_brief",
+    "interventions": {
+     "annual_salary_spend": {
+      "value": 0.22,
+      "source": "cee_hypothesis"
+     },
+     "junior_engineers_hired": {
+      "value": 0.13333333333333333,
+      "source": "cee_hypothesis"
+     }
+    }
+   },
+   {
+    "id": "continue_as_now",
+    "kind": "option",
+    "label": "Continue as now",
+    "provenance": "ai_inferred",
+    "is_baseline": true
+   },
+   {
+    "id": "senior_engineers_hired",
+    "kind": "factor",
+    "label": "Senior engineers hired",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "observed_state": {
+     "cap": 20,
+     "unit": "engineers",
+     "value": 0,
+     "raw_value": 0,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "junior_engineers_hired",
+    "kind": "factor",
+    "label": "Junior engineers hired",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "observed_state": {
+     "cap": 30,
+     "unit": "engineers",
+     "value": 0,
+     "raw_value": 0,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "annual_salary_spend",
+    "kind": "factor",
+    "label": "Annual salary spend",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "observed_state": {
+     "cap": 1000000,
+     "unit": "GBP/year",
+     "value": 0,
+     "raw_value": 0,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "senior_hiring_delay_risk",
+    "kind": "factor",
+    "label": "Senior hiring delay risk",
+    "category": "external",
+    "provenance": "user_set",
+    "display_value": "0.25 probability",
+    "observed_state": {
+     "unit": "probability",
+     "value": 0.25,
+     "source": "user_assumption",
+     "raw_value": 0.25
+    }
+   },
+   {
+    "id": "junior_coaching_load",
+    "kind": "factor",
+    "label": "Junior coaching load",
+    "category": "observable",
+    "provenance": "ai_inferred",
+    "scale_frame": 10,
+    "observed_state": {
+     "unit": "senior-engineer equivalents",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "budget_overrun_risk",
+    "kind": "factor",
+    "label": "Budget overrun risk",
+    "category": "external",
+    "provenance": "user_set",
+    "display_value": "0.1 probability",
+    "observed_state": {
+     "unit": "probability",
+     "value": 0.1,
+     "source": "user_assumption",
+     "raw_value": 0.1
+    }
+   },
+   {
+    "id": "platform_delivery_capacity",
+    "kind": "outcome",
+    "label": "Platform delivery capacity",
+    "provenance": "ai_inferred"
+   }
+  ],
+  "edges": [
+   {
+    "to": "two_senior_engineers",
+    "from": "decision_ship_the_new_platform_by_q3",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "four_junior_engineers",
+    "from": "decision_ship_the_new_platform_by_q3",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "continue_as_now",
+    "from": "decision_ship_the_new_platform_by_q3",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "senior_engineers_hired",
+    "from": "two_senior_engineers",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "annual_salary_spend",
+    "from": "two_senior_engineers",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "junior_engineers_hired",
+    "from": "four_junior_engineers",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "annual_salary_spend",
+    "from": "four_junior_engineers",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "senior_engineers_hired",
+    "from": "continue_as_now",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "annual_salary_spend",
+    "from": "continue_as_now",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "junior_engineers_hired",
+    "from": "continue_as_now",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "platform_delivery_capacity",
+    "from": "senior_engineers_hired",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "platform_delivery_capacity",
+    "from": "junior_engineers_hired",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "senior_hiring_delay_risk",
+    "from": "senior_engineers_hired",
+    "strength": {
+     "std": 0.25,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "natural_effect": {
+      "amount": 0.05,
+      "amount_unit": "probability",
+      "strength_mean": 0.5,
+      "per_source_change": 2,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "engineers"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "platform_delivery_capacity",
+    "from": "senior_hiring_delay_risk",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "junior_coaching_load",
+    "from": "junior_engineers_hired",
+    "strength": {
+     "std": 0.375,
+     "mean": 0.75
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 0.25,
+      "amount_unit": "senior-engineer equivalents",
+      "strength_mean": 0.75,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "engineers"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "platform_delivery_capacity",
+    "from": "junior_coaching_load",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "budget_overrun_risk",
+    "from": "annual_salary_spend",
+    "strength": {
+     "std": 0.25,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "natural_effect": {
+      "amount": 0.11,
+      "amount_unit": "probability",
+      "strength_mean": 0.5,
+      "per_source_change": 220000,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "GBP/year"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "platform_delivery_capacity",
+    "from": "budget_overrun_risk",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "ship_the_new_platform_by_q3",
+    "from": "platform_delivery_capacity",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   }
+  ],
+  "node_count": 12,
+  "edge_count": 19,
+  "goal_constraints": [
+   {
+    "unit": "GBP/year",
+    "label": "Annual salary spend",
+    "value": 400000,
+    "node_id": "annual_salary_spend",
+    "operator": "<=",
+    "provenance": "explicit",
+    "value_frame": "level",
+    "constraint_id": "agent-lane:annual_salary_spend:<="
+   }
+  ]
+ },
+ "served_card_signal_id": "coach:limit_unchecked:5bef31ebf04251e2:2026-09-27T02:17:34.601Z:explicit_run:named:unchecked"
+}

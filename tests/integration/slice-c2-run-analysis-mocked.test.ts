@@ -286,7 +286,7 @@ describe('Slice C2 integration — Suite B (mocked PLoT, golden fixtures)', () =
       (fact.result as unknown as Record<string, unknown>).constraint_verdict,
     ).toEqual({
       may_name_leading_option: true,
-      constraint_verdict_state: 'not_applicable',
+      constraint_verdict_state: 'not_applicable', estimate_only_constraint_ids: [],
     });
     expect(enrichmentWithoutCoaching).toEqual(largerFixture);
     expect(fact.result.enrichment.decision_brief).toBeDefined();

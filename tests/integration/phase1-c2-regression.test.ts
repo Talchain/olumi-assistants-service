@@ -217,7 +217,7 @@ describe('phase 1 C2 regression — run_analysis via tool-use produces same Hand
       (write.handler_facts[0]!.result as unknown as Record<string, unknown>).constraint_verdict,
     ).toEqual({
       may_name_leading_option: true,
-      constraint_verdict_state: 'not_applicable',
+      constraint_verdict_state: 'not_applicable', estimate_only_constraint_ids: [],
     });
     expect(enrichmentWithoutCoaching).toEqual(plotResponse);
   });

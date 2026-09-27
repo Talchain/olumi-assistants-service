@@ -165,3 +165,39 @@ describe('the reload carries the run\'s own leader-limit risks', () => {
     expect('analysis_leader_limit_risks' in read).toBe(false);
   });
 });
+
+describe("RULING 4 — the reload carries the run's own rule-(d) ids (schemas 0.60.0), same fact and gates", () => {
+  const withVerdict = (ids?: string[]) => RunAnalysisHandlerFactSchema.parse({
+    ...runFact(u3b()),
+    result: {
+      ...(runFact(u3b()).result as Json),
+      constraint_verdict: {
+        may_name_leading_option: false, constraint_verdict_state: 'unevaluated',
+        ...(ids === undefined ? {} : { estimate_only_constraint_ids: ids }),
+      },
+    },
+  });
+
+  it('⭐ recorded ids reach the read verbatim, beside the verdict state', async () => {
+    const read = await reloadWith(withVerdict(['gc_u3b']), GRAPH, 'eoi-recorded');
+    expect(read.analysis_result, 'premise: the block is delivered').not.toBeNull();
+    expect(read.analysis_constraint_verdict_state).toBe('unevaluated');
+    expect(read.analysis_constraint_estimate_only_ids).toEqual(['gc_u3b']);
+  });
+
+  it('recorded [] stays [] — "recorded, none"', async () => {
+    expect((await reloadWith(withVerdict([]), GRAPH, 'eoi-empty')).analysis_constraint_estimate_only_ids).toEqual([]);
+  });
+
+  it('a fact from before 0.60.0 (no member) → null — "not recorded", never []', async () => {
+    const read = await reloadWith(withVerdict(undefined), GRAPH, 'eoi-absent');
+    expect(read.analysis_result).not.toBeNull();
+    expect(read.analysis_constraint_estimate_only_ids).toBeNull();
+  });
+
+  it('STALE: after an edit the key is ABSENT, exactly as analysis_result is', async () => {
+    const read = await reloadWith(withVerdict(['gc_u3b']), EDITED, 'eoi-stale');
+    expect(read.analysis_result).toBeNull();
+    expect('analysis_constraint_estimate_only_ids' in read).toBe(false);
+  });
+});
