@@ -1458,7 +1458,9 @@ export async function buildModelFromBrief(
         // `breakLoops`) — which link was left out, or that the user's own loop was kept.
         // `magnitude_unconvertible`: a stated size that could not be read on the two ends' frames, so the standard
         // placeholder stands in (magnitude contract, D2/D6) — never dropped unseen.
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|loop_withheld|loop_kept|magnitude_unconvertible)$|\.observed_state\.baseline$/.test(l.field_path))
+        // `risk_folded`: a risk Olumi drafted as a step between two factors, folded into the direct link with its
+        // overall effect kept (`risk-mediator-fold.ts`, AI Quality #70 5854837708) — Olumi's drafting, so it is said.
+        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|loop_withheld|loop_kept|magnitude_unconvertible|risk_folded)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };
