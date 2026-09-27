@@ -615,6 +615,7 @@ export default async function route(app: FastifyInstance) {
       // baseline", i.e. observe-only. That is the correct degrade: a read
       // failure must not start refusing registrations it cannot adjudicate.
       let baseGraphForInvariants: unknown;
+      let baseReadFailed = false;
       try {
         const base = await store.loadGraph(scenarioId);
         baseGraphForInvariants = base;
@@ -633,11 +634,20 @@ export default async function route(app: FastifyInstance) {
         );
         expectedGraphIdentityHash = undefined;
         expectedGraphAnalysisHash = undefined;
+        baseReadFailed = true;
       }
 
       // An absent `goal_constraints` keeps the stored limits (see the helper).
       // Bound to the SAME server read as the CAS base above.
       const graphToRegister = withStoredLimitsWhenUnstated(parsed.data, submittedRecord, baseGraphForInvariants);
+      // ⛔ The one case where the failed read decides what is written: the register
+      // states no limits, so the stored ones can only be kept by reading them. Without
+      // that read (and with no CAS, the hashes being undefined) it would erase them —
+      // the #2080 defect reopened on a transient error (writer audit 2026-09-27). A
+      // retryable 503; a register that states its list still degrades as before.
+      if (baseReadFailed && !Object.prototype.hasOwnProperty.call(submittedRecord, "goal_constraints")) {
+        return unavailable();
+      }
 
       /**
        * ⛔ A CALLER'S EXPECTATION IS CHECKED BEFORE ANY WRITE, AGAINST THE

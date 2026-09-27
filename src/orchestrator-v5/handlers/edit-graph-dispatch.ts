@@ -17,6 +17,7 @@
  */
 
 import type { FastifyRequest } from 'fastify';
+import { withUndeclaredElementKeysFrom } from '../tools/handlers/d1-shared/undeclared-element-keys.js';
 
 import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/boundary';
 
@@ -2120,10 +2121,11 @@ export function mergeAppliedGraphForPersistence(args: {
     persistedUsable ? persistedBase : ingressBase
   ) as Record<string, unknown>;
 
+  // Undeclared per-node / per-edge keys the strict parse stripped survive the
+  // replace (writer audit 2026-09-27): see `withUndeclaredElementKeysFrom`.
   const merged: Record<string, unknown> = {
     ...base,
-    nodes: appliedGraph.nodes,
-    edges: appliedGraph.edges,
+    ...withUndeclaredElementKeysFrom(base, appliedGraph.nodes, appliedGraph.edges),
   };
 
   // Precedence rule 4 — drop options[] entries provably deleted by THIS

@@ -129,10 +129,18 @@ describe('/graph/register never erases limits it was not told about', () => {
     expect(ids(writtenLimits())).toEqual([]);
   });
 
-  it('a failed read of the stored graph degrades to today: the register proceeds, nothing is carried', async () => {
+  it('⭐ a failed read + NO goal_constraints key FAILS CLOSED (retryable 503): nothing is written, no limit erased', async () => {
     loadGraph.mockRejectedValue(new Error('read failed'));
     const res = await register(structuredClone(GRAPH));
+    expect(res.statusCode, res.body).toBe(503);
+    expect(append).not.toHaveBeenCalled();
+  });
+
+  it('CONTRAST: a failed read + a STATED list still degrades as before: written as sent', async () => {
+    loadGraph.mockRejectedValue(new Error('read failed'));
+    const price = { constraint_id: 'constraint_fac_price_min', node_id: 'fac_price', operator: '>=', value: 0.2, label: 'price floor', provenance: 'explicit' };
+    const res = await register({ ...structuredClone(GRAPH), goal_constraints: [price] });
     expect(res.statusCode, res.body).toBe(200);
-    expect(ids(writtenLimits())).toEqual([]);
+    expect(ids(writtenLimits())).toEqual(['constraint_fac_price_min']);
   });
 });

@@ -22,6 +22,7 @@
 import { GraphV3, type GraphV3T } from '../../../../schemas/cee-v3.js';
 import { log } from '../../../../utils/telemetry.js';
 import { D1HandlerError } from './errors.js';
+import { withUndeclaredElementKeysFrom } from './undeclared-element-keys.js';
 
 /**
  * The runtime shape of a graph returned by `applyAndValidateMutation`:
@@ -123,10 +124,13 @@ export function applyAndValidateMutation<TBefore, TAfter>(
     !Array.isArray(ingressGraph)
       ? (ingressGraph as Record<string, unknown>)
       : {};
+  // The same survival rule one level down: undeclared per-node and per-edge keys
+  // the parse stripped come back from the ingress element they were read from.
+  const kept = withUndeclaredElementKeysFrom(ingressGraph, postParse.data.nodes, postParse.data.edges);
   const mutatedGraph: PersistedGraphV3T = {
     ...ingressShape,
-    nodes: postParse.data.nodes,
-    edges: postParse.data.edges,
+    nodes: kept.nodes,
+    edges: kept.edges,
     ...(postParse.data.goal_constraints !== undefined
       ? { goal_constraints: postParse.data.goal_constraints }
       : {}),
@@ -228,8 +232,11 @@ export function mergeMutatedGraphForPersistence(args: {
   const merged: Record<string, unknown> = persistedUsable
     ? {
         ...(persistedBase as Record<string, unknown>),
-        nodes: mutatedGraph.nodes,
-        edges: mutatedGraph.edges,
+        ...withUndeclaredElementKeysFrom(
+          persistedBase,
+          (mutatedGraph.nodes as unknown[]) ?? [],
+          (mutatedGraph.edges as unknown[]) ?? [],
+        ),
         ...(mutatedGraph.goal_constraints !== undefined
           ? { goal_constraints: mutatedGraph.goal_constraints }
           : {}),
