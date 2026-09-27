@@ -134,6 +134,9 @@ describe('C1 follow-up — the given state is the turn’s START; a tool result 
     expect(wording, 'says it is the model as the turn BEGAN').toMatch(/start of this turn/i);
     expect(wording, 'says a later tool result supersedes it').toContain('supersedes');
     expect(wording, 'says to describe the model from the latest').toContain('from the latest');
+    // AIQ #2118 F1: only an APPLIED change supersedes it; an unapproved proposal's preview never does.
+    expect(wording, 'scoped to applied changes').toContain('APPLIED a change');
+    expect(wording, 'a proposal preview never supersedes it').toContain('readiness_if_approved describes the model only IF the user approves, and never supersedes');
     for (const carrier of ['entities', 'graph_revision', 'change', 'readiness']) {
       expect(wording, `names what a later result can carry: ${carrier}`).toContain(carrier);
     }
@@ -193,5 +196,7 @@ describe('C1 follow-up — the route\u2019s own system prompt says the same as t
     expect(lines, 'control: exactly one instructions line names the given state').toHaveLength(1);
     expect(lines[0]).toContain('supersedes it');
     expect(lines[0]).toContain('describe the model from the latest');
+    expect(lines[0]).toContain('APPLIED a change');
+    expect(lines[0]).toContain('readiness_if_approved describes the model only IF the user approves, and never supersedes');
   });
 });

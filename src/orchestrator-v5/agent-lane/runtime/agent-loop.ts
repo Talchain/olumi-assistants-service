@@ -183,8 +183,9 @@ export const WITHHELD_ON_CHIP_TURN = 'withheld_on_chip_turn';
  * the route prompt match the leading words) and keep `{` out of it (a test parses the state from the first `{`).
  */
 export const CURRENT_MODEL_STATE_PREFIX = 'CURRENT MODEL STATE \u2014 exactly what get_canonical_state returns, read by Olumi at the START of this turn. '
-  + 'If a tool result later in this turn returns entities, a graph_revision, a change or readiness, that result is newer and '
-  + 'supersedes this for anything it covers: describe the model from the latest. As the turn began: ';
+  + 'If a tool result later in this turn APPLIED a change (mutated: true, the new entities, a new graph_revision, readiness_after), that result is '
+  + 'newer and supersedes this for what it covers: describe the model from the latest applied result. A proposal\u2019s '
+  + 'readiness_if_approved describes the model only IF the user approves, and never supersedes this. As the turn began: ';
 
 export async function runAgentTurn(
   input: AgentTurnInput,
