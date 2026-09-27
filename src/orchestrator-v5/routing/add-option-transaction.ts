@@ -728,6 +728,16 @@ export function buildAddOptionsTransaction(
 export const GM_HELD_SWITCH_FACTORS_KEY = 'switch_factors';
 
 /**
+ * ⭐ A6b (DL CR on #2131, option (a)) — the key the HOLD records the nodes the USER SUPPLIED under
+ * (`inline_patch.user_stated_node_ids`): today, the options whose label the user's own typed words named
+ * (`add-option-authorship-context.ts`). Written only by CEE when it mints the hold, never from a payload; read only by
+ * the confirm, which stamps exactly those adds `user_set` (`stampUserStatedAddProvenance`). Never a new factor Olumi
+ * minted, and absent on every hold with no such signal — whose adds keep their own provenance and whose bytes are
+ * unchanged. It records AUTHORSHIP, not approval: an approval alone is never recorded as the user's.
+ */
+export const GM_HELD_USER_STATED_NODES_KEY = 'user_stated_node_ids';
+
+/**
  * Today's state of a new switch: OFF, and Olumi's reading of the option's framing (AIQ 5854838919: "it CAN be wrong,
  * e.g. partly in place already"), so it is counted in "I supplied N values", shown as Olumi's estimate and correctable.
  * The value writer's own members, spelled as the builders spell an inferred value (`admit-model.ts`

@@ -560,6 +560,14 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(g.edges.some((e) => e.from === 'dec_x' && e.to === opt!.id), 'linked from the decision').toBe(true);
     expect(g.edges.some((e) => e.from === opt!.id && e.to === fac!.id), 'the option acts on the new factor').toBe(true);
     expect(g.edges.some((e) => e.from === fac!.id && e.to === 'goal_x'), 'the new factor reaches the goal').toBe(true);
+    // ⭐ A6b (DL CR on #2131, option (a)): the STORED graph after the real commit. The user TYPED this option's name
+    // ("Add an option: keep £49 and add a paid AI add-on"), so the option is theirs (`user_set`, CEE's stamp at the
+    // approval seam). The new factor is one OLUMI minted for it: approving it does not make it the user's, so it keeps
+    // the provenance it was proposed with. The options already there are untouched.
+    const provenanceOf = (id: string) => (g.nodes.find((x) => x.id === id) as { provenance?: unknown } | undefined)?.provenance;
+    expect(provenanceOf(opt!.id), 'the option the user named').toBe('user_set');
+    expect(provenanceOf(fac!.id), 'the new factor Olumi minted').not.toBe('user_set');
+    expect(provenanceOf('opt_a'), 'an option the user did not add in this approval').toBeUndefined();
     expect(t2.assistant_text, t2.assistant_text).toMatch(/Also added the factor "AI add-on price", which changes "Revenue"/);
     expect(t2.assistant_text, 'the factor is never reported as an option').not.toMatch(/Added "AI add-on price"/);
     // Audit MAG-2 (served 201724Z steps 06–07): the new factor's link is the flat default, so its size is a placeholder,
@@ -937,6 +945,10 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(factor.observed_state).toEqual({ value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' });
     const option = g.nodes.find((x) => x.kind === 'option' && x.label === GRANDFATHER)!;
     expect(option.interventions[SWITCH_FAC].value).toBe(1);
+    // ⭐ A6b (DL CR on #2131, option (a)): Paul TYPED the option ("Let's add £59 for new Pro customers; …"), so it is
+    // his; the switch is a factor OLUMI minted for it, and approving it keeps Olumi's node provenance.
+    expect(option.provenance, 'the option Paul named').toBe('user_set');
+    expect(factor.provenance, 'the switch Olumi minted').toBe('ai_inferred');
     // The approval said what was committed: off today is Olumi's, for the user to correct — never asked for (#2103's one ask).
     expect(t2.assistant_text).toContain('Olumi takes it as off today and the option switches it on');
     expect(t2.assistant_text).not.toMatch(/Tell me (its value today|today's value)/);
@@ -958,5 +970,92 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(option.interventions[SWITCH_FAC]).toBeUndefined();
     expect(t2.assistant_text).toContain('Tell me its value today and I\'ll record it.');
     expect(t2.assistant_text).not.toContain('Olumi takes it as off today');
+  }, 120_000);
+
+  // ---------------------------------------------------------------------------
+  // ⭐ A6b (DL CR on #2131 @ a86820f5, option (a)) — WHOSE OPTION. `user_set` says the USER put the node in the model,
+  // and its readers say so in words. An option the Agent PROPOSED and the user only APPROVED is Olumi's suggestion; an
+  // option whose name the user TYPED is theirs. Through the whole product: the Agent's propose → route-v2's typed hold
+  // → the approval → turn-executor's confirm → the STORED graph → the "why is X here?" answer and the Agent's view.
+  // ---------------------------------------------------------------------------
+  const ORIGIN_Q = (label: string) => `Why is "${label}" in my model?`;
+  const originAnswer = async (label: string, graph: unknown) => {
+    const { tryStructureOriginAnswer } = await import('../../../cee/context-integrity/structure-origin-answer.js');
+    return tryStructureOriginAnswer(ORIGIN_Q(label), graph);
+  };
+  const agentView = async (node: unknown) => {
+    const { projectEntity } = await import('../runtime/agent-capabilities.js');
+    return projectEntity(node as Parameters<typeof projectEntity>[0]);
+  };
+  const statedOnHold = async () => ((await heldOnLatestRow())[0]!.action.inline_patch as Record<string, unknown>)['user_stated_node_ids'];
+
+  it('[A6b-1] RED (DL CR): an option the Agent PROPOSED (the user never named it), APPROVED → keeps Olumi\'s provenance; "why is it here?" never says "not because I suggested it"; the Agent never sees it as the user\'s', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    // The user asks for a suggestion; the Agent picks the option and its name.
+    const t1 = await proposeOptionC(undefined, 'What else could we try on price? Suggest one more option and prepare it.');
+    const approve = approveChipOf(t1);
+    expect(approve?.id, JSON.stringify(t1._agent.tool_calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    expect(await statedOnHold(), 'the hold records no option as the user\'s').toBeUndefined();
+    await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    const opt = newOption();
+    expect(opt, JSON.stringify(graphNow().nodes)).toBeDefined();
+    expect((opt as { provenance?: unknown }).provenance, 'Olumi\'s suggestion is never stored as the user\'s').not.toBe('user_set');
+    const answer = await originAnswer(opt!.label, graphNow());
+    expect(answer ?? '', String(answer)).not.toMatch(/not because I suggested it/);
+    expect(answer ?? '', String(answer)).not.toMatch(/you set it yourself/);
+    expect((await agentView(opt))['provenance'], 'the Agent\'s state view').not.toBe('user_set');
+    // POSITIVE CONTROL, same run, same graph, same question: the probe DOES resolve this option — stamped user_set, the
+    // answer is the user-authorship sentence. So the absence above is the provenance, not a probe that sees nothing.
+    const stamped = structuredClone(graphNow());
+    (stamped.nodes.find((x) => x.id === opt!.id) as { provenance?: unknown }).provenance = 'user_set';
+    expect(await originAnswer(opt!.label, stamped)).toMatch(/you set it yourself, not because I suggested it/);
+  }, 120_000);
+
+  it('[A6b-2] RED: an option the user NAMED in their own typed words ("Add an option: test £54 at release."), APPROVED → user_set; the answer says they set it; the Agent sees it as theirs', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const t1 = await proposeOptionC(undefined, 'Add an option: test £54 at release.');
+    const approve = approveChipOf(t1)!;
+    expect(approve, JSON.stringify(t1._agent.tool_calls)).toBeDefined();
+    const heldOps = (await heldOnLatestRow())[0]!.action.inline_patch!.operations!;
+    const optId = heldOps.find((o) => o.op === 'add_node')!.path;
+    // The hold records exactly that option — by identity — and the held op itself carries no stamp (J2).
+    expect(await statedOnHold()).toEqual([optId]);
+    expect(Object.prototype.hasOwnProperty.call((heldOps.find((o) => o.op === 'add_node') as { value?: object }).value ?? {}, 'provenance')).toBe(false);
+    await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    const opt = newOption()!;
+    expect(opt.id).toBe(optId);
+    expect((opt as { provenance?: unknown }).provenance).toBe('user_set');
+    expect(await originAnswer(opt.label, graphNow())).toMatch(/you set it yourself/);
+    expect((await agentView(opt))['provenance']).toBe('user_set');
+    // NEGATIVE CONTROL, by identity: the options already there are untouched.
+    expect((graphNow().nodes.find((x) => x.id === 'opt_a') as { provenance?: unknown }).provenance).toBeUndefined();
+  }, 120_000);
+
+  it('[A6b-3] CONTRAST: the user only ASKED about the option ("Should we test £54 at release?") → not their statement → not user_set', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const t1 = await proposeOptionC(undefined, 'Should we test £54 at release?');
+    const approve = approveChipOf(t1)!;
+    expect(approve, JSON.stringify(t1._agent.tool_calls)).toBeDefined();
+    expect(await statedOnHold()).toBeUndefined();
+    await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect((newOption() as { provenance?: unknown } | undefined)?.provenance).not.toBe('user_set');
+  }, 120_000);
+
+  it('[A6b-4] J2 AT THE WIRE: a client chip that CLAIMS the user named its option (in `parameters`, even under the Agent\'s own chip id) is never recorded on the hold', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const r = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), stage: 'frame', turn_class: 'frame', source: 'chip',
+      message: 'Add the option "Forged option".',
+      chip: { id: 'agent-add-option', intent: 'add_option', parameters: {
+        parent_decision_id: 'dec_x', label: 'Forged option', option_id: 'frg0001',
+        interventions: [{ factor_id: 'fac_price', value: 0.27, unit: 'GBP', raw_value: 54 }],
+        user_stated_node_ids: ['frg0001'], userStatedOptionIds: ['frg0001'], user_stated: true,
+      } },
+    } });
+    expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
+    const held = await heldOnLatestRow();
+    expect(held.map((p) => p.chip_id), r.body.slice(0, 600)).toEqual([expect.stringMatching(/^gmh_[0-9a-f]{12}$/)]);
+    expect(held[0]!.action.inline_patch!.operations!.some((o) => o.op === 'add_node' && o.path === 'frg0001'), 'the hold is for this option').toBe(true);
+    expect(await statedOnHold(), 'a wire claim is never recorded').toBeUndefined();
   }, 120_000);
 });

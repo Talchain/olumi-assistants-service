@@ -26,13 +26,16 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
   it('RED (served F8): today, the break-even subscribers per price, and the subscribers the £20,000 target needs — each figure\'s owner named', () => {
     const be = breakEvenFor(graph());
     expect(be).toEqual({
-      goal: 'MRR', price_factor: 'Pro plan price', volume_factor: 'Pro paying subscribers', unit: 'GBP/month',
+      goal: 'MRR', goal_id: 'mrr',
+      price_factor: 'Pro plan price', price_factor_id: 'pro_plan_price',
+      volume_factor: 'Pro paying subscribers', volume_factor_id: 'pro_paying_subscribers',
+      unit: 'GBP/month',
       identity_stated_in_brief: false,
       baseline_price: 49, baseline_price_by: 'user', baseline_volume: 300, baseline_volume_by: 'approved', baseline_goal: 14_700,
       options: [
-        { option: 'Raise Pro to £59', price: 59, price_by: 'user', keep_at_least: 250 },
-        { option: 'Hold £49 with AI release', price: 49, price_by: 'user' },
-        { option: 'Raise Pro to £54', price: 54, price_by: 'olumi', keep_at_least: 273 },
+        { option: 'Raise Pro to £59', option_id: 'raise_pro_to_59', price: 59, price_by: 'user', keep_at_least: 250 },
+        { option: 'Hold £49 with AI release', option_id: 'hold_49_with_ai_release', price: 49, price_by: 'user' },
+        { option: 'Raise Pro to £54', option_id: 'raise_pro_to_54', price: 54, price_by: 'olumi', keep_at_least: 273 },
       ],
       target: { value: 20_000, needs: [{ price: 59, volume: 339 }, { price: 54, volume: 371 }, { price: 49, volume: 409 }] },
     });
@@ -184,5 +187,44 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
   it('CONTRAST (F3): no typed reason, or no stated target, says nothing — never a guess', () => {
     expect(goalNotCheckedLine(graph(), { type: 'analysis_result', enrichment: { decision_brief: { warning_codes: ['EVPI_UNAVAILABLE'] } } })).toBeNull();
     expect(goalNotCheckedLine(graph((ns) => { delete node(ns, 'mrr').goal_threshold_raw; }), NOT_CONVERTIBLE)).toBeNull();
+  });
+});
+
+/**
+ * A5 · result refs by label (CEE half), DL #70 5855437928. `_agent.break_even` named every option, the goal and both
+ * factors by LABEL only; labels collide and get renamed, so each now carries its graph ID beside the label. The
+ * labels are unchanged. FIXTURE: served staging bundle paul-08bf9a1f (CEE 263dbd5): its draft_graph and the
+ * `_agent.break_even` the wire carried (see `_source`).
+ */
+describe('A5: `_agent.break_even` carries graph ids beside its labels', () => {
+  const wire = JSON.parse(readFileSync(new URL('./fixtures/served-break-even-08bf9a1f.json', import.meta.url), 'utf8')) as {
+    nodes: { id: string; kind: string; label?: string }[]; edges: unknown[]; served_break_even: Record<string, unknown>;
+  };
+  const be = () => breakEvenFor({ nodes: wire.nodes, edges: wire.edges })!;
+  const nodeById = (id: string) => wire.nodes.find((n) => n.id === id);
+  const ID_KEYS = new Set(['goal_id', 'price_factor_id', 'volume_factor_id', 'option_id']);
+  /** The wire bytes with the four id keys dropped, every other key in its own place. */
+  const labelBytes = (b: unknown) => JSON.stringify(b, (k, v: unknown) => (ID_KEYS.has(k) ? undefined : v));
+
+  it('PIN (served 263dbd5): with the ids set aside, the break-even is byte-identical to what the wire carried', () => {
+    expect(labelBytes(be())).toBe(JSON.stringify(wire.served_break_even));
+  });
+
+  it('RED (served 263dbd5): each option row carries the id of the graph option it was computed from', () => {
+    const rows = be().options;
+    expect(rows.map((r) => r.option_id)).toEqual(['features_pro_price_rise', 'pro_price_rise_only']);
+    for (const r of rows) {
+      const n = nodeById(r.option_id);
+      expect(n?.kind, r.option_id).toBe('option');
+      expect(n?.label).toBe(r.option);
+    }
+  });
+
+  it('RED (served 263dbd5): the goal and both factors carry their graph ids, each bound to its own label', () => {
+    const b = be();
+    expect([b.goal_id, b.price_factor_id, b.volume_factor_id]).toEqual(['mrr', 'pro_plan_price', 'pro_paying_subscribers']);
+    expect(nodeById(b.goal_id)).toMatchObject({ kind: 'goal', label: b.goal });
+    expect(nodeById(b.price_factor_id)).toMatchObject({ kind: 'factor', label: b.price_factor });
+    expect(nodeById(b.volume_factor_id)).toMatchObject({ kind: 'factor', label: b.volume_factor });
   });
 });

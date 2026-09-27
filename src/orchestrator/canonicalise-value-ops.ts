@@ -580,6 +580,69 @@ export function stampUserEditProvenance(
 }
 
 // ---------------------------------------------------------------------------
+// ⭐ SLICE A6b — A NODE THE USER SUPPLIED IS THE USER'S; AN APPROVED OLUMI
+// PROPOSAL IS STILL OLUMI'S (Canonical's A6 design, DL #70 5855437928; DL CR on
+// #2131, option (a)).
+//
+// Node `provenance: 'user_set'` (`USER_EDIT_PROVENANCE`, `NodeV3.provenance`) is
+// reserved for a node the USER put in the model (`admit-model.ts`: "user_set is
+// reserved for a direct user edit"), and its readers SAY so: "why is X here?"
+// answers "because you set it yourself, not because I suggested it"
+// (`structure-origin-answer.ts`), and the Agent's state view shows it as the
+// user's (`projectEntity`). So approving a node is NOT supplying it: an option
+// Olumi proposed and the user approved (Paul's Agent-minted `6526b52c`), a
+// `new_factors` node Olumi minted for it (A1's switch), a risk the Agent offered
+// and an `edit_graph` add the model authored all KEEP the provenance they had.
+// Stamping them would make Olumi deny its own suggestion.
+//
+// WHO SAYS THE USER SUPPLIED IT. Only a TYPED authorship signal, recorded on the
+// hold by CEE when the hold is minted (`GM_HELD_USER_STATED_NODES_KEY`), never
+// taken from a payload: today, the Agent's add-option records an option whose
+// label THIS turn's typed words name (`wordsTheUserWrote` over the route-bound
+// `user_turn_text`, carried in-process by `add-option-authorship-context.ts`).
+// A path with no such signal records nothing, and nothing on it is stamped —
+// every miss under-claims. (The canvas `structural_add` stamps its own adds at
+// its own writer, unchanged.)
+//
+// WHERE. Called by exactly ONE seam: the held/confirm apply
+// (`executeGmHeldResume`), AFTER the strip and AFTER the confirm's re-referee.
+//
+// J2 — A PRODUCER CANNOT SELF-STAMP. The ids come from the hold's CEE-written
+// member, not from the operations; a model's own `provenance` on an add is
+// stripped before the hold and refused by the referee's R4 screen at the
+// confirm; and CEE's literal is spread LAST, so no payload value sits in its
+// place.
+//
+// Stamped INTO the op, pre-apply, for the reason `stampUserEditProvenance` is:
+// the applier writes it and `batchFullyLanded` sees raw == canonical. Node
+// `provenance` is outside the analysis-hash whitelist (`graph-hash.ts`), so
+// freshness and the hold pins do not move; the identity hash (an exclude list
+// over persisted fields) does, as it must for a new persisted field.
+//
+// Scope: an `add_node` whose id the hold names, and the NODE claim only — it
+// says who put the node in the model, not whose number any value on it is.
+// Every other op is returned BY REFERENCE. Pure and total; never mutates inputs.
+// ---------------------------------------------------------------------------
+
+/**
+ * Stamp node `provenance: 'user_set'` on each `add_node` whose id is in `userStatedNodeIds` — the nodes the hold
+ * records as SUPPLIED by the user. Every other op, including every other add, is returned by reference.
+ */
+export function stampUserStatedAddProvenance(
+  operations: readonly PatchOperation[],
+  userStatedNodeIds: readonly string[],
+): PatchOperation[] {
+  if (userStatedNodeIds.length === 0) return [...operations];
+  const stated = new Set(userStatedNodeIds);
+  return operations.map((op) => {
+    if (op.op !== 'add_node' || !stated.has(op.path)) return op;
+    const value = asRecord(op.value);
+    if (value === null) return op;
+    return { ...op, value: { ...value, provenance: USER_EDIT_PROVENANCE } };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Observed value-pair authority (ROADMAP 2.1033 — the SERVER half of
 // "screen = commit", 2026-08-09).
 //
