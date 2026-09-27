@@ -4194,7 +4194,7 @@ export function createAgentCapabilities(
         factorTheUserNamed(factorLabel, ctx.user_turn_text, { options: optionNames, others: quantityNames.filter((l) => l !== factorLabel) })
           ? {} : { source: 'cee_hypothesis' });
       const entries = plans.map(({ spec, plan }) => {
-        type Lvl = { value: number; unit?: string; estimate?: string; by?: 'user' | 'olumi'; derived?: string };
+        type Lvl = { value: number; unit?: string; estimate?: string; by?: 'user' | 'olumi' };
         const levelById = new Map<string, Lvl>();
         for (const a of spec.acts_on) {
           const v = a.level?.value;
@@ -4206,8 +4206,9 @@ export function createAgentCapabilities(
         }
         /**
          * ⛔ THE USER'S OWN SPLIT (AI Quality ruling #70 5859388817; served C08 "Let's spit it 50/50" of the £30,000 limit the
-         * user set). Levels the Agent proposed that are exactly the user's typed split of ONE total they stated are theirs,
-         * recorded with how they were derived and said with the working; two totals in scope are asked, never guessed.
+         * user set). Levels the Agent proposed that are exactly the user's typed split of ONE total they stated are set, with
+         * the working as their basis (Olumi's reading until the `derived_from` slot lands, below); two totals in scope are
+         * asked, never guessed.
          */
         // The ratio must be typed in THIS message (condition 1): `user_turn_text`, never the session's `user_text`.
         const split = derivedSplitOf(ctx.user_turn_text ?? '', statedTotalsOf(g.raw), plan.actsOn.flatMap((f) => {
@@ -4232,7 +4233,14 @@ export function createAgentCapabilities(
            */
           const wrote = figureTheUserWroteFor(lvl.value, lvl.unit ?? factorUnit, ctx.user_text, scopeIn(g, f.label, plan.label));
           const derived = !wrote && split.kind === 'derived' && split.factor_ids.includes(f.id) ? split : undefined;
-          const byUser = wrote || derived !== undefined;
+          /**
+           * INTERIM (AI Quality 5859798011): until Canonical's `derived_from` slot lands (#70 5859537590), the add-option
+           * spec drops the key, so the user's split would persist as theirs with no record of how it was derived. It is
+           * recorded as Olumi's reading of their split instead, with the working as its basis; the PR that lands the slot
+           * makes it the user's (`user_specified` + `derived_from`).
+           */
+          if (derived !== undefined) lvl.estimate = `${derived.working}, as Olumi read it`;
+          const byUser = wrote;
           if (!byUser && lvl.estimate === undefined) {
             const ask = split.kind === 'ask_which_total' && split.factor_ids.includes(f.id)
               ? `The user's split could be of more than one total they set (${split.candidates.map((t) => `"${t.label}" ${t.value}${t.unit !== undefined ? ` ${t.unit}` : ''}`).join(' or ')}), so ${f.label}'s level is left unset. Ask which total they mean; never pick one.`
@@ -4240,14 +4248,14 @@ export function createAgentCapabilities(
             levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: ask ?? notWrittenReason(lvl.value, f.label) });
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
-          if (!byUser && contradictsItsName(lvl.value, lvl.unit ?? factorUnit, plan.label)) {
+          // The user's split's figure in the name ("50/50") is its RATIO, never a level it contradicts.
+          if (!byUser && derived === undefined && contradictsItsName(lvl.value, lvl.unit ?? factorUnit, plan.label)) {
             levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
               reason: `Olumi's estimate of ${lvl.value} for ${f.label} does not match the figure in the option's own name ("${plan.label}"), so that level is left unset. Use the figure in the name, or name the option for the figure you mean.` });
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
           lvl.by = byUser ? 'user' : 'olumi';
-          if (derived !== undefined) lvl.derived = derived.working;
-          const stamp = byUser ? (derived !== undefined ? { derived_from: derived.derived_from } : {}) : { source: 'cee_hypothesis' as const };
+          const stamp = byUser ? {} : { source: 'cee_hypothesis' as const };
           const frame = levelFrameOf(factor);
           if (frame !== null) {
             const v = lvl.value / frame;
@@ -4421,8 +4429,7 @@ export function createAgentCapabilities(
           const lvl = set.get(f.id);
           return lvl !== undefined
             ? { factor: f.label, value: lvl.value, ...(lvl.unit !== undefined ? { unit: lvl.unit } : {}),
-              ...(lvl.by === 'olumi' ? { stated_by: 'olumi_estimate', basis: lvl.estimate }
-                : { stated_by: 'user', ...(lvl.derived !== undefined ? { derived: lvl.derived, say_the_working: true } : {}) }) }
+              ...(lvl.by === 'olumi' ? { stated_by: 'olumi_estimate', basis: lvl.estimate } : { stated_by: 'user' }) }
             : { factor: f.label, value: null, still_needed: true };
         }),
       }));

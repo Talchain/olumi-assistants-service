@@ -5,9 +5,11 @@
  * (`goal_constraints` row, `provenance: 'explicit'`). At C08 the user typed "Let's spit it 50/50 at this stage." (sic),
  * and the option went in with NO levels: "'50/50' did not state a separate figure for either factor in the model".
  *
- * THE SEAM: the real `proposeNewOption` over the SERVED C08 graph. The split levels ride the ONE proposal as the
- * user's (no `cee_hypothesis`), each carrying `derived_from` (the carrier waits for Canonical, #70 5859537590), and the
- * Agent is handed the working to say. Anything short of the three conditions takes today's path.
+ * THE SEAM: the real `proposeNewOption` over the SERVED C08 graph. The split levels ride the ONE proposal SET, with the
+ * working as their basis. INTERIM (AI Quality 5859798011): until Canonical's `derived_from` slot lands (#70 5859537590)
+ * they are recorded as Olumi's reading of the user's split (`cee_hypothesis`), never as the user's with no record of the
+ * derivation; the PR that lands the slot flips these rows to `user_specified` + `derived_from`. Anything short of the
+ * three conditions takes today's path (unset and said).
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -56,21 +58,21 @@ async function propose(message: string, levels: { features?: number; ads?: numbe
 const withLimits = (rows: Record<string, unknown>[]) => ({ ...cGraph, goal_constraints: rows });
 const SPEND_LIMIT = cGraph.goal_constraints.find((c) => c.node_id === 'incremental_6_month_spend')!;
 
-describe('C08: "50/50" of the £30,000 the user set → £15,000 each, the user\'s, with the working', () => {
-  it('RED: both parts go as the user\'s levels, each carrying how it was derived', async () => {
+describe('C08: "50/50" of the £30,000 the user set → £15,000 each, set, with the working', () => {
+  it('RED: both parts are SET at £15,000 (served: both left unset), as Olumi\'s reading until the derived_from slot lands', async () => {
     const { iv, r } = await propose(C08, { features: 15000, ads: 15000 });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     for (const id of ['incremental_feature_investment_6_months', 'incremental_advertising_spend_6_months']) {
       expect(iv(id)?.raw_value, id).toBe(15000);
-      expect(iv(id)?.source, `${id}: the user's, never Olumi's estimate`).toBeUndefined();
-      expect(iv(id)?.derived_from).toEqual({ op: 'split', ratio: [0.5, 0.5], base: { node_id: 'incremental_6_month_spend', value: 30000 } });
+      expect(iv(id)?.source, `${id}: never the user's while the derivation cannot be recorded`).toBe('cee_hypothesis');
     }
   });
 
-  it('RED: the Agent is handed the working to say ("£15,000 each: half of your £30,000")', async () => {
+  it('RED: the Agent is handed the working as the basis ("£15,000 each: half of your £30,000, as Olumi read it")', async () => {
     const { lv } = await propose(C08, { features: 15000, ads: 15000 });
-    expect(lv(FEATURES)).toMatchObject({ stated_by: 'user', derived: '£15,000 each: half of your £30,000' });
-    expect(lv(ADS)).toMatchObject({ stated_by: 'user', derived: '£15,000 each: half of your £30,000' });
+    for (const f of [FEATURES, ADS]) {
+      expect(lv(f)).toMatchObject({ stated_by: 'olumi_estimate', basis: '£15,000 each: half of your £30,000, as Olumi read it' });
+    }
   });
 
   it('the total itself is not a part of its own split: a level the user did not write for it stays unset', async () => {
