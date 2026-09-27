@@ -36,6 +36,17 @@ export const SLIGHT_IS_WEAK =
   + 'whether slight means weak. When you ask the user for a band, use the canvas\u2019s words: slight, moderate, strong or very strong.';
 
 /**
+ * \u26d4 PJ-C3: A FACTOR'S SIZE IS THE LINK OUT OF IT (R&C root #70 5860219371, words verbatim; DL route 5860238223). Asked
+ * "price sensitivity is very high", the Agent recorded the link INTO the node (Pro plan price \u2192 Price sensitivity) in 4
+ * of 5 served journey-A runs; the one PASS recorded the link OUT of it (Price sensitivity \u2192 Monthly churn, 0.0075).
+ * A node's "size" is how strongly it moves what it affects. The tool took a from/to and had no rule for a statement
+ * about a node, so the model picked the edge that feeds it.
+ */
+export const NODE_SIZE_MEANS_LINK_FROM =
+  'When the user says how big a factor or risk IS (\'price sensitivity is very high\'), they mean how strongly it moves '
+  + 'what it affects: the link FROM it, to the outcome they name or imply. If it has several and they named none, ask which.';
+
+/**
  * ⛔ A LEVEL'S LINK IS NOT A STRENGTH TO ASK ABOUT (AI Conversation #70 5849437163 U2b, served c35801a): the user gave
  * "it lowers Monthly churn to 6%" for an option not yet linked to churn; the model left that level out and asked "how
  * strong is that effect" — the band question that belongs to a CAUSAL link between factors. A level on an unlinked
@@ -268,6 +279,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'Record how strong an EXISTING link is, as the user\u2019s own estimate, when the user has just said it (for example '
       + '"that effect is strong", or "it actually pushes the other way"). This does NOT change anything: it prepares ONE change '
       + 'and returns its id, which you keep for authorise_change: show the user what it records, never the id, before they approve. '
+      + NODE_SIZE_MEANS_LINK_FROM + ' '
       + 'The user\u2019s word is one of Olumi\u2019s strength bands. If the link already sits in that band, its strength is kept and only '
       + 'recorded as theirs; otherwise it is set to the middle of that band, and the result says the figure so you can tell them. '
       + 'Give `direction` ONLY when the user said the link pushes the other way. When they described the strength in their own words '
