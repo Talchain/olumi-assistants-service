@@ -85,7 +85,8 @@ describe('a packet must be projection-shaped before the tool is omitted', () => 
     const r = run({ entities: [projected] });
     expect(r.freshness.kind).toBe('fresh'); // non-vacuity
     expect(names(r)).not.toContain(TOOL);
-    expect(r.omitted.map((o) => o.name)).toEqual([TOOL]);
+    // A populated model also withholds the build it would refuse (PJ-C1, given-state-lean.test.ts), on the same evidence.
+    expect(r.omitted.map((o) => o.name)).toEqual([TOOL, 'build_model_from_brief']);
   });
 
   it('⛔ KEEPS the tool when entities are present but carry NO id', () => {
