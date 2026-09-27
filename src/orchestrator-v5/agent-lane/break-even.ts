@@ -32,7 +32,10 @@ type Node = {
 export type FigureBy = 'user' | 'approved' | 'olumi';
 
 export interface BreakEvenOption {
+  /** The option's label, as the paragraph says it (its id when it has none). */
   readonly option: string;
+  /** A5 (DL #70 5855437928): the graph option's id — labels collide and get renamed; ids do not. */
+  readonly option_id: string;
   readonly price: number;
   readonly price_by: FigureBy;
   /** Above today's price: the fewest subscribers for the goal to be no lower than today. */
@@ -41,10 +44,17 @@ export interface BreakEvenOption {
   readonly need_at_least?: number;
 }
 
+/**
+ * The wire's `_agent.break_even`. Each named thing carries its LABEL (what the paragraph says) and, beside it, its
+ * graph ID (A5, DL #70 5855437928) — a reader that needs to find the node must use the id, never the label.
+ */
 export interface BreakEven {
   readonly goal: string;
+  readonly goal_id: string;
   readonly price_factor: string;
+  readonly price_factor_id: string;
   readonly volume_factor: string;
+  readonly volume_factor_id: string;
   readonly unit: string;
   readonly identity_stated_in_brief: boolean;
   readonly baseline_price: number;
@@ -119,7 +129,7 @@ export function breakEvenFor(graph: unknown): BreakEven | null {
     if (p === null || by === null || !(p > 0)) return null;
     const least = Math.ceil(baselineGoal / p - 1e-9);
     rows.push({
-      option: o.label ?? o.id, price: p, price_by: by,
+      option: o.label ?? o.id, option_id: o.id, price: p, price_by: by,
       ...(p > p0 ? { keep_at_least: least } : p < p0 ? { need_at_least: least } : {}),
     });
   }
@@ -128,7 +138,9 @@ export function breakEvenFor(graph: unknown): BreakEven | null {
   const targetUnit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit.trim() : '';
   const prices = [...new Set([...rows.map((r) => r.price), p0])].sort((x, y) => y - x);
   return {
-    goal: goal.label ?? goal.id, price_factor: price!.label ?? priceId, volume_factor: volume!.label ?? volumeId, unit,
+    goal: goal.label ?? goal.id, goal_id: goal.id,
+    price_factor: price!.label ?? priceId, price_factor_id: priceId,
+    volume_factor: volume!.label ?? volumeId, volume_factor_id: volumeId, unit,
     identity_stated_in_brief: goal.nonlinear_identity?.stated_in_brief === true,
     baseline_price: p0, baseline_price_by: p0By, baseline_volume: v0, baseline_volume_by: v0By, baseline_goal: baselineGoal,
     options: rows,
