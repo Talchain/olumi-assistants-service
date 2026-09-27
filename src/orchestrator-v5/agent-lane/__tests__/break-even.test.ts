@@ -74,6 +74,14 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
     expect(breakEvenLine(breakEvenFor(f)!)).toBe(f.served_paragraph);
   });
 
+  it('RED (MG B1): a numbered period stays — "GBP per subscriber per 12 months" gives a readable total, not "GBP months"', () => {
+    const said = breakEvenLine(breakEvenFor(graph((ns) => {
+      (node(ns, 'pro_plan_price').observed_state as Record<string, unknown>).unit = 'GBP per subscriber per 12 months';
+    }))!);
+    expect(said).toContain('MRR is £14,700/12 months today.');
+    expect(said).not.toContain('GBP months');
+  });
+
   it('CONTRAST: "GBP per seat per month" drops only the seat; a price with no per-unit word is unchanged', () => {
     const perSeat = breakEvenLine(breakEvenFor(graph((ns) => {
       (node(ns, 'pro_plan_price').observed_state as Record<string, unknown>).unit = 'GBP per seat per month';

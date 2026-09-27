@@ -38,11 +38,16 @@ describe('the unit of a TOTAL of a per-unit price (#70 5853114059, served 263dbd
     expect(totalUnitOfPerUnitPrice('GBP/subscriber/month')).toBe('GBP/month');
     expect(totalUnitOfPerUnitPrice('GBP per seat per month')).toBe('GBP per month');
     expect(totalUnitOfPerUnitPrice('£/seat')).toBe('£');
+    // MG B1: a numbered period is kept — only the per-unit noun goes.
+    expect(totalUnitOfPerUnitPrice('GBP per subscriber per 12 months')).toBe('GBP per 12 months');
+    expect(totalUnitOfPerUnitPrice('GBP (per seat) per month')).toBe('GBP per month');
   });
 
   it('CONTRAST: a unit with no per-unit word, or that is not money, is returned as it is', () => {
     expect(totalUnitOfPerUnitPrice('GBP/month')).toBe('GBP/month');
     expect(totalUnitOfPerUnitPrice('GBP per month')).toBe('GBP per month');
+    expect(totalUnitOfPerUnitPrice('GBP per 12 months')).toBe('GBP per 12 months');
+    expect(totalUnitOfPerUnitPrice('GBP per subscriber-month')).toBe('GBP per subscriber-month');
     expect(totalUnitOfPerUnitPrice('GBP widgets')).toBe('GBP widgets');
     expect(totalUnitOfPerUnitPrice('subscribers/month')).toBe('subscribers/month');
     // A currency denominator is an exchange rate, never a per-unit count: kept as written.

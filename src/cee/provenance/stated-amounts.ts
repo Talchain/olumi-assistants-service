@@ -329,7 +329,11 @@ export function totalUnitOfPerUnitPrice(unit: string): string {
   if (readCurrencyUnitWithQualifiers(unit).kind !== "currency") return unit;
   return unit
     .replace(/\s*(?:\/|\bper\s)\s*([^\s/()]+)/gi, (whole: string, word: string) =>
-      CURRENCY_UNIT_QUALIFIERS.has(word.toLowerCase()) || readUnit(word).kind === "currency" ? whole : "")
+      // Only a plain NOUN goes ("seat", "subscriber"). A numbered period ("per 12 months", MG B1 #2083) or a compound
+      // that carries the period ("per subscriber-month") is kept as written, as are qualifiers and currencies.
+      /^[a-z]+$/i.test(word) && !CURRENCY_UNIT_QUALIFIERS.has(word.toLowerCase()) && readUnit(word).kind !== "currency" ? "" : whole)
+    .replace(/\(\s*\)/g, "")
+    .replace(/\s{2,}/g, " ")
     .trim();
 }
 
