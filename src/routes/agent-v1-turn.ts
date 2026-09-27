@@ -79,6 +79,7 @@ import {
   provisionalViewSidecar,
   readRunInterpretation,
   RUN_INTERPRETATION_FORMAT,
+  sanitiseProvisionalView,
   RUN_INTERPRETATION_VIEW_INSTRUCTION,
   type LeaderStanding,
   type ProvisionalView,
@@ -2243,7 +2244,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * Never in `blocks`, the analysis card or any leader field.
      */
     // C5b: on the Run button the view is the one interpreting call's typed field (`fastPathView`) — the SAME checks follow.
-    const givenView = provisionalViewOfTurn(result.tool_calls, result.tool_results) ?? fastPathView;
+    const rawView = provisionalViewOfTurn(result.tool_calls, result.tool_results) ?? fastPathView;
+    // The Agent's own words pass the user-facing scrub first (`sanitiseProvisionalView`); a code left refuses the view.
+    const givenView = rawView === null ? null : sanitiseProvisionalView(rawView, parsedGraphOrNull(readbackGraph));
+    if (rawView !== null && givenView === null) log.warn({ scenario_id: scenarioId }, 'agent-lane: a provisional view carried an internal code after the scrub — it is not shown');
     const standing = givenView === null ? null : leaderStandingOf({ analysisState, analysisReady, analysisResult });
     // Typed only (never appended to `assistant_text`): see `provisionalViewSidecar`.
     const provisionalView = givenView !== null && standing !== null && standing.analysis_on_record && standing.withheld

@@ -19,6 +19,8 @@
  * receives it injected from the route; the route re-reads it on the final readback before rendering.
  */
 import { splitIntoRedactableUnits } from '../compose/redactable-units.js';
+import { sanitiseCoachingProse } from '../../orchestrator/shared/output-safety.js';
+import { withoutProposalIds } from './display-ids.js';
 import { agentLaneLeaderWithheld, agentNoLeaderReason, limitCauseCodesOf } from './withheld-leader-fail-closed.js';
 
 export const PROVISIONAL_VIEW_TOOL = 'give_provisional_view';
@@ -203,4 +205,38 @@ export function readRunInterpretation(text: string): { readonly answer: string; 
   if (p.provisional_view === null || p.provisional_view === undefined) return { answer: p.answer, view: null };
   const checked = checkProvisionalView(p.provisional_view);
   return { answer: p.answer, view: checked.ok ? checked.view : null };
+}
+
+/**
+ * ⛔ THE AGENT'S OWN WORDS PASS THE USER-FACING SCRUB BEFORE THEY SHIP (DL review of #2101, 5857437282). The view is the
+ * model's text, so an internal id or a raw code in it would reach the chat verbatim (the recorded P1 class). In order:
+ *   1. an exact graph id becomes that node's label (identity, against the turn's own readback graph);
+ *   2. the narrow coaching-prose scrub removes any prefixed id left (`sanitiseCoachingProse`, which never rewrites
+ *      ordinary English, unlike the pattern arm);
+ *   3. proposal ids go (`withoutProposalIds`, as `assistant_text`).
+ * A code-shaped token still left (snake_case or UPPER_SNAKE) REFUSES the view: it is never repaired into words the
+ * Agent did not give. The result is re-checked by the tool's own limits.
+ */
+const CODE_TOKEN = /\b(?:[a-z][a-z0-9]*(?:_[a-z0-9]+)+|[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\b/;
+
+export function sanitiseProvisionalView(
+  v: ProvisionalView,
+  graph: { readonly nodes?: readonly { readonly id?: unknown; readonly label?: unknown }[] } | null,
+): ProvisionalView | null {
+  const ids = (graph?.nodes ?? [])
+    .map((n) => ({ id: typeof n.id === 'string' ? n.id : '', label: typeof n.label === 'string' ? n.label.trim() : '' }))
+    .filter((n) => n.id !== '' && n.label !== '' && n.label !== n.id)
+    .sort((a, b) => b.id.length - a.id.length);
+  const scrub = (text: string): string | null => {
+    let t = text;
+    for (const n of ids) t = t.split(n.id).join(n.label);
+    t = withoutProposalIds(sanitiseCoachingProse(t, graph as never).text);
+    return CODE_TOKEN.test(t) ? null : t;
+  };
+  const view = scrub(v.view);
+  const reasoning = scrub(v.reasoning);
+  const confirm = scrub(v.confirm_step);
+  if (view === null || reasoning === null || confirm === null) return null;
+  const checked = checkProvisionalView({ view, reasoning, confirm_step: confirm });
+  return checked.ok ? checked.view : null;
 }

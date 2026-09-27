@@ -131,6 +131,40 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     return post('Should we raise Pro to £59?');
   };
 
+  const runWithView = (view: typeof VIEW) => {
+    callModelOutputs = [
+      [{ type: 'function_call', name: 'run_analysis', arguments: JSON.stringify({ reason: 'compare' }), call_id: 'c1' }],
+      [{ type: 'function_call', name: 'give_provisional_view', arguments: JSON.stringify(view), call_id: 'c2' }],
+      [{ type: 'message', content: [{ type: 'output_text', text: 'The analysis cannot put an option forward yet.' }] }],
+    ];
+    return post('Should we raise Pro to £59?');
+  };
+
+  it('RED (DL 5857437282): an internal graph id in the Agent\'s reasoning never egresses — it reads as the node\'s label', async () => {
+    readbackState = WITHHELD_STATE;
+    const leaky = { ...VIEW, reasoning: 'Your churn limit rests on pro_plan_price, which the model cannot yet check against the limit.' };
+    const b = (await runWithView(leaky)).json() as Body;
+    const pv = b._agent.provisional_view as { reasoning?: string } | undefined;
+    expect(pv, JSON.stringify(b._agent)).toBeDefined();
+    expect(pv!.reasoning).not.toContain('pro_plan_price');
+    expect(pv!.reasoning).toContain('Pro plan price');
+    expect(JSON.stringify(b._agent.provisional_view)).not.toContain('pro_plan_price');
+  });
+
+  it('RED (DL 5857437282): a raw code left in the reasoning refuses the view — never repaired, never shown', async () => {
+    readbackState = WITHHELD_STATE;
+    const coded = { ...VIEW, reasoning: 'The run returned constraint_verdict_withheld, so the limit is unchecked.' };
+    const b = (await runWithView(coded)).json() as Body;
+    expect(Object.hasOwn(b._agent, 'provisional_view')).toBe(false);
+    expect(JSON.stringify(b._agent)).not.toContain('constraint_verdict_withheld, so the limit');
+  });
+
+  it('CONTROL: clean words pass the scrub unchanged', async () => {
+    readbackState = WITHHELD_STATE;
+    const b = (await runWithView(VIEW)).json() as Body;
+    expect(b._agent.provisional_view).toEqual({ heading, ...VIEW, because });
+  });
+
   it('fixture control: the reply carries the ranking sentence exactly once', () => {
     expect(REPLY.text.split(RANKING_SENTENCE).length).toBe(2);
   });
