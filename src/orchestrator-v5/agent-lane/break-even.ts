@@ -198,3 +198,26 @@ export function withBreakEvenAnswer(text: string, be: BreakEven): string {
   const para = breakEvenLine(be);
   return cut < 0 ? `${text}\n\n${para}` : `${text.slice(0, cut)}\n\n${para}${text.slice(cut)}`;
 }
+
+/**
+ * ⭐ F3 (DL #70 5851710093; final witness `f-20260927T013636Z/01`): the user's headline goal vanished from the first
+ * reply — the target was not scored (`GOAL_THRESHOLD_NOT_CONVERTIBLE`: the goal carries no current value to measure it
+ * against) and neither the model nor the arithmetic named it. ONE deterministic clause names it and why, from the typed
+ * reason on the run's own brief and the goal's stored target. `null` whenever the reason is absent or the target is not
+ * a stated amount — never a guess.
+ */
+export function goalNotCheckedLine(graph: unknown, analysisResult: unknown): string | null {
+  const brief = (analysisResult as { enrichment?: { decision_brief?: { warning_codes?: unknown; warnings?: unknown } } } | null | undefined)
+    ?.enrichment?.decision_brief;
+  const codes = [
+    ...(Array.isArray(brief?.warning_codes) ? brief.warning_codes : []),
+    ...(Array.isArray(brief?.warnings) ? brief.warnings.map((w) => (w as { code?: unknown } | null)?.code) : []),
+  ];
+  if (!codes.includes('GOAL_THRESHOLD_NOT_CONVERTIBLE')) return null;
+  const goal = (((graph as { nodes?: unknown } | null)?.nodes ?? []) as Node[]).find((n) => n.kind === 'goal');
+  const raw = goal?.goal_threshold_raw;
+  const unit = typeof goal?.goal_threshold_unit === 'string' ? goal.goal_threshold_unit.trim() : '';
+  if (goal === undefined || typeof raw !== 'number' || !Number.isFinite(raw) || unit === '') return null;
+  const label = goal.label ?? goal.id;
+  return `Your ${label} target of ${money(raw, unit)} is not checked yet: the model has no current ${label} figure to measure it against.`;
+}

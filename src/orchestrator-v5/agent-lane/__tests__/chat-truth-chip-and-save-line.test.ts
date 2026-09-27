@@ -55,7 +55,7 @@ function chipsFor(store: ProposalStore, turn: { name: string; result: ToolResult
 
 const BUILT: ToolResult = { ok: true, mutated: true, model_version: { version_number: 1 } };
 const OLD_LINE = 'The model was saved as version 1.';
-const NEW_LINE = 'I saved the model I drafted as version 1. The figures in it that you did not give me are Olumi\u2019s estimates; the ones I proposed above become your starting assumptions only when you approve them.';
+const NEW_LINE = 'I saved the model I drafted as version 1. Figures you did not give me are Olumi\u2019s estimates until you approve them.';
 
 /* ── 1. TRUTH: the build's save line ── */
 describe('the build line says what was saved and what was not', () => {
@@ -72,7 +72,7 @@ describe('the build line says what was saved and what was not', () => {
     const n = narrateWriteOutcome('These are starting assumptions, not measurements. Shall I record them?',
       [{ name: 'build_model_from_brief' }, { name: 'propose_starting_point' }],
       [{ ok: true, mutated: true }, { ok: true, mutated: false, proposal_id: 'prop_bbbbbb' }]);
-    expect(n.status).toBe('I saved the model I drafted. The figures in it that you did not give me are Olumi\u2019s estimates; the ones I proposed above become your starting assumptions only when you approve them.');
+    expect(n.status).toBe('I saved the model I drafted. Figures you did not give me are Olumi\u2019s estimates until you approve them.');
     // MG sweep 5851155478 (b): never the old claim that nothing is recorded — Olumi's estimates already are.
     expect(n.status).not.toContain('not recorded until you approve');
     expect(n.status).not.toMatch(/version/);
