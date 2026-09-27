@@ -727,6 +727,29 @@ export function withheldToolsOf(body: Record<string, unknown>): readonly string[
   return typedApprovalOf(body) === undefined && !typedRunOf(body) ? CHIP_TURN_WITHHELD_TOOLS : [];
 }
 
+/**
+ * C6 (measurement before optimisation, #70 5857659587): one internal dispatch, timed. Every call the turn makes goes
+ * through the route's single `dispatch`: its readbacks, and each tool's reads and writes. So the ledger says which calls
+ * took the non-model seconds (an approve spends 4.3–5.2 s with no model call; ~2.2 s of every turn is outside the loop).
+ * The scenario id is masked, and the ledger is capped. Diagnostic only: nothing reads it.
+ */
+export interface DispatchTiming { readonly path: string; readonly ms: number; readonly status: number }
+const DISPATCH_LEDGER_MAX = 40;
+export function timedDispatch(inner: InternalDispatch, ledger: DispatchTiming[], scenarioId: string): InternalDispatch {
+  const masked = (path: string): string => (scenarioId === '' ? path : path.split(scenarioId).join(':scenario'));
+  return async (path, body) => {
+    const t0 = Date.now();
+    let status = 0;
+    try {
+      const res = await inner(path, body);
+      status = res.status;
+      return res;
+    } finally {
+      if (ledger.length < DISPATCH_LEDGER_MAX) ledger.push({ path: masked(path), ms: Date.now() - t0, status });
+    }
+  };
+}
+
 export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
@@ -1330,9 +1353,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       return reply.code(409).send({ error: 'SCENARIO_OWNERSHIP_UNVERIFIABLE', detail: 'Could not verify the scenario. Nothing was changed.' });
     }
 
-    const dispatch = dispatchFor(
+    const dispatchLedger: DispatchTiming[] = [];
+    const dispatch = timedDispatch(dispatchFor(
       typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
-    );
+    ), dispatchLedger, scenarioId);
 
     const approvedProposal = typedApprovalOf(body);
     const requestHash = agentTurnRequestHash(scenarioId, userId, message, approvedProposal !== undefined ? `approve:${approvedProposal}` : undefined);
@@ -2380,7 +2404,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * (model, tools, model time inside tools, residual overhead) plus the whole route, so a served turn says where its
          * time went. Diagnostic only: nothing reads it.
          */
-        timing: { ...result.timing, route_total_ms: Date.now() - startedAt },
+        timing: {
+          ...result.timing,
+          route_total_ms: Date.now() - startedAt,
+          dispatches: dispatchLedger,
+          dispatch_ms: dispatchLedger.reduce((a, d) => a + d.ms, 0),
+        },
         write_claims_removed: narration.stripped.length,
         ...(leaderClaimEnforced ? { leader_claim_enforced: true } : {}),
         /** The run-turn coaching card: shown, or the typed reason it is not (for staging witnesses). */
