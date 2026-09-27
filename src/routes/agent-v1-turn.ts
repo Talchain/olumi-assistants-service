@@ -71,7 +71,7 @@ import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
-import { runDeltaBoundToReadback, runTurnCoaching, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
+import { runDeltaBoundToReadback, runTurnNextMove, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
 import { breakEvenFor, goalNotCheckedLine, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
 import {
   bindRunBlocksToReadback,
@@ -2032,7 +2032,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * without it the first pass is blank. Only the blocks the contract BUILDS are added: the run's own
      * blocks stay under `bindRunBlocksToReadback`'s rule above.
      */
-    const runCoaching = runTurnCoaching(lastRun, { scenarioId, graphHash, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks });
+    // C4: the same blocks and eligibility as `runTurnCoaching`, plus the typed move, its caveats and the science brief.
+    const runCoaching = runTurnNextMove(lastRun, { scenarioId, graphHash, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks });
     const coachingBound = [...runBound, ...runCoaching.blocks.filter((b) => !lastRunBlocks.includes(b))];
     // What changed since the last run: the run turn's own block and refusal reason, only beside that same run.
     const runDelta = runDeltaBoundToReadback(lastRun, { scenarioId, graphHash, analysisState, analysisResult });
@@ -2281,6 +2282,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(leaderClaimEnforced ? { leader_claim_enforced: true } : {}),
         /** The run-turn coaching card: shown, or the typed reason it is not (for staging witnesses). */
         coaching: runCoaching.eligibility,
+        /** C4: the run-turn card's typed move, and the limit caveats said once instead of shown (signal ids). */
+        ...(runCoaching.scienceBrief !== null
+          ? { coaching_next_move: runCoaching.nextMove?.kind ?? null, coaching_caveats: runCoaching.caveats.map((c) => c.block.signal_id) }
+          : {}),
         /**
          * ⭐ WHAT THE AUTOMATIC FIRST ANALYSIS DID, for witnesses: ran, or why not, how long it took,
          * and the (construction, revision) identity it was bound to. Absent when no construction
