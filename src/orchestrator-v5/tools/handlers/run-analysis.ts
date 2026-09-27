@@ -40,6 +40,7 @@
  * keeps the handler pure and the test surface small.
  */
 
+import { collectUnvaluedFactorIds } from '../../coaching/unvalued-factor-ids.js';
 import { RunAnalysisArgsSchema, RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import type {
   RunAnalysisArgs,
@@ -2022,6 +2023,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // sentence below is built from, so the sentence and the suppression can
       // never disagree about which factors are unset.
       unsetOptionEffectFactorIds: unsetOptionEffectFactorIds(unsetOptionEffects),
+      // PJ-B3: the factors the graph this Run analysed holds no value for — never named "the strongest driver".
+      unvaluedFactorIds: collectUnvaluedFactorIds(snapshot.rawPersistedGraph ?? null),
     };
     // ⛔ C46 STAGE 1 (b) — THE LEADER PLoT RANKED FIRST, ON A PRODUCT THIS ENGINE ONLY ADDS UP.
     //
