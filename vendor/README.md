@@ -7,7 +7,41 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.59.0.tgz` ← **THE CURRENT PIN**
+### `talchain-schemas-0.60.0.tgz` ← **THE CURRENT PIN**
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**
+>
+> Downloaded from GitHub Packages at
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.60.0/e30caa3828f1cf1a35ae6290bbd18ec71a02332e`,
+> the tarball `npm publish` produced from `olumi-schemas` `main`
+> **`2a451c7e2177459793258da65e6ed330139fdda3`** (the schemas #68 merge; the
+> registry's own `gitHead` binds that commit; `Publish Package` run
+> `36324213776`), 2026-09-27.
+>
+> **595,889 bytes.** Verified against the registry's published metadata:
+>
+> ```
+> npm shasum (sha1)  e30caa3828f1cf1a35ae6290bbd18ec71a02332e   ← matches
+> integrity (sha512) sha512-M/qX8uWxdD5lF6eVRrTCFioV452cwN7sp1DJpuWmNNAWNKmp8x+IHy2fyebSYeYPhLe1a65sNSgMbMy44B4PPA==   ← matches
+> sha256             31b5f066a2a086af6d2669f5ac1e76d683992ce544655bdc3bd2c703380ff92b
+> ```
+>
+> `pnpm install` wrote the same sha512 into `pnpm-lock.yaml`. Cross-check: a
+> local `npm ci && npm run build && npm pack` at `2a451c7e` gives 596,507 bytes
+> (a different envelope, as with 0.58.0) whose 231 unpacked files are
+> content-identical to this tarball's.
+>
+> **What it adds relative to 0.59.0** (all OPTIONAL; every schema stays
+> `.strict()`): `ConstraintVerdictSchema.per_limit`
+> `[{ constraint_id, state: scored | estimate_only | unscored, reason? }]`,
+> `ConstraintVerdictSchema.joint` `{ state, withheld_reason?, constraint_ids? }`,
+> and `edge_strength_edit.band` (`StrengthBand`). Regenerated
+> `contracts/orchestrator-turn-payload.schema.json` (adds `band` only).
+> **Adoption only:** this pin bump emits neither `per_limit` nor `joint` and
+> reads no `band` — a pre-0.60.0 consumer rejects the nested strict shape, so
+> the producer lands only after every consumer is on 0.60.0.
+
+### `talchain-schemas-0.59.0.tgz` (historical — no longer vendored as of 0.60.0)
 
 > **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**
 >
