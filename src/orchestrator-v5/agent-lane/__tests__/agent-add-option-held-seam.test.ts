@@ -322,12 +322,13 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const t1 = await turn({ message: `Add an option: ${LONG}.` });
     const approve = approveChipOf(t1) as (Chip & { detail?: string }) | undefined;
     expect(approve?.id, JSON.stringify({ chips: t1.suggested_actions, tools: t1._agent.tool_calls })).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
-    // The product still cuts its label (its own choice); the button's full words ride in `detail`.
-    expect(approve!.label, approve!.label).toMatch(/\.\.\.$/);
+    // A multi-part change: the button is short and whole ("Approve N changes"); the full words ride in `detail`,
+    // one change per line, and the UI shows them above the button (UI #2194).
+    expect(approve!.label, approve!.label).toMatch(/^Approve \d+ changes$/);
     expect(approve!.label).not.toContain(LONG);
-    // The product's OWN sentence, by identity: its cut label is this sentence's first 57 characters.
+    // The product's OWN sentence, by identity: its first line names the option whole.
     expect(approve!.detail, JSON.stringify(approve)).toEqual(expect.stringContaining(`'${LONG}'`));
-    expect(approve!.detail!.startsWith(approve!.label.slice(0, -3)), JSON.stringify(approve)).toBe(true);
+    expect(approve!.detail!.split('\n')[0], JSON.stringify(approve)).toContain(`'${LONG}'`);
     const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
     expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
     expect(graphNow().nodes.some((x) => x.kind === 'option' && x.label === LONG), JSON.stringify(graphNow().nodes)).toBe(true);

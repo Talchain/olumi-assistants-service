@@ -711,14 +711,18 @@ export function buildGmHeldPublicCopy(subject: string | null, items?: readonly s
   // (`describeChangeset(...).items`), `detail` is those items, capitalised, one
   // per line: the same content, nothing summarised or dropped. The UI shows the
   // line breaks as they are sent. `message` is untouched (routing matches it).
-  const lines =
-    items !== undefined && items.length > 1 && items.every((i) => typeof i === 'string' && i.trim() !== '')
-      ? items.map((i) => {
-          const t = i.trim();
-          return t.charAt(0).toUpperCase() + t.slice(1);
-        }).join('\n')
-      : capitalised;
-  return { label, message: `Yes, ${subject}.`, detail: lines };
+  const multi = items !== undefined && items.length > 1 && items.every((i) => typeof i === 'string' && i.trim() !== '');
+  const lines = multi
+    ? items.map((i) => {
+        const t = i.trim();
+        return t.charAt(0).toUpperCase() + t.slice(1);
+      }).join('\n')
+    : capitalised;
+  // ⭐ A SHORT, WHOLE BUTTON (Paul, 27 Sep: "premium, intuitive"). A multi-part change clamped mid-word read
+  // "Add option '£59 for new Pro customers; grandfather existi..." on the filled approve button. The UI now shows
+  // `detail` (one change per line) ABOVE the buttons, so the button says what pressing it does and how much:
+  // "Approve 10 changes". A single change keeps its clamped label (its full sentence is the detail).
+  return { label: multi ? `Approve ${items.length} changes` : label, message: `Yes, ${subject}.`, detail: lines };
 }
 
 // ---------------------------------------------------------------------------
