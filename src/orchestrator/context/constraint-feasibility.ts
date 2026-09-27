@@ -1408,6 +1408,7 @@ export function deriveConstraintVerdict(
  *     `threshold_clamped` (c), `CONSTRAINT_NOT_CONVERTIBLE` / `CONSTRAINT_OUT_OF_DOMAIN` (d; producer codes verbatim),
  *     `CONSTRAINT_TARGET_UNRELIABLE` (producer code verbatim), `tally_units_incoherent`.
  *   · A producer removal reason CEE does not map (e.g. `temporal_deadline`) is passed VERBATIM and ranks after those.
+ *     So does `limit_unscored`, PLoT #378's reason for a limit its `joint_withheld.constraint_ids` names.
  *   · CEE's own codes for "no P, and no precondition could be named": `identity_unresolved` (no returned id reconciles
  *     with a ratified one), `constraint_block_withheld` (the producer withheld the whole constraint block, or shipped a
  *     block code naming no limit, and this limit is not independently certified), `no_score_returned` (not every
@@ -1446,8 +1447,20 @@ const FRAME_REFUSAL_REASONS: ReadonlySet<string> = new Set([
   'percent_unit_disagrees_with_target_frame',
 ]);
 
-/** Does a producer warning carry ANY structured identity (a constraint, a node, or a `nodes[<id>]` field path)? */
-function warningIdentity(entry: Record<string, unknown>): { constraintId: string | null; nodeIds: string[] } {
+/**
+ * The structured identity a producer warning carries: a constraint, a node, a `nodes[<id>]` field path, or (PLoT #378)
+ * a `constraint_ids` list.
+ *
+ * `constraintIds` is PLoT #378's `constraint_ids`: CONSTRAINT_TARGET_UNRELIABLE is emitted once per target NODE and
+ * names every withheld limit on it by ratified id. When present (at least one non-empty string) it is AUTHORITATIVE:
+ * the warning is about exactly those limits, so it is never widened to another limit on the same node. `null` when
+ * the field is absent or names nothing, which keeps every older payload on the pre-#378 rule byte for byte.
+ */
+function warningIdentity(entry: Record<string, unknown>): {
+  constraintId: string | null;
+  constraintIds: string[] | null;
+  nodeIds: string[];
+} {
   const nodeIds: string[] = [];
   const nodeId = readString(entry.node_id);
   if (nodeId !== null) nodeIds.push(nodeId);
@@ -1457,8 +1470,26 @@ function warningIdentity(entry: Record<string, unknown>): { constraintId: string
   const field = readString(entry.field);
   const match = field === null ? null : /^nodes\[([^\]]+)\]/.exec(field);
   if (match?.[1] !== undefined) nodeIds.push(match[1]);
-  return { constraintId: readString(entry.constraint_id), nodeIds };
+  return { constraintId: readString(entry.constraint_id), constraintIds: readConstraintIdList(entry.constraint_ids), nodeIds };
 }
+
+/** A producer `constraint_ids` list: its non-empty strings, or `null` when absent, malformed or naming nothing. */
+function readConstraintIdList(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const ids = value.filter((id): id is string => typeof id === 'string' && id.length > 0);
+  return ids.length > 0 ? ids : null;
+}
+
+/**
+ * PLoT #378's `joint_withheld.constraint_ids`: the limits the producer ITSELF says it did not score on this run (its
+ * reason, `limit_unscored`, is the joint's). Empty when the field is absent, which is every pre-#378 payload.
+ */
+function readJointWithheldConstraintIds(envelope: Record<string, unknown>): ReadonlySet<string> {
+  return new Set(readConstraintIdList(readRecord(envelope.joint_withheld)?.constraint_ids) ?? []);
+}
+
+/** The per-limit reason for a limit named in `joint_withheld` (the producer's code, verbatim; unmapped rank). */
+const JOINT_WITHHELD_REASON = 'limit_unscored';
 
 /**
  * The per-limit rows. For each ratified limit (graph order, first occurrence of an id), every reason the producer's
@@ -1466,8 +1497,10 @@ function warningIdentity(entry: Record<string, unknown>): { constraintId: string
  * `scored` and `estimate_only`.
  *
  * ⛔ ONE UNSCOREABLE LIMIT NEVER SILENCES ANOTHER. A limit's reasons come from evidence bound to ITS identity: its
- * `constraint_results` marker, its per-option P, a warning naming its constraint or target node, a filter entry
- * naming it. Two block-level signals are the only exceptions, and both are the producer speaking about the block:
+ * `constraint_results` marker, its per-option P, a warning naming its constraint or target node (or, PLoT #378, naming
+ * it in `constraint_ids`, which then binds to exactly the limits listed), a filter entry naming it, or PLoT #378's
+ * `joint_withheld.constraint_ids` naming it (`limit_unscored`). Two block-level signals are the only exceptions, and
+ * both are the producer speaking about the block:
  *   · `constraints_status` present and not `'computed'`: the producer withheld the block, so no limit has a P;
  *   · a refusal code carrying NO identity. With one limit it can only be about that limit (reported verbatim). With
  *     several it is placed only on limits NOT independently certified (marker + a P on every option), because a code
@@ -1492,7 +1525,7 @@ function derivePerLimitVerdicts(
   const blockWithheld = statusRaw !== undefined && statusRaw !== null && statusRaw !== 'computed';
 
   // Refusal codes, split by whether they carry identity.
-  const namedRefusals: Array<{ code: string; constraintId: string | null; nodeIds: string[] }> = [];
+  const namedRefusals: Array<{ code: string } & ReturnType<typeof warningIdentity>> = [];
   const unattributed: string[] = [];
   for (const key of ['inference_warnings', 'critiques'] as const) {
     const arr = envelope[key];
@@ -1502,7 +1535,7 @@ function derivePerLimitVerdicts(
       const code = readString(rec?.code);
       if (rec === null || code === null || !PER_LIMIT_REFUSAL_CODES.has(code)) continue;
       const identity = warningIdentity(rec);
-      if (identity.constraintId === null && identity.nodeIds.length === 0) {
+      if (identity.constraintId === null && identity.constraintIds === null && identity.nodeIds.length === 0) {
         if (!unattributed.includes(code)) unattributed.push(code);
       } else {
         namedRefusals.push({ code, ...identity });
@@ -1517,16 +1550,20 @@ function derivePerLimitVerdicts(
 
   const options = readOptionResultSources(envelope)[0] ?? [];
   const results = Array.isArray(envelope.constraint_results) ? envelope.constraint_results : [];
+  const jointWithheldIds = readJointWithheldConstraintIds(envelope);
 
   /** Reasons from the limit's OWN identity-bound evidence. Empty = the producer certified it by id. */
   const ownReasons = (c: RatifiedConstraint): string[] => {
     const reasons: string[] = [];
     if (identityUnresolved) reasons.push('identity_unresolved');
     for (const r of namedRefusals) {
-      if (r.constraintId === c.constraint_id || (typeof c.node_id === 'string' && r.nodeIds.includes(c.node_id))) {
-        reasons.push(r.code);
-      }
+      const names =
+        r.constraintIds !== null
+          ? r.constraintIds.includes(c.constraint_id) || r.constraintId === c.constraint_id
+          : r.constraintId === c.constraint_id || (typeof c.node_id === 'string' && r.nodeIds.includes(c.node_id));
+      if (names) reasons.push(r.code);
     }
+    if (jointWithheldIds.has(c.constraint_id)) reasons.push(JOINT_WITHHELD_REASON);
     const rows = results.map(readRecord).filter((r) => r !== null && readString(r.constraint_id) === c.constraint_id);
     if (rows.length === 0) reasons.push('not_decision_grade');
     for (const row of rows) {

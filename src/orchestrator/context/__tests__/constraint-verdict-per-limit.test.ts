@@ -258,6 +258,104 @@ describe('B5-4: an all-scoreable graph with user baselines is scored, and today\
   });
 });
 
+// ── PLoT #378: the producer names the limits itself (`constraint_ids` on a warning, `joint_withheld`) ───────────────
+describe('PLoT #378 wire: a warning\'s constraint_ids and joint_withheld attribute to exactly the limits they name', () => {
+  const { graph } = load('0e19bb82.served-turn.json');
+  /** The fixed-pair (PLoT #378 + ISL B5) answer to CEE's served 0e19bb82 body: EXECUTED bytes, see the README. */
+  const fixed = load('0e19bb82.fixed-pair.V0-served.plot-response.json');
+  const leader = leaderOf(fixed.option_comparison);
+  const unreliable = (env: Json): Json[] =>
+    (env.inference_warnings as Json[]).filter((w) => w.code === 'CONSTRAINT_TARGET_UNRELIABLE');
+  /** Every entry on either warning channel whose refusal code could name spend by its node. */
+  const spendNodeRefusal = (w: Json): boolean =>
+    (w.code === 'CONSTRAINT_NOT_CONVERTIBLE' || w.code === 'CONSTRAINT_OUT_OF_DOMAIN') &&
+    (w.field === 'nodes[six_month_decision_spend].observed_state.baseline' ||
+      (w.affected_node_ids ?? []).includes('six_month_decision_spend'));
+
+  it('precondition: spend is named ONLY by constraint_ids on the unreliable warning, and joint_withheld names spend alone', () => {
+    const [w, ...more] = unreliable(fixed);
+    expect(more).toEqual([]);
+    expect(Object.keys(w!).sort()).toEqual(['code', 'constraint_ids', 'message', 'severity']);
+    expect(w!.constraint_ids).toEqual([SPEND]);
+    expect(fixed.joint_withheld).toEqual({ reason: 'limit_unscored', constraint_ids: [SPEND] });
+    expect(fixed.constraints_status).toBe('computed');
+    expect(fixed.constraint_results.map((r: Json) => [r.constraint_id, r.scale_provenance.decision_grade])).toEqual([[CHURN, true]]);
+    expect(fixed.option_comparison.every((o: Json) => Object.keys(o.constraint_probabilities).join() === CHURN)).toBe(true);
+    // The two OTHER spend-naming refusals the derived row below removes, bound by code + node.
+    const named = [...(fixed.inference_warnings as Json[]), ...(fixed.critiques as Json[])].filter(spendNodeRefusal);
+    expect(named.map((w2) => w2.code)).toEqual(['CONSTRAINT_NOT_CONVERTIBLE', 'CONSTRAINT_OUT_OF_DOMAIN']);
+  });
+
+  it('SERVED fixed pair: churn keeps its own estimate_only row; spend is unscored; the joint is withheld over spend', () => {
+    const v = verdictFor(fixed, graph, leader);
+    expect(rowOf(v, SPEND)).toEqual({ constraint_id: SPEND, state: 'unscored', reason: 'CONSTRAINT_NOT_CONVERTIBLE' });
+    expect(rowOf(v, CHURN)).toEqual({ constraint_id: CHURN, state: 'estimate_only', reason: 'baseline_is_estimate' });
+    expect(v.joint).toEqual({ state: 'withheld', withheld_reason: 'limit_unscored', constraint_ids: [SPEND] });
+    expectContractValid(v);
+  });
+
+  it('DERIVED (spend\'s node-named refusals removed): spend is unscored FROM THE WARNING\'S constraint_ids, not the block rule', () => {
+    const env = structuredClone(fixed);
+    env.inference_warnings = (env.inference_warnings as Json[]).filter((w) => !spendNodeRefusal(w));
+    env.critiques = (env.critiques as Json[]).filter((w) => !spendNodeRefusal(w));
+    const v = verdictFor(env, graph, leader);
+    expect(rowOf(v, SPEND)).toEqual({ constraint_id: SPEND, state: 'unscored', reason: 'CONSTRAINT_TARGET_UNRELIABLE' });
+    expect(rowOf(v, CHURN)).toEqual({ constraint_id: CHURN, state: 'estimate_only', reason: 'baseline_is_estimate' });
+    expect(v.joint).toEqual({ state: 'withheld', withheld_reason: 'limit_unscored', constraint_ids: [SPEND] });
+    expectContractValid(v);
+  });
+
+  it('DERIVED (churn\'s own marker not decision-grade): the constraint_ids:[spend] warning never marks churn', () => {
+    const env = structuredClone(fixed);
+    env.constraint_results[0].scale_provenance = { source: 'unit_percent', range_unified: true, decision_grade: false };
+    const v = verdictFor(env, graph, leader);
+    // churn fails on ITS OWN evidence only: never the spend warning's code, never the block-wide spill.
+    expect(rowOf(v, CHURN)).toEqual({ constraint_id: CHURN, state: 'unscored', reason: 'not_decision_grade' });
+    expect(rowOf(v, SPEND)).toEqual({ constraint_id: SPEND, state: 'unscored', reason: 'CONSTRAINT_NOT_CONVERTIBLE' });
+  });
+
+  it('DERIVED (spec: "exactly those limits"): constraint_ids outranks a node identity on the same warning', () => {
+    const env = structuredClone(fixed);
+    unreliable(env)[0]!.affected_node_ids = ['monthly_churn'];
+    const v = verdictFor(env, graph, leader);
+    expect(rowOf(v, CHURN)).toEqual({ constraint_id: CHURN, state: 'estimate_only', reason: 'baseline_is_estimate' });
+  });
+
+  it('DERIVED (joint_withheld also names churn): the producer\'s own "unscored" is read, and only for the ids it names', () => {
+    const env = structuredClone(fixed);
+    env.joint_withheld = { reason: 'limit_unscored', constraint_ids: [SPEND, CHURN] };
+    const v = verdictFor(env, graph, leader);
+    expect(rowOf(v, CHURN)).toEqual({ constraint_id: CHURN, state: 'unscored', reason: 'limit_unscored' });
+    expect(rowOf(v, SPEND)).toEqual({ constraint_id: SPEND, state: 'unscored', reason: 'CONSTRAINT_NOT_CONVERTIBLE' });
+    expect(v.joint).toEqual({ state: 'withheld', withheld_reason: 'limit_unscored', constraint_ids: [SPEND, CHURN] });
+    expectContractValid(v);
+  });
+
+  // Byte-identity for payloads without either field. Each literal was printed by the verdict code at 6e4f9643 (before
+  // this change), from the same inputs, and is compared as bytes.
+  it.each([
+    ['17d1 (EXEC)', () => [load('17d1cd3a.plot-response.json'), load('17d1cd3a.graph.json').graph],
+      '{"may_name_leading_option":true,"constraint_verdict_state":"evaluated_feasible","per_limit":[{"constraint_id":"agent-lane:monthly_churn:<=","state":"estimate_only","reason":"baseline_is_estimate"}],"joint":{"state":"estimate_only"}}'],
+    ['a6ed1bff (WIRE, identity-less CONSTRAINT_TARGET_UNRELIABLE)', () => [load('a6ed1bff.plot-response.json'), load('a6ed1bff.graph.json').graph],
+      '{"may_name_leading_option":false,"constraint_verdict_state":"unevaluated","per_limit":[{"constraint_id":"agent-lane:monthly_churn:<=","state":"unscored","reason":"CONSTRAINT_TARGET_UNRELIABLE"}],"joint":{"state":"withheld","withheld_reason":"limit_unscored","constraint_ids":["agent-lane:monthly_churn:<="]}}'],
+    ['0e19bb82 served turn (export)', () => [load('0e19bb82.served-turn.json').enrichment, graph],
+      '{"may_name_leading_option":false,"constraint_verdict_state":"unevaluated","per_limit":[{"constraint_id":"agent-lane:six_month_decision_spend:<=","state":"unscored","reason":"CONSTRAINT_NOT_CONVERTIBLE"},{"constraint_id":"agent-lane:monthly_churn:<=","state":"unscored","reason":"constraint_block_withheld"}],"joint":{"state":"withheld","withheld_reason":"limit_unscored","constraint_ids":["agent-lane:six_month_decision_spend:<=","agent-lane:monthly_churn:<="]}}'],
+    ['fixed pair with both new fields DELETED (old shape, DERIVED)', () => {
+      const env = structuredClone(fixed);
+      delete env.joint_withheld;
+      for (const w of env.inference_warnings as Json[]) delete w.constraint_ids;
+      expect(unreliable(env)).toHaveLength(1);
+      return [env, graph];
+    },
+      '{"may_name_leading_option":false,"constraint_verdict_state":"unevaluated","per_limit":[{"constraint_id":"agent-lane:six_month_decision_spend:<=","state":"unscored","reason":"CONSTRAINT_NOT_CONVERTIBLE"},{"constraint_id":"agent-lane:monthly_churn:<=","state":"estimate_only","reason":"baseline_is_estimate"}],"joint":{"state":"withheld","withheld_reason":"limit_unscored","constraint_ids":["agent-lane:six_month_decision_spend:<="]}}'],
+  ] as const)('an old payload with no ids stores byte-identical bytes: %s', (_name, inputs, expected) => {
+    const [env, g] = inputs() as [Json, Json];
+    expect(env.joint_withheld).toBeUndefined();
+    expect(JSON.stringify(env)).not.toContain('"constraint_ids"');
+    expect(JSON.stringify(projectClaimSafety(verdictFor(env, g, leaderOf(env.option_comparison))))).toBe(expected);
+  });
+});
+
 // ── B5-5: reason iff not scored, from the producer's own per-constraint marker (C50 served captures) ─────────────
 describe('B5-5: the first failed precondition is named from the producer\'s marker', () => {
   const rat = (id: string): RatifiedConstraint[] => [{ constraint_id: id, label: null }];
