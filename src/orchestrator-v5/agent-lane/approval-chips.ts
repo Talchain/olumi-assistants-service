@@ -19,6 +19,8 @@
 import type { SuggestedAction } from '../compose/types.js';
 import { formatFactorValueApprox } from '../compose/format-factor-value.js';
 import type { StructuredProposal } from './proposal.js';
+import { CANVAS_BAND_WORD } from '../format/edge-strength-bands.js';
+import type { InfluenceBand } from '../format/influence-bands.js';
 import type { ToolResult } from './runtime/agent-tools.js';
 
 const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
@@ -125,7 +127,31 @@ export function approvalChipsFor(
     const detail = typeof held.held_detail === 'string' && held.held_detail.trim() !== '' ? held.held_detail : undefined;
     return [{ id: approvalChipIdFor(proposalId), label, message, ...(detail !== undefined ? { detail } : {}) }, AMEND_CHIP];
   }
+  const reading = readingShownFor(tool, labelSourceFor?.(proposalId));
+  if (reading !== undefined) return [{ id: approvalChipIdFor(proposalId), ...reading, message: approve.message }, AMEND_CHIP];
   return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, labelSourceFor?.(proposalId)), message: approve.message }, AMEND_CHIP];
+}
+
+/** The tools whose proposal can carry Olumi's reading of the user's own words for a link's band (slice C3). */
+const READING_TOOLS: ReadonlySet<string> = new Set(['propose_link_strength', 'propose_model_change']);
+
+/**
+ * ⭐ THE BUTTON SHOWS THE READING THE USER APPROVES (slice C3). When a link's band was read from the user's own words
+ * ("very high" read as very strong), the approval is of that reading, so the button says it: `Record as very strong
+ * (your "very high")` when that fits {@link APPROVAL_LABEL_MAX}, else `Record as very strong`, with the whole reading
+ * always in `detail` (the boundary `Action`'s optional field). Read from the STORED proposal, and only when the
+ * proposer's own result carries the SAME reading — never the Agent's prose.
+ */
+function readingShownFor(tool: string, source: ApprovalLabelSource | undefined): { label: string; detail: string } | undefined {
+  const proposal = source?.proposal;
+  const result = source?.result;
+  const stored = proposal?.interpretation;
+  if (!READING_TOOLS.has(tool) || stored === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal?.proposal_id) return undefined;
+  const shown = result.interpretation as Record<string, unknown> | undefined;
+  if (shown === undefined || shown === null || typeof shown !== 'object') return undefined;
+  if (shown.field !== stored.field || shown.from_words !== stored.from_words || shown.reading !== stored.reading || shown.shown_as !== stored.shown_as) return undefined;
+  const short = `Record as ${CANVAS_BAND_WORD[stored.reading as InfluenceBand] ?? stored.reading}`;
+  return { label: stored.shown_as.length <= APPROVAL_LABEL_MAX ? stored.shown_as : short, detail: stored.shown_as };
 }
 
 /**

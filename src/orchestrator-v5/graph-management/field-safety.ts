@@ -165,6 +165,10 @@ const PIPELINE_OWNED_MARKERS: readonly string[] = [
  *    `transformResponseToV3` on every response;
  *  - `validation` — two-pass parameter-review pipeline metadata (edges);
  *  - `defaulted` — CIL default-strength flag (edges);
+ *  - `exists_defaulted` — the per-field half of `defaulted` that a user strength
+ *    write leaves behind: the link's EXISTENCE is still Olumi's (edges; A6e,
+ *    minted only by `adjust-edge-strength.ts`). A producer that could set or
+ *    clear it would relabel whose existence claim it is;
  *  - `origin` — creation-source stamp (edges).
  */
 const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
@@ -172,6 +176,7 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
   'provenance_display',
   'validation',
   'defaulted',
+  'exists_defaulted',
   'origin',
   // Extraction-provenance stamps (review hardening, 2026-07-07): these mark
   // HOW a value entered the model and must never be producer-writable —

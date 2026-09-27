@@ -107,7 +107,7 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
 }
 
 import { planNewFactors, planNewOption, type NewFactorRequest } from '../propose-new-option.js';
-import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
+import { createProposal, ProposalStore, type ProposalInterpretation, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
@@ -117,10 +117,11 @@ import { pickGoalThresholdTrio } from '../../../utils/goal-threshold-trio.js';
 import { type InfluenceBand } from '../../format/influence-bands.js';
 import { CANVAS_BAND_WORD, edgeBandFromMagnitude, EDGE_STRENGTH_MIDPOINTS } from '../../format/edge-strength-bands.js';
 import { runWithApprovedAdoption } from '../approved-adoption-context.js';
+import { runWithStatedLinkBand } from '../stated-link-band-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, factorTheUserNamed, figureTheUserWrote, figureTheUserWroteFor, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, factorTheUserNamed, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { figureInUserUnits } from '../approval-chips.js';
 import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
@@ -663,6 +664,31 @@ function earlierAnalysisOf(state: unknown): { analysis: Record<string, unknown> 
  * "strong" stored 0.825, which the canvas drew "Very strong" — R&C #70 5846846471.)
  */
 const bandMidpoint = (band: InfluenceBand): number => EDGE_STRENGTH_MIDPOINTS[band];
+
+/** What the Agent tells the user about a reading: whose words, which band, and that approving it approves the reading. */
+const readingNote = (i: ProposalInterpretation): string =>
+  `This is your reading of the user\u2019s own words "${i.from_words}" as ${linkBandWord(i.reading as InfluenceBand)}: say so plainly `
+  + `("I\u2019ve read your \u201c${i.from_words}\u201d as ${linkBandWord(i.reading as InfluenceBand)}"), so that approving it approves that reading. `;
+
+/**
+ * ⭐ HOW A LINK'S BAND IS GROUNDED IN THE USER'S WORDS (slice C3; ruling ChatGPT 5854968869 P3B). Measured on Paul's
+ * served transcript (27 Sep): "price sensitivity is very high" was refused `strength_not_stated` twice, and recording
+ * "very strong" took four turns for one action.
+ *
+ * - `literal`: the user named the band itself this turn (`bandTheUserWrote`) — today's path, unchanged.
+ * - `reading`: the user described it in their own words, and the Agent gave that phrase as `from_words`. Admitted only
+ *   when the phrase is written, as whole words, in THIS turn's typed message, said rather than asked or denied
+ *   (`wordsTheUserWrote`), and holds no band word (a band word is the literal matcher's alone). The Agent's reading is
+ *   carried as an `interpretation` the user sees on the approve button and approves.
+ * - `null`: neither — refused exactly as before. The Agent cannot invent the user's words.
+ */
+function bandGrounding(band: InfluenceBand, fromWords: unknown, turnText: string | undefined):
+  { readonly kind: 'literal' } | { readonly kind: 'reading'; readonly interpretation: ProposalInterpretation } | null {
+  if (bandTheUserWrote(band, turnText)) return { kind: 'literal' };
+  if (typeof fromWords !== 'string' || holdsABandWord(fromWords) || !wordsTheUserWrote(fromWords, turnText)) return null;
+  const phrase = fromWords.trim();
+  return { kind: 'reading', interpretation: { field: 'band', from_words: phrase, reading: band, shown_as: `Record as ${linkBandWord(band)} (your "${phrase}")` } };
+}
 const isInfluenceBand = (v: unknown): v is InfluenceBand => typeof v === 'string' && Object.hasOwn(EDGE_STRENGTH_MIDPOINTS, v);
 
 /**
@@ -1515,12 +1541,16 @@ export function createAgentCapabilities(
             + 'ask the user which, in the canvas\u2019s words: slight, moderate, strong or very strong.' };
       }
       const band = args.strength;
-      // ⛔ Recorded as the user's only when the user named the band (`bandTheUserWrote`); the writer stamps it as theirs.
-      if (!bandTheUserWrote(band, ctx.user_turn_text)) {
+      // ⛔ Recorded as the user's only when the user named the band, or approves Olumi's reading of their own words
+      // (`bandGrounding`); the writer stamps it as theirs.
+      const grounding = bandGrounding(band, args.from_words, ctx.user_turn_text);
+      if (grounding === null) {
         return { ok: false, mutated: false, refusal: 'strength_not_stated',
           detail: `The user has not called this link ${linkBandWord(band)} in this message, in their own words, so nothing was prepared: it would be recorded as their estimate. `
             + 'Ask them how strong they think it is \u2014 slight, moderate, strong or very strong \u2014 and never offer a band as theirs.' };
       }
+      const interpretation = grounding.kind === 'reading' ? grounding.interpretation : undefined;
+      const yourWords = interpretation === undefined ? '' : `, Olumi\u2019s reading of your "${interpretation.from_words}"`;
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const fromRes = resolveNamed(g, String(args.from_label ?? ''), () => true);
@@ -1561,6 +1591,10 @@ export function createAgentCapabilities(
         intent: confirm ? 'confirm_current' : 'set',
         direction_intent: confirm || args.direction === undefined ? 'preserve' : wanted,
         expected: { mean, effect_direction: current },
+        // ⭐ A6e — the band the USER named, kept on the approved proposal (content-hashed with it) and carried to the
+        // writer in-process on approval, never on the wire: a named band stores the band's own spread as the link's
+        // std (`edgeBandStd`), which the `edge_strength_edit` event cannot tell apart from an exact figure.
+        band,
       };
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
@@ -1570,8 +1604,9 @@ export function createAgentCapabilities(
         provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: confirm
-          ? `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}, as your own estimate (strength kept at ${quotable(Math.abs(mean))} on Olumi's 0\u20131 scale)`
-          : `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)} (${magnitude} on Olumi's 0\u20131 scale), as your own estimate${wanted !== current ? `, pushing ${wanted === 'positive' ? 'up' : 'down'}` : ''}`,
+          ? `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords}, as your own estimate (strength kept at ${quotable(Math.abs(mean))} on Olumi's 0\u20131 scale)`
+          : `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords} (${magnitude} on Olumi's 0\u20131 scale), as your own estimate${wanted !== current ? `, pushing ${wanted === 'positive' ? 'up' : 'down'}` : ''}`,
+        ...(interpretation === undefined ? {} : { interpretation }),
       });
       proposals.put(proposal);
       return {
@@ -1581,9 +1616,10 @@ export function createAgentCapabilities(
         base_revision: g.graph_hash,
         link: { from: from.label, to: to.label, was: { band: linkBandWord(currentBand), strength: quotable(Math.abs(mean)), direction: current },
           becomes: { band: linkBandWord(band), strength: quotable(magnitude), direction: wanted }, keeps_current_strength: confirm },
-        note: confirm
+        ...(interpretation === undefined ? {} : { interpretation }),
+        note: (interpretation === undefined ? '' : readingNote(interpretation)) + (confirm
           ? 'Nothing has changed yet. The link already sits in that band, so its strength is kept and only recorded as the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree.'
-          : `Nothing has changed yet. Tell the user it will be recorded as ${linkBandWord(band)}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree.`,
+          : `Nothing has changed yet. Tell the user it will be recorded as ${linkBandWord(band)}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree.`),
       };
     },
 
@@ -1710,7 +1746,9 @@ export function createAgentCapabilities(
        * link that cannot be added is.
        */
       const band = isInfluenceBand(args?.strength) ? args.strength : undefined;
-      if (band === undefined || !bandTheUserWrote(band, ctx.user_turn_text)) {
+      // …or the user described it in their own words, and approves Olumi's reading of them (`bandGrounding`, slice C3).
+      const grounding = band === undefined ? null : bandGrounding(band, args?.from_words, ctx.user_turn_text);
+      if (band === undefined || grounding === null) {
         const ask = 'ask them "how strong is that effect: slight, moderate, strong or very strong?" and never offer a band as theirs.';
         return { ok: false, mutated: false, refusal: 'strength_not_stated',
           detail: band === undefined
@@ -1720,6 +1758,7 @@ export function createAgentCapabilities(
               + `it would be recorded as their estimate. Instead, ${ask}` };
       }
       const magnitude = bandMidpoint(band);
+      const interpretation = grounding.kind === 'reading' ? grounding.interpretation : undefined;
       const operations: ProposalOperation[] = [
         { op: 'add_edge', path: `${from.id}::${to.id}`, value: { effect_direction: args.direction, magnitude } },
       ];
@@ -1730,7 +1769,8 @@ export function createAgentCapabilities(
         operations,
         provenance: { authored_by: 'model_proposed', basis: args.rationale },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Connect "${from.label}" to "${to.label}" (${args.direction}) as ${linkBandWord(band)}, your own estimate`,
+        public_label: `Connect "${from.label}" to "${to.label}" (${args.direction}) as ${linkBandWord(band)}${interpretation === undefined ? '' : `, Olumi\u2019s reading of your "${interpretation.from_words}"`}, your own estimate`,
+        ...(interpretation === undefined ? {} : { interpretation }),
       });
       proposals.put(proposal);
       return {
@@ -1739,7 +1779,8 @@ export function createAgentCapabilities(
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
         link: { from: from.label, to: to.label, direction: args.direction, band, strength: magnitude },
-        note: `Nothing has changed. Tell the user the link will be recorded as ${linkBandWord(band)}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and ask them to approve it before calling authorise_change.`,
+        ...(interpretation === undefined ? {} : { interpretation }),
+        note: `${interpretation === undefined ? '' : readingNote(interpretation)}Nothing has changed. Tell the user the link will be recorded as ${linkBandWord(band)}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and ask them to approve it before calling authorise_change.`,
       };
     },
 
@@ -2425,12 +2466,22 @@ export function createAgentCapabilities(
       if (ops.length === 1 && ops[0]!.op === 'update_edge') {
         const op = ops[0]!;
         const [fromId, toId] = op.path.split('::') as [string, string];
-        const v = op.value as { magnitude: number; intent: 'set' | 'confirm_current'; direction_intent: 'preserve' | 'positive' | 'negative'; expected: { mean: number; effect_direction: 'positive' | 'negative' } };
+        const v = op.value as { magnitude: number; intent: 'set' | 'confirm_current'; direction_intent: 'preserve' | 'positive' | 'negative'; expected: { mean: number; effect_direction: 'positive' | 'negative' }; band?: unknown };
         const operationId = authorisationTurnId(decision.proposal.proposal_id);
-        const res = await dispatch('/orchestrate/v2/turn', {
+        const send = () => dispatch('/orchestrate/v2/turn', {
           kind: 'system_event', turn_id: operationId, scenario_id: ctx.scenario_id, stage: 'frame',
           event: { kind: 'edge_strength_edit', from: fromId, to: toId, intent: v.intent, direction_intent: v.direction_intent, magnitude: v.magnitude, expected: v.expected },
         });
+        // ⭐ A6e — THE BAND THE USER NAMED rides this verified approval in-process (`stated-link-band-context.ts`), the
+        // way an approved adoption does: only a proposal the user authored (`user_stated`) that stored a band. One
+        // restored from before the band was stored sends none, and the writer keeps the link's spread (a figure).
+        const statedBand = decision.proposal.provenance.authored_by === 'user_stated' && isInfluenceBand(v.band) ? v.band : undefined;
+        const res = statedBand !== undefined
+          ? await runWithStatedLinkBand(
+            { scenarioId: ctx.scenario_id, proposalId: decision.proposal.proposal_id, from: fromId, to: toId, band: statedBand },
+            send,
+          )
+          : await send();
         const after = await readGraph(ctx.scenario_id);
         const dir = v.direction_intent === 'preserve' ? v.expected.effect_direction : v.direction_intent;
         const want = dir === 'negative' ? -v.magnitude : v.magnitude;

@@ -20,6 +20,7 @@ import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/
 import { computeGraphIdentityHash } from '../../../src/orchestrator-v5/context/graph-identity.js';
 import { GraphStaleWriteError } from '../../../src/orchestrator-v5/session/store.js';
 import { isProvenanceOnlyEdgeConfirmation } from '../../../src/orchestrator-v5/system-events/edge-strength-edit.js';
+import { edgeBandStd } from '../../../src/orchestrator-v5/format/edge-strength-bands.js';
 import { log } from '../../../src/utils/telemetry.js';
 
 function buildPersistedGraph() {
@@ -197,6 +198,9 @@ vi.mock('../../../src/config/index.js', async (importOriginal) => {
 });
 
 const { ceeOrchestratorRouteV2 } = await import('../../../src/orchestrator/route-v2.js');
+// Imported AFTER the mocks, as the adoption precedent does (route-v2-option-intervention-edit.test.ts), so the
+// context the test enters is the instance the route's writer reads.
+const { runWithStatedLinkBand } = await import('../../../src/orchestrator-v5/agent-lane/stated-link-band-context.js');
 
 const SCENARIO_ID = '22222222-2222-4222-8222-222222222222';
 const TURN_ID_BASE = '11111111-1111-4111-8111-1111111111';
@@ -1277,6 +1281,47 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
       expect(committedEdge()).not.toHaveProperty('defaulted');
     });
 
+    /**
+     * A6e (AIQ #70 5855430153): the Agent's `confirm_current` is the BAND path — the user named the band the link
+     * already sits in. The band rides the approval in-process (`stated-link-band-context.ts`), exactly as
+     * `authorise_change` wraps its `app.inject`, and the writer stores the band's own spread. The dispatcher re-runs
+     * the confirmation guard on the COMMITTED bytes, so it must judge them with the same band or it withholds a
+     * write that landed (500 `system_event_commit_failed`).
+     */
+    it('⭐ A6e: the Agent\'s band confirm keeps the mean, stores the band\'s spread, keeps existence Olumi\'s — and the post-commit receipt guard admits it', async () => {
+      persisted = withDefaultedEdges();
+      const response = await runWithStatedLinkBand(
+        { scenarioId: SCENARIO_ID, proposalId: 'p-route-a6e', from: 'f-demand', to: 'g-growth', band: 'strong' },
+        // ⚠ AWAITED INSIDE the scope, as production's `dispatchFor` does: `app.inject()` returns a lazy thenable
+        // that dispatches on `.then()`, so a bare `() => app.inject(...)` would fire OUTSIDE the context.
+        async () => await app.inject({
+          method: 'POST',
+          url: '/orchestrate/v2/turn',
+          payload: {
+            kind: 'system_event',
+            turn_id: `${TURN_ID_BASE}a4`,
+            scenario_id: SCENARIO_ID,
+            stage: 'frame',
+            event: { kind: 'edge_strength_edit', from: 'f-demand', to: 'g-growth', intent: 'confirm_current', direction_intent: 'preserve', magnitude: 0.4, expected: { mean: -0.4, effect_direction: 'negative' } },
+          },
+        }),
+      );
+
+      expect(response.statusCode, response.body).toBe(200);
+      const body = JSON.parse(response.body) as Record<string, unknown>;
+      expect(body.assistant_text).toContain('Confirmed the current strength');
+      expect(committedEdge()).toMatchObject({
+        strength: { mean: -0.4, std: edgeBandStd('strong') },
+        effect_direction: 'negative',
+        exists_probability: 0.9,
+        exists_defaulted: true,
+        provenance: { source: 'user_specified' },
+      });
+      expect(committedEdge()).not.toHaveProperty('defaulted');
+      expect((committedEdge() as { provenance?: Record<string, unknown> }).provenance).not.toHaveProperty('reasoning');
+      expect(edgeOf(body.draft_graph, 'f-demand', 'g-growth')).toMatchObject({ exists_defaulted: true, strength: { std: edgeBandStd('strong') } });
+    });
+
     describe('the confirmation allowlist admits exactly `defaulted` → absent on the target edge, nothing wider', () => {
       const stamped = (graph: LooseGraph) => {
         const after = structuredClone(graph);
@@ -1288,11 +1333,19 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
       const confirm = (before: LooseGraph, after: LooseGraph) =>
         isProvenanceOnlyEdgeConfirmation({ before, after, from: 'f-demand', to: 'g-growth' });
 
-      it('⭐ the target\'s flag removed: admitted', () => {
+      it('⭐ the target\'s flag removed, WITH the per-field `exists_defaulted: true` the writer mints (A6e): admitted', () => {
         const before = withDefaultedEdges();
         const after = stamped(before);
         delete edgeOf(after, 'f-demand', 'g-growth')!.defaulted;
+        edgeOf(after, 'f-demand', 'g-growth')!.exists_defaulted = true;
         expect(confirm(before, after)).toBe(true);
+      });
+
+      it('A6e: the target\'s flag removed WITHOUT `exists_defaulted`: refused — the pair moves together', () => {
+        const before = withDefaultedEdges();
+        const after = stamped(before);
+        delete edgeOf(after, 'f-demand', 'g-growth')!.defaulted;
+        expect(confirm(before, after)).toBe(false);
       });
 
       it('the flag ADDED to the target: refused', () => {
@@ -1411,13 +1464,17 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
     });
 
     describe('the pure guard', () => {
-      /** The writer's projection for a confirm on the served edge: stamped, flag cleared, Olumi's sizing dropped. */
+      /**
+       * The writer's projection for a confirm on the served edge: stamped, Olumi's sizing and reasoning dropped (A6c),
+       * and the whole-edge flag cleared WITH the per-field existence flag it leaves behind (A6e).
+       */
       const projected = (graph: LooseGraph) => {
         const after = structuredClone(graph);
         const target = edgeOf(after, FROM, TO)!;
-        const { natural_effect: _naturalEffect, magnitude: _magnitude, ...rest } = target.provenance as Record<string, unknown>;
+        const { natural_effect: _naturalEffect, magnitude: _magnitude, reasoning: _reasoning, ...rest } = target.provenance as Record<string, unknown>;
         target.provenance = { ...rest, source: 'user_specified' };
         target.provenance_display = 'user_set';
+        if (target.defaulted === true) target.exists_defaulted = true;
         delete target.defaulted;
         return after;
       };

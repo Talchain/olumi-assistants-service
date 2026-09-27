@@ -123,6 +123,10 @@ function renderQuotedLabelList(labels: readonly string[]): string {
  *     values. Names them when the caller knows them, in the same words the
  *     UI's own blocked reason uses ("has no effect values yet"), and never an
  *     internal field name.
+ *     ⚠ SLICE A1b: these are PAYLOAD statuses. A partially configured option
+ *     (per-option `needs_encoding` that KEEPS its values) never reaches this
+ *     branch — its own `missing_value` blocker makes the payload
+ *     `needs_user_input`. Pinned in `option-ready-means-complete.test.ts`.
  *   - undefined / unknown literal → fall back to the neutral "ready to
  *     analyse" wording. The chip generator's own readiness gate prevents
  *     a misleading executable chip in that case.
