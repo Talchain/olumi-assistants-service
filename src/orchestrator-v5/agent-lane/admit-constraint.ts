@@ -107,6 +107,8 @@ const POINTS_HEADS: readonly string[] = [...(UNIT_SCALE_CLASS_TOKENS.find(([cls]
   .sort((a, b) => b.length - a.length);
 /** "point" / "points" after a percent head ("percentage points", "% points"), then only an optional period. */
 const POINTS_TAIL = /^points?(?:\s+(.*))?$/;
+/** "of <population>" after a percent head: "% of Pro subscribers per month", "percent of customers". */
+const OF_TAIL = /^of\s+\S/;
 /** A unit that ends in a magnitude suffix; whether its head is a currency is asked of the ONE vocabulary below. */
 const MAGNITUDE_SUFFIX = /^(.*?)\s*([km])$/i;
 
@@ -158,6 +160,19 @@ export function isPercentWithPeriod(unit: string): boolean {
  * (`CONSTRAINT_NOT_CONVERTIBLE`, no `observed_state.baseline`): 0/3 options decision-grade. Run 1, same brief, drafted
  * "percent per month", was relabelled to `"%"` and scored 4/4.
  */
+/**
+ * ⭐ A percent head qualified by its population ("% of Pro subscribers per month"). On a LEVEL limit it is that percent,
+ * like percentage points (DL #70 5851043488, the unit-spelling CLASS): served `f-20260926T174453Z/01` spelled churn so on
+ * both the limit (10) and the node (raw 6, `scale_frame` 100), and the limit was never scored. "% change vs …" and
+ * "percentage points of …" are not this shape and stay verbatim.
+ */
+export function isPercentOfPopulation(unit: string): boolean {
+  if (classifyUnitScaleClass(unit) !== 'percent') return false;
+  const t = norm(unit);
+  const head = PERCENT_HEADS.find((h) => t.startsWith(h));
+  return head !== undefined && OF_TAIL.test(t.slice(head.length).trim());
+}
+
 export function isPercentagePointsWithPeriod(unit: string): boolean {
   const t = norm(unit);
   const cls = classifyUnitScaleClass(unit);
@@ -218,8 +233,9 @@ export function canonicaliseLimitUnit(
   const verbatim: UnitCanonical = { value, unit };
   // PP: a LEVEL limit in percentage points is that percent (`isPercentagePointsWithPeriod`); the same gates as P follow.
   const pointsLevel = frame === 'level' && isPercentagePointsWithPeriod(unit);
+  const ofLevel = frame === 'level' && isPercentOfPopulation(unit);
 
-  if ((isPercentWithPeriod(unit) || pointsLevel) && Math.abs(value) >= 1 && Math.abs(value) <= 100) {
+  if ((isPercentWithPeriod(unit) || pointsLevel || ofLevel) && Math.abs(value) >= 1 && Math.abs(value) <= 100) {
     // A rewrite onto the spelling the limit already has is no rewrite: nothing to stamp.
     const relabel = (to: string): UnitCanonical =>
       to === unit
@@ -228,7 +244,7 @@ export function canonicaliseLimitUnit(
             value,
             unit: to,
             provenance_unit_relabelled: {
-              rule: pointsLevel ? 'agent_lane_limit_pp_level_v1' : 'agent_lane_limit_unit_v1',
+              rule: pointsLevel ? 'agent_lane_limit_pp_level_v1' : ofLevel ? 'agent_lane_limit_pct_of_level_v1' : 'agent_lane_limit_unit_v1',
               pre_normalisation_value: value,
               pre_normalisation_unit: unit,
             },
@@ -237,7 +253,13 @@ export function canonicaliseLimitUnit(
     const nodeUnit = target.unit;
     // A node that is not a plain percent (a count, a "% change") is not the limit's scale: PLoT refuses it. A node's
     // observed state is its LEVEL, so a node spelled in percentage points is a percent level (served run 2's churn).
-    if (nodeUnit !== undefined && !isPercentWithPeriod(nodeUnit) && !isPercentagePointsWithPeriod(nodeUnit)) return verbatim;
+    // A node "% of <population>" is a percent level too. An "of" LIMIT reads only a node in its own spelling: "% of X" can
+    // name a reference ("90% of last year's churn"), not a population, and only the node's own unit tells them apart
+    // (MG #2061 B1: on a plain-percent node that limit became "churn ≤ 90%", trivially met).
+    const nodeIsPercentLevel = ofLevel
+      ? nodeUnit !== undefined && norm(nodeUnit) === norm(unit)
+      : nodeUnit === undefined || isPercentWithPeriod(nodeUnit) || isPercentagePointsWithPeriod(nodeUnit) || isPercentOfPopulation(nodeUnit);
+    if (!nodeIsPercentLevel) return verbatim;
     // The same spelling on a capped node: PLoT already reconciles it against the cap.
     if (target.cap !== undefined && nodeUnit !== undefined && norm(nodeUnit) === norm(unit)) return verbatim;
     if (levelIsPercentOver100(target)) return relabel('%');
@@ -278,7 +300,7 @@ export function percentLevelFrame(value: number, unit: string | undefined, value
   const pointsLevel = valueFrame === 'level' && unit !== undefined && isPercentagePointsWithPeriod(unit);
   const frame = unitPinnedScaleFrame(unit, value) ?? (pointsLevel ? unitPinnedScaleFrame('%', value) : undefined);
   if (frame === undefined) return undefined;
-  return canonicaliseLimitUnit(value, unit, { scale_frame: frame }, valueFrame).unit === '%' ? frame : undefined;
+  return canonicaliseLimitUnit(value, unit, { scale_frame: frame, unit }, valueFrame).unit === '%' ? frame : undefined;
 }
 
 export interface ConstraintAdmissionResult {
