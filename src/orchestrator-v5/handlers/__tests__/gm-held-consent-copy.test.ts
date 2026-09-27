@@ -30,7 +30,7 @@ import {
   HELD_AWARE_DEGRADE_TEXT,
 } from '../../coaching/coaching-output-postcheck.js';
 import { findForbiddenPhraseHit } from '../../compose/forbidden-user-facing-phrases.js';
-import { describeChangeset } from '../describe-changeset.js';
+import { describeChangeset, clampLabel } from '../describe-changeset.js';
 
 const GRAPH = {
   nodes: [
@@ -258,7 +258,11 @@ describe('buildGmHeldPublicCopy — a multi-part hold lists one change per line'
     expect(d, 'positive control: the ops describe').not.toBeNull();
     expect(d!.items.length).toBe(5);
     const copy = buildGmHeldPublicCopy(d!.subject, d!.items);
-    expect(copy.label.endsWith('...'), 'positive control: the clamp fired').toBe(true);
+    const whole = d!.subject.charAt(0).toUpperCase() + d!.subject.slice(1);
+    expect(clampLabel(whole) !== whole, 'positive control: the clamp fires on this subject').toBe(true);
+    // ⭐ A short, WHOLE button: how many changes it approves, never a sentence cut mid-word (the list is the detail).
+    expect(copy.label).toBe('Approve 5 changes');
+    expect(copy.label).not.toMatch(/\.\.\.$|…$/);
     const lines = copy.detail!.split('\n');
     expect(lines).toEqual(d!.items.map((i) => i.charAt(0).toUpperCase() + i.slice(1)));
     expect(lines[0]).toContain(`'${OPT}'`);
@@ -272,6 +276,9 @@ describe('buildGmHeldPublicCopy — a multi-part hold lists one change per line'
     const LONG = "add option '£59 for new Pro customers; grandfather existing customers and more words'";
     expect(buildGmHeldPublicCopy(LONG, [LONG]).detail).toBe(LONG.charAt(0).toUpperCase() + LONG.slice(1));
     expect(buildGmHeldPublicCopy(LONG).detail).toBe(LONG.charAt(0).toUpperCase() + LONG.slice(1));
+    // One change keeps its own (clamped) words on the button: there is no list to count.
+    expect(buildGmHeldPublicCopy(LONG, [LONG]).label.endsWith('...')).toBe(true);
+    expect(buildGmHeldPublicCopy(LONG).label.endsWith('...')).toBe(true);
   });
 
   it('a short subject still carries no detail, whatever the items', () => {
