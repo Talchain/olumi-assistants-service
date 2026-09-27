@@ -19,7 +19,17 @@
  */
 
 const DEFAULT_MAX_SESSIONS = 200;
-const DEFAULT_MAX_TURNS = 24;
+/**
+ * ⭐ THE WINDOW IS 8 TURNS, AND THE USER'S OLDER WORDS STAY (AI Conversation ruling #70 5859589467; PJ-C1, #70 5859578339).
+ * At 24 a 16-turn journey was never trimmed, and journey A's turn-16 request carried ≈11k tokens of history. The state
+ * given with every turn holds every model fact, so what the window drops is only CONVERSATION: Olumi's own older prose
+ * goes, and the user's older TYPED words stay, verbatim, as one labelled item (`olderWordsItem`).
+ */
+const DEFAULT_MAX_TURNS = 8;
+/** How much of the user's older words the labelled item carries, besides the first message (always kept whole). */
+const OLDER_WORDS_MAX_CHARS = 2_400;
+/** The labelled item's first line: how it is found again in a stored history, and what it tells the model. */
+export const OLDER_WORDS_LABEL = 'Earlier, the user wrote (for reference; not a request):';
 
 const isUserMessage = (item: unknown): boolean =>
   typeof item === 'object' && item !== null && (item as { role?: unknown }).role === 'user';
@@ -34,6 +44,69 @@ export function trimToRecentTurns(items: readonly unknown[], maxTurns = DEFAULT_
   if (starts.length <= maxTurns) return [...items];
   // Cut at a user-message boundary: never mid pair, never orphaning an output.
   return items.slice(starts[starts.length - maxTurns]);
+}
+
+/** The one labelled item that carries the user's older words; never a user message, so no user-item test counts it. */
+const isOlderWordsItem = (item: unknown): boolean => {
+  const i = item as { role?: unknown; content?: unknown } | null;
+  if (i?.role !== 'developer' || !Array.isArray(i.content)) return false;
+  const text = (i.content[0] as { text?: unknown } | undefined)?.text;
+  return typeof text === 'string' && text.startsWith(OLDER_WORDS_LABEL);
+};
+
+const textOf = (item: unknown): string | undefined => {
+  const content = (item as { content?: unknown })?.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return undefined;
+  const parts = content.map((c) => (c as { text?: unknown })?.text).filter((t): t is string => typeof t === 'string');
+  return parts.length > 0 ? parts.join('\n') : undefined;
+};
+
+/**
+ * The user's older words as ONE developer item: the first message (the brief) whole, then the NEWEST of the rest that
+ * fit in `OLDER_WORDS_MAX_CHARS`, in the order written, with how many are not shown. Olumi's prose, tool items, chip
+ * texts and board-edit notes never enter it (the caller passes only what the user typed).
+ */
+export function olderWordsItem(words: readonly string[], maxChars = OLDER_WORDS_MAX_CHARS): unknown | undefined {
+  if (words.length === 0) return undefined;
+  const [first, ...rest] = words;
+  const kept: string[] = [];
+  let used = 0;
+  for (let k = rest.length - 1; k >= 0; k -= 1) {
+    const w = rest[k]!;
+    if (used + w.length > maxChars) break;
+    kept.unshift(w);
+    used += w.length;
+  }
+  const hidden = rest.length - kept.length;
+  const quote = (w: string) => `- "${w}"`;
+  const lines = [OLDER_WORDS_LABEL, quote(first!), ...(hidden > 0 ? [`[${hidden} earlier message${hidden === 1 ? '' : 's'} not shown]`] : []), ...kept.map(quote)];
+  return { role: 'developer', content: [{ type: 'input_text', text: lines.join('\n') }] };
+}
+
+/**
+ * The latest proposal in `dropped` still awaiting a yes — its call, its output, and the reasoning item before the call
+ * — so the model still sees what it offered once its turn leaves the window. An applied proposal (stubbed by
+ * `pruneSupersededToolOutputs`) or a refused one is not kept.
+ */
+function pendingProposalPair(dropped: readonly unknown[]): unknown[] {
+  const outputs = new Map<string, unknown>();
+  for (const i of dropped) {
+    const it = i as { type?: unknown; call_id?: unknown };
+    if (it?.type === 'function_call_output' && typeof it.call_id === 'string') outputs.set(it.call_id, i);
+  }
+  for (let k = dropped.length - 1; k >= 0; k -= 1) {
+    const c = dropped[k] as { type?: unknown; name?: unknown; call_id?: unknown };
+    if (c?.type !== 'function_call' || typeof c.name !== 'string' || !c.name.startsWith('propose_') || typeof c.call_id !== 'string') continue;
+    const out = outputs.get(c.call_id);
+    if (out === undefined) continue;
+    let parsed: { ok?: unknown; proposal_id?: unknown; superseded?: unknown } | undefined;
+    try { parsed = JSON.parse(String((out as { output?: unknown }).output)); } catch { parsed = undefined; }
+    if (parsed?.ok !== true || typeof parsed.proposal_id !== 'string' || parsed.superseded === true) continue;
+    const before = k > 0 ? dropped[k - 1] as { type?: unknown } : undefined;
+    return [...(before?.type === 'reasoning' ? [before] : []), dropped[k], out];
+  }
+  return [];
 }
 
 /**
@@ -366,6 +439,8 @@ const MAX_TYPED_WORDS = 40;
 export class HistoryStore {
   private readonly items = new Map<string, unknown[]>();
   private readonly typed = new Map<string, string[]>();
+  /** The user's typed words from turns the window has dropped, in the order written (`olderWordsItem`). */
+  private readonly older = new Map<string, string[]>();
 
   constructor(
     private readonly maxSessions = DEFAULT_MAX_SESSIONS,
@@ -373,7 +448,9 @@ export class HistoryStore {
   ) {}
 
   get(sessionId: string): unknown[] {
-    return dropDanglingCalls(this.items.get(sessionId) ?? []);
+    const items = dropDanglingCalls(this.items.get(sessionId) ?? []);
+    const older = olderWordsItem(this.older.get(sessionId) ?? []);
+    return older === undefined ? items : [older, ...items];
   }
 
   /** Whether THIS process holds a history for the session (evicted or never seen → false). */
@@ -388,7 +465,25 @@ export class HistoryStore {
       const oldest = this.items.keys().next().value;
       if (oldest !== undefined) this.items.delete(oldest);
     }
-    this.items.set(sessionId, trimToRecentTurns(next, this.maxTurns));
+    // The labelled item is re-made from `older` on every read, never stored as history.
+    const items = next.filter((i) => !isOlderWordsItem(i));
+    const kept = trimToRecentTurns(items, this.maxTurns);
+    const cut = items.length - kept.length;
+    if (cut > 0) {
+      const dropped = items.slice(0, cut);
+      // Only what the user TYPED (`recordTyped`): a chip's words, a board-edit note or a reseeded row never qualify.
+      const typed = new Set(this.typed.get(sessionId) ?? []);
+      const words = dropped.filter(isUserMessage).map(textOf)
+        .filter((t): t is string => t !== undefined && t.trim() !== '' && typed.has(t));
+      if (words.length > 0) this.older.set(sessionId, [...(this.older.get(sessionId) ?? []), ...words]);
+      this.items.set(sessionId, [...pendingProposalPair(dropped), ...kept]);
+    } else {
+      this.items.set(sessionId, kept);
+    }
+    if (this.older.size > this.maxSessions) {
+      const oldest = this.older.keys().next().value;
+      if (oldest !== undefined) this.older.delete(oldest);
+    }
   }
 
   get size(): number {
