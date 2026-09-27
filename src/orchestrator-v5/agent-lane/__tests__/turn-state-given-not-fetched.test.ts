@@ -405,6 +405,34 @@ describe('the kept run is compacted by its own permission, and marked stale once
     }
   });
 
+  /**
+   * ⭐ THE KEPT PROSE CARRIES NO PER-OPTION OUTCOME (AI Quality #70 5859537680 condition, measured safe on Paul's 3 served
+   * withheld exports in 5859548979). The key filter cannot see a figure written INTO `summary` / `what_is_missing`, so
+   * the served run's OWN per-option figures — each option's win probability and outcome mean/p50, in the forms a
+   * sentence would print them — are bound here by identity, never by a word list.
+   */
+  it('PIN: a WITHHELD run’s kept summary and what_is_missing print none of the served run’s per-option outcome figures', () => {
+    const printed = (x: number): string[] => {
+      const r = Math.round(x);
+      return [String(r), r.toLocaleString('en-GB'), `£${r.toLocaleString('en-GB')}`];
+    };
+    const figures = [
+      ...Object.values(RAW.win_probabilities as Record<string, number>).flatMap((p) => [`${Math.round(p * 100)}%`, `${(p * 100).toFixed(1)}%`]),
+      ...(RAW.enrichment.option_comparison as { outcome: { mean: number; p50: number } }[]).flatMap((o) => [...printed(o.outcome.mean), ...printed(o.outcome.p50)]),
+    ];
+    const figuresIn = (text: unknown): string[] => (typeof text === 'string' ? figures.filter((f) => text.includes(f)) : []);
+    expect(figures.length, 'control: the served run has per-option figures to look for').toBeGreaterThanOrEqual(12);
+    // CONTRAST: the probe catches a planted leader sentence in the served run's own figures, so an empty list below is not blind.
+    const [leaderLabel, leaderP] = Object.entries(RAW.win_probabilities as Record<string, number>).sort((a, b) => b[1] - a[1])[0]!;
+    expect(figuresIn(`${leaderLabel} leads, winning ${Math.round(leaderP * 100)}% of the time.`)).not.toEqual([]);
+    for (const [label, run] of [['the Agent’s own call', RUN_RESULT], ['the Run chip’s fast path', viaRunChip(RUN_RESULT)]] as const) {
+      const kept = keptRun(prune(afterRun(run), SERVED_READBACK));
+      expect(kept.claim_permissions.leader_may_be_named, label).toBe(false);
+      expect(figuresIn(kept.result.summary), `${label}: summary`).toEqual([]);
+      expect(figuresIn(kept.what_is_missing), `${label}: what_is_missing`).toEqual([]);
+    }
+  });
+
   it('RED (row 2): a PERMITTED run keeps win_probabilities and option_comparison, and drops the four heavy fields', () => {
     expect(RUN_RESULT_PERMITTED.claim_permissions.leader_may_be_named, 'control: the permitted variant may name a leader').toBe(true);
     for (const k of HEAVY) expect(Object.keys(RAW.enrichment), `control: the served run carries ${k}`).toContain(k);
