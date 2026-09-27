@@ -295,7 +295,13 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
       const at = typeof v === 'number' ? ` as version ${v}` : '';
       const saved = pending === null
         ? `The model was saved${at}.`
-        : `I saved the model I drafted${at}. ${pending === 'figures' ? 'The figures above are not recorded until you approve them.' : 'What I proposed above is not made until you approve it.'}`;
+        // ⛔ MG sweep (#70 5851155478 b, DL 5851162511 item 3): "The figures above are not recorded until you approve
+        // them" was FALSE on Paul's path — Olumi's 300 subscribers and 7% churn were already saved and run on. Say what
+        // is saved (Olumi's estimates, beside the user's own figures) and what approval changes (they become the user's
+        // starting assumptions) — true whether a proposed figure is already in the model or not yet.
+        : `I saved the model I drafted${at}. ${pending === 'figures'
+          ? 'The figures in it that you did not give me are Olumi\u2019s estimates; the ones I proposed above become your starting assumptions only when you approve them.'
+          : 'What I proposed above is not made until you approve it.'}`;
       return `${saved}${leftOutLine(r)}${openQuestionsLine(r)}${contextFactorsLine(r)}`;
     }
     const unconfirmed = UNCONFIRMED_WORDS[String(r.refusal)];
