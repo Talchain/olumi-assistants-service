@@ -170,6 +170,9 @@ const textOf = (items: readonly Record<string, unknown>[]): string => {
 /** The refusal a withheld tool returns. It consumed nothing and moved nothing. */
 export const WITHHELD_ON_CHIP_TURN = 'withheld_on_chip_turn';
 
+/** Opens the state item a fresh packet puts into a turn's input (and marks it, so history never keeps one). */
+export const CURRENT_MODEL_STATE_PREFIX = 'CURRENT MODEL STATE \u2014 exactly what get_canonical_state returns, read by Olumi at the start of this turn. Describe the model from it: ';
+
 export async function runAgentTurn(
   input: AgentTurnInput,
   caps: AgentCapabilities,
@@ -178,10 +181,30 @@ export async function runAgentTurn(
   const mode: AgentLaneMode = input.mode ?? 'full';
   const maxHops = input.maxHops ?? DEFAULT_MAX_HOPS;
   const withheld = new Set(input.withheldTools ?? []);
+  /**
+   * ⭐ THE STATE THE SERVER ALREADY HOLDS IS GIVEN, NOT FETCHED (slice C1; P3A replay of Paul's transcript, 27 Sep).
+   * Every ordinary turn spent a whole model call (~3 s) asking for `get_canonical_state`, and every answer then sat
+   * in the history for 24 turns: 7.4k input tokens at turn 0, 62.7k by turn 19. When the packet is fresh and
+   * addressable, `eligibleTools` withholds that tool; the SAME state goes in as this turn's input instead. The two
+   * move together — the model has the state and no tool, or the tool and no state — and the item is never handed
+   * on into the history: the next turn gets its own, fresh.
+   */
+  const eligibility = input.canonicalContext === undefined ? undefined : eligibleTools({
+    mode,
+    context: input.canonicalContext.packet,
+    expectation: input.canonicalContext.expectation,
+  });
+  const stateItem = eligibility !== undefined && input.canonicalContext?.packet != null
+    && eligibility.omitted.some((o) => o.name === 'get_canonical_state')
+    ? { role: 'developer', content: [{ type: 'input_text', text: `${CURRENT_MODEL_STATE_PREFIX}${JSON.stringify(input.canonicalContext.packet.state)}` }] }
+    : undefined;
   const items: unknown[] = [
     ...input.history,
+    ...(stateItem !== undefined ? [stateItem] : []),
     { role: 'user', content: [{ type: 'input_text', text: input.message }] },
   ];
+  /** What this turn hands on as history: everything but the state it was given. */
+  const handedOn = (): unknown[] => (stateItem === undefined ? items : items.filter((i) => i !== stateItem));
   const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string }[] = [];
   const toolResults: ToolResult[] = [];
   let mutated = false;
@@ -247,13 +270,8 @@ export async function runAgentTurn(
       // Eligibility, not the raw catalogue. `eligibleTools` starts from
       // `toolsFor(mode)` and can only REMOVE, so the mode remains the authority
       // and a context packet can never widen the surface.
-      tools: (input.canonicalContext === undefined
-        ? toolsFor(input.mode ?? 'full')
-        : eligibleTools({
-            mode: input.mode ?? 'full',
-            context: input.canonicalContext.packet,
-            expectation: input.canonicalContext.expectation,
-          }).tools).filter((t) => !withheld.has(t.name)) as readonly unknown[],
+      tools: (eligibility === undefined ? toolsFor(input.mode ?? 'full') : eligibility.tools)
+        .filter((t) => !withheld.has(t.name)) as readonly unknown[],
       max_output_tokens: input.maxOutputTokens,
     });
     providerMs += Math.max(0, now() - providerStartedAt);
@@ -288,7 +306,7 @@ export async function runAgentTurn(
         log.warn({ hop, incomplete_reason: resp.incomplete_reason ?? null }, 'agent-lane: final answer incomplete — not returned as an answer');
         return {
           assistant_text: '',
-          items,
+          items: handedOn(),
           tool_calls: toolCalls,
           tool_results: toolResults,
           mutated,
@@ -300,7 +318,7 @@ export async function runAgentTurn(
       items.push(...out);
       return {
         assistant_text: textOf(out),
-        items,
+        items: handedOn(),
         tool_calls: toolCalls,
         tool_results: toolResults,
         mutated,
@@ -380,7 +398,7 @@ export async function runAgentTurn(
   // empty text here would read to the user as the Agent having nothing to say.
   return {
     assistant_text: '',
-    items,
+    items: handedOn(),
     tool_calls: toolCalls,
     tool_results: toolResults,
     mutated,

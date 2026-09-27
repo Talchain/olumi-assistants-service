@@ -19,6 +19,8 @@
 import type { SuggestedAction } from '../compose/types.js';
 import { formatFactorValueApprox } from '../compose/format-factor-value.js';
 import type { StructuredProposal } from './proposal.js';
+import { CANVAS_BAND_WORD } from '../format/edge-strength-bands.js';
+import type { InfluenceBand } from '../format/influence-bands.js';
 import type { ToolResult } from './runtime/agent-tools.js';
 
 const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
@@ -34,7 +36,14 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_link_strength: { label: 'Record this link', message: 'Yes, record that.' },
   // The goal's success target the user stated, written through the product's typed target writer.
   propose_goal_target: { label: 'Set this target', message: 'Yes, set that target.' },
+  // SLICE C2: a new risk, held on the product's own seam like the add-option (`gmh_`, the product's words on the button).
+  propose_new_risk: { label: 'Add this risk', message: 'Yes, add that risk.' },
+  // SLICE C2: a new figure for a limit the model already holds, written through the product's limit door.
+  propose_limit_change: { label: 'Change this limit', message: 'Yes, change that limit.' },
 };
+
+/** The proposers whose change is HELD on the product's own seam (`gmh_`): the button carries the product's own words. */
+const HELD_ON_THE_PRODUCT_SEAM: ReadonlySet<string> = new Set(['propose_new_option', 'propose_new_risk']);
 
 /**
  * ⛔ ONE APPROVAL CARRIES ONE CHANGE, SO A TURN LEAVES AT MOST ONE PROPOSAL OPEN (AI Conversation #70 5847130065 (a);
@@ -114,12 +123,42 @@ export function approvalChipsFor(
    * resolves the hold instead of reading as new words for the edit model.
    */
   const held = labelSourceFor?.(proposalId)?.result;
-  if (tool === 'propose_new_option' && /^gmh_/.test(proposalId) && held !== undefined) {
+  if (HELD_ON_THE_PRODUCT_SEAM.has(tool) && /^gmh_/.test(proposalId) && held !== undefined) {
     const label = typeof held.public_label === 'string' && held.public_label.trim() !== '' ? held.public_label : approve.label;
     const message = typeof held.held_message === 'string' && held.held_message.trim() !== '' ? held.held_message : approve.message;
-    return [{ id: approvalChipIdFor(proposalId), label, message }, AMEND_CHIP];
+    /**
+     * ⛔ THE BUTTON NEVER CUTS THE OPTION'S NAME (Paul's test, 27 Sep, B3): the product's label is clamped to 57
+     * characters ("Add option '£59 for new Pro customers; grandfather existi...") and its full sentence rides in
+     * `detail`, which the UI shows on the button. The Agent's copy of the chip dropped it; it carries it now.
+     */
+    const detail = typeof held.held_detail === 'string' && held.held_detail.trim() !== '' ? held.held_detail : undefined;
+    return [{ id: approvalChipIdFor(proposalId), label, message, ...(detail !== undefined ? { detail } : {}) }, AMEND_CHIP];
   }
+  const reading = readingShownFor(tool, labelSourceFor?.(proposalId));
+  if (reading !== undefined) return [{ id: approvalChipIdFor(proposalId), ...reading, message: approve.message }, AMEND_CHIP];
   return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, labelSourceFor?.(proposalId)), message: approve.message }, AMEND_CHIP];
+}
+
+/** The tools whose proposal can carry Olumi's reading of the user's own words for a link's band (slice C3). */
+const READING_TOOLS: ReadonlySet<string> = new Set(['propose_link_strength', 'propose_model_change']);
+
+/**
+ * ⭐ THE BUTTON SHOWS THE READING THE USER APPROVES (slice C3). When a link's band was read from the user's own words
+ * ("very high" read as very strong), the approval is of that reading, so the button says it: `Record as very strong
+ * (your "very high")` when that fits {@link APPROVAL_LABEL_MAX}, else `Record as very strong`, with the whole reading
+ * always in `detail` (the boundary `Action`'s optional field). Read from the STORED proposal, and only when the
+ * proposer's own result carries the SAME reading — never the Agent's prose.
+ */
+function readingShownFor(tool: string, source: ApprovalLabelSource | undefined): { label: string; detail: string } | undefined {
+  const proposal = source?.proposal;
+  const result = source?.result;
+  const stored = proposal?.interpretation;
+  if (!READING_TOOLS.has(tool) || stored === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal?.proposal_id) return undefined;
+  const shown = result.interpretation as Record<string, unknown> | undefined;
+  if (shown === undefined || shown === null || typeof shown !== 'object') return undefined;
+  if (shown.field !== stored.field || shown.from_words !== stored.from_words || shown.reading !== stored.reading || shown.shown_as !== stored.shown_as) return undefined;
+  const short = `Record as ${CANVAS_BAND_WORD[stored.reading as InfluenceBand] ?? stored.reading}`;
+  return { label: stored.shown_as.length <= APPROVAL_LABEL_MAX ? stored.shown_as : short, detail: stored.shown_as };
 }
 
 /**
@@ -228,6 +267,6 @@ export function typedApprovalOf(body: unknown): string | undefined {
   const id = (body as { chip?: { id?: unknown } } | null | undefined)?.chip?.id;
   if (typeof id !== 'string' || !id.startsWith(APPROVE_PREFIX)) return undefined;
   const proposalId = id.slice(APPROVE_PREFIX.length);
-  // `gmh_…` is a held add-option on the product's own seam (C52): the same typed, zero-call approval.
+  // `gmh_…` is a held add-option or add-risk on the product's own seam (C52, SLICE C2): the same typed, zero-call approval.
   return /^prop_[0-9a-f]{6,64}$/.test(proposalId) || /^gmh_[0-9a-f]{12}$/.test(proposalId) ? proposalId : undefined;
 }

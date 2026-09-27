@@ -566,6 +566,30 @@ export const EdgeV3 = z.object({
   validation: z.any().optional(),
   /** CIL flag: true when default strength was applied (no LLM differentiation) */
   defaulted: z.boolean().optional(),
+  /**
+   * ⭐ A6e — THIS LINK'S EXISTENCE IS STILL OLUMI'S DEFAULT (Canonical #70 5855416983, AIQ agreed).
+   *
+   * `defaulted` above is WHOLE-EDGE: it says Olumi supplied the link's numbers. A user who adopts the STRENGTH ends
+   * that for the strength — the writer deletes `defaulted` — but `exists_probability` is untouched and still
+   * Olumi's. Before this field that fact was simply lost: the edge read as entirely the user's. This is the
+   * per-field half that survives.
+   *
+   * CEE-MINTED, ONE WRITER: `adjust-edge-strength.ts` sets it to `true` exactly when a user write removes
+   * `defaulted: true` from an edge. The confirmation guard (`isProvenanceOnlyEdgeConfirmation`) admits that pair and
+   * nothing else. A producer cannot write it: the root is in `field-safety.ts` `CEE_ANALYSIS_OWNED_ROOTS`, so a model
+   * update naming it is refused PIPELINE_OWNED_FIELD at any depth, and an `add_node` value carrying it is stripped;
+   * the draft transform builds edges field-by-field and does not copy it.
+   *
+   * ⚠ THIS DECLARATION IS LOAD-BEARING, NOT DOCUMENTATION — the warning `goal_threshold_frame` carries. `EdgeV3` is
+   * a plain `z.object`, so an undeclared `exists_defaulted` is SILENTLY DELETED by the handler's own post-mutation
+   * `GraphV3` parse (`applyAndValidateMutation`) and never reaches the store.
+   *
+   * ABSENCE MEANS NOT MARKED — every edge persisted before this field, and every edge whose strength was never a
+   * default, reads exactly as before. A malformed value is dropped (`.catch`), never a new reason to refuse a stored
+   * graph. OUT of `computeAnalysisAffectingGraphHash` (its edge projection is a whitelist): it is a label on a value,
+   * not an input to analysis.
+   */
+  exists_defaulted: z.boolean().optional().catch(undefined),
 }); // CIL Phase 1: declared fields only — unknown fields stripped with warning
 /** EdgeV3 with full ValidationMetadata typing (superset of Zod schema). */
 export type EdgeV3T = z.infer<typeof EdgeV3> & {

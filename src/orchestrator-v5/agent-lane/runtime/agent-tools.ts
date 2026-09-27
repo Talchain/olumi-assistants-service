@@ -19,6 +19,18 @@ import { sendableQuery } from './public-research.js';
  * asked "does slight mean weak?"; the user's "Yes." named no band, so it was refused, and the user was then told to say
  * "weak" — a word the canvas never shows. `bandTheUserWrote` already grounds "slight" (#2008); this tells the model so.
  */
+/**
+ * ⭐ THE USER'S OWN WORDS, PROPOSED AS A READING THEY APPROVE (slice C3; ruling ChatGPT 5854968869 P3B). Measured on
+ * Paul's served transcript (27 Sep): "price sensitivity is very high" was refused twice, and recording "very strong"
+ * took four turns. The capability admits the phrase only when it is written in THIS turn's typed words
+ * (`wordsTheUserWrote`), so the Agent cannot invent it; the approve button shows the reading.
+ */
+export const FROM_WORDS_DESCRIPTION =
+  'When the user described the strength in their own words rather than a band word, give their exact phrase here and your '
+  + 'reading in `strength`; the user approves your reading. Copy it exactly from their message this turn (for example '
+  + '"very high"); never a phrase they did not write.';
+const FROM_WORDS = { type: 'string', description: FROM_WORDS_DESCRIPTION } as const;
+
 export const SLIGHT_IS_WEAK =
   ' The canvas calls the lowest band Slight: when the user calls a link slight, that IS `weak` \u2014 pass `weak`, and never ask '
   + 'whether slight means weak. When you ask the user for a band, use the canvas\u2019s words: slight, moderate, strong or very strong.';
@@ -32,6 +44,14 @@ export const SLIGHT_IS_WEAK =
 export const LEVEL_BRINGS_ITS_LINK =
   ' A level on a factor the option is not linked to yet brings that link with it, in the same change: the link only says the '
   + 'option acts on that factor, so never ask how strong it is — send the level the user gave.';
+
+/**
+ * ⛔ A RISK IS NOT A MEDIATOR (Canonical #70 5855234599): it links TO the goal or an outcome it threatens and FROM the
+ * factors that drive it — never INTO a factor. The door refuses any other pair; this tells the model before it asks.
+ */
+export const RISK_LINKS_RULE =
+  'A risk links TO the goal or an outcome it threatens (`affects`, at least one) and FROM factors that drive it (`caused_by`, '
+  + 'optional) \u2014 never into a factor: a risk affects the goal or an outcome, not a factor directly.';
 
 export interface AgentToolContext {
   /** Bound from the request, never from model output. */
@@ -100,6 +120,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'proposal and returns its id, which you keep for authorise_change: show the user what it changes, never the id, before asking them to approve. ' +
       'Use the labels exactly as get_canonical_state returned them. ' +
       'The link is recorded with `strength` as the user\u2019s own estimate, so give ONLY the band the user named for it in this message; ' +
+      'if they described it in their own words ("very high"), give your reading in `strength` and their exact phrase in `from_words`, and show it; ' +
       'if they named none, ask how strong the effect is first \u2014 a band they did not say is refused.' + SLIGHT_IS_WEAK,
     parameters: obj({
       from_label: { type: 'string' },
@@ -107,8 +128,9 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       direction: { type: 'string', enum: ['positive', 'negative'] },
       strength: {
         type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'],
-        description: 'The band the user said for this link in THIS message, in their own words. Never your own guess.',
+        description: 'The band the user said for this link in THIS message, in their own words \u2014 or your reading of their own words, given with `from_words`. Never your own guess.',
       },
+      from_words: FROM_WORDS,
       rationale: { type: 'string', description: 'Why this link matters, in the user’s terms.' },
     }, ['from_label', 'to_label', 'direction', 'rationale']),
   },
@@ -236,12 +258,15 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'and returns its id, which you keep for authorise_change: show the user what it records, never the id, before they approve. '
       + 'The user\u2019s word is one of Olumi\u2019s strength bands. If the link already sits in that band, its strength is kept and only '
       + 'recorded as theirs; otherwise it is set to the middle of that band, and the result says the figure so you can tell them. '
-      + 'Give `direction` ONLY when the user said the link pushes the other way. Never use this for a strength the user did not state: '
-      + 'if they have not named a band in their own words, ask which it is first \u2014 a band they did not say is refused.' + SLIGHT_IS_WEAK,
+      + 'Give `direction` ONLY when the user said the link pushes the other way. When they described the strength in their own words '
+      + '("very high", "hardly at all"), give your reading in `strength` and their exact phrase in `from_words`: the user approves your reading. '
+      + 'Never use this for a strength the user did not state: if they said nothing about how strong it is, ask which band it is first '
+      + '\u2014 a band they did not say is refused.' + SLIGHT_IS_WEAK,
     parameters: obj({
       from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
       to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
-      strength: { type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'], description: 'The strength the user stated.' },
+      strength: { type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'], description: 'The strength the user stated, or your reading of their own words, given with `from_words`.' },
+      from_words: FROM_WORDS,
       direction: { type: 'string', enum: ['positive', 'negative'], description: 'ONLY when the user said the link pushes the other way.' },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
     }, ['from_label', 'to_label', 'strength', 'rationale']),
@@ -262,6 +287,55 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       unit: { type: 'string', description: 'The unit of that figure, as the user gave it (for example £, % or customers).' },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
     }, ['constraint_type', 'value', 'unit', 'rationale']),
+  },
+  {
+    type: 'function',
+    name: 'propose_new_risk',
+    description:
+      'Add a RISK the user has just asked for, when the model does NOT already have it: something that could go wrong and would '
+      + 'hurt the goal or an outcome (for example \u201ccompetitors respond to our price rise\u201d). This does NOT change anything: it '
+      + 'prepares ONE complete change and returns its id, which you keep for authorise_change: show the user the risk, what it '
+      + 'threatens and what drives it, never the id, before asking them to approve. ' + RISK_LINKS_RULE + ' How strongly each '
+      + 'link acts is not known yet: Olumi records a placeholder strength, not an estimate \u2014 say so. Use the labels exactly as the '
+      + 'CURRENT MODEL STATE gives them.',
+    parameters: obj({
+      label: { type: 'string', description: 'The risk in the user\u2019s own words (e.g. "Competitive response").' },
+      affects: {
+        type: 'array',
+        description: 'What the risk threatens: the goal or an outcome in the model, and which way. At least one. Never a factor.',
+        items: obj({
+          target_label: { type: 'string', description: 'The goal or an outcome, exactly as the CURRENT MODEL STATE labels it.' },
+          direction: { type: 'string', enum: ['positive', 'negative'], description: 'negative when the risk lowers it (the usual case); from the user\u2019s words, never a guess.' },
+        }, ['target_label', 'direction']),
+      },
+      caused_by: {
+        type: 'array',
+        description: 'Factors in the model that drive the risk, and which way (optional).',
+        items: obj({
+          factor_label: { type: 'string', description: 'A factor exactly as the CURRENT MODEL STATE labels it.' },
+          direction: { type: 'string', enum: ['positive', 'negative'], description: 'positive when raising the factor makes the risk more likely.' },
+        }, ['factor_label', 'direction']),
+      },
+      rationale: { type: 'string', description: 'What the user said, in their words.' },
+    }, ['label', 'affects', 'rationale']),
+  },
+  {
+    type: 'function',
+    name: 'propose_limit_change',
+    description:
+      'Change the figure of a LIMIT the model already holds (one listed under `limits` in the CURRENT MODEL STATE) when the user '
+      + 'has just stated its new figure (for example \u201cthe budget is now \u00a330k\u201d). This does NOT change anything: it prepares ONE '
+      + 'change and returns its id, which you keep for authorise_change: show the user the limit, its current figure and the new one, '
+      + 'never the id, before they approve. Give the figure exactly as the user wrote it, in the limit\u2019s own unit (30000 for \u00a330k). '
+      + 'The limit keeps its unit and meaning; only its figure changes, recorded as the user\u2019s. It never adds a limit, and never '
+      + 'sets the goal\u2019s own target (that is propose_goal_target). A figure the user did not write is refused.',
+    parameters: obj({
+      limit_label: { type: 'string', description: 'The limit\u2019s `on` label exactly as the CURRENT MODEL STATE lists it under limits.' },
+      operator: { type: 'string', enum: ['<=', '>='], description: 'The limit\u2019s operator exactly as the state lists it.' },
+      new_value: { type: 'number', description: 'The new figure the user stated, in the limit\u2019s own unit.' },
+      unit: { type: 'string', description: 'The unit the user wrote the figure in, if any.' },
+      rationale: { type: 'string', description: 'What the user said, in their words.' },
+    }, ['limit_label', 'operator', 'new_value', 'rationale']),
   },
   {
     type: 'function',
@@ -374,6 +448,32 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       query: { type: 'string', description: 'The exact public search question, one line, at most 200 characters.' },
     }, ['query']),
   },
+  /**
+   * ⭐ C5 — THE AGENT'S PROVISIONAL VIEW (Paul, DL #70 5855324470: "Yes, labelled provisional"). Read-only: it changes
+   * nothing and proposes nothing. The ROUTE renders it after the leader gate, labelled (`../provisional-view.ts`).
+   */
+  {
+    type: 'function',
+    name: 'give_provisional_view',
+    description:
+      'Give YOUR OWN provisional view when the analysis cannot put an option forward yet (a leader may not be named). ' +
+      'This changes nothing. Olumi shows it beneath your reply as ONE paragraph labelled as your provisional view \u2014 ' +
+      'never as the analysis result \u2014 with why the analysis cannot confirm it yet. Call it at most once per reply, and ' +
+      'never write the view in your reply text: a reply sentence that ranks or favours an option is removed. It is refused ' +
+      'when the analysis may name a leading option (then report what the analysis says) or when no analysis has completed.',
+    parameters: obj({
+      view: { type: 'string', description: 'At most 2 sentences: what you would do, in plain words.' },
+      reasoning: {
+        type: 'string',
+        description: 'At most 3 sentences: why, from the model\u2019s own facts and the user\u2019s own words. Never quote win percentages as a ranking.',
+      },
+      confirm_step: {
+        type: 'string',
+        description: 'ONE sentence: the one thing that would let the analysis confirm or overturn this view \u2014 something the user can do, ' +
+          'or a change one of your tools can propose. Never a step that cannot help.',
+      },
+    }, ['view', 'reasoning', 'confirm_step']),
+  },
 ];
 
 export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
@@ -392,7 +492,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_link_strength', 'propose_goal_target', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'authorise_change'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_new_risk', 'propose_link_strength', 'propose_goal_target', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'authorise_change'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -424,16 +524,30 @@ export interface AgentCapabilities {
     from_label: string; to_label: string; direction: 'positive' | 'negative'; rationale: string;
     /** The band the user typed THIS turn; without it (or with one they did not type) nothing is prepared. */
     strength?: 'weak' | 'moderate' | 'strong' | 'very strong';
+    /** The user's own phrase THIS turn when `strength` is Olumi's reading of it (slice C3). */
+    from_words?: string;
   }): Promise<ToolResult>;
   authoriseChange(ctx: AgentToolContext, args: { proposal_id: string }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */
   proposeLinkStrength?(ctx: AgentToolContext, args: {
     from_label: string; to_label: string; strength: 'weak' | 'moderate' | 'strong' | 'very strong';
     direction?: 'positive' | 'negative'; rationale: string;
+    /** The user's own phrase THIS turn when `strength` is Olumi's reading of it (slice C3). */
+    from_words?: string;
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */
   proposeGoalTarget?(ctx: AgentToolContext, args: {
     constraint_type: 'at_least' | 'at_most'; value: number; unit: string; rationale: string;
+  }): Promise<ToolResult>;
+  /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). SLICE C2. */
+  proposeNewRisk?(ctx: AgentToolContext, args: {
+    label: string; rationale: string;
+    affects: readonly { target_label: string; direction: 'positive' | 'negative' }[];
+    caused_by?: readonly { factor_label: string; direction: 'positive' | 'negative' }[];
+  }): Promise<ToolResult>;
+  /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). SLICE C2. */
+  proposeLimitChange?(ctx: AgentToolContext, args: {
+    limit_label: string; operator: '<=' | '>='; new_value: number; unit?: string; rationale: string;
   }): Promise<ToolResult>;
   runAnalysis(ctx: AgentToolContext, args: { reason: string }): Promise<ToolResult>;
   buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;
@@ -458,6 +572,8 @@ export interface AgentCapabilities {
   proposeGoalCurrentLevel(ctx: AgentToolContext, args: {
     goal_label: string; value: number; unit: string; goal_is: 'at_least' | 'above' | 'at_most' | 'below'; user_stated: boolean;
   }): Promise<ToolResult>;
+  /** C5: the Agent's own provisional view on a withheld turn (`../provisional-view.ts`). Optional: absent ⇒ refused plainly. */
+  giveProvisionalView?(ctx: AgentToolContext, args: { view: string; reasoning: string; confirm_step: string }): Promise<ToolResult>;
 }
 
 export async function dispatchTool(
@@ -504,12 +620,24 @@ export async function dispatchTool(
       return caps.proposeGoalTarget !== undefined
         ? caps.proposeGoalTarget(ctx, args as never)
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A goal’s target cannot be set here. Nothing was changed.' };
+    case 'propose_new_risk':
+      return caps.proposeNewRisk !== undefined
+        ? caps.proposeNewRisk(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A risk cannot be added here. Nothing was changed.' };
+    case 'propose_limit_change':
+      return caps.proposeLimitChange !== undefined
+        ? caps.proposeLimitChange(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A limit cannot be changed here. Nothing was changed.' };
     case 'propose_option_interventions':
       return caps.proposeOptionInterventions(ctx, args as never);
     case 'propose_starting_point':
       return caps.proposeStartingPoint(ctx, args as never);
     case 'propose_goal_current_level':
       return caps.proposeGoalCurrentLevel(ctx, args as never);
+    case 'give_provisional_view':
+      return caps.giveProvisionalView !== undefined
+        ? caps.giveProvisionalView(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A provisional view cannot be given here. Nothing was shown.' };
     case 'offer_public_research': {
       // Pure: nothing is searched here. The route turns the query into the one control that can send it.
       const query = sendableQuery(args.query);

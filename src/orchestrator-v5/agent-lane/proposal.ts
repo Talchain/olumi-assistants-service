@@ -72,7 +72,14 @@ export interface ProposalOperation {
      * `{constraint_type, raw_value, unit}` exactly as the `goal_target_edit` event carries them.
      * Written only through the product's typed target writer (`goal_target_edit` → `add_constraint`).
      */
-    | 'set_goal_target';
+    | 'set_goal_target'
+    /**
+     * ⭐ A NEW FIGURE FOR A LIMIT THE MODEL ALREADY HOLDS (SLICE C2) — `path` is the limit's node id, `value` is
+     * `{operator, raw_value, unit, constraint_id, before}`. Written only through the product's in-process limit door
+     * (`commitLimitEditInProcess` → `add_constraint`), which keeps the row's unit and frame and stamps the figure as the
+     * user's. Never adds a limit, never the goal's own target.
+     */
+    | 'set_limit';
   /** Node id, or `from::to` for an edge. */
   readonly path: string;
   readonly value?: unknown;
@@ -98,6 +105,23 @@ export interface StructuredProposal {
   readonly validation: ProposalValidation;
   /** What the user was actually shown. Stored so the receipt can quote it. */
   readonly public_label: string;
+  /**
+   * ⭐ OLUMI'S READING OF THE USER'S OWN WORDS, which the user approves (slice C3). Present only when a typed value
+   * (a link's band) was not named literally but read from the user's phrase — "very high" read as very strong — so
+   * the approve button can show the reading, and the approval is of that reading. Part of the id when present.
+   */
+  readonly interpretation?: ProposalInterpretation;
+}
+
+/** A typed value read from the user's own phrase, as the approve button shows it. */
+export interface ProposalInterpretation {
+  readonly field: 'band';
+  /** The user's phrase, verbatim as the Agent gave it (checked against this turn's typed words). */
+  readonly from_words: string;
+  /** The typed value it is read as (a strength band). */
+  readonly reading: string;
+  /** What the user is shown: `Record as <band> (your "<from_words>")`. */
+  readonly shown_as: string;
 }
 
 export type ProposalContent = Omit<StructuredProposal, 'proposal_id'>;
@@ -135,6 +159,8 @@ export function computeProposalId(c: ProposalContent): string {
     [c.provenance.authored_by, c.provenance.basis ?? null],
     [c.validation.admitted, c.validation.loss_count, [...c.validation.refusals].sort()],
     c.public_label,
+    // Appended only when present, so every proposal without a reading keeps the id it always had.
+    ...(c.interpretation === undefined ? [] : [c.interpretation]),
   ]));
   return 'prop_' + createHash('sha256').update(canonical).digest('hex').slice(0, 32);
 }

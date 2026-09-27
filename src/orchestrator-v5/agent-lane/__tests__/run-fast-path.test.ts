@@ -93,6 +93,12 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
     expect(b._diagnostic_trace.fast_path).toBe('run');
     expect(b._agent.tool_calls.map((c) => c.name)).toEqual(['run_analysis']);
     expect(b.assistant_text).toBe('In the current model, the result turns on Capacity.');
+    // C6: the served turn says where its time went (the loop's split + the whole route).
+    const t = (b._diagnostic_trace as unknown as { timing?: Record<string, number> }).timing;
+    expect(t, 'timing is on the trace').toBeDefined();
+    for (const k of ['total_ms', 'provider_ms', 'tool_ms', 'overhead_ms', 'route_total_ms']) expect(typeof t![k], k).toBe('number');
+    expect(t!.provider_calls).toBe(1);
+    expect(t!.route_total_ms).toBeGreaterThanOrEqual(t!.total_ms);
   });
 
   /**

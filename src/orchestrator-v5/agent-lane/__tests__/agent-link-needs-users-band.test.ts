@@ -214,6 +214,7 @@ describe('the Agent is told to ask for the band when the user gave none', () => 
 
   it('the route\'s instruction for propose_model_change says to ask how strong when the user named no band', () => {
     const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    expect(route).toMatch(/propose_model_change for a link \(with the strength band the user named; if they named none, ask how strong first\)/);
+    // Slice C3: or the Agent's reading of the user's own words, given with `from_words`; it asks only when the words fit two bands or name none.
+    expect(route).toContain('propose_model_change for a link (with the strength band the user named, or \\u2014 when they described it in their own words \\u2014 your reading of them, with their exact phrase as `from_words`; ask how strong first only when their words fit two bands equally or name no strength at all)');
   });
 });

@@ -89,6 +89,7 @@ const OWNED_NAMES_REACHABLE_IN_THIS_REPO = [
   'origin',
   'validation',
   'defaulted',
+  'exists_defaulted', // A6e (Canonical #70 5855416983): a user strength write's per-field existence flag
   // src/schemas/cee-v3.ts — ObservedStateV3
   'source',
   'raw_value',
@@ -119,21 +120,25 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
 // ---------------------------------------------------------------------------
 
 /**
- * The same six the derived test computes — written here as literals so the
+ * The same names the derived test computes — written here as literals so the
  * pair DISAGREE if the contract shifts. If `InterventionV3` ever gains, say,
- * an `origin` field, the derived list silently shrinks to five and every
- * derived assertion still passes; this literal list REDs.
+ * an `origin` field, the derived list silently shrinks and every derived
+ * assertion still passes; this literal list REDs.
+ *
+ * Six at 2.478; A6e (Canonical #70 5855416983) adds a seventh, `exists_defaulted`
+ * — a STAMP (whose existence claim this is), so stripping it from an add is right.
  */
 const SIX_SMUGGLE_NAMES = [
   'provenance',
   'provenance_display',
   'validation',
   'defaulted',
+  'exists_defaulted',
   'origin',
   'extractiontype',
 ] as const;
 
-describe('corpus B — the six smuggle names, hand-written', () => {
+describe('corpus B — the six (now seven) smuggle names, hand-written', () => {
   it('each is owned by CEE and is NOT an intervention contract key', () => {
     for (const name of SIX_SMUGGLE_NAMES) {
       expect(PIPELINE_OWNED_ROOTS.has(name), `${name} owned`).toBe(true);
@@ -141,7 +146,7 @@ describe('corpus B — the six smuggle names, hand-written', () => {
     }
   });
 
-  it('the hand list and the derived difference are the SAME SIX (a disagreement is the signal)', () => {
+  it('the hand list and the derived difference are the SAME set (a disagreement is the signal)', () => {
     const derived = [...CEE_ANALYSIS_OWNED_ROOTS_FOR_TEST]
       .filter((k) => !INTERVENTION_CONTRACT_KEYS.has(k))
       .sort();

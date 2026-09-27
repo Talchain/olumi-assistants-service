@@ -91,8 +91,10 @@ const SMUGGLE_NAMES = [...CEE_ANALYSIS_OWNED_ROOTS_FOR_TEST]
 
 describe('the six zero-reader smuggle names — enumerated at the bytes', () => {
   it('is exactly the CEE-owned names that are NOT intervention contract keys', () => {
+    // Six at 2.478; A6e adds `exists_defaulted` (Canonical #70 5855416983), a CEE-owned edge stamp.
     expect(SMUGGLE_NAMES).toEqual([
       'defaulted',
+      'exists_defaulted',
       'extractiontype',
       'origin',
       'provenance',
@@ -108,9 +110,9 @@ describe('the six zero-reader smuggle names — enumerated at the bytes', () => 
     expect(PIPELINE_OWNED_ROOTS.has('raw_value')).toBe(true);
   });
 
-  it('the J2 union adds five MORE names the same screen now kills (11 total, not 6)', () => {
+  it('the J2 union adds five MORE names the same screen now kills (12 total with A6e, not 7)', () => {
     const all = [...PIPELINE_OWNED_ROOTS].filter((k) => !INTERVENTION_CONTRACT_KEYS.has(k)).sort();
-    expect(all.length).toBe(11);
+    expect(all.length).toBe(12);
     expect(all.filter((k) => !SMUGGLE_NAMES.includes(k))).toEqual([
       'beliefexistssource',
       'directionsource',

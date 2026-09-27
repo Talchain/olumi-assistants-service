@@ -53,6 +53,38 @@ export function trimToRecentTurns(items: readonly unknown[], maxTurns = DEFAULT_
  * rejection and dropping a call cannot create one, because the output is
  * removed with it.
  */
+/** What a superseded read or run output becomes in the history: small, and still a valid output for its call. */
+export const SUPERSEDED_OUTPUT = JSON.stringify({ superseded: true, note: 'An earlier read. The current model state is given at the start of each turn.' });
+/** Tools whose output is a snapshot of the model: every one is superseded by the state given with the next turn. */
+const SNAPSHOT_TOOLS = new Set(['get_canonical_state', 'build_model_from_brief']);
+
+/**
+ * ⭐ A SUPERSEDED SNAPSHOT IS NOT KEPT (slice C1; P3A replay of Paul's transcript, 27 Sep). Each state read added
+ * 2.5–3k tokens and each run 3.1–3.6k, all carried for 24 turns — 55k of a 62.7k request was old copies of the model.
+ * Every state read and build result is replaced by a stub, and every run result but the LATEST (the one a follow-up
+ * question is about). The call and its output stay paired — only the output's text changes — so the next request
+ * stays valid input (see `dropDanglingCalls`).
+ */
+export function pruneSupersededToolOutputs(items: readonly unknown[]): unknown[] {
+  const nameOf = new Map<string, string>();
+  for (const i of items) {
+    const c = i as { type?: unknown; call_id?: unknown; name?: unknown };
+    if (c?.type === 'function_call' && typeof c.call_id === 'string' && typeof c.name === 'string') nameOf.set(c.call_id, c.name);
+  }
+  const outputOf = (i: unknown): string | undefined => {
+    const o = i as { type?: unknown; call_id?: unknown };
+    return o?.type === 'function_call_output' && typeof o.call_id === 'string' ? nameOf.get(o.call_id) : undefined;
+  };
+  let lastRun = -1;
+  items.forEach((i, k) => { if (outputOf(i) === 'run_analysis') lastRun = k; });
+  return items.map((i, k) => {
+    const name = outputOf(i);
+    if (name === undefined) return i;
+    if (SNAPSHOT_TOOLS.has(name) || (name === 'run_analysis' && k !== lastRun)) return { ...(i as object), output: SUPERSEDED_OUTPUT };
+    return i;
+  });
+}
+
 export function dropDanglingCalls(items: readonly unknown[]): unknown[] {
   const answered = new Set<string>();
   for (const i of items) {

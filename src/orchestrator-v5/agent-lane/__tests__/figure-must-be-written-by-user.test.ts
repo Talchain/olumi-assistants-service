@@ -229,6 +229,7 @@ describe('the Agent route binds the user\'s words to every tool it runs', () => 
     expect(route).toContain('if (typedNow !== null) histories.recordTyped(sessionId, typedNow);');
     expect(route).not.toContain('userWordsOf(history');
     expect(route).not.toContain('{ scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id }');
-    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the three dispatch sites').toBe(4);
+    // Declared once; used at the three dispatch sites and the turn's state read (slice C1).
+    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the three dispatch sites and the state read').toBe(5);
   });
 });

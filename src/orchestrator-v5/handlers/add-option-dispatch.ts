@@ -176,9 +176,9 @@ export function buildLinkedUnvaluedNotice(label: string, factorLabels: readonly 
 /**
  * Map an `EditGmChip` to the boundary `Action` shape, PRESERVING its id (the
  * `gmh_…` proposal ref) so the confirm chip is identifiable — unlike the
- * free-text edit lane's positional `edit_graph_action_<n>` ids.
+ * free-text edit lane's positional `edit_graph_action_<n>` ids. Shared with the add-risk dispatch.
  */
-function chipToBoundaryAction(chip: EditGmChip): BoundaryAction {
+export function chipToBoundaryAction(chip: EditGmChip): BoundaryAction {
   const action: BoundaryAction = {
     id: chip.id,
     label: chip.label,
@@ -192,9 +192,9 @@ function chipToBoundaryAction(chip: EditGmChip): BoundaryAction {
 /**
  * Read a minimal `{nodes, edges}` view for the transaction builder from the
  * persisted frame graph. Returns null when the graph is unreadable (→ skip),
- * so a corrupt frame never synthesises a doomed proposal.
+ * so a corrupt frame never synthesises a doomed proposal. Shared with the add-risk dispatch.
  */
-function toGraphView(currentGraph: unknown): AddOptionGraphView | null {
+export function toGraphView(currentGraph: unknown): AddOptionGraphView | null {
   const parsed = GraphV3.safeParse(currentGraph);
   if (!parsed.success) return null;
   return {
