@@ -18,6 +18,7 @@ import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-rece
 import { createHash, randomUUID } from 'node:crypto';
 import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
 import { AGENT_ADD_OPTION_CHIP_ID, AGENT_RUN_ANALYSIS_CHIP_ID } from '../../handlers/agent-chip-ids.js';
+import { runWithUserNamedOptions } from '../../handlers/add-option-authorship-context.js';
 import {
   buildAddOptionsTransaction,
   GM_HELD_SWITCH_FACTORS_KEY,
@@ -4384,11 +4385,23 @@ export function createAgentCapabilities(
           detail: `That could not be prepared as one change, so nothing was sent or changed.${why} Tell the user plainly.` };
       }
       const labels = kept.map((x) => x.plan.label);
-      const r = await dispatch('/orchestrate/v2/turn', {
-        kind: 'message', turn_id: authorisationTurnId(`agent_add_option:${ctx.scenario_id}:${JSON.stringify(parameters)}`), scenario_id: ctx.scenario_id,
+      const addTurnId = authorisationTurnId(`agent_add_option:${ctx.scenario_id}:${JSON.stringify(parameters)}`);
+      const sendAdd = () => dispatch('/orchestrate/v2/turn', {
+        kind: 'message', turn_id: addTurnId, scenario_id: ctx.scenario_id,
         stage: 'frame', turn_class: 'frame', source: 'chip', message: `Add ${labels.map((l) => `the option "${l}"`).join(' and ')}.`,
         chip: { id: AGENT_ADD_OPTION_CHIP_ID, intent: 'add_option', parameters },
       });
+      /**
+       * ⭐ A6b (DL CR on #2131, option (a)) — WHOSE OPTION. It is the user's only when THIS turn's typed words name it
+       * (`wordsTheUserWrote`, the lane's one said-not-asked matcher, over `user_turn_text` — never a chip's text).
+       * An option Olumi suggested and the user only approves is Olumi's, and keeps Olumi's provenance: the stamp would
+       * make "why is X here?" answer "you set it yourself, not because I suggested it". A new factor is never named
+       * here: Olumi mints it. The ids ride IN-PROCESS to the hold (`add-option-authorship-context.ts`), never on the wire.
+       */
+      const userNamedIds = kept.filter((x) => wordsTheUserWrote(x.plan.label, ctx.user_turn_text)).map((x) => x.plan.optionId);
+      const r = userNamedIds.length === 0
+        ? await sendAdd()
+        : await runWithUserNamedOptions({ scenarioId: ctx.scenario_id, turnId: addTurnId, optionIds: userNamedIds }, sendAdd);
       /**
        * ⛔ HELD, OR NOT PROPOSED. The only proof is the product's own handle for THIS batch (`gmh_` over the
        * scenario and the FIRST option's id), and, where the store can be read, the held batch itself adding
