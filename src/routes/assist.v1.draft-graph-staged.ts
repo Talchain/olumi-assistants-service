@@ -116,9 +116,13 @@ const SSE_HEADERS = {
   "cache-control": "no-cache",
 } as const;
 
-/** The five frame classes. Order of DECLARATION is the order of EMISSION. */
+/**
+ * The frame classes. Order of DECLARATION is the order of EMISSION. `BRIEF_READ` (C6-2) is written only by the
+ * agent-lane turn stream, between DRAFTING and GRAPH_READY; this route's pipeline never emits it.
+ */
 export const STAGED_FRAME_CLASSES = [
   "DRAFTING",
+  "BRIEF_READ",
   "PROGRESS",
   "GRAPH_READY",
   "COACHING_READY",

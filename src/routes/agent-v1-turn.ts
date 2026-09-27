@@ -73,7 +73,8 @@ import { computeSurvivingPriorPendingsDetailed } from '../orchestrator-v5/commit
 import { GM_HELD_HANDLER_ID } from '../orchestrator-v5/handlers/edit-graph-referee-gate.js';
 import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
-import { currentStageEmitter } from '../cee/unified-pipeline/stage-stream-context.js';
+import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
+import { readBrief, BRIEF_READING_TIMEOUT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
 import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runDeltaBoundToReadback, runTurnNextMove, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
@@ -1188,6 +1189,39 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     return { text, usage: j.usage };
   }, (call, err) => log.warn({ err, call }, 'agent-lane transport failure, retrying once'));
 
+  /**
+   * ⭐ C6-2: the ONE brief-reading call (`agent-lane/brief-reading.ts`). Same provider policy and usage ledger as every
+   * Agent call, its own alias, strict JSON, temperature 0, and a hard abort: a reading that is late is no reading.
+   * No retry. It is optional display work, so a failure only means nothing is shown.
+   */
+  const callBriefReading: CallBriefReading = async (reqBody) => {
+    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callBriefReading', {
+      model: reqBody.model, purpose: 'brief_reading', ...agentPromptIdentity('agent.read_brief', reqBody.instructions),
+    });
+    const r = await fetch(OPENAI_RESPONSES_URL, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: reqBody.model,
+        instructions: reqBody.instructions,
+        input: reqBody.input,
+        temperature: 0,
+        max_output_tokens: 600,
+        text: { format: { type: 'json_schema', name: 'brief_spans', strict: true, schema: reqBody.schema } },
+      }),
+      signal: AbortSignal.timeout(BRIEF_READING_TIMEOUT_MS),
+    });
+    if (!r.ok) throw new Error(`openai_${r.status}`);
+    const j = (await r.json()) as { output?: { type?: string; content?: { type?: string; text?: string }[] }[]; usage?: unknown };
+    recordProviderUsage(usageHandle, j.usage);
+    let text = '';
+    for (const item of j.output ?? []) {
+      if (item.type !== 'message') continue;
+      for (const c of item.content ?? []) if (c.type === 'output_text') text += c.text ?? '';
+    }
+    return text;
+  };
+
   /*
    * ⛔ EVERY AGENT TURN IS OPENAI-ONLY (Paul, 23 Sep: zero Anthropic calls on the
    * OpenAI journey). Any Anthropic attempt beneath this turn — including internal
@@ -1905,6 +1939,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         timing: { total_ms: ms, provider_ms: ms, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: providerCalls, tool_calls: 1, hops: 0 },
       };
     }
+    /**
+     * ⭐ C6-2: open while the Agent turn runs, closed in the `finally` below — BEFORE this handler returns, so the
+     * reading can never write a frame after the turn's terminal frame. See the start point after the state read.
+     */
+    let briefReadingOpen = false;
     if (result === undefined) try {
       /**
        * ⭐ THE SERVER READS THE MODEL ONCE AND GIVES IT (slice C1). The same `get_canonical_state` result the Agent
@@ -1934,6 +1973,26 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             packet: issueContextPacket({ ...subject, captured_at_turn: 0, state: st }, secret),
             expectation: { ...subject, current_turn: 0, binding_secret: secret },
           };
+        }
+        /**
+         * ⭐ C6-2 — "READING YOUR DECISION" (X5; AIQ ruling #70 5858767026). The model is KNOWN empty (the same read
+         * the packet above binds), so this turn is a first brief: a 75–110 s wait on served CEE. In parallel with the
+         * Agent, ONE fast call copies the user's own goal and options out of THEIR message (never the Agent's
+         * restatement); each span must be an exact substring of it or it is dropped (`gateBriefReading`).
+         *   · Streamed turns only: a buffered turn has no stage emitter, so nothing starts and its body is untouched.
+         *   · Never awaited: the turn's latency and outcome cannot depend on it; a failure is simply no frame.
+         *   · Emitted only while the Agent turn is open AND before GRAPH_READY: the model supersedes the reading.
+         * Display-only: nothing is persisted, and nothing reaches the Agent or the COMPLETE body.
+         */
+        const emitStage = currentStageEmitter();
+        if (emitStage !== undefined && st.ok === true && (st as { empty?: unknown }).empty === true) {
+          briefReadingOpen = true;
+          void readBrief(message, callBriefReading).then((reading) => {
+            if (!briefReadingOpen || reading === null || graphPreviewEmitted()) return;
+            try {
+              emitStage({ kind: 'BRIEF_READ', goal: reading.goal, options: reading.options, elapsed_ms: Date.now() - startedAt });
+            } catch { /* display work never costs the turn */ }
+          });
         }
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: turn state could not be read — the Agent will read it itself');
@@ -1966,6 +2025,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         error: 'UPSTREAM_ERROR', detail: String(err).slice(0, 300),
         ...(turnId !== undefined ? { retry_safe: released } : {}),
       });
+    } finally {
+      briefReadingOpen = false;
     }
 
     histories.set(sessionId, pruneSupersededToolOutputs(result.items));
