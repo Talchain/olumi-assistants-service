@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { runAgentTurn } from '../runtime/agent-loop.js';
 import { issueContextPacket } from '../runtime/request-assembly.js';
 import * as historyStore from '../history-store.js';
+import { journeyItems, journeyTurns, RUN_RESULT } from './fixtures/a-journey-history.js';
 
 const SCENARIO = '11111111-1111-1111-1111-111111111111';
 const USER = 'user-a';
@@ -198,5 +199,112 @@ describe('C1 follow-up — the route\u2019s own system prompt says the same as t
     expect(lines[0]).toContain('describe the model from the latest');
     expect(lines[0]).toContain('APPLIED a change');
     expect(lines[0]).toContain('readiness_if_approved describes the model only IF the user approves, and never supersedes');
+  });
+});
+
+/**
+ * ⭐ AN APPLIED PROPOSAL AND AN EARLIER APPROVAL ARE NOT KEPT EITHER (DL scoreboard PJ-C1, token half). Served run
+ * `pj-20260927T181846Z` (CEE 523e18d, journey A): the first model call of each turn read 15.4k → 18.3k → 20.3k →
+ * 21.3k → 22.8k input tokens across four propose → approve cycles, against a 15,000 cap. Every proposal's output
+ * (230–990 tokens each, from the served per-call deltas) stayed for 24 turns after the change it described was applied
+ * and was in the state given with each turn.
+ *
+ * ⛔ THE CHIP APPROVAL LEAVES NO RECORD IN THE HISTORY. All four approvals in journey A were chip clicks (`hops: 0`),
+ * and the fast path appends only the chip's words and Olumi's status (agent-v1-turn.ts :1696–1751): no call, no
+ * proposal id. So what a turn applied is ALSO taken from its own approval results (the route's `tool_results`) —
+ * the row `chip-approval-prunes-its-proposal.test.ts` drives it through the route.
+ */
+describe('an applied proposal and an earlier approval are not kept in the history', () => {
+  type Prune = (items: readonly unknown[], approvalsThisTurn?: readonly unknown[]) => unknown[];
+  const prune = (items: readonly unknown[], approvals?: readonly unknown[]) =>
+    (historyStore as unknown as { pruneSupersededToolOutputs: Prune }).pruneSupersededToolOutputs(items, approvals);
+  const call = (id: string, name: string, args: unknown) => ({ type: 'function_call', call_id: id, name, arguments: JSON.stringify(args) });
+  const out = (id: string, result: unknown) => ({ type: 'function_call_output', call_id: id, output: JSON.stringify(result) });
+  const user = (text: string) => ({ role: 'user', content: [{ type: 'input_text', text }] });
+  const outputOf = (items: readonly unknown[], id: string) =>
+    (items.find((i) => (i as { type?: string }).type === 'function_call_output' && (i as { call_id?: string }).call_id === id) as { output: string }).output;
+  const applied = (proposal_id: string) => ({ ok: true, mutated: true, applied: true, proposal_id, receipts: [{ version: 3 }], follow_up: `Saved ${proposal_id} as version 3.` });
+  const OPTION = { ok: true, mutated: false, proposal_id: 'prop_1', public_label: 'Add "Raise Pro to £59"', option: { label: 'Raise Pro to £59' }, note: 'Nothing has changed yet.' };
+  const ASSUMPTIONS = { ok: true, mutated: false, proposal_id: 'prop_0', values: [{ factor: 'Monthly churn rate', value: 0.03 }], note: 'Nothing has changed yet.' };
+  const LINK = { ok: true, mutated: false, proposal_id: 'prop_2', link: { from: 'Price sensitivity', to: 'Monthly churn rate', becomes: { band: 'very strong' } }, note: 'Nothing has changed yet.' };
+  // prop_0 approved first, then prop_1 approved, then prop_2 proposed and still awaiting the user's yes.
+  const items = [
+    user('use those starting values'), call('a0', 'propose_assumptions', { values: [] }), out('a0', ASSUMPTIONS),
+    user('yes'), call('z0', 'authorise_change', { proposal_id: 'prop_0' }), out('z0', applied('prop_0')),
+    user('add the £59 option'), call('p1', 'propose_new_option', { options: [] }), out('p1', OPTION),
+    user('yes'), call('z1', 'authorise_change', { proposal_id: 'prop_1' }), out('z1', applied('prop_1')),
+    user('price sensitivity is very high'), call('p2', 'propose_link_strength', { strength: 'very strong' }), out('p2', LINK),
+  ];
+
+  it('RED: an applied proposal’s output is stubbed, a PENDING one is kept verbatim, and only the LATEST approval’s output is kept', () => {
+    const pruned = prune(items);
+    expect(outputOf(pruned, 'p1'), 'prop_1 was applied (z1)').toMatch(/superseded/);
+    expect(outputOf(pruned, 'p1')).not.toContain('Raise Pro to £59');
+    expect(outputOf(pruned, 'a0'), 'prop_0 was applied (z0)').toMatch(/superseded/);
+    expect(outputOf(pruned, 'p2'), 'prop_2 awaits a yes: byte-identical').toBe(JSON.stringify(LINK));
+    expect(outputOf(pruned, 'z1'), 'the latest approval is what "what did that change?" is about').toBe(JSON.stringify(applied('prop_1')));
+    expect(outputOf(pruned, 'z0'), 'an earlier approval').toMatch(/superseded/);
+    expect(outputOf(pruned, 'z0')).not.toContain('prop_0');
+    // The calls themselves are untouched: the Agent still sees what it proposed and what it authorised.
+    expect(pruned.filter((i) => (i as { type?: string }).type === 'function_call')).toEqual(items.filter((i) => (i as { type?: string }).type === 'function_call'));
+  });
+
+  it('RED: the chip path — no authorise_change in the history — resolves its proposal from the turn’s own approval result', () => {
+    const chipTurn = [user('add the £59 option'), call('p1', 'propose_new_option', { options: [] }), out('p1', OPTION),
+      user('Yes, add that option.'), { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Saved as version 3.' }] }];
+    expect(outputOf(prune(chipTurn, [applied('prop_1')]), 'p1')).toMatch(/superseded/);
+    // CONTRAST: the same history with no approval result — nothing in it says prop_1 was applied, so it is kept.
+    expect(outputOf(prune(chipTurn), 'p1')).toBe(JSON.stringify(OPTION));
+  });
+
+  it('CONTROL: a proposal still awaiting a yes is byte-identical — never proposed, refused, or only part-applied', () => {
+    const refused = { ok: false, mutated: false, applied: false, refusal: 'superseded', proposal_id: 'prop_1' };
+    // ProposalStore.markApplied only when every level landed (agent-capabilities.ts :3139, :3704): part-landed stays outstanding.
+    const partial = { ok: true, mutated: true, applied: true, proposal_id: 'prop_1', recorded_count: 1, requested_count: 2 };
+    for (const [label, history] of [
+      ['no approval at all', [user('add it'), call('p1', 'propose_new_option', {}), out('p1', OPTION)]],
+      ['the approval was refused', [user('add it'), call('p1', 'propose_new_option', {}), out('p1', OPTION), user('yes'), call('z1', 'authorise_change', { proposal_id: 'prop_1' }), out('z1', refused)]],
+      ['the approval landed only in part', [user('add it'), call('p1', 'propose_new_option', {}), out('p1', OPTION), user('yes'), call('z1', 'authorise_change', { proposal_id: 'prop_1' }), out('z1', partial)]],
+      ['another proposal was applied', [user('add it'), call('p1', 'propose_new_option', {}), out('p1', OPTION), user('yes'), call('z1', 'authorise_change', { proposal_id: 'prop_9' }), out('z1', applied('prop_9'))]],
+    ] as const) {
+      expect(outputOf(prune(history), 'p1'), label).toBe(JSON.stringify(OPTION));
+      expect(outputOf(prune(history, [refused, partial]), 'p1'), `${label} (+ unapplied results this turn)`).toBe(JSON.stringify(OPTION));
+    }
+  });
+
+  /**
+   * MEASURED on this fixture (the served A02 run, 14,865 bytes, is the latest and kept): typed approvals 30,899 → 22,893
+   * bytes (−25.9%, ≈2.0k tokens at ~4 bytes a token), chip approvals 28,432 → 23,160 (−18.5%, ≈1.3k). ⚠ The 30% first
+   * aimed for is NOT reached: the kept run is half of what is left. The floors below sit just under the measurement,
+   * so keeping any one applied proposal or earlier approval turns this row red.
+   */
+  it('SIZE: a journey-A-shaped history (served run, 3 proposals, 3 approvals) shrinks ≥25% (typed) and ≥18% (chip); every call stays paired', () => {
+    const paired = (h: readonly unknown[]) => {
+      const calls = h.filter((i) => (i as { type?: string }).type === 'function_call').map((i) => (i as { call_id: string }).call_id);
+      const outs = h.filter((i) => (i as { type?: string }).type === 'function_call_output').map((i) => (i as { call_id: string }).call_id);
+      return calls.length > 0 && JSON.stringify([...calls].sort()) === JSON.stringify([...outs].sort());
+    };
+    // Composer approvals: the whole history pruned at once, as the store's next `set` does.
+    const composer = journeyItems('composer');
+    const composerPruned = prune(composer);
+    // Chip approvals: turn by turn, each approval turn pruned with its own results, as the route does.
+    let chip: unknown[] = [];
+    for (const t of journeyTurns('chip')) chip = prune([...chip, ...t.items], t.approvals);
+    const chipRaw = journeyItems('chip');
+    for (const [label, raw, pruned, floor] of [['composer', composer, composerPruned, 0.25], ['chip', chipRaw, chip, 0.18]] as const) {
+      const before = JSON.stringify(raw).length;
+      const after = JSON.stringify(pruned).length;
+      expect(after, `${label}: ${before} → ${after} bytes`).toBeLessThanOrEqual(before * (1 - floor));
+      expect(pruned, label).toHaveLength(raw.length);
+      expect(paired(pruned), `${label}: every call keeps its output`).toBe(true);
+      // Messages are never touched.
+      expect(pruned.filter((i) => (i as { type?: string }).type !== 'function_call_output'), label)
+        .toEqual(raw.filter((i) => (i as { type?: string }).type !== 'function_call_output'));
+      // The run is the latest: kept verbatim.
+      expect(outputOf(pruned, 'call_run'), label).toBe(JSON.stringify(RUN_RESULT));
+    }
+    // Pruning a pruned history changes nothing (the store re-prunes what it holds every turn).
+    expect(prune(composerPruned)).toEqual(composerPruned);
+    expect(prune(chip)).toEqual(chip);
   });
 });

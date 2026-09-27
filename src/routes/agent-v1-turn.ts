@@ -1968,7 +1968,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       });
     }
 
-    histories.set(sessionId, pruneSupersededToolOutputs(result.items));
+    // ⛔ This turn's approval results go with it: the approve chip's fast path puts no authorise_change in the history
+    // (only its words and Olumi's status), so they are the only record of which proposal it applied (PJ-C1).
+    const results = result.tool_results;
+    histories.set(sessionId, pruneSupersededToolOutputs(result.items, result.tool_calls.flatMap((c, k) => (c.name === 'authorise_change' && k < results.length ? [results[k]] : []))));
 
     // A hop limit is never returned as an empty answer.
     const text = result.stopped_reason === 'incomplete'

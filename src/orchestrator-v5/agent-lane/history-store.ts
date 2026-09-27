@@ -58,14 +58,61 @@ export const SUPERSEDED_OUTPUT = JSON.stringify({ superseded: true, note: 'An ea
 /** Tools whose output is a snapshot of the model: every one is superseded by the state given with the next turn. */
 const SNAPSHOT_TOOLS = new Set(['get_canonical_state', 'build_model_from_brief']);
 
+/** What an APPLIED proposal's output becomes: the model now holds the change, and the state given with each turn shows it. */
+export const APPLIED_PROPOSAL_OUTPUT = JSON.stringify({ superseded: true, note: 'A proposal since approved and applied. The current model state is given at the start of each turn.' });
+/** What an earlier approval's output becomes once a later approval is in the history. */
+export const EARLIER_APPROVAL_OUTPUT = JSON.stringify({ superseded: true, note: 'An earlier approval. The reply after it said what happened; the current model state is given at the start of each turn.' });
+
+/**
+ * The proposal a result says was applied IN FULL — `ProposalStore.markApplied`'s own condition — else undefined.
+ *
+ * ⛔ APPLIED, NOT MERELY ANSWERED. A refused approval (`superseded`, `not_applied`, `unknown_proposal`) leaves the
+ * proposal listed as awaiting a yes, and the Agent may have to prepare it again from what it said; so does an approval
+ * that landed only IN PART — `applied: true` with fewer levels or values recorded than requested, which is not marked
+ * applied (agent-capabilities.ts :3139, :3704). Both keep their proposal verbatim. `already_applied` is applied.
+ */
+export function proposalAppliedBy(result: unknown): string | undefined {
+  const r = result as { applied?: unknown; proposal_id?: unknown; requested_count?: unknown; recorded_count?: unknown; adopted_count?: unknown } | null;
+  if (r === null || typeof r !== 'object' || r.applied !== true || typeof r.proposal_id !== 'string') return undefined;
+  const landed = typeof r.recorded_count === 'number' ? r.recorded_count : typeof r.adopted_count === 'number' ? r.adopted_count : undefined;
+  if (typeof r.requested_count === 'number' && landed !== undefined && landed < r.requested_count) return undefined;
+  return r.proposal_id;
+}
+
+const parsedOutput = (item: unknown): unknown => {
+  const output = (item as { output?: unknown }).output;
+  if (typeof output !== 'string') return undefined;
+  try { return JSON.parse(output); } catch { return undefined; }
+};
+
 /**
  * ⭐ A SUPERSEDED SNAPSHOT IS NOT KEPT (slice C1; P3A replay of Paul's transcript, 27 Sep). Each state read added
  * 2.5–3k tokens and each run 3.1–3.6k, all carried for 24 turns — 55k of a 62.7k request was old copies of the model.
  * Every state read and build result is replaced by a stub, and every run result but the LATEST (the one a follow-up
  * question is about). The call and its output stay paired — only the output's text changes — so the next request
  * stays valid input (see `dropDanglingCalls`).
+ *
+ * ⭐ NOR IS AN APPLIED PROPOSAL, OR AN EARLIER APPROVAL (DL scoreboard PJ-C1, token half). Served run
+ * `pj-20260927T181846Z` (CEE 523e18d, journey A): the first model call of each turn read 15.4k → 18.3k → 20.3k →
+ * 21.3k → 22.8k input tokens over ten turns of propose → approve, against a 15,000 cap. Each proposal's output —
+ * 230–990 tokens by the served per-call deltas, 1.9–2.7k for journey A's four — rode in every request for 24 turns
+ * after the change it described was applied and was already in the state given with each turn (`agent-loop.ts`,
+ * CURRENT MODEL STATE). So:
+ *   - a `propose_*` output is stubbed once a LATER approval applied that proposal in full (`proposalAppliedBy`);
+ *     a proposal still awaiting a yes — never approved, refused, or part-applied — is kept byte for byte;
+ *   - every `authorise_change` output but the LATEST is stubbed (the latest is what "what did that change?" is about).
+ * Messages, calls and their arguments are never touched. MEASURED on a journey-A-shaped history (the served A02 run,
+ * then 3 proposals and 3 approvals; `__tests__/fixtures/a-journey-history.ts`): 30,899 → 22,893 bytes (−25.9%, ≈2.0k
+ * tokens) with typed approvals, 28,432 → 23,160 (−18.5%, ≈1.3k) with chip approvals. ⚠ NOT ENOUGH ON ITS OWN for the
+ * 15,000 cap: by the served deltas it takes journey A's last request from 22,752 to ≈20.0–20.9k. The latest run (≈3.9k
+ * tokens, kept by the rule above though every approval since has changed the model) is the next largest item.
+ *
+ * ⛔ THE APPROVE CHIP LEAVES NO RECORD IN THE HISTORY. Its fast path (agent-v1-turn.ts, FAST PATH 2) appends only the
+ * chip's words and Olumi's status — no call, no proposal id — and every approval in that served run was a chip. So the
+ * route also passes the turn's own approval results (`approvalsThisTurn`); being this turn's, they are later than
+ * every output already in the history.
  */
-export function pruneSupersededToolOutputs(items: readonly unknown[]): unknown[] {
+export function pruneSupersededToolOutputs(items: readonly unknown[], approvalsThisTurn: readonly unknown[] = []): unknown[] {
   const nameOf = new Map<string, string>();
   for (const i of items) {
     const c = i as { type?: unknown; call_id?: unknown; name?: unknown };
@@ -76,11 +123,30 @@ export function pruneSupersededToolOutputs(items: readonly unknown[]): unknown[]
     return o?.type === 'function_call_output' && typeof o.call_id === 'string' ? nameOf.get(o.call_id) : undefined;
   };
   let lastRun = -1;
-  items.forEach((i, k) => { if (outputOf(i) === 'run_analysis') lastRun = k; });
+  let lastApproval = -1;
+  /** Each applied proposal, with the position of the LAST approval that applied it (this turn's: after everything). */
+  const appliedAt = new Map<string, number>();
+  for (const r of approvalsThisTurn) {
+    const id = proposalAppliedBy(r);
+    if (id !== undefined) appliedAt.set(id, items.length);
+  }
+  items.forEach((i, k) => {
+    const name = outputOf(i);
+    if (name === 'run_analysis') lastRun = k;
+    if (name !== 'authorise_change') return;
+    lastApproval = k;
+    const id = proposalAppliedBy(parsedOutput(i));
+    if (id !== undefined && (appliedAt.get(id) ?? -1) < k) appliedAt.set(id, k);
+  });
   return items.map((i, k) => {
     const name = outputOf(i);
     if (name === undefined) return i;
     if (SNAPSHOT_TOOLS.has(name) || (name === 'run_analysis' && k !== lastRun)) return { ...(i as object), output: SUPERSEDED_OUTPUT };
+    if (name === 'authorise_change' && k !== lastApproval) return { ...(i as object), output: EARLIER_APPROVAL_OUTPUT };
+    if (name.startsWith('propose_')) {
+      const id = (parsedOutput(i) as { proposal_id?: unknown } | undefined)?.proposal_id;
+      if (typeof id === 'string' && (appliedAt.get(id) ?? -1) > k) return { ...(i as object), output: APPLIED_PROPOSAL_OUTPUT };
+    }
     return i;
   });
 }
