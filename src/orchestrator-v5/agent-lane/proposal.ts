@@ -72,7 +72,14 @@ export interface ProposalOperation {
      * `{constraint_type, raw_value, unit}` exactly as the `goal_target_edit` event carries them.
      * Written only through the product's typed target writer (`goal_target_edit` → `add_constraint`).
      */
-    | 'set_goal_target';
+    | 'set_goal_target'
+    /**
+     * ⭐ A NEW FIGURE FOR A LIMIT THE MODEL ALREADY HOLDS (SLICE C2) — `path` is the limit's node id, `value` is
+     * `{operator, raw_value, unit, constraint_id, before}`. Written only through the product's in-process limit door
+     * (`commitLimitEditInProcess` → `add_constraint`), which keeps the row's unit and frame and stamps the figure as the
+     * user's. Never adds a limit, never the goal's own target.
+     */
+    | 'set_limit';
   /** Node id, or `from::to` for an edge. */
   readonly path: string;
   readonly value?: unknown;

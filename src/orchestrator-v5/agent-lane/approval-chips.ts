@@ -36,7 +36,14 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_link_strength: { label: 'Record this link', message: 'Yes, record that.' },
   // The goal's success target the user stated, written through the product's typed target writer.
   propose_goal_target: { label: 'Set this target', message: 'Yes, set that target.' },
+  // SLICE C2: a new risk, held on the product's own seam like the add-option (`gmh_`, the product's words on the button).
+  propose_new_risk: { label: 'Add this risk', message: 'Yes, add that risk.' },
+  // SLICE C2: a new figure for a limit the model already holds, written through the product's limit door.
+  propose_limit_change: { label: 'Change this limit', message: 'Yes, change that limit.' },
 };
+
+/** The proposers whose change is HELD on the product's own seam (`gmh_`): the button carries the product's own words. */
+const HELD_ON_THE_PRODUCT_SEAM: ReadonlySet<string> = new Set(['propose_new_option', 'propose_new_risk']);
 
 /**
  * ⛔ ONE APPROVAL CARRIES ONE CHANGE, SO A TURN LEAVES AT MOST ONE PROPOSAL OPEN (AI Conversation #70 5847130065 (a);
@@ -116,7 +123,7 @@ export function approvalChipsFor(
    * resolves the hold instead of reading as new words for the edit model.
    */
   const held = labelSourceFor?.(proposalId)?.result;
-  if (tool === 'propose_new_option' && /^gmh_/.test(proposalId) && held !== undefined) {
+  if (HELD_ON_THE_PRODUCT_SEAM.has(tool) && /^gmh_/.test(proposalId) && held !== undefined) {
     const label = typeof held.public_label === 'string' && held.public_label.trim() !== '' ? held.public_label : approve.label;
     const message = typeof held.held_message === 'string' && held.held_message.trim() !== '' ? held.held_message : approve.message;
     /**
@@ -260,6 +267,6 @@ export function typedApprovalOf(body: unknown): string | undefined {
   const id = (body as { chip?: { id?: unknown } } | null | undefined)?.chip?.id;
   if (typeof id !== 'string' || !id.startsWith(APPROVE_PREFIX)) return undefined;
   const proposalId = id.slice(APPROVE_PREFIX.length);
-  // `gmh_…` is a held add-option on the product's own seam (C52): the same typed, zero-call approval.
+  // `gmh_…` is a held add-option or add-risk on the product's own seam (C52, SLICE C2): the same typed, zero-call approval.
   return /^prop_[0-9a-f]{6,64}$/.test(proposalId) || /^gmh_[0-9a-f]{12}$/.test(proposalId) ? proposalId : undefined;
 }

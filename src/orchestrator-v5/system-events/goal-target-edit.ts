@@ -216,21 +216,70 @@ export async function applyGoalTargetEdit(
     return refused('target_not_goal');
   }
 
+  // ── 4–7. the SAME proposal, validator, handler and re-merge — shared with the limit edit ──
+  return applyConstraintEditThroughAddConstraint({
+    payload,
+    requestId,
+    persistedGraph,
+    graph,
+    priorFacts,
+    targetId: event.goal_node_id,
+    constraintType: event.constraint_type,
+    rawValue: event.raw_value,
+    unit: event.unit,
+    // The CONTRACT's attestation, relayed through the handler's own side-band.
+    // The 0.59.0 member declares `raw_value` an absolute LEVEL in user units;
+    // the handler writes it onto the row (and it is the same constant the
+    // handler stamps as `goal_threshold_frame`).
+    confirmedConstraintValueFrame: CEE_GOAL_THRESHOLD_FRAME,
+    eventName: 'goal_target_edit',
+    logBase,
+  });
+}
+
+/**
+ * Steps 4–7 of a structured constraint write — the typed chip's proposal, the EXISTING validator, the EXISTING
+ * `add_constraint` handler, the persisted-base re-merge — shared by `goal_target_edit` (above) and the Agent's
+ * limit edit (`limit-edit.ts`, SLICE C2). The caller has already read the base, run the stale gate and decided
+ * which node may be targeted; this owns no mutation logic of its own, exactly as the header says.
+ */
+export async function applyConstraintEditThroughAddConstraint(params: {
+  readonly payload: Pick<SystemEventTurnPayload, 'scenario_id' | 'turn_id' | 'stage'>;
+  readonly requestId: string;
+  readonly persistedGraph: unknown;
+  /** `persistedGraph`, already GraphV3-parsed by the caller. */
+  readonly graph: GraphV3T;
+  readonly priorFacts: readonly HandlerFact[];
+  readonly targetId: string;
+  readonly constraintType: 'at_least' | 'at_most';
+  readonly rawValue: number;
+  readonly unit?: string;
+  readonly label?: string;
+  readonly confirmedConstraintValueFrame?: HandlerInvocation['confirmedConstraintValueFrame'];
+  /** The writer's name in its logs (`goal_target_edit`, `limit_edit`). */
+  readonly eventName: string;
+  readonly logBase: Readonly<Record<string, unknown>>;
+}): Promise<GoalTargetEditResult> {
+  const {
+    payload, requestId, persistedGraph, graph, priorFacts, targetId, constraintType, rawValue, unit, label,
+    confirmedConstraintValueFrame, eventName, logBase,
+  } = params;
   // ── 4. the SAME proposal the typed chip builds ───────────────────────────
   const built = buildTypedChipMutationProposal(
     'add_constraint',
     {
-      target_id: event.goal_node_id,
-      constraint_type: event.constraint_type,
-      value: event.raw_value,
-      unit: event.unit,
+      target_id: targetId,
+      constraint_type: constraintType,
+      value: rawValue,
+      ...(unit !== undefined ? { unit } : {}),
+      ...(label !== undefined ? { label } : {}),
     },
     { nodes: graph.nodes, edges: graph.edges },
   );
   if (!built.matched) {
     log.warn(
-      { ...logBase, event: 'v5.system_event.goal_target_edit.proposal_unbuilt', reason: built.reason },
-      'goal_target_edit — typed proposal builder declined; refusing',
+      { ...logBase, event: `v5.system_event.${eventName}.proposal_unbuilt`, reason: built.reason },
+      `${eventName} — typed proposal builder declined; refusing`,
     );
     return refused(`proposal_${built.reason}`);
   }
@@ -257,10 +306,10 @@ export async function applyGoalTargetEdit(
     log.info(
       {
         ...logBase,
-        event: 'v5.system_event.goal_target_edit.validation_refused',
+        event: `v5.system_event.${eventName}.validation_refused`,
         code: validation.error.code,
       },
-      'goal_target_edit — validator refused; no graph written',
+      `${eventName} — validator refused; no graph written`,
     );
     return refused(validation.error.code);
   }
@@ -308,11 +357,9 @@ export async function applyGoalTargetEdit(
     orientationText: '',
     proposal: validation.proposal,
     graphForTurn,
-    // The CONTRACT's attestation, relayed through the handler's own side-band.
-    // The 0.59.0 member declares `raw_value` an absolute LEVEL in user units;
-    // the handler writes it onto the row (and it is the same constant the
-    // handler stamps as `goal_threshold_frame`).
-    confirmedConstraintValueFrame: CEE_GOAL_THRESHOLD_FRAME,
+    // The caller's attestation of the row's frame, relayed through the
+    // handler's own side-band (absent: the handler's own rules decide).
+    ...(confirmedConstraintValueFrame !== undefined ? { confirmedConstraintValueFrame } : {}),
   };
 
   let outcome;
@@ -323,10 +370,10 @@ export async function applyGoalTargetEdit(
       log.info(
         {
           ...logBase,
-          event: 'v5.system_event.goal_target_edit.handler_refused',
+          event: `v5.system_event.${eventName}.handler_refused`,
           cause_kind: err.cause_kind,
         },
-        'goal_target_edit — handler refused; no graph written',
+        `${eventName} — handler refused; no graph written`,
       );
       return refused(err.cause_kind);
     }
@@ -349,8 +396,8 @@ export async function applyGoalTargetEdit(
     outcome.__elicit_baseline !== undefined
   ) {
     log.error(
-      { ...logBase, event: 'v5.system_event.goal_target_edit.unpersistable_pending' },
-      'goal_target_edit — handler asked a question this event cannot persist; refusing',
+      { ...logBase, event: `v5.system_event.${eventName}.unpersistable_pending` },
+      `${eventName} — handler asked a question this event cannot persist; refusing`,
     );
     return refused('unpersistable_pending_question');
   }
