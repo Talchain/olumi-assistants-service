@@ -135,6 +135,7 @@ import { howStronglyWords } from '../strength-authorship-words.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel } from '../goal-current-level.js';
+import { applyStatedResponse, isStatedResponseProposal, proposeStatedResponse } from '../stated-response.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
 
@@ -2551,6 +2552,11 @@ export function createAgentCapabilities(
         return applyGoalCurrentLevel({ dispatch, readGraph, proposals, operationId: authorisationTurnId }, ctx, decision.proposal, before);
       }
 
+      // What the user said a factor of a product does at a price (`../stated-response.ts`): one CAS-gated write.
+      if (isStatedResponseProposal(decision.proposal)) {
+        return applyStatedResponse({ dispatch, readGraph, proposals, operationId: authorisationTurnId }, ctx, decision.proposal, before);
+      }
+
       if (ops[0]?.op === 'set_option_intervention') {
         /**
          * ⚠ THIS EVENT IS CAS-GATED AND `factor_value_edit` IS NOT — it carries
@@ -4163,6 +4169,11 @@ export function createAgentCapabilities(
     async proposeGoalCurrentLevel(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       return proposeGoalCurrentLevel({ readGraph, proposals }, ctx, args);
+    },
+
+    async proposeStatedResponse(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      return proposeStatedResponse({ readGraph, proposals }, ctx, args);
     },
 
     async runAnalysis(ctx, args): Promise<ToolResult> {

@@ -488,6 +488,43 @@ export const NodeV3 = z.object({
     .strict()
     .optional()
     .catch(undefined),
+  /**
+   * ⭐ WHAT THE USER SAID ONE FACTOR OF THE PRODUCT DOES AT A PRICE (the node carrying `nonlinear_identity`).
+   *
+   * "We have 250 Pro subscribers; at £59 about 30 would leave." on MRR = price × subscribers is ONE typed fact:
+   * today's count (the operand) and the count remaining at each stated price. It is a CONDITIONAL level, never
+   * today's, so it is not `observed_state`. Written only by the Agent's held proposal (`agent-lane/stated-response.ts`,
+   * one approval, every figure found in the user's own typed words), read by AX1 (`agent-lane/break-even.ts`).
+   *
+   * ⛔ BOUND BY CONTENT, NEVER BY A HASH: the fact lives inside the graph, so a graph hash could never match it. The
+   * READER holds it current only while `today.value` is the operand's stored count (and that count is the user's) and
+   * each `at[].price` is a current option's price on `price_node_id`. So no writer rewrites it when a count or a price
+   * moves: it goes stale, and the Agent asks again.
+   *
+   * ⛔ NEVER SENT TO THE ENGINE: `run_analysis` strips it from the PLoT request's wire copy
+   * (`tools/handlers/stated-response-wire.ts`). Not in the analysis hash (`graph-hash.ts` is a whitelist).
+   *
+   * ⚠ THIS DECLARATION IS LOAD-BEARING, NOT DOCUMENTATION — the warning `nonlinear_identity` carries: `NodeV3` is a
+   * plain `z.object`, so an undeclared `stated_response` is SILENTLY DELETED by `GraphV3.safeParse` and by every D1
+   * writer that re-parses (a churn edit would erase the user's statement). A malformed value is dropped (`.catch`),
+   * never a new reason to refuse a stored graph. Not AI-editable: absent from `aiEditableFieldRoots('node')`.
+   */
+  stated_response: z
+    .object({
+      operand_node_id: z.string().min(1),
+      today: z.object({ value: z.number().finite(), unit: z.string().min(1), by: z.literal('user') }).strict(),
+      at: z
+        .array(z.object({
+          price_node_id: z.string().min(1),
+          price: z.number().finite(),
+          level: z.number().finite(),
+          by: z.literal('user'),
+        }).strict())
+        .min(1),
+    })
+    .strict()
+    .optional()
+    .catch(undefined),
 }); // CIL Phase 1: declared fields only — unknown fields stripped with warning
 export type NodeV3T = z.infer<typeof NodeV3>;
 

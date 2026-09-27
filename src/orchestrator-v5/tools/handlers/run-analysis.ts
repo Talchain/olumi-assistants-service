@@ -122,6 +122,7 @@ import {
   withholdUnprovablePercentFrames,
 } from './level-limit-baseline.js';
 import { carryStatedLevelSpread, carrySwitchLevelSpread, statedLevelNodeIds, switchLevelNodeIds } from './stated-level-spread.js';
+import { statedResponseNodeIds, withoutStatedResponse } from './stated-response-wire.js';
 import {
   AnalysisNotReadyError,
   readinessQuestions,
@@ -955,8 +956,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
     // A 0/1 switch an option sets is held at its state, never sampled as a partial state (`stated-level-spread.ts`).
-    const wireGraph = carrySwitchLevelSpread(statedGraph, finalWireOptions);
-    if (wireGraph !== statedGraph) {
+    const switchGraph = carrySwitchLevelSpread(statedGraph, finalWireOptions);
+    if (switchGraph !== statedGraph) {
       log.info(
         {
           event: 'run_analysis.switch_level_spread_carried',
@@ -965,6 +966,20 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           node_ids: [...switchLevelNodeIds(statedGraph, finalWireOptions)],
         },
         'run_analysis sent option-set 0/1 switch levels at the minimum spread (wire copy only; no magnitudes)',
+      );
+    }
+    // What the user SAID a factor does at a price is Olumi's arithmetic, never the engine's input
+    // (`stated-response-wire.ts`): left off this wire copy, so PLoT computes exactly what it did before it existed.
+    const wireGraph = withoutStatedResponse(switchGraph);
+    if (wireGraph !== switchGraph) {
+      log.info(
+        {
+          event: 'run_analysis.stated_response_withheld_from_engine',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          node_ids: statedResponseNodeIds(switchGraph),
+        },
+        'run_analysis left the user\'s stated response off the engine request (wire copy only; no magnitudes)',
       );
     }
     const plotPayload: Record<string, unknown> = {

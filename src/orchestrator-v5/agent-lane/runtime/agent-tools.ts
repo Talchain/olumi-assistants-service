@@ -356,6 +356,35 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   },
   {
     type: 'function',
+    name: 'propose_stated_response',
+    description:
+      'Record what the user has just said one factor of the goal does at a price, when the goal multiplies that factor by the ' +
+      'price (for example MRR = price \u00d7 subscribers, and the user says "we have 250 Pro subscribers; at \u00a359 about 30 would ' +
+      'leave"). This does NOT change anything: it records an exact proposal and returns its id, which you keep for ' +
+      'authorise_change: show the user what it records, never the id, before asking them to approve. Only figures the user ' +
+      'wrote themselves, as they wrote them: today\u2019s count, each price, and at each price how many would leave (`lost`) OR how ' +
+      'many would stay (`remaining`) \u2014 whichever they said, never both, and never a figure you worked out. Leave `today` out ' +
+      'only when the user has not given today\u2019s count; if it is refused, ask them for it. Use the factor\u2019s label exactly as ' +
+      'get_canonical_state returned it, and each price in its own units (59 for \u00a359).',
+    parameters: obj({
+      operand_label: { type: 'string', description: 'The factor the user gave counts for (e.g. "Pro paying subscribers"), exactly as get_canonical_state labels it.' },
+      today: obj({
+        value: { type: 'number', description: 'Today\u2019s count as the user wrote it (250 for "we have 250").' },
+        unit: { type: 'string', description: 'The unit the user gave, if any (e.g. subscribers).' },
+      }, ['value']),
+      at: {
+        type: 'array',
+        description: 'Each price the user named (1 to 4), with what they said happens to the count at it.',
+        items: obj({
+          price: { type: 'number', description: 'The price the user wrote, in its own units (59 for \u00a359).' },
+          lost: { type: 'number', description: 'How many the user said would leave at this price. Give this OR remaining.' },
+          remaining: { type: 'number', description: 'How many the user said would stay at this price. Give this OR lost.' },
+        }, ['price']),
+      },
+    }, ['operand_label', 'at']),
+  },
+  {
+    type: 'function',
     name: 'offer_public_research',
     description:
       'Offer to search the public web when the user wants outside evidence the model does not hold (a benchmark, a ' +
@@ -385,7 +414,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_link_strength', 'propose_goal_target', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'authorise_change'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_link_strength', 'propose_goal_target', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'propose_stated_response', 'authorise_change'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -451,6 +480,14 @@ export interface AgentCapabilities {
   proposeGoalCurrentLevel(ctx: AgentToolContext, args: {
     goal_label: string; value: number; unit: string; goal_is: 'at_least' | 'above' | 'at_most' | 'below'; user_stated: boolean;
   }): Promise<ToolResult>;
+  /**
+   * What the user said a factor of a product goal does at a price — held for approval (`../stated-response.ts`).
+   * Optional: a capability set without it refuses the tool plainly (`dispatchTool`).
+   */
+  proposeStatedResponse?(ctx: AgentToolContext, args: {
+    operand_label: string; today?: { value: number; unit?: string };
+    at: readonly { price: number; lost?: number; remaining?: number }[];
+  }): Promise<ToolResult>;
 }
 
 export async function dispatchTool(
@@ -503,6 +540,10 @@ export async function dispatchTool(
       return caps.proposeStartingPoint(ctx, args as never);
     case 'propose_goal_current_level':
       return caps.proposeGoalCurrentLevel(ctx, args as never);
+    case 'propose_stated_response':
+      return caps.proposeStatedResponse !== undefined
+        ? caps.proposeStatedResponse(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'What the user said at a price cannot be recorded here. Nothing was changed.' };
     case 'offer_public_research': {
       // Pure: nothing is searched here. The route turns the query into the one control that can send it.
       const query = sendableQuery(args.query);
