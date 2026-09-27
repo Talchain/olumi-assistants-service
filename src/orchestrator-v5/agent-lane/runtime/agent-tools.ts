@@ -45,6 +45,14 @@ export const LEVEL_BRINGS_ITS_LINK =
   ' A level on a factor the option is not linked to yet brings that link with it, in the same change: the link only says the '
   + 'option acts on that factor, so never ask how strong it is — send the level the user gave.';
 
+/**
+ * ⛔ A RISK IS NOT A MEDIATOR (Canonical #70 5855234599): it links TO the goal or an outcome it threatens and FROM the
+ * factors that drive it — never INTO a factor. The door refuses any other pair; this tells the model before it asks.
+ */
+export const RISK_LINKS_RULE =
+  'A risk links TO the goal or an outcome it threatens (`affects`, at least one) and FROM factors that drive it (`caused_by`, '
+  + 'optional) \u2014 never into a factor: a risk affects the goal or an outcome, not a factor directly.';
+
 export interface AgentToolContext {
   /** Bound from the request, never from model output. */
   readonly scenario_id: string;
@@ -275,6 +283,55 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   },
   {
     type: 'function',
+    name: 'propose_new_risk',
+    description:
+      'Add a RISK the user has just asked for, when the model does NOT already have it: something that could go wrong and would '
+      + 'hurt the goal or an outcome (for example \u201ccompetitors respond to our price rise\u201d). This does NOT change anything: it '
+      + 'prepares ONE complete change and returns its id, which you keep for authorise_change: show the user the risk, what it '
+      + 'threatens and what drives it, never the id, before asking them to approve. ' + RISK_LINKS_RULE + ' How strongly each '
+      + 'link acts is not known yet: Olumi records a placeholder strength, not an estimate \u2014 say so. Use the labels exactly as the '
+      + 'CURRENT MODEL STATE gives them.',
+    parameters: obj({
+      label: { type: 'string', description: 'The risk in the user\u2019s own words (e.g. "Competitive response").' },
+      affects: {
+        type: 'array',
+        description: 'What the risk threatens: the goal or an outcome in the model, and which way. At least one. Never a factor.',
+        items: obj({
+          target_label: { type: 'string', description: 'The goal or an outcome, exactly as the CURRENT MODEL STATE labels it.' },
+          direction: { type: 'string', enum: ['positive', 'negative'], description: 'negative when the risk lowers it (the usual case); from the user\u2019s words, never a guess.' },
+        }, ['target_label', 'direction']),
+      },
+      caused_by: {
+        type: 'array',
+        description: 'Factors in the model that drive the risk, and which way (optional).',
+        items: obj({
+          factor_label: { type: 'string', description: 'A factor exactly as the CURRENT MODEL STATE labels it.' },
+          direction: { type: 'string', enum: ['positive', 'negative'], description: 'positive when raising the factor makes the risk more likely.' },
+        }, ['factor_label', 'direction']),
+      },
+      rationale: { type: 'string', description: 'What the user said, in their words.' },
+    }, ['label', 'affects', 'rationale']),
+  },
+  {
+    type: 'function',
+    name: 'propose_limit_change',
+    description:
+      'Change the figure of a LIMIT the model already holds (one listed under `limits` in the CURRENT MODEL STATE) when the user '
+      + 'has just stated its new figure (for example \u201cthe budget is now \u00a330k\u201d). This does NOT change anything: it prepares ONE '
+      + 'change and returns its id, which you keep for authorise_change: show the user the limit, its current figure and the new one, '
+      + 'never the id, before they approve. Give the figure exactly as the user wrote it, in the limit\u2019s own unit (30000 for \u00a330k). '
+      + 'The limit keeps its unit and meaning; only its figure changes, recorded as the user\u2019s. It never adds a limit, and never '
+      + 'sets the goal\u2019s own target (that is propose_goal_target). A figure the user did not write is refused.',
+    parameters: obj({
+      limit_label: { type: 'string', description: 'The limit\u2019s `on` label exactly as the CURRENT MODEL STATE lists it under limits.' },
+      operator: { type: 'string', enum: ['<=', '>='], description: 'The limit\u2019s operator exactly as the state lists it.' },
+      new_value: { type: 'number', description: 'The new figure the user stated, in the limit\u2019s own unit.' },
+      unit: { type: 'string', description: 'The unit the user wrote the figure in, if any.' },
+      rationale: { type: 'string', description: 'What the user said, in their words.' },
+    }, ['limit_label', 'operator', 'new_value', 'rationale']),
+  },
+  {
+    type: 'function',
     name: 'propose_option_interventions',
     description:
       'Propose the level an option sets a factor to \u2014 what the option actually DOES. An option ' +
@@ -402,7 +459,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_link_strength', 'propose_goal_target', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'authorise_change'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_new_risk', 'propose_link_strength', 'propose_goal_target', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'authorise_change'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -448,6 +505,16 @@ export interface AgentCapabilities {
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */
   proposeGoalTarget?(ctx: AgentToolContext, args: {
     constraint_type: 'at_least' | 'at_most'; value: number; unit: string; rationale: string;
+  }): Promise<ToolResult>;
+  /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). SLICE C2. */
+  proposeNewRisk?(ctx: AgentToolContext, args: {
+    label: string; rationale: string;
+    affects: readonly { target_label: string; direction: 'positive' | 'negative' }[];
+    caused_by?: readonly { factor_label: string; direction: 'positive' | 'negative' }[];
+  }): Promise<ToolResult>;
+  /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). SLICE C2. */
+  proposeLimitChange?(ctx: AgentToolContext, args: {
+    limit_label: string; operator: '<=' | '>='; new_value: number; unit?: string; rationale: string;
   }): Promise<ToolResult>;
   runAnalysis(ctx: AgentToolContext, args: { reason: string }): Promise<ToolResult>;
   buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;
@@ -518,6 +585,14 @@ export async function dispatchTool(
       return caps.proposeGoalTarget !== undefined
         ? caps.proposeGoalTarget(ctx, args as never)
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A goal’s target cannot be set here. Nothing was changed.' };
+    case 'propose_new_risk':
+      return caps.proposeNewRisk !== undefined
+        ? caps.proposeNewRisk(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A risk cannot be added here. Nothing was changed.' };
+    case 'propose_limit_change':
+      return caps.proposeLimitChange !== undefined
+        ? caps.proposeLimitChange(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A limit cannot be changed here. Nothing was changed.' };
     case 'propose_option_interventions':
       return caps.proposeOptionInterventions(ctx, args as never);
     case 'propose_starting_point':

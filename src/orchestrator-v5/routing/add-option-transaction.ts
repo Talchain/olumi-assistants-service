@@ -491,8 +491,8 @@ function isAffectsTarget(node: { kind: string; category?: string } | undefined):
   return node.kind === 'factor' && (node.category === 'observable' || node.category === 'external');
 }
 
-/** Does a path from `start` reach a goal node over the view's directed edges? */
-function reachesGoal(graph: AddOptionGraphView, start: string): boolean {
+/** Does a path from `start` reach a goal node over the view's directed edges? Shared with the add-risk builder. */
+export function reachesGoal(graph: AddOptionGraphView, start: string): boolean {
   const kindOf = new Map(graph.nodes.map((n) => [n.id, n.kind] as const));
   const seen = new Set<string>([start]);
   const queue = [start];
@@ -509,7 +509,7 @@ function reachesGoal(graph: AddOptionGraphView, start: string): boolean {
   return false;
 }
 
-const sameLabel = (a: string | undefined, b: string): boolean =>
+export const sameLabel = (a: string | undefined, b: string): boolean =>
   (a ?? '').trim().toLowerCase().replace(/\s+/g, ' ') === b.trim().toLowerCase().replace(/\s+/g, ' ');
 
 /**
@@ -517,8 +517,11 @@ const sameLabel = (a: string | undefined, b: string): boolean =>
  * edge (`STRENGTH_DEFAULT_SIGNATURE`, `DEFAULT_EXISTS_PROBABILITY`), stamped `defaulted` + `cee_hypothesis`
  * and signed by the USER's stated direction. Never `STRUCTURAL_EDGE_DEFAULTS`: strength 1.0 is topology, and
  * on a causal link it would claim the factor fully drives what it touches.
+ *
+ * Exported for the add-risk builder (`add-risk-transaction.ts`, Canonical #70 5855234599): a new risk's every link is
+ * this same placeholder hypothesis — never `user_specified`.
  */
-function hypothesisEdgeValue(from: string, to: string, direction: 'positive' | 'negative'): Record<string, unknown> {
+export function hypothesisEdgeValue(from: string, to: string, direction: 'positive' | 'negative'): Record<string, unknown> {
   return {
     from,
     to,

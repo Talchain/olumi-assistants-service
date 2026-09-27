@@ -109,7 +109,8 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
 import { planNewFactors, planNewOption, type NewFactorRequest } from '../propose-new-option.js';
 import { createProposal, ProposalStore, type ProposalInterpretation, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
-import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
+import type { CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
+import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
 import { readinessViewOf, withoutCantRunOpening } from '../readiness-view.js';
@@ -128,7 +129,7 @@ import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } f
 
 import { defaultFrameFor, nonlinearIdentityForAgent } from '../admit-model.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
-import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
+import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel } from './build-model.js';
 import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysisInput, type FirstAnalysisOutcome } from '../first-analysis.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
@@ -138,6 +139,7 @@ import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel } from '../goal-current-level.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
+import { FRACTION_SPELLED_UNIT } from '../../coaching/bound-graph.js';
 
 /**
  * Whose figure: the labels it is FOR, and every other QUANTITY's label (`figureTheUserWroteFor`). Options and the
@@ -761,6 +763,24 @@ const AMBIGUOUS_NOTE =
   'label, current value, what it is connected to), never by its id. Then propose again, passing that entity’s ' +
   '`id` exactly as given here in place of its label.';
 
+/**
+ * Why a new risk reaches nothing (Canonical 5856206675: "the refusal must name the missing link type so the Agent can
+ * propose it"). What it would hurt does not lead to the goal, so it cannot change the comparison. The one link the
+ * Agent CAN propose is risk → goal (an `affects` entry naming the goal); a link from that outcome to the goal is not
+ * an Agent move, so it is named as the canvas's, never offered.
+ */
+function riskUnreachableWhy(g: Pick<GraphRead, 'nodes'>, risk: string, links: readonly { to_id?: string }[]): string {
+  const goal = g.nodes.find((n) => n.kind === 'goal');
+  const hurt = [...new Set(links.flatMap((l) => {
+    const n = l.to_id !== undefined ? g.nodes.find((x) => x.id === l.to_id) : undefined;
+    return n !== undefined ? [`"${n.label}"`] : [];
+  }))].join(' and ');
+  const goalName = goal !== undefined ? `"${goal.label}"` : 'the goal';
+  return ` The missing link is risk → goal: in the model, ${hurt || 'what it would hurt'} does not lead to ${goalName}, so "${risk}" could not `
+    + `change the comparison. Ask the user whether "${risk}" would also hurt ${goalName} directly; if they say so, propose it again with ${goalName} in affects. `
+    + `A link from ${hurt || 'that outcome'} to ${goalName} is added on the canvas, not here — never offer to add it.`;
+}
+
 /** A goal target's direction, in words (the product's own receipt says "at least" / "at most"). */
 const DIRECTION_WORDS = { at_least: 'at least', at_most: 'at most' } as const;
 /** A goal target's figure in the user's units: the approve chip's own formatter, else the target writer's receipt formatter. */
@@ -850,6 +870,16 @@ export function createAgentCapabilities(
      * and `model_version_receipt`). Absent ⇒ unavailable.
      */
     readonly commitOptionLevels?: (input: CommitOptionLevelsInput) => Promise<CommitOptionLevelsResult>;
+    /**
+     * ⭐ SLICE C2 (Canonical #70 5855234599): the product's add-risk door, reached in-process (`holdAddRiskInProcess`):
+     * ONE `gmh_` hold pinned to the base hash, confirmed by the product's own held resume. Absent ⇒ unavailable.
+     */
+    readonly holdAddRisk?: (input: HoldAddRiskInput) => Promise<HoldAddRiskResult>;
+    /**
+     * ⭐ SLICE C2: the product's limit door (`commitLimitEditInProcess`): a new figure for an EXISTING limit row, its unit
+     * and frame kept, stamped as the user's, ONE CAS commit with the base-hash gate. Absent ⇒ unavailable.
+     */
+    readonly commitLimitEdit?: (input: CommitLimitEditInput) => Promise<CommitLimitEditResult>;
   } = {},
 ): AgentCapabilities {
   const readOnly = mode === 'preview';
@@ -1005,19 +1035,32 @@ export function createAgentCapabilities(
     let stillHeld = true;
     try { stillHeld = (await liveHeldHold(ctx.scenario_id, ref)) !== undefined; } catch { stillHeld = true; }
     const heldOps = heldOpsOf(hold);
-    // ⛔ A held batch may also ADD a factor (`new_factors`): only an option node is an option.
-    const isFactorAdd = (o: { op: string; value?: unknown }): boolean => o.op === 'add_node' && (o.value as { kind?: unknown } | undefined)?.kind === 'factor';
-    const optionIds = heldOps.filter((o) => o.op === 'add_node' && !isFactorAdd(o)).map((o) => o.path);
+    // ⛔ A held batch may also ADD a factor (`new_factors`), or be a new RISK (SLICE C2): only an option node is an option.
+    const addedKind = (o: { op: string; value?: unknown }): unknown => (o.op === 'add_node' ? (o.value as { kind?: unknown } | undefined)?.kind : undefined);
+    const isFactorAdd = (o: { op: string; value?: unknown }): boolean => addedKind(o) === 'factor';
+    const isRiskAdd = (o: { op: string; value?: unknown }): boolean => addedKind(o) === 'risk';
+    const optionIds = heldOps.filter((o) => o.op === 'add_node' && !isFactorAdd(o) && !isRiskAdd(o)).map((o) => o.path);
     const addedFactorIds = heldOps.filter(isFactorAdd).map((o) => o.path);
+    const addedRiskIds = heldOps.filter(isRiskAdd).map((o) => o.path);
     // The decision link of each option, from the held batch itself (`decision::option`).
     const decisionLinks = heldOps.filter((o) => o.op === 'add_edge' && optionIds.some((id) => o.path.endsWith(`::${id}`)))
       .map((o) => o.path.split('::') as [string, string]);
+    /**
+     * ⭐ EVERY HELD NODE AND EVERY HELD LINK, not only "options + decision links" (SLICE C2): a held risk has no option and
+     * no decision link, and what the approval landed is the whole batch. An add-option hold is judged exactly as before
+     * (each option WITH its decision link) and, in addition, on the rest of its own batch.
+     */
+    const heldNodeIds = heldOps.filter((o) => o.op === 'add_node').map((o) => o.path);
+    const heldLinks = heldOps.filter((o) => o.op === 'add_edge').map((o) => o.path.split('::') as [string, string]);
     const holdsAll = (g: { nodes?: unknown; edges?: unknown } | null | undefined): boolean => {
       const nodes = Array.isArray(g?.nodes) ? g.nodes as { id?: unknown }[] : [];
       const edges = Array.isArray(g?.edges) ? g.edges as { from?: unknown; to?: unknown }[] : [];
-      return optionIds.length > 0 && decisionLinks.length >= optionIds.length
+      const optionsLinked = optionIds.length === 0 || (decisionLinks.length >= optionIds.length
         && optionIds.every((id) => nodes.some((x) => x?.id === id))
-        && decisionLinks.every(([from, to]) => edges.some((e) => e?.from === from && e?.to === to));
+        && decisionLinks.every(([from, to]) => edges.some((e) => e?.from === from && e?.to === to)));
+      return heldNodeIds.length > 0 && optionsLinked
+        && heldNodeIds.every((id) => nodes.some((x) => x?.id === id))
+        && heldLinks.every(([from, to]) => edges.some((e) => e?.from === from && e?.to === to));
     };
     const applied = r.status === 200 && r.json.draft_graph !== null && typeof r.json.draft_graph === 'object'
       && holdsAll(r.json.draft_graph as { nodes?: unknown; edges?: unknown });
@@ -1051,6 +1094,19 @@ export function createAgentCapabilities(
         + (estimated.length > 0 ? ` Its level for ${estimated.join(', ')} is Olumi's estimate, for you to correct.` : '')
         + (unlevelled.length > 0 ? ` It does not yet set a level for ${unlevelled.join(', ')}; tell me the figure for each and I'll set it.` : '');
     });
+    // SLICE C2: a new risk, said from what was COMMITTED — what it threatens, what drives it, and who sized each link.
+    for (const rid of addedRiskIds) {
+      const risk = after!.nodes.find((x) => x.id === rid);
+      if (risk === undefined) continue;
+      const labelOf = (id: string): string => quoted(String(after!.nodes.find((x) => x.id === id)?.label ?? id));
+      const out = after!.edges.filter((e) => e.from === rid);
+      const into = after!.edges.filter((e) => e.to === rid);
+      // Opens `Added "<label>"` exactly as the option sentence does: an unquoted "Added the …" is a model-style completion
+      // claim the write narrator strips (`write-outcome.ts` CLAIM_OPENER), which dropped this whole sentence (measured).
+      sentences.push(`Added "${String(risk.label ?? rid)}" as a risk, affecting ${out.map((e) => labelOf(e.to)).join(', ')}`
+        + (into.length > 0 ? ` and driven by ${into.map((e) => labelOf(e.from)).join(', ')}` : '')
+        + `; ${howStronglyWords([...out, ...into])}`);
+    }
     for (const fid of addedFactorIds) {
       const f = after!.nodes.find((x) => x.id === fid);
       if (f === undefined) continue;
@@ -2581,6 +2637,63 @@ export function createAgentCapabilities(
           ok: true, mutated: true, applied: true, proposal_id: decision.proposal.proposal_id, operation_id: operationId, receipts,
           ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
           follow_up: `The goal "${goalLabel}" now has the target ${DIRECTION_WORDS[v.constraint_type]} ${targetFigure(v.raw_value, v.unit)}, as you stated it.`,
+        };
+      }
+
+      /**
+       * ⭐ SLICE C2 — A NEW FIGURE FOR A LIMIT THE MODEL ALREADY HOLDS, through the product's limit door
+       * (`commitLimitEditInProcess`): the proposal's base hash is its stale gate, the row keeps its unit and frame, the
+       * figure is stamped as the user's, ONE CAS commit. Applied ONLY when the door committed AND the model read back holds
+       * that very row (same constraint_id) at exactly the approved figure, in its own unit.
+       */
+      if (ops.length === 1 && ops[0]!.op === 'set_limit') {
+        const op = ops[0]!;
+        const v = op.value as { operator: '<=' | '>='; raw_value: number; unit: string | null; constraint_id: string; before: number };
+        const pid = decision.proposal.proposal_id;
+        if (opts.commitLimitEdit === undefined) {
+          return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: pid,
+            detail: 'This limit cannot be changed here, so nothing was written. Tell the user plainly.' };
+        }
+        const operationId = authorisationTurnId(pid);
+        const res = await opts.commitLimitEdit({
+          scenario_id: ctx.scenario_id, turn_id: operationId, base_graph_hash: decision.proposal.base_graph_identity_hash,
+          node_id: op.path, operator: v.operator, raw_value: v.raw_value,
+        });
+        const label = String(before.nodes.find((x) => x.id === op.path)?.label ?? 'that limit');
+        const figure = (x: number): string => (v.unit !== null ? targetFigure(x, v.unit) : String(x));
+        if (res.status === 'stale') {
+          return { ok: false, mutated: false, applied: false, refusal: 'superseded', proposal_id: pid,
+            detail: 'The model changed just before this limit was written, so nothing was changed. Offer to prepare it again.' };
+        }
+        if (res.status === 'refused') {
+          return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: pid,
+            follow_up: `The limit on "${label}" was not changed. Nothing on your model changed.`,
+            detail: `The limit was not changed, and nothing on the model changed. Tell the user plainly, and ask what they would like instead.` };
+        }
+        if (res.status === 'unconfirmed') {
+          return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: pid,
+            detail: 'The limit was sent, but what the model now holds could not be confirmed. Tell the user plainly that it could not be confirmed, '
+              + 'offer to check the model again, and never say it was changed or that it was not.' };
+        }
+        // Landed is what the model HOLDS: that very row, at exactly the approved figure, in its own unit.
+        const after = await readGraph(ctx.scenario_id);
+        const heldRows = (Array.isArray(after?.raw.goal_constraints) ? after!.raw.goal_constraints as Record<string, unknown>[] : [])
+          .filter((c) => c !== null && typeof c === 'object' && c['node_id'] === op.path && c['operator'] === v.operator);
+        const landed = heldRows.length === 1 && heldRows[0]!['constraint_id'] === v.constraint_id && heldRows[0]!['value'] === v.raw_value
+          && (heldRows[0]!['unit'] ?? null) === v.unit;
+        if (!landed) {
+          return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: pid,
+            detail: 'The limit was written, but what the model now holds could not be confirmed. Tell the user plainly that it could not be confirmed, '
+              + 'offer to check the model again, and never say it was changed or that it was not.' };
+        }
+        const receipt = receiptSummaryOf({ model_version_receipt: res.model_version_receipt });
+        const receipts = receipt.summary !== null ? [receipt.summary] : [];
+        proposals.markApplied(pid, receipts);
+        const words = v.operator === '<=' ? 'at most' : 'at least';
+        return {
+          ok: true, mutated: true, applied: true, proposal_id: pid, operation_id: operationId, receipts,
+          ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
+          follow_up: `The limit on "${label}" is now ${words} ${figure(v.raw_value)} (it was ${figure(v.before)}), as you stated it.`,
         };
       }
 
@@ -4210,6 +4323,234 @@ export function createAgentCapabilities(
           + 'that each is linked from the decision, what it acts on and each level — saying plainly which have no level yet, and which '
           + 'levels are Olumi\u2019s estimates (stated_by olumi_estimate), with why, for the user to correct — never the id, '
           + 'and call authorise_change with this proposal_id once they agree.',
+      };
+    },
+
+    /**
+     * ⭐ SLICE C2 — A NEW RISK, HELD ON THE PRODUCT'S OWN SEAM (Canonical #70 5855234599). Paul's served test (27 Sep,
+     * 90b8f080): the Agent offered a "competitive response" risk, he said "Yes.", and there was nothing it could apply.
+     * Labels resolve to ids by the SAME rule every proposer uses (`resolveNamed`); the batch is built purely first
+     * (`buildAddRiskTransaction`, the door's own builder: a spec it would refuse is never sent); then the product's
+     * add-risk door holds it as ONE `gmh_` pending pinned to the model this read saw. Held, or not proposed: the handle
+     * must be the product's for THIS risk and, where the store can be read, the hold must add the risk and every link.
+     */
+    async proposeNewRisk(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      if (opts.holdAddRisk === undefined) {
+        return { ok: false, mutated: false, refusal: 'unavailable', detail: 'A risk cannot be added here. Nothing was changed. Tell the user plainly.' };
+      }
+      const label = typeof args?.label === 'string' ? args.label.trim() : '';
+      if (label === '') {
+        return { ok: false, mutated: false, refusal: 'unreadable_risk', detail: 'A new risk needs a name, in the user’s words. Nothing was prepared.' };
+      }
+      const affects = Array.isArray(args?.affects) ? args.affects : [];
+      const causedBy = Array.isArray(args?.caused_by) ? args.caused_by : [];
+      if (affects.length === 0) {
+        return { ok: false, mutated: false, refusal: 'no_affects',
+          detail: `Nothing was prepared. ${RISK_LINKS_RULE} Ask the user what "${label}" would hurt if it happened.` };
+      }
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      if (g.nodes.some((n) => norm(n.label) === norm(label))) {
+        return { ok: false, mutated: false, refusal: 'risk_exists',
+          detail: `The model already has something called "${label}", so nothing was prepared. Describe it from the model instead of adding it again.` };
+      }
+      const links: { from_id?: string; to_id?: string; effect_direction: 'positive' | 'negative' }[] = [];
+      const ambiguous: AmbiguousTarget[] = [];
+      const direction = (d: unknown): 'positive' | 'negative' | null => (d === 'positive' || d === 'negative' ? d : null);
+      for (const a of affects as { target_label?: unknown; direction?: unknown }[]) {
+        const asked = String(a?.target_label ?? '');
+        const dir = direction(a?.direction);
+        const res = resolveNamed(g, asked, (n) => n.kind === 'goal' || n.kind === 'outcome');
+        if (res.kind === 'ambiguous') { ambiguous.push(describeAmbiguity(g, asked, res.candidates)); continue; }
+        if (res.kind === 'other' && res.node.kind === 'factor') {
+          // ⛔ Never INTO a factor: said in the words the Agent can repeat, and nothing is prepared.
+          return { ok: false, mutated: false, refusal: 'risk_affects_factor',
+            detail: `Nothing was prepared: a risk affects the goal or an outcome, not a factor directly. "${res.node.label}" is a factor. `
+              + 'Say that plainly, and ask which outcome or goal the risk would hurt (a factor that makes the risk more likely goes in caused_by).' };
+        }
+        if (res.kind !== 'one') {
+          return { ok: false, mutated: false, refusal: 'target_not_goal_or_outcome',
+            detail: res.kind === 'none'
+              ? `The model has nothing called "${asked}", so nothing was prepared. ${RISK_LINKS_RULE}`
+              : `"${asked}" is not the goal or an outcome, so nothing was prepared. ${RISK_LINKS_RULE}` };
+        }
+        if (dir === null) {
+          return { ok: false, mutated: false, refusal: 'direction_not_stated',
+            detail: `Nothing was prepared: say whether "${label}" would raise or lower "${res.node.label}", from the user’s words; if it is unclear, ask.` };
+        }
+        links.push({ to_id: res.node.id, effect_direction: dir });
+      }
+      for (const c of causedBy as { factor_label?: unknown; direction?: unknown }[]) {
+        const asked = String(c?.factor_label ?? '');
+        const dir = direction(c?.direction);
+        const res = resolveNamed(g, asked, (n) => n.kind === 'factor');
+        if (res.kind === 'ambiguous') { ambiguous.push(describeAmbiguity(g, asked, res.candidates)); continue; }
+        if (res.kind !== 'one') {
+          return { ok: false, mutated: false, refusal: 'cause_not_a_factor',
+            detail: `"${asked}" is not a factor in the model, so nothing was prepared. What drives a risk must be one of the model’s factors; leave caused_by out if none does.` };
+        }
+        if (dir === null) {
+          return { ok: false, mutated: false, refusal: 'direction_not_stated',
+            detail: `Nothing was prepared: say whether raising "${res.node.label}" makes "${label}" more or less likely, from the user’s words; if it is unclear, ask.` };
+        }
+        links.push({ from_id: res.node.id, effect_direction: dir });
+      }
+      if (ambiguous.length > 0) {
+        return { ok: false, mutated: false, refusal: 'ambiguous_target', ambiguous_targets: ambiguous, detail: AMBIGUOUS_NOTE };
+      }
+      // The door's own builder, run here purely: a spec it would refuse is never sent.
+      const built = buildAddRiskTransaction({ risk: { label }, links }, { nodes: g.nodes as never, edges: g.edges as never });
+      if (!built.matched) {
+        const why = built.reason === 'kind_pair_not_allowed'
+          ? ` ${RISK_LINKS_RULE}`
+          : built.reason === 'risk_unreachable'
+            ? riskUnreachableWhy(g, label, links)
+            : '';
+        return { ok: false, mutated: false, refusal: 'not_prepared', reason: built.reason,
+          detail: `That risk could not be prepared as one change, so nothing was sent or changed.${why} Tell the user plainly.` };
+      }
+      const riskId = built.proposal.riskId;
+      const res = await opts.holdAddRisk({
+        scenario_id: ctx.scenario_id,
+        // A fresh row per offer (see `HoldAddRiskInput.turn_id`): a lapsed hold never blocks offering the same risk again.
+        turn_id: randomUUID(),
+        base_graph_hash: g.graph_hash,
+        risk: { id: riskId, label },
+        links,
+      });
+      if (res.status === 'stale') {
+        return { ok: false, mutated: false, refusal: 'model_changed',
+          detail: 'The model changed while this was being prepared, so nothing was held. Read it again and propose afresh.' };
+      }
+      const ref = gmHeldProposalRef(ctx.scenario_id, `node:${riskId}`);
+      let heldOk = res.status === 'held' && res.proposal_id === ref && res.risk_id === riskId;
+      if (heldOk && opts.readPendingActions !== undefined) {
+        try {
+          const hold = await liveHeldHold(ctx.scenario_id, ref);
+          const ops = hold !== undefined ? heldOpsOf(hold) : [];
+          heldOk = ops.some((o) => o.op === 'add_node' && o.path === riskId)
+            && built.proposal.links.every((l) => ops.some((o) => o.op === 'add_edge' && o.path === `${l.from}::${l.to}`));
+        } catch {
+          heldOk = false;
+        }
+      }
+      if (!heldOk || res.status !== 'held') {
+        return { ok: false, mutated: false, refusal: 'not_prepared', ...(res.status === 'refused' ? { reason: res.reason } : {}),
+          detail: res.status === 'refused' && res.reason === 'kind_pair_not_allowed'
+            ? `Olumi did not prepare that change, so nothing was added. ${RISK_LINKS_RULE} Tell the user plainly.`
+            : 'Olumi could not prepare that as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };
+      }
+      const labelOfId = (id: string): string => String(g.nodes.find((n) => n.id === id)?.label ?? id);
+      const effect = (d: 'positive' | 'negative'): string => (d === 'positive' ? 'raises it' : 'lowers it');
+      return {
+        ok: true, mutated: false,
+        proposal_id: ref,
+        public_label: res.public_label.trim() !== '' ? res.public_label : `Add the risk "${label}"`,
+        held_message: res.held_message,
+        ...(res.detail !== undefined && res.detail.trim() !== '' ? { held_detail: res.detail } : {}),
+        base_revision: g.graph_hash,
+        risk: {
+          label,
+          threatens: built.proposal.links.filter((l) => l.from === riskId).map((l) => `${labelOfId(l.to)} (${effect(l.effect_direction)})`),
+          driven_by: built.proposal.links.filter((l) => l.to === riskId).map((l) => `${labelOfId(l.from)} (${l.effect_direction === 'positive' ? 'more of it makes the risk more likely' : 'more of it makes the risk less likely'})`),
+          how_strongly: 'not known yet: Olumi uses a placeholder strength for each link, not an estimate',
+        },
+        note: 'Nothing has changed yet. Tell the user it will add the risk, what it threatens and what drives it, and that how strongly '
+          + 'is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.',
+      };
+    },
+
+    /**
+     * ⭐ SLICE C2 — A NEW FIGURE FOR A LIMIT THE MODEL ALREADY HOLDS (Canonical #70 5855234599). Paul's served test (27 Sep,
+     * 08bf9a1f): "the budget rose to £30k" → "I can't update that budget constraint". The limit is named as the state
+     * names it (its `on` label, `projectModelContext`) with its operator; it must be an EXISTING row on a node that is not
+     * an option, a decision or the goal (the goal's target is `propose_goal_target`'s); the figure must be the user's own
+     * (`figureTheUserWrote`, the lane's one matcher), in the row's own unit. ONE `prop_` proposal; the approval writes it
+     * through the product's limit door.
+     */
+    async proposeLimitChange(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const value = args?.new_value;
+      const operator = args?.operator;
+      const asked = typeof args?.limit_label === 'string' ? args.limit_label.trim() : '';
+      if (typeof value !== 'number' || !Number.isFinite(value) || (operator !== '<=' && operator !== '>=') || asked === '') {
+        return { ok: false, mutated: false, refusal: 'unreadable_limit',
+          detail: 'A limit change needs the limit as the model lists it, its operator, and the new figure. Nothing was prepared; ask the user for whichever is missing.' };
+      }
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const rows = (Array.isArray(g.raw.goal_constraints) ? g.raw.goal_constraints : [])
+        .filter((c): c is Record<string, unknown> => c !== null && typeof c === 'object' && c['operator'] === operator);
+      const res = resolveNamed(g, asked, (n) => n.kind !== 'option' && n.kind !== 'decision');
+      if (res.kind === 'ambiguous') {
+        return { ok: false, mutated: false, refusal: 'ambiguous_target', ambiguous_targets: [describeAmbiguity(g, asked, res.candidates)], detail: AMBIGUOUS_NOTE };
+      }
+      // The node the limit sits on; a row named only by its own label (its node absent from the model) is found by that label.
+      const byRowLabel = rows.filter((c) => norm(c['label']) === norm(asked));
+      const node = res.kind === 'one' ? res.node
+        : byRowLabel.length === 1 ? g.nodes.find((n) => n.id === byRowLabel[0]!['node_id']) : undefined;
+      if (node?.kind === 'goal') {
+        return { ok: false, mutated: false, refusal: 'goal_target_not_a_limit',
+          detail: `"${node.label}" is the goal: its target is set with propose_goal_target, not as a limit. Nothing was prepared.` };
+      }
+      if (node === undefined || node.kind === 'option' || node.kind === 'decision') {
+        return { ok: false, mutated: false, refusal: 'no_such_limit',
+          detail: `The model holds no ${operator === '<=' ? 'at most' : 'at least'} limit called "${asked}", so nothing was prepared. `
+            + 'This changes only a limit the model already lists under limits. Tell the user plainly.' };
+      }
+      const matching = rows.filter((c) => c['node_id'] === node.id);
+      if (matching.length !== 1) {
+        return { ok: false, mutated: false, refusal: matching.length === 0 ? 'no_such_limit' : 'limit_ambiguous',
+          detail: matching.length === 0
+            ? `The model holds no ${operator === '<=' ? 'at most' : 'at least'} limit on "${node.label}", so nothing was prepared. This changes only a limit the model already lists under limits. Tell the user plainly.`
+            : `More than one limit sits on "${node.label}", so nothing was prepared. Ask the user which one they mean.` };
+      }
+      const row = matching[0]!;
+      const unit = typeof row['unit'] === 'string' && row['unit'] !== '' ? row['unit'] : null;
+      // ⛔ A limit stored as a FRACTION of one (shown as a percent): the user's percent would be written 100× too large.
+      // The door refuses it too (`limit-edit.ts`); saying so here means nothing is offered that cannot be approved.
+      if (unit !== null && FRACTION_SPELLED_UNIT.test(unit)) {
+        return { ok: false, mutated: false, refusal: 'limit_stored_as_fraction',
+          detail: `The limit on "${node.label}" is stored as a fraction, and this path cannot yet change a limit stored that way, so nothing was prepared. `
+            + 'Tell the user plainly that it can be changed on the canvas, and never offer to change it here.' };
+      }
+      const figureOf = (x: number): string => (unit !== null ? targetFigure(x, unit) : String(x));
+      // ⛔ A figure in another kind of unit is never this limit's (the lane's one family check).
+      if (typeof args?.unit === 'string' && args.unit.trim() !== '' && unitsConflict(args.unit.trim(), unit ?? undefined) !== null) {
+        return { ok: false, mutated: false, refusal: 'limit_unit_mismatch',
+          detail: `The limit on "${node.label}" is in ${String(unit)}, and the figure given is a different kind of figure, so nothing was prepared. Ask the user for the limit in its own units.` };
+      }
+      // ⛔ Recorded as the user's own figure, so it must be one the user wrote.
+      if (!figureTheUserWrote(value, unit, ctx.user_text)) {
+        return { ok: false, mutated: false, refusal: 'figure_not_stated',
+          detail: `${figureOf(value)} is not a figure the user wrote, so nothing was prepared: it would be recorded as their limit. `
+            + 'Ask them what the new limit is, in their own words, and never offer a figure of your own as theirs.' };
+      }
+      const before = typeof row['value'] === 'number' ? row['value'] : NaN;
+      if (before === value) {
+        return { ok: false, mutated: false, refusal: 'already_that_figure',
+          detail: `The limit on "${node.label}" is already ${figureOf(value)}, so nothing needs to change. Tell the user so.` };
+      }
+      const words = operator === '<=' ? 'at most' : 'at least';
+      const proposal = createProposal({
+        scenario_id: ctx.scenario_id,
+        user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash,
+        operations: [{ op: 'set_limit', path: node.id, value: { operator, raw_value: value, unit, constraint_id: String(row['constraint_id'] ?? ''), before } }],
+        provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: `Change the limit on "${node.label}" from ${words} ${figureOf(before)} to ${words} ${figureOf(value)}`,
+      });
+      proposals.put(proposal);
+      return {
+        ok: true, mutated: false,
+        proposal_id: proposal.proposal_id,
+        public_label: proposal.public_label,
+        base_revision: g.graph_hash,
+        limit: { on: node.label, now: `${words} ${figureOf(before)}`, becomes: `${words} ${figureOf(value)}` },
+        note: `Nothing has changed yet. Tell the user it will change the limit on "${node.label}" from ${words} ${figureOf(before)} to ${words} ${figureOf(value)}, `
+          + 'as their own figure, keeping its units — never the id — and call authorise_change with this proposal_id once they agree.',
       };
     },
 
