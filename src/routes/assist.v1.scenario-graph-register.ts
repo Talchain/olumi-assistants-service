@@ -169,6 +169,34 @@ import {
 import type { PendingAction } from "../orchestrator-v5/session/pending-action.js";
 
 /** Wire schema discriminator. Frozen — the UI lane builds against this. */
+
+/**
+ * ⭐ AN ABSENT `goal_constraints` IS "NO STATEMENT", NOT "NO LIMITS" (#70 5852105101).
+ * Measured on staging: a register whose graph omitted the key replaced the
+ * persisted list with nothing (1 → 0), so a writer that registers nodes and edges
+ * alone erased limits the user had stated in chat. An explicit list — `[]`
+ * included — is the caller's statement and is written as sent. The UI's own
+ * hydration reads the same way: a null canvas list "cannot say no limit".
+ * A stored limit whose node the new graph no longer holds is not carried: it has
+ * nothing left to constrain. `stored` is the server read the CAS is bound to, so a
+ * graph that moved between that read and the write is refused, never merged.
+ */
+function withStoredLimitsWhenUnstated<T extends { nodes: ReadonlyArray<{ id?: unknown }> }>(
+  graph: T,
+  submitted: Record<string, unknown>,
+  stored: unknown,
+): T {
+  if (Object.prototype.hasOwnProperty.call(submitted, "goal_constraints")) return graph;
+  if (stored === null || typeof stored !== "object") return graph;
+  const limits = (stored as { goal_constraints?: unknown }).goal_constraints;
+  if (!Array.isArray(limits) || limits.length === 0) return graph;
+  const nodeIds = new Set(graph.nodes.map((n) => String(n.id)));
+  const carried = limits.filter(
+    (c) => c !== null && typeof c === "object" && nodeIds.has(String((c as { node_id?: unknown }).node_id)),
+  );
+  return carried.length === 0 ? graph : { ...graph, goal_constraints: carried };
+}
+
 export const SCENARIO_GRAPH_REGISTRATION_SCHEMA =
   "scenario_graph_registration.v1" as const;
 
@@ -607,6 +635,10 @@ export default async function route(app: FastifyInstance) {
         expectedGraphAnalysisHash = undefined;
       }
 
+      // An absent `goal_constraints` keeps the stored limits (see the helper).
+      // Bound to the SAME server read as the CAS base above.
+      const graphToRegister = withStoredLimitsWhenUnstated(parsed.data, submittedRecord, baseGraphForInvariants);
+
       /**
        * ⛔ A CALLER'S EXPECTATION IS CHECKED BEFORE ANY WRITE, AGAINST THE
        * SERVER'S OWN READ.
@@ -734,7 +766,7 @@ export default async function route(app: FastifyInstance) {
           try {
             const committed = await store.readCommittedTurn(scenarioId, registrationTurnId(scenarioId, operationId));
             if (committed === null) return false;
-            const bytes = projectGraphForPersistence(parsed.data, {
+            const bytes = projectGraphForPersistence(graphToRegister, {
               scenarioId,
               turnClass: "direct_answer",
               source: "graph_registration",
@@ -852,7 +884,7 @@ export default async function route(app: FastifyInstance) {
       // which a graph is persisted". Hashing before it would advertise an
       // identity for bytes we do not store, which is the exact ordering defect
       // `commit.ts` was restructured to close.
-      const graphForStore = projectGraphForPersistence(parsed.data, {
+      const graphForStore = projectGraphForPersistence(graphToRegister, {
         scenarioId,
         turnClass: "direct_answer",
         source: "graph_registration",
