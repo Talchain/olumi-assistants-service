@@ -368,6 +368,55 @@ export function computeAnalysisReadyStatusWithReason(
 }
 
 // ============================================================================
+// Slice A1b — `ready` means complete
+// ============================================================================
+
+/**
+ * ⭐⭐ SLICE A1b — AN OPTION WITH AN OUTSTANDING LEVEL IS NEVER `ready`.
+ *
+ * `computeAnalysisReadyStatusWithReason` decides from the interventions COUNT,
+ * so an option carrying ONE level while another connected controllable factor
+ * has none left it `ready`. Measured on Paul's staging export `90b8f080`:
+ * option `146aa89d` shipped `status: "ready"` in the same payload whose
+ * `blockers[]` held a `missing_value` for (146aa89d,
+ * `fac_existing_customers_grandfathered`). Every consumer reading `ready` as
+ * "complete" asked nothing.
+ *
+ * THE RULE: `ready` ⇔ no option-scoped `missing_value` blocker names the
+ * option. The caller (`buildAnalysisReadyPayload`, the only producer holding
+ * the blocker set) passes the labels of the factors those blockers name.
+ *
+ *   · Only `ready` is demoted, and only to the EXISTING `needs_encoding` —
+ *     "connected, magnitude outstanding". No new value, no new field. A
+ *     `needs_user_mapping` option already says more is missing; it is left.
+ *   · The option KEEPS its interventions. `needs_encoding` therefore no longer
+ *     implies "no effect values": consumers whose copy means that bind to
+ *     `interventions`, never to this status (A1b consumer rebinds).
+ *   · ⛔ THE HELD BASELINE IS NEVER DEMOTED. `interventions: {}` on it is a
+ *     complete statement (the 2026-09-18 ruling above); the ask would have no
+ *     answerable form.
+ */
+export function adjudicateOutstandingLevels(
+  decided: AnalysisReadyStatusResult,
+  outstandingFactorLabels: readonly string[],
+  isBaseline = false,
+): AnalysisReadyStatusResult {
+  if (decided.status !== "ready") return decided;
+  if (isBaseline === true) return decided;
+  if (outstandingFactorLabels.length === 0) return decided;
+  const named = [...new Set(outstandingFactorLabels.map((label) => label.trim()))]
+    .filter((label) => label.length > 0)
+    .map((label) => `"${label}"`);
+  const reason =
+    named.length === 0
+      ? "Awaiting an effect value for a connected factor"
+      : named.length === 1
+        ? `Awaiting an effect value for ${named[0]}`
+        : `Awaiting effect values for ${named.slice(0, -1).join(", ")} and ${named[named.length - 1]}`;
+  return { status: "needs_encoding", reason };
+}
+
+// ============================================================================
 // User Question Classification
 // ============================================================================
 
