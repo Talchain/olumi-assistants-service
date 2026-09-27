@@ -1,7 +1,10 @@
 /**
  * Executable catalogue contract (#70 5858459113). These are TEST expectations,
  * never a runtime registry. Dispatch checks alone are not writer evidence;
- * agent-capability-lifecycle.test.ts exercises the real product writer.
+ * agent-capability-lifecycle.test.ts exercises the real product routes/writers.
+ * Specialised positive paths remain in build-model-capability.test.ts,
+ * public-research-route.test.ts and provisional-view-route.test.ts; their
+ * executable cases are run with this contract (no filename-only evidence gate).
  */
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
@@ -96,6 +99,19 @@ describe('raw arguments reach production dispatch without a test validator', () 
     const caps = createAgentCapabilities(read, new ProposalStore());
     expect(await dispatchTool('authorise_change', '{', ctx, caps))
       .toMatchObject({ ok: false, mutated: false, refusal: 'unparsable_arguments' });
+  });
+  it.each([
+    ['propose_assumptions', '{"assumptions":"five"}'],
+    ['propose_option_interventions', '{"interventions":42}'],
+    ['offer_public_research', '{"query":{"text":"burnout"}}'],
+    ['authorise_change', '[]'],
+  ])('%s refuses wrong-shaped raw arguments without a write', async (name, raw) => {
+    const readsOnly = vi.fn<InternalDispatch>(async (path) => {
+      expect(path).toMatch(/\/graph$/);
+      return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'base' } };
+    });
+    const caps = createAgentCapabilities(readsOnly, new ProposalStore());
+    expect(await dispatchTool(name, raw, ctx, caps)).toMatchObject({ ok: false, mutated: false });
   });
   it.each(['authorise_change', 'offer_public_research'])('%s refuses JSON null without throwing or writing', async (name) => {
     const caps = createAgentCapabilities(read, new ProposalStore());
