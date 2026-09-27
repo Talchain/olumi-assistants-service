@@ -300,12 +300,18 @@ export function readCurrencyUnitWithQualifiers(unit: string | null | undefined):
     .split(/\s+/)
     .filter((t) => t.length > 0);
   if (tokens.length < 2) return direct;
+  // ⭐ A PRICE PER SEAT IS MONEY (MG construction sweep, 27 Sep; served CEE e7d28fd): ONE word directly after "per" or
+  // "/" is the rate's DENOMINATOR ("GBP per seat per month", "GBP per subscriber per month"), not a second thing. It
+  // made the whole unit `plain`, so "What I was given" said the brief's stated £40 per-seat price was absent. Any other
+  // word still leaves the unit plain ("GBP widgets"), and a second currency is still ambiguous (the loop below).
+  const isDenominator = (j: number): boolean =>
+    j > 0 && (tokens[j - 1] === "/" || tokens[j - 1].toLowerCase() === "per") && readUnit(tokens[j]).kind !== "currency";
   let found: UnitReading | null = null;
   for (let i = 0; i < tokens.length; i += 1) {
     const reading = readUnit(tokens[i]);
     if (reading.kind !== "currency") continue;
-    const rest = tokens.filter((_, j) => j !== i);
-    if (!rest.every((t) => CURRENCY_UNIT_QUALIFIERS.has(t.toLowerCase()))) continue;
+    const restOk = tokens.every((t, j) => j === i || CURRENCY_UNIT_QUALIFIERS.has(t.toLowerCase()) || isDenominator(j));
+    if (!restOk) continue;
     if (found !== null) return direct; // two currencies: ambiguous, stay plain
     found = reading;
   }
