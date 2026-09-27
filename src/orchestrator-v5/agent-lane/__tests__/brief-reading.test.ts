@@ -7,7 +7,11 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { gateBriefReading, readBrief, MAX_OPTIONS, BRIEF_READING_MODEL, BRIEF_READING_SCHEMA } from '../brief-reading.js';
-import corpus from './fixtures/brief-reading-corpus.json' with { type: 'json' };
+import { readFileSync } from 'node:fs';
+
+const corpus = JSON.parse(readFileSync(new URL('./fixtures/brief-reading-corpus.json', import.meta.url), 'utf8')) as {
+  briefs: Record<string, string>; not_limits: Record<string, string[]>; responses: { id: string; draw: number; spans: unknown }[];
+};
 
 const PAUL_C = 'We need to reach £100k MRR within 6 months with a £20k budget, while keeping monthly churn under 4%. Should we develop new features and increase our Pro plan price from £49 to £59 per month in the next release, or invest in additional advertising?';
 const TECHLEAD = 'Should I hire a Tech lead or two developers to increase productivity, while maintaining code quality? We have an urgent launch date in the next three months. We currently have six mid-weight developers, so we\'re lacking leadership. Our budget is £200,000, but we\'d like to spend less.';
