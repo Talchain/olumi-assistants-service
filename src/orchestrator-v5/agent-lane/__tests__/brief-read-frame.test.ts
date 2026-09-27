@@ -197,14 +197,7 @@ type Body = {
   _diagnostic_trace: { first_analysis?: Record<string, unknown> };
   _agent: { replayed?: boolean; tool_calls: { name: string; ok: boolean; refusal?: string; replayed?: boolean }[] };
 };
-type GraphReady = Extract<PipelineStageEvent, { kind: 'GRAPH_READY' }>;
 
-const nodeIds = (g: { nodes?: unknown[] } | undefined) => new Set((g?.nodes ?? []).map((n) => String((n as { id?: unknown }).id)));
-/** Edge identity: its `id` when it has one, else its endpoints — the pair the UI's drift check reconciles by. */
-const edgeIds = (g: { edges?: unknown[] } | undefined) => new Set((g?.edges ?? []).map((e) => {
-  const x = e as { id?: unknown; from?: unknown; to?: unknown };
-  return typeof x.id === 'string' ? x.id : `${String(x.from)}->${String(x.to)}`;
-}));
 /** Every key at any depth. */
 const deepKeys = (v: unknown, out: string[] = []): string[] => {
   if (Array.isArray(v)) { for (const x of v) deepKeys(x, out); return out; }
