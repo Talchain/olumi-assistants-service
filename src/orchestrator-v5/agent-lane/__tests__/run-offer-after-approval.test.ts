@@ -167,15 +167,18 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     expect(b.suggested_actions.map((c) => c.id)).toEqual(['agent-run-analysis']);
   });
 
-  it('OPPOSITE CONTROL: the approval commits but the readback FAILS → no next-step chip and no Run (unknown is not a refusal)', async () => {
-    readiness = { status: 'ready', may_run: true }; // what the model really is — the route just cannot read it
-    failReadbackAfterWrite = true;
+  it('OPPOSITE CONTROL (C6 turnReadCache): after a VERIFIED commit the route answers from that verified read — it makes no second post-write read that could fail', async () => {
+    // Before C6 the route re-read the model after the capability had already read it back, and this control failed
+    // that second read to prove "unknown is not a refusal". With nothing written between the two, the route now reuses
+    // the verified read, so that unknown state cannot arise here. The unknown-readiness rule at the approval is pinned by
+    // the seam row `agent-writer-doors-seam.test.ts` (7c): an in-process write, then every read fails (DL #2114 Q4).
+    readiness = { status: 'ready', may_run: true };
+    failReadbackAfterWrite = true; // any SECOND post-write read would be refused
     const b = await proposeThenApprove() as unknown as { suggested_actions: Chip[]; _agent: { tool_calls: { name: string; mutated: boolean }[] } };
     expect(edges, 'the approval really committed').toHaveLength(1);
-    expect(b._agent.tool_calls.find((c) => c.name === 'authorise_change')?.mutated, 'PRECONDITION: the approval reports it applied').toBe(true);
-    expect(postWriteReads, 'PRECONDITION: the readback was attempted and refused').toBeGreaterThanOrEqual(2);
-    expect(b.suggested_actions.some((c) => c.id === 'agent-suggest-what-it-needs'), 'no blocked claim on an unknown state').toBe(false);
-    expect(b.suggested_actions.some((c) => c.action_type === 'run_analysis')).toBe(false);
+    expect(b._agent.tool_calls.find((c) => c.name === 'authorise_change')?.mutated, 'the approval reports it applied').toBe(true);
+    expect(postWriteReads, 'ONE post-write read: the capability\'s own check, reused by the final readback').toBe(1);
+    expect(b.suggested_actions.some((c) => c.id === 'agent-suggest-what-it-needs'), 'a ready model is never given a blocked claim').toBe(false);
   });
 
   it('REPLAY: a remembered next-step chip is re-offered only on a KNOWN refusal, never on an unknown re-read (pre-review 5827131835)', async () => {

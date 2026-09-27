@@ -33,6 +33,9 @@ const order: string[] = [];
 let graphOf = new Map<string, unknown>();
 /** Every append that carried a graph, per scenario: "ONE graph-bearing row". */
 const graphWrites = new Map<string, number>();
+/** (7c) Refuse every graph read once the scenario has more than this many graph-bearing rows; `undefined` = never. */
+let failReadsAfterWrites: number | undefined;
+let readsRefused = 0;
 const latestRow = (sid: string = SCENARIO): Row | undefined =>
   [...order].reverse().map((k) => rows.get(k)!).find((r) => r.scenario_id === sid && !r.turn_id.endsWith(':claim'));
 const jsonbOrder = (v: unknown): unknown =>
@@ -164,8 +167,13 @@ describe('SLICE C2 — the Agent reaches the product\'s own writers: a new risk 
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
     app = Fastify({ logger: false });
-    app.post('/assist/v1/scenarios/:id/graph', async (req) => {
-      const g = graphOf.get((req.params as { id: string }).id) ?? null;
+    app.post('/assist/v1/scenarios/:id/graph', async (req, reply) => {
+      const id = (req.params as { id: string }).id;
+      if (failReadsAfterWrites !== undefined && (graphWrites.get(id) ?? 0) > failReadsAfterWrites) {
+        readsRefused += 1;
+        return reply.code(500).send({ error: 'read failed' });
+      }
+      const g = graphOf.get(id) ?? null;
       return { graph: g, graph_hash: g === null ? null : computeAnalysisAffectingGraphHash(g as never) };
     });
     await app.register(ceeOrchestratorRouteV2);
@@ -173,7 +181,7 @@ describe('SLICE C2 — the Agent reaches the product\'s own writers: a new risk 
     await app.ready();
   }, 600_000);
   afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { nextScenario(); script = []; openAiCalls = 0; routerCalls.length = 0; });
+  beforeEach(() => { nextScenario(); script = []; openAiCalls = 0; routerCalls.length = 0; failReadsAfterWrites = undefined; readsRefused = 0; });
 
   const turn = async (payload: Record<string, unknown>): Promise<Body> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), ...payload } });
@@ -411,6 +419,29 @@ describe('SLICE C2 — the Agent reaches the product\'s own writers: a new risk 
     graphOf.set(SCENARIO, seedGraph());
     const t1 = await proposeLimit({}, 'The budget rose to £30k.');
     expect(t1._agent.tool_calls.find((c) => c.name === 'propose_limit_change'), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true }));
+  }, 120_000);
+
+  /**
+   * ⛔ AN UNKNOWN STATE IS NEVER PRESENTED AS A REFUSAL (DL CHANGES_REQUIRED on #2114, Q4, 5858770298).
+   * The limit door writes in-process, so the turn's read cache advances its epoch and the route's final readback is a
+   * FRESH read. If that read fails, readiness is unknown: `knownNotRunnable` is false, so the approval must not offer
+   * the next-step chip ("what it still needs" is a blocked claim) and `admitsRunOffer` is false, so no Run either.
+   * The mutant `knownNotRunnable` → `!admitsRunOffer` at the approval rule offers the chip here.
+   */
+  it('(7c) RED seam: the limit write lands and every later read fails → readiness UNKNOWN: no next-step chip, no Run', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const approve = approveChipOf(await proposeLimit());
+    expect(approve, 'control: a real limit proposal was offered').toBeDefined();
+    const writesBefore = graphWrites.get(SCENARIO) ?? 0;
+    failReadsAfterWrites = writesBefore; // every read after this approval's write is refused
+    const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    expect((graphWrites.get(SCENARIO) ?? 0) - writesBefore, 'the write landed').toBe(1);
+    // The write landed (`mutated`) but its own confirming read failed: the approval cannot say it applied.
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', mutated: true, refusal: 'not_confirmed' })]);
+    expect(readsRefused, 'control: a read after the write really was refused').toBeGreaterThan(0);
+    const ids = t2.suggested_actions.map((c) => c.id);
+    expect(ids, 'an unknown readiness is never a blocked claim').not.toContain('agent-suggest-what-it-needs');
+    expect(ids, 'nor a Run offer').not.toContain('agent-run-analysis');
   }, 120_000);
 
   it('(8) RED: the model moves before the approval → nothing written; and the DOOR refuses a stale base as stale, byte-identical', async () => {

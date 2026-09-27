@@ -101,6 +101,19 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
     expect(t!.route_total_ms).toBeGreaterThanOrEqual(t!.total_ms);
   });
 
+  it('RED (C6, #70 5857893554): a Run reads the model ONCE after it runs — the post-run read and the final readback share it', async () => {
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
+    } });
+    expect(r.statusCode).toBe(200);
+    const d = (r.json() as { _diagnostic_trace: { timing: { dispatches: { path: string }[] } } })._diagnostic_trace.timing.dispatches;
+    const paths = d.map((x) => x.path);
+    const runAt = paths.indexOf('/orchestrate/v2/turn');
+    expect(runAt, JSON.stringify(paths)).toBeGreaterThanOrEqual(0);
+    const readsAfterRun = paths.slice(runAt + 1).filter((p) => p === '/assist/v1/scenarios/:scenario/graph').length;
+    expect(readsAfterRun, JSON.stringify(paths)).toBe(1);
+  });
+
   it('RED (C6, #70 5857659587): the trace names every internal dispatch the turn made, timed, with the scenario id masked', async () => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },

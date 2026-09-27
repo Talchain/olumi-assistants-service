@@ -48,6 +48,7 @@ import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { answerIsIncomplete, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
+import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js';
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
 import { commitLimitEditInProcess, commitOptionLevelsInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
@@ -1563,21 +1564,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // safe to release its claim (nothing sent) or must leave it (outcome unknown).
     let writesDispatched = 0;
     /**
-     * ⭐ ONE READ OF THE MODEL PER TURN WHEN NOTHING WAS WRITTEN (slice C1c; served replay of Paul's transcript on
-     * 339ed34, 27 Sep: an ordinary turn read the scenario twice — the state the Agent is given, and the readback
-     * for this response — at ~1.3 s of server time each). Only a READ-ONLY turn reuses its read: once the turn
-     * writes anything (every write goes through this dispatch or bumps `writesDispatched`) nothing is reused, and
-     * a write turn reads exactly as before — a changed model is never answered from before it changed.
+     * ⭐ ONE READ OF THE MODEL PER WRITE EPOCH (C6; widens slice C1c, which reused a read only before the first
+     * write). See `turnReadCache`: a graph read is reused while nothing else has been dispatched or written since
+     * it was taken: the epoch advances when any other dispatch or in-process writer (`readCache.around`) finishes, and a
+     * kept read carries the epoch it STARTED in. So a read after a write always sees it. Served: 22 reads at ~1.1 s in one
+     * journey; an approve made 4.
      */
-    const graphReadPath = `/assist/v1/scenarios/${scenarioId}/graph`;
-    let graphRead: Awaited<ReturnType<typeof dispatch>> | undefined;
-    const readingDispatch: typeof dispatch = async (path, body) => {
-      if (path !== graphReadPath) return dispatch(path, body);
-      if (graphRead !== undefined && writesDispatched === 0) return graphRead;
-      const res = await dispatch(path, body);
-      graphRead = res.status === 200 && writesDispatched === 0 ? res : undefined;
-      return res;
-    };
+    const readCache = turnReadCache(dispatch, `/assist/v1/scenarios/${scenarioId}/graph`);
+    const readingDispatch: typeof dispatch = readCache.dispatch;
     const countingDispatch: typeof dispatch = async (path, body) => {
       if (path.endsWith('/graph/register') || path === '/orchestrate/v2/turn') writesDispatched += 1;
       return readingDispatch(path, body);
@@ -1592,7 +1586,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let firstAnalysis: { outcome: FirstAnalysisOutcome; ms: number; constructionTurnId: string; revision: string } | undefined;
     const runFirstAnalysis = async (input: Parameters<typeof runFirstAnalysisAfterConstruction>[0]): Promise<FirstAnalysisOutcome> => {
       const t0 = Date.now();
-      const outcome = await runFirstAnalysisAfterConstruction({ ...input, onDispatch: () => { writesDispatched += 1; } });
+      const outcome = await readCache.around(() => runFirstAnalysisAfterConstruction({ ...input, onDispatch: () => { writesDispatched += 1; } }));
       firstAnalysis = { outcome, ms: Date.now() - t0, constructionTurnId: input.constructionTurnId, revision: input.revisionHash };
       return outcome;
     };
@@ -1643,20 +1637,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // ⭐ Whole-request atomicity (ChatGPT #70 5847200462): N option levels and their links as ONE commit, in-process.
         commitOptionLevels: async (input) => {
           writesDispatched += 1;
-          return commitOptionLevelsInProcess(input, String(req.id));
+          return readCache.around(() => commitOptionLevelsInProcess(input, String(req.id)));
         },
         // ⭐ C5: the provisional view is accepted only while the analysis withholds its leader — read from THIS route's
         // readback through the wire gate's own predicate, so the capability and the gate below cannot disagree.
-        readLeaderStanding: async (sid: string) => leaderStandingOf(await readBackState(dispatch, sid)),
+        readLeaderStanding: async (sid: string) => leaderStandingOf(await readBackState(readingDispatch, sid)),
         // ⭐ SLICE C2 (Canonical #70 5855234599): the product's add-risk door (ONE held change) and limit door (ONE commit),
         // in-process. Each commits a turn row, so each counts as a write.
         holdAddRisk: async (input) => {
           writesDispatched += 1;
-          return holdAddRiskInProcess(input, String(req.id));
+          return readCache.around(() => holdAddRiskInProcess(input, String(req.id)));
         },
         commitLimitEdit: async (input) => {
           writesDispatched += 1;
-          return commitLimitEditInProcess(input, String(req.id));
+          return readCache.around(() => commitLimitEditInProcess(input, String(req.id)));
         },
       },
     );
@@ -1778,7 +1772,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       let canonicalAfterRun: { analysis_state?: unknown; analysis_ready?: unknown; run_delta?: unknown; run_delta_absence_reason?: string } = {};
       let standingAfterRun: LeaderStanding | null = null;
       try {
-        const st = await readBackState(dispatch, scenarioId);
+        const st = await readBackState(readingDispatch, scenarioId);
         /**
          * ⭐ WHAT CHANGED SINCE THE LAST RUN REACHES THE INTERPRETER TOO (served `263dbd5`, final witness `053159Z/15`:
          * the reply said "This run does not supply a precomputed before/after delta" while the response carried one and
