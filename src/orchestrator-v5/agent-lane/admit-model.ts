@@ -510,9 +510,15 @@ function framedObservedState(f: {
   baseline_value: number | null; unit: string | null; provenance: string; plausible_max?: number | null;
 }): Record<string, unknown> {
   const raw = f.baseline_value as number;
+  // ⛔ A KNOWN BASELINE THE BUILDER INFERRED IS OLUMI'S, NOT NOBODY'S (AIQ #70 5852160429). Source-less, served
+  // eng-hiring (`2d0df14`) left salary spend and both headcounts unauthored: "I supplied N values" skipped them and
+  // the magnitude reader (`knownBaseline`) took the unauthored 0 as today's known level. Same author as
+  // `estimatedObservedState` and `withdrawUnstatedBaselineStamps` (#2076). "Today is 100 % of today" is a definition,
+  // not an estimate, so a restated change keeps no author (review 5835754404 row 4a; MG 5852168578).
+  const definitional = f.unit === TODAY_UNIT && raw === TODAY_LEVEL;
   const base = {
     ...(f.unit ? { unit: f.unit } : {}),
-    ...(f.provenance === 'explicit' ? { source: 'brief_extraction' } : {}),
+    ...(f.provenance === 'explicit' ? { source: 'brief_extraction' } : definitional ? {} : { source: 'cee_inference' }),
   };
   const cap = f.plausible_max;
   // Already a proportion, or no usable range: leave it exactly as it was. A
