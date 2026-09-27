@@ -187,7 +187,12 @@ export function buildCandidateSchema(): Record<string, unknown> {
         provenance,
       }, ['outcome', 'operation', 'factors', 'provenance']) },
     unknowns: { type: 'array', items: { type: 'string' } },
-  }, ['goal', 'constraints', 'options', 'factors', 'risks', 'outcomes', 'links', 'identities', 'unknowns']);
+    // ⭐ THE QUESTION CARD'S TITLE (Paul, 27 Sep: served "Decision: MRR"). COPIED, never written: admission takes it only
+    // when it is verbatim brief text (`admit-model.ts` `decisionEntityFor`). REQUIRED so strict output must say "no
+    // question" (null) rather than omit it.
+    decision_question: { anyOf: [{ type: 'string' }, { type: 'null' }], description:
+      'The question the brief asks, copied VERBATIM from the brief (only the question itself, without any lead-in clause), or null if it asks none.' },
+  }, ['goal', 'constraints', 'options', 'factors', 'risks', 'outcomes', 'links', 'identities', 'unknowns', 'decision_question']);
 }
 
 export const BUILD_INSTRUCTIONS = [
@@ -263,6 +268,7 @@ export const BUILD_INSTRUCTIONS = [
   'STATE EACH LINK’S SIZE IN NATURAL UNITS: `effect_amount` is the signed change in the target’s own unit (in points for a percentage, so 4% to 3% is -1) caused by `effect_per_source_change` of the source in its own unit (1 for switching a yes/no on), with `effect_provenance` "explicit" only when the user stated that size, and all three null when you cannot give a defensible size.',
   'GIVE EVERY FACTOR A `plausible_max`. IT IS REQUIRED AND NEVER NULL, for every factor, whether or not it has a baseline today. A number above 1 with no range beside it CANNOT BE ANALYSED \u2014 the engine has nothing to read it against, Olumi refuses the WHOLE analysis rather than guess, and NO LATER EDIT CAN SUPPLY THE RANGE: the only remedy is rebuilding the model. The range is a SCALE, not a forecast: 100 for a percentage or a score out of 100, exactly 1 for something already between 0 and 1, and a round number comfortably above anything realistic for a count, an amount or a price. Measured twice on real models.',
   'Labels are NAMES, not sentences.',
+  'Set `decision_question` to the question the brief asks, copied VERBATIM from the brief (only the question itself, without any lead-in clause), or null if it asks none. Never reword it.',
   'Output only the schema.',
 ].join(' ');
 
@@ -374,9 +380,21 @@ export async function findConstructionVersion(
  * the model links to it by its exact label; the unchanged identity check still
  * refuses anything else.
  */
-export function retrySchemaPinningGoal(goal: CandidateModel['goal']): Record<string, unknown> {
+export function retrySchemaPinningGoal(
+  goal: CandidateModel['goal'],
+  /**
+   * The first draft's copied question, pinned the same way: a compaction may not re-choose the question either, and a
+   * question admission took as the user's is user material (`keepsEveryUserStatedIdentity`). Absent (a candidate from
+   * before the key) pins to "no question" (null).
+   */
+  decisionQuestion?: string | null,
+): Record<string, unknown> {
   const schema = buildCandidateSchema();
-  const goalSchema = (schema['properties'] as Record<string, Record<string, unknown>>)['goal'];
+  const properties = schema['properties'] as Record<string, Record<string, unknown>>;
+  properties['decision_question'] = typeof decisionQuestion === 'string'
+    ? { type: 'string', enum: [decisionQuestion] }
+    : { type: 'null' };
+  const goalSchema = properties['goal'];
   if (goalSchema === undefined) return schema;
   goalSchema['properties'] = {
     metric: { type: 'string', enum: [goal.metric] },
@@ -491,6 +509,31 @@ function unattachedLimitLines(model: CandidateModel, loss: readonly { readonly f
     if (seen.has(key)) continue;
     seen.add(key);
     lines.push(`${users ? `Your limit "${limit}"` : `The limit Olumi proposed ("${limit}")`} is not in the model: no part of the model is "${c.metric}", so the analysis cannot check it.`);
+  }
+  return lines;
+}
+/**
+ * ⛔ A STRICT LIMIT THE STORE WIDENS IS SAID (Codex PJ-A2 row 14; MG bank `strict-operator` 4e6f0511, rebuilt here).
+ * "under 4%" arrives typed as `<`, and admission keeps it only where the canonical store can hold it
+ * (`admit-constraint.ts` `admittedOperator`). Today it cannot, so the limit is held as "at most 4%" and exactly 4%
+ * counts as meeting it. Admission records that widening per limit (`goal_constraints[<node>].operator`, `before` the
+ * typed operator, `after` the held one); until now it never reached the Agent, so the user's excluded boundary was
+ * counted as met without a word. Words, never symbols, from the typed operators alone; the user's only when they stated it.
+ */
+function widenedLimitLines(admitted: Pick<AdmittedModel, 'loss' | 'goal_constraints'>): string[] {
+  const lines: string[] = [];
+  for (const l of admitted.loss) {
+    const nodeId = /^goal_constraints\[(.+)\]\.operator$/.exec(l.field_path)?.[1];
+    if (nodeId === undefined || typeof l.before !== 'string' || typeof l.after !== 'string') continue;
+    const c = admitted.goal_constraints.find((x) => x.node_id === nodeId && x.operator === l.after);
+    const stated = OPERATOR_WORDS[l.before];
+    const held = OPERATOR_WORDS[l.after];
+    if (c === undefined || c.label === undefined || stated === undefined || held === undefined) continue;
+    const unit = c.unit === undefined || c.unit === '' ? '' : c.unit.startsWith('%') ? c.unit : ` ${c.unit}`;
+    const amount = `${c.value}${unit}`;
+    const limit = `${c.label} ${stated} ${amount}`;
+    lines.push(`${c.provenance === 'explicit' ? `Your limit "${limit}"` : `The limit Olumi proposed ("${limit}")`} is held as `
+      + `"${held} ${amount}": the model cannot hold a strict limit yet, so exactly ${amount} counts as meeting it.`);
   }
   return lines;
 }
@@ -1049,7 +1092,7 @@ export async function buildModelFromBrief(
   const firstCandidate = candidate;
   let preparation = prepareProvisionalCandidate(candidate);
   candidate = preparation.candidate;
-  let admitted = admitCandidateModel(candidate, {});
+  let admitted = admitCandidateModel(candidate, {}, brief);
   preparation = gapsOnRegisteredOptions(preparation, firstCandidate, admitted);
 
   /**
@@ -1157,13 +1200,13 @@ export async function buildModelFromBrief(
           : `${brief}\n\nYour previous model, to shrink: ${JSON.stringify(firstCandidate)}`,
         max_output_tokens: budget.max_output_tokens,
         reasoning_effort: budget.reasoning_effort,
-        schema: retrySchemaPinningGoal(candidate.goal),
+        schema: retrySchemaPinningGoal(candidate.goal, candidate.decision_question),
       });
       if (retry.text.length > 0) {
         const retryRaw = JSON.parse(retry.text) as CandidateModel;
         const retryPrepared = prepareProvisionalCandidate(retryRaw);
         const retryCandidate = retryPrepared.candidate;
-        const retryAdmitted = admitCandidateModel(retryCandidate, {});
+        const retryAdmitted = admitCandidateModel(retryCandidate, {}, brief);
         // ⛔ Leave out only what the FIRST draft never registered: withholding a registered option never closes its gaps in the count (adversarial verify of 843c0960).
         const firstGone = new Set((admitted.options_withheld ?? []).map((w) => canonicalLabel(w.option)));
         const firstRegistered = new Set(firstCandidate.options.map((o) => canonicalLabel(o.label)).filter((l) => !firstGone.has(l)));
@@ -1269,6 +1312,9 @@ export async function buildModelFromBrief(
    * "GraphV3 has nowhere to put it" / "a consumer cannot tell a floor from a ceiling" — would be false, and goes.
    * What is NOT held keeps its line, exactly as before.
    */
+  // ⭐ MG's HORIZON ATTESTATION (`attestHorizon`, PJ-A2 rows 25–27) decides the deadline G1 holds, and its verdict is
+  // `statedGoal.horizon` whatever it is. ⚠ HAND-OFF: an `unresolved` deadline's own words ("by Q3") have no stored field
+  // yet; they stay on this typed result until the joint work frame (Codex rows 2–3, 27) gives them one.
   const statedGoal = holdStatedGoalAttributes(withdrawUnstatedBaselineStamps(admitted.nodes, brief), candidate.goal, brief);
   if (statedGoal.held.horizon || statedGoal.held.direction) {
     admitted = {
@@ -1493,6 +1539,7 @@ export async function buildModelFromBrief(
         .map((l) => l.after)
         .filter((a): a is string => typeof a === 'string'),
       ...unattachedLimitLines(candidate, admitted.loss),
+      ...widenedLimitLines(admitted),
       ...preparation.additions_without_total.map(sayAdditionWithoutTotal),
       ...preparation.provenance_demoted.map((d) =>
         `I've treated your ${d.value} for "${d.factor}" in "${d.option}" as a working figure because the current ` +
