@@ -12,6 +12,8 @@
  *   0 `limit_risk_leader`     — the named leader probably breaks a limit it was scored on. Not a choice: saying it is
  *                               the CONDITION for naming the leader (AI Quality claim permission 5842498806).
  *   1 `missing_level`         — an option the run could not test for want of a level → give its level.
+ *     `missing_value`         — a top-3 driver (PLoT's structural order) the model holds NO value for → give its value
+ *                               (PJ-B3; `unvalued-driver-card.ts`): never presented as an analysed driver.
  *   2 `no_option_meets_limit` — a SCORED limit no option meets (F-LIMIT tiers) → change or add an option.
  *     `real_figure`           — a limit checked only against Olumi's estimate / an assumed figure → give the real one.
  *   3 (reserved) value of information — NOT in this selector: AI Quality 5855170731 ruled factor EVPPI structurally
@@ -52,11 +54,13 @@ import { everyLimitProvedUnanchored, limitNodeLabels } from './bound-graph.js';
 import { buildNearTieCard } from './near-tie-card.js';
 import { buildEstimatedLimitCard } from './estimated-limit-card.js';
 import { buildLeaderLimitRiskCard } from './leader-limit-risk-card.js';
+import { buildUnvaluedDriverCard } from './unvalued-driver-card.js';
 import { COACHING_BLOCK_BODY_MAX } from './fragile-edge-offer-text.js';
 
 export type NextMoveKind =
   | 'limit_risk_leader'
   | 'missing_level'
+  | 'missing_value'
   | 'no_option_meets_limit'
   | 'real_figure'
   | 'link_view'
@@ -66,6 +70,7 @@ export type NextMoveKind =
 export const NEXT_MOVE_CAPABILITY: Readonly<Record<NextMoveKind, string>> = Object.freeze({
   limit_risk_leader: 'ask_only',
   missing_level: 'propose_option_interventions',
+  missing_value: 'propose_assumptions',
   no_option_meets_limit: 'propose_new_option',
   real_figure: 'propose_starting_point',
   link_view: 'propose_link_strength',
@@ -221,6 +226,11 @@ export function selectNextMove(args: NextMoveInputs): NextMoveSelection {
     const ids = untestedOptions(analysisReady, input.analysisResult).flatMap((o) => (o.factorId !== null ? [o.id, o.factorId] : [o.id]));
     return { move: withCaveatSentence(moveOf('missing_level', untested, ids), caveats), reason: null, caveats };
   }
+
+  // 1b — a factor the result depends on most (PLoT's top 3) that the model holds no value for (PJ-B3, DL 5860325629):
+  // never said as an analysed driver — said as the ask it is.
+  const unvalued = buildUnvaluedDriverCard(input, boundGraph);
+  if (unvalued !== null) return { move: withCaveatSentence(moveOf('missing_value', unvalued), caveats), reason: null, caveats };
 
   // 2 — a limit gap the user can close.
   if (noOptionMeets !== null) return { move: moveOf('no_option_meets_limit', noOptionMeets), reason: null, caveats };
