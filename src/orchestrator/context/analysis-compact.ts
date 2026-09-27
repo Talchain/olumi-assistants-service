@@ -109,7 +109,13 @@ export interface AnalysisResponseSummary {
   winner: {
     option_id: string;
     option_label: string;
-    win_probability: number;
+    /**
+     * `null` = ABSENT: the run declared this leader but the same result carries no probability CEE can tie
+     * to its id (A5, DL #70 5855437928). Only the prior-fact fallback's minimal branch produces it
+     * (`resolveLeadingWinProbability`, orchestrator-v5/context/analysis-fallback.ts) — never read it as 0.
+     * `compactAnalysis` always sets a number.
+     */
+    win_probability: number | null;
     /**
      * Trust-spine board #1 (CEE half). Set true when the leading option
      * violates a hard constraint (CEE_CONSTRAINT_INFEASIBLE_GATE ON). A typed

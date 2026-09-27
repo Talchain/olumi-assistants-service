@@ -65,10 +65,12 @@ describe('AX1: a Run whose leader is withheld for the product still answers with
     const b = await pressRun();
     expect(b._agent?.break_even).toMatchObject({
       goal: 'MRR', unit: 'GBP/month', baseline_price: 49, baseline_volume: 300, baseline_volume_by: 'approved', baseline_goal: 14_700,
+      // A5 (DL #70 5855437928): the graph ids ride beside the labels on the wire.
+      goal_id: 'mrr', price_factor_id: 'pro_plan_price', volume_factor_id: 'pro_paying_subscribers',
       options: [
-        { option: 'Raise Pro to £59', price: 59, price_by: 'user', keep_at_least: 250 },
-        { option: 'Hold £49 with AI release', price: 49, price_by: 'user' },
-        { option: 'Raise Pro to £54', price: 54, price_by: 'olumi', keep_at_least: 273 },
+        { option: 'Raise Pro to £59', option_id: 'raise_pro_to_59', price: 59, price_by: 'user', keep_at_least: 250 },
+        { option: 'Hold £49 with AI release', option_id: 'hold_49_with_ai_release', price: 49, price_by: 'user' },
+        { option: 'Raise Pro to £54', option_id: 'raise_pro_to_54', price: 54, price_by: 'olumi', keep_at_least: 273 },
       ],
       target: { value: 20_000, needs: [{ price: 59, volume: 339 }, { price: 54, volume: 371 }, { price: 49, volume: 409 }] },
     });
