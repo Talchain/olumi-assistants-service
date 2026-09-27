@@ -2291,8 +2291,10 @@ function admitOnce(
     ...(widened.proposed_outcomes ?? []).map((o) => ({ label: o.label, kind: 'outcome' as const, provenance: 'ai_proposed' })),
   ];
 
-  // The goal's operator and horizon have NO GraphV3 home. Recording them is the
-  // only way they survive the projection at all.
+  // The goal's operator and horizon are recorded as losses HERE, where the brief is not known. GraphV3 now
+  // declares `goal_direction` / `goal_horizon_months` (G1), and `build-model.ts` holds each on the goal node
+  // only when the brief attests it (`holdStatedGoalAttributes`) — dropping this line then, since it is no
+  // longer a loss. Unattested, the line stands and is said, exactly as before.
   //
   // ⚠ `REPAIR_CODES` has no member meaning "a representation was dropped" —
   // the closest is RESOLVE_BELIEF_PRECEDENCE. That is a gap in the shared

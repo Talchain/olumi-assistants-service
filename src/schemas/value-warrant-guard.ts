@@ -784,6 +784,21 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
       "erasing them; goal-target-stamp-survives-mutation.test.ts) and neither reads " +
       "nor writes them; CEE's own target stays `goal_threshold_raw` with its unit.",
   },
+  // ── SCOPE-AMBIGUOUS: the goal's stated deadline (declared 27 Sep 2026, G1) ───
+  {
+    id: "scope-ambiguous:cee.NodeV3::goal_horizon_months",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — the warrant is field-scoped by construction, not by a sibling. " +
+      "Its UNIT is its name (whole months; `.int().positive()`), and its ATTESTATION " +
+      "is its one writer's rule: construction writes it ONLY when the brief writes " +
+      "that literal \"N months\" / \"N-month\" (`holdStatedGoalAttributes`, " +
+      "stated-by-user.ts), no producer may set it (field-safety CEE-owned roots), " +
+      "and absence means unattested, never defaulted. The level-scoped qualifiers " +
+      "(`threshold_source`, `goal_threshold_unit`, …) are about the target and are " +
+      "not read as its warrant. It is a DURATION, not a level of the goal metric: " +
+      "out of the analysis hash and outside `carriesValue` / `NODE_QUANTITY_FIELDS`.",
+  },
 ];
 
 // ============================================================================
