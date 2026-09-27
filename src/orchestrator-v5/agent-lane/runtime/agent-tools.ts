@@ -19,6 +19,18 @@ import { sendableQuery } from './public-research.js';
  * asked "does slight mean weak?"; the user's "Yes." named no band, so it was refused, and the user was then told to say
  * "weak" — a word the canvas never shows. `bandTheUserWrote` already grounds "slight" (#2008); this tells the model so.
  */
+/**
+ * ⭐ THE USER'S OWN WORDS, PROPOSED AS A READING THEY APPROVE (slice C3; ruling ChatGPT 5854968869 P3B). Measured on
+ * Paul's served transcript (27 Sep): "price sensitivity is very high" was refused twice, and recording "very strong"
+ * took four turns. The capability admits the phrase only when it is written in THIS turn's typed words
+ * (`wordsTheUserWrote`), so the Agent cannot invent it; the approve button shows the reading.
+ */
+export const FROM_WORDS_DESCRIPTION =
+  'When the user described the strength in their own words rather than a band word, give their exact phrase here and your '
+  + 'reading in `strength`; the user approves your reading. Copy it exactly from their message this turn (for example '
+  + '"very high"); never a phrase they did not write.';
+const FROM_WORDS = { type: 'string', description: FROM_WORDS_DESCRIPTION } as const;
+
 export const SLIGHT_IS_WEAK =
   ' The canvas calls the lowest band Slight: when the user calls a link slight, that IS `weak` \u2014 pass `weak`, and never ask '
   + 'whether slight means weak. When you ask the user for a band, use the canvas\u2019s words: slight, moderate, strong or very strong.';
@@ -100,6 +112,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'proposal and returns its id, which you keep for authorise_change: show the user what it changes, never the id, before asking them to approve. ' +
       'Use the labels exactly as get_canonical_state returned them. ' +
       'The link is recorded with `strength` as the user\u2019s own estimate, so give ONLY the band the user named for it in this message; ' +
+      'if they described it in their own words ("very high"), give your reading in `strength` and their exact phrase in `from_words`, and show it; ' +
       'if they named none, ask how strong the effect is first \u2014 a band they did not say is refused.' + SLIGHT_IS_WEAK,
     parameters: obj({
       from_label: { type: 'string' },
@@ -107,8 +120,9 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       direction: { type: 'string', enum: ['positive', 'negative'] },
       strength: {
         type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'],
-        description: 'The band the user said for this link in THIS message, in their own words. Never your own guess.',
+        description: 'The band the user said for this link in THIS message, in their own words \u2014 or your reading of their own words, given with `from_words`. Never your own guess.',
       },
+      from_words: FROM_WORDS,
       rationale: { type: 'string', description: 'Why this link matters, in the user’s terms.' },
     }, ['from_label', 'to_label', 'direction', 'rationale']),
   },
@@ -229,12 +243,15 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'and returns its id, which you keep for authorise_change: show the user what it records, never the id, before they approve. '
       + 'The user\u2019s word is one of Olumi\u2019s strength bands. If the link already sits in that band, its strength is kept and only '
       + 'recorded as theirs; otherwise it is set to the middle of that band, and the result says the figure so you can tell them. '
-      + 'Give `direction` ONLY when the user said the link pushes the other way. Never use this for a strength the user did not state: '
-      + 'if they have not named a band in their own words, ask which it is first \u2014 a band they did not say is refused.' + SLIGHT_IS_WEAK,
+      + 'Give `direction` ONLY when the user said the link pushes the other way. When they described the strength in their own words '
+      + '("very high", "hardly at all"), give your reading in `strength` and their exact phrase in `from_words`: the user approves your reading. '
+      + 'Never use this for a strength the user did not state: if they said nothing about how strong it is, ask which band it is first '
+      + '\u2014 a band they did not say is refused.' + SLIGHT_IS_WEAK,
     parameters: obj({
       from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
       to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
-      strength: { type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'], description: 'The strength the user stated.' },
+      strength: { type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'], description: 'The strength the user stated, or your reading of their own words, given with `from_words`.' },
+      from_words: FROM_WORDS,
       direction: { type: 'string', enum: ['positive', 'negative'], description: 'ONLY when the user said the link pushes the other way.' },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
     }, ['from_label', 'to_label', 'strength', 'rationale']),
@@ -417,12 +434,16 @@ export interface AgentCapabilities {
     from_label: string; to_label: string; direction: 'positive' | 'negative'; rationale: string;
     /** The band the user typed THIS turn; without it (or with one they did not type) nothing is prepared. */
     strength?: 'weak' | 'moderate' | 'strong' | 'very strong';
+    /** The user's own phrase THIS turn when `strength` is Olumi's reading of it (slice C3). */
+    from_words?: string;
   }): Promise<ToolResult>;
   authoriseChange(ctx: AgentToolContext, args: { proposal_id: string }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */
   proposeLinkStrength?(ctx: AgentToolContext, args: {
     from_label: string; to_label: string; strength: 'weak' | 'moderate' | 'strong' | 'very strong';
     direction?: 'positive' | 'negative'; rationale: string;
+    /** The user's own phrase THIS turn when `strength` is Olumi's reading of it (slice C3). */
+    from_words?: string;
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */
   proposeGoalTarget?(ctx: AgentToolContext, args: {

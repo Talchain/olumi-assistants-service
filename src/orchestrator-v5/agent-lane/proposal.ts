@@ -98,6 +98,23 @@ export interface StructuredProposal {
   readonly validation: ProposalValidation;
   /** What the user was actually shown. Stored so the receipt can quote it. */
   readonly public_label: string;
+  /**
+   * ⭐ OLUMI'S READING OF THE USER'S OWN WORDS, which the user approves (slice C3). Present only when a typed value
+   * (a link's band) was not named literally but read from the user's phrase — "very high" read as very strong — so
+   * the approve button can show the reading, and the approval is of that reading. Part of the id when present.
+   */
+  readonly interpretation?: ProposalInterpretation;
+}
+
+/** A typed value read from the user's own phrase, as the approve button shows it. */
+export interface ProposalInterpretation {
+  readonly field: 'band';
+  /** The user's phrase, verbatim as the Agent gave it (checked against this turn's typed words). */
+  readonly from_words: string;
+  /** The typed value it is read as (a strength band). */
+  readonly reading: string;
+  /** What the user is shown: `Record as <band> (your "<from_words>")`. */
+  readonly shown_as: string;
 }
 
 export type ProposalContent = Omit<StructuredProposal, 'proposal_id'>;
@@ -135,6 +152,8 @@ export function computeProposalId(c: ProposalContent): string {
     [c.provenance.authored_by, c.provenance.basis ?? null],
     [c.validation.admitted, c.validation.loss_count, [...c.validation.refusals].sort()],
     c.public_label,
+    // Appended only when present, so every proposal without a reading keeps the id it always had.
+    ...(c.interpretation === undefined ? [] : [c.interpretation]),
   ]));
   return 'prop_' + createHash('sha256').update(canonical).digest('hex').slice(0, 32);
 }
