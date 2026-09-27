@@ -290,7 +290,7 @@ export function assessContextFreshness(
 /** A tool that was withheld, and the reason, so the omission is never silent. */
 export interface OmittedTool {
   readonly name: string;
-  readonly reason: 'context_already_supplied';
+  readonly reason: 'context_already_supplied' | 'model_already_exists';
 }
 
 export interface ToolEligibility {
@@ -302,10 +302,22 @@ export interface ToolEligibility {
 
 /**
  * The tool whose whole job is to fetch what a fresh packet already contains.
- * This is the only tool eligibility removes, and it is restored the moment the
- * context is anything other than fresh.
+ * It is restored the moment the context is anything other than fresh. (The
+ * only other omission, `BUILD_TOOL` below, needs the same fresh evidence.)
  */
 const CONTEXT_EQUIVALENT_TOOL = 'get_canonical_state';
+
+/**
+ * ⛔ A BUILD IS NOT OFFERED ON A MODEL THAT HAS ONE (PJ-C1, #70 5859578339). `build_model_from_brief` refuses on any
+ * model with entities (`model_already_exists`), so on a populated turn its schema is paid for on every call and never
+ * usable. Withheld ONLY when a FRESH packet shows addressable entities — the same evidence the C1 omission needs; an
+ * empty model, an absent packet or a stale one keeps it. The server's refusal stays the boundary either way.
+ */
+const BUILD_TOOL = 'build_model_from_brief';
+const holdsEntities = (state: unknown): boolean => {
+  const entities = (state as { entities?: unknown } | null | undefined)?.entities;
+  return Array.isArray(entities) && entities.length > 0;
+};
 
 /**
  * Does this state carry entities the Agent can actually ACT on?
@@ -404,11 +416,13 @@ export function eligibleTools(input: {
     return { tools: allowed, omitted: [], freshness };
   }
 
-  const tools = allowed.filter((t) => t.name !== CONTEXT_EQUIVALENT_TOOL);
-  const omitted: OmittedTool[] =
-    tools.length === allowed.length
-      ? []
-      : [{ name: CONTEXT_EQUIVALENT_TOOL, reason: 'context_already_supplied' }];
+  const populated = holdsEntities(input.context?.state);
+  const tools = allowed.filter((t) => t.name !== CONTEXT_EQUIVALENT_TOOL && !(populated && t.name === BUILD_TOOL));
+  const offered = new Set(allowed.map((t) => t.name));
+  const omitted: OmittedTool[] = [
+    ...(offered.has(CONTEXT_EQUIVALENT_TOOL) ? [{ name: CONTEXT_EQUIVALENT_TOOL, reason: 'context_already_supplied' as const }] : []),
+    ...(populated && offered.has(BUILD_TOOL) ? [{ name: BUILD_TOOL, reason: 'model_already_exists' as const }] : []),
+  ];
   return { tools, omitted, freshness };
 }
 
