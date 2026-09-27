@@ -36,7 +36,7 @@ describe('AX1 at the user\'s own figures: a stated response names the arithmetic
     expect(be.stated?.at_your_figures?.map((x) => [x.option, x.volume, x.goal_value])).toEqual([
       ['Raise Pro to £59', 260, 15_340], ['Hold £49 with AI release', 300, 14_700], ['Raise Pro to £54', 280, 15_120]]);
     const said = breakEvenLine(be);
-    expect(said).toContain('At your own figures, Raise Pro to £59 gives £15,340/month (260 at £59/month), Hold £49 with AI release gives £14,700/month (300 at £49/month) and Raise Pro to £54 gives £15,120/month (280 at £54/month).');
+    expect(said).toContain('At your own figures, Raise Pro to £59 gives £15,340/month (260 at £59/month), Hold £49 with AI release gives £14,700/month (300 at £49/month, as today) and Raise Pro to £54 gives £15,120/month (280 at £54/month).');
     expect(said).toContain('On this arithmetic, Raise Pro to £59 gives the most MRR.');
     expect(said).toContain('This is arithmetic on your figures, not the analysis ranking the options.');
     expect(said).not.toContain('it says nothing about how many will stay');
@@ -52,7 +52,7 @@ describe('AX1 at the user\'s own figures: a stated response names the arithmetic
   it('CONTRAST: the user\'s count but no stated response → the break-even stays, and Olumi asks at each compared price', () => {
     const said = breakEvenLine(breakEvenFor(graph())!);
     expect(said).toContain('it says nothing about how many will stay.');
-    expect(said).toContain('To compare them at your own figures, tell me how many Pro paying subscribers you would expect at £59/month or £54/month.');
+    expect(said).toContain('To compare them at your own figures, tell me how many Pro paying subscribers you would expect at £54/month or £59/month.');
   });
 
   it('CONTRAST (AIQ Q1): a rival at a price with no stated count → no leader; the ask names only that price', () => {
@@ -64,7 +64,7 @@ describe('AX1 at the user\'s own figures: a stated response names the arithmetic
   it('STALE (AIQ): today\'s count changed since it was stated → nothing is named from it; Olumi asks again', () => {
     const be = breakEvenFor(graph({ fact: FACT, change: (ns) => { node(ns, 'pro_paying_subscribers').observed_state!.raw_value = 320; } }))!;
     expect(be.stated?.leader).toBeUndefined();
-    expect(be.stated?.ask).toEqual({ at_prices: [59, 54] });
+    expect(be.stated?.ask).toEqual({ at_prices: [54, 59] });
   });
 
   it('STALE (AIQ): an option\'s price changed (£59 → £64) → that price has no stated count; Olumi asks for it', () => {
@@ -85,7 +85,7 @@ describe('AX1 at the user\'s own figures: a stated response names the arithmetic
     const notUsers = breakEvenFor(graph({ fact: { ...FACT, at: [{ ...at(59, 260), by: 'olumi' }, at(54, 280)] } }))!;
     expect(notUsers.stated).toEqual({ ask: { at_prices: [59] } });
     const otherOperand = breakEvenFor(graph({ fact: { ...FACT, operand_node_id: 'monthly_churn' } }))!;
-    expect(otherOperand.stated).toEqual({ ask: { at_prices: [59, 54] } });
+    expect(otherOperand.stated).toEqual({ ask: { at_prices: [54, 59] } });
   });
 
   it('STALE (AIQ 3): the identity moved — its operand is now another factor → the fact no longer answers it; nothing named', () => {
@@ -105,22 +105,59 @@ describe('AX1 at the user\'s own figures: a stated response names the arithmetic
     const changed = breakEvenFor(graph({ fact: FACT, change: (ns) => { node(ns, 'pro_paying_subscribers').observed_state!.unit = 'paying accounts'; } }));
     expect(changed?.stated?.leader).toBeUndefined();
     const noUnit = breakEvenFor(graph({ fact: { ...FACT, today: { value: 300, by: 'user' } } }))!;
-    expect(noUnit.stated).toEqual({ ask: { at_prices: [59, 54] } });
+    expect(noUnit.stated).toEqual({ ask: { at_prices: [54, 59] } });
     const caseOnly = breakEvenFor(graph({ fact: { ...FACT, today: { value: 300, unit: '  Subscribers ', by: 'user' } } }))!;
     expect(caseOnly.stated?.leader, 'trimmed and case-folded, as limitTargetCaps compares').toBe('Raise Pro to £59');
   });
 
-  it('RED (AIQ B1): an option also moves another lever from today (the AI release is 0 today, every option sets 1) → no figures, no leader, no ask; the break-even stays', () => {
+  it('RED (AIQ B1, MG refinement): the options share a lever that differs from today (AI 0 today, all set 1) → today\'s count cannot stand in for £49; £49 is asked too, no leader', () => {
     const be = breakEvenFor(graph({ fact: FACT, aiToday: 0 }))!;
-    expect(be.stated).toEqual({});
+    expect(be.stated).toEqual({ ask: { at_prices: [49] }, with: ['AI feature availability on'] });
     const said = breakEvenLine(be);
-    expect(said).not.toContain('At your own figures');
     expect(said).not.toContain('gives the most');
-    expect(said).toContain('it says nothing about how many will stay.');
+    expect(said).toContain('you would expect at £49/month, with AI feature availability on.');
   });
 
-  it('CONTRAST (AIQ B1): the same fact with the release already 1 today → price is the only lever, and the leader is named', () => {
-    expect(breakEvenFor(graph({ fact: FACT, aiToday: 1 }))!.stated?.leader).toBe('Raise Pro to £59');
+  it('RED (MG): the same, with a stated count at £49 too → the leader from three stated counts (today\'s 300 is not used)', () => {
+    const be = breakEvenFor(graph({ fact: { ...FACT, at: [...FACT.at, at(49, 310)] }, aiToday: 0 }))!;
+    expect(be.stated?.at_your_figures?.find((x) => x.price === 49)?.volume).toBe(310);
+    expect(be.stated?.leader).toBe('Raise Pro to £59');
+  });
+
+  it('CONTRAST (AIQ B1): the release is already 1 today → the shared lever equals today; £49 uses today\'s count and the leader is named', () => {
+    const be = breakEvenFor(graph({ fact: FACT, aiToday: 1 }))!;
+    expect(be.stated?.at_your_figures?.find((x) => x.price === 49)?.volume).toBe(300);
+    expect(be.stated?.leader).toBe('Raise Pro to £59');
+  });
+
+  it('FAIL-CLOSED (AIQ B1): the options disagree on another lever (one without the release) → no figures, no leader, no ask', () => {
+    const be = breakEvenFor(graph({ fact: { ...FACT, at: [...FACT.at, at(49, 310)] }, aiToday: 0, change: (ns) => { delete node(ns, 'raise_pro_to_54').interventions!.ai_feature_availability; } }))!;
+    expect(be.stated).toEqual({});
+    expect(breakEvenLine(be)).toContain('it says nothing about how many will stay.');
+  });
+
+  it('RED (AIQ P1): "keep current" (£49, AI off) and "hold £49 with the release" (AI on) never share a count', () => {
+    const be = breakEvenFor(graph({ fact: { ...FACT, at: [...FACT.at, at(49, 310)] }, aiToday: 0, change: (ns) => {
+      const hold = node(ns, 'hold_49_with_ai_release');
+      ns.push({ id: 'keep_current', kind: 'option', label: 'Keep current position', interventions: {
+        pro_plan_price: structuredClone(hold.interventions!.pro_plan_price), ai_feature_availability: { value: 0, source: 'cee_hypothesis' } } });
+    } }))!;
+    const figs = be.stated?.at_your_figures ?? [];
+    expect(figs.find((x) => x.option === 'Keep current position')).toMatchObject({ volume: 300, as_today: true });
+    expect(figs.find((x) => x.option === 'Hold £49 with AI release')?.volume).toBe(310);
+    const said = breakEvenLine(be);
+    expect(said).toContain('At your own figures, with AI feature availability on, ');
+    expect(said).toContain('Keep current position gives £14,700/month (300 at £49/month, as today)');
+  });
+
+  it('FAIL-CLOSED (AIQ P2): a row that does not set a lever the others set is a disagreement, not "today"', () => {
+    const be = breakEvenFor(graph({ fact: FACT, aiToday: 1, change: (ns) => { delete node(ns, 'raise_pro_to_54').interventions!.ai_feature_availability; } }))!;
+    expect(be.stated).toEqual({});
+  });
+
+  it('CONTRAST (MG M1): two stated counts at one price that disagree are no count — that price is asked again', () => {
+    const be = breakEvenFor(graph({ fact: { ...FACT, at: [...FACT.at, at(59, 240)] } }))!;
+    expect(be.stated).toEqual({ ask: { at_prices: [59] } });
   });
 
   it('CONTRAST: a tie at the top names no single leader', () => {

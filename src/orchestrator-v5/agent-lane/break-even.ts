@@ -20,6 +20,7 @@ import { deriveEmittedGoalDirection } from '../goal-target/goal-direction.js';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
 import { totalUnitOfPerUnitPrice } from '../../cee/provenance/stated-amounts.js';
+import { switchStateWords } from '../../cee/magnitude/link-effect.js';
 
 type Node = {
   id: string; kind?: string; label?: string;
@@ -69,7 +70,9 @@ export interface BreakEven {
  */
 export interface StatedArithmetic {
   /** Each compared option at the user's figures: its price × the count the user says goes with that price. */
-  readonly at_your_figures?: readonly { readonly option: string; readonly price: number; readonly volume: number; readonly goal_value: number }[];
+  readonly at_your_figures?: readonly { readonly option: string; readonly price: number; readonly volume: number; readonly goal_value: number; readonly as_today?: true }[];
+  /** The other levers every compared option shares where they differ from today — the figures hold only with them. */
+  readonly with?: readonly string[];
   /** The option whose goal value is strictly highest at those figures; absent on a tie. */
   readonly leader?: string;
   /** What Olumi asks instead: today's count (it is not the user's), or the count at each price with none stated. */
@@ -87,7 +90,11 @@ type StatedAt = { price_node_id: string; price: number; level: number; by: 'user
  */
 function statedArithmeticFor(fact: unknown, m: {
   readonly volumeId: string; readonly priceId: string; readonly volumeUnit: string;
-  readonly v0: number; readonly v0By: FigureBy; readonly p0: number; readonly rows: readonly BreakEvenOption[];
+  readonly v0: number; readonly v0By: FigureBy; readonly rows: readonly BreakEvenOption[];
+  /** Per row: the status quo (today's price, every other lever at today) — its count is today's (AIQ P1). */
+  readonly rowIsToday: readonly boolean[];
+  /** The other levers every non-status-quo option shares, where they differ from today, in words ("AI release on"). */
+  readonly sharedAway: readonly string[];
 }): StatedArithmetic {
   if (m.v0By !== 'user') return { ask: { today: true } };
   const f = (fact !== null && typeof fact === 'object' ? fact : {}) as StatedFact;
@@ -103,17 +110,22 @@ function statedArithmeticFor(fact: unknown, m: {
       && typeof (a as StatedAt).price === 'number' && Number.isFinite((a as StatedAt).price) && (a as StatedAt).price > 0
       && typeof (a as StatedAt).level === 'number' && Number.isFinite((a as StatedAt).level) && (a as StatedAt).level >= 0)
     : [];
-  const levelAt = (p: number): number | undefined => at.find((a) => Math.abs(a.price - p) <= 1e-9)?.level;
-  const compared = [...new Set(m.rows.map((r) => r.price).filter((p) => Math.abs(p - m.p0) > 1e-9))].sort((x, y) => y - x);
+  // Two stated counts at one price that disagree are no count at all (MG M1): asked again, never first-wins.
+  const levelAt = (p: number): number | undefined => {
+    const levels = [...new Set(at.filter((a) => Math.abs(a.price - p) <= 1e-9).map((a) => a.level))];
+    return levels.length === 1 ? levels[0] : undefined;
+  };
+  const compared = [...new Set(m.rows.filter((_, i) => !m.rowIsToday[i]).map((r) => r.price))].sort((x, y) => x - y);
+  const withLevers = m.sharedAway.length > 0 ? { with: m.sharedAway } : {};
   const missing = compared.filter((p) => levelAt(p) === undefined);
-  if (missing.length > 0) return { ask: { at_prices: missing } };
-  const figures = m.rows.map((r) => {
-    const volume = Math.abs(r.price - m.p0) <= 1e-9 ? m.v0 : levelAt(r.price)!;
-    return { option: r.option, price: r.price, volume, goal_value: r.price * volume };
+  if (missing.length > 0) return { ask: { at_prices: missing }, ...withLevers };
+  const figures = m.rows.map((r, i) => {
+    const volume = m.rowIsToday[i] ? m.v0 : levelAt(r.price)!;
+    return { option: r.option, price: r.price, volume, goal_value: r.price * volume, ...(m.rowIsToday[i] ? { as_today: true as const } : {}) };
   });
   const top = Math.max(...figures.map((x) => x.goal_value));
   const leaders = figures.filter((x) => Math.abs(x.goal_value - top) <= 1e-9);
-  return { at_your_figures: figures, ...(leaders.length === 1 ? { leader: leaders[0]!.option } : {}) };
+  return { at_your_figures: figures, ...(leaders.length === 1 ? { leader: leaders[0]!.option } : {}), ...withLevers };
 }
 
 /**
@@ -169,29 +181,27 @@ export function breakEvenFor(graph: unknown): BreakEven | null {
   if (volumeUnit === '' || classifyUnitScaleClass(volumeUnit) !== 'unknown') return null;
   const baselineGoal = p0 * v0;
   const rows: BreakEvenOption[] = [];
-  /**
-   * ⛔ AIQ B1 on #2088: the user's figures are for PRICE alone. An option that also moves another lever away from today
-   * (the AI release, say) is not "250 at £49": the user said 250 TODAY. So every compared option must set each other
-   * factor at that factor's today level (the stored model values; an unknown today counts as moved) — else no figures.
-   */
-  let priceIsTheOnlyLever = true;
   const modelValue = (v: unknown): number | null => {
     const x = typeof v === 'number' ? v : (v as { value?: unknown } | null | undefined)?.value;
     return typeof x === 'number' && Number.isFinite(x) ? x : null;
   };
+  const atToday = (factorId: string, set: unknown): boolean => {
+    const today = modelValue(byId.get(factorId)?.observed_state);
+    const to = modelValue(set);
+    return today !== null && to !== null && Math.abs(today - to) <= 1e-9;
+  };
+  /** Per row: is it the status quo — today's price and every other lever it sets at today's level (AIQ P1)? */
+  const rowIsToday: boolean[] = [];
+  const pricedOptions: Node[] = [];
   for (const o of options) {
     const level = o.interventions?.[priceId];
     if (level === undefined) continue;
-    for (const [factorId, set] of Object.entries(o.interventions ?? {})) {
-      if (factorId === priceId) continue;
-      const today = modelValue(byId.get(factorId)?.observed_state);
-      const to = modelValue(set);
-      if (today === null || to === null || Math.abs(today - to) > 1e-9) priceIsTheOnlyLever = false;
-    }
     const stored = (typeof level === 'number' ? { value: level } : level) as { value?: unknown; raw_value?: unknown; source?: unknown };
     const p = exactRaw(stored, cap);
     const by = byOf(stored.source);
     if (p === null || by === null || !(p > 0)) return null;
+    pricedOptions.push(o);
+    rowIsToday.push(Math.abs(p - p0) <= 1e-9 && Object.entries(o.interventions ?? {}).every(([f, v]) => f === priceId || atToday(f, v)));
     const least = Math.ceil(baselineGoal / p - 1e-9);
     rows.push({
       option: o.label ?? o.id, price: p, price_by: by,
@@ -199,6 +209,33 @@ export function breakEvenFor(graph: unknown): BreakEven | null {
     });
   }
   if (rows.length === 0) return null;
+  /**
+   * ⛔ AIQ B1 on #2088, as MG refined it (5854719679) and AIQ made precise (5854728693): the stated counts compare
+   * OPTIONS, so every option that is not the status quo must SET the same other levers to the same readable level (a
+   * lever one sets and another does not is a disagreement — P2; unreadable is one too). Else no figures at all. When
+   * the levels they share differ from TODAY, today's count stands only for the status-quo row, and the shared levers are
+   * named wherever the figures or the ask are said.
+   */
+  const moving = pricedOptions.filter((_, idx) => !rowIsToday[idx]);
+  const otherLevers = [...new Set(moving.flatMap((o) => Object.keys(o.interventions ?? {}).filter((f) => f !== priceId)))];
+  let optionsAgree = true;
+  const sharedAway: string[] = [];
+  for (const f of otherLevers) {
+    const levels = moving.map((o) => (o.interventions?.[f] !== undefined ? modelValue(o.interventions[f]) : null));
+    if (levels.some((l) => l === null) || levels.some((l) => Math.abs((l as number) - (levels[0] as number)) > 1e-9)) { optionsAgree = false; continue; }
+    if (!atToday(f, levels[0])) {
+      const n = byId.get(f);
+      const set = moving[0]!.interventions![f] as { raw_value?: unknown } | number;
+      const raw = typeof set === 'object' && set !== null && typeof set.raw_value === 'number' ? set.raw_value : null;
+      const unit = typeof n?.observed_state?.unit === 'string' ? n.observed_state.unit : '';
+      const sw = switchStateWords(levels[0] as number);
+      const label = n?.label ?? f;
+      // A switch reads on/off; any other lever its own display level; a level neither can say is not named, so not used.
+      if (sw !== undefined && /\b0\s*\/\s*1\b/.test(unit)) sharedAway.push(`${label} ${sw}`);
+      else if (raw !== null) sharedAway.push(`${label} at ${raw.toLocaleString('en-GB')}${unit !== '' ? ` ${unit}` : ''}`);
+      else optionsAgree = false;
+    }
+  }
   const targetValue = goal.goal_threshold_raw;
   const targetUnit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit.trim() : '';
   const prices = [...new Set([...rows.map((r) => r.price), p0])].sort((x, y) => y - x);
@@ -207,7 +244,7 @@ export function breakEvenFor(graph: unknown): BreakEven | null {
     identity_stated_in_brief: goal.nonlinear_identity?.stated_in_brief === true,
     baseline_price: p0, baseline_price_by: p0By, baseline_volume: v0, baseline_volume_by: v0By, baseline_goal: baselineGoal,
     options: rows,
-    stated: priceIsTheOnlyLever ? statedArithmeticFor(goal.stated_response, { volumeId, priceId, volumeUnit, v0, v0By, p0, rows }) : {},
+    stated: optionsAgree ? statedArithmeticFor(goal.stated_response, { volumeId, priceId, volumeUnit, v0, v0By, rows, rowIsToday, sharedAway }) : {},
     // MG B1: only a LEVEL target is an amount to reach; a delta ("grow MRR by £5k") is not, and an absent frame is not
     // assumed to be one.
     // A target is a TOTAL, so it is compared with the total's unit: a per-subscriber price ("GBP/subscriber/month") still
@@ -272,7 +309,8 @@ export function breakEvenLine(be: BreakEven): string {
   const listed = (xs: readonly string[], last = 'or'): string => (xs.length === 1 ? xs[0]! : `${xs.slice(0, -1).join(', ')} ${last} ${xs[xs.length - 1]!}`);
   const figures = be.stated?.at_your_figures;
   if (figures !== undefined) {
-    parts.push(`At your own figures, ${listed(figures.map((x) => `${x.option} gives ${money(x.goal_value, totalUnit)} (${count(x.volume)} at ${money(x.price, be.unit)})`), 'and')}.`);
+    const withWords = be.stated?.with !== undefined ? `, with ${listed(be.stated.with, 'and')},` : ',';
+    parts.push(`At your own figures${withWords} ${listed(figures.map((x) => `${x.option} gives ${money(x.goal_value, totalUnit)} (${count(x.volume)} at ${money(x.price, be.unit)}${x.as_today === true ? ', as today' : ''})`), 'and')}.`);
     parts.push(be.stated?.leader !== undefined
       ? `On this arithmetic, ${be.stated.leader} gives the most ${be.goal}.`
       : `On this arithmetic, no single option gives the most ${be.goal}: the top ones are equal.`);
@@ -283,7 +321,8 @@ export function breakEvenLine(be: BreakEven): string {
   const ask = be.stated?.ask;
   if (ask !== undefined && 'today' in ask) parts.push(`To compare the options at your own figures, tell me how many ${vol} you have today.`);
   if (ask !== undefined && 'at_prices' in ask) {
-    parts.push(`To compare them at your own figures, tell me how many ${vol} you would expect at ${listed(ask.at_prices.map((p) => money(p, be.unit)))}.`);
+    const withWords = be.stated?.with !== undefined ? `, with ${listed(be.stated.with, 'and')}` : '';
+    parts.push(`To compare them at your own figures, tell me how many ${vol} you would expect at ${listed(ask.at_prices.map((p) => money(p, be.unit)))}${withWords}.`);
   }
   return parts.join(' ');
 }
