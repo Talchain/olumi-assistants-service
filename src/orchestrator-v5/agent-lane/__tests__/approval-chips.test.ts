@@ -31,6 +31,24 @@ describe('approval chips', () => {
   });
 
   /**
+   * ⛔ B3 (Paul's test, 27 Sep): a held add-option's button carries the product's FULL sentence (`detail`) when the
+   * product cut its label; with no sentence from the product, no `detail` is invented.
+   */
+  describe('held add-option (gmh_) — the product\'s full sentence', () => {
+    const calls = [{ name: 'propose_new_option', ok: true, mutated: false, proposal_id: 'gmh_0123456789ab' }];
+    const held = (extra: Record<string, unknown>) => () => ({ proposal: undefined, result: { ok: true, mutated: false, proposal_id: 'gmh_0123456789ab',
+      public_label: "Add option '£59 for new Pro customers; grandfather existi...", held_message: "Yes, add option '£59 for new Pro customers; grandfather existing customers'.", ...extra } });
+    it('RED: the product sent its full sentence → the button carries it as `detail`, beside the product\'s own label and message', () => {
+      const [approve] = approvalChipsFor(calls, held({ held_detail: "Add option '£59 for new Pro customers; grandfather existing customers'." }));
+      expect(approve).toEqual({ id: 'agent-approve-proposal:gmh_0123456789ab', label: "Add option '£59 for new Pro customers; grandfather existi...",
+        message: "Yes, add option '£59 for new Pro customers; grandfather existing customers'.", detail: "Add option '£59 for new Pro customers; grandfather existing customers'." });
+    });
+    it('CONTRAST: no sentence from the product (absent or blank) → no `detail` key', () => {
+      for (const extra of [{}, { held_detail: '  ' }]) expect(Object.keys(approvalChipsFor(calls, held(extra))[0]!)).toEqual(['id', 'label', 'message']);
+    });
+  });
+
+  /**
    * ⭐ A turn that APPROVED one change and PROPOSED the next offers the next one's chip (measured on
    * served `6dfb56f`, 24 Sep: "Yes, make that change" applied the baseline link and proposed its level,
    * and the reply offered NO chip — the user had to type "yes" again). Only proposals authorised in

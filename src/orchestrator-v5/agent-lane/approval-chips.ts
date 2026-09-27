@@ -117,7 +117,13 @@ export function approvalChipsFor(
   if (tool === 'propose_new_option' && /^gmh_/.test(proposalId) && held !== undefined) {
     const label = typeof held.public_label === 'string' && held.public_label.trim() !== '' ? held.public_label : approve.label;
     const message = typeof held.held_message === 'string' && held.held_message.trim() !== '' ? held.held_message : approve.message;
-    return [{ id: approvalChipIdFor(proposalId), label, message }, AMEND_CHIP];
+    /**
+     * ⛔ THE BUTTON NEVER CUTS THE OPTION'S NAME (Paul's test, 27 Sep, B3): the product's label is clamped to 57
+     * characters ("Add option '£59 for new Pro customers; grandfather existi...") and its full sentence rides in
+     * `detail`, which the UI shows on the button. The Agent's copy of the chip dropped it; it carries it now.
+     */
+    const detail = typeof held.held_detail === 'string' && held.held_detail.trim() !== '' ? held.held_detail : undefined;
+    return [{ id: approvalChipIdFor(proposalId), label, message, ...(detail !== undefined ? { detail } : {}) }, AMEND_CHIP];
   }
   return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, labelSourceFor?.(proposalId)), message: approve.message }, AMEND_CHIP];
 }
