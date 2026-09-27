@@ -338,9 +338,12 @@ function composeTypedVerdict(
 
 /**
  * The F-LIMIT words: what every option does against the limit, in the tier's own register (tier 2 never says
- * "meets"), and the one move that can change it — the Agent's own: that limit or one of the options, offered for
- * approval. Every option breaks the SAME limit, but no typed per-limit verdict reaches this card, so with two or
- * more limits it says "all of" (tier 1) or "one of" (tier 2) and never which. Never "run again": it cannot help.
+ * "meets"), and the one move that can change it that the Agent can PROPOSE: change an option or add one
+ * (`add_option` / `set_option_intervention`), offered for approval. ⛔ Never "change the limit": no served writer
+ * edits a limit on a non-goal node (the Agent's `set_goal_target` and the `goal_target_edit` event both refuse a
+ * node that is not the goal), so the offer would end at an approval that cannot exist. Every option breaks the SAME
+ * limit, but no typed per-limit verdict reaches this card, so with two or more limits it says "all of" (tier 1) or
+ * "one of" (tier 2) and never which. Never "run again": it cannot help.
  */
 function composeEveryOptionBreaks(firstPass: boolean, named: readonly NamedLimit[], tier: EveryOptionTier): FragileLinkChallengeCopy {
   const { body_max: bodyMax, action_prompt_max: promptMax } = RUN_TURN_COACHING_CONTRACT.limits;
@@ -351,14 +354,14 @@ function composeEveryOptionBreaks(firstPass: boolean, named: readonly NamedLimit
   const whose = (who: 'your' | 'my') => (one ? `${who} limit${on}` : tier === 'none_meets' ? `all of ${who} limits${on}` : `one of ${who} limits${on}`);
   const finding = (who: 'your' | 'my') => (tier === 'none_meets' ? `no option meets ${whose(who)}` : `every option would probably break ${whose(who)}`);
   const where = tier === 'none_meets' ? 'In this analysis' : 'On these estimates';
-  const move = one ? 'change that limit or one of the options' : 'change one of those limits or one of the options';
+  const move = `change one of the options or add one that could stay within ${one ? 'it' : 'them'}`;
   const CLOSE = 'If I choose, offer that change for me to approve, and change nothing until I do.';
   return {
     title: tier === 'none_meets'
       ? (one ? 'No option meets your limit' : 'No option meets all your limits')
       : (one ? 'Every option would probably break your limit' : 'Every option would probably break a limit'),
     body: fit([`${firstPass ? `${FIRST_PASS_PREFIX}` : `${where}, `}${finding('your')}, so none is put forward.`], bodyMax),
-    action_label: one ? 'Change the limit or an option' : 'Change a limit or an option',
+    action_label: 'Change or add an option',
     action_prompt: fit([
       `${where}, ${finding('my')}. Ask me whether to ${move}, and what that rests on. ${CLOSE}`,
       `${where}, ${finding('my')}. Ask me whether to ${move}. ${CLOSE}`,

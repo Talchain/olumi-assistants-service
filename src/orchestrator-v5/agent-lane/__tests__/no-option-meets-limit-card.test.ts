@@ -9,9 +9,10 @@
  * cannot change the limit verdict, and nothing on screen offered the move that can.
  *
  * THE RULE: when the readback's typed claim says every option breaks the same limit (tier 1) or would probably break
- * it (tier 2), the limit card is the turn's one card, in that tier's words, and its action is the move the Agent's own
- * fail-closed sentence names (`withheld-leader-fail-closed.ts`): change that limit or one of the options — offered for
- * the user's approval, changing nothing until they approve. Tier 2 never says "meets".
+ * it (tier 2), the limit card is the turn's one card, in that tier's words, and its action is a move the Agent can
+ * PROPOSE: change one of the options or add one (`add_option` / `set_option_intervention`) — offered for the user's
+ * approval, changing nothing until they approve. Tier 2 never says "meets". ⛔ It never offers to change the limit:
+ * no served writer edits a limit on a non-goal node (`set_goal_target` / `goal_target_edit` refuse a non-goal node).
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -48,7 +49,8 @@ const withReason = (withheld_reason: string) => {
 const runCards = (blocks: readonly { signal_id: string }[]) =>
   blocks.filter((b) => /^coach:(fragile_link|no_flagged_link|limit_unchecked|near_tie):/.test(b.signal_id));
 const LIMIT = '“Monthly churn rate” (10%)';
-const NEXT_MOVE = 'change that limit or one of the options';
+const NEXT_MOVE = 'change one of the options or add one that could stay within it';
+const UNWRITABLE = /change (that|the|a|one of (those|these|my)) limits?|limit itself/i;
 const HOLDS = /change nothing until I (do|approve)/;
 
 describe('every option breaks the limit: the limit card, not a link card', () => {
@@ -74,6 +76,7 @@ describe('every option breaks the limit: the limit card, not a link card', () =>
     expect(card!.action_prompt).toContain(NEXT_MOVE);
     expect(card!.action_prompt).toMatch(HOLDS);
     expect(card!.action_prompt).not.toMatch(/re-run|run (it|the analysis) again/i);
+    expect(`${card!.action_label} ${card!.action_prompt}`).not.toMatch(UNWRITABLE);
   });
 
   it('RED: tier 2 — "would probably break", never "meets"', () => {
@@ -94,6 +97,7 @@ describe('every option breaks the limit: the limit card, not a link card', () =>
     expect(none.body).toContain('no option meets all of your limits on “Churn” (10%) and “Budget”');
     expect(likely.body).toContain('every option would probably break one of your limits on “Churn” (10%) and “Budget”');
     for (const c of [none, likely, composeLimitUncheckedCard(true, undefined, 'none_meets'), composeLimitUncheckedCard(false, undefined, 'likely_breaks')]) {
+      expect(`${c.action_label} ${c.action_prompt}`).not.toMatch(UNWRITABLE);
       expect(c.title.length).toBeLessThanOrEqual(RUN_TURN_COACHING_CONTRACT.limits.title_max);
       expect(c.body.length).toBeLessThanOrEqual(RUN_TURN_COACHING_CONTRACT.limits.body_max);
       expect(c.action_label.length).toBeLessThanOrEqual(RUN_TURN_COACHING_CONTRACT.limits.action_label_max);
