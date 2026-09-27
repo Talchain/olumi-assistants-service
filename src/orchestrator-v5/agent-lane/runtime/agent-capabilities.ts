@@ -129,6 +129,7 @@ import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, factorTheUserNamed, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { derivedSplitOf, statedTotalsOf } from '../derived-split.js';
 import { figureInUserUnits } from '../approval-chips.js';
 import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
@@ -4193,7 +4194,7 @@ export function createAgentCapabilities(
         factorTheUserNamed(factorLabel, ctx.user_turn_text, { options: optionNames, others: quantityNames.filter((l) => l !== factorLabel) })
           ? {} : { source: 'cee_hypothesis' });
       const entries = plans.map(({ spec, plan }) => {
-        type Lvl = { value: number; unit?: string; estimate?: string; by?: 'user' | 'olumi' };
+        type Lvl = { value: number; unit?: string; estimate?: string; by?: 'user' | 'olumi'; derived?: string };
         const levelById = new Map<string, Lvl>();
         for (const a of spec.acts_on) {
           const v = a.level?.value;
@@ -4203,6 +4204,16 @@ export function createAgentCapabilities(
           const basis = a.level?.estimate === true && typeof a.level?.basis === 'string' && a.level.basis.trim() !== '' ? a.level.basis.trim() : undefined;
           if (f !== undefined) levelById.set(f.id, { value: v, ...(typeof a.level?.unit === 'string' && a.level.unit.trim() !== '' ? { unit: a.level.unit.trim() } : {}), ...(basis !== undefined ? { estimate: basis } : {}) });
         }
+        /**
+         * ⛔ THE USER'S OWN SPLIT (AI Quality ruling #70 5859388817; served C08 "Let's spit it 50/50" of the £30,000 limit the
+         * user set). Levels the Agent proposed that are exactly the user's typed split of ONE total they stated are theirs,
+         * recorded with how they were derived and said with the working; two totals in scope are asked, never guessed.
+         */
+        // The ratio must be typed in THIS message (condition 1): `user_turn_text`, never the session's `user_text`.
+        const split = derivedSplitOf(ctx.user_turn_text ?? '', statedTotalsOf(g.raw), plan.actsOn.flatMap((f) => {
+          const l = levelById.get(f.id);
+          return l === undefined ? [] : [{ factor_id: f.id, value: l.value, unit: l.unit ?? factorUnitOf(g.raw, g.nodes.find((x) => x.id === f.id)) }];
+        }));
         const set = new Map<string, Lvl>();
         const interventions = plan.actsOn.map((f) => {
           const lvl = levelById.get(f.id);
@@ -4219,9 +4230,14 @@ export function createAgentCapabilities(
            * was stored as the user's 0% churn). Otherwise it is Olumi's ESTIMATE only when the Agent said so, with a
            * basis, and it is recorded and shown as that (`cee_hypothesis`, C2). Anything else is left unset and said.
            */
-          const byUser = figureTheUserWroteFor(lvl.value, lvl.unit ?? factorUnit, ctx.user_text, scopeIn(g, f.label, plan.label));
+          const wrote = figureTheUserWroteFor(lvl.value, lvl.unit ?? factorUnit, ctx.user_text, scopeIn(g, f.label, plan.label));
+          const derived = !wrote && split.kind === 'derived' && split.factor_ids.includes(f.id) ? split : undefined;
+          const byUser = wrote || derived !== undefined;
           if (!byUser && lvl.estimate === undefined) {
-            levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: notWrittenReason(lvl.value, f.label) });
+            const ask = split.kind === 'ask_which_total' && split.factor_ids.includes(f.id)
+              ? `The user's split could be of more than one total they set (${split.candidates.map((t) => `"${t.label}" ${t.value}${t.unit !== undefined ? ` ${t.unit}` : ''}`).join(' or ')}), so ${f.label}'s level is left unset. Ask which total they mean; never pick one.`
+              : undefined;
+            levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: ask ?? notWrittenReason(lvl.value, f.label) });
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
           if (!byUser && contradictsItsName(lvl.value, lvl.unit ?? factorUnit, plan.label)) {
@@ -4230,7 +4246,8 @@ export function createAgentCapabilities(
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
           lvl.by = byUser ? 'user' : 'olumi';
-          const stamp = byUser ? {} : { source: 'cee_hypothesis' as const };
+          if (derived !== undefined) lvl.derived = derived.working;
+          const stamp = byUser ? (derived !== undefined ? { derived_from: derived.derived_from } : {}) : { source: 'cee_hypothesis' as const };
           const frame = levelFrameOf(factor);
           if (frame !== null) {
             const v = lvl.value / frame;
@@ -4404,7 +4421,8 @@ export function createAgentCapabilities(
           const lvl = set.get(f.id);
           return lvl !== undefined
             ? { factor: f.label, value: lvl.value, ...(lvl.unit !== undefined ? { unit: lvl.unit } : {}),
-              ...(lvl.by === 'olumi' ? { stated_by: 'olumi_estimate', basis: lvl.estimate } : { stated_by: 'user' }) }
+              ...(lvl.by === 'olumi' ? { stated_by: 'olumi_estimate', basis: lvl.estimate }
+                : { stated_by: 'user', ...(lvl.derived !== undefined ? { derived: lvl.derived, say_the_working: true } : {}) }) }
             : { factor: f.label, value: null, still_needed: true };
         }),
       }));

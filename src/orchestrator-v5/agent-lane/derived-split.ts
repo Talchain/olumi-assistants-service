@@ -86,3 +86,81 @@ export function readUserSplit(message: string, totals: readonly StatedTotal[], p
   if (Math.abs(parts.reduce((a, b) => a + b, 0) - base.value) > 1e-9 * Math.max(1, base.value)) return NOT;
   return { kind: 'user_split', ratio, base, parts, working: workingOf(ratio, parts, base) };
 }
+
+/** One unit key for an exact compare: "GBP" and "£" are one unit; anything else must match as written. */
+function unitKey(unit: string | undefined): string {
+  const u = (unit ?? '').trim().toLowerCase();
+  return u === '£' ? 'gbp' : u;
+}
+
+/**
+ * The totals the user STATED that the model holds (condition 1's only admissible bases): every limit stamped
+ * `explicit` (the compound-goal vocabulary is explicit | inferred | proxy; an inferred or proxy limit is Olumi's), and
+ * every factor value the user typed (`brief_extraction`, `user_specified`), read as its RAW figure. An adopted
+ * assumption (`user_assumption`) was Olumi's suggestion the user accepted, never typed, so it is not a base.
+ */
+export function statedTotalsOf(rawGraph: unknown): StatedTotal[] {
+  const raw = (rawGraph ?? {}) as { goal_constraints?: unknown; nodes?: unknown };
+  const nodes = Array.isArray(raw.nodes) ? raw.nodes as Record<string, unknown>[] : [];
+  const labelOf = (id: unknown): string | undefined => {
+    const l = nodes.find((n) => n?.id === id)?.label;
+    return typeof l === 'string' ? l : undefined;
+  };
+  const out: StatedTotal[] = [];
+  for (const c of Array.isArray(raw.goal_constraints) ? raw.goal_constraints as Record<string, unknown>[] : []) {
+    if (c?.provenance !== 'explicit' || typeof c.node_id !== 'string' || typeof c.value !== 'number' || !Number.isFinite(c.value)) continue;
+    out.push({ node_id: c.node_id, label: labelOf(c.node_id) ?? (typeof c.label === 'string' ? c.label : c.node_id), value: c.value,
+      ...(typeof c.unit === 'string' ? { unit: c.unit } : {}), by: 'user' });
+  }
+  for (const n of nodes) {
+    const os = n?.observed_state as { source?: unknown; raw_value?: unknown; unit?: unknown } | undefined;
+    if (n?.kind !== 'factor' || typeof n.id !== 'string' || (os?.source !== 'brief_extraction' && os?.source !== 'user_specified')) continue;
+    if (typeof os.raw_value !== 'number' || !Number.isFinite(os.raw_value)) continue;
+    out.push({ node_id: n.id, label: typeof n.label === 'string' ? n.label : n.id, value: os.raw_value,
+      ...(typeof os.unit === 'string' ? { unit: os.unit } : {}), by: 'user' });
+  }
+  return out;
+}
+
+/** A level the Agent proposed for one factor of the option, in the factor's own unit. */
+export interface ProposedPart { readonly factor_id: string; readonly value: number; readonly unit?: string }
+
+export type DerivedLevels =
+  | { readonly kind: 'derived'; readonly factor_ids: readonly string[]; readonly working: string;
+      readonly derived_from: { readonly op: 'split'; readonly ratio: readonly number[]; readonly base: { readonly node_id: string; readonly value: number } } }
+  | { readonly kind: 'ask_which_total'; readonly factor_ids: readonly string[]; readonly candidates: readonly StatedTotal[] }
+  | { readonly kind: 'none' };
+
+/**
+ * The option's levels that are the USER's split of a total they stated, or a single ask, or nothing.
+ *
+ * A total is in scope when the message's typed shares split it across exactly the option's OTHER levels in its unit
+ * (the total's own node is never one of its parts). Two totals in scope ⇒ ask which (condition 3), whatever figures
+ * the Agent proposed: a proposal matching one of them is the Agent's guess, not the user's choice.
+ *
+ * v1 binds EQUAL shares only ("50/50", "evenly", "a third each"): every part is the same figure, so no factor has to
+ * be matched to a share. An unequal split ("70/30") names no factor for each share, so which gets 70 is Olumi's
+ * reading: it is not derived here, and takes the ordinary path (unset and asked, or Olumi's estimate with its basis).
+ * Every proposed part must equal the user's part exactly; one that does not means the split is not the user's.
+ */
+export function derivedSplitOf(message: string, totals: readonly StatedTotal[], proposed: readonly ProposedPart[]): DerivedLevels {
+  const none: DerivedLevels = { kind: 'none' };
+  const inScope: { base: StatedTotal; parts: readonly ProposedPart[]; reading: Extract<SplitReading, { kind: 'user_split' }> }[] = [];
+  for (const t of totals) {
+    const parts = proposed.filter((p) => p.factor_id !== t.node_id && unitKey(p.unit) === unitKey(t.unit));
+    const reading = readUserSplit(message, [t], parts.length);
+    if (reading.kind === 'user_split') inScope.push({ base: t, parts, reading });
+  }
+  if (inScope.length > 1) {
+    return { kind: 'ask_which_total', candidates: inScope.map((s) => s.base),
+      factor_ids: [...new Set(inScope.flatMap((s) => s.parts.map((p) => p.factor_id)))] };
+  }
+  const only = inScope[0];
+  if (only === undefined) return none;
+  const { base, parts, reading } = only;
+  if (!reading.ratio.every((r) => Math.abs(r - reading.ratio[0]!) < 1e-12)) return none;
+  const each = reading.parts[0]!;
+  if (!parts.every((p) => Math.abs(p.value - each) <= 1e-9 * Math.max(1, base.value))) return none;
+  return { kind: 'derived', factor_ids: parts.map((p) => p.factor_id), working: reading.working,
+    derived_from: { op: 'split', ratio: reading.ratio, base: { node_id: base.node_id, value: base.value } } };
+}
