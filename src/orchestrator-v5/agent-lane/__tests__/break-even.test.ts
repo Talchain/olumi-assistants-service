@@ -48,6 +48,43 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
     expect(said).toContain('not the analysis ranking the options');
   });
 
+  it('RED (served 263dbd5, run 053159Z): a PER-SUBSCRIBER price writes totals per month, and the £20,000 line stays', () => {
+    const be = breakEvenFor(graph((ns) => { (node(ns, 'pro_plan_price').observed_state as Record<string, unknown>).unit = 'GBP/subscriber/month'; }))!;
+    expect(be.target, 'a "GBP/month" target meets a per-subscriber price').toBeDefined();
+    const said = breakEvenLine(be);
+    expect(said).toContain('at £49/subscriber/month and 300 Pro paying subscribers (an assumption you approved), MRR is £14,700/month today.');
+    expect(said).toContain('At £59/subscriber/month, MRR stays at least that while 250 or more of the 300 stay');
+    expect(said).toContain('£20,000/month needs 339 at £59/subscriber/month, 371 at £54/subscriber/month or 409 at £49/subscriber/month.');
+    expect(said).not.toMatch(/£[\d,]+\/subscriber\/month (?:today|needs)/);
+  });
+
+  it('RED (the served graph itself, 053159Z/01): the break-even the wire carried, now with totals per month and the target line', () => {
+    const wire = JSON.parse(readFileSync(new URL('./fixtures/served-per-subscriber-price-263dbd5.json', import.meta.url), 'utf8')) as { nodes: unknown[]; edges: unknown[] };
+    const be = breakEvenFor(wire)!;
+    // PRECONDITION: this is the served shape — the wire's `_agent.break_even` carried this unit and today's figure.
+    expect(be).toMatchObject({ unit: 'GBP/subscriber/month', baseline_price: 49, baseline_volume: 200, baseline_goal: 9_800 });
+    const said = breakEvenLine(be);
+    expect(said).toContain('MRR is £9,800/month today.');
+    expect(said).not.toContain('£9,800/subscriber/month');
+    expect(said).toContain('£20,000/month needs 339 at £59/subscriber/month');
+  });
+
+  it('CONTRAST (the other served run, 053639Z/01, price GBP/month): the paragraph is byte-identical to what the wire carried', () => {
+    const f = JSON.parse(readFileSync(new URL('./fixtures/served-per-month-price-263dbd5.json', import.meta.url), 'utf8')) as { served_paragraph: string; nodes: unknown[]; edges: unknown[] };
+    expect(breakEvenLine(breakEvenFor(f)!)).toBe(f.served_paragraph);
+  });
+
+  it('CONTRAST: "GBP per seat per month" drops only the seat; a price with no per-unit word is unchanged', () => {
+    const perSeat = breakEvenLine(breakEvenFor(graph((ns) => {
+      (node(ns, 'pro_plan_price').observed_state as Record<string, unknown>).unit = 'GBP per seat per month';
+      node(ns, 'mrr').goal_threshold_unit = 'GBP per month';
+    }))!);
+    expect(perSeat).toContain('at £49/seat/month and 300');
+    expect(perSeat).toContain('MRR is £14,700/month today.');
+    expect(perSeat).toContain('£20,000/month needs 339');
+    expect(breakEvenLine(breakEvenFor(graph())!)).toContain('at £49/month and 300 Pro paying subscribers (an assumption you approved), MRR is £14,700/month today.');
+  });
+
   it('CONTRAST: no product identity on the goal → nothing (an additive goal is the analysis\'s to answer)', () => {
     expect(breakEvenFor(graph((ns) => { delete node(ns, 'mrr').nonlinear_identity; }))).toBeNull();
   });
