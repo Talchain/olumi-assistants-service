@@ -17,9 +17,13 @@ type N = Record<string, unknown> & { observed_state?: Record<string, unknown>; i
 const node = (ns: Record<string, unknown>[], id: string) => ns.find((n) => n.id === id)! as N;
 const at = (price: number, level: number) => ({ price_node_id: 'pro_plan_price', price, level, by: 'user' });
 const FACT = { operand_node_id: 'pro_paying_subscribers', today: { value: 300, unit: 'subscribers', by: 'user' }, at: [at(59, 260), at(54, 280)] };
-const graph = (opts: { userCount?: boolean; fact?: unknown; change?: (ns: Record<string, unknown>[]) => void } = {}) => {
+const graph = (opts: { userCount?: boolean; fact?: unknown; aiToday?: number; change?: (ns: Record<string, unknown>[]) => void } = {}) => {
   const g = structuredClone(served);
   if (opts.userCount !== false) node(g.nodes, 'pro_paying_subscribers').observed_state!.source = 'brief_extraction';
+  // Paul's graph AFTER the starting point: the AI release is 1 today, as every option sets it (AIQ B1), so price is the
+  // only lever that differs. The served F8 draft itself has it at 0 today — the B1 RED below.
+  node(g.nodes, 'ai_feature_availability').observed_state!.value = opts.aiToday ?? 1;
+  node(g.nodes, 'ai_feature_availability').observed_state!.raw_value = opts.aiToday ?? 1;
   if (opts.fact !== undefined) node(g.nodes, 'mrr').stated_response = opts.fact;
   opts.change?.(g.nodes);
   return g;
@@ -104,6 +108,19 @@ describe('AX1 at the user\'s own figures: a stated response names the arithmetic
     expect(noUnit.stated).toEqual({ ask: { at_prices: [59, 54] } });
     const caseOnly = breakEvenFor(graph({ fact: { ...FACT, today: { value: 300, unit: '  Subscribers ', by: 'user' } } }))!;
     expect(caseOnly.stated?.leader, 'trimmed and case-folded, as limitTargetCaps compares').toBe('Raise Pro to £59');
+  });
+
+  it('RED (AIQ B1): an option also moves another lever from today (the AI release is 0 today, every option sets 1) → no figures, no leader, no ask; the break-even stays', () => {
+    const be = breakEvenFor(graph({ fact: FACT, aiToday: 0 }))!;
+    expect(be.stated).toEqual({});
+    const said = breakEvenLine(be);
+    expect(said).not.toContain('At your own figures');
+    expect(said).not.toContain('gives the most');
+    expect(said).toContain('it says nothing about how many will stay.');
+  });
+
+  it('CONTRAST (AIQ B1): the same fact with the release already 1 today → price is the only lever, and the leader is named', () => {
+    expect(breakEvenFor(graph({ fact: FACT, aiToday: 1 }))!.stated?.leader).toBe('Raise Pro to £59');
   });
 
   it('CONTRAST: a tie at the top names no single leader', () => {

@@ -96,7 +96,7 @@ function statedArithmeticFor(fact: unknown, m: {
   // factors (breakEvenFor derives them from it; a non-product identity yields no arithmetic at all). And the SAME unit,
   // trimmed and case-folded, never converted: a count re-stated in another unit makes the figures incomparable.
   const todayHolds = f.operand_node_id === m.volumeId && f.today?.by === 'user' && f.today?.value === m.v0
-    && typeof todayUnit === 'string' && todayUnit.trim().toLowerCase() === m.volumeUnit.toLowerCase();
+    && typeof todayUnit === 'string' && todayUnit.trim().toLowerCase() === m.volumeUnit.trim().toLowerCase();
   const at: StatedAt[] = todayHolds && Array.isArray(f.at)
     ? (f.at as unknown[]).filter((a): a is StatedAt => a !== null && typeof a === 'object'
       && (a as StatedAt).price_node_id === m.priceId && (a as StatedAt).by === 'user'
@@ -169,9 +169,25 @@ export function breakEvenFor(graph: unknown): BreakEven | null {
   if (volumeUnit === '' || classifyUnitScaleClass(volumeUnit) !== 'unknown') return null;
   const baselineGoal = p0 * v0;
   const rows: BreakEvenOption[] = [];
+  /**
+   * ⛔ AIQ B1 on #2088: the user's figures are for PRICE alone. An option that also moves another lever away from today
+   * (the AI release, say) is not "250 at £49": the user said 250 TODAY. So every compared option must set each other
+   * factor at that factor's today level (the stored model values; an unknown today counts as moved) — else no figures.
+   */
+  let priceIsTheOnlyLever = true;
+  const modelValue = (v: unknown): number | null => {
+    const x = typeof v === 'number' ? v : (v as { value?: unknown } | null | undefined)?.value;
+    return typeof x === 'number' && Number.isFinite(x) ? x : null;
+  };
   for (const o of options) {
     const level = o.interventions?.[priceId];
     if (level === undefined) continue;
+    for (const [factorId, set] of Object.entries(o.interventions ?? {})) {
+      if (factorId === priceId) continue;
+      const today = modelValue(byId.get(factorId)?.observed_state);
+      const to = modelValue(set);
+      if (today === null || to === null || Math.abs(today - to) > 1e-9) priceIsTheOnlyLever = false;
+    }
     const stored = (typeof level === 'number' ? { value: level } : level) as { value?: unknown; raw_value?: unknown; source?: unknown };
     const p = exactRaw(stored, cap);
     const by = byOf(stored.source);
@@ -191,7 +207,7 @@ export function breakEvenFor(graph: unknown): BreakEven | null {
     identity_stated_in_brief: goal.nonlinear_identity?.stated_in_brief === true,
     baseline_price: p0, baseline_price_by: p0By, baseline_volume: v0, baseline_volume_by: v0By, baseline_goal: baselineGoal,
     options: rows,
-    stated: statedArithmeticFor(goal.stated_response, { volumeId, priceId, volumeUnit, v0, v0By, p0, rows }),
+    stated: priceIsTheOnlyLever ? statedArithmeticFor(goal.stated_response, { volumeId, priceId, volumeUnit, v0, v0By, p0, rows }) : {},
     // MG B1: only a LEVEL target is an amount to reach; a delta ("grow MRR by £5k") is not, and an absent frame is not
     // assumed to be one.
     // A target is a TOTAL, so it is compared with the total's unit: a per-subscriber price ("GBP/subscriber/month") still
