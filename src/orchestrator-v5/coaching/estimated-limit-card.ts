@@ -140,6 +140,15 @@ export function estimatedLimitIn(graph: Record<string, unknown> | null): Estimat
   const matches = graph.nodes.filter((n) => readRecord(n)?.id === nodeId);
   if (matches.length !== 1) return null;
   const node = readRecord(matches[0])!;
+  // ⛔ A check Olumi cannot cite (DL #70 5855470798): the limit's threshold was RELABELLED into another unit
+  // (`provenance_unit_relabelled`), or its unit is not the node's own. Paul's 17d1cd3a "met with certainty" was a raw "%"
+  // threshold scored against a "% per month" node — so "your limit was checked against …" would cite a false check.
+  const row = (Array.isArray(graph.goal_constraints) ? graph.goal_constraints : [])
+    .map(readRecord).find((r) => r?.constraint_id === ratified[0]!.constraint_id);
+  const nodeUnit = readRecord(node.observed_state)?.unit;
+  const limitUnit = ratified[0]!.unit;
+  if (row?.provenance_unit_relabelled !== undefined) return null;
+  if (typeof limitUnit === 'string' && typeof nodeUnit === 'string' && limitUnit.trim() !== nodeUnit.trim()) return null;
   const level = levelOf(readRecord(node.observed_state));
   const label = typeof node.label === 'string' ? node.label.trim() : '';
   const kind = typeof node.kind === 'string' && TARGETABLE_NODE_KINDS.includes(node.kind) ? node.kind : null;

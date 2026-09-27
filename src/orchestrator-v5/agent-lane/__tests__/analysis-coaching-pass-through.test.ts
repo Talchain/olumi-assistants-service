@@ -890,10 +890,13 @@ test('ESTIMATED LIMIT — the level must be Olumi\'s, from ONE limit node, on th
 // Paul's served churn level is the ADOPTED starting point: observed_state.source 'user_assumption', classed
 // `user_ratified` (obligation-provenance.ts). The card keyed on 'cee_inference' only, so it was silent on HIS journey.
 // Served shape per AI Quality (PLoT request n6sq-20260926T080013Z: raw 4, unit '%'); not re-read by R&C.
+// C4 (DL #70 5855470798): a check whose limit unit is not its node's own cannot be cited as "was checked", so a
+// DERIVED level keeps the limit in the node's unit — as a checkable limit must be.
 const withChurnLevel = (source: unknown, raw = 4, unit = '%') => {
  const x=structuredClone(PAUL_GRAPH) as Record<string, any>;
  const n=x.nodes.find((m: any)=>m.id==='monthly_churn');
  n.observed_state={...n.observed_state,raw_value:raw,unit};
+ for (const c of x.goal_constraints) if (c.node_id==='monthly_churn') c.unit=unit;
  if (source===undefined) delete n.observed_state.source; else n.observed_state.source=source;
  return x;
 };
@@ -947,6 +950,16 @@ test('ESTIMATED LIMIT — one next action names ONE figure: an Olumi-estimate li
 // The state is derived by PRODUCTION deriveConstraintVerdict from the graph's own readRatifiedConstraints, over a
 // minimal doctrine-B envelope shaped as in constraint-verdict-out-of-scope.test.ts: `_meta.filtered_constraints` is
 // PLoT's FilteredConstraintRecord; per-option `constraint_probabilities` are keyed by constraint_id.
+test('ESTIMATED LIMIT — C4: a check Olumi cannot cite is refused: the limit RELABELLED into another unit, or a unit that is not the node\'s (Paul 17d1cd3a, DL 5855470798)',()=>{
+ // Control: the served graph's limit and node share "percent per month" — the card speaks.
+ assert.equal(estCards(estCase('evaluated_feasible')).length,1);
+ const relabelled=structuredClone(PAUL_GRAPH) as Record<string, any>;
+ relabelled.goal_constraints[0].provenance_unit_relabelled={rule:'agent_lane_limit_unit_v1',pre_normalisation_unit:'% per month',pre_normalisation_value:10};
+ assert.equal(estCards(estCase('evaluated_feasible',undefined,relabelled)).length,0,'relabelled');
+ const otherUnit=structuredClone(PAUL_GRAPH) as Record<string, any>;
+ otherUnit.goal_constraints[0].unit='%';
+ assert.equal(estCards(estCase('evaluated_feasible',undefined,otherUnit)).length,0,'limit "%" vs node "percent per month"');
+});
 const CHURN_ID = 'agent-lane:monthly_churn:<=';
 const PRICE_ID = 'agent-lane:pro_plan_price:<=';
 const PRICE_LIMIT = {constraint_id:PRICE_ID,node_id:'pro_plan_price',operator:'<=',value:59,label:'Pro plan price',unit:'GBP per month',provenance:'explicit'};
@@ -1139,6 +1152,7 @@ test('sayLevel — EVERY key of the canonical currency map: an all-letter key fo
 test('ESTIMATED LIMIT — the level is said by the ONE shared formatter (bound-graph sayLevel): a currency estimate reads "£5,000"',()=>{
  const x=structuredClone(PAUL_GRAPH) as Record<string, any>;
  Object.assign(x.nodes.find((n: any)=>n.id==='monthly_churn').observed_state,{raw_value:5000,unit:'£'});
+ x.goal_constraints[0].unit='£';
  const est=estCards(estCase('evaluated_feasible',undefined,x)) as any[];
  assert.equal(est.length,1);
  assert.match(est[0].body,/Olumi's estimate that it is about £5,000 today/);

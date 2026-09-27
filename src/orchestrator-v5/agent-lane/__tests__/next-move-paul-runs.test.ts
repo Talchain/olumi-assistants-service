@@ -113,15 +113,30 @@ describe('C4 on Paul 08bf9a1f (explicit Run): a definition is never the move —
   });
 });
 
-describe('C4 on Paul 17d1cd3a (automatic first pass): the real figure is the move, and its title stands alone', () => {
+describe('C4 on Paul 17d1cd3a (automatic first pass): a check Olumi cannot cite is never the move', () => {
   const f = load('17d1cd3a');
-  it('the served card is still the move (same signal id), now titled with the limit and the figure', () => {
+  it('precondition: the served card cited a check on a RELABELLED limit ("% per month" → "%"; DL 5855470798: a false "met")', () => {
+    expect(f.served_card_signal_ids[0].startsWith('coach:limit_estimate:')).toBe(true);
+    const limit = f.draft_graph.goal_constraints[0];
+    expect(limit.provenance_unit_relabelled).toMatchObject({ pre_normalisation_unit: '% per month' });
+    expect(limit.unit).toBe('%');
+  });
+  it('RED: the estimate card is refused; the move is the next one (the link view), and it is typed', () => {
     const got = cards(runTurnCoaching(...args(f)).blocks) as Rec[];
-    expect(got.map((c) => c.signal_id)).toEqual(f.served_card_signal_ids);
-    expect(got[0]!.title).toBe("Your “Monthly churn” limit was checked against Olumi's estimate of 3% per month");
+    expect(got.some((c) => c.signal_id.startsWith('coach:limit_estimate:'))).toBe(false);
+    expect(got).toHaveLength(1);
     const r = runTurnNextMove(...args(f));
-    expect(r.nextMove).toMatchObject({ kind: 'real_figure', capability: 'propose_starting_point', target_ids: ['monthly_churn'] });
+    expect(r.nextMove?.kind).toBe('link_view');
     expect(r.caveats).toEqual([]);
+  });
+  it('CONTRAST: the same run with the limit in the node\'s own unit (no relabel) → the estimate card, its title naming the limit and the figure', () => {
+    const g = { ...f.draft_graph, goal_constraints: f.draft_graph.goal_constraints.map((c: Rec) => {
+      const { provenance_unit_relabelled: _dropped, ...rest } = c;
+      return { ...rest, unit: '% per month' };
+    }) };
+    const r = runTurnNextMove(...args(f, g));
+    expect(r.nextMove).toMatchObject({ kind: 'real_figure', capability: 'propose_starting_point', target_ids: ['monthly_churn'] });
+    expect(r.nextMove?.block.title).toBe("Your “Monthly churn” limit was checked against Olumi's estimate of 3% per month");
   });
 });
 
