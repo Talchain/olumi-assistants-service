@@ -114,13 +114,14 @@ export function leaderStandingOf(readback: { readonly analysisState?: unknown; r
 }
 
 /**
- * The EXACT sentence the view opens on — the label and the typed reason the analysis cannot confirm it. Server-owned
- * words, so the view can never read as the analysis's own finding. The chat renders it verbatim and composes no reason
+ * The EXACT sentence the view opens on: the label and the fact that the analysis cannot confirm it. Server-owned
+ * words, so the view can never read as the analysis's own finding. The typed reason travels beside it as `because`. The chat renders it verbatim and composes no reason
  * of its own (AIC 5855633777, under ChatGPT's thin-UI ruling 5855577789).
  */
-export function provisionalViewHeading(because: string): string {
-  const why = because.startsWith('because ') ? ` ${because}` : `, ${because}`;
-  return `${PROVISIONAL_VIEW_LABEL} \u2014 the analysis can't confirm this yet${why}.`;
+export function provisionalViewHeading(): string {
+  // The reason is NOT repeated here (AIC 27 Sep, served 770a477: a four-line bold heading beside a reply that already
+  // said it). It travels typed as `because`, and the chat opens "Why Olumi thinks this" with it (UI #2204).
+  return `${PROVISIONAL_VIEW_LABEL} \u2014 the analysis can't confirm this yet.`;
 }
 
 /**
@@ -133,7 +134,7 @@ export interface ProvisionalViewSidecar extends ProvisionalView {
   readonly because: string;
 }
 export function provisionalViewSidecar(v: ProvisionalView, because: string): ProvisionalViewSidecar {
-  return { heading: provisionalViewHeading(because), ...v, because };
+  return { heading: provisionalViewHeading(), ...v, because };
 }
 
 /**

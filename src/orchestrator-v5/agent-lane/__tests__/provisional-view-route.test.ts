@@ -92,7 +92,8 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     noLeaderSentence = (await import('../withheld-leader-fail-closed.js')).agentNoLeaderSentence('constraint_verdict_withheld', FX.state.analysis_ready);
     // Written out here, not imported from the module under test: the reason is the gate's own clause, before its ask.
     because = noLeaderSentence.replace(/^No single option can be put forward yet, /, '').split(';')[0]!.trim();
-    heading = `Provisional view \u2014 the analysis can't confirm this yet ${because}.`;
+    // The heading is the label alone; the gate's reason travels typed as `because` (the chat opens its why with it).
+    heading = `Provisional view \u2014 the analysis can't confirm this yet.`;
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
     app.post('/orchestrate/v2/turn', async () => ({
