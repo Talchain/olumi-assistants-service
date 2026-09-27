@@ -510,7 +510,9 @@ describe('(c) precedence: the limit keeps its code and card; the unrequested fir
     const { registered, out } = await build(paul({ churnLimit: true }));
     expect((registered as unknown as { goal_constraints?: unknown[] }).goal_constraints?.length).toBe(1);
     const fact = await runOn(registered, [RAISE, KEEP]);
-    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: false, constraint_verdict_state: 'unevaluated' });
+    // B5's per-limit rows ride the same field; this row is about the leader verdict only.
+    const { per_limit: _perLimit, joint: _joint, ...leaderVerdict } = fact.result.constraint_verdict!;
+    expect(leaderVerdict).toEqual({ may_name_leading_option: false, constraint_verdict_state: 'unevaluated' });
     const { state, block } = stateFor(fact, registered);
 
     // 1. The LIMIT: `constraint_verdict_withheld` keeps the field, so the limit card fires and is built.

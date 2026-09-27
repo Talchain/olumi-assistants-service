@@ -588,3 +588,41 @@ describe("the reload carries the selected run's leader-limit risks (R&C #70 5843
     expect(body).not.toHaveProperty("analysis_leader_limit_risks");
   });
 });
+
+// ─── B5: the run's own per-limit verdicts ride with the same block (DL 5859845823) ────────────
+
+describe("the reload carries the selected run's per-limit verdicts (B5, `analysis_limit_verdicts`)", () => {
+  const LIMIT_VERDICTS = {
+    per_limit: [{ constraint_id: "gc_budget", state: "estimate_only", reason: "level_olumi_estimate" }],
+    joint: { state: "estimate_only" },
+  };
+  const withRows = (graphHash: string) => {
+    const fact = runAnalysisFact({ graphHash, mayName: true }) as { result: { constraint_verdict: Record<string, unknown> } };
+    fact.result.constraint_verdict = { ...fact.result.constraint_verdict, ...LIMIT_VERDICTS };
+    return fact;
+  };
+
+  it("FRESH — the fact's stored rows, beside its block, equal to what the fact stores", async () => {
+    readFactsFor.mockResolvedValue([withRows(GRAPH_HASH)]);
+    const app = await buildApp();
+    const body = (await read(app)).json() as Record<string, unknown>;
+    expect(body.analysis_result).not.toBeNull();
+    expect(body.analysis_limit_verdicts).toEqual(LIMIT_VERDICTS);
+  });
+
+  it("CONTRAST — a fresh fact that attests no rows carries no key (absent = not attested)", async () => {
+    readFactsFor.mockResolvedValue([runAnalysisFact({ graphHash: GRAPH_HASH, mayName: true })]);
+    const app = await buildApp();
+    const body = (await read(app)).json() as Record<string, unknown>;
+    expect(body.analysis_constraint_verdict_state, "control: the same fact is read").toBe("evaluated_feasible");
+    expect(body).not.toHaveProperty("analysis_limit_verdicts");
+  });
+
+  it("STALE — no block, and no rows: both describe a different graph", async () => {
+    readFactsFor.mockResolvedValue([withRows(PRE_EDIT_GRAPH_HASH)]);
+    const app = await buildApp();
+    const body = (await read(app)).json() as Record<string, unknown>;
+    expect(body.analysis_result).toBeNull();
+    expect(body).not.toHaveProperty("analysis_limit_verdicts");
+  });
+});

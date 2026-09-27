@@ -43,7 +43,7 @@ import { contextBindingSecret, issueContextPacket } from '../orchestrator-v5/age
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
 import { log } from '../utils/telemetry.js';
-import { asVerdictState } from '../orchestrator/context/constraint-feasibility.js';
+import { asVerdictState, readLimitVerdicts, type StoredLimitVerdicts } from '../orchestrator/context/constraint-feasibility.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { answerIsIncomplete, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
@@ -800,7 +800,7 @@ export function timedDispatch(inner: InternalDispatch, ledger: DispatchTiming[],
   };
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest }> {
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -830,6 +830,8 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   let leaderLimitRisks: readonly unknown[] | null | undefined;
   /** A7: the read's own `not_modelled`, as read — derived by the read route over this same graph, never here. */
   let notModelled: NotModelledManifest | undefined;
+  /** B5: the selected run's per-limit rows (`analysis_limit_verdicts`), same fact and gates as `analysisResult`. */
+  let limitVerdicts: StoredLimitVerdicts | undefined;
   /**
    * ⛔ THE CANVAS RENDERS FROM `draft_graph`, NOT FROM `graph_hash`.
    *
@@ -869,6 +871,8 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
       const llr = after.json.analysis_leader_limit_risks;
       if (llr === null || Array.isArray(llr)) leaderLimitRisks = llr;
       notModelled = notModelledOfRead(after.json.not_modelled);
+      // Only a pair the 0.60 contract accepts, with at least one row, is carried: absent = not attested.
+      limitVerdicts = readLimitVerdicts(after.json.analysis_limit_verdicts) ?? undefined;
       /**
        * ⭐ READINESS FROM THE MOMENT THE MODEL EXISTS, not from the moment
        * someone runs an analysis.
@@ -995,7 +999,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled };
+  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -2189,7 +2193,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * BEFORE the reply is composed, because the Run offer below keys on the
      * readiness this same response carries.
      */
-    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled } = await readBackState(readingDispatch, scenarioId);
+    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts } = await readBackState(readingDispatch, scenarioId);
 
     // ⛔ This turn's approval results go with it ONLY on the approve chip's fast path: it puts no authorise_change in
     // the history (only its words and Olumi's status), so they are the only record of which proposal it applied
@@ -2595,6 +2599,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * (DGAI `src/v5/responseParser.ts`) moves an undeclared root key into `__additive__` — no schemas release.
        */
       ...(notModelledCarrier !== undefined ? { _not_modelled: notModelledCarrier } : {}),
+      /**
+       * ⭐ B5 (DL 5859845823): the run's per-limit verdicts, `{per_limit, joint}`, as a SIDECAR root key, the A7 pattern
+       * above: spread after the finalised body, undeclared in 0.60, moved into `__additive__` by the UI parser (DGAI
+       * #2212 reads `__additive__.limit_verdicts`). Bound to the run it describes: the graph read takes it off the SAME
+       * fact, under the SAME gates, as the `analysis_result` this turn carries. Absent = not attested.
+       */
+      ...(limitVerdicts !== undefined ? { limit_verdicts: limitVerdicts } : {}),
       /**
        * ⭐ SAY WHICH PATH SERVED THIS TURN.
        *

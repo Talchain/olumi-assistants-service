@@ -765,6 +765,15 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
   /** Readiness on the registered graph. A kept £54 whose AI availability stays open is one honest value question, never a withheld option. */
   const blocking = (g: SGraph) => assessCanonicalAnalysisReadiness(g).blockingIssues.map((i) => [i.code, i.message]);
   const ASK_54_AI = [['MISSING_OPTION_VALUE', 'Factor "AI feature availability" needs a numeric value for option "£54 with AI release"']];
+  /**
+   * placeholder-zero (48f2e12f): a row whose registered AI availability is levelled at 0.5 (not a 0/1 switch) needs a
+   * status-quo level for it, or readiness also asks what it is today — a question that row is not about. `padded`'s
+   * baseline (0, not known) never registers on the factor's frame of 1, so these rows' drafts state it KNOWN: 0 today,
+   * the AI release not yet shipped. With a level held, an open £54 is asked against it ("is currently 0").
+   */
+  const knownAi = <D extends CandidateModel>(d: D): D =>
+    ({ ...d, factors: d.factors.map((f) => (f.label === 'AI feature availability' ? { ...f, baseline_known: true, baseline_value: 0 } : f)) }) as D;
+  const ASK_54_AI_AT_0 = [['MISSING_OPTION_VALUE', 'Factor "AI feature availability" is currently 0. What should option "£54 with AI release" set it to?']];
 
   it('PRECONDITION (row 2e): within the limit, "£54 with AI release" is registered and distinct, and the one gap asked is £54\'s', async () => {
     for (const withTest of [true, false]) {
@@ -789,7 +798,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
   });
 
   it('CONTROL (row 2e, compliant): a retry that levels £54 -> AI feature availability is adopted — no duplicate in either draft', async () => {
-    const { out, graph, reqs } = await construct(with54(false), with54(false, LEVELLED_54));
+    const { out, graph, reqs } = await construct(knownAi(with54(false)), knownAi(with54(false, LEVELLED_54)));
     expect(reqs).toHaveLength(2);
     expect(issues(reqs[1]!.input)).toEqual([GAP_54]);
     expect([out.ok, out.size_retried]).toEqual([true, false]);
@@ -802,7 +811,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
   it('CONTROL (row 2f, the other side): the FIRST draft already withheld the duplicate — the compliant retry that copies it as drafted is adopted', async () => {
     // The duplicate is withheld by both admissions. The first draft never registered it, so the retry side still leaves
     // its pairs out: 0 < 1. Counted, 2 < 1 fails and £54 never gets the level the retry gave it.
-    const { out, graph, reqs } = await construct(with54(true), with54(true, LEVELLED_54));
+    const { out, graph, reqs } = await construct(knownAi(with54(true)), knownAi(with54(true, LEVELLED_54)));
     expect(reqs).toHaveLength(2);
     expect(issues(reqs[1]!.input)).toEqual([GAP_54]);
     expect([out.ok, out.size_retried]).toEqual([true, false]);
@@ -872,12 +881,12 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
   });
 
   it('CONTROL (row 2h, partial progress — the verifier\'s P2-ctrl): a retry that levels £64 and leaves £54 as drafted is adopted — all four registered, £54 still asked', async () => {
-    const { out, graph } = await construct(with54And64(), with54And64({}, LEVELLED(64, 0.5)));
+    const { out, graph } = await construct(knownAi(with54And64()), knownAi(with54And64({}, LEVELLED(64, 0.5))));
     expect([out.ok, out.size_retried]).toEqual([true, false]);
     expect(optionIds(graph!)).toEqual(FOUR);
     expect(levelsById(graph!)['54_with_ai_release']).toEqual({ pro_plan_price: 0.27 });
     expect(levelsById(graph!)['64_with_ai_release']).toEqual({ pro_plan_price: 0.32, ai_feature_availability: 0.5 });
-    expect(blocking(graph!)).toEqual(ASK_54_AI);
+    expect(blocking(graph!)).toEqual(ASK_54_AI_AT_0);
     expect(withheldOptions(out)).toEqual(ONLY_TEST_WITHHELD);
     expect(out.left_out_to_stay_compact).toBeUndefined();
   });
@@ -1001,9 +1010,9 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
   it('CONTROL (row 2j, a duplicate only the RETRY adds): the first draft withholds nothing; a retry that levels £54 and adds the duplicate is adopted', async () => {
     // The rule is about options the first draft REGISTERED: a new duplicate is the retry's own to withhold and say, and its
     // pairs are no gap (0 < 1). Counted, 2 < 1 fails; refused for withholding anything, £54 never gets its level.
-    expect(withheldBy(with54(false))).toEqual([]);
-    expect(withheldBy(with54(true, LEVELLED_54))).toEqual(['Test £59 with AI release']);
-    const { out, graph, reqs } = await construct(with54(false), with54(true, LEVELLED_54));
+    expect(withheldBy(knownAi(with54(false)))).toEqual([]);
+    expect(withheldBy(knownAi(with54(true, LEVELLED_54)))).toEqual(['Test £59 with AI release']);
+    const { out, graph, reqs } = await construct(knownAi(with54(false)), knownAi(with54(true, LEVELLED_54)));
     expect(reqs).toHaveLength(2);
     expect(issues(reqs[1]!.input)).toEqual([GAP_54]);
     expect([out.ok, out.size_retried]).toEqual([true, false]);
@@ -1078,7 +1087,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
   });
 
   it('CONTROL (row 3c): the same levelled retry, declaring nothing new, is adopted — "Keep current pricing" held and stamped', async () => {
-    const { out, graph } = await construct(with54(true), with54(true, LEVELLED_54));
+    const { out, graph } = await construct(knownAi(with54(true)), knownAi(with54(true, LEVELLED_54)));
     expect([out.ok, out.size_retried]).toEqual([true, false]);
     expect(levelsById(graph!)['54_with_ai_release']).toEqual({ pro_plan_price: 0.27, ai_feature_availability: 0.5 });
     expect(held(graph!)).toEqual(['keep_current_pricing']);
