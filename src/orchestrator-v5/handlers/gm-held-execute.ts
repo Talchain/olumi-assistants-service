@@ -44,6 +44,7 @@ import { applyPatchOperations } from '../../orchestrator/patch-applier.js';
 import {
   canonicaliseValueOps,
   stampUserEditProvenance,
+  stampUserApprovedAddProvenance,
   reconcileObservedValuePair,
   batchFullyLanded,
   findAmbiguousScaleValueOps,
@@ -698,9 +699,17 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
   // failure; `reconcileObservedValuePair` would throw on it anyway (the
   // fail-loud backstop), and this prescreen turns that into the seam's
   // honest decline instead of an unhandled error.
-  const heldCanonicalisedOps = stampUserEditProvenance(
-    canonicaliseValueOps(operations, input.currentGraph).operations,
-    operations,
+  //
+  // ⭐ A6b (DL #70 5855437928): every `add_node` the user just CONFIRMED is
+  // theirs — node `provenance: 'user_set'`, written by CEE HERE, after the
+  // re-referee (whose R4 screen refuses any producer-written `provenance` on an
+  // add, so a model can never self-stamp) and never on the normal seam, where an
+  // add applies only unapproved. See `stampUserApprovedAddProvenance`.
+  const heldCanonicalisedOps = stampUserApprovedAddProvenance(
+    stampUserEditProvenance(
+      canonicaliseValueOps(operations, input.currentGraph).operations,
+      operations,
+    ),
   );
   const heldAmbiguousOps = findAmbiguousScaleValueOps(heldCanonicalisedOps, input.currentGraph);
   if (heldAmbiguousOps.length > 0) {

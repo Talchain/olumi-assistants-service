@@ -580,6 +580,57 @@ export function stampUserEditProvenance(
 }
 
 // ---------------------------------------------------------------------------
+// ⭐ SLICE A6b — AN ADD THE USER APPROVED IS THE USER'S (Canonical's A6 design,
+// DL #70 5855437928).
+//
+// Node `provenance: 'user_set'` (`USER_EDIT_PROVENANCE`, `NodeV3.provenance`) is
+// the ONE node spelling for "the user put this here". Before this, only the
+// canvas `structural_add` wrote it: an option the user added through the chip or
+// the Agent (and the `new_factors` it brings), an approved `edit_graph` add and
+// any other held structural add all landed with NO node provenance, so they read
+// as nobody's. Served: Paul's Agent-minted option `6526b52c`.
+//
+// WHERE, AND WHY ONLY THERE. Called by exactly ONE seam: the held/confirm apply
+// (`executeGmHeldResume`), i.e. the user's approval. Under the live posture every
+// structural add reaches the graph through it (referee: `add_node` →
+// STRUCTURAL_APPLY_HELD), as does every add-option chip. It is deliberately NOT
+// called on the normal edit seam (`edit-graph.ts`): an add applies there only when
+// the referee does not hold (`shadow`/`off`), which is an auto-applied MODEL add
+// no user approved. Draft generation and repair never reach either seam. All of
+// those stay unstamped.
+//
+// J2 — A PRODUCER CANNOT SELF-STAMP. The stamp is CEE's, written AFTER the strip
+// and AFTER the confirm's re-referee, never taken from the payload: a model's own
+// `provenance` on an add is stripped before the hold
+// (`stripPipelineOwnedFromAddOperations`) and refused by the referee's R4 screen
+// if it ever reaches the confirm; and here CEE's literal is spread LAST, so no
+// payload value — `user_set` or any other member — sits in its place.
+//
+// Stamped INTO the op, pre-apply, for the reason `stampUserEditProvenance` is:
+// the applier writes it and `batchFullyLanded` sees raw == canonical. Node
+// `provenance` is outside the analysis-hash whitelist (`graph-hash.ts`), so
+// freshness and the hold pins do not move; the identity hash (an exclude list
+// over persisted fields) does, as it must for a new persisted field.
+//
+// Scope: `add_node` only, and the NODE claim only. It says who put the node in
+// the model, not whose number any value on it is — `observed_state.source` and an
+// intervention's `source` keep their own writers. Every other op is returned BY
+// REFERENCE. Pure and total; never mutates its inputs.
+// ---------------------------------------------------------------------------
+
+/** Stamp every `add_node` in a batch the USER APPROVED with node `provenance: 'user_set'`. */
+export function stampUserApprovedAddProvenance(
+  operations: readonly PatchOperation[],
+): PatchOperation[] {
+  return operations.map((op) => {
+    if (op.op !== 'add_node') return op;
+    const value = asRecord(op.value);
+    if (value === null) return op;
+    return { ...op, value: { ...value, provenance: USER_EDIT_PROVENANCE } };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Observed value-pair authority (ROADMAP 2.1033 — the SERVER half of
 // "screen = commit", 2026-08-09).
 //

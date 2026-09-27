@@ -852,7 +852,7 @@ export function createSetFactorValueHandler(): HandlerFn {
 
       // Stamp provenance so downstream consumers know the value was
       // user-set (NodeV3.provenance enum supports 'user_set' directly).
-      node.provenance = 'user_set';
+      delete (node as { provenance?: unknown }).provenance;
       // The second carrier of the same producer claim. Repair stages promote
       // `extractionType` to the node (`NodeV3.extractionType`), and both the UI
       // predicate (`d?.extractionType`) and `readFactorValueView` (observed_state
