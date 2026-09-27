@@ -1,0 +1,626 @@
+{
+ "source": "gpt-4.1-2025-04-14 responses captured by AIC 27 Sep (c62-spans-r1.jsonl + c62-spans-outside.jsonl); AIQ GO #70 5859288025",
+ "briefs": {
+  "paulA": "Given our goal of reaching £100k MRR within 12 months [Currently 75k] while keeping monthly churn under 4%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?",
+  "paulC": "We need to reach £100k MRR within 6 months with a £20k budget, while keeping monthly churn under 4%. Should we develop new features and increase our Pro plan price from £49 to £59 per month in the next release, or invest in additional advertising?",
+  "techlead": "Should I hire a Tech lead or two developers to increase productivity, while maintaining code quality? We have an urgent launch date in the next three months. We currently have six mid-weight developers, so we're lacking leadership. Our budget is £200,000, but we'd like to spend less.",
+  "sales": "We're a B2B SaaS company (£8k MRR, 120 customers) deciding whether to hire a dedicated sales team or continue with founder-led sales. Our goal is reaching £30k MRR within 18 months. Key context:\n\n- Current conversion rate from trial to paid is 12%, which we believe is partly driven by product quality and partly by how much attention each trial gets from the founder\n- Our churn rate is 4% monthly, but we suspect churn and customer acquisition cost are both influenced by the same underlying factor: how well we understand our ICP (ideal customer profile), which we haven't formally validated\n- We've heard from three churned customers that they left because of missing integrations, not price - so we think product gaps mediate the relationship between customer satisfaction and churn\n- A competitor just raised £5m and is hiring aggressively, but we don't know their exact strategy\n- If we hire sales, we'd need to spend £80-120k on the first hire plus £20k tooling, funded from our £200k runway\n- The founder currently spends 60% of time on sales - hiring would free this up for product, which we believe indirectly affects retention through product quality improvements\n- We're also considering a middle option: hiring a part-time SDR (£40k) to handle top-of-funnel while the founder stays on closing\n\nImportant constraints: we must keep at least 6 months runway at all times, and we want customer acquisition cost to stay under £500.",
+  "gtm": "We're deciding between three go-to-market strategies for our new B2B SaaS AI-native strategic enhancement product: direct sales hiring, channel partnerships, or product-led growth. Our goal is to reach £500k ARR within 12 months. We currently have 15 beta customers, a 3-person founding team, and £200k runway remaining. Key risks include long enterprise sales cycles, partner reliability, and self-serve conversion rates.",
+  "assistant": "I need to focus on more strategic tasks. Help me decide whether to hire a personal assistant or use an AI assistant to save money.  The personal assistant will likely be 10x as expensive, but I hope it will significantly increase my ability to focus on high-value tasks. I could also hire an assistant and equip them with an AI tool, but is it worth spending $40,000 to $50,000 versus $10,000 per year for the AI?",
+  "investors": "For our startup, should we target angel investors or focus only on funds that can provide the full amount for our pre-seed round? We're raising 1.3 million, and we need all of it. If we fall short, we'd have to completely replan our approach, which would be a very bad outcome. Ideally, we'd like to be offered more.",
+  "marketing": "Should I hire a marketing manager, or use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising? Our budget for the year is £100,000. I can't spend more than 25% of my time on this, and I'm not that experienced with marketing.",
+  "midmarket": "We're a 50-person B2B SaaS company doing £3M ARR. We need to decide how to expand our product into the mid-market segment within 12 months.\nGoal: Reach 200 mid-market customers with a net revenue retention rate above 110%.\nOptions we're considering:\n1. Build a dedicated mid-market product tier with enterprise features (SSO, audit logs, custom roles)\n2. Partner with 3-4 system integrators who already serve mid-market clients\n3. Acquire a smaller competitor that already has mid-market traction\nKey factors we think matter:\n* Engineering capacity — we have 20 engineers, 8 of whom are senior\n* Sales cycle length — mid-market deals typically take 3-6 months\n* Product-market fit — we've had 12 inbound enquiries from mid-market companies in the last quarter\n* Integration complexity — mid-market buyers expect integrations with Salesforce, HubSpot, and Slack\n* Competitive pressure — two VC-backed competitors launched mid-market tiers last quarter\n* Cash runway — we have under 18 months of runway... [truncated_by: bundle_redaction, 1140 chars total]",
+  "engE": "Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under £400k?",
+  "b1": "I need to work out whether we push into Germany next year or double down on the UK — that's the decision, and honestly the board is split. We're an 85-person regtech SaaS doing £11.2m ARR, growing about 28% year on year, but UK new-logo growth slowed to 9% over the last two quarters and I think the UK market is maybe 70% penetrated for our segment — that's my gut, not a real number. The goal is to get to £20m ARR by end of FY28 without dropping gross margin below 78%. Germany: TAM is supposedly €400m (that's from the 2025 Gartner regtech sizing, though our head of sales thinks it's inflated, maybe half that once you strip out the banks we can't serve). BaFin licensing will take 9 to 14 months, legal quoted us €250k for the process, and we'd need maybe 6 local hires — say €900k a year fully loaded. We have £3.1m cash and we're profitable-ish, breakeven plus or minus £100k a quarter, so we can't fund a two-year burn on this. Assumption: our UK compliance content localises to the German regime with about 60% reuse — our CTO says it's more like 40%, and if he's right the engineering cost roughly doubles. Two existing customers (both UK banks with Frankfurt operations) have said they'd sponsor a pilot — I have the emails from May. Constraint: we cannot hire more than 8 people total next year, HR freeze from the board, and marketing spend is capped at £1.5m. There's a half-formed idea floating around that we partner with a local player like Regnology instead of going direct — nobody has scoped it, might be nothing. Also worth saying: our NRR is 112%, and if we just focused on expansion we might hit £16m without any new market — Priya's cohort model in the June board pack says £15.8m by FY28 on expansion alone. I honestly don't know whether the Germany window closes if we wait a year — two US competitors raised big rounds in Q2. The CFO wants to wait 12 months, the CRO wants to go now. So: Germany in 2027, or UK depth?",
+  "b2": "Should we outsource our payroll to an external provider, or keep it in-house? Payroll admin currently costs us about £85,000 a year in staff time, and the provider quotes £3,000 a month plus a £10,000 setup fee. We are worried about error rates and losing control of our data.",
+  "b3": "We're a 20-person B2B SaaS doing £2M ARR. I'm torn on whether to move upmarket to enterprise or double down on SMB. Enterprise means longer sales cycles and more support but bigger deals. I'm worried about spreading the team too thin. Help me think this through.",
+  "b4": "Right now SMB is about 400 customers at roughly £400/month, and monthly churn is around 3% which honestly scares me. We've had maybe 5 enterprise leads come inbound this quarter and closed one at £60k ARR. The team is 8 engineers, 4 sales, 3 customer success, the rest ops and founders. My gut says enterprise but I don't want to bet the company on it.",
+  "b5": "We have approved headcount for four hires next year but not the money for six. The choice is three account executives to push revenue now, four platform engineers to pay down the reliability debt driving our biggest churn complaints, or a two-and-two split. Our constraint is that the sales team already misses quota with the current product reliability, and engineering attrition is rising. The board wants to see ARR growth by Q3.",
+  "b6": "Restate the target as a change from today: I want the churn goal to improve by 1.5 percentage points from where it is now, and runway to fall by no more than 5 months from today. Record those as change-from-today targets, then run the analysis again and name the option that best meets them.",
+  "b7": "Should we expand into the European market in the next 6-12 months, as the US market is highly competitive, and we believe we could have the advantage of a significantly differentiated and valuable offering in a number of European countries? Our current customer base is 400. The target is 800. Monthly churn is 3%. Investment budget up to £500k. Competition intensity varies. Multiple complex country regulations are a consideration.",
+  "b8": "Should we hire 3 full-time engineers or use contractors for our 6-month project? We need strong React and Node.js skills, budget is $300k.",
+  "b9": "Should we replace our current CRM with HubSpot next quarter, or keep what we have? We are a 24-person B2B sales team. Annual CRM cost is about £50,000 and switching would cost roughly £20,000 one-off. The goal is higher sales productivity without blowing the budget.",
+  "b10": "Should we open a second warehouse in Leeds next year, or expand the one we have? We ship about 1667 orders a week and next-day coverage is slipping in the north. The goal is faster delivery without doubling our fixed costs."
+ },
+ "not_limits": {
+  "assistant": [
+   "$40,000 to $50,000",
+   "$10,000 per year"
+  ],
+  "gtm": [
+   "£200k runway remaining"
+  ],
+  "investors": [
+   "raising 1.3 million",
+   "we need all of it"
+  ],
+  "midmarket": [
+   "within 12 months"
+  ],
+  "b3": [
+   "spreading the team too thin"
+  ],
+  "b7": [
+   "Monthly churn is 3%."
+  ],
+  "b9": [
+   "Annual CRM cost is about £50,000",
+   "switching would cost roughly £20,000 one-off"
+  ]
+ },
+ "responses": [
+  {
+   "id": "paulA",
+   "draw": 1,
+   "spans": {
+    "goal": "reaching £100k MRR within 12 months",
+    "limits": [
+     "keeping monthly churn under 4%"
+    ],
+    "options": [
+     "increase the Pro plan price from £49 to £59 per month with the next Pro feature release"
+    ]
+   }
+  },
+  {
+   "id": "paulA",
+   "draw": 2,
+   "spans": {
+    "goal": "reaching £100k MRR within 12 months",
+    "limits": [
+     "keeping monthly churn under 4%"
+    ],
+    "options": [
+     "increase the Pro plan price from £49 to £59 per month with the next Pro feature release"
+    ]
+   }
+  },
+  {
+   "id": "paulC",
+   "draw": 1,
+   "spans": {
+    "goal": "reach £100k MRR within 6 months",
+    "limits": [
+     "£20k budget",
+     "monthly churn under 4%"
+    ],
+    "options": [
+     "develop new features and increase our Pro plan price from £49 to £59 per month in the next release",
+     "invest in additional advertising"
+    ]
+   }
+  },
+  {
+   "id": "paulC",
+   "draw": 2,
+   "spans": {
+    "goal": "reach £100k MRR within 6 months",
+    "limits": [
+     "£20k budget",
+     "monthly churn under 4%"
+    ],
+    "options": [
+     "develop new features and increase our Pro plan price from £49 to £59 per month in the next release",
+     "invest in additional advertising"
+    ]
+   }
+  },
+  {
+   "id": "techlead",
+   "draw": 1,
+   "spans": {
+    "goal": "increase productivity, while maintaining code quality",
+    "limits": [
+     "urgent launch date in the next three months",
+     "budget is £200,000, but we'd like to spend less"
+    ],
+    "options": [
+     "hire a Tech lead",
+     "hire two developers"
+    ]
+   }
+  },
+  {
+   "id": "techlead",
+   "draw": 2,
+   "spans": {
+    "goal": null,
+    "limits": [
+     "urgent launch date in the next three months",
+     "budget is £200,000",
+     "we'd like to spend less"
+    ],
+    "options": [
+     "hire a Tech lead",
+     "two developers"
+    ]
+   }
+  },
+  {
+   "id": "sales",
+   "draw": 1,
+   "spans": {
+    "goal": "reaching £30k MRR within 18 months",
+    "limits": [
+     "we must keep at least 6 months runway at all times",
+     "we want customer acquisition cost to stay under £500"
+    ],
+    "options": [
+     "hire a dedicated sales team",
+     "continue with founder-led sales",
+     "hiring a part-time SDR (£40k) to handle top-of-funnel while the founder stays on closing"
+    ]
+   }
+  },
+  {
+   "id": "sales",
+   "draw": 2,
+   "spans": {
+    "goal": "reaching £30k MRR within 18 months",
+    "limits": [
+     "we must keep at least 6 months runway at all times",
+     "we want customer acquisition cost to stay under £500"
+    ],
+    "options": [
+     "hire a dedicated sales team",
+     "continue with founder-led sales",
+     "hiring a part-time SDR (£40k) to handle top-of-funnel while the founder stays on closing"
+    ]
+   }
+  },
+  {
+   "id": "gtm",
+   "draw": 1,
+   "spans": {
+    "goal": "reach £500k ARR within 12 months",
+    "limits": [
+     "£200k runway remaining"
+    ],
+    "options": [
+     "direct sales hiring",
+     "channel partnerships",
+     "product-led growth"
+    ]
+   }
+  },
+  {
+   "id": "gtm",
+   "draw": 2,
+   "spans": {
+    "goal": "reach £500k ARR within 12 months",
+    "limits": [
+     "£200k runway remaining"
+    ],
+    "options": [
+     "direct sales hiring",
+     "channel partnerships",
+     "product-led growth"
+    ]
+   }
+  },
+  {
+   "id": "assistant",
+   "draw": 1,
+   "spans": {
+    "goal": "significantly increase my ability to focus on high-value tasks",
+    "limits": [
+     "$40,000 to $50,000",
+     "$10,000 per year"
+    ],
+    "options": [
+     "hire a personal assistant",
+     "use an AI assistant",
+     "hire an assistant and equip them with an AI tool"
+    ]
+   }
+  },
+  {
+   "id": "assistant",
+   "draw": 2,
+   "spans": {
+    "goal": null,
+    "limits": [
+     "$40,000 to $50,000",
+     "$10,000 per year"
+    ],
+    "options": [
+     "hire a personal assistant",
+     "use an AI assistant",
+     "hire an assistant and equip them with an AI tool"
+    ]
+   }
+  },
+  {
+   "id": "investors",
+   "draw": 1,
+   "spans": {
+    "goal": "be offered more",
+    "limits": [
+     "raising 1.3 million",
+     "we need all of it"
+    ],
+    "options": [
+     "target angel investors",
+     "focus only on funds that can provide the full amount for our pre-seed round"
+    ]
+   }
+  },
+  {
+   "id": "investors",
+   "draw": 2,
+   "spans": {
+    "goal": "be offered more",
+    "limits": [
+     "raising 1.3 million",
+     "we need all of it"
+    ],
+    "options": [
+     "target angel investors",
+     "focus only on funds that can provide the full amount for our pre-seed round"
+    ]
+   }
+  },
+  {
+   "id": "marketing",
+   "draw": 1,
+   "spans": {
+    "goal": null,
+    "limits": [
+     "Our budget for the year is £100,000.",
+     "I can't spend more than 25% of my time on this"
+    ],
+    "options": [
+     "hire a marketing manager",
+     "use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising"
+    ]
+   }
+  },
+  {
+   "id": "marketing",
+   "draw": 2,
+   "spans": {
+    "goal": null,
+    "limits": [
+     "Our budget for the year is £100,000.",
+     "I can't spend more than 25% of my time on this"
+    ],
+    "options": [
+     "hire a marketing manager",
+     "use an AI tool to plan the campaign for the next product feature launch, and use the money I'd save to spend more on advertising"
+    ]
+   }
+  },
+  {
+   "id": "midmarket",
+   "draw": 1,
+   "spans": {
+    "goal": "Reach 200 mid-market customers with a net revenue retention rate above 110%.",
+    "limits": [
+     "within 12 months"
+    ],
+    "options": [
+     "Build a dedicated mid-market product tier with enterprise features (SSO, audit logs, custom roles)",
+     "Partner with 3-4 system integrators who already serve mid-market clients",
+     "Acquire a smaller competitor that already has mid-market traction"
+    ]
+   }
+  },
+  {
+   "id": "midmarket",
+   "draw": 2,
+   "spans": {
+    "goal": "Reach 200 mid-market customers with a net revenue retention rate above 110%.",
+    "limits": [
+     "within 12 months"
+    ],
+    "options": [
+     "Build a dedicated mid-market product tier with enterprise features (SSO, audit logs, custom roles)",
+     "Partner with 3-4 system integrators who already serve mid-market clients",
+     "Acquire a smaller competitor that already has mid-market traction"
+    ]
+   }
+  },
+  {
+   "id": "engE",
+   "draw": 1,
+   "spans": {
+    "goal": "ship the new platform by Q3",
+    "limits": [
+     "annual salary spend under £400k"
+    ],
+    "options": [
+     "hire two senior engineers",
+     "four junior engineers"
+    ]
+   }
+  },
+  {
+   "id": "engE",
+   "draw": 2,
+   "spans": {
+    "goal": "ship the new platform by Q3",
+    "limits": [
+     "annual salary spend under £400k"
+    ],
+    "options": [
+     "hire two senior engineers",
+     "four junior engineers"
+    ]
+   }
+  },
+  {
+   "id": "b1",
+   "draw": 1,
+   "spans": {
+    "goal": "get to £20m ARR by end of FY28 without dropping gross margin below 78%",
+    "limits": [
+     "we cannot hire more than 8 people total next year",
+     "marketing spend is capped at £1.5m"
+    ],
+    "options": [
+     "push into Germany next year",
+     "double down on the UK"
+    ]
+   }
+  },
+  {
+   "id": "b1",
+   "draw": 2,
+   "spans": {
+    "goal": "get to £20m ARR by end of FY28 without dropping gross margin below 78%",
+    "limits": [
+     "we cannot hire more than 8 people total next year",
+     "marketing spend is capped at £1.5m"
+    ],
+    "options": [
+     "push into Germany next year",
+     "double down on the UK"
+    ]
+   }
+  },
+  {
+   "id": "b2",
+   "draw": 1,
+   "spans": {
+    "goal": null,
+    "limits": [],
+    "options": [
+     "outsource our payroll to an external provider",
+     "keep it in-house"
+    ]
+   }
+  },
+  {
+   "id": "b2",
+   "draw": 2,
+   "spans": {
+    "goal": null,
+    "limits": [],
+    "options": [
+     "outsource our payroll to an external provider",
+     "keep it in-house"
+    ]
+   }
+  },
+  {
+   "id": "b3",
+   "draw": 1,
+   "spans": {
+    "goal": null,
+    "limits": [
+     "spreading the team too thin"
+    ],
+    "options": [
+     "move upmarket to enterprise",
+     "double down on SMB"
+    ]
+   }
+  },
+  {
+   "id": "b3",
+   "draw": 2,
+   "spans": {
+    "goal": null,
+    "limits": [
+     "spreading the team too thin"
+    ],
+    "options": [
+     "move upmarket to enterprise",
+     "double down on SMB"
+    ]
+   }
+  },
+  {
+   "id": "b4",
+   "draw": 1,
+   "spans": {
+    "goal": null,
+    "limits": [],
+    "options": [
+     "SMB",
+     "enterprise"
+    ]
+   }
+  },
+  {
+   "id": "b4",
+   "draw": 2,
+   "spans": {
+    "goal": null,
+    "limits": [],
+    "options": [
+     "SMB",
+     "enterprise"
+    ]
+   }
+  },
+  {
+   "id": "b5",
+   "draw": 1,
+   "spans": {
+    "goal": "ARR growth by Q3",
+    "limits": [
+     "approved headcount for four hires next year",
+     "not the money for six"
+    ],
+    "options": [
+     "three account executives to push revenue now",
+     "four platform engineers to pay down the reliability debt driving our biggest churn complaints",
+     "a two-and-two split"
+    ]
+   }
+  },
+  {
+   "id": "b5",
+   "draw": 2,
+   "spans": {
+    "goal": "ARR growth by Q3",
+    "limits": [
+     "approved headcount for four hires next year",
+     "not the money for six"
+    ],
+    "options": [
+     "three account executives to push revenue now",
+     "four platform engineers to pay down the reliability debt driving our biggest churn complaints",
+     "a two-and-two split"
+    ]
+   }
+  },
+  {
+   "id": "b6",
+   "draw": 1,
+   "spans": {
+    "goal": "churn goal to improve by 1.5 percentage points from where it is now",
+    "limits": [
+     "runway to fall by no more than 5 months from today"
+    ],
+    "options": []
+   }
+  },
+  {
+   "id": "b6",
+   "draw": 2,
+   "spans": {
+    "goal": "churn goal to improve by 1.5 percentage points from where it is now",
+    "limits": [
+     "runway to fall by no more than 5 months from today"
+    ],
+    "options": []
+   }
+  },
+  {
+   "id": "b7",
+   "draw": 1,
+   "spans": {
+    "goal": "The target is 800.",
+    "limits": [
+     "Monthly churn is 3%.",
+     "Investment budget up to £500k."
+    ],
+    "options": [
+     "expand into the European market in the next 6-12 months"
+    ]
+   }
+  },
+  {
+   "id": "b7",
+   "draw": 2,
+   "spans": {
+    "goal": "The target is 800.",
+    "limits": [
+     "Monthly churn is 3%.",
+     "Investment budget up to £500k."
+    ],
+    "options": [
+     "expand into the European market in the next 6-12 months"
+    ]
+   }
+  },
+  {
+   "id": "b8",
+   "draw": 1,
+   "spans": {
+    "goal": null,
+    "limits": [
+     "budget is $300k"
+    ],
+    "options": [
+     "hire 3 full-time engineers",
+     "use contractors"
+    ]
+   }
+  },
+  {
+   "id": "b8",
+   "draw": 2,
+   "spans": {
+    "goal": null,
+    "limits": [
+     "budget is $300k"
+    ],
+    "options": [
+     "hire 3 full-time engineers",
+     "use contractors"
+    ]
+   }
+  },
+  {
+   "id": "b9",
+   "draw": 1,
+   "spans": {
+    "goal": "higher sales productivity without blowing the budget",
+    "limits": [
+     "Annual CRM cost is about £50,000",
+     "switching would cost roughly £20,000 one-off"
+    ],
+    "options": [
+     "replace our current CRM with HubSpot next quarter",
+     "keep what we have"
+    ]
+   }
+  },
+  {
+   "id": "b9",
+   "draw": 2,
+   "spans": {
+    "goal": "higher sales productivity without blowing the budget",
+    "limits": [
+     "Annual CRM cost is about £50,000",
+     "switching would cost roughly £20,000 one-off"
+    ],
+    "options": [
+     "replace our current CRM with HubSpot next quarter",
+     "keep what we have"
+    ]
+   }
+  },
+  {
+   "id": "b10",
+   "draw": 1,
+   "spans": {
+    "goal": "faster delivery without doubling our fixed costs",
+    "limits": [
+     "without doubling our fixed costs"
+    ],
+    "options": [
+     "open a second warehouse in Leeds next year",
+     "expand the one we have"
+    ]
+   }
+  },
+  {
+   "id": "b10",
+   "draw": 2,
+   "spans": {
+    "goal": "faster delivery without doubling our fixed costs",
+    "limits": [
+     "without doubling our fixed costs"
+    ],
+    "options": [
+     "open a second warehouse in Leeds next year",
+     "expand the one we have"
+    ]
+   }
+  }
+ ]
+}

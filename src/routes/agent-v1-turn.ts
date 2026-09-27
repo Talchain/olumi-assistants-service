@@ -1990,7 +1990,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           void readBrief(message, callBriefReading).then((reading) => {
             if (!briefReadingOpen || reading === null || graphPreviewEmitted()) return;
             try {
-              emitStage({ kind: 'BRIEF_READ', goal: reading.goal, options: reading.options, elapsed_ms: Date.now() - startedAt });
+              emitStage({ kind: 'BRIEF_READ', goal: reading.goal, options: reading.options, limits: reading.limits, elapsed_ms: Date.now() - startedAt });
             } catch { /* display work never costs the turn */ }
           });
         }
