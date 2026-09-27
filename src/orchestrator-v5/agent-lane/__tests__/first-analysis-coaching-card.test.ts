@@ -152,7 +152,7 @@ type Reply = {
   blocks?: Block[];
   graph_hash?: string;
   analysis_state?: { run_state?: { computed_at?: string } };
-  _diagnostic_trace: { fast_path?: string; first_analysis?: Record<string, unknown>; coaching?: { eligible: boolean; reason?: string } };
+  _diagnostic_trace: { fast_path?: string; first_analysis?: Record<string, unknown>; coaching?: { eligible: boolean; reason?: string }; coaching_next_move?: string | null; coaching_caveats?: string[] };
 };
 
 let n = 0;
@@ -211,9 +211,11 @@ describe('the automatic first analysis shows the fragile-link coaching card', ()
     expect(card.created_at).toBe(r.analysis_state?.run_state?.computed_at);
     // First-pass copy, one conversational action, leader-free on this withheld run.
     expect(String(card.body).startsWith(FIRST_PASS)).toBe(true);
-    // c19-B t2's leader is withheld FOR A LIMIT, so the one card is the limit card (limit first, #70), never a link card.
-    expect(String(card.signal_id).startsWith('coach:limit_unchecked:')).toBe(true);
-    expect(card.action_label).toBe('What this means for my limits');
+    // c19-B t2's leader is withheld FOR A LIMIT: C4 says the limit once as the caveat, and the one card is the link card.
+    expect(String(card.signal_id).startsWith('coach:fragile_link:')).toBe(true);
+    expect(r._diagnostic_trace.coaching_next_move).toBe('link_view');
+    expect(r._diagnostic_trace.coaching_caveats).toHaveLength(1);
+    expect(String(r._diagnostic_trace.coaching_caveats?.[0]).startsWith('coach:limit_unchecked:')).toBe(true);
     for (const field of ['title', 'body', 'action_label', 'action_prompt'] as const) expect(String(card[field])).not.toMatch(LEADER);
     expect((r.blocks ?? []).filter((b) => b.type === 'analysis_result')).toHaveLength(1);
     expect(r._diagnostic_trace.coaching).toEqual({ eligible: true });
@@ -232,14 +234,13 @@ describe('the automatic first analysis shows the fragile-link coaching card', ()
     const card = cards[0]!;
     expect(CoachingBlockSchema.safeParse(card).success).toBe(true);
     const computedAt = (PAUL_T1.analysis_state.run_state as { computed_at: string }).computed_at;
-    // Reverting agent-v1-turn.ts's `graph: readbackGraph` turns this RED: the card falls back to the generic words.
-    // Churn is worked out from price and adoption on this graph and no run option sets it, so the route's card also
-    // says the PROVED cause (`:unanchored`): the route hands the run's own analysis_ready options to the proof.
-    expect(card.signal_id).toBe(`coach:limit_unchecked:${PAUL_T1.graph_hash}:${computedAt}:auto_first_pass:named:unanchored`);
-    expect(String(card.body)).toContain('your limit on “Monthly churn”');
-    expect(String(card.body)).toContain('Olumi works that out from other parts of your model');
-    expect(String(card.action_prompt)).toContain('my limit on “Monthly churn”');
-    expect(card.action_label).toBe('What this means for my limit');
+    // C4: the limit is the CAVEAT (its words are pinned in analysis-coaching-pass-through.test.ts); its signal id is in
+    // the trace. Reverting agent-v1-turn.ts's `graph: readbackGraph` turns this RED: the caveat loses `:named`.
+    // Churn is worked out from price and adoption on this graph and no run option sets it, so the caveat also carries
+    // the PROVED cause (`:unanchored`): the route hands the run's own analysis_ready options to the proof.
+    expect(r._diagnostic_trace.coaching_caveats).toEqual([`coach:limit_unchecked:${PAUL_T1.graph_hash}:${computedAt}:auto_first_pass:named:unanchored`]);
+    // The one card is the move: a link card bound to the same run.
+    expect(String(card.signal_id).startsWith('coach:fragile_link:')).toBe(true);
     expect(card.graph_hash_at_generation).toBe(r.graph_hash);
     expect(r._diagnostic_trace.coaching).toEqual({ eligible: true });
   });
@@ -250,16 +251,15 @@ describe('the automatic first analysis shows the fragile-link coaching card', ()
     const cards = coachingOf(r);
     expect(cards).toHaveLength(1);
     const computedAt = (PAUL_T1.analysis_state.run_state as { computed_at: string }).computed_at;
-    // Reverting agent-v1-turn.ts's `constraintVerdictState` threading turns this RED: the card says the proved cause.
-    expect(cards[0]!.signal_id).toBe(`coach:limit_unchecked:${PAUL_T1.graph_hash}:${computedAt}:auto_first_pass:named:identity`);
-    expect(String(cards[0]!.body)).toContain('could not tell whether your limit on “Monthly churn”');
+    // Reverting agent-v1-turn.ts's `constraintVerdictState` threading turns this RED: the caveat says the proved cause.
+    expect(r._diagnostic_trace.coaching_caveats).toEqual([`coach:limit_unchecked:${PAUL_T1.graph_hash}:${computedAt}:auto_first_pass:named:identity`]);
   });
 
   it('SEAM control: a graph read whose verdict state AGREES with the proof (unevaluated) keeps the proved cause', async () => {
     knobs.bound = { turn: PAUL_T1, graph: PAUL_GRAPH, verdictState: 'unevaluated' };
-    const cards = coachingOf(await buildTurn(app));
-    expect(cards).toHaveLength(1);
-    expect(String(cards[0]!.signal_id).endsWith(':named:unanchored')).toBe(true);
+    const r = await buildTurn(app);
+    expect(coachingOf(r)).toHaveLength(1);
+    expect(String(r._diagnostic_trace.coaching_caveats?.[0]).endsWith(':named:unanchored')).toBe(true);
   });
 
   it('RED: an explicit Run on the same model → its OWN card (explicit copy, a different block_id)', async () => {
