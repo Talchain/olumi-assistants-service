@@ -154,11 +154,14 @@ describe('the ROUTE\'s renderer — typed and labelled, never prose (AIC 5855633
 
   it('RED (mutant: remove the label): the heading is the exact label sentence with the typed reason', () => {
     expect(PROVISIONAL_VIEW_LABEL).toBe('Provisional view');
-    expect(provisionalViewHeading(because)).toBe(`Provisional view \u2014 the analysis can't confirm this yet ${because}.`);
+    expect(provisionalViewHeading()).toBe(`Provisional view \u2014 the analysis can't confirm this yet.`);
+    // AIC 27 Sep (served 770a477): the reason is said once — typed as `because`, which the chat shows in its why —
+    // never again in a four-line bold heading beside the reply that already states it.
+    expect(provisionalViewHeading()).not.toContain(because.replace(/^because /, ''));
   });
 
   it('the sidecar carries the heading, the three parts and the reason — the chat composes nothing', () => {
-    expect(provisionalViewSidecar(VIEW, because)).toEqual({ heading: provisionalViewHeading(because), ...VIEW, because });
+    expect(provisionalViewSidecar(VIEW, because)).toEqual({ heading: provisionalViewHeading(), ...VIEW, because });
   });
 
   it('CONTRAST (why it is typed): the gate strips the SAME view written as prose', () => {
