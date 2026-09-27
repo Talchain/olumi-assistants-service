@@ -17,9 +17,12 @@ import { isDeepStrictEqual } from 'node:util';
 
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { log } from '../../utils/telemetry.js';
+import { statedLinkBandFor } from '../agent-lane/stated-link-band-context.js';
 import { composeToolCallResponse } from '../compose.js';
 import { composeRecoverableHandlerResponse } from '../compose/recoverable-handler-response.js';
 import { composeRecoverableValidationResponse } from '../compose/recoverable-validation-response.js';
+import { edgeBandFromMagnitude, edgeBandStd } from '../format/edge-strength-bands.js';
+import type { InfluenceBand } from '../format/influence-bands.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { buildGraphLookup } from '../routing/graph-lookup-adapter.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
@@ -82,6 +85,11 @@ export type EdgeStrengthEditResult =
       readonly handlerFacts: readonly HandlerFact[];
       readonly graph: GraphV3T;
       readonly baseGraph: unknown;
+      /**
+       * The band the user named for this write, when it was one (A6e). The dispatcher's post-commit
+       * confirmation guard needs the SAME answer the adapter's pre-commit guard used.
+       */
+      readonly statedBand?: InfluenceBand;
     }
   | {
       readonly kind: 'refused';
@@ -159,21 +167,29 @@ function rawExactEdge(
 }
 
 /**
- * Olumi's sizing of a link, which the writer drops on EVERY user write (magnitude
- * contract, R&C 5845818897; `adjust-edge-strength.ts`): `natural_effect` states
- * Olumi's β in natural units and `magnitude` says who chose it. Once the user
- * adopts the strength, neither describes the user's own value.
+ * What Olumi said about a link that the writer drops on EVERY user write
+ * (`adjust-edge-strength.ts`): `natural_effect` states Olumi's β in natural units
+ * and `magnitude` says who chose it (magnitude contract, R&C 5845818897);
+ * `reasoning` is the model's WHY for the link (A6c). Once the user adopts the
+ * strength, none of them is the user's, and each would read as theirs under the
+ * user's stamp.
  */
-const MAGNITUDE_CONTRACT_REMOVALS = ['natural_effect', 'magnitude'] as const;
+const USER_WRITE_PROVENANCE_REMOVALS = ['natural_effect', 'magnitude', 'reasoning'] as const;
 
 /**
  * Full-graph confirmation guard. The only permitted differences on the target
  * edge are:
  * - `provenance.source` and `provenance_display` (the stamp itself);
- * - removal of its `defaulted` flag (adopting the strength ends Olumi's default);
+ * - removal of its `defaulted` flag (adopting the strength ends Olumi's default)
+ *   TOGETHER WITH `exists_defaulted` absent → `true` when that flag was `true`: the
+ *   link's existence is still Olumi's (A6e, Canonical #70 5855416983);
  * - removal of `provenance.natural_effect` and `provenance.magnitude`, because the
  *   magnitude contract drops Olumi's sizing on any user write. Without these, every
- *   confirm on an Olumi-sized link refused (served CEE `1226b3e`, Canvas #70 5848798561).
+ *   confirm on an Olumi-sized link refused (served CEE `1226b3e`, Canvas #70 5848798561);
+ * - removal of `provenance.reasoning`, the model's WHY (A6c);
+ * - ONLY when `statedBand` is given — the user named the band the link already sits
+ *   in (the Agent's confirm; AIQ #70 5855430153) — `strength.std` becoming exactly
+ *   that band's spread (`edgeBandStd`). The mean never moves.
  * Each removal is PRESENT → ABSENT only: a field added or rewritten still fails.
  * Every other byte of persisted JSON — including cosmetic/additive fields outside
  * the analysis hash — must remain deeply equal.
@@ -183,6 +199,8 @@ export function isProvenanceOnlyEdgeConfirmation(args: {
   readonly after: unknown;
   readonly from: string;
   readonly to: string;
+  /** The band the user named for this confirm, if it is one; absent = a confirm of the exact figure. */
+  readonly statedBand?: InfluenceBand;
 }): boolean {
   const beforeParse = GraphV3.safeParse(args.before);
   const afterParse = GraphV3.safeParse(args.after);
@@ -197,8 +215,17 @@ export function isProvenanceOnlyEdgeConfirmation(args: {
   if (beforeEdges.length !== 1 || afterEdges.length !== 1) return false;
   const beforeEdge = beforeEdges[0]!;
   const afterEdge = afterEdges[0]!;
+  // A figure confirm keeps the whole strength. A band confirm keeps the mean and may
+  // move the std only to the stated band's own spread — and only when the link
+  // really sits in that band.
+  const strengthAdmitted =
+    args.statedBand === undefined
+      ? isDeepStrictEqual(beforeEdge.strength, afterEdge.strength)
+      : edgeBandFromMagnitude(Math.abs(beforeEdge.strength.mean)) === args.statedBand &&
+        afterEdge.strength.mean === beforeEdge.strength.mean &&
+        afterEdge.strength.std === edgeBandStd(args.statedBand);
   if (
-    !isDeepStrictEqual(beforeEdge.strength, afterEdge.strength) ||
+    !strengthAdmitted ||
     beforeEdge.effect_direction !== afterEdge.effect_direction ||
     afterEdge.provenance?.source !== 'user_specified' ||
     afterEdge.provenance_display !== 'user_set'
@@ -220,9 +247,9 @@ export function isProvenanceOnlyEdgeConfirmation(args: {
     } else {
       delete afterProvenance.source;
     }
-    // Olumi's sizing may go from present to absent (magnitude contract). A value
-    // the write adds or rewrites is left in place and fails the equality below.
-    for (const key of MAGNITUDE_CONTRACT_REMOVALS) {
+    // Olumi's sizing and reasoning may go from present to absent. A value the
+    // write adds or rewrites is left in place and fails the equality below.
+    for (const key of USER_WRITE_PROVENANCE_REMOVALS) {
       if (key in beforeProvenance && !(key in afterProvenance)) {
         afterProvenance[key] = structuredClone(beforeProvenance[key]);
       }
@@ -246,7 +273,24 @@ export function isProvenanceOnlyEdgeConfirmation(args: {
   // `defaulted` may go from present to absent. Nothing else about it may change:
   // a flag the write adds or rewrites still fails the equality below.
   if ('defaulted' in rawBeforeEdge && !('defaulted' in rawAfterEdge)) {
+    // ⭐ A6e — and when it WAS a default, the per-field existence flag must arrive
+    // with it: the pair moves together or not at all. `exists_defaulted` anywhere
+    // else (added to a never-defaulted edge, `false`, rewritten) fails below.
+    if (rawBeforeEdge.defaulted === true && !('exists_defaulted' in rawBeforeEdge)) {
+      if (rawAfterEdge.exists_defaulted !== true) return false;
+      delete rawAfterEdge.exists_defaulted;
+    }
     rawAfterEdge.defaulted = structuredClone(rawBeforeEdge.defaulted);
+  }
+
+  // The band's spread was checked on the parsed edges above; restore the stored
+  // std so the byte comparison below judges everything else.
+  if (
+    args.statedBand !== undefined &&
+    isRecord(rawBeforeEdge.strength) &&
+    isRecord(rawAfterEdge.strength)
+  ) {
+    rawAfterEdge.strength.std = structuredClone(rawBeforeEdge.strength.std);
   }
 
   return isDeepStrictEqual(normalisedAfter, args.before);
@@ -429,6 +473,18 @@ export async function applyEdgeStrengthEdit(
     persistedDirection: targetEdge.effect_direction,
   });
 
+  // ⭐ A6e — is this write a BAND the user named, or an exact figure? The event
+  // cannot say (the UI's pill, slider, β field and "Confirm this estimate" all send
+  // it), so only an approval that carried the band in-process for this exact link,
+  // landing in that band, counts (`stated-link-band-context.ts`). Everything else is
+  // a figure and keeps the link's spread.
+  const statedBand = statedLinkBandFor(
+    payload.scenario_id,
+    event.from,
+    event.to,
+    event.magnitude,
+  );
+
   // `set` and `confirm_current` are intentionally different acts. A set that
   // resolves to the already-persisted scientific tuple has changed nothing,
   // so it must not reach the handler merely to stamp human provenance. Only
@@ -525,6 +581,7 @@ export async function applyEdgeStrengthEdit(
     // canonical handler's legacy NL composite parser trims endpoint halves;
     // reparsing here would weaken the event contract's byte-exact match.
     edgeStrengthEndpointAuthority: { from: event.from, to: event.to },
+    ...(statedBand !== undefined ? { edgeStrengthBandAuthority: statedBand } : {}),
     // Give the canonical handler the strict raw persisted shape. It performs
     // its own GraphV3 narrowing for mutation while its existing merge helper
     // preserves additive top-level fields; the parsed `graph` above remains
@@ -587,10 +644,11 @@ export async function applyEdgeStrengthEdit(
     );
   }
 
-  // `confirm_current` is permission to stamp exactly two provenance fields,
-  // not permission to repair, normalise or cosmetically rewrite anything else.
-  // Analysis-hash equality alone is insufficient: it ignores labels and other
-  // additive persisted fields whose loss would still corrupt the shared model.
+  // `confirm_current` is permission to stamp the user's provenance (and, for a
+  // band the user named, the band's spread) — not permission to repair, normalise
+  // or cosmetically rewrite anything else. Analysis-hash equality alone is
+  // insufficient: it ignores labels and other additive persisted fields whose loss
+  // would still corrupt the shared model.
   if (
     event.intent === 'confirm_current' &&
     !isProvenanceOnlyEdgeConfirmation({
@@ -598,6 +656,7 @@ export async function applyEdgeStrengthEdit(
       after: projectedGraph,
       from: event.from,
       to: event.to,
+      ...(statedBand !== undefined ? { statedBand } : {}),
     })
   ) {
     log.warn(
@@ -640,5 +699,6 @@ export async function applyEdgeStrengthEdit(
     handlerFacts: outcome.handler_facts,
     graph: projectedParse.data,
     baseGraph: persistedGraph,
+    ...(statedBand !== undefined ? { statedBand } : {}),
   };
 }

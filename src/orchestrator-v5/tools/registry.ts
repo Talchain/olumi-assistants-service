@@ -253,6 +253,15 @@ export interface HandlerInvocation {
    */
   readonly edgeStrengthDirectionAuthority?: 'positive' | 'negative';
   /**
+   * ⭐ A6e — the BAND the user named for this link, when the write is one.
+   *
+   * Present only on the strict `edge_strength_edit` path, and only when the approval that sent it carried the band
+   * in-process (`agent-lane/stated-link-band-context.ts`) for this exact link and the write lands in that band. The
+   * handler then stores the band's own spread as `strength.std` (`edgeBandStd`). Absent means an exact figure, which
+   * keeps its spread. A routing model cannot populate it: it is not a proposal parameter.
+   */
+  readonly edgeStrengthBandAuthority?: import('../format/influence-bands.js').InfluenceBand;
+  /**
    * ⭐⭐ THIS TURN IS AN ANSWER TO A BASELINE QUESTION THE PRODUCT ASKED, AND
    * THE AUTHORITY IT CARRIES IS FOR THE BASELINE FIELD ONLY.
    *
