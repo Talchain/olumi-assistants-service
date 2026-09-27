@@ -46,7 +46,7 @@ import {
   type ConstructionSizeVerdict,
 } from '../construction-size-gate.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
-import { withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
+import { holdStatedGoalAttributes, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
@@ -221,7 +221,11 @@ export const BUILD_INSTRUCTIONS = [
   + 'and up to 4 to 6 outcomes and risks between them, only where they materially change the reasoning (the outcome the factors act through, the risk that could reverse the answer). '
   + 'A model below this envelope cannot carry the reasoning; a model above it buries it. Do NOT widen beyond it on this turn: no speculative options, secondary factors, or decorative risks and outcomes. '
   + 'Anything you judge material but that does not meet that bar belongs in `unknowns` as a question, NOT as a node \u2014 it can become a proposal later. '
-  + `Stay within ${COMPACT_LIMITS.maxNodes} nodes and ${COMPACT_LIMITS.maxEdges} links in total, counting one link from the decision to each option. Correct, connected items beat a comprehensive map: an oversized first model is refused before it reaches the canvas.`,
+  // ⛔ THE COUNT IS THE GATE'S (AIQ #70 5858990481 item 5: the first draft's budget is the truth-safe lever). The rule
+  // named only the decision's links, but admission also links each option to each factor it acts on, and the held
+  // status quo to each factor the others act on (`admit-model.ts`): a served-shape draft the rule counted at 23 was
+  // 33 at the gate (`construction-first-draft-link-budget.test.ts`).
+  + `Stay within ${COMPACT_LIMITS.maxNodes} nodes and ${COMPACT_LIMITS.maxEdges} links in total, counting one link from the decision to each option, one from each option to each factor it acts on (for the option that keeps things as they are, each factor the other options act on) and each entry in \`links\`. Correct, connected items beat a comprehensive map: an oversized first model is refused before it reaches the canvas.`,
   // ⛔ AN ADDED OPTION THE MODEL CANNOT TELL APART IS A DEAD START (DL #70 5842361028 / 5842400604). Served ef99a97 and
   // cb1778b added "Test £59 with AI release" beside the user's £59 option; the fill made them identical and the run
   // refused NOTHING_TO_COMPARE. Admission withholds such an option and says so (`admit-model.ts`), but withholding
@@ -1258,6 +1262,22 @@ export async function buildModelFromBrief(
    * produces an enforceable constraint rather than a sentence the model merely
    * mentioned.
    */
+  /**
+   * ⭐ THE GOAL'S STATED TARGET SOURCE, DIRECTION AND DEADLINE ARE HELD ON THE GOAL NODE, WHEN THE BRIEF STATES THEM
+   * (G1; `holdStatedGoalAttributes`). A factor named in the brief is not a baseline the brief states (DL #70
+   * 5851742282): `withdrawUnstatedBaselineStamps`. What the node now holds is no longer a loss, so its ledger line —
+   * "GraphV3 has nowhere to put it" / "a consumer cannot tell a floor from a ceiling" — would be false, and goes.
+   * What is NOT held keeps its line, exactly as before.
+   */
+  const statedGoal = holdStatedGoalAttributes(withdrawUnstatedBaselineStamps(admitted.nodes, brief), candidate.goal, brief);
+  if (statedGoal.held.horizon || statedGoal.held.direction) {
+    admitted = {
+      ...admitted,
+      loss: admitted.loss.filter((l) => !(statedGoal.held.horizon && /\.horizon_months$/.test(l.field_path))
+        && !(statedGoal.held.direction && /\.goal_operator$/.test(l.field_path))),
+    };
+  }
+
   const parked = (candidate as { unknowns?: unknown }).unknowns;
   const openQuestions = userFacingDrafterQuestions(parked);
   // ⭐ THE MAGNITUDE CONTRACT (D5–D8): a size Olumi set aside, a user's size that cannot hold, or a placeholder sized to
@@ -1280,15 +1300,19 @@ export async function buildModelFromBrief(
     ...(admitted.indistinct_stated_options ?? []).map((g) => g.question),
   );
   /**
-   * ⛔ A DEADLINE THE MODEL CANNOT HOLD IS ASKED WHERE THE USER ALWAYS SEES IT. GraphV3 has no carrier for
-   * `horizon_months`, so admission records the loss in `not_represented` — but only the Agent's model reads
+   * ⛔ A DEADLINE NO RESULT ANSWERS IS ASKED WHERE THE USER ALWAYS SEES IT. Unattested, the goal holds no deadline and
+   * admission records the loss in `not_represented`; attested, the goal holds it (G1) but the analysis compares levels,
+   * not a path over time, so the question stays, worded truthfully either way. Only the Agent's model reads
    * that, and on served CEE `85ce874` (MG fidelity scorecard, 26 Sep) Paul's "£20k MRR within 12 months"
    * reply never mentioned the deadline. `open_questions` is appended to the reply by the server every time
    * (`write-outcome.ts` `openQuestionsLine`), so the deadline goes FIRST there, ahead of the five-question cap.
    */
   const horizon = candidate.goal?.horizon_months;
   if (typeof horizon === 'number' && Number.isFinite(horizon) && horizon > 0) {
-    openQuestions.unshift(`Does "${candidate.goal.metric}" get there within ${horizon} months? The model holds no deadline yet, so no result answers that.`);
+    // Held (G1): the model keeps the deadline, but the analysis compares levels, so still no result answers it.
+    openQuestions.unshift(statedGoal.held.horizon
+      ? `Does "${candidate.goal.metric}" get there within ${horizon} months? The model holds the deadline; no result answers that yet.`
+      : `Does "${candidate.goal.metric}" get there within ${horizon} months? The model holds no deadline yet, so no result answers that.`);
   }
   // ⛔ C46: the goal's unstated scope (`admit-model.ts` records the question as the reason of
   // its `goal_scope` entry). First, because the ruling requires it clarified or named before
@@ -1298,8 +1322,8 @@ export async function buildModelFromBrief(
   openQuestions.unshift(...admitted.loss.filter((l) => /\.goal_scope$/.test(l.field_path)).map((l) => l.reason));
 
   const graph = {
-    // A factor named in the brief is not a baseline the brief states (DL #70 5851742282): see the function.
-    nodes: withdrawUnstatedBaselineStamps(admitted.nodes, brief),
+    // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
+    nodes: statedGoal.nodes,
     edges: admitted.edges,
     ...(admitted.goal_constraints.length > 0
       ? { goal_constraints: admitted.goal_constraints }

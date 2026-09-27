@@ -258,6 +258,27 @@ export const NodeV3 = z.object({
   threshold_source: z.string().max(64).optional().catch(undefined),
   success_threshold: z.number().finite().nullable().optional().catch(undefined),
   /**
+   * ⛔ THE GOAL'S STATED DIRECTION AND DEADLINE (goal nodes only; G1, PJ-A2). Written ONLY by construction, and only
+   * when the brief attests each one (`holdStatedGoalAttributes`, `stated-by-user.ts`). ABSENCE MEANS UNATTESTED —
+   * never defaulted, never inferred from the label.
+   *
+   * `goal_direction` is the comparator of the stated target (`>=` "reach £100k"; `<` "under 4%"), the candidate
+   * contract's own four values (`buildCandidateSchema`, goal.operator; pinned equal by `goal-stated-attrs-held.test.ts`).
+   * ⚠ NOT the `goal_direction` on the PLoT request (`run-analysis.ts`, `'minimise'`): that is the objective's SENSE,
+   * derived from the label, a top-level wire key. Same word, a different concept at a different level.
+   *
+   * `goal_horizon_months` is the deadline the brief states ("within 12 months"). The analysis has no time axis: it
+   * compares levels, so no result answers the deadline yet.
+   *
+   * THESE DECLARATIONS ARE LOAD-BEARING, the same warning `threshold_source` carries above: undeclared, the next
+   * write's re-parse SILENTLY DELETES them. OUT of the analysis hash (a whitelist; a horizon-only edit changes no
+   * result) and IN the identity hash (an exclude list; a changed frame is a new model version). CEE-owned
+   * (`field-safety.ts`): no producer may set them. A malformed value is dropped as absence (`.catch`), never a new
+   * reason to refuse a stored graph.
+   */
+  goal_direction: z.enum(['>=', '<=', '>', '<']).optional().catch(undefined),
+  goal_horizon_months: z.number().int().positive().optional().catch(undefined),
+  /**
    * ⛔ THE SAVED-EXAMPLE STAMPS (the UI's register writes them on the nodes of a loaded saved example).
    *
    * THIS DECLARATION IS LOAD-BEARING, for the same reason as `threshold_source` above. The UI registers

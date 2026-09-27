@@ -92,14 +92,17 @@ async function canonicalEntities(raw: unknown): Promise<Record<string, unknown>[
 }
 
 const goalOf = (g: Graph) => g.nodes.find((n) => n.kind === 'goal')!;
-/** The deadline question staging #1939 asks first for Paul's "within 12 months" (exact sentence, by the goal's metric). */
+/**
+ * The deadline question staging #1939 asks first for Paul's "within 12 months" (exact sentence, by the goal's metric).
+ * G1: this brief writes "12 months", so the goal now HOLDS the deadline and the question says so (`holdStatedGoalAttributes`).
+ */
 const deadlineQuestion = (metric: string) =>
-  `Does "${metric}" get there within 12 months? The model holds no deadline yet, so no result answers that.`;
+  `Does "${metric}" get there within 12 months? The model holds the deadline; no result answers that yet.`;
 const allQuestions = (out: Record<string, unknown>) => (out.open_questions as string[] | undefined) ?? [];
 /** Every open question except the deadline one (#1939), which this brief's 12-month horizon always adds. */
 const questions = (out: Record<string, unknown>) => {
   const all = allQuestions(out);
-  const deadline = all.filter((q) => /^Does ".*" get there within 12 months\? The model holds no deadline yet, so no result answers that\.$/.test(q));
+  const deadline = all.filter((q) => /^Does ".*" get there within 12 months\? The model holds the deadline; no result answers that yet\.$/.test(q));
   expect(deadline, JSON.stringify(all)).toHaveLength(1);
   return all.filter((q) => !deadline.includes(q));
 };

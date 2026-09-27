@@ -105,8 +105,13 @@ export interface ConstructionSizeVerdict {
    * at 78b07e8b: a retry with the same brief-stated COUNTS but a swapped option
    * or relationship was adopted. Keyed on kind + normalised label (admission
    * re-slugs ids between passes; a label is what the user said).
+   *
+   * ⛔ `limits` — every limit the user stated that admission ATTACHED, keyed on its node's identity, bound, figure,
+   * unit and frame (AIQ #70 5858990481 item 5: a size retry may drop only Olumi's structure, never a brief-stated
+   * limit). Read off the admitted `goal_constraints`, so a retry that sheds the node a limit names — and so has it
+   * withheld — has lost the limit too.
    */
-  readonly brief_stated_keys: { readonly nodes: readonly string[]; readonly edges: readonly string[] };
+  readonly brief_stated_keys: { readonly nodes: readonly string[]; readonly edges: readonly string[]; readonly limits: readonly string[] };
   /** One sentence a user could be shown. Empty when within budget. */
   readonly detail: string;
 }
@@ -130,14 +135,16 @@ export const nodeIdentity = (n: unknown): string => {
 };
 
 /**
- * TRUE only when every user-stated node AND relationship of `before` is still
- * present in `after`, by identity. Counts are not enough: a same-count swap is a
+ * TRUE only when every user-stated node, relationship AND limit of `before` is
+ * still present in `after`, by identity. Counts are not enough: a same-count swap is a
  * different decision.
  */
 export function keepsEveryUserStatedIdentity(before: ConstructionSizeVerdict, after: ConstructionSizeVerdict): boolean {
   const n = new Set(after.brief_stated_keys.nodes);
   const e = new Set(after.brief_stated_keys.edges);
-  return before.brief_stated_keys.nodes.every((k) => n.has(k)) && before.brief_stated_keys.edges.every((k) => e.has(k));
+  const l = new Set(after.brief_stated_keys.limits);
+  return before.brief_stated_keys.nodes.every((k) => n.has(k)) && before.brief_stated_keys.edges.every((k) => e.has(k))
+    && before.brief_stated_keys.limits.every((k) => l.has(k));
 }
 
 /** An admitted edge the user themselves stated. */
@@ -161,7 +168,7 @@ const EMPTY_PROVENANCE: Readonly<Record<InferenceClass, number>> = {
  * one that gets registered, and would disagree with the canvas the user sees.
  */
 export function assessConstructionSize(
-  admitted: Pick<AdmittedModel, 'nodes' | 'edges' | 'inference_classes'>,
+  admitted: Pick<AdmittedModel, 'nodes' | 'edges' | 'inference_classes'> & Partial<Pick<AdmittedModel, 'goal_constraints'>>,
   limits: ConstructionSizeLimits = COMPACT_LIMITS,
 ): ConstructionSizeVerdict {
   const nodes = admitted.nodes.length;
@@ -223,6 +230,11 @@ export function assessConstructionSize(
       .filter(isBriefStatedEdge)
       .map((e) => `${identityOf.get(endpoint(e, 'from')) ?? endpoint(e, 'from')}->${identityOf.get(endpoint(e, 'to')) ?? endpoint(e, 'to')}:${String((e as { effect_direction?: unknown }).effect_direction ?? '')}`)
       .sort(),
+    // The user's own limits (`admit-constraint.ts`: only a bound the user stated is `explicit`).
+    limits: (admitted.goal_constraints ?? [])
+      .filter((c) => c.provenance === 'explicit')
+      .map((c) => [identityOf.get(c.node_id) ?? c.node_id, c.operator, c.value, c.unit ?? '', c.value_frame ?? ''].join('|'))
+      .sort(),
   };
 
   const parts: string[] = [];
@@ -263,11 +275,16 @@ export function assessConstructionSize(
  * where it belongs and keeps the refusal honest if it fails again.
  */
 export function retryInstruction(v: ConstructionSizeVerdict): string {
+  // The concrete overage, per dimension over (served midmarket-2: "32 links; limit 30", nodes within).
+  const over = [
+    ...(v.over_by.nodes > 0 ? [`${v.over_by.nodes} nodes`] : []),
+    ...(v.over_by.edges > 0 ? [`${v.over_by.edges} links`] : []),
+  ].join(' and ');
   return [
-    `Your previous model was too large: ${v.nodes} nodes and ${v.edges} links.`,
+    `Your previous model was too large: ${v.nodes} nodes and ${v.edges} links${over === '' ? '' : `, ${over} over the limit`}.`,
     `The limit is ${v.limits.maxNodes} nodes and ${v.limits.maxEdges} links.`,
     'Keep EVERY option, factor, figure, constraint, horizon AND STATED RELATIONSHIP the brief gives — those are not negotiable and must not be dropped or merged.',
-    'Remove what you ADDED beyond the brief: speculative options, secondary factors, risks and outcomes that are not decision-critical for this question.',
+    'Remove what you ADDED beyond the brief: speculative options, secondary factors, risks, outcomes and links that are not decision-critical for this question.',
     'Anything you judge material but cannot fit belongs in `unknowns` as a question, NOT as a node.',
     'Do not invent a number, an effect or a baseline to make the smaller model analysable.',
     'Every option must still say what it does, and every kept node must still reach the goal metric.',

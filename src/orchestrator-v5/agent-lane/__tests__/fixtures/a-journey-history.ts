@@ -53,6 +53,24 @@ export const RUN_RESULT = {
   claim_permissions: claimPermissionsFrom(served.analysis_state, served.analysis_ready, { requested: true }),
 };
 
+/** The served run's own A02 verdict and result — the readback of a model nobody has changed since that run. */
+export const SERVED_READBACK = { analysisState: served.analysis_state, analysisResult: served.analysis_result, analysisReady: served.analysis_ready } as const;
+
+/**
+ * THE SERVED RUN, PERMITTED. A02 withheld its leader for ONE reason (`nonlinear_identity_sign_unproven`) on a
+ * `comparative_leader` admission; lifting that one verdict — `leader_claim.permitted: true`, no reason — through the
+ * same producer (`claimPermissionsFrom`) is the only change. Every figure is the served one.
+ */
+const servedClaim = (served.analysis_state as { leader_claim: Record<string, unknown> }).leader_claim;
+const { withheld_reason: _liftedReason, ...permittedClaim } = servedClaim;
+export const RUN_RESULT_PERMITTED = {
+  ...RUN_RESULT,
+  claim_permissions: claimPermissionsFrom(
+    { ...(served.analysis_state as Record<string, unknown>), leader_claim: { ...permittedClaim, permitted: true } },
+    served.analysis_ready, { requested: true },
+  ),
+};
+
 /** A03: two options as ONE held change (`gmh_`), each with a new switch factor. */
 const OPTIONS_ARGS = {
   options: [

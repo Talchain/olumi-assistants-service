@@ -181,6 +181,15 @@ function reaches(g: Graph, from: string, to: string): boolean {
   return false;
 }
 
+/**
+ * G1 (27 Sep): the served brief states the £20k target and "12 months", so construction now HOLDS the goal's direction,
+ * deadline and target source on the goal node (`holdStatedGoalAttributes`). The served draft predates that, so the served
+ * GOAL is compared with exactly these three added, by value; every other node stays byte for byte.
+ */
+const G1_HELD = { threshold_source: 'brief_extraction', goal_direction: '>=', goal_horizon_months: 12 } as const;
+const asServedNow = (n: unknown): unknown =>
+  (n !== null && typeof n === 'object' && (n as { kind?: unknown }).kind === 'goal' ? { ...n, ...G1_HELD } : n);
+
 /** Sorted-key JSON, so the served bytes and ours compare by content, not key order. */
 const canon = (v: unknown): string => JSON.stringify(v, (_k, x) =>
   x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => a.localeCompare(b))) : x);
@@ -223,7 +232,7 @@ describe('the fixture IS the served model (fidelity, not a self-authored stand-i
 
   it('the reconstructed candidate registers the served nodes byte-for-byte, and the served edges less ONLY the withheld loop link', async () => {
     const { out, body } = await build(servedCandidate());
-    expect(body.nodes.map(canon)).toEqual(SERVED.draft_graph.nodes.map(canon));
+    expect(body.nodes.map(canon)).toEqual(SERVED.draft_graph.nodes.map(asServedNow).map(canon));
     const withheld = new Set(loopWithheld(out));
     const servedLessWithheld = (SERVED.draft_graph.edges as unknown as Edge[]).filter((e) => !withheld.has(`${e.from}->${e.to}`));
     // PR1b sizes the served links into bounded targets; subtract that known delta and count it (magnitude-delta.ts).

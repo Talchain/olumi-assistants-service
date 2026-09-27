@@ -30,6 +30,7 @@ import { config } from '../config/index.js';
 import { OPENAI_ONLY, assertProviderAllowed, providerLedgerTruncated, recordProviderUsage, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { RESEARCH_CHIP_PREFIX, approvedQueryOf, readResearchResponse, researchChipFor, researchReplyText, researchRequestBody, type ResearchOutcome } from '../orchestrator-v5/agent-lane/runtime/public-research.js';
 import { agentPromptIdentity, conversationPromptAlias } from '../orchestrator-v5/agent-lane/runtime/prompt-identity.js';
+import { composeProposalReply } from '../orchestrator-v5/agent-lane/proposal-reply.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
@@ -2067,7 +2068,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           void readBrief(message, callBriefReading).then((reading) => {
             if (!briefReadingOpen || reading === null || graphPreviewEmitted()) return;
             try {
-              emitStage({ kind: 'BRIEF_READ', goal: reading.goal, options: reading.options, elapsed_ms: Date.now() - startedAt });
+              emitStage({ kind: 'BRIEF_READ', goal: reading.goal, options: reading.options, limits: reading.limits, elapsed_ms: Date.now() - startedAt });
             } catch { /* display work never costs the turn */ }
           });
         }
@@ -2084,6 +2085,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           mode,
           withheldTools: withheldToolsOf(body),
           ...(canonicalContext !== undefined ? { canonicalContext } : {}),
+          // PJ-C1 latency: a lone proposal is answered from its own result, with no narrating call (proposal-reply.ts).
+          composeReply: (tool, args, toolResult) => composeProposalReply(tool, args, toolResult, message),
         },
         capabilities,
         callModel,
@@ -2105,16 +2108,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     } finally {
       briefReadingOpen = false;
     }
-
-    // ⛔ This turn's approval results go with it ONLY on the approve chip's fast path: it puts no authorise_change in
-    // the history (only its words and Olumi's status), so they are the only record of which proposal it applied
-    // (PJ-C1). On every other turn an approval is already in `items` at its TRUE position; passing it again would
-    // place it after everything and could stub a same-id proposal made later in the turn (adversarial review F2).
-    const results = result.tool_results;
-    const chipApprovals = fastPath === 'approve'
-      ? result.tool_calls.flatMap((c, k) => (c.name === 'authorise_change' && k < results.length ? [results[k]] : []))
-      : [];
-    histories.set(sessionId, pruneSupersededToolOutputs(result.items, chipApprovals));
 
     // A hop limit is never returned as an empty answer.
     const text = result.stopped_reason === 'incomplete'
@@ -2197,6 +2190,24 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * readiness this same response carries.
      */
     const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled } = await readBackState(readingDispatch, scenarioId);
+
+    // ⛔ This turn's approval results go with it ONLY on the approve chip's fast path: it puts no authorise_change in
+    // the history (only its words and Olumi's status), so they are the only record of which proposal it applied
+    // (PJ-C1). On every other turn an approval is already in `items` at its TRUE position; passing it again would
+    // place it after everything and could stub a same-id proposal made later in the turn (adversarial review F2).
+    const results = result.tool_results;
+    const chipApprovals = fastPath === 'approve'
+      ? result.tool_calls.flatMap((c, k) => (c.name === 'authorise_change' && k < results.length ? [results[k]] : []))
+      : [];
+    /**
+     * ⭐ STORED AFTER THIS READBACK, AND WITH IT (AIQ #70 5859279825 (a)): the kept run is marked stale unless the
+     * readback's canonical verdict selected THAT run (`staleNoteFor`, history-store.ts), so a run an approval in this
+     * turn has moved past says so in the very next request. Its verdict and selected result — never `graphHash`, the RAW
+     * compare-and-set base, which differs from the run's canonical stamp on a repaired-shape graph that has not moved.
+     * Nothing between the turn's end and here reads the history, and `readBackState` swallows its own failures (an
+     * unreadable state stores the run as unconfirmed: fail closed). No extra read: this is the read the reply needs.
+     */
+    histories.set(sessionId, pruneSupersededToolOutputs(result.items, chipApprovals, { analysisState, analysisResult }));
     const fa = firstAnalysis?.outcome;
     // An analysis of THIS revision exists because this turn's construction ran it (or already had).
     const firstAnalysisExists = fa !== undefined && (fa.ran || fa.reason === 'already_ran_for_construction');

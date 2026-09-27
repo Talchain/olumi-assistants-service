@@ -198,6 +198,20 @@ async function runAnalysis(graph: Graph): Promise<{ plotCalls: { options: { opti
   return { plotCalls, error };
 }
 
+/** The fields G1 (#2140) stamps on the ONE goal node (`stated-by-user.ts`), named so a re-pin can never hide another move. */
+const G1_GOAL_FIELDS = ['threshold_source', 'goal_direction', 'goal_horizon_months'] as const;
+function withoutG1<T extends { kind?: string }>(n: T): T {
+  if (n.kind !== 'goal') return n;
+  const copy = { ...(n as Record<string, unknown>) };
+  for (const k of G1_GOAL_FIELDS) delete copy[k];
+  return copy as T;
+}
+function addedGoalKeys(built: ReadonlyArray<{ kind?: string }>, served: ReadonlyArray<{ kind?: string }>): string[] {
+  const b = (built.find((n) => n.kind === 'goal') ?? {}) as Record<string, unknown>;
+  const v = (served.find((n) => n.kind === 'goal') ?? {}) as Record<string, unknown>;
+  return Object.keys(b).filter((k) => !(k in v)).sort();
+}
+
 describe('the fixture IS the served model (fidelity, not a self-authored stand-in)', () => {
   it('served: the option pointed at itself, the self-link was the only loop, and Run was refused on it', async () => {
     expect(SERVED.analysis_ready).toMatchObject({ status: 'blocked', blocked_reason: 'CYCLE_DETECTED', may_run: false });
@@ -223,7 +237,12 @@ describe('the fixture IS the served model (fidelity, not a self-authored stand-i
       const { [ADVERTISING]: _self, ...rest } = n.interventions!;
       return { ...n, interventions: rest };
     });
-    expect(body.nodes.map(canon)).toEqual(servedNodes.map(canon));
+    // G1 (#2140, landed after this capture) stamps the goal's held attributes. They are NAMED here and subtracted, never
+    // hidden: the rest of every node must still equal the served model byte for byte.
+    const added = addedGoalKeys(body.nodes, servedNodes);
+    expect(added.length).toBeGreaterThan(0); // G1 did stamp this brief's goal (a vacuous subtraction is a failure)
+    expect(added.every((k) => (G1_GOAL_FIELDS as readonly string[]).includes(k)), added.join(',')).toBe(true);
+    expect(body.nodes.map((n) => canon(withoutG1(n)))).toEqual(servedNodes.map(canon));
     expect(body.edges.map(canon)).toEqual(SERVED.draft_graph.edges.filter((e) => !withheld.has(`${e.from}->${e.to}`)).map(canon));
     expect(canon(body.goal_constraints)).toEqual(canon(SERVED.draft_graph.goal_constraints));
   });
@@ -304,7 +323,8 @@ describe('CONTRAST — nothing else moves, and nothing of the user’s is droppe
     expect(loopWithheld(out)).toEqual([]);
     expect(loopLines(out)).toEqual([]);
     expect(calls).toBe(1);
-    expect(createHash('sha256').update(canon(body)).digest('hex')).toBe(ACYCLIC_BODY_SHA256_AT_BASE);
+    // The digest recorded at cd489f1 (before G1) still pins every byte except G1's named goal fields (#2140).
+    expect(createHash('sha256').update(canon({ ...body, nodes: body.nodes.map(withoutG1) })).digest('hex')).toBe(ACYCLIC_BODY_SHA256_AT_BASE);
   });
 
   it('a self-link the USER stated is never dropped: kept, and said as theirs', async () => {

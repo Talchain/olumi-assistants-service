@@ -31,9 +31,9 @@
  *   · IS IT IN THE GOAL'S OWN UNIT? (`readStatedGoalLevel`, below). "12%" for a GBP goal would pass the scale
  *     rule (12 / 25000 is inside [0, 1]), so the unit check is the one that refuses it — and on this path it
  *     FAILS CLOSED, because the figure feeds the headline chance of reaching the target.
- * The goal's comparator is NOT persisted (`admit-model.ts`, the `goal_operator` loss), so the Agent states
- * how the user put the target (`goal_is`) — the same model-read the brief's `operator` is — and an unstated
- * one is refused, never defaulted.
+ * The goal's comparator is persisted only beside a target the brief states (`goal_direction`, G1) and this path
+ * does not read it, so the Agent states how the user put the target (`goal_is`) — the same model-read the brief's
+ * `operator` is — and an unstated one is refused, never defaulted.
  */
 import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import { sameUnit } from '../../utils/currency-alphabet.js';
