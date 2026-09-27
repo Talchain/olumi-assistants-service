@@ -45,6 +45,7 @@ import {
   type ConstructionSizeVerdict,
 } from '../construction-size-gate.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
@@ -1251,7 +1252,8 @@ export async function buildModelFromBrief(
   openQuestions.unshift(...admitted.loss.filter((l) => /\.goal_scope$/.test(l.field_path)).map((l) => l.reason));
 
   const graph = {
-    nodes: admitted.nodes,
+    // A factor named in the brief is not a baseline the brief states (DL #70 5851742282): see the function.
+    nodes: withdrawUnstatedBaselineStamps(admitted.nodes, brief),
     edges: admitted.edges,
     ...(admitted.goal_constraints.length > 0
       ? { goal_constraints: admitted.goal_constraints }

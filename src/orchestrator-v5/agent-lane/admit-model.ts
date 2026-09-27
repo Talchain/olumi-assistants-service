@@ -1695,8 +1695,8 @@ function sayKeptLoop(loopLabels: readonly string[], links: readonly KeptLoopLink
  * change-versus-level classification whose corpus must come from served captures, not from
  * this file's author, so it is not guessed here.
  */
-const TODAY_LEVEL = 100;
-const TODAY_UNIT = '% of today';
+export const TODAY_LEVEL = 100;
+export const TODAY_UNIT = '% of today';
 function restateSignedPercentChanges(model: CandidateModel): {
   model: CandidateModel;
   restated: { label: string; frame: number }[];
