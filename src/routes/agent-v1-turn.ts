@@ -1593,7 +1593,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         onModelRegistered: (raw) => {
           const emitStage = currentStageEmitter();
           if (emitStage === undefined || !Array.isArray(raw.nodes) || raw.nodes.length === 0) return;
-          const g = raw as unknown as GraphV3T;
+          // The persisted graph as read back — the same single cast COMPLETE's readback makes (`after.json.graph`).
+          const g = raw as GraphV3T;
           emitStage({
             kind: 'GRAPH_READY',
             graph: buildAppliedGraphWireField({ ...g, edges: Array.isArray(g.edges) ? g.edges : [] }),
