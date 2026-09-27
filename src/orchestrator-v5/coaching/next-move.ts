@@ -23,6 +23,8 @@
  *                               definition, not a belief (R&C manual-test review #69 5837270934, F1/A1: the served
  *                               "Pressure-test this link" on price → MRR was the wrong intervention): the next fragile
  *                               link that is not a definition speaks; when every one is, no card (`definitional_link`).
+ *                               And NEVER a link the bound graph does not hold (`modelLinks`): the run can report a
+ *                               fragile edge its own graph lacks (served hiring, CEE 9bd3747) → no card (`link_not_in_model`).
  *   5 `near_tie`              — a first-pass near tie → which difference matters most.
  * A limit left unchecked for a cause the user cannot close (not scored, no writer) is NEVER the move: its card's
  * words are returned as a CAVEAT, for the reply to say once (`caveats`).
@@ -37,6 +39,7 @@ import type { CoachingBlock } from '@talchain/schemas/boundary';
 
 import {
   buildFragileLinkChallenge,
+  FIRST_PASS_PREFIX,
   readRecord,
   type FragileLinkChallengeInput,
   type RunTurnCoachingEligibility,
@@ -49,6 +52,7 @@ import { everyLimitProvedUnanchored, limitNodeLabels } from './bound-graph.js';
 import { buildNearTieCard } from './near-tie-card.js';
 import { buildEstimatedLimitCard } from './estimated-limit-card.js';
 import { buildLeaderLimitRiskCard } from './leader-limit-risk-card.js';
+import { COACHING_BLOCK_BODY_MAX } from './fragile-edge-offer-text.js';
 
 export type NextMoveKind =
   | 'limit_risk_leader'
@@ -121,6 +125,64 @@ export function definitionalLinks(boundGraph: Record<string, unknown> | null): R
   return out;
 }
 
+/**
+ * The edge identities (`${from}→${to}`) of the bound graph: the only links a link move may name (a fragile edge the
+ * run reports but the model does not hold is not a relationship the user can be asked about). No graph → null
+ * (today's selection).
+ */
+export function modelLinks(boundGraph: Record<string, unknown> | null): ReadonlySet<string> | null {
+  const edges = boundGraph?.edges;
+  if (!Array.isArray(edges)) return null;
+  const out = new Set<string>();
+  for (const edge of edges.map(readRecord)) {
+    const from = edge?.from ?? edge?.from_id;
+    const to = edge?.to ?? edge?.to_id;
+    if (typeof from === 'string' && from.length > 0 && typeof to === 'string' && to.length > 0) out.add(composeEdgeIdentity(from, to));
+  }
+  return out;
+}
+
+/** The limit card's closing sentence (`limit-unchecked-card.ts`): the one-card form drops it, keeping the finding. */
+const ONE_REASON = ' That is one reason no option is put forward yet.';
+const FIRST_PASS_SUBJECT = 'This first pass on Olumi\'s estimates ';
+
+/** The limit card's quoted list of limits (`on “A” (v) and “B” (w)`), which the short form drops. */
+const NAMED_LIMITS_RE = / on “[^”]+”(?: \([^)]*\))?(?:(?:, | and )“[^”]+”(?: \([^)]*\))?)*/;
+
+/**
+ * The limit card's OWN finding as one sentence — "This first pass on Olumi's estimates could not check your limit on
+ * “Monthly churn” (10%)." — or null when its words are not that card's known shape (the card is then unchanged).
+ */
+function caveatSentence(caveat: CoachingBlock): string | null {
+  const body = typeof caveat.body === 'string' ? caveat.body : '';
+  const subject = body.startsWith(`${FIRST_PASS_PREFIX}it `) ? FIRST_PASS_SUBJECT
+    : body.startsWith('This analysis ') ? 'This analysis ' : null;
+  if (subject === null || !body.endsWith(ONE_REASON)) return null;
+  const rest = body.slice(subject === FIRST_PASS_SUBJECT ? `${FIRST_PASS_PREFIX}it `.length : 'This analysis '.length);
+  return `${subject}${rest.slice(0, -ONE_REASON.length)}`;
+}
+
+/**
+ * ⭐ The caveat said ONCE, on the move card (#70 5859409296; DL 5859428786): until the reply carries `caveats`
+ * (Runtime's C1 hook), a limit left unchecked would otherwise reach the user nowhere. The body opens with the limit
+ * card's own finding, then the move's words without the shared first-pass opening. Over `body_max` → unchanged.
+ */
+export function withCaveatSentence(move: NextMove, caveats: readonly NextMoveCaveat[]): NextMove {
+  const first = caveats[0];
+  if (first === undefined) return move;
+  const sentence = caveatSentence(first.block);
+  const body = typeof move.block.body === 'string' ? move.block.body : '';
+  if (sentence === null || body.length === 0) return move;
+  const rest = body.startsWith(FIRST_PASS_PREFIX)
+    ? `${body.charAt(FIRST_PASS_PREFIX.length).toUpperCase()}${body.slice(FIRST_PASS_PREFIX.length + 1)}`
+    : body;
+  // Preferred first: the finding naming the limits; then the same finding without the list (Paul 08bf9a1f's two
+  // limits + the link card = 334 chars). Neither fits → unchanged; the caveat stays in `caveats` for the reply.
+  const composed = [`${sentence} ${rest}`, `${sentence.replace(NAMED_LIMITS_RE, '')} ${rest}`]
+    .find((b) => b.length <= COACHING_BLOCK_BODY_MAX);
+  return composed === undefined ? move : { ...move, block: { ...move.block, body: composed } };
+}
+
 function moveOf(kind: NextMoveKind, block: CoachingBlock, ids?: readonly string[]): NextMove {
   const refs = Array.isArray(block.target_refs) ? block.target_refs : [];
   return { kind, capability: NEXT_MOVE_CAPABILITY[kind], block, target_ids: ids ?? refs.map((r) => r.id) };
@@ -149,7 +211,7 @@ export function selectNextMove(args: NextMoveInputs): NextMoveSelection {
 
   // 0 — the condition for naming the leader.
   const risk = buildLeaderLimitRiskCard(input, constraintVerdictState, leaderClaim, leaderLimitRisks, boundGraph);
-  if (risk.block !== null) return { move: moveOf('limit_risk_leader', risk.block), reason: null, caveats };
+  if (risk.block !== null) return { move: withCaveatSentence(moveOf('limit_risk_leader', risk.block), caveats), reason: null, caveats };
 
   // 1 — an option the run could not test.
   const untested = buildUntestedOptionCard(input, analysisReady);
@@ -157,7 +219,7 @@ export function selectNextMove(args: NextMoveInputs): NextMoveSelection {
     // The card carries no target ref (an option is not a target kind); the move names the option and, when the one
     // missing-level authority names exactly one, the factor it has no level for.
     const ids = untestedOptions(analysisReady, input.analysisResult).flatMap((o) => (o.factorId !== null ? [o.id, o.factorId] : [o.id]));
-    return { move: moveOf('missing_level', untested, ids), reason: null, caveats };
+    return { move: withCaveatSentence(moveOf('missing_level', untested, ids), caveats), reason: null, caveats };
   }
 
   // 2 — a limit gap the user can close.
@@ -170,12 +232,14 @@ export function selectNextMove(args: NextMoveInputs): NextMoveSelection {
   if (estimate.block !== null) return { move: moveOf('real_figure', estimate.block), reason: null, caveats };
 
   // 4 — the user's view of the link the result rests on.
-  const built = buildFragileLinkChallenge({ ...input, definitionalLinks: definitionalLinks(boundGraph) });
+  const built = buildFragileLinkChallenge({
+    ...input, definitionalLinks: definitionalLinks(boundGraph), modelLinks: modelLinks(boundGraph),
+  });
   const chosen = built.block === null && built.reason === 'no_groundable_fragile_edge' ? buildNoFlaggedLinkCard(input) : built;
-  if (chosen.block !== null) return { move: moveOf('link_view', chosen.block), reason: null, caveats };
+  if (chosen.block !== null) return { move: withCaveatSentence(moveOf('link_view', chosen.block), caveats), reason: null, caveats };
 
   // 5 — a first-pass near tie with no flagged link.
   const tie = buildNearTieCard(input, leaderClaim?.withheld_reason, Array.isArray(runOptions) ? runOptions.length : null);
-  if (tie.block !== null) return { move: moveOf('near_tie', tie.block), reason: null, caveats };
+  if (tie.block !== null) return { move: withCaveatSentence(moveOf('near_tie', tie.block), caveats), reason: null, caveats };
   return { move: null, reason: chosen.reason, caveats };
 }

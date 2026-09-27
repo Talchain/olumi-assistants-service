@@ -97,6 +97,9 @@ describe('the six zero-reader smuggle names — enumerated at the bytes', () => 
       'defaulted',
       'exists_defaulted',
       'extractiontype',
+      // + G1 (27 Sep): the goal's stated direction and deadline, written only by construction from the brief.
+      'goal_direction',
+      'goal_horizon_months',
       // + the three saved-example stamps, CEE-owned since the writer audit (2026-09-27): declared on
       // NodeV3 so writes keep them, so a producer must never be able to set them.
       'interventionkeys',
@@ -117,11 +120,11 @@ describe('the six zero-reader smuggle names — enumerated at the bytes', () => 
     expect(PIPELINE_OWNED_ROOTS.has('raw_value')).toBe(true);
   });
 
-  it('the J2 union adds five MORE names the same screen now kills (16 total with A6e + A5 + A6f, not 11)', () => {
+  it('the J2 union adds five MORE names the same screen now kills (18 total with A6e + A5 + A6f + G1, not 13)', () => {
     const all = [...PIPELINE_OWNED_ROOTS].filter((k) => !INTERVENTION_CONTRACT_KEYS.has(k)).sort();
-    // 11 CEE-owned smuggle names (6 + A6e's `exists_defaulted` + A5's three saved-example stamps
-    // + A6f's `std_defaulted`) + the 5 J2 names.
-    expect(all.length).toBe(16);
+    // 13 CEE-owned smuggle names (6 + A6e's `exists_defaulted` + A5's three saved-example stamps
+    // + A6f's `std_defaulted` + G1's `goal_direction` / `goal_horizon_months`) + the 5 J2 names.
+    expect(all.length).toBe(18);
     expect(all.filter((k) => !SMUGGLE_NAMES.includes(k))).toEqual([
       'beliefexistssource',
       'directionsource',

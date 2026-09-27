@@ -635,10 +635,34 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): vo
       .map((n) => n.id),
   );
 
+  // ⭐ A LIMIT-ONLY DECISION TALLY IS A VALID TERMINAL (AIQ ruling #70 5858730290 (a); P2 re-measure 5858749394).
+  // Served: Paul's budget brief (journey C) never ran — its spend total carries "≤ £30,000", is a sum of the levers'
+  // spends, and has no outgoing edge, so this loop refused the whole model on the node the limit watches. A tally bound
+  // by a limit is a cost constraint scored against its limit, never a cause of the goal; drafting a tally → goal link to
+  // pass this check would invent the false cause A4b removed. Exempt ONLY when all three hold: a `goal_constraints` row
+  // names the node; it has no outgoing directed edge (a terminal); and every parent is a lever (an option, or a
+  // controllable factor). Any other dead end — including a limited node fed by a non-lever — is still refused.
+  const limitTargetIds = new Set(
+    (graph.goal_constraints ?? []).map((c) => c.node_id).filter((id): id is string => typeof id === 'string'),
+  );
+  const kindById = new Map(graph.nodes.map((n) => [n.id, n] as const));
+  const isLever = (id: string): boolean => {
+    const n = kindById.get(id);
+    return n !== undefined && (n.kind === 'option'
+      || (n.kind === 'factor' && (n as { category?: unknown }).category === 'controllable'));
+  };
+  const isLimitOnlyTally = (id: string): boolean => {
+    if (!limitTargetIds.has(id)) return false;
+    if (graph.edges.some((edge) => isDirected(edge) && edge.from === id)) return false;
+    const parents = graph.edges.filter((edge) => isDirected(edge) && edge.to === id).map((edge) => edge.from);
+    return parents.length > 0 && parents.every(isLever);
+  };
+
   for (const node of graph.nodes) {
     if (node.kind === 'goal') continue; // Trivially reaches itself; loop 1 owns the goal.
     if (node.kind === 'decision') continue; // Loop 1 owns the decision→goal relationship.
     if (canReachGoal.has(node.id)) continue;
+    if (isLimitOnlyTally(node.id)) continue;
     if (node.kind === 'option' && optionsMissingFactorEdge.has(node.id)) continue;
     // Already caught by orphan check if it has no edges at all —
     // but an edged node can still be a dead-end with no path to the goal.

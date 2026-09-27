@@ -109,6 +109,9 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
     expect(extra).toEqual([
       'beliefexistssource',
       'directionsource',
+      // G1 (27 Sep): the goal's stated direction and deadline — CEE-owned; construction writes them from the brief.
+      'goal_direction',
+      'goal_horizon_months',
       // The saved-example stamps: CEE-owned and deliberately unread here (writer audit 2026-09-27).
       'interventionkeys',
       'starterid',
@@ -147,6 +150,9 @@ const SIX_SMUGGLE_NAMES = [
   'starterid',
   'startertitle',
   'interventionkeys',
+  // G1 (27 Sep): the goal's stated direction and deadline joined the CEE-owned roots.
+  'goal_direction',
+  'goal_horizon_months',
 ] as const;
 
 describe('corpus B — the six (now eight) smuggle names, hand-written', () => {

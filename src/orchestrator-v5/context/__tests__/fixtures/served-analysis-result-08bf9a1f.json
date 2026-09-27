@@ -1,0 +1,83 @@
+{
+  "_source": "Served staging debug bundle paul-08bf9a1f (request 08bf9a1f-8b82-43df-99f8-5114a173ebc5, 2026-09-27T10:02:26Z; builds CEE 263dbd5, UI e8ba18e6, PLoT 1f6ad52, ISL 3717e36). payloads.cee_response.blocks[0] (type analysis_result) scrubbed to: leading_option_id, win_probabilities (verbatim, served key order), computed_against_hash, enrichment.option_comparison[] (option_id/option_label/label/status/win_probability only, served order) and enrichment.decision_brief.options[] (option_id/label/win_probability only). Nothing else kept. The served leading_option_id is null (the leader was withheld on that run).",
+  "analysis_result": {
+    "type": "analysis_result",
+    "leading_option_id": null,
+    "win_probabilities": {
+      "Carry on as now": 0.008640000000000064,
+      "Pro price rise only": 0.2507899999999996,
+      "Additional advertising": 0.26033999999999935,
+      "Features + Pro price rise": 0.41153999999999713,
+      "Split the extra budget: £5k features + £5k advertising": 0.06869000000000025
+    },
+    "computed_against_hash": "0e19bb826dd6fde4",
+    "enrichment": {
+      "option_comparison": [
+        {
+          "option_id": "features_pro_price_rise",
+          "option_label": "Features + Pro price rise",
+          "label": "Features + Pro price rise",
+          "status": "computed",
+          "win_probability": 0.41153999999999713
+        },
+        {
+          "option_id": "additional_advertising",
+          "option_label": "Additional advertising",
+          "label": "Additional advertising",
+          "status": "computed",
+          "win_probability": 0.26033999999999935
+        },
+        {
+          "option_id": "pro_price_rise_only",
+          "option_label": "Pro price rise only",
+          "label": "Pro price rise only",
+          "status": "computed",
+          "win_probability": 0.2507899999999996
+        },
+        {
+          "option_id": "carry_on_as_now",
+          "option_label": "Carry on as now",
+          "label": "Carry on as now",
+          "status": "computed",
+          "win_probability": 0.008640000000000064
+        },
+        {
+          "option_id": "6526b52c",
+          "option_label": "Split the extra budget: £5k features + £5k advertising",
+          "label": "Split the extra budget: £5k features + £5k advertising",
+          "status": "computed",
+          "win_probability": 0.06869000000000025
+        }
+      ],
+      "decision_brief": {
+        "options": [
+          {
+            "option_id": "6526b52c",
+            "label": "Split the extra budget: £5k features + £5k advertising",
+            "win_probability": 0.06869000000000025
+          },
+          {
+            "option_id": "additional_advertising",
+            "label": "Additional advertising",
+            "win_probability": 0.26033999999999935
+          },
+          {
+            "option_id": "carry_on_as_now",
+            "label": "Carry on as now",
+            "win_probability": 0.008640000000000064
+          },
+          {
+            "option_id": "features_pro_price_rise",
+            "label": "Features + Pro price rise",
+            "win_probability": 0.41153999999999713
+          },
+          {
+            "option_id": "pro_price_rise_only",
+            "label": "Pro price rise only",
+            "win_probability": 0.2507899999999996
+          }
+        ]
+      }
+    }
+  }
+}

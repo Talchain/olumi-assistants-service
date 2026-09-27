@@ -368,8 +368,24 @@ describe('CONTRAST — everything that is not a new switch is byte-identical to 
     expect(HASH).toBe(BASE.outputs.stored_hash);
   });
 
+  /**
+   * The ONE change since base, by design: C2 consent (consent-names-new-option-levels.test.ts, AIC #70 5859629053) — the
+   * hold ask names each level the option writes, right after the option's label. Pinned as that exact insertion into
+   * the recorded base text; every other output (ops, inline_patch, public label, committed graph) stays byte-identical.
+   */
+  const C2_LEVELS: Record<string, string> = {
+    existing: ", with 'Pro plan price' at 64 GBP per month",
+    grandfathering_graded: ", with 'Pro plan price' at 59 GBP per month",
+  };
   it.each(['existing', 'graded', 'grandfathering_graded'])('%s: builder ops, hold inline_patch, copy and committed graph are byte-identical', (name) => {
-    expect(JSON.stringify(headOutputs(BASE.specs[name]!))).toBe(JSON.stringify(BASE.outputs[name]));
+    const head = headOutputs(BASE.specs[name]!);
+    const base = BASE.outputs[name] as Json;
+    const levels = C2_LEVELS[name];
+    const named = `add option '${BASE.specs[name]!.label}'`;
+    if (levels !== undefined) expect(base.assistant_text, 'control: the base text names the option').toContain(named);
+    const expected = levels === undefined ? base.assistant_text : String(base.assistant_text).replace(named, `${named}${levels}`);
+    expect(head.assistant_text).toBe(expected);
+    expect(JSON.stringify({ ...head, assistant_text: undefined })).toBe(JSON.stringify({ ...base, assistant_text: undefined }));
   });
 
   it('CONTRAST: a GRADED new factor ("Marketing spend", £5,000/month asked) stays valueless and asked — never 0', () => {
