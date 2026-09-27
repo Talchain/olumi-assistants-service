@@ -90,7 +90,8 @@ const obj = (props: Record<string, unknown>, required: string[]): Record<string,
  */
 const WHOLE_REQUEST = {
   type: 'boolean',
-  description: 'true ONLY when this one call is everything the user asked for in their latest message (no other change, no question to answer). If you will make another change or answer anything else in this reply, false.',
+  // Words: AI Conversation #70 5860022029.
+  description: 'true ONLY when this one call does everything the user asked for in their latest message: no other change to make, no question to answer, nothing else to explain. If there is anything more, or you are unsure, false.',
 } as const;
 
 /** The factors ONE option would change — shared by the single and the several-option forms of propose_new_option. */
