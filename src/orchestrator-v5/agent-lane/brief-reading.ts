@@ -75,7 +75,7 @@ export function gateBriefReading(message: string, text: string): BriefReading | 
   let raw: unknown;
   try { raw = JSON.parse(text); } catch { return null; }
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const r = raw as { goal?: unknown; options?: unknown };
+  const r = raw as { goal?: unknown; options?: unknown; limits?: unknown };
   const span = (v: unknown): string | null => {
     if (typeof v !== 'string') return null;
     const t = v.trim();
