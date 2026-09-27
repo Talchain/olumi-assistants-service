@@ -2293,6 +2293,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         hops: result.hops,
         stopped_reason: result.stopped_reason,
         tools_called: result.tool_calls.map((c) => c.name),
+        /**
+         * C6 (ChatGPT #70 5857276235 item 4: measurement on served turns before any optimisation). The loop's own split
+         * (model, tools, model time inside tools, residual overhead) plus the whole route, so a served turn says where its
+         * time went. Diagnostic only: nothing reads it.
+         */
+        timing: { ...result.timing, route_total_ms: Date.now() - startedAt },
         write_claims_removed: narration.stripped.length,
         ...(leaderClaimEnforced ? { leader_claim_enforced: true } : {}),
         /** The run-turn coaching card: shown, or the typed reason it is not (for staging witnesses). */
