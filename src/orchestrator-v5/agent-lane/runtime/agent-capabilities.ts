@@ -129,7 +129,7 @@ import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, factorTheUserNamed, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
-import { derivedSplitOf, statedTotalsOf } from '../derived-split.js';
+import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { figureInUserUnits } from '../approval-chips.js';
 import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
@@ -4213,7 +4213,7 @@ export function createAgentCapabilities(
         // The ratio must be typed in THIS message (condition 1): `user_turn_text`, never the session's `user_text`.
         const split = derivedSplitOf(ctx.user_turn_text ?? '', statedTotalsOf(g.raw), plan.actsOn.flatMap((f) => {
           const l = levelById.get(f.id);
-          return l === undefined ? [] : [{ factor_id: f.id, value: l.value, unit: l.unit ?? factorUnitOf(g.raw, g.nodes.find((x) => x.id === f.id)) }];
+          return l === undefined ? [] : [{ factor_id: f.id, value: l.value, unit: partUnit(l.unit, factorUnitOf(g.raw, g.nodes.find((x) => x.id === f.id))) }];
         }));
         const set = new Map<string, Lvl>();
         const interventions = plan.actsOn.map((f) => {

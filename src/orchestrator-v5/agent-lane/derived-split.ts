@@ -164,3 +164,17 @@ export function derivedSplitOf(message: string, totals: readonly StatedTotal[], 
   return { kind: 'derived', factor_ids: parts.map((p) => p.factor_id), working: reading.working,
     derived_from: { op: 'split', ratio: reading.ratio, base: { node_id: base.node_id, value: base.value } } };
 }
+
+/**
+ * The unit a proposed part is compared in (served journey C, `pj-aic-C-9303888`): the limit and the factors are in
+ * "GBP over 6 months", and an Agent level spelt "GBP" left both parts unset, because "GBP" ≠ "GBP over 6 months".
+ * A level with NO unit, or the BARE currency of the factor's own unit ("GBP", "£"), is in the factor's unit. Anything
+ * else keeps the Agent's spelling: "GBP per month" names another period, so it never binds to a six-month total.
+ */
+export function partUnit(agentUnit: string | undefined, factorUnit: string | undefined): string | undefined {
+  if (factorUnit === undefined) return agentUnit;
+  if (agentUnit === undefined || agentUnit.trim() === '') return factorUnit;
+  const bare = unitKey(agentUnit);
+  const fu = unitKey(factorUnit);
+  return (bare === 'gbp' && (fu === 'gbp' || fu.startsWith('gbp ') || fu.startsWith('gbp/'))) ? factorUnit : agentUnit;
+}
