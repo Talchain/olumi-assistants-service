@@ -72,6 +72,11 @@ function t3(aiToChurn: Size, aiToChurnProvenance: Prov = 'inferred') {
       link('AI feature availability', 'Pro subscribers', 'positive'),
       link('AI feature availability', 'Monthly churn', 'negative', aiToChurn, aiToChurnProvenance),
       link('Price sensitivity', 'Monthly churn', 'positive'),
+      // A second parent keeps "Price sensitivity" a risk of its own (and its two links on the graph, where the rows
+      // below read their sizes): a one-parent risk Olumi drafts between two factors is folded into one link at
+      // admission (A4a, `risk-mediator-fold.ts`), which is not what these rows are about. Its target has no frame, so
+      // it is today's ±0.5 / 0.125 and asks nothing.
+      link('AI feature availability', 'Price sensitivity', 'positive'),
       link('Monthly churn', 'Pro subscribers', 'negative'),
       link('Pro subscribers', 'MRR', 'positive'),
       link('Monthly churn', 'MRR', 'negative'),

@@ -28,6 +28,7 @@ import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js
 import { labelMatchesBaseline } from '../../../cee/transforms/analysis-ready.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { subtractMagnitudeDelta } from './magnitude-delta.js';
+import { subtractRiskFoldDelta } from './risk-fold-delta.js';
 
 // ── the served corpus ────────────────────────────────────────────────────────
 type Level = { value: number; source?: string };
@@ -187,6 +188,17 @@ const baseGraph = (key: string): SGraph => JSON.parse(BASE!.graphs[key]!) as SGr
 /** PR1b's known delta subtracted (magnitude-delta.ts): the served captures pre-date bounded-target sizing. */
 const unsized = (g: SGraph): SGraph => ({ ...g, edges: subtractMagnitudeDelta(g.edges).edges });
 /**
+ * A4a's known delta subtracted and COUNTED (risk-fold-delta.ts): the served captures and base's bytes pre-date the fold
+ * of a one-parent risk Olumi drafted between two factors. Restored from `reference` (the served graph for content, base's
+ * bytes for bytes), and the folded risks must be exactly `risks`. Applied BEFORE `unsized`: a folded link carries the
+ * size PR1b gave its input.
+ */
+const unfolded = (g: SGraph, reference: SGraph, risks: readonly string[]): SGraph => {
+  const u = subtractRiskFoldDelta(g, reference);
+  expect(u.folded).toEqual(risks);
+  return { ...g, nodes: u.nodes, edges: u.edges };
+};
+/**
  * AIQ #70 5852160429: a KNOWN baseline the builder inferred is stamped Olumi's (`source: 'cee_inference'`, written
  * last, as `framedObservedState` writes it); "100 % of today" keeps no author. The captures pre-date it, so it is
  * their one known node delta.
@@ -242,9 +254,9 @@ const levelsById = (g: SGraph) => Object.fromEntries(g.nodes.filter((n) => n.kin
 
 // ── served shapes ────────────────────────────────────────────────────────────
 describe.each([
-  { name: 'served shape 1 (f-20260926T020217Z, CEE ef99a97)', key: 'f-20260926T020217Z', run: SHAPE_1, unknowns: UNKNOWNS_1, step: STEP_1, olumi: 'ai_proposed' as const, twin: '59_with_ai_release', sq: 'keep_current_pricing', common: { ai_feature_availability: 1 } as Record<string, number> },
-  { name: 'served shape 2 (f-20260926T022404Z, CEE cb1778b)', key: 'f-20260926T022404Z', run: SHAPE_2, unknowns: UNKNOWNS_2, step: STEP_2, olumi: 'inferred' as const, twin: 'raise_pro_price_to_59', sq: 'keep_pro_price_at_49', common: { ai_feature_value: 0.65 } as Record<string, number> },
-])('$name', ({ key, run, unknowns, step, olumi, twin, sq, common }) => {
+  { name: 'served shape 1 (f-20260926T020217Z, CEE ef99a97)', key: 'f-20260926T020217Z', run: SHAPE_1, unknowns: UNKNOWNS_1, step: STEP_1, olumi: 'ai_proposed' as const, twin: '59_with_ai_release', sq: 'keep_current_pricing', common: { ai_feature_availability: 1 } as Record<string, number>, folds: ['price_driven_churn', 'ai_value_mismatch'] },
+  { name: 'served shape 2 (f-20260926T022404Z, CEE cb1778b)', key: 'f-20260926T022404Z', run: SHAPE_2, unknowns: UNKNOWNS_2, step: STEP_2, olumi: 'inferred' as const, twin: 'raise_pro_price_to_59', sq: 'keep_pro_price_at_49', common: { ai_feature_value: 0.65 } as Record<string, number>, folds: ['price_resistance'] },
+])('$name', ({ key, run, unknowns, step, olumi, twin, sq, common, folds }) => {
   const draft = () => candidateFromServed(run.brief.draft_graph, { olumi, unknowns });
 
   it('vacuity: the served turn is the dead start (first pass may_run false; approval NOTHING_TO_COMPARE, may_run false)', () => {
@@ -255,8 +267,8 @@ describe.each([
 
   it('FIDELITY: the reconstruction registers the served graph exactly, apart from the Olumi-added test option', async () => {
     const { graph: sizedGraph } = await build(draft());
-    const graph = unsized(sizedGraph);
     const served = run.brief.draft_graph;
+    const graph = unsized(unfolded(sizedGraph, served, folds));
     expect(withoutOption(graph, TEST_ID).nodes).toEqual(withoutOption(served, TEST_ID).nodes);
     expect(withoutOption(graph, TEST_ID).edges).toEqual(withoutOption(served, TEST_ID).edges);
     expect(statedLimits(graph)).toEqual(statedLimits(served));
@@ -266,7 +278,7 @@ describe.each([
     const { graph } = await build(draft());
     const base = baseGraph(key);
     expect(optionIds(base)).toContain(TEST_ID);
-    expect(JSON.stringify(unsized(graph))).toBe(JSON.stringify(framedBase(withoutOption(base, TEST_ID))));
+    expect(JSON.stringify(unsized(unfolded(graph, base, folds)))).toBe(JSON.stringify(framedBase(withoutOption(base, TEST_ID))));
   });
 
   it('RED: the Olumi-added test option is not registered — no node, no edge', async () => {
@@ -330,16 +342,19 @@ describe.each([
 
 // ── controls ─────────────────────────────────────────────────────────────────
 describe('controls — what the rule must never touch', () => {
+  // `folds`: the one-parent risks Olumi drafted between two factors, which A4a now folds (subtracted and counted);
+  // £49's "Price resistance" has two parents, so it is left as drafted and its registration is unchanged.
   it.each([
-    ['Phased £54 (f-20260926T001627Z, CEE 85ce874): the Olumi-added "Raise to £54 with release" sets a distinct known level', 'f-20260926T001627Z', PHASED_54, 'raise_to_54_with_release'],
-    ['£49 with AI release (f-20260926T022612Z, CEE cb1778b): its price equals today and its AI level equals £59\'s, yet no option matches it on both', 'f-20260926T022612Z', AT_49, '49_with_ai_release'],
-  ])('CONTROL %s — kept; the served graph, and base\'s registration byte for byte', async (_name, key, run, olumiId) => {
+    ['Phased £54 (f-20260926T001627Z, CEE 85ce874): the Olumi-added "Raise to £54 with release" sets a distinct known level', 'f-20260926T001627Z', PHASED_54, 'raise_to_54_with_release', ['price_driven_churn_risk']],
+    ['£49 with AI release (f-20260926T022612Z, CEE cb1778b): its price equals today and its AI level equals £59\'s, yet no option matches it on both', 'f-20260926T022612Z', AT_49, '49_with_ai_release', []],
+  ])('CONTROL %s — kept; the served graph, and base\'s registration byte for byte', async (_name, key, run, olumiId, folds) => {
     expect(run.brief.may_run).toBe(true);
     const { graph, out } = await build(candidateFromServed(run.brief.draft_graph, { olumi: 'ai_proposed', horizon: null }));
     expect(optionIds(graph)).toContain(olumiId);
-    expect(graph.nodes).toEqual(olumisKnownLevels(run.brief.draft_graph.nodes));
-    expect(unsized(graph).edges).toEqual(run.brief.draft_graph.edges);
-    expect(JSON.stringify(unsized(graph))).toBe(JSON.stringify(framedBase(baseGraph(key))));
+    const content = unfolded(graph, run.brief.draft_graph, folds);
+    expect(content.nodes).toEqual(olumisKnownLevels(run.brief.draft_graph.nodes));
+    expect(unsized(content).edges).toEqual(run.brief.draft_graph.edges);
+    expect(JSON.stringify(unsized(unfolded(graph, baseGraph(key), folds)))).toBe(JSON.stringify(framedBase(baseGraph(key))));
     expect(out).not.toHaveProperty('options_withheld');
     expect(questions(out).filter((q) => q.startsWith('I left out ') || q.startsWith('What makes '))).toEqual([]);
   });
@@ -577,6 +592,10 @@ describe('a second real draft, another domain — the banked LIVE hiring candida
  * rows keep their assertions unchanged. Olumi's "Test £59 with AI release" is left AS SERVED (no level): it is the
  * option admission withholds, so its pairs must never count as gaps. `servedGaps: true` keeps the served draft's
  * gaps, for the combined rows below.
+ *
+ * ⚠ RE-PINNED FOR A4a (`risk-mediator-fold.ts`): admission now folds shape 1's two one-parent risks Olumi drafted
+ * between two factors ("Price driven churn", "AI value mismatch"), so the draft registers 2 nodes fewer and each padding
+ * below is 2 larger (7 -> 9 is again exactly one node over, 8 -> 10 again oversized). The assertions are unchanged.
  */
 const padded = (n: number, withTest: boolean, { servedGaps = false }: { servedGaps?: boolean } = {}) => {
   const base = candidateFromServed(SHAPE_1.brief.draft_graph, { olumi: 'ai_proposed', unknowns: [] });
@@ -601,18 +620,18 @@ const padded = (n: number, withTest: boolean, { servedGaps = false }: { servedGa
 describe('ordering — the rule runs inside admission, so the size gate measures what is registered', () => {
 
   it('RED: a draft oversized ONLY by its indistinct option is registered on the first pass — no retry is spent', async () => {
-    const draft = padded(7, true);
+    const draft = padded(9, true);
     // Vacuity: with the option given a distinct level (so nothing is withheld) the same draft is oversized; without it, within.
     const distinct = { ...draft, options: draft.options.map((o) => (o.label !== 'Test £59 with AI release' ? o : { ...o, interventions: [{ factor_label: 'Pro plan price', value: 54, value_kind: 'absolute', unit: '£ per month', provenance: 'ai_proposed' }] })) } as typeof draft;
     expect(assessConstructionSize(admitCandidateModel(distinct, {})).nodes).toBe(COMPACT_LIMITS.maxNodes + 1);
-    expect(assessConstructionSize(admitCandidateModel(padded(7, false), {})).within).toBe(true);
+    expect(assessConstructionSize(admitCandidateModel(padded(9, false), {})).within).toBe(true);
     const { out, calls } = await build(draft);
     expect([calls, out.size_retried, out.within_compact_limits]).toEqual([1, false, true]);
     expect(out.options_withheld).toEqual([{ option: 'Test £59 with AI release', like: '£59 with AI release', reason: 'option_indistinct' }]);
   });
 
   it('RED: an adopted size retry that drops the withheld option still says the step (never silently)', async () => {
-    const first = padded(8, true);
+    const first = padded(10, true);
     const retry = padded(0, false);
     const { out, calls, graph } = await build(first, retry);
     expect([calls, out.size_retried]).toEqual([2, true]);
@@ -654,7 +673,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
   const issues = (input: string): string[] => JSON.parse(/Construction issues: (\[.*\])\n/.exec(input)![1]!) as string[];
   const withheldOptions = (out: Record<string, unknown>) => out.options_withheld;
   const said = (out: Record<string, unknown>) => questions(out).filter((q) => q === STEP_1).length;
-  const first = () => padded(8, true, { servedGaps: true });
+  const first = () => padded(10, true, { servedGaps: true });
 
   it('PRECONDITION: the served gaps sit on the user\'s kept option AND on the option admission withholds; oversized after withholding', () => {
     const prep = prepareProvisionalCandidate(first());

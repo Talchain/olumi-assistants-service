@@ -46,6 +46,7 @@ import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
 import type { SessionStore } from '../../session/store.js';
 import { subtractMagnitudeDelta } from './magnitude-delta.js';
+import { subtractRiskFoldDelta } from './risk-fold-delta.js';
 
 
 type Edge = { from: string; to: string; provenance?: { source?: string }; effect_direction?: string; strength?: { mean: number } };
@@ -223,12 +224,20 @@ describe('the fixture IS the served model (fidelity, not a self-authored stand-i
 
   it('the reconstructed candidate registers the served nodes byte-for-byte, and the served edges less ONLY the withheld loop link', async () => {
     const { out, body } = await build(servedCandidate());
-    expect(body.nodes.map(canon)).toEqual(SERVED.draft_graph.nodes.map(canon));
+    // A4a folds the served risk mediator (Pro plan price -> Price sensitivity -> Monthly churn); subtract that known
+    // delta and count it (risk-fold-delta.ts).
+    const unfolded = subtractRiskFoldDelta(body, SERVED.draft_graph);
+    expect(unfolded.folded).toEqual(['price_sensitivity']);
+    expect(unfolded.nodes.map(canon)).toEqual(SERVED.draft_graph.nodes.map(canon));
     const withheld = new Set(loopWithheld(out));
     const servedLessWithheld = (SERVED.draft_graph.edges as unknown as Edge[]).filter((e) => !withheld.has(`${e.from}->${e.to}`));
     // PR1b sizes the served links into bounded targets; subtract that known delta and count it (magnitude-delta.ts).
-    const { edges: unsized, sized } = subtractMagnitudeDelta(body.edges);
-    expect(sized, 'PR1b sized at least one served link into a bounded target').toBeGreaterThan(0);
+    const { edges: unsized, sized } = subtractMagnitudeDelta(unfolded.edges);
+    // The ONE served link PR1b sized (Price sensitivity -> Monthly churn, measured at base) is inside A4a's fold now:
+    // its size is carried on the folded link, still stamped as Olumi's placeholder, so none is left to subtract.
+    expect(sized).toBe(0);
+    expect(body.edges.filter((e) => (e.provenance as { magnitude?: string } | undefined)?.magnitude === 'olumi_placeholder').map((e) => `${e.from}->${e.to}`))
+      .toEqual(['pro_plan_price->monthly_churn']);
     expect(unsized.map(canon)).toEqual(servedLessWithheld.map(canon));
   });
 });
@@ -246,8 +255,11 @@ describe('SERVED 2-loop (factor <-> risk, both Olumi’s): withheld, said, and t
     // The risk's own threat to availability is kept — and through it the risk still reaches MRR.
     expect(graph.edges.find((e) => e.from === DELAY && e.to === AVAILABILITY)?.effect_direction).toBe('negative');
     expect(reaches(graph, DELAY, GOAL)).toBe(true);
-    // Nothing else moved: one link fewer than served, and no node lost its path to the goal.
-    expect(graph.edges).toHaveLength(SERVED.draft_graph.edges.length - 1);
+    // Nothing else moved: one link fewer than served (A4a's fold of the served risk mediator subtracted and counted),
+    // and no node lost its path to the goal.
+    const unfolded = subtractRiskFoldDelta(graph, SERVED.draft_graph);
+    expect(unfolded.folded).toEqual(['price_sensitivity']);
+    expect(unfolded.edges).toHaveLength(SERVED.draft_graph.edges.length - 1);
     for (const n of graph.nodes) if (n.kind !== 'goal' && n.kind !== 'decision') expect(reaches(graph, n.id, GOAL), n.id).toBe(true);
   });
 
@@ -389,9 +401,14 @@ describe('CONTROL: an acyclic model is unchanged', () => {
     expect(loopWithheld(out)).toEqual([]);
     expect(saidAbout(out)).toEqual([]);
     const served = (SERVED.draft_graph.edges as unknown as Edge[]).filter((e) => !(e.from === AVAILABILITY && e.to === DELAY));
-    expect(body.edges).toHaveLength(served.length);
-    const { edges: unsized, sized } = subtractMagnitudeDelta(body.edges);
-    expect(sized).toBeGreaterThan(0);
+    const unfolded = subtractRiskFoldDelta(body, SERVED.draft_graph);
+    expect(unfolded.folded).toEqual(['price_sensitivity']);
+    expect(unfolded.edges).toHaveLength(served.length);
+    const { edges: unsized, sized } = subtractMagnitudeDelta(unfolded.edges);
+    // PR1b's one sized link is inside A4a's fold (see the fidelity row above).
+    expect(sized).toBe(0);
+    expect(body.edges.filter((e) => (e.provenance as { magnitude?: string } | undefined)?.magnitude === 'olumi_placeholder').map((e) => `${e.from}->${e.to}`))
+      .toEqual(['pro_plan_price->monthly_churn']);
     expect(unsized.map(canon)).toEqual(served.map(canon));
   });
 });
@@ -424,6 +441,10 @@ function extended(base: CandidateModel, add: Addition): CandidateModel {
   }
   return c as unknown as CandidateModel;
 }
+/**
+ * `n` Olumi additions, each one node and one link. The served candidate registers 13 nodes since A4a folds its risk
+ * mediator ("Price sensitivity"; 14 before), so an OVERSIZED first draft (COMPACT_LIMITS.maxNodes 18) takes 6, not 5.
+ */
 const speculative = (kind: 'factors' | 'risks', n: number): Addition => {
   const labels = Array.from({ length: n }, (_, i) => `Speculative ${kind === 'factors' ? 'factor' : 'risk'} ${i}`);
   return { [kind]: labels, links: labels.map((l) => L(l, 'MRR', kind === 'factors' ? 'positive' : 'negative', 'ai_proposed')) };
@@ -432,7 +453,7 @@ const ledger = (c: CandidateModel) => admitCandidateModel(prepareProvisionalCand
 
 describe('BLOCKING-1: a loop never costs the user their model — an oversized first draft is still built', () => {
   it('RED: oversized + looped; the size retry EDITS its draft (the measured 8/8 route), keeps the loop, and is adopted — the backstop withholds and says it', async () => {
-    const first = extended(servedCandidate(), speculative('factors', 5));
+    const first = extended(servedCandidate(), speculative('factors', 6));
     const { out, graph, calls, inputs, instructions } = await build(first, servedCandidate());
     expect(out.size_retried, 'PRECONDITION: the first draft was oversized').toBe(true);
     expect(calls).toBe(2);
@@ -449,7 +470,7 @@ describe('BLOCKING-1: a loop never costs the user their model — an oversized f
   });
 
   it('RED: oversized + looped; a size retry that sheds Olumi’s own added risks is adopted (no risk-retention gate a loop alone would impose)', async () => {
-    const first = extended(servedCandidate(), speculative('risks', 5));
+    const first = extended(servedCandidate(), speculative('risks', 6));
     const fixed = withLinks((ls) => [...ls.filter((l) => l !== DELAY_TO_AVAIL), L('AI release delay', 'New Pro conversions', 'negative')]);
     const { out, graph } = await build(first, fixed);
     expect(out.size_retried).toBe(true);
@@ -531,6 +552,10 @@ describe('(b) the rules no test pinned', () => {
         L('Referral rate', 'Churn spike', 'positive'),
         L('Churn spike', 'Non-Pro MRR', 'negative'),
         L('Non-Pro MRR', 'Referral rate', 'positive', 'explicit'),
+        // A second parent keeps "Churn spike" a risk of its own: a one-parent risk between two factors is folded
+        // into one link at admission (A4a), and this row is about a risk's only route. Off the loop, it moves no
+        // node's distance to the goal.
+        L('Pro plan price', 'Churn spike', 'positive'),
       ],
     });
     const { out, graph } = await build(c);
@@ -600,7 +625,7 @@ describe('COMBINED (#1891 × #1956): coverage gaps and a loop in one draft', () 
   });
 
   it('RED (row 1): OVERSIZED + gap + loop — the gap is asked, the loop is not, as a compaction; the compliant retry is adopted and the loop is broken by admission and said', async () => {
-    const first = extended(withGap(servedCandidate()), speculative('factors', 5));
+    const first = extended(withGap(servedCandidate()), speculative('factors', 6));
     const { out, graph, calls, inputs, instructions } = await build(first, servedCandidate());
     expect(out.size_retried, 'PRECONDITION: the first draft was oversized').toBe(true);
     expect(calls).toBe(2);
@@ -625,7 +650,7 @@ describe('COMBINED (#1891 × #1956): coverage gaps and a loop in one draft', () 
   });
 
   it('CONTRAST (row 1): the same oversized loop with NO gap takes #1898\'s size-only retry — nothing is asked', async () => {
-    const { out, calls, inputs } = await build(extended(servedCandidate(), speculative('factors', 5)), servedCandidate());
+    const { out, calls, inputs } = await build(extended(servedCandidate(), speculative('factors', 6)), servedCandidate());
     expect([out.size_retried, calls]).toEqual([true, 2]);
     expect(inputs[1]).toContain('Your previous model, to shrink:');
     expect(inputs[1]).not.toContain('Construction issues');

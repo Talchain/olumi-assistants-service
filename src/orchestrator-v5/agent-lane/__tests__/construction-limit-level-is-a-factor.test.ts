@@ -21,6 +21,7 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
 import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
+import { subtractRiskFoldDelta } from './risk-fold-delta.js';
 
 type Node = Record<string, unknown> & { id: string; kind: string };
 type Edge = Record<string, unknown> & { from: string; to: string };
@@ -145,10 +146,20 @@ const parents = (g: Graph, id: string): string[] => g.edges.filter((e) => e.to =
 const children = (g: Graph, id: string): string[] => g.edges.filter((e) => e.from === id).map((e) => e.to).sort();
 const blockingCodes = (g: unknown): string[] => assessCanonicalAnalysisReadiness(g).blockingIssues.map((i) => i.code).sort();
 const canHoldAStartingValue = (n: Node | undefined): boolean => n !== undefined && SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS.includes(n.kind);
+/**
+ * The registered graph with A4a's known delta subtracted and counted (`risk-fold-delta.ts`): both served drafts carry a
+ * one-parent risk Olumi drafted between two factors, which admission now folds into one link per child.
+ */
+const unfold = (g: Graph, s: Graph, risk: string): Graph => {
+  const u = subtractRiskFoldDelta(g, s);
+  expect(u.folded).toEqual([risk]);
+  return { ...g, nodes: u.nodes, edges: u.edges };
+};
 
 describe('a limit the user states on a level is admitted on a factor that can hold a starting value', () => {
   it('FIDELITY: the rebuilt served outcome draft reproduces the served graph on every other node and every edge', async () => {
-    const { graph } = await register(outcomeDraft());
+    const { graph: registered } = await register(outcomeDraft());
+    const graph = unfold(registered, SERVED_OUTCOME, 'price_sensitivity');
     expect(edgeKeys(graph)).toEqual(edgeKeys(SERVED_OUTCOME));
     for (const s of SERVED_OUTCOME.nodes.filter((n) => n.id !== 'monthly_churn')) {
       expect(byId(graph, s.id), s.id).toStrictEqual(s);
@@ -182,7 +193,10 @@ describe('a limit the user states on a level is admitted on a factor that can ho
   });
 
   it('it keeps every link in and out: the same parents and the same child as served', async () => {
-    const { graph } = await register(outcomeDraft());
+    const { graph: registered } = await register(outcomeDraft());
+    // A4a: the risk Olumi drafted between price and churn is folded, so price reaches churn in one link.
+    expect(parents(registered, 'monthly_churn')).toEqual(['ai_feature_value', 'pro_plan_price']);
+    const graph = unfold(registered, SERVED_OUTCOME, 'price_sensitivity');
     expect(parents(graph, 'monthly_churn')).toEqual(['ai_feature_value', 'price_sensitivity']);
     expect(children(graph, 'monthly_churn')).toEqual(['pro_plan_subscribers']);
     expect(parents(graph, 'monthly_churn')).toEqual(parents(SERVED_OUTCOME, 'monthly_churn'));
@@ -220,7 +234,8 @@ describe('a limit the user states on a level is admitted on a factor that can ho
 
 describe('CONTROLS — what the rule must leave alone', () => {
   it('the served FACTOR-kind draft registers byte-identical to what was served', async () => {
-    const { graph } = await register(factorDraft());
+    const { graph: registered } = await register(factorDraft());
+    const graph = unfold(registered, SERVED_FACTOR, 'price_resistance');
     expect(graph.nodes).toStrictEqual(SERVED_FACTOR.nodes);
     expect(edgeKeys(graph)).toEqual(edgeKeys(SERVED_FACTOR));
     expect(graph.goal_constraints).toStrictEqual(SERVED_FACTOR_GC_FRAMED);

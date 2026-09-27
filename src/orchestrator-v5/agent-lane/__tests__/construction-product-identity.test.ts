@@ -777,7 +777,13 @@ const edgeKeys = (m: ReturnType<typeof admitCandidateModel>) => m.edges
 
 describe('rule 6 (B3): the rules the verification found unpinned', () => {
   it('the reconstructed served candidate admits to exactly the captured structure', () => {
-    expect(edgeKeys(admit(served()))).toEqual(CAPTURED_EDGES);
+    // ⚠ Since A4a (`risk-mediator-fold.ts`, AI Quality 5854837708 / 5854861848), admission folds the served one-parent
+    // risk "Price sensitivity" Olumi drafted between price and churn: its two links become ONE price -> churn link.
+    // That is the only change to the captured structure, stated here rather than re-recorded, and no C46 rule this
+    // fixture pins moves (price still reaches Pro subscribers through churn, the same way).
+    const folded = [...CAPTURED_EDGES.filter((k) => k !== 'pro_plan_price>price_sensitivity' && k !== 'price_sensitivity>monthly_churn'), 'pro_plan_price>monthly_churn'].sort();
+    expect(folded).toHaveLength(CAPTURED_EDGES.length - 1);
+    expect(edgeKeys(admit(served()))).toEqual(folded);
   });
 
   it('RED B3.1: the served two-lever option (price + AI availability) is sign_not_provable, naming both priced options', () => {
