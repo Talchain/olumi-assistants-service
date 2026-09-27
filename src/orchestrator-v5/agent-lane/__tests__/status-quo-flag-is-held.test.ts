@@ -62,7 +62,7 @@ const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
 type Graph = { nodes: { id: string; kind: string; label: string }[]; edges: { from: string; to: string; origin?: unknown }[] };
 
 async function build(model: CandidateModel) {
-  const wire = { ...model, unknowns: [] };
+  const wire = { ...model, unknowns: [], decision_question: null };
   expect(strict(wire), JSON.stringify(strict.errors)).toBe(true);
   let graph: unknown = null;
   const call = (async () => ({ text: JSON.stringify(wire) })) as unknown as CallStructuredModel;

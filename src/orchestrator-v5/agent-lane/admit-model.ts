@@ -32,6 +32,7 @@ import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
+import { bindOptionLabelToBrief, bindingEarnsBriefClaim } from '../../cee/provenance/brief-binding.js';
 import { sizeLink, type LinkSizing, type MagnitudeNode } from '../../cee/magnitude/link-effect.js';
 import {
   admitCandidateConstraints,
@@ -75,8 +76,9 @@ export type CandidateNodeKind =
  * emits goal, options, factors, risks, outcomes and links — and no decision — so
  * every model admitted from it was unanalysable before anything else mattered.
  *
- * It is `ai_inferred`: nobody stated it, it is read off the question the brief
- * asks. The label is the goal metric's decision framing, not invented content.
+ * Its label is the brief's OWN question when the drafter copied it verbatim
+ * (`decision_question`, admitted by `decisionEntityFor`), and otherwise the goal
+ * metric's decision framing, "Decision: <metric>", `ai_inferred`: nobody stated it.
  */
 
 export interface CandidateModel {
@@ -154,6 +156,12 @@ export interface CandidateModel {
    * means none was declared, exactly what an older candidate meant.
    */
   readonly identities?: readonly CandidateIdentity[];
+  /**
+   * The question the brief asks, as the drafter COPIED it from the brief, or `null` when it asks none. Optional because
+   * the banked contract has no such field: absent means no question was copied, exactly what an older candidate meant.
+   * Admission takes it only when it is verbatim brief text (`decisionEntityFor`); it is never read as English.
+   */
+  readonly decision_question?: string | null;
 }
 
 /**
@@ -403,6 +411,47 @@ export function slugId(label: string): string {
 
 /** Same words, ignoring case and spacing — the test for "the same thing". */
 export const canonicalLabel = (label: string): string => label.trim().toLowerCase().replace(/\s+/g, ' ');
+
+/** A copied question is 8 to 240 characters once its whitespace is collapsed; anything else is not taken as one. */
+const DECISION_QUESTION_MIN_CHARS = 8;
+const DECISION_QUESTION_MAX_CHARS = 240;
+const collapseWhitespace = (text: string): string => text.replace(/\s+/g, ' ').trim();
+
+/**
+ * ⭐ THE QUESTION CARD ASKS THE BRIEF'S OWN QUESTION. Served to Paul (27 Sep, export 17d1cd3a): the brief asked
+ * "…should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?" and the
+ * Question card read "Decision: MRR", because this label was minted from the goal metric and the UI shows it verbatim.
+ *
+ * TYPED GROUNDING, NOT READING ENGLISH. The drafter copies the question (`decision_question`); it is taken only when it
+ * is a verbatim substring of the brief once whitespace is collapsed on both sides, 8 to 240 characters. The label is
+ * that span with its first character upper-cased and nothing else changed. Anything else — null, a candidate from
+ * before the key, no brief, a paraphrase, a span too short or too long — keeps exactly "Decision: <metric>" as before.
+ * So does a span spelled like another entity: `assignIds` would fold that entity into the decision node.
+ *
+ * ⚠ The label budget still applies downstream (`shortLabel`): a question over 33 characters keeps its full text on
+ * `description`, which is also its identity (`construction-size-gate.ts` `nodeIdentity`).
+ *
+ * PROVENANCE IS THE ESTATE'S RULE, NOT A NEW ONE (`schema-v3.ts` `LABEL_BOUND_PROVENANCE_KINDS`, which lists
+ * `decision`; row 2.1205): a value-free label of at least two words that `bindOptionLabelToBrief` binds to the brief
+ * is the user's (`explicit`); otherwise it is Olumi's (`inferred`).
+ */
+export function decisionEntityFor(
+  model: Pick<CandidateModel, 'goal' | 'decision_question'>,
+  brief: string | undefined,
+  otherLabels: readonly string[],
+): { readonly label: string; readonly provenance: 'explicit' | 'inferred' } {
+  const fallback = { label: `Decision: ${model.goal.metric}`, provenance: 'inferred' as const };
+  const copied = model.decision_question;
+  if (typeof copied !== 'string' || typeof brief !== 'string') return fallback;
+  const span = collapseWhitespace(copied);
+  if (span.length < DECISION_QUESTION_MIN_CHARS || span.length > DECISION_QUESTION_MAX_CHARS) return fallback;
+  if (!collapseWhitespace(brief).includes(span)) return fallback;
+  const label = span.charAt(0).toUpperCase() + span.slice(1);
+  if (otherLabels.some((other) => canonicalLabel(other) === canonicalLabel(label))) return fallback;
+  const words = label.trim().split(/\s+/).filter(Boolean).length;
+  const users = words >= 2 && bindingEarnsBriefClaim(bindOptionLabelToBrief(label, brief));
+  return { label, provenance: users ? 'explicit' : 'inferred' };
+}
 
 /**
  * Deterministic, collision-safe id assignment in a fixed traversal order.
@@ -1965,11 +2014,13 @@ export function admitStatedGoalLevel(args: {
 export function admitCandidateModel(
   candidateModel: CandidateModel,
   widened: WidenerAdditions = {},
+  /** The user's brief, which the decision node's question must be copied from (`decisionEntityFor`). */
+  brief?: string,
 ): AdmittedModel {
   const declared = new Set(candidateModel.options
     .filter((o) => readIsBaseline({ ...(typeof o.is_status_quo === 'boolean' ? { is_baseline: o.is_status_quo } : {}) }) === true)
     .map((o) => canonicalLabel(o.label)));
-  const first = admitOnce(candidateModel, widened);
+  const first = admitOnce(candidateModel, widened, brief);
   const verdict = judgeOptionIdentity(first, declared);
   // Never withhold a name another entity shares: removing its links would take that entity's with it.
   const otherNames = new Set([
@@ -1990,6 +2041,7 @@ export function admitCandidateModel(
       ...(widened.proposed_options !== undefined ? { proposed_options: widened.proposed_options.filter((o) => !gone.has(canonicalLabel(o.label))) } : {}),
       ...(widened.proposed_links !== undefined ? { proposed_links: widened.proposed_links.filter((l) => !names(l)) } : {}),
     },
+    brief,
   );
   const options_withheld: WithheldOption[] = withheld.map((w) => ({
     option: w.option, like: w.like, reason: 'option_indistinct', sentence: indistinctStep(w.option, w.like),
@@ -2013,6 +2065,7 @@ export function admitCandidateModel(
 function admitOnce(
   candidateModel: CandidateModel,
   widened: WidenerAdditions,
+  brief: string | undefined,
 ): AdmittedModel {
   const { model, restated: restatedChanges } = restateSignedPercentChanges(candidateModel);
 
@@ -2331,8 +2384,9 @@ function admitOnce(
 
   // The decision node is prepended so it takes a stable id before any entity
   // whose label might slug to the same token.
-  const DECISION_LABEL = `Decision: ${model.goal.metric}`;
-  entities.unshift({ label: DECISION_LABEL, kind: 'decision', provenance: 'inferred' });
+  const decision = decisionEntityFor(model, brief, entities.map((e) => e.label));
+  const DECISION_LABEL = decision.label;
+  entities.unshift({ label: DECISION_LABEL, kind: 'decision', provenance: decision.provenance });
 
   const ids = assignIds(entities.map((e) => e.label));
   const nodes: AdmittedNode[] = [];

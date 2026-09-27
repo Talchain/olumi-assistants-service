@@ -29,6 +29,7 @@ import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_CONTINUATION, parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { TODAY_LEVEL, TODAY_UNIT } from './admit-model.js';
+import { attestHorizon, type HorizonAttestation } from './horizon-attestation.js';
 import { unitPhraseFamily } from './unit-conflict.js';
 
 const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
@@ -96,16 +97,6 @@ export interface HeldGoalAttributes {
 }
 
 /**
- * Whether the brief writes the deadline `months` as a literal "N months" / "N month" / "N-month". ONLY the literal:
- * no helper here reads a duration (`figureTheUserWrote(12, 'months', …)` grounds "12 subscribers", measured), so
- * a figure beside another noun never grounds a deadline. Every miss under-claims: "eighteen months", "a year" and
- * "by Q3" are left unheld, and the deadline stays a question.
- */
-function horizonTheBriefStates(months: number, brief: string): boolean {
-  return new RegExp(`(?<![\\d.,])${months}(?:\\s+|\\s*-\\s*)months?\\b`, 'i').test(brief);
-}
-
-/**
  * ⭐ THE GOAL'S STATED TARGET SOURCE, DIRECTION AND DEADLINE ARE HELD ON THE GOAL NODE — ONLY WHEN THE BRIEF STATES
  * THEM (G1; PJ-A2 rows 6–13, 28, 29). Before this, admission recorded the direction and deadline only as ledger
  * "losses" (GraphV3 had no home for them) and never stamped whose target it was, so a cold read had none of the three.
@@ -117,18 +108,21 @@ function horizonTheBriefStates(months: number, brief: string): boolean {
  *    comparator OF that stated target, the same reading admission already acts on (`admitStatedGoalLevel`) and
  *    `goal_constraints` store. It is not read from words: `comparatorTheUserWrote` is turn-scoped and reads neither
  *    PJ-A2 brief (null on both, measured — "churn under 4%" sits beside "reaching £100k").
- *  · horizon → `goal_horizon_months`: a positive whole number of months the brief writes literally
- *    (`horizonTheBriefStates`).
+ *  · horizon → `goal_horizon_months`: the drafter's month count, held only when MG's `attestHorizon` finds the brief
+ *    writing that deadline ("within 12 months", "over the next year"; never "12 subscribers"). Its verdict is returned
+ *    as `horizon` whatever it is, so an unresolved deadline's own words ("by Q3") reach the caller, not the node.
  * Not grounded ⇒ absent, exactly as before; nothing is defaulted. Only the one goal node is touched.
  */
 export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   nodes: readonly N[],
   goal: { readonly operator?: unknown; readonly horizon_months?: unknown; readonly provenance?: unknown; readonly unit?: unknown } | null | undefined,
   brief: string,
-): { nodes: N[]; held: HeldGoalAttributes } {
+): { nodes: N[]; held: HeldGoalAttributes; horizon: HorizonAttestation } {
   const none: HeldGoalAttributes = { target: false, direction: false, horizon: false };
   const goals = nodes.filter((n) => n.kind === 'goal');
-  if (goal === null || goal === undefined || goals.length !== 1) return { nodes: [...nodes], held: none };
+  // The deadline's attestation, whatever it finds: held below only when `attested`; otherwise returned, never stored.
+  const attestation = attestHorizon(brief, goal);
+  if (goal === null || goal === undefined || goals.length !== 1) return { nodes: [...nodes], held: none, horizon: attestation };
   const node = goals[0] as N & { readonly goal_threshold_raw?: unknown; readonly goal_threshold_unit?: unknown };
   const raw = node.goal_threshold_raw;
   const target = typeof raw === 'number' && Number.isFinite(raw) && goal.provenance === 'explicit'
@@ -136,16 +130,16 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   // The stored comparator's own schema reads it (one list, `NodeV3`): anything else is undefined, i.e. not held.
   const operator = target ? NodeV3.shape.goal_direction.parse(goal.operator) : undefined;
   const direction = operator !== undefined;
-  const months = goal.horizon_months;
-  const horizon = typeof months === 'number' && Number.isInteger(months) && months > 0 && horizonTheBriefStates(months, brief);
-  if (!target && !horizon) return { nodes: [...nodes], held: none };
+  const months = attestation.status === 'attested' ? attestation.months : null;
+  const horizon = months !== null;
+  if (!target && !horizon) return { nodes: [...nodes], held: none, horizon: attestation };
   const stamped = {
     ...node,
     ...(target ? { threshold_source: 'brief_extraction' } : {}),
     ...(operator !== undefined ? { goal_direction: operator } : {}),
-    ...(horizon ? { goal_horizon_months: months as number } : {}),
+    ...(months !== null ? { goal_horizon_months: months } : {}),
   };
-  return { nodes: nodes.map((n) => (n === node ? stamped : n)), held: { target, direction, horizon } };
+  return { nodes: nodes.map((n) => (n === node ? stamped : n)), held: { target, direction, horizon }, horizon: attestation };
 }
 
 /**

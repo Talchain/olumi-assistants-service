@@ -26,14 +26,26 @@
  *
  * So: preserve the number, widen the operator, and record the widening as a
  * loss that names the admitted boundary value explicitly.
+ *
+ * ⭐ THE WIDENING IS THE STORE'S LIMIT, NOT ADMISSION'S CHOICE (G1 drafting half; Codex PJ-A2 row 14). The drafter
+ * emits the TYPED operator (`buildCandidateSchema`: `>= <= > <`, no word is read), and admission keeps it whenever the
+ * canonical store can hold it: {@link CANONICAL_CONSTRAINT_OPERATORS} is `GoalConstraintSchema`'s own list, never a
+ * second one. Today that list is `>= <=`, so "under 4%" is still held as "at most 4%", recorded here and said to the
+ * user (`build-model.ts`, `widenedLimitLines`). ⚠ WIDENING THE SCHEMA ALONE IS NOT ENOUGH: PLoT's preflight refuses
+ * any other operator (`CONSTRAINT_INVALID_OPERATOR`, plot-lite-service `src/validation/preflight-v2.ts`
+ * `VALID_OPERATORS`), so the store and PLoT move together, and `admit-constraint-typed-operator.test.ts` pins today's
+ * list so that move cannot happen unseen.
  */
 
 import { REPAIR_CODES, type RepairEntry } from '@talchain/schemas';
+import { GoalConstraintSchema, type GoalConstraintT } from '../../schemas/assist.js';
 import { classifyUnitScaleClass, UNIT_SCALE_CLASS_TOKENS, unitPinnedScaleFrame } from '../../cee/draft/records/unit-scale-class.js';
 import { isCurrencyUnit, sameUnit } from '../../utils/currency-alphabet.js';
 
 export type CandidateOperator = '>=' | '<=' | '>' | '<';
-export type CanonicalOperator = '>=' | '<=';
+/** The comparators the canonical store holds: `GoalConstraintSchema.operator`, derived, never restated. */
+export type CanonicalOperator = GoalConstraintT['operator'];
+export const CANONICAL_CONSTRAINT_OPERATORS: readonly CanonicalOperator[] = GoalConstraintSchema.shape.operator.options;
 
 export interface CandidateConstraint {
   readonly metric: string;
@@ -320,6 +332,17 @@ export function isStrictnessLost(op: CandidateOperator): boolean {
   return op === '<' || op === '>';
 }
 
+/** The typed operator as stated when the store can hold it; otherwise its non-strict widening (`RELAXES_TO`). */
+export function admittedOperator(
+  op: CandidateOperator,
+  operators: readonly string[] = CANONICAL_CONSTRAINT_OPERATORS,
+): CanonicalOperator {
+  return operators.includes(op) ? (op as CanonicalOperator) : RELAXES_TO[op];
+}
+
+/** A lower bound (`>=`, `>`) as opposed to an upper one; strict or not, it is the same side. */
+const isLowerBound = (op: string): boolean => op.startsWith('>');
+
 /** Only a bound the user actually stated may be reported as theirs. */
 function isUserAuthored(candidateProvenance: string): boolean {
   return candidateProvenance === 'explicit';
@@ -333,6 +356,8 @@ export function admitCandidateConstraints(
   candidates: readonly CandidateConstraint[],
   nodeIdFor: (metric: string) => string | undefined,
   targetScaleFor: (nodeId: string) => LimitTargetScale | undefined = () => undefined,
+  /** The store's comparators (`GoalConstraintSchema`'s own list); a parameter only so a test can hold a wider store. */
+  operators: readonly string[] = CANONICAL_CONSTRAINT_OPERATORS,
 ): ConstraintAdmissionResult {
   const constraints: AdmittedConstraint[] = [];
   const loss: RepairEntry[] = [];
@@ -355,7 +380,7 @@ export function admitCandidateConstraints(
       continue;
     }
 
-    const operator = RELAXES_TO[c.operator];
+    const operator = admittedOperator(c.operator, operators);
     // The user's number is never adjusted to compensate for the operator. It is rescaled ONLY by a stated magnitude
     // suffix (£k) onto a node in the bare currency, and every rewrite is stamped (`canonicaliseLimitUnit`).
     const { value, unit, ...unitProvenance } = canonicaliseLimitUnit(c.value, c.unit, targetScaleFor(nodeId), c.frame);
@@ -375,7 +400,7 @@ export function admitCandidateConstraints(
       ...(c.frame === 'level' || c.frame === 'delta' ? { value_frame: c.frame } : {}),
     };
 
-    if (isStrictnessLost(c.operator)) {
+    if (operator !== c.operator) {
       loss.push({
         code: REPAIR_CODES.NORMALISE_STRENGTH_RANGE,
         layer: 'cee',
@@ -402,8 +427,8 @@ export function admitCandidateConstraints(
   // are withheld together and the loss is said in words; neither side is guessed. A genuine range still attaches.
   const contradicted = new Set<string>();
   for (const lower of constraints) {
-    if (lower.operator !== '>=') continue;
-    const upper = constraints.find((u) => u.node_id === lower.node_id && u.operator === '<=' && lower.value >= u.value);
+    if (!isLowerBound(lower.operator)) continue;
+    const upper = constraints.find((u) => u.node_id === lower.node_id && !isLowerBound(u.operator) && lower.value >= u.value);
     if (upper === undefined || contradicted.has(lower.node_id)) continue;
     contradicted.add(lower.node_id);
     const metric = candidates.find((c) => nodeIdFor(c.metric) === lower.node_id)?.metric ?? lower.node_id;
@@ -430,7 +455,7 @@ export function admitCandidateConstraints(
   const directions = new Map<string, Set<CanonicalOperator>>();
   for (const c of kept) directions.set(c.node_id, (directions.get(c.node_id) ?? new Set<CanonicalOperator>()).add(c.operator));
   const named = kept.map((c) => ((directions.get(c.node_id)?.size ?? 0) > 1 && c.label !== undefined
-    ? { ...c, label: `${c.label} ${c.operator === '>=' ? 'floor' : 'cap'}` }
+    ? { ...c, label: `${c.label} ${isLowerBound(c.operator) ? 'floor' : 'cap'}` }
     : c));
   return { constraints: named, loss };
 }
