@@ -679,8 +679,9 @@ export function projectRequestInterventionsToWireScale(
    * ⛔ AN ALL-IN-RANGE REQUEST CARRYING A RAW VALUE IS READ AS UNIT SCALE (DL #70 5858285859; PLoT #373 KNOWN RESIDUAL).
    * PLoT reads a request as raw only when some value lies outside [0,1]. "Cut churn to 0.8%" on a framed churn node
    * ships `raw_value_used` 0.8 with nothing out of range, so PLoT read it as 80%. Such a request is demoted too, so
-   * every value reaches PLoT in the one scale it will read. (WIP: the typed refusal for an in-range raw value with no
-   * known unit form, and the RED rows, follow.)
+   * every value reaches PLoT in the one scale it will read. Pinned by `plot-request-scale-all-in-range-raw.test.ts`.
+   * Still open (AIQ #2116 N3): an in-range RAW value with NO known unit form ships as before; it is to be refused with
+   * a typed reason naming the factor once measured (a legitimate unframed share must not be blocked).
    */
   const rawReadAsUnit = outsideUnitInterval.length === 0
     ? present.filter((r) =>

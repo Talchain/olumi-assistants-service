@@ -38,3 +38,25 @@ describe('probe — percent levels on a framed churn node, alone and beside othe
     });
   }
 });
+
+/** AIQ #2116 N1: a demoted request never turns a switch's "on" into 0.01 (A1's switch as #2107 stamps it). */
+describe('0|1 switch beside the demote — verbatim', () => {
+  const sw = { id: 'grandfathered', kind: 'factor', label: 'Grandfather existing customers',
+    observed_state: { value: 0, raw_value: 0, source: 'cee_inference' } };
+  const map = () => buildFactorScaleMap([churn, sw]);
+  const lvl = (raw: number) => ({ value: raw / 100, raw_value: raw, unit: '%' });
+  it('switch 1 alone → 1', () => {
+    const out = projectRequestInterventionsToWireScale([{ grandfathered: 1 }] as never, map());
+    expect(out.perOption[0]!.grandfathered).toBe(1);
+  });
+  it('switch 1 + churn 0.8% on one option → switch 1, churn 0.008', () => {
+    const out = projectRequestInterventionsToWireScale([{ grandfathered: 1, monthly_churn: lvl(0.8) }] as never, map());
+    expect(out.perOption[0]!.grandfathered).toBe(1);
+    expect(out.perOption[0]!.monthly_churn).toBeCloseTo(0.008, 10);
+  });
+  it('the same across two options', () => {
+    const out = projectRequestInterventionsToWireScale([{ grandfathered: 1 }, { monthly_churn: lvl(0.8) }] as never, map());
+    expect(out.perOption[0]!.grandfathered).toBe(1);
+    expect(out.perOption[1]!.monthly_churn).toBeCloseTo(0.008, 10);
+  });
+});
