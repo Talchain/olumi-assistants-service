@@ -9,7 +9,7 @@
 **Run command from each checkout:**
 
 ```sh
-./node_modules/.bin/vitest run src/orchestrator-v5/agent-lane/__tests__/pj-a2-work-frame.red.test.ts --reporter=json --outputFile=/private/tmp/pj-a2-<candidate>-results.json --maxWorkers=2
+./node_modules/.bin/vitest run src/orchestrator-v5/agent-lane/__tests__/pj-a2-work-frame.red.test.ts --reporter=json --outputFile=/private/tmp/pj-a2-rerun-results.json --maxWorkers=2
 ```
 
 The three isolated Canonical/A7 candidate runs used `--maxWorkers=1`; test and fixture bytes were identical (SHA256 test `438e5ae9c1c11745ac89be80217258ee7b1be51e9cd6b048702add061edcc933`, fixture `4c4bf38d89e33e172aca53d9afef7700fe3cc78f23f0c18ec280e4b0c95ae829`). Expected process exit is 1 while RED.
