@@ -1403,6 +1403,38 @@ function collectCandidates(graph: Record<string, unknown>): Candidate[] {
       out.push(...collectSourceBoundInterventionCandidates(node, factorLabels));
     }
   }
+  out.push(...collectLimitCandidates(graph));
+  return out;
+}
+
+/**
+ * ⭐ A LIVE LIMIT ROW CARRIES ITS FIGURE (MG construction sweep, 27 Sep; served CEE e7d28fd). The agent lane holds a
+ * stated limit ("keeping monthly churn under 10%") only as a `goal_constraints[]` row bound to its node, and PLoT scores
+ * it; no node value repeats it. With node and option values as the only candidates, "10%" read `absent` in 4/4 served
+ * runs and "What I was given" told the user the limit was not modelled. The row's own `value` and `unit`, read through
+ * the SAME unit reader as every node carrier, are a candidate; `numbersEqual` + `unitCompatible` still decide the match.
+ */
+function collectLimitCandidates(graph: Record<string, unknown>): Candidate[] {
+  const rows = graph.goal_constraints;
+  if (!Array.isArray(rows)) return [];
+  const labels = new Map<string, string>();
+  if (Array.isArray(graph.nodes)) {
+    for (const n of graph.nodes) {
+      const r = n as Record<string, unknown> | null;
+      if (r !== null && typeof r === "object" && typeof r.id === "string" && typeof r.label === "string") labels.set(r.id, r.label);
+    }
+  }
+  const out: Candidate[] = [];
+  for (const raw of rows) {
+    if (raw === null || typeof raw !== "object") continue;
+    const row = raw as Record<string, unknown>;
+    const nodeId = typeof row.node_id === "string" && row.node_id.length > 0 ? row.node_id : null;
+    const label = nodeId === null ? null : (labels.get(nodeId) ?? (typeof row.label === "string" ? row.label : null));
+    if (nodeId === null || label === null || typeof row.value !== "number" || !Number.isFinite(row.value)) continue;
+    const declaredUnit = typeof row.unit === "string" ? row.unit : null;
+    const { kind, currencyCode, multiplier } = readCurrencyUnitWithQualifiers(declaredUnit);
+    out.push({ nodeId, label, value: row.value * multiplier, unitKind: kind, currencyCode: currencyCode ?? null, declaredUnit });
+  }
   return out;
 }
 
