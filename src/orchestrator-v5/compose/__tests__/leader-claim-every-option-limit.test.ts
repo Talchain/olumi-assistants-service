@@ -175,7 +175,10 @@ describe('F-LIMIT — the claim: the two codes, their precedence, and their read
     for (const said of [none, likely]) {
       expect(said).not.toBe(agentNoLeaderSentence(WITHHELD_CONSTRAINT_VERDICT, undefined));
       expect(said).not.toBe(fallback);
-      expect(said).toMatch(/change that limit or one of the options/);
+      // DL 5851485153: offer only served writes — change or add an option, or give a figure; never the limit itself.
+      expect(said).toMatch(/change one of the options or add one/);
+      expect(said).toMatch(/give me a real figure you know/);
+      expect(said).not.toMatch(/change (that|the|your|a|one of (those|your|these)) limits?\b/i);
       expect(said).not.toMatch(/run the analysis again/i);
     }
     expect(none).toMatch(/no option meets one of your limits/);
