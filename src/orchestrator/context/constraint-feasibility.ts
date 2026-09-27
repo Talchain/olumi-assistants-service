@@ -417,6 +417,47 @@ export const MAY_NAME_LEADING_OPTION: Readonly<
   identity_unresolved: false,
 });
 
+/**
+ * ⭐ B5 — ONE TYPED VERDICT PER RATIFIED LIMIT (`@talchain/schemas` 0.60.0 `ConstraintPerLimitVerdictSchema`; meaning
+ * AI Quality #70 5855511541, Paul's 17d1 → `estimate_only` 5856308029).
+ *
+ * WHY IT EXISTS. Paul's 17d1 churn limit ("≤ 4 %") was reported met with certainty: P = 1 for every option, marked
+ * decision-grade. MG's EXECUTED replay (#70 5856264807) showed ISL compared 0.04 against Olumi's own 3 % ESTIMATE as if
+ * it had been measured. The leader-level {@link ConstraintVerdictState} cannot say that: it answers "may a leader be
+ * named", not "what was established about THIS limit".
+ *
+ * One meaning per `state`:
+ *   · `scored`: P exists on every option AND every precondition held: the producer's own per-constraint marker
+ *     certifies the threshold (framed, unclamped, decision-grade), no producer code names the limit, AND (e) the
+ *     target's level is the USER's (authorship credit, the one authority `collectLeaderEstimatedTargetIds` uses).
+ *     `reason` is ABSENT.
+ *   · `estimate_only`: as `scored`, but (e) fails: the level is Olumi's estimate (or the leader SETS the target at a
+ *     non-user level, rule (d), which folds in here). `reason: 'baseline_is_estimate'`.
+ *   · `unscored`: the producer published no trustworthy P. `reason` is the first failed precondition by
+ *     {@link PER_LIMIT_REASON_RANK}.
+ *
+ * Constraint IDS only, never labels.
+ */
+export type PerLimitState = 'scored' | 'estimate_only' | 'unscored';
+
+export interface PerLimitVerdict {
+  constraint_id: string;
+  state: PerLimitState;
+  /** Absent iff `state === 'scored'`. A documented code, never prose. */
+  reason?: string;
+}
+
+/**
+ * The run-level joint verdict (0.60.0 `ConstraintJointVerdictSchema`): `scored` iff every limit is `scored`;
+ * `estimate_only` iff none is `unscored` and at least one is `estimate_only`; otherwise `withheld` with
+ * `withheld_reason: 'limit_unscored'` and the unscored ids. It is computed over EVERY limit, never a scored subset.
+ */
+export interface JointLimitVerdict {
+  state: 'scored' | 'estimate_only' | 'withheld';
+  withheld_reason?: string;
+  constraint_ids?: string[];
+}
+
 export interface ConstraintVerdict {
   /** Which of the five answers this turn's producer evidence selects. */
   readonly state: ConstraintVerdictState;
@@ -528,6 +569,14 @@ export interface ConstraintVerdict {
    * change to any withholding.
    */
   readonly unmeasuredTargetConstraints?: readonly RatifiedConstraint[];
+  /**
+   * B5 — one {@link PerLimitVerdict} per ratified limit, in graph order. ABSENT = not attested: the run had no ratified
+   * limit, or the caller supplied no baseline input. It is never defaulted, because a defaulted `scored` row would be
+   * a manufactured certificate. Independent of {@link state}: it neither grants nor withdraws the leader permission.
+   */
+  readonly perLimit?: readonly PerLimitVerdict[];
+  /** B5 — the run-level joint verdict over {@link perLimit}. Present exactly when `perLimit` is. */
+  readonly joint?: JointLimitVerdict;
 }
 
 function verdict(
@@ -739,6 +788,37 @@ export function collectLeaderEstimatedTargetIds(
       : (sourceOf(setBy[c.node_id]) ?? sourceOf(graphInterventions?.[c.node_id]));
     if (earnsAuthorshipCredit(classifyValueSource(stamp))) continue;
     out.add(c.constraint_id);
+  }
+  return out;
+}
+
+/**
+ * ⭐ B5 precondition (e): the ratified limits whose TARGET'S LEVEL is the user's own figure.
+ *
+ * A limit is compared against its target's held level (ISL: `goal_baseline` + the option's same-draw difference; MG
+ * EXEC #70 5856264807). When that level is Olumi's estimate (`cee_inference`), a ratified-only estimate
+ * (`user_confirmed`), an admitted guess (`user_assumption`) or has no readable owner, P restates the estimate, so the
+ * limit is at best `estimate_only`.
+ *
+ * WHOSE LEVEL, from the SAME one authority {@link collectLeaderEstimatedTargetIds} uses:
+ * `earnsAuthorshipCredit(classifyValueSource(observed_state.source))`. No second list of sources lives here.
+ *
+ * POSITIVE ATTESTATION ONLY, so it fails toward `estimate_only`: a missing graph, a missing target, a target with no
+ * `observed_state` object (a derived node, a legacy bare number) or no source all leave the id OUT. Pure.
+ */
+export function collectUserBaselineConstraintIds(
+  graph: unknown,
+  ratified: readonly RatifiedConstraint[],
+): Set<string> {
+  const out = new Set<string>();
+  const rawNodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
+  if (!Array.isArray(rawNodes)) return out;
+  for (const c of ratified) {
+    if (typeof c.node_id !== 'string' || c.node_id.length === 0) continue;
+    const node = rawNodes.find((n) => readRecord(n)?.id === c.node_id);
+    const level = readRecord(readRecord(node)?.observed_state);
+    if (level === null) continue;
+    if (earnsAuthorshipCredit(classifyValueSource(level.source))) out.add(c.constraint_id);
   }
   return out;
 }
@@ -970,6 +1050,21 @@ function collectProducerFilteredConstraintIds(
   envelope: Record<string, unknown>,
 ): { outOfScope: Set<string>; refused: Set<string> } {
   const out = { outOfScope: new Set<string>(), refused: new Set<string>() };
+  for (const { id, reason } of readProducerFilteredEntries(envelope)) {
+    (reason !== null && OUT_OF_SCOPE_FILTER_REASONS.has(reason) ? out.outOfScope : out.refused).add(id);
+  }
+  return out;
+}
+
+/**
+ * The producer's `_meta.filtered_constraints[]` entries, in wire order: `{constraint_id, reason}` only. The ONE walk
+ * of that channel, shared by the leader verdict ({@link collectProducerFilteredConstraintIds}) and B5's per-limit rows
+ * (which need the reason, not just the partition). Fails CLOSED (empty) on every malformed shape.
+ */
+function readProducerFilteredEntries(
+  envelope: Record<string, unknown>,
+): Array<{ id: string; reason: string | null }> {
+  const out: Array<{ id: string; reason: string | null }> = [];
   const meta = envelope._meta;
   if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) return out;
   const filtered = (meta as Record<string, unknown>).filtered_constraints;
@@ -978,8 +1073,7 @@ function collectProducerFilteredConstraintIds(
     if (entry === null || typeof entry !== 'object') continue;
     const id = readString((entry as Record<string, unknown>).constraint_id);
     if (id === null) continue;
-    const reason = readString((entry as Record<string, unknown>).reason);
-    (reason !== null && OUT_OF_SCOPE_FILTER_REASONS.has(reason) ? out.outOfScope : out.refused).add(id);
+    out.push({ id, reason: readString((entry as Record<string, unknown>).reason) });
   }
   return out;
 }
@@ -1085,8 +1179,10 @@ function collectNotDecisionGradeCodes(
  * PURE. The `CEE_CONSTRAINT_INFEASIBLE_GATE` feature flag is enforced by the
  * callers, exactly as it is for {@link deriveWinnerConstraintInfeasibility}, so
  * this function stays trivially testable and the gate keeps one owner.
+ *
+ * B5: the exported {@link deriveConstraintVerdict} is this function plus the per-limit rows. This one is unchanged.
  */
-export function deriveConstraintVerdict(
+function deriveLeaderClaimVerdict(
   envelope: Record<string, unknown>,
   ratified: readonly RatifiedConstraint[],
   leadingOptionId: string | null | undefined,
@@ -1263,6 +1359,236 @@ export function deriveConstraintVerdict(
       });
 }
 
+/**
+ * THE constraint verdict for one analysis turn: the single owner of "was the user's hard constraint honoured?"
+ * (`@talchain/schemas` `handler-results.ts` names this function as that owner).
+ *
+ * It returns {@link deriveLeaderClaimVerdict}'s verdict (every precedence rule documented there, unchanged) and, when
+ * the caller supplies `perLimitInput` and the user ratified at least one limit, B5's typed rows: one
+ * {@link PerLimitVerdict} per ratified limit plus the run-level {@link JointLimitVerdict}. The rows are ADDITIVE:
+ * they never change `state`, `mayNameLeadingOption` or any other member, so a caller that omits `perLimitInput` gets
+ * today's verdict exactly, and absence of the rows means "not attested", never "scored".
+ */
+export function deriveConstraintVerdict(
+  envelope: Record<string, unknown>,
+  ratified: readonly RatifiedConstraint[],
+  leadingOptionId: string | null | undefined,
+  /** See {@link deriveLeaderClaimVerdict}. Deliberately NOT passed by run_analysis. */
+  unmeasuredTargetIds?: ReadonlySet<string>,
+  /** {@link collectLeaderEstimatedTargetIds}. Also folds into B5's `estimate_only` (rule (d)). */
+  leaderEstimatedTargetIds?: ReadonlySet<string>,
+  /**
+   * B5. `userBaselineIds` = {@link collectUserBaselineConstraintIds} over the analysed graph. OPTIONAL, and omitted is
+   * the SAFE value: no rows are attested (never a defaulted `scored`).
+   */
+  perLimitInput?: { readonly userBaselineIds: ReadonlySet<string> },
+): ConstraintVerdict {
+  const leaderVerdict = deriveLeaderClaimVerdict(
+    envelope,
+    ratified,
+    leadingOptionId,
+    unmeasuredTargetIds,
+    leaderEstimatedTargetIds,
+  );
+  if (perLimitInput === undefined || ratified.length === 0) return leaderVerdict;
+  const perLimit = derivePerLimitVerdicts(envelope, ratified, perLimitInput.userBaselineIds, leaderEstimatedTargetIds);
+  return { ...leaderVerdict, perLimit, joint: deriveJointLimitVerdict(perLimit) };
+}
+
+// ===========================================================================
+// B5 — ONE TYPED VERDICT PER LIMIT
+// ===========================================================================
+
+/**
+ * The per-limit `reason` codes, ranked by the precondition they report (AI Quality 5855511541: "reason names the FIRST
+ * failed precondition"). Lower is earlier; ties keep the first reason found. A code is a `string` on the contract so a
+ * consumer on an older pin never fails to parse a new one (hazard 1).
+ *
+ *   · AI Quality's documented codes, in precondition order: `threshold_unframed` (a), `target_unanchored` (b),
+ *     `threshold_clamped` (c), `CONSTRAINT_NOT_CONVERTIBLE` / `CONSTRAINT_OUT_OF_DOMAIN` (d; producer codes verbatim),
+ *     `CONSTRAINT_TARGET_UNRELIABLE` (producer code verbatim), `tally_units_incoherent`.
+ *   · A producer removal reason CEE does not map (e.g. `temporal_deadline`) is passed VERBATIM and ranks after those.
+ *   · CEE's own codes for "no P, and no precondition could be named": `identity_unresolved` (no returned id reconciles
+ *     with a ratified one), `constraint_block_withheld` (the producer withheld the whole constraint block, or shipped a
+ *     block code naming no limit, and this limit is not independently certified), `no_score_returned` (not every
+ *     option carries a P), and `not_decision_grade` (every option carries a P, but the per-constraint marker is
+ *     absent, malformed or not decision-grade for a reason it does not name).
+ *
+ * `target_unanchored` and `tally_units_incoherent` are ranked but NOT PRODUCED today: no producer field reports them
+ * yet (ISL B1a's `level_anchor_source` is the planned carrier for the first).
+ */
+export const PER_LIMIT_REASON_RANK: ReadonlyMap<string, number> = new Map([
+  ['threshold_unframed', 1],
+  ['target_unanchored', 2],
+  ['threshold_clamped', 3],
+  ['CONSTRAINT_NOT_CONVERTIBLE', 4],
+  ['CONSTRAINT_OUT_OF_DOMAIN', 4],
+  ['CONSTRAINT_TARGET_UNRELIABLE', 5],
+  ['tally_units_incoherent', 6],
+  ['identity_unresolved', 8],
+  ['constraint_block_withheld', 9],
+  ['no_score_returned', 10],
+  ['not_decision_grade', 11],
+]);
+/** A producer removal reason CEE does not map, passed verbatim: after the named preconditions, before CEE's own codes. */
+const UNMAPPED_PRODUCER_REASON_RANK = 7;
+
+/** The producer's warning codes that, NAMING a limit, mean that limit was not scored to decision grade (verbatim). */
+const PER_LIMIT_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  'CONSTRAINT_NOT_CONVERTIBLE',
+  'CONSTRAINT_OUT_OF_DOMAIN',
+  'CONSTRAINT_TARGET_UNRELIABLE',
+]);
+
+/** Producer removal reasons meaning the threshold could not be carried through the target's frame (precondition (a)). */
+const FRAME_REFUSAL_REASONS: ReadonlySet<string> = new Set([
+  'delta_frame_value_altered_by_normalisation',
+  'percent_unit_disagrees_with_target_frame',
+]);
+
+/** Does a producer warning carry ANY structured identity (a constraint, a node, or a `nodes[<id>]` field path)? */
+function warningIdentity(entry: Record<string, unknown>): { constraintId: string | null; nodeIds: string[] } {
+  const nodeIds: string[] = [];
+  const nodeId = readString(entry.node_id);
+  if (nodeId !== null) nodeIds.push(nodeId);
+  if (Array.isArray(entry.affected_node_ids)) {
+    for (const id of entry.affected_node_ids) if (typeof id === 'string' && id.length > 0) nodeIds.push(id);
+  }
+  const field = readString(entry.field);
+  const match = field === null ? null : /^nodes\[([^\]]+)\]/.exec(field);
+  if (match?.[1] !== undefined) nodeIds.push(match[1]);
+  return { constraintId: readString(entry.constraint_id), nodeIds };
+}
+
+/**
+ * The per-limit rows. For each ratified limit (graph order, first occurrence of an id), every reason the producer's
+ * evidence gives is collected and the earliest-ranked one is reported; with none, the baseline decides between
+ * `scored` and `estimate_only`.
+ *
+ * ⛔ ONE UNSCOREABLE LIMIT NEVER SILENCES ANOTHER. A limit's reasons come from evidence bound to ITS identity: its
+ * `constraint_results` marker, its per-option P, a warning naming its constraint or target node, a filter entry
+ * naming it. Two block-level signals are the only exceptions, and both are the producer speaking about the block:
+ *   · `constraints_status` present and not `'computed'`: the producer withheld the block, so no limit has a P;
+ *   · a refusal code carrying NO identity. With one limit it can only be about that limit (reported verbatim). With
+ *     several it is placed only on limits NOT independently certified (marker + a P on every option), because a code
+ *     that names nobody cannot be about a limit the producer certified by id; if every limit is certified the code
+ *     cannot be placed, and all of them fail closed.
+ *
+ * Pure.
+ */
+function derivePerLimitVerdicts(
+  envelope: Record<string, unknown>,
+  ratified: readonly RatifiedConstraint[],
+  userBaselineIds: ReadonlySet<string>,
+  leaderEstimatedTargetIds: ReadonlySet<string> | undefined,
+): PerLimitVerdict[] {
+  const seen = new Set<string>();
+  const limits = ratified.filter((c) => (seen.has(c.constraint_id) ? false : (seen.add(c.constraint_id), true)));
+  const filteredEntries = readProducerFilteredEntries(envelope);
+  const filteredIds = new Set(filteredEntries.map((e) => e.id));
+  const effective = limits.filter((c) => !filteredIds.has(c.constraint_id));
+
+  const statusRaw = envelope.constraints_status;
+  const blockWithheld = statusRaw !== undefined && statusRaw !== null && statusRaw !== 'computed';
+
+  // Refusal codes, split by whether they carry identity.
+  const namedRefusals: Array<{ code: string; constraintId: string | null; nodeIds: string[] }> = [];
+  const unattributed: string[] = [];
+  for (const key of ['inference_warnings', 'critiques'] as const) {
+    const arr = envelope[key];
+    if (!Array.isArray(arr)) continue;
+    for (const entry of arr) {
+      const rec = readRecord(entry);
+      const code = readString(rec?.code);
+      if (rec === null || code === null || !PER_LIMIT_REFUSAL_CODES.has(code)) continue;
+      const identity = warningIdentity(rec);
+      if (identity.constraintId === null && identity.nodeIds.length === 0) {
+        if (!unattributed.includes(code)) unattributed.push(code);
+      } else {
+        namedRefusals.push({ code, ...identity });
+      }
+    }
+  }
+
+  // Rule 2's observable, per limit: evaluations exist and not one reconciles with a ratified id.
+  const evaluated = collectEvaluatedConstraintIds(envelope);
+  const identityUnresolved =
+    evaluated.size > 0 && effective.length > 0 && effective.every((c) => !evaluated.has(c.constraint_id));
+
+  const options = readOptionResultSources(envelope)[0] ?? [];
+  const results = Array.isArray(envelope.constraint_results) ? envelope.constraint_results : [];
+
+  /** Reasons from the limit's OWN identity-bound evidence. Empty = the producer certified it by id. */
+  const ownReasons = (c: RatifiedConstraint): string[] => {
+    const reasons: string[] = [];
+    if (identityUnresolved) reasons.push('identity_unresolved');
+    for (const r of namedRefusals) {
+      if (r.constraintId === c.constraint_id || (typeof c.node_id === 'string' && r.nodeIds.includes(c.node_id))) {
+        reasons.push(r.code);
+      }
+    }
+    const rows = results.map(readRecord).filter((r) => r !== null && readString(r.constraint_id) === c.constraint_id);
+    if (rows.length === 0) reasons.push('not_decision_grade');
+    for (const row of rows) {
+      const marker = EnrichmentScaleProvenanceSchema.safeParse(row?.scale_provenance);
+      if (!marker.success) {
+        reasons.push('not_decision_grade');
+        continue;
+      }
+      if (marker.data.range_unified === false) reasons.push('threshold_unframed');
+      if (marker.data.threshold_clamped !== undefined) reasons.push('threshold_clamped');
+      if (marker.data.decision_grade !== true) reasons.push('not_decision_grade');
+    }
+    const everyOptionScores =
+      options.length > 0 &&
+      options.every((o) => readConstraintSatisfactionProbs(o).some((p) => p.id === c.constraint_id));
+    if (!everyOptionScores) reasons.push('no_score_returned');
+    return reasons;
+  };
+
+  const own = new Map(effective.map((c) => [c.constraint_id, ownReasons(c)] as const));
+  const everyLimitCertified = effective.every((c) => own.get(c.constraint_id)!.length === 0);
+
+  const firstFailed = (reasons: readonly string[]): string =>
+    reasons.reduce((best, r) =>
+      (PER_LIMIT_REASON_RANK.get(r) ?? UNMAPPED_PRODUCER_REASON_RANK) <
+      (PER_LIMIT_REASON_RANK.get(best) ?? UNMAPPED_PRODUCER_REASON_RANK)
+        ? r
+        : best,
+    );
+
+  return limits.map((c): PerLimitVerdict => {
+    // Removed by the producer before computing: never a P. Frame refusals are precondition (a); others verbatim.
+    if (filteredIds.has(c.constraint_id)) {
+      const reasons = filteredEntries
+        .filter((e) => e.id === c.constraint_id)
+        .map((e) =>
+          e.reason === null ? 'no_score_returned' : FRAME_REFUSAL_REASONS.has(e.reason) ? 'threshold_unframed' : e.reason,
+        );
+      return { constraint_id: c.constraint_id, state: 'unscored', reason: firstFailed(reasons) };
+    }
+    const reasons = [...own.get(c.constraint_id)!];
+    const certified = reasons.length === 0;
+    if (blockWithheld || (unattributed.length > 0 && (effective.length === 1 || !certified || everyLimitCertified))) {
+      if (effective.length === 1 && unattributed.length > 0) reasons.push(...unattributed);
+      else reasons.push('constraint_block_withheld');
+    }
+    if (reasons.length > 0) return { constraint_id: c.constraint_id, state: 'unscored', reason: firstFailed(reasons) };
+    const usersOwnLevel =
+      userBaselineIds.has(c.constraint_id) && leaderEstimatedTargetIds?.has(c.constraint_id) !== true;
+    return usersOwnLevel
+      ? { constraint_id: c.constraint_id, state: 'scored' }
+      : { constraint_id: c.constraint_id, state: 'estimate_only', reason: 'baseline_is_estimate' };
+  });
+}
+
+/** The joint over EVERY row (AI Quality 5855511541, B5 rule 2). Pure. */
+function deriveJointLimitVerdict(rows: readonly PerLimitVerdict[]): JointLimitVerdict {
+  const unscored = rows.filter((r) => r.state === 'unscored').map((r) => r.constraint_id);
+  if (unscored.length > 0) return { state: 'withheld', withheld_reason: 'limit_unscored', constraint_ids: unscored };
+  return rows.some((r) => r.state === 'estimate_only') ? { state: 'estimate_only' } : { state: 'scored' };
+}
+
 // ===========================================================================
 // THE LEADER PROBABLY BREAKS A LIMIT IT IS ALLOWED TO BE NAMED UNDER
 // ===========================================================================
@@ -1434,6 +1760,10 @@ export interface PersistedClaimSafety {
   readonly may_name_leading_option: boolean;
   /** Verbatim {@link ConstraintVerdict.state}, for telemetry and triage. */
   readonly constraint_verdict_state: ConstraintVerdictState;
+  /** B5 (0.60.0) — verbatim {@link ConstraintVerdict.perLimit}. Absent = not attested. */
+  readonly per_limit?: PerLimitVerdict[];
+  /** B5 (0.60.0) — verbatim {@link ConstraintVerdict.joint}. Present exactly when `per_limit` is. */
+  readonly joint?: JointLimitVerdict;
 }
 
 /**
@@ -1473,6 +1803,16 @@ export function projectClaimSafety(verdict: ConstraintVerdict): PersistedClaimSa
   return {
     may_name_leading_option: verdict.mayNameLeadingOption,
     constraint_verdict_state: verdict.state,
+    // B5: copied only when attested, so a verdict without rows persists today's two keys byte for byte.
+    ...(verdict.perLimit !== undefined ? { per_limit: verdict.perLimit.map((row) => ({ ...row })) } : {}),
+    ...(verdict.joint !== undefined
+      ? {
+          joint: {
+            ...verdict.joint,
+            ...(verdict.joint.constraint_ids !== undefined ? { constraint_ids: [...verdict.joint.constraint_ids] } : {}),
+          },
+        }
+      : {}),
   };
 }
 
