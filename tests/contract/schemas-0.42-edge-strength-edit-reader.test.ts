@@ -206,8 +206,8 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // So the member gains ONE OPTIONAL key and nothing else: every field, the
     // intent/direction vocabularies and the root superRefine this suite
     // exercises are unchanged, and every pre-0.60.0 event still parses.
-    // CEE does not READ `band` in this pin bump (adoption only — the band
-    // writer is a separate change); an event carrying it now parses.
+    // The pin bump itself was adoption only; CEE now READS `band` — the band
+    // reader (`system-events/edge-strength-edit.ts`, `edge-band-reader.test.ts`).
     expect(SCHEMA_PACKAGE_VERSION).toBe('0.60.0');
   });
 
