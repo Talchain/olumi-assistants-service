@@ -436,8 +436,8 @@ export type AddOptionsSkipReason =
   | 'new_factor_unreachable'
   | 'new_factor_not_found'
   | 'new_factor_unused'
-  // A new SWITCH (`kind: 'switch'`) that an option acting on it does not switch ON (level exactly 1): refused, never
-  // guessed (Canonical #70 5854919806 item 1).
+  // A new SWITCH (`kind: 'switch'`) that an option acting on it does not switch ON (level exactly a bare 1 — a 1 that
+  // carries a unit or a raw figure is an amount, not on): refused, never guessed (Canonical #70 5854919806 item 1).
   | 'new_switch_not_switched_on';
 
 export type AddOptionsBuildResult =
@@ -679,12 +679,22 @@ export function buildAddOptionsTransaction(
   if (!plan.factors.every((f) => used.has(f.id))) return { matched: false, reason: 'new_factor_unused' };
   // ⭐ A SWITCH IS SWITCHED ON by every option that acts on it: its level is exactly 1. Unset, or any other level, and
   // "off today, on under this option" would describe a move the option does not make — refused, never guessed.
+  // ⛔ AND ONLY A BARE 1 (independent verification of A1, round 2): a switch has no level of its own, so a 1 that carries
+  // a unit or a raw figure (£1/month, 1%, 1 hire, "0.5", "50%", 100% as 1) is an amount, never "on" — taken as on, the
+  // user's figure would be dropped without a word and today-0 written as Olumi's. Refused, never guessed.
   for (let index = 0; index < built.proposals.length; index += 1) {
     const p = built.proposals[index]!;
-    const levels = levelsOf((p.operations[0]!.value as { interventions?: unknown }).interventions);
+    const bundle = (p.operations[0]!.value as { interventions?: unknown }).interventions;
+    const levels = levelsOf(bundle);
     for (const id of plan.switchIds) {
       const acts = p.configuredFactorIds.includes(id) || p.linkedUnvaluedFactorIds.includes(id);
-      if (acts && levels.get(id) !== 1) return { matched: false, reason: 'new_switch_not_switched_on', index };
+      if (!acts) continue;
+      const entry: unknown = bundle !== null && typeof bundle === 'object' ? (bundle as Record<string, unknown>)[id] : undefined;
+      const carriesUnit = entry !== null && typeof entry === 'object' && 'unit' in entry;
+      const carriesRawFigure = entry !== null && typeof entry === 'object' && 'raw_value' in entry;
+      if (levels.get(id) !== 1 || carriesUnit || carriesRawFigure) {
+        return { matched: false, reason: 'new_switch_not_switched_on', index };
+      }
     }
   }
 

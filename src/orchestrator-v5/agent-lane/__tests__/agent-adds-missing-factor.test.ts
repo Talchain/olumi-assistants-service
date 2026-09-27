@@ -193,6 +193,39 @@ describe('A1 — propose_new_option sends a new SWITCH switched on, in the same 
     }
   });
 
+  /**
+   * ⛔ A SWITCH HAS NO LEVEL OF ITS OWN (independent verification, round 2). Before this, only the NUMBER was compared
+   * with 1: £1/month, 1% or 1 hire — and a figure that is not a number at all — were taken as ON, the unit or string
+   * dropped without a word and today-0 written as Olumi's; and 100% was refused while 1% was accepted. Every level
+   * that is not a bare 1 now carries a figure the switch cannot keep, so it is refused and nothing is sent.
+   */
+  it.each([
+    ['£1/month', { value: 1, unit: '£/month' }],
+    ['1%', { value: 1, unit: '%' }],
+    ['1 hire', { value: 1, unit: 'hire' }],
+    ["'0.5' (a string)", { value: '0.5' }],
+    ["'50%' (a string)", { value: '50%' }],
+    ['100%', { value: 100, unit: '%' }],
+    ["1 as Olumi's estimate", { value: 1, estimate: true, basis: 'the option turns it on' }],
+  ])('RED: a switch given %s is refused with nothing sent — its figure is never dropped and read as on', async (_name, level) => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx, call(level) as never) as { refusal?: string; detail?: string };
+    expect(r.refusal).toBe('switch_level_not_on');
+    expect(sent).toEqual([]);
+    // Why, in the user's terms: a switch has no level; say it is on under this option; ask for the figure if one was meant.
+    expect(r.detail).toContain('A switch has no level of its own');
+    expect(r.detail).toContain('tell the user it is on under this option');
+    expect(r.detail).toContain('leave kind out, and ask the user for that figure');
+  });
+
+  it('CONTRAST: a bare 1 (no unit, no estimate) is on and is sent — as is a level that says estimate: false', async () => {
+    for (const level of [{ value: 1 }, { value: 1, estimate: false }, { value: 1, unit: '' }]) {
+      const { caps, sent } = setup();
+      const r = await caps.proposeNewOption(ctx, call(level) as never);
+      expect(paramsOf(sent)?.['interventions'], JSON.stringify(r)).toEqual([{ factor_key: 'ai_add_on_offered', value: 1, source: 'cee_hypothesis' }]);
+    }
+  });
+
   it('RED: an unknown kind is refused before anything is sent — never read as switch or graded', async () => {
     const { caps, sent } = setup();
     const r = await caps.proposeNewOption(ctx, call(undefined, 'boolean') as never) as { refusal?: string };

@@ -305,6 +305,34 @@ const NEW_SWITCH_NOTE = 'This change also ADDS these factors as switches the opt
   + 'Say that off-today is Olumi\u2019s reading, for the user to correct if it is already partly in place; do not ask for its value today.';
 
 /**
+ * ⛔ A SWITCH HAS NO LEVEL OF ITS OWN (independent verification of A1, round 2). The option's level on a new switch is
+ * exactly 1 — ON — and nothing else, so the only level the Agent may give it is a bare 1. Anything more carries a figure
+ * the switch cannot keep: a unit (£1/month, 1%, 1 hire — a 1 in a unit is an amount, never "on"; 1% is refused just as
+ * 100% is), Olumi's estimate (the on level is not estimated), a value that is not a number
+ * ("0.5", "50%"), or a level that is not an object at all. Taken as on, the user's figure would be dropped without a word
+ * and today-0 written as Olumi's, so each is a conflict: refused, nothing sent. No level (absent, null, or one that
+ * carries nothing) is on. Returns the conflict's parts to show, or `null` when the level is on.
+ */
+function newSwitchLevelConflict(level: unknown): { value: unknown; unit?: unknown; estimate?: unknown } | null {
+  if (level === undefined || level === null) return null;
+  if (typeof level !== 'object' || Array.isArray(level)) return { value: level };
+  const { value, unit, estimate } = level as { value?: unknown; unit?: unknown; estimate?: unknown };
+  const hasValue = value !== undefined && value !== null;
+  const hasUnit = unit !== undefined && unit !== null && !(typeof unit === 'string' && unit.trim() === '');
+  const hasEstimate = estimate !== undefined && estimate !== null && estimate !== false;
+  if (!hasUnit && !hasEstimate && (!hasValue || value === 1)) return null;
+  return { value, ...(hasUnit ? { unit } : {}), ...(hasEstimate ? { estimate } : {}) };
+}
+
+/** A switch conflict's figure as the user would read it: `1 £/month`, `1%`, `"0.5"`, `1 (as Olumi's estimate)`. */
+function shownSwitchLevel(c: { value: unknown; unit?: unknown; estimate?: unknown }): string {
+  const figure = typeof c.value === 'number' ? String(c.value)
+    : c.value === undefined || c.value === null ? 'no figure' : JSON.stringify(c.value) ?? String(c.value);
+  const unit = c.unit === undefined ? '' : String(c.unit).trim() === '%' ? '%' : ` ${String(c.unit).trim()}`;
+  return `${figure}${unit}${c.estimate !== undefined ? ' (as Olumi\u2019s estimate)' : ''}`;
+}
+
+/**
  * The `observed_state.source` an adopted Olumi assumption is stored with. Typed
  * against the shared contract's vocabulary, so it cannot drift to a literal the
  * product does not know. See `applyCompound` for why it exists.
@@ -3946,8 +3974,8 @@ export function createAgentCapabilities(
       const outOfRange: { option: string; factor: string; value: number; range: number }[] = [];
       const unitMismatch: { option: string; factor: string; value: number; unit: string; factor_unit: string }[] = [];
       const levelsNotSet: { option: string; factor: string; value: number; reason: string }[] = [];
-      /** A figure the Agent gave for a new SWITCH that is not "on" (1): the kind and the figure disagree, so nothing is sent. */
-      const switchLevelConflicts: { option: string; factor: string; value: number }[] = [];
+      /** A level the Agent gave for a new SWITCH that is not a bare 1 (`newSwitchLevelConflict`): refused, nothing sent. */
+      const switchLevelConflicts: { option: string; factor: string; value: unknown; unit?: unknown; estimate?: unknown }[] = [];
       const isNewSwitch = (key: string): boolean => newFactors.some((f) => f.key === key && f.kind === 'switch');
       /**
        * ⛔ WHOSE LINK (U3, DL 5849023213 (2)). A link with no level is written by Canonical's builder as the user's
@@ -4022,12 +4050,16 @@ export function createAgentCapabilities(
          *
          * ⭐ A new SWITCH (`kind: 'switch'`, Canonical #70 5854919806 item 1) is the exception: the option turns it ON, so
          * its level here is exactly 1, in this same change, and its today-0 is Olumi's, written by the same commit. A
-         * figure the Agent gave for it that is not 1 contradicts "switch" and is refused below, never rounded to on.
+         * level the Agent gave for it that is anything but a bare 1 (`newSwitchLevelConflict`) contradicts "switch" and is
+         * refused below, never rounded to on.
          */
         for (const a of plan.newActsOn) {
-          const asked = spec.acts_on.find((x) => norm(x.factor_label) === norm(a.label))?.level?.value;
+          const level: unknown = spec.acts_on.find((x) => norm(x.factor_label) === norm(a.label))?.level;
+          const asked = (level as { value?: unknown } | null | undefined)?.value;
           if (isNewSwitch(a.key)) {
-            if (typeof asked === 'number' && asked !== 1) switchLevelConflicts.push({ option: plan.label, factor: a.label, value: asked });
+            // Anything but a bare 1 carries a figure the switch cannot keep (a unit, an estimate, a non-number): refused.
+            const conflict = newSwitchLevelConflict(level);
+            if (conflict !== null) switchLevelConflicts.push({ option: plan.label, factor: a.label, ...conflict });
             continue;
           }
           if (typeof asked === 'number' && Number.isFinite(asked)) {
@@ -4042,9 +4074,11 @@ export function createAgentCapabilities(
         const c = switchLevelConflicts[0]!;
         return {
           ok: false, mutated: false, refusal: 'switch_level_not_on', switch_level_conflicts: switchLevelConflicts,
-          detail: `"${c.factor}" was added as a switch that "${c.option}" turns on, but the level given for it is ${c.value}, not on. `
-            + 'Nothing was prepared. If the option simply turns it on, call propose_new_option again with no level for it. '
-            + 'If it sets an amount or a share (part of the customers, say), leave kind out: it is then added with its level asked for.',
+          detail: `"${c.factor}" was added as a switch that "${c.option}" turns on, but it was given a level: ${shownSwitchLevel(c)}. `
+            + 'A switch has no level of its own \u2014 it is off today and on under this option \u2014 so that figure would be dropped, '
+            + 'and it is not taken as on. Nothing was prepared. If the option simply turns it on, call propose_new_option again '
+            + 'with no level for it, and tell the user it is on under this option. If a figure was meant (an amount, a rate or a '
+            + 'share of the customers), it is not a switch: leave kind out, and ask the user for that figure.',
         };
       }
       if (unitMismatch.length > 0) {

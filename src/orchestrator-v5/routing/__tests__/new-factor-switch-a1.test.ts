@@ -266,6 +266,38 @@ describe('R3 — a refusal leaves the stored graph byte-identical (key-order-ins
     expect(canonical(STORED)).toBe(snapshot);
   });
 
+  /**
+   * ⛔ A SWITCH HAS NO LEVEL OF ITS OWN (independent verification, round 2). Each row is a level of 1 — so the level check
+   * alone reads it as on — with the figure the user gave riding beside it: a unit, a raw figure, or both. Taken as on,
+   * the user's figure would be dropped without a word and today-0 written as Olumi's. The unit-only row (1%) and the
+   * raw-only rows ("0.5", "50%") each pin one half of the check.
+   */
+  it.each([
+    ['£1/month', { raw_value: 1, unit: 'GBP per month' }],
+    ['1%', { unit: '%' }],
+    ['1 hire', { raw_value: 1, unit: 'hire' }],
+    ["'0.5' (a string)", { raw_value: '0.5' }],
+    ["'50%' (a string)", { raw_value: '50%' }],
+    ['100%', { raw_value: 100, unit: '%' }],
+  ])('RED: a switch level of 1 that carries %s is refused at the builder, and nothing is held', (_name, figure) => {
+    const snapshot = canonical(STORED);
+    const spec = SWITCH_SPEC();
+    Object.assign(spec.interventions[1], figure);
+    expect(spec.interventions[1].value).toBe(1);
+    expect(buildAddOptionsTransaction(spec, STORED as never)).toMatchObject({ matched: false, reason: 'new_switch_not_switched_on' });
+    expect(hold(spec).kind).not.toBe('held');
+    expect(canonical(STORED)).toBe(snapshot);
+  });
+
+  it('CONTRAST: a bare 1 (no unit, no raw figure) is on — built and held with its switch named', () => {
+    const spec = SWITCH_SPEC();
+    expect(spec.interventions[1]).toEqual({ factor_key: 'existing_customers_grandfathered', value: 1, source: 'cee_hypothesis' });
+    expect(buildAddOptionsTransaction(spec, STORED as never)).toMatchObject({ matched: true, switchFactorIds: [FAC] });
+    const held = hold(spec);
+    expect(held.kind).toBe('held');
+    expect(held.pendingActions[0].action.inline_patch[GM_HELD_SWITCH_FACTORS_KEY]).toEqual([FAC]);
+  });
+
   it('RED: a hold whose switch member does not match its batch is refused WHOLE at the confirm — nothing to commit', () => {
     const snapshot = canonical(STORED);
     const held = hold(SWITCH_SPEC());
