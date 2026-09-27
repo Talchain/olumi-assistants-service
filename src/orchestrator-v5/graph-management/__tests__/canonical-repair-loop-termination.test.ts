@@ -49,7 +49,8 @@
  * `tests/unit/ci/fixtures/live-journey-draftfirst-turn1-2ceb65f.json` is a
  * recorded live-journey turn-1 response (`graph_hash f986ac90c77eafbd`), also
  * read by `tests/unit/ci/staging-journey-smoke.test.ts`. Its `draft_graph` is
- * used unmodified and is a genuine MULTI-BLOCKER model: six `MISSING_OPTION_VALUE`
+ * used unmodified except for two disclosed status-quo levels (`startGraph`,
+ * placeholder-zero 48f2e12f) and is a genuine MULTI-BLOCKER model: six `MISSING_OPTION_VALUE`
  * blockers across four options and two factors, and — the reason this capture
  * and not the brief-04 ones — NOTHING ELSE, so clearing the six is what makes
  * it analysable and the terminal flip is observable rather than masked by
@@ -112,7 +113,23 @@ interface JourneyFixture {
 const CAPTURE = JSON.parse(readFileSync(FIXTURE_PATH, 'utf8')) as JourneyFixture;
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
-const startGraph = (): JourneyFixture['draft_graph'] => clone(CAPTURE.draft_graph);
+/**
+ * placeholder-zero (48f2e12f): the capture's two external goal roots —
+ * "Time pressure and readiness" (`27e9797f`) and "Local Leeds market demand"
+ * (`cce94719`) — carry no status-quo level, so readiness would also ask for
+ * them and the model under repair would not be "only missing effect values".
+ * They are given levels here, a DISCLOSED in-test patch like the two variants
+ * below; the capture file itself is not edited.
+ */
+const STATUS_QUO_LEVELS: Readonly<Record<string, number>> = { '27e9797f': 0.6, cce94719: 0.5 };
+const startGraph = (): JourneyFixture['draft_graph'] => {
+  const graph = clone(CAPTURE.draft_graph);
+  graph.nodes = graph.nodes.map((node) =>
+    typeof node.id === 'string' && node.id in STATUS_QUO_LEVELS
+      ? { ...node, observed_state: { value: STATUS_QUO_LEVELS[node.id] } }
+      : node);
+  return graph;
+};
 
 /** The user's own number. Any 0-1 effect value; the loop is indifferent to it. */
 const USER_VALUE = '0.6';

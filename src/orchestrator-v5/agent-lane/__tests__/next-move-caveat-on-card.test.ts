@@ -42,14 +42,15 @@ describe('C4: the limit caveat is said once, on the move card (served Paul, CEE 
     expect(f.served_card_body).not.toMatch(/limit/i);
   });
 
-  it('RED: ONE card — the same move (same signal id) — whose body says the limit went unchecked, then the move', () => {
+  it('RED: ONE card whose body says the limit went unchecked, then the move (since PJ-B3 the move is "give the value" of the unvalued #1 driver, Pro paying subscribers)', () => {
     const r = runTurnNextMove(...args(f));
     const got = cards(r.blocks);
     expect(got).toHaveLength(1);
-    expect(got[0]!.signal_id).toBe(f.served_card_signal_ids[0]);
+    expect(r.nextMove!.kind).toBe('missing_value');
+    expect(got[0]!.signal_id.startsWith('coach:unvalued_driver:')).toBe(true);
     expect(got[0]!.body).toBe(
       'This first pass on Olumi\'s estimates could not check your limit on “Monthly churn” (10%). '
-      + 'The robustness check flagged the link from Monthly churn to Pro paying subscribers as sensitive, and some of its numbers are starting assumptions — worth saying what you believe about it.',
+      + 'The analysis ranks “Pro paying subscribers” among the three factors this result depends on most, but the model has no value for it yet, so that ranking comes from how the model is built, not from your figures.',
     );
     expect(got[0]!.body.length).toBeLessThanOrEqual(COACHING_BLOCK_BODY_MAX);
     expect(r.nextMove!.block.body).toBe(got[0]!.body);

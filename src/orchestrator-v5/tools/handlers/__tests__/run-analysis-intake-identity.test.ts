@@ -103,7 +103,9 @@ describe('run_analysis handler — source-bound intake identity', () => {
   it.each([false, true])('preserves the real unevaluated churn constraint with bound=%s', async (bound) => {
     const nodes = bound ? boundNodes : boundNodes.map(({ source_quote: _quote, ...node }) => node);
     const { outcome, result } = await run({ nodes, goal_constraints: churn });
-    expect(result.constraint_verdict).toEqual({
+    // B5's per-limit rows ride the same field; this row is about the leader verdict only.
+    const { per_limit: _perLimit, joint: _joint, ...leaderVerdict } = result.constraint_verdict!;
+    expect(leaderVerdict).toEqual({
       may_name_leading_option: false, constraint_verdict_state: 'unevaluated',
     });
     expect(outcome.assistant_text).toContain('Customer churn');

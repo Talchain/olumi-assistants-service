@@ -93,6 +93,12 @@ export interface AgentTurnInput {
    * any capability is reached. Can only REMOVE: absent means the mode's set.
    */
   readonly withheldTools?: readonly string[];
+  /**
+   * ⭐ PJ-C1 LATENCY (#70 5859918872; words AIC 5859933281): given the turn's ONLY tool call and its result, the reply
+   * composed from that result (`composeProposalReply`), or `null` to keep the narrating call. Asked only when a hop made
+   * exactly one call and it is the turn's first; a composed reply ends the turn with no further model call.
+   */
+  readonly composeReply?: (tool: string, args: unknown, result: ToolResult) => string | null;
   /** Injected for deterministic tests; defaults to the wall clock. */
   readonly now?: () => number;
 }
@@ -408,6 +414,25 @@ export async function runAgentTurn(
         call_id: call.call_id,
         output: JSON.stringify(result),
       });
+    }
+    // ⭐ ONE CALL, NOT TWO: the turn's only call, answered from its own result (`composeReply`) — no narrating call.
+    if (input.composeReply !== undefined && calls.length === 1 && toolCalls.length === 1) {
+      let args: unknown;
+      try { args = JSON.parse(String(calls[0]!.arguments ?? '{}')); } catch { args = undefined; }
+      const text = input.composeReply(String(calls[0]!.name), args, toolResults[0]!);
+      if (text !== null && text.trim() !== '') {
+        items.push({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
+        return {
+          assistant_text: text,
+          items: handedOn(),
+          tool_calls: toolCalls,
+          tool_results: toolResults,
+          mutated,
+          hops: hop + 1,
+          stopped_reason: 'answered',
+          timing: ((t) => { emitTiming(t); return t; })(timingAt(hop + 1)),
+        };
+      }
     }
   }
 

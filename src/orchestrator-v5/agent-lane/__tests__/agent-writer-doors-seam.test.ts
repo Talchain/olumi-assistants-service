@@ -284,6 +284,12 @@ describe('SLICE C2 — the Agent reaches the product\'s own writers: a new risk 
     const g = graphNow();
     expect(g.edges.some((e) => e.from === 'fac_price' && e.to === risk!.id)).toBe(true);
     expect(g.edges.some((e) => e.from === risk!.id && e.to === 'goal_x')).toBe(true);
+    // ⭐ A6b (DL CR on #2131, option (a)): the risk the AGENT offered and the user only APPROVED is never recorded as
+    // the user's — the add-risk door carries no typed authorship signal, so the STORED risk keeps the provenance it
+    // was proposed with (none), and so do the factor that drives it and the goal it threatens.
+    expect(risk!['provenance'], 'the approved risk is not the user\u2019s').toBeUndefined();
+    expect(g.nodes.find((x) => x.id === 'fac_price')!['provenance'], 'the factor that drives it').toBeUndefined();
+    expect(g.nodes.find((x) => x.id === 'goal_x')!['provenance'], 'the goal it threatens').toBeUndefined();
     expect(await heldOnLatestRow(), 'the hold is consumed').toEqual([]);
     expect(t2.assistant_text, t2.assistant_text).toContain('Added "Competitive response" as a risk, affecting "Revenue" and driven by "Price"');
     expect(t2.assistant_text, t2.assistant_text).toMatch(/placeholder strength, not an estimate/);

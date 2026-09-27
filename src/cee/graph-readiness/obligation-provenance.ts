@@ -677,7 +677,11 @@ export function classifyIssueObligation(
   const waived =
     typeof issue.option_id === 'string' && waivedOptionIds.includes(issue.option_id);
 
-  if (OBLIGATION_EXEMPT_CATEGORIES.has(issue.category)) {
+  // A goal root with no status-quo level (placeholder-zero) refuses the Run
+  // whoever drafted the factor: the engine would read it as 0, and no option
+  // exclusion answers it. Stamping it `offered` would tell the user "Olumi can
+  // fill" a gap the Run is refused on.
+  if (OBLIGATION_EXEMPT_CATEGORIES.has(issue.category) || issue.code === 'MISSING_FACTOR_LEVEL') {
     return {
       provenance: structureProvenanceOfEffect(graph, issue.option_id, issue.factor_id),
       obligation: 'required',

@@ -40,6 +40,7 @@
  * keeps the handler pure and the test surface small.
  */
 
+import { collectUnvaluedFactorIds } from '../../coaching/unvalued-factor-ids.js';
 import { RunAnalysisArgsSchema, RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import type {
   RunAnalysisArgs,
@@ -49,6 +50,7 @@ import type {
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import {
   collectLeaderEstimatedTargetIds,
+  collectLimitLevelOwners,
   deriveConstraintVerdict,
   readRatifiedConstraints,
   projectClaimSafety,
@@ -1841,12 +1843,18 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         'run_analysis: a limit on a quantity the leading option sets at Olumi\'s estimate is not counted as checked',
       );
     }
+    // ⭐ B5 (AI Quality 5855511541): one typed verdict PER ratified limit, stored on the fact's `constraint_verdict`
+    // (`per_limit` + `joint`, schemas 0.60.0). Precondition (e), "the level is the user's", is read off the SAME
+    // analysed graph as rule (d) above, through the same authorship authority. Paul's 17d1 churn limit compared
+    // against Olumi's own 3 % is `estimate_only` here, never `scored` (MG EXEC #70 5856264807).
     const constraintVerdict = deriveConstraintVerdict(
       response as Record<string, unknown>,
       ratifiedConstraints,
       leadingOptionId ?? null,
       undefined,
       leaderEstimatedTargetIds,
+      // (a) and WHOSE figure an estimate_only row was checked against (DL CR 5859853452), from the same one walk.
+      collectLimitLevelOwners(graphForAnalysis, ratifiedConstraints),
     );
     // ⚠ NO TELEMETRY EVENT FOR THE UNMEASURED-TARGET PARTITION, AND THAT IS A
     // DISCLOSED GAP RATHER THAN AN OVERSIGHT — the same call, for the same
@@ -2022,6 +2030,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // sentence below is built from, so the sentence and the suppression can
       // never disagree about which factors are unset.
       unsetOptionEffectFactorIds: unsetOptionEffectFactorIds(unsetOptionEffects),
+      // PJ-B3: the factors the graph this Run analysed holds no value for — never named "the strongest driver".
+      unvaluedFactorIds: collectUnvaluedFactorIds(snapshot.rawPersistedGraph ?? null),
     };
     // ⛔ C46 STAGE 1 (b) — THE LEADER PLoT RANKED FIRST, ON A PRODUCT THIS ENGINE ONLY ADDS UP.
     //
@@ -2991,6 +3001,15 @@ export function buildDedupKeptLabelResolver(
  * Returns `null` when the resulting map would be empty — the handler omits
  * `win_probabilities` entirely in that case rather than emitting an empty
  * object (matches the optional-schema shape cleanly).
+ *
+ * ⚠ A LABEL-KEYED DISPLAY MAP, NOT AN ID INDEX (A5; Canonical's ruling: the key stays, byte-identical).
+ * Its keys are read as option LABELS (`coaching/untested-option-card.ts`, `coaching/fragile-link-challenge.ts`),
+ * two options sharing a label keep only the last, and `leading_option_id` beside it is an ID — so a reader
+ * seeking an option BY ID must never index this map with that id (the prior-fact fallback did, and read
+ * every labelled leader as 0). Go to the id-bearing records on the same result instead:
+ * `enrichment.option_comparison[]` (`option_id`, `option_label`, `win_probability`), walked with the other
+ * option sources by `readOptionResultSources` — as `resolveLeadingWinProbability`
+ * (context/analysis-fallback.ts) does.
  */
 function extractWinProbabilities(
   records: ReadonlyArray<Record<string, unknown>>,

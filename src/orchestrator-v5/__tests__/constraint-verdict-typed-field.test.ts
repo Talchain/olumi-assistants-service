@@ -171,6 +171,9 @@ describe('§1 PRODUCER + DRIFT — every newly-persisted run_analysis fact carri
     expect(fact.result.constraint_verdict).toEqual({
       may_name_leading_option: false,
       constraint_verdict_state: 'unevaluated',
+      // B5 (schemas 0.60.0): the same field also carries one typed row per ratified limit. No option carries a P.
+      per_limit: [{ constraint_id: 'constraint_out_total_cost_max', state: 'unscored', reason: 'no_score_returned' }],
+      joint: { state: 'withheld', withheld_reason: 'limit_unscored', constraint_ids: ['constraint_out_total_cost_max'] },
     });
   });
 
@@ -182,6 +185,10 @@ describe('§1 PRODUCER + DRIFT — every newly-persisted run_analysis fact carri
     expect(fact.result.constraint_verdict).toEqual({
       may_name_leading_option: true,
       constraint_verdict_state: 'evaluated_feasible',
+      // B5: the leader may be named, yet the limit is not `scored`: this hand-built envelope carries no
+      // `constraint_results[].scale_provenance` marker, and the contract reads a missing marker as not decision-grade.
+      per_limit: [{ constraint_id: 'constraint_out_total_cost_max', state: 'unscored', reason: 'not_decision_grade' }],
+      joint: { state: 'withheld', withheld_reason: 'limit_unscored', constraint_ids: ['constraint_out_total_cost_max'] },
     });
   });
 

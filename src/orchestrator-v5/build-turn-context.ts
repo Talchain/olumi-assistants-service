@@ -725,6 +725,9 @@ export async function buildTurnContext(
     durableMutationFactRead,
     durableScenarioAnalysisFactRead,
     analysisInvalidatedAtRead,
+    persistedScenarioStateRead,
+    mostRecentPendingActionsRead,
+    priorCoachingStateRead,
   ] = await Promise.all([
     fetchPriorTurns(payload.scenario_id, requestId, store),
     fetchPriorTurnsTotal(payload.scenario_id, requestId, store),
@@ -777,6 +780,14 @@ export async function buildTurnContext(
         return null;
       },
     ),
+    // ⭐ PJ-C1 (DL #70 5860578805, batch 5 A): the graph + brief, the pending actions and the prior coaching state
+    // depend on nothing read above — only the scenario, the request and the store — and each resolves its own
+    // failure to its fallback (`fetchPersistedScenarioState` → a degraded read, the other two → [] / null; each
+    // catches a synchronous throw too), so none can reject this batch. They were three serial round trips after
+    // it (~150–220 ms each on served approvals); here they cost the batch's max. Used below exactly as before.
+    fetchPersistedScenarioState(payload.scenario_id, requestId, store),
+    fetchMostRecentPendingActions(payload.scenario_id, requestId, store),
+    fetchMostRecentCoachingState(payload.scenario_id, requestId, store),
   ]);
   const priorTurns = priorTurnsRead.turns;
   // V5 Conversation Context Reliability: continuity-gap guard. A 'chip'/'chip_click'
@@ -910,11 +921,8 @@ export async function buildTurnContext(
   // read scenarios.* is non-fatal (graceful degradation); the field
   // collapses to null and decision_review skips with `no_brief` exactly
   // as before.
-  const scenarioState = await fetchPersistedScenarioState(
-    payload.scenario_id,
-    requestId,
-    store,
-  );
+  // Read in the parallel batch above (batch 5 A).
+  const scenarioState = persistedScenarioStateRead;
 
   // ── ARE WE ENTITLED TO SAY THIS USER HAS NO MODEL? ─────────────────────
   // `fetchPersistedScenarioState` answers "did the read succeed?"; this
@@ -954,21 +962,15 @@ export async function buildTurnContext(
   // V5 Wave 2: read pending actions from the most recent prior turn.
   // Read failures are non-fatal — empty array on degradation, mirrors
   // the prior_turns degradation path.
-  const mostRecentPendingActions = await fetchMostRecentPendingActions(
-    payload.scenario_id,
-    requestId,
-    store,
-  );
+  // Read in the parallel batch above (batch 5 A).
+  const mostRecentPendingActions = mostRecentPendingActionsRead;
 
   // V5 Coaching State Spine — Stage 2B-1b: read the most recent PRIOR pre-dispatch
   // coaching-state snapshot (non-null, bounded LIMIT 1). Internal-only; attached as
   // prior_coaching_state for future (Stage 2B-2) lifecycle consumers. Read failures
   // degrade to null — never fail the turn. No lifecycle is derived here.
-  const priorCoachingState = await fetchMostRecentCoachingState(
-    payload.scenario_id,
-    requestId,
-    store,
-  );
+  // Read in the parallel batch above (batch 5 A).
+  const priorCoachingState = priorCoachingStateRead;
 
   // V5 Coaching State Spine — Stage 1: derive the DecisionContext projection
   // deterministically from canonical state (brief_text + graph). Pure + total
