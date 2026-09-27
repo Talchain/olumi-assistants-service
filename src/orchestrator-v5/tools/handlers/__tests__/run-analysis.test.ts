@@ -13,6 +13,8 @@
  *   - AbortSignal + budget propagation
  */
 
+import { readFileSync } from 'node:fs';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { setTestSink } from '../../../../utils/telemetry.js';
@@ -733,6 +735,36 @@ describe('run_analysis handler — win_probabilities extraction', () => {
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
     expect(fact.result.win_probabilities).toEqual({ B: 0.7 });
+  });
+
+  // A5 · result refs by label (DL #70 5855437928; Canonical's ruling): the map STAYS a label-keyed DISPLAY map — the
+  // UI renders its KEY as the pill text, and two coaching cards read keys as labels. Id-seeking readers go to
+  // `option_comparison[]`. Records: the served option_comparison of staging bundle paul-08bf9a1f (CEE 263dbd5).
+  it('PIN (A5, served 263dbd5 option_comparison): win_probabilities is keyed by option LABEL, byte-identical, in record order', async () => {
+    const served = JSON.parse(readFileSync(
+      new URL('../../../context/__tests__/fixtures/served-analysis-result-08bf9a1f.json', import.meta.url), 'utf8',
+    )) as { analysis_result: { enrichment: { option_comparison: Record<string, unknown>[] } } };
+    const response: V2RunResponseEnvelope = {
+      meta: { seed_used: 1, n_samples: 10, response_hash: 'a5' },
+      results: [],
+      option_comparison: served.analysis_result.enrichment.option_comparison,
+      response_hash: 'a5-top',
+      analysis_status: 'completed',
+    };
+    const handler = createRunAnalysisHandler({
+      plotClient: makePlotClient(response),
+      scenarioReader: makeScenarioReader(),
+    });
+    const outcome = await handler(makeInvocation());
+    const fact = outcome.handler_facts[0]!;
+    if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
+    expect(JSON.stringify(fact.result.win_probabilities)).toBe(
+      '{"Features + Pro price rise":0.41153999999999713,"Additional advertising":0.26033999999999935,'
+      + '"Pro price rise only":0.2507899999999996,"Carry on as now":0.008640000000000064,'
+      + '"Split the extra budget: £5k features + £5k advertising":0.06869000000000025}',
+    );
+    // …while the leader stays an ID: the two refs differ in kind, which is why the fallback resolves by id.
+    expect(fact.result.leading_option_id).toBe('features_pro_price_rise');
   });
 });
 

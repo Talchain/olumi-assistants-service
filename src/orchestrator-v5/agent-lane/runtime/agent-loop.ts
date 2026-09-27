@@ -93,6 +93,12 @@ export interface AgentTurnInput {
    * any capability is reached. Can only REMOVE: absent means the mode's set.
    */
   readonly withheldTools?: readonly string[];
+  /**
+   * ⭐ PJ-C1 LATENCY (#70 5859918872; words AIC 5859933281): given the turn's ONLY tool call and its result, the reply
+   * composed from that result (`composeProposalReply`), or `null` to keep the narrating call. Asked only when a hop made
+   * exactly one call and it is the turn's first; a composed reply ends the turn with no further model call.
+   */
+  readonly composeReply?: (tool: string, args: unknown, result: ToolResult) => string | null;
   /** Injected for deterministic tests; defaults to the wall clock. */
   readonly now?: () => number;
 }
@@ -143,6 +149,8 @@ export interface AgentTurnResult {
   readonly tool_calls: readonly {
     name: string; ok: boolean; mutated: boolean;
     proposal_id?: string; outcome?: string; refusal?: string;
+    /** Why a construction ended without an answer (`max_output_tokens`, `construction_timeout`) — for exports. */
+    incomplete_reason?: string;
   }[];
   /** Full results, so Olumi can decide what it owes the user this turn. */
   readonly tool_results: readonly ToolResult[];
@@ -219,7 +227,7 @@ export async function runAgentTurn(
   ];
   /** What this turn hands on as history: everything but the state it was given. */
   const handedOn = (): unknown[] => (stateItem === undefined ? items : items.filter((i) => i !== stateItem));
-  const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string }[] = [];
+  const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; incomplete_reason?: string }[] = [];
   const toolResults: ToolResult[] = [];
   let mutated = false;
   const now = input.now ?? (() => Date.now());
@@ -398,6 +406,7 @@ export async function runAgentTurn(
         ...(typeof result.proposal_id === 'string' ? { proposal_id: result.proposal_id } : {}),
         ...(typeof result.outcome === 'string' ? { outcome: result.outcome } : {}),
         ...(typeof result.refusal === 'string' ? { refusal: result.refusal } : {}),
+        ...(typeof result.incomplete_reason === 'string' ? { incomplete_reason: result.incomplete_reason } : {}),
       });
       toolResults.push(result);
       items.push({
@@ -405,6 +414,25 @@ export async function runAgentTurn(
         call_id: call.call_id,
         output: JSON.stringify(result),
       });
+    }
+    // ⭐ ONE CALL, NOT TWO: the turn's only call, answered from its own result (`composeReply`) — no narrating call.
+    if (input.composeReply !== undefined && calls.length === 1 && toolCalls.length === 1) {
+      let args: unknown;
+      try { args = JSON.parse(String(calls[0]!.arguments ?? '{}')); } catch { args = undefined; }
+      const text = input.composeReply(String(calls[0]!.name), args, toolResults[0]!);
+      if (text !== null && text.trim() !== '') {
+        items.push({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
+        return {
+          assistant_text: text,
+          items: handedOn(),
+          tool_calls: toolCalls,
+          tool_results: toolResults,
+          mutated,
+          hops: hop + 1,
+          stopped_reason: 'answered',
+          timing: ((t) => { emitTiming(t); return t; })(timingAt(hop + 1)),
+        };
+      }
     }
   }
 

@@ -2347,8 +2347,10 @@ function admitOnce(
     ...(widened.proposed_outcomes ?? []).map((o) => ({ label: o.label, kind: 'outcome' as const, provenance: 'ai_proposed' })),
   ];
 
-  // The goal's operator and horizon have NO GraphV3 home. Recording them is the
-  // only way they survive the projection at all.
+  // The goal's operator and horizon are recorded as losses HERE, where the brief is not known. GraphV3 now
+  // declares `goal_direction` / `goal_horizon_months` (G1), and `build-model.ts` holds each on the goal node
+  // only when the brief attests it (`holdStatedGoalAttributes`) — dropping this line then, since it is no
+  // longer a loss. Unattested, the line stands and is said, exactly as before.
   //
   // ⚠ `REPAIR_CODES` has no member meaning "a representation was dropped" —
   // the closest is RESOLVE_BELIEF_PRECEDENCE. That is a gap in the shared
@@ -3076,6 +3078,24 @@ function admitOnce(
    * second pass then breaks any loop a repair itself closes (a repair is Olumi's link).
    */
   const structuralEdges = new Set<object>([...topologyEdges, ...heldStatusQuoEdges]);
+  /**
+   * ⛔ AN OPTION NEVER SETS ITSELF (DL journey C, run pj-20260927T183807Z, served CEE 9bd3747, scenario
+   * 46f84464 — `construction-option-self-loop.test.ts`). The drafter named an option "Advertising investment"
+   * AND the quantity it sets "Advertising investment"; `assignIds` gives the same words one id, so the factor
+   * was never built and the option's level on it resolved to the option itself — a structural self-link nobody
+   * stated. Protected as "what the option sets", it was KEPT and registered, and readiness refused the model
+   * at birth and at every Run (`CYCLE_DETECTED`), with nothing the user could say to clear it.
+   *
+   * A link from an option to itself is not what an option sets. So when neither the link nor the level it
+   * carries is the user's, it is Olumi's link like any other: withheld, said, asked of the one repair retry
+   * (`loopIssues`), and the level it carried goes with it (below). A self-link the user stated, or one that
+   * carries the user's own figure, is never dropped: it is kept and said, as before.
+   */
+  const olumisSelfLink = (e: { from: string; to: string }): boolean => {
+    if (e.from !== e.to || kindById.get(e.from) !== 'option') return false;
+    const level = nodes.find((n) => n.id === e.from)?.interventions?.[e.to];
+    return !USER_AUTHORED_EDGE_SOURCES.has(String(level?.source ?? ''));
+  };
   const loopWithheld: { from: string; to: string; reason: string; detail: string; loop: readonly string[] }[] = [];
   const acyclic = <E extends AdmittedEdge>(edges: readonly E[], reportKept: boolean): E[] => {
     const labelsOf = (loop: readonly { from: string }[]) => loop.map((e) => labelById.get(e.from) ?? e.from);
@@ -3088,7 +3108,7 @@ function admitOnce(
     const pairKey = (e: { from: string; to: string }): string => `${e.from}\u0000${e.to}`;
     const userPairs = new Set(edges.filter(isUsers).map(pairKey));
     const result = breakLoops(edges, {
-      mayWithhold: (e) => !structuralEdges.has(e) && !isUsers(e),
+      mayWithhold: (e) => (!structuralEdges.has(e) || olumisSelfLink(e)) && !isUsers(e),
       goalId: goalForReach?.id,
       kindOf: (id) => kindById.get(id),
     });
@@ -3131,6 +3151,16 @@ function admitOnce(
 
   const riskRepairs: AdmittedEdge[] = [];
   const brokenEdges = acyclic(allEdges, true);
+  // The level a withheld self-link carried goes with it, as a withheld link's projection entries do: left on the
+  // node it reached the Run as a level on an option (`advertising_investment: 0.2`). The node's bundle is the one
+  // `interventionsByOption` holds, so both read the same. A repair (the second pass) never closes a self-link.
+  for (const w of loopWithheld) {
+    if (w.from !== w.to) continue;
+    const n = nodes.find((x) => x.id === w.from);
+    if (n?.interventions === undefined) continue;
+    delete n.interventions[w.to];
+    if (Object.keys(n.interventions).length === 0) delete n.interventions;
+  }
   let finalEdges: AdmittedEdge[] = brokenEdges;
 
   if (goalForReach !== undefined) {

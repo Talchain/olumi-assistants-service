@@ -17,8 +17,8 @@
  * symbols, PMS task ids, routes and prompt text are untouched; an alias is a string constant plus a ledger field.
  *
  * ⚠ WHAT v1 DOES NOT IDENTIFY, said here so an absent field is never read as "no prompt":
- *   · only the Agent route's three OpenAI call sites set these fields (`agent-v1-turn.ts` callModel / callResearch /
- *     callStructured). Every LEGACY site (`anthropic.client`, `decision_review`, the draft pipeline …) stays UNALIASED:
+ *   · only the Agent route's OpenAI call sites set these fields (`agent-v1-turn.ts` callModel / callResearch /
+ *     callStructured / callBriefReading — the last is C6-2's `agent.read_brief`). Every LEGACY site (`anthropic.client`, `decision_review`, the draft pipeline …) stays UNALIASED:
  *     its rows carry neither field. The map's `legacy.*` aliases are names only until a legacy site is wired;
  *   · the hash covers `instructions` ONLY — not the tool descriptions (`agent.tools` in the map), not `input`;
  *   · `agent.construct` covers `BUILD_INSTRUCTIONS` AND its retry / size / compaction suffixes under one alias; the
@@ -27,7 +27,7 @@
 import { createHash } from 'node:crypto';
 
 /** The served Agent lane's prompt aliases (map Part 3, stages 1–4). One list, so tests and the map share it. */
-export const AGENT_PROMPT_ALIASES = ['agent.converse', 'agent.interpret', 'agent.research', 'agent.construct'] as const;
+export const AGENT_PROMPT_ALIASES = ['agent.converse', 'agent.interpret', 'agent.research', 'agent.construct', 'agent.read_brief'] as const;
 export type AgentPromptAlias = (typeof AGENT_PROMPT_ALIASES)[number];
 
 /**

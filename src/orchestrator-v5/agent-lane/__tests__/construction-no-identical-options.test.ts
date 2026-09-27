@@ -206,6 +206,21 @@ const framedBase = (g: SGraph): SGraph => ({
       (k === 'provenance' ? [[k, v], ['value_frame', 'level']] : [[k, v]]))) as SConstraint),
   }),
 });
+/**
+ * G1 (27 Sep): Paul's brief states the £20k target and "12 months", so construction now HOLDS the goal's target source,
+ * direction and (when drafted) deadline on the goal node (`holdStatedGoalAttributes`). The captures and base's bytes
+ * predate that. So the registered goal must hold EXACTLY these values, which are then set aside, and everything else is
+ * compared exactly as before, bytes included (removing keys keeps the others' order).
+ */
+const G1_KEYS: readonly string[] = ['threshold_source', 'goal_direction', 'goal_horizon_months'];
+const G1_WITH_HORIZON = { threshold_source: 'brief_extraction', goal_direction: '>=', goal_horizon_months: 12 };
+const G1_NO_HORIZON = { threshold_source: 'brief_extraction', goal_direction: '>=' };
+function withoutG1(g: SGraph, expected: Record<string, unknown>): SGraph {
+  const goal = g.nodes.find((n) => n.kind === 'goal') as unknown as Record<string, unknown>;
+  expect(Object.fromEntries(G1_KEYS.filter((k) => goal[k] !== undefined).map((k) => [k, goal[k]])), 'G1: the goal holds what the brief states').toEqual(expected);
+  return { ...g, nodes: g.nodes.map((n) => (n.kind === 'goal'
+    ? Object.fromEntries(Object.entries(n).filter(([k]) => !G1_KEYS.includes(k))) as unknown as SNode : n)) };
+}
 const optionIds = (g: SGraph) => g.nodes.filter((n) => n.kind === 'option').map((n) => n.id);
 const questions = (out: Record<string, unknown>) => (out.open_questions ?? []) as string[];
 const statusLine = (out: Record<string, unknown>) =>
@@ -216,7 +231,8 @@ const shownQuestions = (out: Record<string, unknown>) => questions(out).slice(0,
 /** The step, word for word. Never the user's words: "as drafted" is Olumi's draft. */
 const STEP_1 = 'I left out "Test £59 with AI release" as a separate option: as drafted it sets nothing the model can hold that "£59 with AI release" does not — a test, pilot or staged rollout needs its own level on a factor the model holds. It stays open as a next step.';
 const STEP_2 = 'I left out "Test £59 With AI Release" as a separate option: as drafted it sets nothing the model can hold that "Raise Pro Price to £59" does not — a test, pilot or staged rollout needs its own level on a factor the model holds. It stays open as a next step.';
-const HORIZON = 'Does "MRR" get there within 12 months? The model holds no deadline yet, so no result answers that.';
+// G1: the brief writes "12 months", so the goal holds the deadline and the question says so.
+const HORIZON = 'Does "MRR" get there within 12 months? The model holds the deadline; no result answers that yet.';
 
 /**
  * The starting point's fill, as it ran on the wire: every option level left open is filled from the SAME
@@ -257,7 +273,7 @@ describe.each([
   it('FIDELITY: the reconstruction registers the served graph exactly, apart from the Olumi-added test option', async () => {
     const { graph: sizedGraph } = await build(draft());
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
-    const graph = unsized(asServedBeforeOneForm(sizedGraph));
+    const graph = unsized(withoutG1(asServedBeforeOneForm(sizedGraph), G1_WITH_HORIZON));
     const served = run.brief.draft_graph;
     expect(withoutOption(graph, TEST_ID).nodes).toEqual(withoutOption(served, TEST_ID).nodes);
     expect(withoutOption(graph, TEST_ID).edges).toEqual(withoutOption(served, TEST_ID).edges);
@@ -268,7 +284,7 @@ describe.each([
     const { graph } = await build(draft());
     const base = baseGraph(key);
     expect(optionIds(base)).toContain(TEST_ID);
-    expect(JSON.stringify(unsized(asServedBeforeOneForm(graph)))).toBe(JSON.stringify(framedBase(withoutOption(base, TEST_ID))));
+    expect(JSON.stringify(unsized(withoutG1(asServedBeforeOneForm(graph), G1_WITH_HORIZON)))).toBe(JSON.stringify(framedBase(withoutOption(base, TEST_ID))));
   });
 
   it('RED: the Olumi-added test option is not registered — no node, no edge', async () => {
@@ -340,9 +356,9 @@ describe('controls — what the rule must never touch', () => {
     const { graph, out } = await build(candidateFromServed(run.brief.draft_graph, { olumi: 'ai_proposed', horizon: null }));
     expect(optionIds(graph)).toContain(olumiId);
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
-    expect(asServedBeforeOneForm(graph).nodes).toEqual(olumisKnownLevels(run.brief.draft_graph.nodes));
+    expect(withoutG1(asServedBeforeOneForm(graph), G1_NO_HORIZON).nodes).toEqual(olumisKnownLevels(run.brief.draft_graph.nodes));
     expect(unsized(graph).edges).toEqual(run.brief.draft_graph.edges);
-    expect(JSON.stringify(unsized(asServedBeforeOneForm(graph)))).toBe(JSON.stringify(framedBase(baseGraph(key))));
+    expect(JSON.stringify(unsized(withoutG1(asServedBeforeOneForm(graph), G1_NO_HORIZON)))).toBe(JSON.stringify(framedBase(baseGraph(key))));
     expect(out).not.toHaveProperty('options_withheld');
     expect(questions(out).filter((q) => q.startsWith('I left out ') || q.startsWith('What makes '))).toEqual([]);
   });

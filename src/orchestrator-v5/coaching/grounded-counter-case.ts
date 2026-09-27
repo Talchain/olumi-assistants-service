@@ -112,6 +112,11 @@ export type GroundedCounterCaseRefusalReason =
    * passed by the caller): a relation nobody holds a belief about (C4, `next-move.ts`).
    */
   | 'only_definitional_edges'
+  /**
+   * Fragile edges exist, but none is an edge of the run's hash-bound graph (the caller's `inModel`): a link the model
+   * does not hold is not a relationship the user can be asked about (C4; served hiring capture, CEE 9bd3747).
+   */
+  | 'only_edges_not_in_model'
   /** Rows exist but the metric-selected row carries no `(from_id, to_id)` identity. */
   | 'no_edge_identity'
   /** The metric-selected row carries no human-readable endpoint labels. */
@@ -247,6 +252,11 @@ export function selectGroundedCounterCase(
    * Absent or empty ⇒ byte-identical to before.
    */
   definitional?: ReadonlySet<string>,
+  /**
+   * Edge identities (`${fromId}→${toId}`) of the run's HASH-BOUND graph (C4 `modelLinks`): only these are selectable.
+   * Absent or null (no bound graph) ⇒ byte-identical to before.
+   */
+  inModel?: ReadonlySet<string> | null,
 ): GroundedCounterCaseDecision {
   const root = readRecord(enrichment);
   const robustness = root !== null ? readRecord(root.robustness) : null;
@@ -268,6 +278,17 @@ export function selectGroundedCounterCase(
   if (rows.length === 0) {
     return { grounded: null, refusalReason: 'only_definitional_edges' };
   }
+  const modelRows = inModel === undefined || inModel === null
+    ? rows
+    : rows.filter((row) => {
+      const r = readRecord(row);
+      const from = r !== null ? nonEmptyString(r.from_id) : null;
+      const to = r !== null ? nonEmptyString(r.to_id) : null;
+      return from !== null && to !== null && inModel.has(composeEdgeIdentity(from, to));
+    });
+  if (modelRows.length === 0) {
+    return { grounded: null, refusalReason: 'only_edges_not_in_model' };
+  }
 
   // ⚠ CONDITIONAL-SWITCH MAXIMUM, NOT ARRAY HEAD (CEE #933 review).
   //
@@ -282,7 +303,7 @@ export function selectGroundedCounterCase(
   // importance (the rule this module's header invokes) — it is declining to
   // infer that metric from arrival order. Ties keep producer order, so where
   // the array IS sorted the behaviour is byte-identical to before.
-  const selectedRaw = selectFragilityPriorityRow(rows);
+  const selectedRaw = selectFragilityPriorityRow(modelRows);
   const head = readRecord(selectedRaw);
   const fromId = head !== null ? nonEmptyString(head.from_id) : null;
   const toId = head !== null ? nonEmptyString(head.to_id) : null;

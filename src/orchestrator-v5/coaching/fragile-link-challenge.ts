@@ -75,6 +75,9 @@ export const RUN_TURN_COACHING_REASONS = [
   // C4 (`next-move.ts`): the one link the card would name is an operand of an identity the model declares on its
   // target (`nonlinear_identity`), a definition, never a belief to challenge or elicit.
   'definitional_link',
+  // C4 (`next-move.ts` `modelLinks`): every fragile edge the run named is absent from the run's own hash-bound graph —
+  // a link the model does not hold is never the move (served hiring capture, CEE 9bd3747).
+  'link_not_in_model',
 ] as const;
 export type RunTurnCoachingReason = (typeof RUN_TURN_COACHING_REASONS)[number];
 
@@ -383,6 +386,11 @@ export interface FragileLinkChallengeInput {
    * HASH-BOUND graph. The card never names one. Absent ⇒ today's selection.
    */
   readonly definitionalLinks?: ReadonlySet<string>;
+  /**
+   * C4 (`next-move.ts` `modelLinks`): the edge identities of the run's HASH-BOUND graph; the card names only one of
+   * these. Absent or null (no bound graph) ⇒ today's selection.
+   */
+  readonly modelLinks?: ReadonlySet<string> | null;
 }
 
 export type FragileLinkChallengeDecision =
@@ -398,7 +406,7 @@ export function buildFragileLinkChallenge(input: FragileLinkChallengeInput): Fra
   const enrichment = readRecord(result.enrichment);
 
   // (3) one metric-selected fragile edge, with both endpoint labels.
-  const decision = selectGroundedCounterCase(enrichment, input.definitionalLinks);
+  const decision = selectGroundedCounterCase(enrichment, input.definitionalLinks, input.modelLinks);
   if (decision.grounded === null) {
     // `not_composable` is a prose-gate hit on the labels; every other refusal
     // is the absence of a nameable relationship.
@@ -406,7 +414,8 @@ export function buildFragileLinkChallenge(input: FragileLinkChallengeInput): Fra
       block: null,
       reason: decision.refusalReason === 'not_composable'
         ? 'copy_gate'
-        : decision.refusalReason === 'only_definitional_edges' ? 'definitional_link' : 'no_groundable_fragile_edge',
+        : decision.refusalReason === 'only_definitional_edges' ? 'definitional_link'
+          : decision.refusalReason === 'only_edges_not_in_model' ? 'link_not_in_model' : 'no_groundable_fragile_edge',
     };
   }
   const { edgeIdentity, fromLabel, toLabel, fromId, toId } = decision.grounded;

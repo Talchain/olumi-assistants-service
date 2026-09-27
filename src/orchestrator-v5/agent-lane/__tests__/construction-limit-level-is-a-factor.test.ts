@@ -32,6 +32,13 @@ const SERVED_OUTCOME = served('served-paul-churn-outcome-20260926T032916Z.json')
 const SERVED_FACTOR = served('served-paul-churn-factor-20260926T032913Z.json');
 /** The served limit row was captured before #1919, which stamps the drafter's stated frame; nothing else differs. */
 const SERVED_FACTOR_GC_FRAMED = (SERVED_FACTOR.goal_constraints as Record<string, unknown>[]).map((c) => ({ ...c, value_frame: 'level' }));
+/**
+ * G1 (27 Sep): this brief states the £20k target and "12 months", so construction now HOLDS the goal's direction,
+ * deadline and target source on the goal node (`holdStatedGoalAttributes`). The served drafts predate that, so a served
+ * GOAL is compared with exactly these three added, by value; every other node stays byte for byte.
+ */
+const G1_HELD = { threshold_source: 'brief_extraction', goal_direction: '>=', goal_horizon_months: 12 } as const;
+const asServedNow = (n: Node | undefined): Node | undefined => (n?.kind === 'goal' ? { ...n, ...G1_HELD } : n);
 
 const BRIEF =
   'Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 10%, should we increase the '
@@ -154,7 +161,7 @@ describe('a limit the user states on a level is admitted on a factor that can ho
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
     const asServed = asServedBeforeOneForm(graph);
     for (const s of SERVED_OUTCOME.nodes.filter((n) => n.id !== 'monthly_churn')) {
-      expect(byId(asServed, s.id), s.id).toStrictEqual(s);
+      expect(byId(asServed, s.id), s.id).toStrictEqual(asServedNow(s));
     }
   });
 
@@ -225,7 +232,7 @@ describe('CONTROLS — what the rule must leave alone', () => {
   it('the served FACTOR-kind draft registers byte-identical to what was served', async () => {
     const { graph } = await register(factorDraft());
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
-    expect(asServedBeforeOneForm(graph).nodes).toStrictEqual(SERVED_FACTOR.nodes);
+    expect(asServedBeforeOneForm(graph).nodes).toStrictEqual(SERVED_FACTOR.nodes.map(asServedNow));
     expect(edgeKeys(graph)).toEqual(edgeKeys(SERVED_FACTOR));
     expect(graph.goal_constraints).toStrictEqual(SERVED_FACTOR_GC_FRAMED);
   });
@@ -258,7 +265,7 @@ describe('CONTROLS — what the rule must leave alone', () => {
       { metric: 'MRR', operator: '<=', value: 50, unit: '%', provenance: 'explicit', frame: 'level' },
       { metric: 'Price sensitivity', operator: '<=', value: 50, unit: '%', provenance: 'explicit', frame: 'level' },
     ] }));
-    expect(byId(graph, 'mrr')).toStrictEqual(byId(SERVED_OUTCOME, 'mrr'));
+    expect(byId(graph, 'mrr')).toStrictEqual(asServedNow(byId(SERVED_OUTCOME, 'mrr')));
     expect(byId(graph, 'price_sensitivity')).toStrictEqual(byId(SERVED_OUTCOME, 'price_sensitivity'));
     expect(graph.goal_constraints?.map((c) => c.node_id).sort()).toEqual(['monthly_churn', 'mrr', 'price_sensitivity']);
     expect(byId(graph, 'monthly_churn')?.kind, 'the churn limit alone still converts its node').toBe('factor');

@@ -22,10 +22,11 @@
  * own units are 0–1.
  *
  * Every miss fails toward UNDER-claiming (the figure is left unset or recorded as Olumi's, and said): word-form
- * numerals ("four percent"), a figure the Agent derived ("down a point" → 4), and a magnitude written with a suffix
+ * money and percentages ("four percent"; a plain COUNT in words IS read by `figureTheUserWroteFor`), a figure the Agent derived ("down a point" → 4), and a magnitude written with a suffix
  * the Agent dropped (£54k vs 54).
  */
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
+import { NodeV3 } from '../../schemas/cee-v3.js';
 import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_CONTINUATION, parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { TODAY_LEVEL, TODAY_UNIT } from './admit-model.js';
 import { unitPhraseFamily } from './unit-conflict.js';
@@ -85,6 +86,66 @@ export function withdrawUnstatedBaselineStamps<N extends { readonly kind?: unkno
     // level-limit carry (`levelHasAnAuthor`) all read. Source-less, it was nobody's (#2073 review F1, AIQ 5851906910).
     return { ...n, observed_state: { ...os, source: 'cee_inference' } };
   });
+}
+
+/** What `holdStatedGoalAttributes` held on the goal node; each `false` is unattested and left absent. */
+export interface HeldGoalAttributes {
+  readonly target: boolean;
+  readonly direction: boolean;
+  readonly horizon: boolean;
+}
+
+/**
+ * Whether the brief writes the deadline `months` as a literal "N months" / "N month" / "N-month". ONLY the literal:
+ * no helper here reads a duration (`figureTheUserWrote(12, 'months', …)` grounds "12 subscribers", measured), so
+ * a figure beside another noun never grounds a deadline. Every miss under-claims: "eighteen months", "a year" and
+ * "by Q3" are left unheld, and the deadline stays a question.
+ */
+function horizonTheBriefStates(months: number, brief: string): boolean {
+  return new RegExp(`(?<![\\d.,])${months}(?:\\s+|\\s*-\\s*)months?\\b`, 'i').test(brief);
+}
+
+/**
+ * ⭐ THE GOAL'S STATED TARGET SOURCE, DIRECTION AND DEADLINE ARE HELD ON THE GOAL NODE — ONLY WHEN THE BRIEF STATES
+ * THEM (G1; PJ-A2 rows 6–13, 28, 29). Before this, admission recorded the direction and deadline only as ledger
+ * "losses" (GraphV3 had no home for them) and never stamped whose target it was, so a cold read had none of the three.
+ *
+ * THE RULE, per attribute (each independent of the others except as said):
+ *  · target → `threshold_source: 'brief_extraction'`: the goal holds a target (`goal_threshold_raw`), the drafter
+ *    marked the goal `explicit`, AND `figureTheUserWrote` finds that figure in the brief in the goal's unit.
+ *  · direction → `goal_direction`: the candidate's comparator, held ONLY beside a target held above — it is the
+ *    comparator OF that stated target, the same reading admission already acts on (`admitStatedGoalLevel`) and
+ *    `goal_constraints` store. It is not read from words: `comparatorTheUserWrote` is turn-scoped and reads neither
+ *    PJ-A2 brief (null on both, measured — "churn under 4%" sits beside "reaching £100k").
+ *  · horizon → `goal_horizon_months`: a positive whole number of months the brief writes literally
+ *    (`horizonTheBriefStates`).
+ * Not grounded ⇒ absent, exactly as before; nothing is defaulted. Only the one goal node is touched.
+ */
+export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
+  nodes: readonly N[],
+  goal: { readonly operator?: unknown; readonly horizon_months?: unknown; readonly provenance?: unknown; readonly unit?: unknown } | null | undefined,
+  brief: string,
+): { nodes: N[]; held: HeldGoalAttributes } {
+  const none: HeldGoalAttributes = { target: false, direction: false, horizon: false };
+  const goals = nodes.filter((n) => n.kind === 'goal');
+  if (goal === null || goal === undefined || goals.length !== 1) return { nodes: [...nodes], held: none };
+  const node = goals[0] as N & { readonly goal_threshold_raw?: unknown; readonly goal_threshold_unit?: unknown };
+  const raw = node.goal_threshold_raw;
+  const target = typeof raw === 'number' && Number.isFinite(raw) && goal.provenance === 'explicit'
+    && figureTheUserWrote(raw, goal.unit ?? node.goal_threshold_unit, brief);
+  // The stored comparator's own schema reads it (one list, `NodeV3`): anything else is undefined, i.e. not held.
+  const operator = target ? NodeV3.shape.goal_direction.parse(goal.operator) : undefined;
+  const direction = operator !== undefined;
+  const months = goal.horizon_months;
+  const horizon = typeof months === 'number' && Number.isInteger(months) && months > 0 && horizonTheBriefStates(months, brief);
+  if (!target && !horizon) return { nodes: [...nodes], held: none };
+  const stamped = {
+    ...node,
+    ...(target ? { threshold_source: 'brief_extraction' } : {}),
+    ...(operator !== undefined ? { goal_direction: operator } : {}),
+    ...(horizon ? { goal_horizon_months: months as number } : {}),
+  };
+  return { nodes: nodes.map((n) => (n === node ? stamped : n)), held: { target, direction, horizon } };
 }
 
 /**
@@ -173,12 +234,15 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
     const o = decisiveOther.some((x) => sameWord(x, w));
     return t && !o ? 'target' : o && !t ? 'other' : null;
   };
-  return findStatedAmounts(userText).some((a) => {
+  return [...findStatedAmounts(userText), ...countsInWords(userText)].some((a) => {
     const matches = a.kind === 'currency'
       ? (family === null || family === 'currency') && same(a.magnitude, value)
       : a.kind === 'percent'
         ? (family === null || family === 'percent') && (same(a.magnitude, value) || same(a.magnitude / 100, value))
-        : same(a.magnitude, value);
+        : a.kind === 'words'
+          // A count in words grounds a PLAIN figure only: "two" is never £2 or 2%, which need their written unit.
+          ? family !== 'currency' && family !== 'percent' && same(a.magnitude, value)
+          : same(a.magnitude, value);
     if (!matches) return false;
     const amountEnd = a.index + a.matchedText.length;
     const before = userText.slice(0, a.index);
@@ -202,8 +266,27 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
     // after the figure is its denominator, so it is passed over whatever unit the factor declares.
     const rate = /^\s*(?:(?:per|an?|each|every)\s+|\/\s*)[\p{L}\p{N}]+/iu.exec(after);
     const afterRate = right.slice(rate === null ? 0 : [...rate[0].matchAll(/[\p{L}\p{N}]+/gu)].length);
+    if (a.kind === 'words') {
+      // ⭐ A count in WORDS is an idiom far more often than a digit is ("That's one option we could try", "One more
+      // thing"; AIQ #70 5859477600). It is the user's only when a label word of THIS entity sits within two words of it:
+      // never by the "names nothing, so theirs" fallback below that a written digit gets.
+      const near = firstMention(afterRate.slice(0, 2)) ?? firstMention([...left].reverse().slice(0, 2));
+      return near === 'target';
+    }
     const about = firstMention(afterRate.slice(0, 2)) ?? firstMention([...left].reverse()) ?? firstMention(afterRate.slice(2));
     return about === null || about === 'target';
+  });
+}
+
+/**
+ * ⭐ A COUNT WRITTEN IN WORDS ("one senior and two juniors"), read by the repo's one cardinal grammar (no articles, no
+ * fractions), for `figureTheUserWroteFor` ONLY: it then binds clause by clause exactly as its digits would. Served
+ * journey E07 (DL pj-20260927T181846Z): the user's 1 and 2 were dropped as "not written" (Canonical #70 5859331002).
+ */
+function countsInWords(text: string): { kind: 'words'; magnitude: number; index: number; matchedText: string }[] {
+  return [...text.matchAll(CARDINAL_PHRASE)].flatMap((m) => {
+    const v = parseCardinalAmount(m[0]);
+    return v === null || m.index === undefined ? [] : [{ kind: 'words' as const, magnitude: v, index: m.index, matchedText: m[0] }];
   });
 }
 

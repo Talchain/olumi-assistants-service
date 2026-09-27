@@ -63,6 +63,13 @@ const GTM = (goal: Record<string, unknown>) => ({
 // level (`baseline_*`, #1840) is required the same way; neither brief states one.
 const WITH_DEADLINE = GTM({ metric: 'New ARR', operator: '>=', target_stated: true, value: 3000000, unit: 'GBP', horizon_months: 18, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null });
 const NO_DEADLINE = GTM({ metric: 'New ARR', operator: '>=', target_stated: true, value: 3000000, unit: 'GBP', horizon_months: null, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null });
+/**
+ * G1 (27 Sep): a direction beside a target the brief STATES ("£3m") is now held on the goal (`goal_direction`), so it is
+ * no longer a loss and is not said as one. A direction is still dropped, and said, when the brief does not state the
+ * target: £2.5m is not written in either brief below. (The deadline here is written in words, "eighteen months", so
+ * it is not held and stays said: `holdStatedGoalAttributes` reads only a literal "N months".)
+ */
+const unstatedTarget = (c: ReturnType<typeof GTM>) => ({ ...c, goal: { ...c.goal, value: 2500000 } });
 
 /**
  * ⭐ THE FIXTURE MUST BE ONE THE REAL SCHEMA WOULD ACCEPT. A test in this area once
@@ -126,7 +133,7 @@ async function build(payload: Record<string, unknown>) {
 
 describe('a construction says WHICH goal facts the model could not carry', () => {
   it('names the dropped deadline and the dropped direction, not just how many fields were lost', async () => {
-    const r = await build(WITH_DEADLINE);
+    const r = await build(unstatedTarget(WITH_DEADLINE));
     // The count already travelled before this change; it is the sentence that was missing.
     expect(r.projected_field_count, 'the losses are recorded').toBeGreaterThan(0);
     const said = (r.not_represented ?? []).join(' · ');
@@ -141,10 +148,17 @@ describe('a construction says WHICH goal facts the model could not carry', () =>
    * the recorded losses, this would keep asserting a deadline the goal never stated.
    */
   it('says nothing about a deadline when the goal states none, while still naming the direction', async () => {
-    const r = await build(NO_DEADLINE);
+    const r = await build(unstatedTarget(NO_DEADLINE));
     const said = (r.not_represented ?? []).join(' · ');
     expect(said, `not_represented was: ${JSON.stringify(r.not_represented)}`).not.toMatch(/horizon/i);
     expect(said, `not_represented was: ${JSON.stringify(r.not_represented)}`).toMatch(/floor from a ceiling/);
+  });
+
+  it('G1: a direction beside a target the brief states is HELD, so it is not said as a loss; the unheld deadline still is', async () => {
+    const r = await build(WITH_DEADLINE);
+    const said = (r.not_represented ?? []).join(' · ');
+    expect(said, `not_represented was: ${JSON.stringify(r.not_represented)}`).not.toMatch(/floor from a ceiling/);
+    expect(said, `not_represented was: ${JSON.stringify(r.not_represented)}`).toMatch(/18-month horizon/);
   });
 });
 

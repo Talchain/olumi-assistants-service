@@ -36,6 +36,8 @@
  * Near-zero links (|β| < `NEAR_ZERO_INFLUENCE_THRESHOLD`) are still "negligible" in
  * the link phrases; that threshold is unchanged.
  */
+import type { StrengthBand } from '@talchain/schemas/boundary';
+
 import type { InfluenceBand } from './influence-bands.js';
 
 /** Lower bound of each band above the lowest, on |β|. */
@@ -64,6 +66,32 @@ export const CANVAS_BAND_WORD: Readonly<Record<InfluenceBand, string>> = {
   strong: 'strong',
   'very strong': 'very strong',
 };
+
+/**
+ * ⭐ THE CONTRACT'S BAND WORD → CEE'S (schemas 0.60.0 `edge_strength_edit.band`; #2115, Canonical 5858386465).
+ *
+ * The canvas band pill sends the band the user chose in the contract's ONE band vocabulary (`StrengthBand`,
+ * `very_strong | strong | moderate | slight`). CEE's edge writer, the Agent's tool enum and the table above speak
+ * `InfluenceBand`. This is the ONE translation between them — a word map, not a second band table: the ranges stay
+ * the cuts above (`edgeBandStd` reads them). `slight` is the canvas's label for CEE's `weak`, the same range
+ * (`CANVAS_BAND_WORD`). Exhaustive: a new `StrengthBand` literal fails the typecheck at the `never` below.
+ */
+export function edgeBandFromStrengthBand(band: StrengthBand): InfluenceBand {
+  switch (band) {
+    case 'very_strong':
+      return 'very strong';
+    case 'strong':
+      return 'strong';
+    case 'moderate':
+      return 'moderate';
+    case 'slight':
+      return 'weak';
+    default: {
+      const unmapped: never = band;
+      throw new Error(`edge strength band has no CEE band word: ${String(unmapped)}`);
+    }
+  }
+}
 
 /** The band a link's |β| falls in. */
 export function edgeBandFromMagnitude(absValue: number): InfluenceBand {
@@ -101,8 +129,10 @@ function edgeBandBounds(band: InfluenceBand): readonly [number, number] {
  * std = (hi − lo)/√12 — weak and moderate 0.0577, strong and very strong 0.0866. Derived from the same cuts the
  * band words use, never hand-listed.
  *
- * Only for a BAND the user named. An exact figure states no range: the spread stays Olumi's, carried to the new mean
- * (`adjust-edge-strength.ts` `olumiSpreadForMean`) and flagged `std_defaulted` (A6f, AIQ N1 on #2096).
+ * Only for a BAND the user named — to the Agent (`stated-link-band-context.ts`) or on the canvas pill (0.60.0
+ * `edge_strength_edit.band`, `edgeBandFromStrengthBand`). An exact figure states no range: the spread stays Olumi's,
+ * carried to the new mean (`adjust-edge-strength.ts` `olumiSpreadForMean`) and flagged `std_defaulted` (A6f, AIQ N1
+ * on #2096).
  */
 export function edgeBandStd(band: InfluenceBand): number {
   const [lo, hi] = edgeBandBounds(band);

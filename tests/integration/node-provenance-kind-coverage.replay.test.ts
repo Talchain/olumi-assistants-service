@@ -609,6 +609,14 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "encoding_map",
       "extractionType",
       "factor_type",
+      // G1, 27 Sep — THE VALUE-BEARING DECISION: `goal_direction` and `goal_horizon_months` are NOT value-bearing
+      // and must NOT join `carriesValue` (nor `NODE_QUANTITY_FIELDS`). The direction is a comparator, never a
+      // magnitude. The horizon IS a number the user stated, but it says WHEN, never HOW MUCH of the goal metric:
+      // it is the frame the target is stated in (the sibling of `goal_threshold_frame`), and a goal carrying only a
+      // deadline carries no level of its metric, so its label binding must still be judged. Joining would let a
+      // month count read as a level of the goal.
+      "goal_direction",
+      "goal_horizon_months",
       "goal_threshold",
       "goal_threshold_cap",
       "goal_threshold_cap_provenance",
