@@ -27,6 +27,8 @@ type Node = {
   interventions?: Record<string, unknown>;
   goal_threshold_raw?: unknown; goal_threshold_unit?: unknown; goal_threshold_frame?: unknown;
   nonlinear_identity?: { stated_in_brief?: unknown } | null;
+  /** The user's typed stated response (MG's one-approval commit, on the node carrying `nonlinear_identity`). */
+  stated_response?: unknown;
 };
 
 export type FigureBy = 'user' | 'approved' | 'olumi';
@@ -55,6 +57,63 @@ export interface BreakEven {
   readonly options: readonly BreakEvenOption[];
   /** The goal's target and, per price, the subscribers it needs (only when the target is in the price's own unit). */
   readonly target?: { readonly value: number; readonly needs: readonly { readonly price: number; readonly volume: number }[] };
+  /** The arithmetic at the user's OWN stated figures, or what Olumi asks for instead (#70 AIQ 5854577702 / 5854607789). */
+  readonly stated?: StatedArithmetic;
+}
+
+/**
+ * ⭐ THE ARITHMETIC LEADER AT THE USER'S OWN FIGURES (AIQ rulings #70 5854577702 and 5854607789; DL 5854587915 split).
+ * When the user states today's count AND how many stay at each compared price (MG's typed stated response, one
+ * approval), price × count names the option with the most goal value AT THOSE FIGURES — arithmetic, never the
+ * analysis's causal ranking, which stays withheld (C46). The graph and every limit are untouched: this only reads.
+ */
+export interface StatedArithmetic {
+  /** Each compared option at the user's figures: its price × the count the user says goes with that price. */
+  readonly at_your_figures?: readonly { readonly option: string; readonly price: number; readonly volume: number; readonly goal_value: number }[];
+  /** The option whose goal value is strictly highest at those figures; absent on a tie. */
+  readonly leader?: string;
+  /** What Olumi asks instead: today's count (it is not the user's), or the count at each price with none stated. */
+  readonly ask?: { readonly today: true } | { readonly at_prices: readonly number[] };
+}
+
+type StatedFact = { operand_node_id?: unknown; today?: { value?: unknown; unit?: unknown; by?: unknown } | null; at?: unknown };
+type StatedAt = { price_node_id: string; price: number; level: number; by: 'user' };
+
+/**
+ * The stated response is CURRENT only while its inputs are (AIQ 5854607789): the identity's operands, today's count
+ * (the user's, same value and unit) and each compared option's price. Any other edit — churn, the AI release, a link —
+ * leaves it current; a changed count or price makes that figure missing, and Olumi asks again. It is bound by content,
+ * not by graph hash: it lives inside the graph it would hash.
+ */
+function statedArithmeticFor(fact: unknown, m: {
+  readonly volumeId: string; readonly priceId: string; readonly volumeUnit: string;
+  readonly v0: number; readonly v0By: FigureBy; readonly p0: number; readonly rows: readonly BreakEvenOption[];
+}): StatedArithmetic {
+  if (m.v0By !== 'user') return { ask: { today: true } };
+  const f = (fact !== null && typeof fact === 'object' ? fact : {}) as StatedFact;
+  const todayUnit = f.today?.unit;
+  // (AIQ 5854631596) The identity still answers it: the operand and price ids are the CURRENT product identity's two
+  // factors (breakEvenFor derives them from it; a non-product identity yields no arithmetic at all). And the SAME unit,
+  // trimmed and case-folded, never converted: a count re-stated in another unit makes the figures incomparable.
+  const todayHolds = f.operand_node_id === m.volumeId && f.today?.by === 'user' && f.today?.value === m.v0
+    && typeof todayUnit === 'string' && todayUnit.trim().toLowerCase() === m.volumeUnit.toLowerCase();
+  const at: StatedAt[] = todayHolds && Array.isArray(f.at)
+    ? (f.at as unknown[]).filter((a): a is StatedAt => a !== null && typeof a === 'object'
+      && (a as StatedAt).price_node_id === m.priceId && (a as StatedAt).by === 'user'
+      && typeof (a as StatedAt).price === 'number' && Number.isFinite((a as StatedAt).price) && (a as StatedAt).price > 0
+      && typeof (a as StatedAt).level === 'number' && Number.isFinite((a as StatedAt).level) && (a as StatedAt).level >= 0)
+    : [];
+  const levelAt = (p: number): number | undefined => at.find((a) => Math.abs(a.price - p) <= 1e-9)?.level;
+  const compared = [...new Set(m.rows.map((r) => r.price).filter((p) => Math.abs(p - m.p0) > 1e-9))].sort((x, y) => y - x);
+  const missing = compared.filter((p) => levelAt(p) === undefined);
+  if (missing.length > 0) return { ask: { at_prices: missing } };
+  const figures = m.rows.map((r) => {
+    const volume = Math.abs(r.price - m.p0) <= 1e-9 ? m.v0 : levelAt(r.price)!;
+    return { option: r.option, price: r.price, volume, goal_value: r.price * volume };
+  });
+  const top = Math.max(...figures.map((x) => x.goal_value));
+  const leaders = figures.filter((x) => Math.abs(x.goal_value - top) <= 1e-9);
+  return { at_your_figures: figures, ...(leaders.length === 1 ? { leader: leaders[0]!.option } : {}) };
 }
 
 /**
@@ -132,6 +191,7 @@ export function breakEvenFor(graph: unknown): BreakEven | null {
     identity_stated_in_brief: goal.nonlinear_identity?.stated_in_brief === true,
     baseline_price: p0, baseline_price_by: p0By, baseline_volume: v0, baseline_volume_by: v0By, baseline_goal: baselineGoal,
     options: rows,
+    stated: statedArithmeticFor(goal.stated_response, { volumeId, priceId, volumeUnit, v0, v0By, p0, rows }),
     // MG B1: only a LEVEL target is an amount to reach; a delta ("grow MRR by £5k") is not, and an absent frame is not
     // assumed to be one.
     // A target is a TOTAL, so it is compared with the total's unit: a per-subscriber price ("GBP/subscriber/month") still
@@ -193,7 +253,22 @@ export function breakEvenLine(be: BreakEven): string {
     const list = needs.length === 1 ? needs[0]! : `${needs.slice(0, -1).join(', ')} or ${needs[needs.length - 1]!}`;
     parts.push(`${money(be.target.value, totalUnit)} needs ${list}.`);
   }
-  parts.push('This is arithmetic on these figures, not the analysis ranking the options, and it says nothing about how many will stay.');
+  const listed = (xs: readonly string[], last = 'or'): string => (xs.length === 1 ? xs[0]! : `${xs.slice(0, -1).join(', ')} ${last} ${xs[xs.length - 1]!}`);
+  const figures = be.stated?.at_your_figures;
+  if (figures !== undefined) {
+    parts.push(`At your own figures, ${listed(figures.map((x) => `${x.option} gives ${money(x.goal_value, totalUnit)} (${count(x.volume)} at ${money(x.price, be.unit)})`), 'and')}.`);
+    parts.push(be.stated?.leader !== undefined
+      ? `On this arithmetic, ${be.stated.leader} gives the most ${be.goal}.`
+      : `On this arithmetic, no single option gives the most ${be.goal}: the top ones are equal.`);
+    parts.push('This is arithmetic on your figures, not the analysis ranking the options.');
+  } else {
+    parts.push('This is arithmetic on these figures, not the analysis ranking the options, and it says nothing about how many will stay.');
+  }
+  const ask = be.stated?.ask;
+  if (ask !== undefined && 'today' in ask) parts.push(`To compare the options at your own figures, tell me how many ${vol} you have today.`);
+  if (ask !== undefined && 'at_prices' in ask) {
+    parts.push(`To compare them at your own figures, tell me how many ${vol} you would expect at ${listed(ask.at_prices.map((p) => money(p, be.unit)))}.`);
+  }
   return parts.join(' ');
 }
 

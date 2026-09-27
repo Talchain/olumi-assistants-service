@@ -35,6 +35,8 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
         { option: 'Raise Pro to £54', price: 54, price_by: 'olumi', keep_at_least: 273 },
       ],
       target: { value: 20_000, needs: [{ price: 59, volume: 339 }, { price: 54, volume: 371 }, { price: 49, volume: 409 }] },
+      // The count is an approved assumption, not the user's: no figures of theirs to compare at, so Olumi asks for it.
+      stated: { ask: { today: true } },
     });
   });
 
@@ -71,7 +73,8 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
 
   it('CONTRAST (the other served run, 053639Z/01, price GBP/month): the paragraph is byte-identical to what the wire carried', () => {
     const f = JSON.parse(readFileSync(new URL('./fixtures/served-per-month-price-263dbd5.json', import.meta.url), 'utf8')) as { served_paragraph: string; nodes: unknown[]; edges: unknown[] };
-    expect(breakEvenLine(breakEvenFor(f)!)).toBe(f.served_paragraph);
+    // Byte-identical to the served paragraph, plus the one ask the stated-response slice adds (the count is Olumi's).
+    expect(breakEvenLine(breakEvenFor(f)!)).toBe(`${f.served_paragraph} To compare the options at your own figures, tell me how many Pro paying subscribers you have today.`);
   });
 
   it('RED (MG B1): a numbered period stays — "GBP per subscriber per 12 months" gives a readable total, not "GBP months"', () => {
