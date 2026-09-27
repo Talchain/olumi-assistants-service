@@ -35,16 +35,18 @@ describe('AX2 (c): the build turn shows the two priority questions and offers th
     expect(words(SERVED_BLOCK)).toBe(144);
   });
 
-  it('RED (served 01): the first two questions are shown whole, the third is not, and the rest are offered', () => {
+  it('RED (served 01): the first two questions are shown whole, the third is not, and the count is said — no promise', () => {
     const line = statusOf(SERVED_QUESTIONS);
-    expect(line).toContain(`Questions this model does not answer yet: ${SERVED_QUESTIONS[0]} ${SERVED_QUESTIONS[1]} Ask me for the other 6.`);
+    expect(line).toContain(`Questions this model does not answer yet: ${SERVED_QUESTIONS[0]} ${SERVED_QUESTIONS[1]} (2 of 8 shown.)`);
+    // DL 5851835121: never a promise the Agent does not keep.
+    expect(line).not.toContain('Ask me for');
     expect(line).not.toContain(SERVED_QUESTIONS[2]!);
     const block = line.slice(line.indexOf('Questions this model does not answer yet'));
     expect(words(block), block).toBeLessThanOrEqual(65);
   });
 
-  it('RED: one question over the two is offered as "the other one"', () => {
-    expect(statusOf(SERVED_QUESTIONS.slice(0, 3))).toContain('Ask me for the other one.');
+  it('RED: one question over the two is counted, not promised', () => {
+    expect(statusOf(SERVED_QUESTIONS.slice(0, 3))).toContain('(2 of 3 shown.)');
   });
 
   it('CONTRAST: two questions or fewer read exactly as before', () => {
