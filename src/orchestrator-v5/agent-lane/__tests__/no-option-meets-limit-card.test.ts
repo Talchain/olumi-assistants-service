@@ -59,9 +59,14 @@ describe('every option breaks the limit: the limit card, not a link card', () =>
     expect(served.analysis_result.computed_against_hash).toBe(served.graph_hash);
   });
 
-  it('CONTRAST: the same served run under a non-limit reason still picks the served link card (the fixture rebinds)', () => {
+  it('CONTRAST: the same served run under a non-limit reason picks a LINK card (the fixture rebinds) — C4: never the served price → MRR, a declared definition', () => {
     const cards = runCards(withReason('nonlinear_identity_sign_unproven').blocks);
-    expect(cards.map((c) => c.signal_id)).toEqual([served.served_card_signal_id]);
+    // The served card named price → MRR, an operand of the MRR identity this graph declares (C4 `definitionalLinks`):
+    // the next fragile link that is not a definition speaks instead, on the same run.
+    expect(served.served_card_signal_id.startsWith('coach:fragile_link:pro_plan_price→mrr:')).toBe(true);
+    expect(cards.map((c) => c.signal_id)).toEqual([
+      served.served_card_signal_id.replace('pro_plan_price→mrr', 'monthly_new_pro_subscribers→pro_paying_subscribers'),
+    ]);
   });
 
   it('RED: tier 1 (served) — one limit card that says no option meets the named limit and offers the next move', () => {

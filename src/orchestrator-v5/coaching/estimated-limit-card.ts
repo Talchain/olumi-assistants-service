@@ -158,11 +158,27 @@ function elicitationPrompt(lead: string): string {
   return forms.find((f) => f.length <= RUN_TURN_COACHING_CONTRACT.limits.action_prompt_max) ?? forms[forms.length - 1]!;
 }
 
+/** The title when no form naming the limit and its figure fits `title_max`; the body still names both. */
+export const ESTIMATED_LIMIT_FALLBACK_TITLE = 'Check the figure your limit was checked against';
+
+/**
+ * The first title form within the contract's bound. The Reasoning tab's "Challenge the thinking" shows the TITLE
+ * alone (Paul's test 27 Sep, Panel S3), so the title names the limit and the figure it was checked against; a long
+ * label or level falls back to a shorter form, never refusing the card.
+ */
+function titleNamingIt(forms: readonly string[]): string {
+  return forms.find((f) => f.length <= RUN_TURN_COACHING_CONTRACT.limits.title_max) ?? ESTIMATED_LIMIT_FALLBACK_TITLE;
+}
+
 /** The card's words. */
 export function composeEstimatedLimitCard(limit: EstimatedLimit): FragileLinkChallengeCopy {
   if (limit.whose === 'ratified') {
     return {
-      title: 'Check the figure your limit was checked against',
+      title: titleNamingIt([
+        `Your “${limit.label}” limit was checked against an assumed ${limit.level}`,
+        `“${limit.label}” limit checked against an assumed ${limit.level}`,
+        `Your limit was checked against an assumed ${limit.level}`,
+      ]),
       body: `Your limit on “${limit.label}” was checked against about ${limit.level} today, a figure recorded `
         + 'as an assumption rather than a measurement. If you know the real figure, it is worth saying.',
       action_label: 'Give the real figure',
@@ -171,7 +187,11 @@ export function composeEstimatedLimitCard(limit: EstimatedLimit): FragileLinkCha
     };
   }
   return {
-    title: 'Check the figure your limit was checked against',
+    title: titleNamingIt([
+      `Your “${limit.label}” limit was checked against Olumi's estimate of ${limit.level}`,
+      `“${limit.label}” limit checked against Olumi's estimate of ${limit.level}`,
+      `Your limit was checked against Olumi's estimate of ${limit.level}`,
+    ]),
     body: `Your limit on “${limit.label}” was checked against Olumi's estimate that it is about ${limit.level} `
       + 'today, not a figure you gave. If you know the real figure, it is worth saying.',
     action_label: 'Give the real figure',

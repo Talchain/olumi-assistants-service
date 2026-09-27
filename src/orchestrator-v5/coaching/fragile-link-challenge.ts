@@ -72,6 +72,9 @@ export const RUN_TURN_COACHING_REASONS = [
   'edge_sensitivity_not_evidenced',
   'claim_not_usable',
   'copy_gate',
+  // C4 (`next-move.ts`): the one link the card would name is an operand of an identity the model declares on its
+  // target (`nonlinear_identity`), a definition, never a belief to challenge or elicit.
+  'definitional_link',
 ] as const;
 export type RunTurnCoachingReason = (typeof RUN_TURN_COACHING_REASONS)[number];
 
@@ -375,6 +378,11 @@ export interface FragileLinkChallengeInput {
    * (`coaching/edge-strength-authorship.ts` `edgeAuthorshipIn`). Absent ⇒ `not_tested` ⇒ the neutral card.
    */
   readonly edgeAuthorship?: (fromId: string, toId: string) => EdgeAuthorship;
+  /**
+   * C4 (`next-move.ts` `definitionalLinks`): edge identities the model declares as definitions, from the run's
+   * HASH-BOUND graph. The card never names one. Absent ⇒ today's selection.
+   */
+  readonly definitionalLinks?: ReadonlySet<string>;
 }
 
 export type FragileLinkChallengeDecision =
@@ -390,13 +398,15 @@ export function buildFragileLinkChallenge(input: FragileLinkChallengeInput): Fra
   const enrichment = readRecord(result.enrichment);
 
   // (3) one metric-selected fragile edge, with both endpoint labels.
-  const decision = selectGroundedCounterCase(enrichment);
+  const decision = selectGroundedCounterCase(enrichment, input.definitionalLinks);
   if (decision.grounded === null) {
     // `not_composable` is a prose-gate hit on the labels; every other refusal
     // is the absence of a nameable relationship.
     return {
       block: null,
-      reason: decision.refusalReason === 'not_composable' ? 'copy_gate' : 'no_groundable_fragile_edge',
+      reason: decision.refusalReason === 'not_composable'
+        ? 'copy_gate'
+        : decision.refusalReason === 'only_definitional_edges' ? 'definitional_link' : 'no_groundable_fragile_edge',
     };
   }
   const { edgeIdentity, fromLabel, toLabel, fromId, toId } = decision.grounded;

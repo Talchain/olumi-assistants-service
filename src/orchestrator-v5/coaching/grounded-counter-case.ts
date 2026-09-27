@@ -107,6 +107,11 @@ import { findForbiddenPhraseHit, RAW_DECIMAL_RE } from '../compose/forbidden-use
 export type GroundedCounterCaseRefusalReason =
   /** No robustness object, or it carried no fragile edges. */
   | 'no_fragile_edges'
+  /**
+   * Fragile edges exist, but every one is a DEFINITION the model declares (an operand of a `nonlinear_identity`,
+   * passed by the caller): a relation nobody holds a belief about (C4, `next-move.ts`).
+   */
+  | 'only_definitional_edges'
   /** Rows exist but the metric-selected row carries no `(from_id, to_id)` identity. */
   | 'no_edge_identity'
   /** The metric-selected row carries no human-readable endpoint labels. */
@@ -235,15 +240,33 @@ export function passesGroundedProseGates(sentence: string): boolean {
  *
  * Total: every input yields a decision, and every refusal names its reason.
  */
-export function selectGroundedCounterCase(enrichment: unknown): GroundedCounterCaseDecision {
+export function selectGroundedCounterCase(
+  enrichment: unknown,
+  /**
+   * Edge identities (`${fromId}→${toId}`) the model declares as definitions (C4 `definitionalLinks`): never selected.
+   * Absent or empty ⇒ byte-identical to before.
+   */
+  definitional?: ReadonlySet<string>,
+): GroundedCounterCaseDecision {
   const root = readRecord(enrichment);
   const robustness = root !== null ? readRecord(root.robustness) : null;
-  const rows = robustness !== null && Array.isArray(robustness.fragile_edges)
+  const all = robustness !== null && Array.isArray(robustness.fragile_edges)
     ? robustness.fragile_edges
     : [];
 
-  if (rows.length === 0) {
+  if (all.length === 0) {
     return { grounded: null, refusalReason: 'no_fragile_edges' };
+  }
+  const rows = definitional === undefined || definitional.size === 0
+    ? all
+    : all.filter((row) => {
+      const r = readRecord(row);
+      const from = r !== null ? nonEmptyString(r.from_id) : null;
+      const to = r !== null ? nonEmptyString(r.to_id) : null;
+      return from === null || to === null || !definitional.has(composeEdgeIdentity(from, to));
+    });
+  if (rows.length === 0) {
+    return { grounded: null, refusalReason: 'only_definitional_edges' };
   }
 
   // ⚠ CONDITIONAL-SWITCH MAXIMUM, NOT ARRAY HEAD (CEE #933 review).

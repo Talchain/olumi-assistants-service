@@ -45,10 +45,17 @@ const run = (opts: { ready?: Served['analysis_ready']; result?: Served['analysis
     /^coach:(fragile_link|no_flagged_link|limit_unchecked|near_tie|limit_estimate|untested_option):/.test((b as { signal_id: string }).signal_id),
   ) as Array<{ signal_id: string; title: string; body: string; action_label: string; action_prompt: string }>;
 };
-const withStatus = (status: string) => ({
-  ...served.analysis_ready,
-  options: served.analysis_ready.options.map((o) => (o.label === ADDED ? { ...o, status } : o)),
-});
+// `ready` ALSO drops that option's typed `missing_value` blocker: the one missing-level authority
+// (`deriveMissingEffectPairs`) reads it, so a status-only flip still leaves the option untested (C4 / Paul-hit B1).
+const withStatus = (status: string) => {
+  const optionId = served.analysis_ready.options.find((o) => o.label === ADDED)?.option_id;
+  const blockers = (served.analysis_ready as { blockers?: { option_id?: unknown }[] }).blockers;
+  return {
+    ...served.analysis_ready,
+    options: served.analysis_ready.options.map((o) => (o.label === ADDED ? { ...o, status } : o)),
+    ...(status === 'ready' && Array.isArray(blockers) ? { blockers: blockers.filter((b) => b.option_id !== optionId) } : {}),
+  };
+};
 
 describe('an option the run could not test is the one next move', () => {
   it('precondition: the served run left the added option out (needs_encoding, not scored)', () => {
@@ -67,7 +74,8 @@ describe('an option the run could not test is the one next move', () => {
     const [card] = cards;
     expect(card!.signal_id.startsWith('coach:untested_option:')).toBe(true);
     expect(card!.signal_id.endsWith(':explicit_run:named:80206211')).toBe(true);
-    expect(card!.title).toBe('One option was not tested');
+    // C4: the title stands alone (a surface may show it without the body), so it names the option.
+    expect(card!.title).toBe(`“${ADDED}” was not tested`);
     expect(card!.body).toContain(`This analysis did not test “${ADDED}”`);
     expect(card!.action_label).toBe('Give its level');
     expect(card!.action_prompt).toContain('Ask me what level it sets and what that rests on.');

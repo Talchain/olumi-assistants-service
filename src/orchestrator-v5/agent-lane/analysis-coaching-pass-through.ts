@@ -15,19 +15,13 @@
 import { CoachingBlockSchema, type CoachingBlock } from '@talchain/schemas/boundary';
 import { compareAnalysisRunFactIdentity } from '../context/analysis-interpretation-identity.js';
 import {
-  buildFragileLinkChallenge,
   isRunTurnTrigger,
   type FragileLinkChallengeInput,
   type RunTurnCoachingEligibility,
   type RunTurnTrigger,
 } from '../coaching/fragile-link-challenge.js';
-import { buildNoFlaggedLinkCard } from '../coaching/no-flagged-link-card.js';
-import { buildLimitUncheckedCard, everyOptionBreaksALimit, leaderWithheldForALimit } from '../coaching/limit-unchecked-card.js';
-import { buildUntestedOptionCard } from '../coaching/untested-option-card.js';
-import { everyLimitProvedUnanchored, graphBoundToHash, limitNodeLabels } from '../coaching/bound-graph.js';
-import { buildNearTieCard } from '../coaching/near-tie-card.js';
-import { buildEstimatedLimitCard } from '../coaching/estimated-limit-card.js';
-import { buildLeaderLimitRiskCard } from '../coaching/leader-limit-risk-card.js';
+import { graphBoundToHash } from '../coaching/bound-graph.js';
+import { selectNextMove, type NextMove, type NextMoveCaveat } from '../coaching/next-move.js';
 import { edgeAuthorshipIn } from '../coaching/edge-strength-authorship.js';
 import { WITHHELD_NEAR_TIE } from '../compose/analysis-state-v1.js';
 import { summaryAsksUserToRepairALimit } from '../coaching/constraint-gap-disclosure.js';
@@ -73,6 +67,60 @@ export interface RunTurnCoachingFinal {
 export interface RunTurnCoachingResult {
   readonly blocks: CoachingBlock[];
   readonly eligibility: RunTurnCoachingEligibility;
+}
+
+/** C4 (`runTurnNextMove`): the same blocks and eligibility, plus the typed move, its caveats and the science brief. */
+export interface RunTurnNextMoveResult extends RunTurnCoachingResult {
+  /** The run's one typed next move (its block is the run-turn card in `blocks`). Null when a bound run has none. */
+  readonly nextMove: NextMove | null;
+  /** What the reply must say once and never spend as the move (a limit unchecked for a cause the user cannot close). */
+  readonly caveats: readonly NextMoveCaveat[];
+  /** The ≤1k science brief Runtime's lean TurnContext carries in place of the raw result (5855043957); null unbound. */
+  readonly scienceBrief: ScienceBrief | null;
+}
+
+/**
+ * ⭐ C4 — THE SCIENCE BRIEF (Runtime hook, #70 5855043957), in place of the raw `analysis_result` JSON the Agent
+ * re-derives from today (P3C C5). It carries ONLY what AI Quality ruled coach-safe on Paul's runs (5855170731): the
+ * move, the caveats, and whether the leader is withheld and why. No engine number: none is coach-safe today, and the
+ * "no single assumption" line is structural in the additive engine, so `decision_sensitivity` is not carried.
+ */
+export interface ScienceBrief {
+  readonly next_move: {
+    readonly kind: NextMove['kind'];
+    readonly capability: string;
+    readonly target_ids: readonly string[];
+    readonly title: string;
+    readonly body: string;
+    readonly action_label: string | null;
+  } | null;
+  readonly caveats: readonly { readonly title: string; readonly body: string }[];
+  /** The READBACK's typed leader claim: may the leader be named, and if not, the typed reason. */
+  readonly leader: { readonly may_be_named: boolean; readonly withheld_reason: string | null };
+}
+
+export function scienceBriefOf(
+  nextMove: NextMove | null,
+  caveats: readonly NextMoveCaveat[],
+  analysisState: unknown,
+): ScienceBrief {
+  const claim = record(record(analysisState)?.leader_claim);
+  return {
+    next_move: nextMove === null ? null : {
+      kind: nextMove.kind,
+      capability: nextMove.capability,
+      target_ids: nextMove.target_ids,
+      title: nextMove.block.title,
+      body: nextMove.block.body,
+      action_label: nextMove.block.action_label ?? null,
+    },
+    caveats: caveats.map((c) => ({ title: c.block.title, body: c.block.body })),
+    leader: {
+      // Fail closed: only an explicit `permitted: true` names the leader.
+      may_be_named: claim?.permitted === true,
+      withheld_reason: typeof claim?.withheld_reason === 'string' ? claim.withheld_reason : null,
+    },
+  };
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -268,9 +316,19 @@ export function runTurnCoaching(
   captured: CapturedAnalysis | undefined,
   final: RunTurnCoachingFinal,
 ): RunTurnCoachingResult {
+  const { blocks, eligibility } = runTurnNextMove(captured, final);
+  return { blocks, eligibility };
+}
+
+/** {@link runTurnCoaching}, plus the C4 move, its caveats and the science brief (Runtime's C1 hook). Total. */
+export function runTurnNextMove(
+  captured: CapturedAnalysis | undefined,
+  final: RunTurnCoachingFinal,
+): RunTurnNextMoveResult {
+  const none = { nextMove: null, caveats: [], scienceBrief: null } as const;
   // (1) a run response was handed over THIS turn, and it succeeded.
   if (captured === undefined || captured.status !== 200) {
-    return { blocks: [], eligibility: { eligible: false, reason: 'no_run_this_turn' } };
+    return { blocks: [], eligibility: { eligible: false, reason: 'no_run_this_turn' }, ...none };
   }
   // (2) it is the run the readback shows, current for the readback's graph.
   const bound = bindCapturedRun(captured, final);
@@ -278,15 +336,15 @@ export function runTurnCoaching(
     ? dedupeByBlockId(forwardUpstreamCoaching(captured.blocks ?? [], bound.graphHash))
     : [];
   if (!isRunTurnTrigger(captured.trigger)) {
-    return { blocks: upstream, eligibility: { eligible: false, reason: 'no_run_this_turn' } };
+    return { blocks: upstream, eligibility: { eligible: false, reason: 'no_run_this_turn' }, ...none };
   }
   if (bound === null) {
-    return { blocks: [], eligibility: { eligible: false, reason: 'identity_mismatch' } };
+    return { blocks: [], eligibility: { eligible: false, reason: 'identity_mismatch' }, ...none };
   }
   // (2b) ONE next action: when the run's own summary asks the user to repair a
   // limit, that step IS the turn's next action; no run-turn card competes with it.
   if (summaryAsksUserToRepairALimit(bound.analysisResult.summary)) {
-    return { blocks: upstream, eligibility: { eligible: false, reason: 'limit_repair_pending' } };
+    return { blocks: upstream, eligibility: { eligible: false, reason: 'limit_repair_pending' }, ...none };
   }
   // The run's own graph, only when its analysis-affecting hash is the bound run's.
   const boundGraph = graphBoundToHash(final.graph, bound.graphHash);
@@ -302,55 +360,33 @@ export function runTurnCoaching(
     optionLabels: optionLabelsFromReady(captured.analysis_ready),
     edgeAuthorship: edgeAuthorshipIn(boundGraph),
   };
-  // (2b') ONE next action: an option the run could NOT test (its `analysis_ready` status is not `ready` and the result
-  // does not score it) is the one that could change any verdict below, and its level is the move that tests it
-  // (served dloop2x-1, 27 Sep: an added option left out, and the card said "Change or add an option" again).
-  const untested = buildUntestedOptionCard(input, captured.analysis_ready);
-  if (untested !== null) return { blocks: dedupeByBlockId([...upstream, untested]), eligibility: { eligible: true } };
-  // (2c) ONE next action, TYPED: when the READBACK's leader claim is withheld for
-  // a limit, the limit is the decisive caveat — the limit card is the turn's one
-  // card and no link card competes with it. Read from the typed claim, never the
-  // summary: the automatic first pass replaces the prose (unrequested-analysis-
-  // confinement.ts), so the prose gate above is blind there. A refused limit card
-  // fails CLOSED (no card), never back to a link card. F-LIMIT's tiers (every option breaks, or would probably
-  // break, the same limit) are withheld for a limit too, in their own words (served dloop-3, 27 Sep).
-  const everyOption = everyOptionBreaksALimit(final.analysisState);
-  if (everyOption !== null || leaderWithheldForALimit(final.analysisState)) {
-    const limitLabels = boundGraph !== null ? limitNodeLabels(boundGraph) ?? undefined : undefined;
-    // The cause, only on proof from the SAME bound graph and the bound run's own options.
-    const provedUnanchored = everyOption === null && boundGraph !== null
-      && everyLimitProvedUnanchored(boundGraph, record(captured.analysis_ready)?.options);
-    const limit = buildLimitUncheckedCard(input, limitLabels, provedUnanchored, final.constraintVerdictState, everyOption);
-    if (limit.block === null) return { blocks: upstream, eligibility: { eligible: false, reason: limit.reason } };
-    return { blocks: dedupeByBlockId([...upstream, limit.block]), eligibility: { eligible: true } };
+  // (2b')–(2d) ONE next move, chosen by what it lets the user do (C4, `coaching/next-move.ts`): the card IS the move;
+  // a limit the user cannot close is a caveat for the reply, never the move.
+  const selection = selectNextMove({
+    input,
+    analysisReady: captured.analysis_ready,
+    analysisState: final.analysisState,
+    constraintVerdictState: final.constraintVerdictState,
+    leaderLimitRisks: final.leaderLimitRisks,
+    boundGraph,
+  });
+  const scienceBrief = scienceBriefOf(selection.move, selection.caveats, final.analysisState);
+  if (selection.move === null) {
+    return {
+      blocks: upstream,
+      eligibility: { eligible: false, reason: selection.reason ?? 'no_groundable_fragile_edge' },
+      nextMove: null,
+      caveats: selection.caveats,
+      scienceBrief,
+    };
   }
-  // (2c') The option the run may name is more likely than not to BREAK a limit it scored (AI Quality claim
-  // permission 5842498806): the leader may be named only if the card names the limit and says so. It outranks
-  // every other card, including the estimate card below, whose figure the risk may rest on.
-  const risk = buildLeaderLimitRiskCard(input, final.constraintVerdictState, record(final.analysisState)?.leader_claim,
-    final.leaderLimitRisks, boundGraph);
-  if (risk.block !== null) return { blocks: dedupeByBlockId([...upstream, risk.block]), eligibility: { eligible: true } };
-  // (2c'') A limit the run DID check, but only against Olumi's own estimate of its level (AI Quality
-  // 5842174563): the verdict rests on an assumption the user never saw named, so it outranks a link card.
-  // Reads the READBACK's typed verdict state (`analysis_constraint_verdict_state` on the graph read, carried as
-  // `final.constraintVerdictState`, Canonical 5842397050); absent → this leg is inert.
-  const estimate = buildEstimatedLimitCard(input, final.constraintVerdictState, boundGraph, record(captured.analysis_ready)?.options);
-  if (estimate.block !== null) return { blocks: dedupeByBlockId([...upstream, estimate.block]), eligibility: { eligible: true } };
-  const built = buildFragileLinkChallenge(input);
-  const chosen = built.block === null && built.reason === 'no_groundable_fragile_edge'
-    ? buildNoFlaggedLinkCard(input)
-    : built;
-  if (chosen.block === null) {
-    // (2d) The automatic first pass of a NEAR TIE with no flagged link (AI Quality 5841805590): no link
-    // card can speak, so the one move is to ask which difference matters most. Its own gates decide;
-    // when it declines, the link path's reason stands.
-    const readyOptions = record(captured.analysis_ready)?.options;
-    const tie = buildNearTieCard(input, record(record(final.analysisState)?.leader_claim)?.withheld_reason,
-      Array.isArray(readyOptions) ? readyOptions.length : null);
-    if (tie.block !== null) return { blocks: dedupeByBlockId([...upstream, tie.block]), eligibility: { eligible: true } };
-    return { blocks: upstream, eligibility: { eligible: false, reason: chosen.reason } };
-  }
-  return { blocks: dedupeByBlockId([...upstream, chosen.block]), eligibility: { eligible: true } };
+  return {
+    blocks: dedupeByBlockId([...upstream, selection.move.block]),
+    eligibility: { eligible: true },
+    nextMove: selection.move,
+    caveats: selection.caveats,
+    scienceBrief,
+  };
 }
 
 /** Backwards-compatible: the blocks of {@link runTurnCoaching}. */
