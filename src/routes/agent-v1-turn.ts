@@ -2009,8 +2009,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const staleLine = wroteThisTurn ? staleResultLine(analysisState, analysisReady) : null;
     const postWriteReadiness = wroteThisTurn ? postWriteReadinessLine(readbackGraph, analysisReady) : null;
     const askLine = wroteThisTurn ? postWriteAskLine(readbackGraph, analysisReady) : null;
-    // "Run it again" already says a run is permitted; the readiness sentence would repeat it.
-    const readinessLine = staleLine !== null && (analysisReady as { may_run?: unknown } | undefined)?.may_run === true ? null : postWriteReadiness;
+    // "Run it again" already says a run is permitted; the readiness sentence would repeat it. And on the build turn whose
+    // automatic first pass already RAN, "The analysis can run now" sits beside that result with no Run chip (the route
+    // offers none over the run that just happened): an instruction nobody can follow (MG sweep #70 5851155478). Only
+    // the "can run" sentence goes; a "can't run yet" reason is always said.
+    const firstPassRan = fa?.ran === true;
+    const readinessLine = (staleLine !== null || firstPassRan) && (analysisReady as { may_run?: unknown } | undefined)?.may_run === true ? null : postWriteReadiness;
     const composed = composeDirectAnswerResponse({
       // ⛔ A proposal id is a binding for authorise_change, never text a user reads or
       // types (display-ids.ts). Applied here, before the answer row is written, so a
