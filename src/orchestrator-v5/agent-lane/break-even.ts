@@ -219,5 +219,13 @@ export function goalNotCheckedLine(graph: unknown, analysisResult: unknown): str
   const unit = typeof goal?.goal_threshold_unit === 'string' ? goal.goal_threshold_unit.trim() : '';
   if (goal === undefined || typeof raw !== 'number' || !Number.isFinite(raw) || unit === '') return null;
   const label = goal.label ?? goal.id;
-  return `Your ${label} target of ${money(raw, unit)} is not checked yet: the model has no current ${label} figure to measure it against.`;
+  // R&C B1 (#2071): ISL mints this code for seven reasons, and "no current figure" is only one of them. The cause is said
+  // ONLY when the graph itself shows it — the goal carries no current figure at all; otherwise the target is named with
+  // no cause.
+  const os = goal.observed_state;
+  const hasCurrent = [os?.value, os?.raw_value, (os as { baseline?: unknown } | null | undefined)?.baseline]
+    .some((v) => typeof v === 'number' && Number.isFinite(v));
+  return hasCurrent
+    ? `Your ${label} target of ${money(raw, unit)} was not checked in this analysis.`
+    : `Your ${label} target of ${money(raw, unit)} is not checked yet: the model has no current ${label} figure to measure it against.`;
 }

@@ -120,6 +120,12 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
       .toBe('Your MRR target of \u00a320,000/month is not checked yet: the model has no current MRR figure to measure it against.');
   });
 
+  it('CONTRAST (F3, R&C B1): a goal that HAS a current figure is named with no cause — the code has seven reasons', () => {
+    const said = goalNotCheckedLine(graph((ns) => { node(ns, 'mrr').observed_state = { baseline: 0.49, raw_value: 9800, unit: 'GBP/month' }; }), NOT_CONVERTIBLE);
+    expect(said).toBe('Your MRR target of \u00a320,000/month was not checked in this analysis.');
+    expect(said).not.toContain('no current');
+  });
+
   it('CONTRAST (F3): no typed reason, or no stated target, says nothing — never a guess', () => {
     expect(goalNotCheckedLine(graph(), { type: 'analysis_result', enrichment: { decision_brief: { warning_codes: ['EVPI_UNAVAILABLE'] } } })).toBeNull();
     expect(goalNotCheckedLine(graph((ns) => { delete node(ns, 'mrr').goal_threshold_raw; }), NOT_CONVERTIBLE)).toBeNull();
