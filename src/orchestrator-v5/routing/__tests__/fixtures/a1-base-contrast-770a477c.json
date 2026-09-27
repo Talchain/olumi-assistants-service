@@ -1,7 +1,8 @@
 {
  "_provenance": {
-  "what": "Outputs of buildAddOptionsTransaction, dispatchAddOptionTransaction (inline_patch minus the random candidate_id, public_label, assistant_text) and executeGmHeldResume (mutatedGraph) for three specs on paul-a295e4a1-before-grandfathering.json, EXECUTED at base 15e332b2f004b68bb3880937aaf5256c85d14096 (staging tip, 27 Sep 2026) before this change. Two base runs were identical except candidate_id.",
-  "base_sha": "15e332b2f004b68bb3880937aaf5256c85d14096"
+  "what": "Outputs of buildAddOptionsTransaction, dispatchAddOptionTransaction (inline_patch minus the random candidate_id, public_label, assistant_text) and executeGmHeldResume (mutatedGraph) for three specs on paul-a295e4a1-before-grandfathering.json, EXECUTED at base 770a477c7fbd6da5903566084da15843831ea61f (staging tip, 27 Sep 2026) WITHOUT this change. Two base runs were byte-identical.",
+  "base_sha": "770a477c7fbd6da5903566084da15843831ea61f",
+  "rerecorded_from": "a1-base-contrast-15e332b2.json (base 15e332b2f004b68bb3880937aaf5256c85d14096). Re-executed on plain staging when A1 was brought current; the only member that moved is public_label in all three specs ('Add option …' -> 'Approve N changes'), which is staging #2102 (bc695398), not A1. specs are unchanged."
  },
  "specs": {
   "existing": {
@@ -281,7 +282,7 @@
     "params": {},
     "target_entity_ids": []
    },
-   "public_label": "Add option 'Increase price to £64', link 'Decision: MRR' ...",
+   "public_label": "Approve 3 changes",
    "assistant_text": "I'm holding these changes rather than applying them straight away: add option 'Increase price to £64', link 'Decision: MRR' to 'Increase price to £64' and link 'Increase price to £64' to 'Pro plan price'. Nothing in the model moves until you confirm. Reply yes to continue, or tell me what to adjust instead. 'Increase price to £64' comes with its effect values, so once you apply this it is configured and the analysis can run.",
    "execute_status": "executed",
    "mutatedGraph": {
@@ -1045,7 +1046,7 @@
     "params": {},
     "target_entity_ids": []
    },
-   "public_label": "Add option 'Increase marketing spend to £5,000/month', ad...",
+   "public_label": "Approve 5 changes",
    "assistant_text": "I'm holding these changes rather than applying them straight away: add option 'Increase marketing spend to £5,000/month', add factor 'Marketing spend', link 'Decision: MRR' to 'Increase marketing spend to £5,000/month', link 'Marketing spend' to 'Monthly new Pro subscribers' and link 'Increase marketing spend to £5,000/month' to 'Marketing spend'. Nothing in the model moves until you confirm. Reply yes to continue, or tell me what to adjust instead. I've linked 'Increase marketing spend to £5,000/month' to 'Marketing spend', without a size of effect on it — I don't have those numbers. Tell me what it changes by and I'll write them in.",
    "execute_status": "executed",
    "mutatedGraph": {
@@ -1942,7 +1943,7 @@
     "params": {},
     "target_entity_ids": []
    },
-   "public_label": "Add option '£59 for new Pro customers; grandfather existi...",
+   "public_label": "Approve 7 changes",
    "assistant_text": "I'm holding these changes rather than applying them straight away: add option '£59 for new Pro customers; grandfather existing customers', add factor 'Existing customers grandfathered', link 'Decision: MRR' to '£59 for new Pro customers; grandfather existing customers', link 'Existing customers grandfathered' to 'Monthly churn', link 'Existing customers grandfathered' to 'MRR', link '£59 for new Pro customers; grandfather existing customers' to 'Pro plan price' and link '£59 for new Pro customers; grandfather existing customers' to 'Existing customers grandfathered'. Nothing in the model moves until you confirm. Reply yes to continue, or tell me what to adjust instead. I've linked '£59 for new Pro customers; grandfather existing customers' to 'Existing customers grandfathered', without a size of effect on it — I don't have those numbers. Tell me what it changes by and I'll write them in.",
    "execute_status": "executed",
    "mutatedGraph": {

@@ -36,7 +36,7 @@ const { _provenance: _p, ...GRAPH } = FX;
 const STORED = projectGraphForPersistence(structuredClone(GRAPH)) as Json;
 const HASH = computeAnalysisAffectingGraphHash(STORED as never)!;
 const BASE = JSON.parse(
-  readFileSync(new URL('./fixtures/a1-base-contrast-15e332b2.json', import.meta.url), 'utf8'),
+  readFileSync(new URL('./fixtures/a1-base-contrast-770a477c.json', import.meta.url), 'utf8'),
 ) as { specs: Record<string, Json> };
 
 const SCENARIO_ID = randomUUID();

@@ -48,9 +48,9 @@ const { _provenance: PROVENANCE, ...GRAPH } = FX;
 const STORED = projectGraphForPersistence(structuredClone(GRAPH)) as Json;
 const HASH = computeAnalysisAffectingGraphHash(STORED as never)!;
 
-/** Executed at base 15e332b2 before this change (see the fixture's `_provenance`). */
+/** Executed at base 770a477c without this change (see the fixture's `_provenance`; re-recorded from 15e332b2 when brought current). */
 const BASE = JSON.parse(
-  readFileSync(new URL('./fixtures/a1-base-contrast-15e332b2.json', import.meta.url), 'utf8'),
+  readFileSync(new URL('./fixtures/a1-base-contrast-770a477c.json', import.meta.url), 'utf8'),
 ) as { specs: Record<string, Json>; outputs: Record<string, Json> };
 
 const OPT = '146aa89d';
@@ -343,7 +343,7 @@ describe('R3 — a refusal leaves the stored graph byte-identical (key-order-ins
   });
 });
 
-describe('CONTRAST — everything that is not a new switch is byte-identical to base 15e332b2', () => {
+describe('CONTRAST — everything that is not a new switch is byte-identical to base 770a477c', () => {
   const headOutputs = (spec: Json): Json => {
     const built = buildAddOptionsTransaction(structuredClone(spec), STORED as never);
     const held = hold(structuredClone(spec));
