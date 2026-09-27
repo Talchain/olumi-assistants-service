@@ -141,6 +141,11 @@ export interface EditGmEvaluationInput {
    */
   readonly envelopeCap?: number;
   /**
+   * The new 0/1 switches a typed add-option builds (`buildAddOptionsTransaction` `switchFactorIds`), so the consent
+   * copy says the option turns each ON instead of printing its level 1 (C2; AIC #70 5859629053). Describing only.
+   */
+  readonly switchFactorIds?: readonly string[];
+  /**
    * F-3 negation guard (probe P8/P9, 2026-07-20): the CURRENT turn's raw
    * user message, used ONLY for deterministic protection-scope extraction
    * ("… but do NOT touch X" → any op targeting X is demoted would_apply →
@@ -946,7 +951,7 @@ function buildHeldPending(
   // generic swept copy when no safe subject is derivable.
   // ONE call gives both the subject and the items it was joined from, so the
   // chip's per-line `detail` can never describe a different change.
-  const heldChangeset = describeChangeset(input.operations, input.currentGraph);
+  const heldChangeset = describeChangeset(input.operations, input.currentGraph, { switchFactorIds: input.switchFactorIds });
   const heldSubject = heldChangeset?.subject ?? null;
   const heldPublicCopy = buildGmHeldPublicCopy(heldSubject, heldChangeset?.items);
   const pending: PendingAction = {
@@ -1152,6 +1157,7 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
       const heldChangesetSubject = describeHeldOperationsSubject(
         input.operations,
         input.currentGraph,
+        { switchFactorIds: input.switchFactorIds },
       );
       const heldProposalBlock: HeldProposalBlock | null =
         (input.dispatchPath ?? 'edit_graph') === 'edit_graph'

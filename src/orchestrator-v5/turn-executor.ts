@@ -4632,7 +4632,7 @@ export async function runTurnExecutor(
         // the real configure path (shared builder → deterministic edit-lane
         // route) rather than offering nothing.
         const gmReadiness = buildCanonicalAnalysisReadyFromGraph(outcome.appliedGraph);
-        const gmAppliedSubject = describeHeldOperationsSubject(read.operations, gmBaseGraph);
+        const gmAppliedSubject = describeHeldOperationsSubject(read.operations, gmBaseGraph, { switchFactorIds: read.switchFactorIds });
         const appliedResponse = composeAnswer({
           answerKind: 'functional',
           assistant_text: buildGmHeldAppliedReceipt(
@@ -4862,7 +4862,7 @@ export async function runTurnExecutor(
             chip_id: holds[i]!.chip_id,
             candidate_count: holds.length,
           });
-          const subject = describeHeldOperationsSubject(reads[i]!.operations, preStepGraph);
+          const subject = describeHeldOperationsSubject(reads[i]!.operations, preStepGraph, { switchFactorIds: reads[i]!.switchFactorIds });
           if (subject !== null) appliedSubjects.push(subject);
           appliedFacts.push(outcome.fact);
           consumedRefs.push(holds[i]!.chip_id);
