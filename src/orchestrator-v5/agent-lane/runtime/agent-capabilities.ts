@@ -14,6 +14,7 @@
  * re-reads the model afterwards and reports what the model actually shows.
  */
 
+import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
 import { AGENT_ADD_OPTION_CHIP_ID, AGENT_RUN_ANALYSIS_CHIP_ID } from '../../handlers/agent-chip-ids.js';
@@ -1107,15 +1108,17 @@ export function createAgentCapabilities(
         + (into.length > 0 ? ` and driven by ${into.map((e) => labelOf(e.from)).join(', ')}` : '')
         + `; ${howStronglyWords([...out, ...into])}`);
     }
+    const factorParts: AddedFactorPart[] = [];
     for (const fid of addedFactorIds) {
       const f = after!.nodes.find((x) => x.id === fid);
       if (f === undefined) continue;
       const outgoing = after!.edges.filter((e) => e.from === fid);
       const changes = outgoing.map((e) => quoted(String(after!.nodes.find((x) => x.id === e.to)?.label ?? e.to)));
       // Who sized each committed link decides the words (audit MAG-2): a flat default is a placeholder, never "Olumi's estimate".
-      sentences.push(`Also added the factor "${String(f.label ?? fid)}", which changes ${changes.join(', ')}; ${howStronglyWords(outgoing)} `
-        + 'Its current value is not set yet; tell me what it is today and I\'ll record it.');
+      factorParts.push({ label: String(f.label ?? fid), changes, strength: howStronglyWords(outgoing) });
     }
+    // One ask for today's values, naming every added factor (`added-factors-receipt.ts`).
+    sentences.push(...addedFactorsReceipt(factorParts));
     return {
       ok: true, mutated: true, applied: true, outcome: 'applied', proposal_id: ref,
       receipts: summary !== null ? [summary] : [],
