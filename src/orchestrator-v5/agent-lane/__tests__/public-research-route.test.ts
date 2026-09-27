@@ -33,10 +33,20 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
   return { ...actual, resolveUserIdentity: async () => ({ mode: 'off' }) };
 });
 
+/** The native response with `extra` appended to its answer text (its citation indices stay valid: they precede it). */
+const withExtraText = (response: unknown, extra: string): unknown => {
+  const copy = JSON.parse(JSON.stringify(response)) as { output: Array<{ type: string; content?: Array<{ text?: string }> }> };
+  const part = copy.output.find((o) => o.type === 'message')!.content![0]!;
+  part.text = `${part.text ?? ''}\n\n${extra}`;
+  return copy;
+};
+
 describe('public research: the Agent offers, the user\'s click searches once, the reply keeps the sources', () => {
   let app: FastifyInstance;
   let bodies: Record<string, unknown>[] = [];
   let research: 'ok' | 'fail' = 'ok';
+  let researchExtra = '';
+  let withheldRun = false;
   const searchCalls = () => bodies.filter((b) => JSON.stringify(b['tools'] ?? []).includes('web_search'));
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
@@ -44,7 +54,7 @@ describe('public research: the Agent offers, the user\'s click searches once, th
       bodies.push(body);
       if (JSON.stringify(body['tools'] ?? []).includes('web_search')) {
         if (research === 'fail') return new Response(JSON.stringify({ error: { message: 'boom' } }), { status: 500 });
-        return new Response(JSON.stringify(NE02), { status: 200 });
+        return new Response(JSON.stringify(researchExtra === '' ? NE02 : withExtraText(NE02, researchExtra)), { status: 200 });
       }
       // The Agent: first it offers the search, then it says so.
       const agentCalls = bodies.filter((b) => !JSON.stringify(b['tools'] ?? []).includes('web_search')).length;
@@ -62,12 +72,17 @@ describe('public research: the Agent offers, the user\'s click searches once, th
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
       graph: { nodes: [{ id: 'g', kind: 'goal', label: 'MRR' }, { id: 'f', kind: 'factor', label: 'Monthly churn' }], edges: [{ from: 'f', to: 'g' }] },
       graph_hash: '0123456789abcdef',
+      // A run exists and its leader is withheld (served `5668902`: `nonlinear_identity_sign_unproven`).
+      ...(withheldRun ? {
+        analysis_result: { type: 'analysis_result', summary: 'A provisional first pass.', computed_against_hash: '0123456789abcdef' },
+        analysis_state: { run_state: { kind: 'complete_current' }, leader_claim: { permitted: false, withheld_reason: 'nonlinear_identity_sign_unproven' } },
+      } : {}),
     }));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { bodies = []; research = 'ok'; appended.length = 0; rows.clear(); });
+  beforeEach(() => { bodies = []; research = 'ok'; researchExtra = ''; withheldRun = false; appended.length = 0; rows.clear(); });
 
   type Body = { assistant_text: string; suggested_actions: { id: string; label: string; message: string; detail?: string }[]; _diagnostic_trace?: { fast_path?: string }; _agent?: { mutated?: boolean } };
 
@@ -133,5 +148,31 @@ describe('public research: the Agent offers, the user\'s click searches once, th
     expect(searchCalls().length).toBeLessThanOrEqual(2);
     expect(b.assistant_text).toContain('The research did not finish, so no finding is shown');
     expect(b.assistant_text).not.toContain('**Sources**');
+  });
+  const WHY = /No single option can be put forward yet/;
+  const RANKING = '- **Raising the price is the better option.** It beats holding the price for most SaaS firms.';
+  const click = async () => {
+    await offer();
+    const chip = researchChipFor(Q)!;
+    return (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, turn_id: '5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8d', message: chip.message, source: 'chip_click', chip: { id: chip.id },
+    } })).json() as Body;
+  };
+
+  it('RED (served 5668902): a research answer whose source ranking is dropped gets no closing about the user\'s model', async () => {
+    withheldRun = true;
+    researchExtra = RANKING;
+    const b = await click();
+    expect(b._diagnostic_trace?.fast_path).toBe('research');
+    expect(b.assistant_text, 'the wire drop ran: the ranking is gone').not.toContain('the better option');
+    expect(b.assistant_text).toContain('less than 1% for enterprise SaaS. [1]');
+    expect(b.assistant_text).not.toMatch(WHY);
+  });
+
+  it('PRECONDITION: with no withheld run the same answer keeps the sentence — the RED row\'s drop is the wire gate\'s', async () => {
+    researchExtra = RANKING;
+    const b = await click();
+    expect(b.assistant_text).toContain('the better option');
+    expect(b.assistant_text).not.toMatch(WHY);
   });
 });

@@ -2093,7 +2093,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         graph: readbackGraph ?? null,
         analysisReady,
         // AX2: the build turn's automatic first pass was not asked to rank anything — drop a ranking, add no "why".
-        sayWhyWithheld: !(fa !== undefined && fastPath !== 'run' && !result.tool_calls.some((c) => c.name === 'run_analysis')),
+        // Nor was a research answer (served `5668902`: a public source's ranking was dropped, and the closing about the
+        // user's model followed a reply about public evidence).
+        sayWhyWithheld: fastPath !== 'research' && !(fa !== undefined && fastPath !== 'run' && !result.tool_calls.some((c) => c.name === 'run_analysis')),
       });
       if (enforced.changed) {
         leaderClaimEnforced = true;

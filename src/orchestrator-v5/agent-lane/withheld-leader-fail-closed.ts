@@ -1270,6 +1270,13 @@ export interface FailClosedProseResult {
  * removed with the SHORTER of its two separators, so a list or paragraph break survives; a list
  * marker whose first sentence was dropped is kept for the sentence that follows it.
  */
+/**
+ * ⛔ A LINE LEFT HOLDING ONLY ITS CITATION GOES (served CEE `5668902`, the research reply): the splitter keeps "… firms. [2]"
+ * as two units, so a bullet whose sentences were all dropped read "- [2]". Such a line goes whole; a line that keeps any
+ * sentence keeps its marker.
+ */
+const CITATION_ONLY = /^\s*(?:\[\d+\]\s*)+$/;
+
 export function dropRankingSentences(text: string, labels: RankingLabelContext = NO_LABELS): FailClosedProseResult {
   if (typeof text !== 'string' || text.length === 0) return { text, droppedSentences: 0 };
   type Seg = Segment;
@@ -1376,7 +1383,7 @@ export function dropRankingSentences(text: string, labels: RankingLabelContext =
     if (n === 0) return seg;
     dropped += n;
     const kept = seg.units.filter((_, i) => !drop[i]);
-    if (!kept.some((u) => /\S/.test(u))) return null;
+    if (!kept.some((u) => /\S/.test(u) && !CITATION_ONLY.test(u))) return null;
     let line = kept.join('');
     if (drop[0] === true) {
       const lead = LIST_MARKER.exec(seg.units[0]!)?.[1] ?? /^\s*/.exec(seg.units[0]!)![0];
