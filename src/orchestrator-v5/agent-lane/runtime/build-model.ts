@@ -978,11 +978,27 @@ const COMPACTION_REPAIR_RULE =
   + 'Every option you keep still acts on each factor it acted on that you keep. Keep every risk the brief states; a risk you added may go. '
   + 'Every risk you keep keeps its causal direction and its path to the goal; do not delete an option or a risk the brief states to clear validation.';
 
+/**
+ * ⭐ X5 (DL design `tracks/c6-draft/DESIGN.md` Q3): WHY the one construction retry ran, and what became of it — so
+ * AIQ/MG can fix the class that costs the ~20 s (brief C retried on 4 of 9 draws) before any prompt changes.
+ * Diagnostic only: told to an observer the route puts on `_diagnostic_trace`, never to the model.
+ */
+export type ConstructionTrace =
+  | { readonly retried: false }
+  | {
+    readonly retried: true;
+    /** What the retry was asked about: an oversized draft, and the counts of each issue class handed to it. */
+    readonly reasons: { readonly size: boolean; readonly mechanism: number; readonly coverage: number; readonly loop: number };
+    /** `adopted`: the retry's model registered · `kept_first`: an adoption gate refused it · `retry_failed`: the call or its parse threw. */
+    readonly outcome: 'adopted' | 'kept_first' | 'retry_failed';
+  };
+
 export async function buildModelFromBrief(
   scenarioId: string,
   brief: string,
   dispatch: InternalDispatch,
   callStructured: CallStructuredModel,
+  observeConstruction?: (t: ConstructionTrace) => void,
 ): Promise<ToolResult> {
   const budget = budgetFor('gpt-5.6-terra', 'whole');
   let candidate: CandidateModel;
@@ -1087,9 +1103,17 @@ export async function buildModelFromBrief(
   const loops = loopIssues(admitted);
   const loopsAsked = needsSizeRetry ? [] : loops;
   const asked = [...repairIssues(preparation), ...loopsAsked];
+  let trace: ConstructionTrace = { retried: false };
   if (needsSizeRetry || asked.length > 0) {
     sizeRetried = needsSizeRetry;
     constructionRetried = true;
+    const reasons = {
+      size: needsSizeRetry,
+      mechanism: preparation.mechanism_issues.length,
+      coverage: sayCoverageGaps(preparation).length,
+      loop: loopsAsked.length,
+    };
+    trace = { retried: true, reasons, outcome: 'kept_first' };
     try {
       const retry = await callStructured({
         model: budget.model,
@@ -1171,13 +1195,16 @@ export async function buildModelFromBrief(
           // (review 5822933692, B3): a retry that echoes the prepared candidate
           // re-prepares to nothing, and the user's 7 would read as Olumi's again.
           preparation = carryFindingsAcrossRetry(preparation, retryPreparation);
+          trace = { retried: true, reasons, outcome: 'adopted' };
         }
       }
     } catch {
       // A failed retry costs the retry, never the turn: the refusal below reports
       // the FIRST model's real counts rather than inventing a reason.
+      trace = { retried: true, reasons, outcome: 'retry_failed' };
     }
   }
+  try { observeConstruction?.(trace); } catch { /* an observer never costs the build */ }
 
   if (!size.within && !size.user_material_exceeds_limit) {
     return {

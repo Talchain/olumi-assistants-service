@@ -10,6 +10,8 @@
  * move together, that the given state never enters the history, and that superseded snapshots are pruned.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { runAgentTurn } from '../runtime/agent-loop.js';
 import { issueContextPacket } from '../runtime/request-assembly.js';
 import * as historyStore from '../history-store.js';
@@ -75,6 +77,82 @@ describe('C1 — the turn state is given, not fetched', () => {
   });
 });
 
+/**
+ * ⛔ THE GIVEN STATE IS THE MODEL AS THE TURN BEGAN — A LATER TOOL RESULT IN THE SAME TURN SUPERSEDES IT (C1 follow-up,
+ * raised in the CEE #2112 review, 27 Sep).
+ *
+ * The state item stays in the input for EVERY hop of the turn (moving or removing it mid-turn would change the request
+ * prefix and defeat prompt caching), while `get_canonical_state` stays withheld. On a first brief #2112 gives the EMPTY
+ * model (`{empty:true, entities:[]}`); hop 1 builds it, hop 2 still reads "Describe the model from it" above an empty
+ * model — so the Agent could tell the user "the model is empty" straight after building it. The fix is wording only:
+ * the item says it is the START of the turn, and that a later tool result covering entities, a graph_revision, a
+ * change or readiness is newer and supersedes it.
+ */
+describe('C1 follow-up — the given state is the turn’s START; a tool result later in the turn supersedes it', () => {
+  const EMPTY_STATE = { ok: true, graph_revision: REV, empty: true, entities: [] };
+  const emptyPacket = () =>
+    issueContextPacket({ scenario_id: SCENARIO, authenticated_user_id: USER, graph_revision: REV, captured_at_turn: 0, state: EMPTY_STATE }, SECRET);
+  const BUILT = { ok: true, mutated: true, graph_revision: 'c'.repeat(64), entities: [{ id: 'goal_x', label: 'Delivery reliability', kind: 'goal', value: null }] };
+  const textOfItem = (item: unknown): string =>
+    ((item as { content?: { text?: unknown }[] }).content ?? []).map((c) => c?.text).find((t): t is string => typeof t === 'string') ?? '';
+
+  /** Hop 1 builds the model from the brief; hop 2 answers. Every request is captured as sent. */
+  function scriptedBuildThenAnswer() {
+    const seen: { tools?: readonly unknown[]; input?: readonly unknown[] }[] = [];
+    const callModel = vi.fn(async (req: { tools?: readonly unknown[]; input?: readonly unknown[] }) => {
+      seen.push({ tools: req.tools, input: [...(req.input ?? [])] });
+      return (seen.length === 1
+        ? { output: [{ type: 'function_call', name: 'build_model_from_brief', arguments: '{"brief":"Hire a tech lead or two developers?"}', call_id: 'c1' }] }
+        : { output: [{ type: 'message', content: [{ type: 'output_text', text: 'I have built the model around delivery reliability.' }] }] }) as never;
+    });
+    const buildModelFromBrief = vi.fn(async () => BUILT);
+    return { seen, callModel: callModel as never, caps: { buildModelFromBrief } as never, buildModelFromBrief };
+  }
+
+  it('RED: an empty model built in hop 1 → hop 2 still carries ONE unchanged state item (caching kept), it says a later result supersedes it, and the build output follows it', async () => {
+    const { seen, callModel, caps, buildModelFromBrief } = scriptedBuildThenAnswer();
+    const r = await runAgentTurn(
+      { ...base, message: 'Should we hire a tech lead or two developers?', mode: 'full', canonicalContext: { packet: emptyPacket(), expectation } },
+      caps, callModel,
+    );
+    // Controls: the turn really took two hops through the build, on a turn that was GIVEN the empty model.
+    expect(buildModelFromBrief, 'control: the build tool was dispatched').toHaveBeenCalledTimes(1);
+    expect(seen, 'control: two model calls').toHaveLength(2);
+    expect(r.stopped_reason).toBe('answered');
+    expect(toolNames(seen[0]!), 'control: the state was given, not offered as a tool').not.toContain('get_canonical_state');
+    expect(JSON.stringify(stateItems(seen[0]!.input)), 'control: hop 1 was given the EMPTY model').toContain('\\"empty\\":true');
+
+    const hop2 = seen[1]!.input!;
+    const given = stateItems(hop2);
+    expect(given, 'exactly one state item on hop 2').toHaveLength(1);
+    // Caching kept: hop 2's request opens with hop 1's input, byte for byte — the item was neither moved nor removed.
+    expect(JSON.stringify(hop2.slice(0, seen[0]!.input!.length))).toBe(JSON.stringify(seen[0]!.input));
+
+    const text = textOfItem(given[0]);
+    expect(text.startsWith('CURRENT MODEL STATE'), 'the item still opens with its marker').toBe(true);
+    const wording = text.slice(0, text.indexOf('{'));
+    expect(wording, 'says it is the model as the turn BEGAN').toMatch(/start of this turn/i);
+    expect(wording, 'says a later tool result supersedes it').toContain('supersedes');
+    expect(wording, 'says to describe the model from the latest').toContain('from the latest');
+    // AIQ #2118 F1: only an APPLIED change supersedes it; an unapproved proposal's preview never does.
+    expect(wording, 'scoped to applied changes').toContain('APPLIED a change');
+    expect(wording, 'a proposal preview never supersedes it').toContain('readiness_if_approved describes the model only IF the user approves, and never supersedes');
+    for (const carrier of ['entities', 'graph_revision', 'change', 'readiness']) {
+      expect(wording, `names what a later result can carry: ${carrier}`).toContain(carrier);
+    }
+    expect(wording, 'the old unconditional instruction is gone').not.toContain('Describe the model from it');
+
+    // The build's output — the NEW model — sits AFTER the state item, so "the latest" is unambiguous.
+    const buildOutput = hop2.findIndex((i) => (i as { type?: string; call_id?: string }).type === 'function_call_output' && (i as { call_id?: string }).call_id === 'c1');
+    expect(buildOutput, 'the build output is in the hop-2 input').toBeGreaterThanOrEqual(0);
+    expect(String((hop2[buildOutput] as { output?: unknown }).output)).toContain('goal_x');
+    expect(buildOutput).toBeGreaterThan(hop2.indexOf(given[0]!));
+
+    // And the turn still hands on no state item.
+    expect(stateItems(r.items)).toEqual([]);
+  });
+});
+
 describe('C1 — a superseded snapshot is not kept in the history', () => {
   const call = (id: string, name: string) => ({ type: 'function_call', call_id: id, name, arguments: '{}' });
   const out = (id: string, output: string) => ({ type: 'function_call_output', call_id: id, output });
@@ -107,5 +185,18 @@ describe('C1 — a superseded snapshot is not kept in the history', () => {
     expect(pruned).toHaveLength(items.length);
     const callIds = new Set(pruned.filter((i) => (i as { type?: string }).type === 'function_call').map((i) => (i as { call_id: string }).call_id));
     for (const o of pruned.filter((i) => (i as { type?: string }).type === 'function_call_output')) expect(callIds.has((o as { call_id: string }).call_id)).toBe(true);
+  });
+});
+
+describe('C1 follow-up — the route\u2019s own system prompt says the same as the given item', () => {
+  it('RED: the Agent instructions line about CURRENT MODEL STATE says a later tool result in the turn supersedes it', () => {
+    // AGENT_INSTRUCTIONS is module-private; the line is read from the route source, as the estate's scanner tests do.
+    const src = readFileSync(fileURLToPath(new URL('../../../routes/agent-v1-turn.ts', import.meta.url)), 'utf8');
+    const lines = src.split('\n').filter((l) => l.includes('Each turn opens with a CURRENT MODEL STATE input'));
+    expect(lines, 'control: exactly one instructions line names the given state').toHaveLength(1);
+    expect(lines[0]).toContain('supersedes it');
+    expect(lines[0]).toContain('describe the model from the latest');
+    expect(lines[0]).toContain('APPLIED a change');
+    expect(lines[0]).toContain('readiness_if_approved describes the model only IF the user approves, and never supersedes');
   });
 });

@@ -29,6 +29,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
 import { OPENAI_ONLY, assertProviderAllowed, providerLedgerTruncated, recordProviderUsage, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { RESEARCH_CHIP_PREFIX, approvedQueryOf, readResearchResponse, researchChipFor, researchReplyText, researchRequestBody, type ResearchOutcome } from '../orchestrator-v5/agent-lane/runtime/public-research.js';
+import { agentPromptIdentity, conversationPromptAlias } from '../orchestrator-v5/agent-lane/runtime/prompt-identity.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
@@ -51,7 +52,7 @@ import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/ag
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
 import { commitLimitEditInProcess, commitOptionLevelsInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
 import { readinessSentence, readinessViewOf, stillNeededLine } from '../orchestrator-v5/agent-lane/readiness-view.js';
-import type { CallStructuredModel } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
+import type { CallStructuredModel, ConstructionTrace } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
 import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
@@ -290,7 +291,7 @@ export { BOARD_EDIT_PREFIX } from '../orchestrator-v5/agent-lane/history-store.j
 const AGENT_INSTRUCTIONS = [
   'You are Olumi, a strategic reasoning layer. Improve human strategic judgement rather than deciding for the user.',
   'Answer the user’s actual question directly and naturally.',
-  'Never invent canonical facts. Each turn opens with a CURRENT MODEL STATE input: exactly what get_canonical_state returns, read by Olumi at the start of the turn. Describe the model from it; call get_canonical_state only when that input is absent.',
+  'Never invent canonical facts. Each turn opens with a CURRENT MODEL STATE input: exactly what get_canonical_state returns, read by Olumi at the start of the turn. A tool result later in the same turn that APPLIED a change (mutated: true, the new entities, a new graph_revision, readiness_after) is newer and supersedes it for what it covers: describe the model from the latest applied result. A proposal\u2019s readiness_if_approved describes the model only IF the user approves, and never supersedes it. Call get_canonical_state only when that input is absent.',
   'Distinguish user facts and evidence from machine-authored estimates and from unknowns. An absent value is unknown, never zero.',
   /*
    * ⛔ CARRYING THE FIELD IS NOT SAYING IT. Measured 3/3 on the Agent route: the
@@ -1046,7 +1047,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * conversation calls per turn, and attributing a cache hit to the wrong one is the
      * quietest possible way to make the measurement wrong.
      */
-    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callModel', { model: budget.model, purpose: 'conversation' });
+    /**
+     * ⭐ WHICH PROMPT, NOT ONLY WHICH SITE (AIQ identity map @30c0e79c; `prompt-identity.ts`). The Run fast path's one
+     * interpreting call (`tool_choice: 'none'`) is `agent.interpret`; every other conversation call is
+     * `agent.converse`. The sha is of `req.instructions` — the SAME string the body below sends, so C5b's view line or
+     * the interpret-only constraint changes it.
+     */
+    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callModel', {
+      model: budget.model,
+      purpose: 'conversation',
+      ...agentPromptIdentity(conversationPromptAlias((req as { tool_choice?: unknown }).tool_choice), req.instructions),
+    });
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: {
@@ -1089,11 +1100,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
    */
   const callResearch = async (query: string): Promise<unknown> => {
     const model = budgetFor('gpt-5.6-terra', 'conversation').model;
-    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callResearch', { model, purpose: 'public_research' });
+    // Built once, so the ledger's sha is of the instructions this exact body sends (`RESEARCH_INSTRUCTIONS` today).
+    const researchBody = researchRequestBody(query, model);
+    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callResearch', {
+      model, purpose: 'public_research', ...agentPromptIdentity('agent.research', researchBody['instructions']),
+    });
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: { authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`, 'content-type': 'application/json' },
-      body: JSON.stringify(researchRequestBody(query, model)),
+      body: JSON.stringify(researchBody),
       // Bounded (#2042 N2): the captured search took 15 s; a hung one is said as unfinished, never waited on.
       signal: AbortSignal.timeout(60_000),
     });
@@ -1125,7 +1140,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * ⚠ `j.usage` was ALREADY parsed and returned by this function; only the ledger
      * write was missing. Nothing new is fetched or computed here.
      */
-    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callStructured', { model: reqBody.model, purpose: 'construction' });
+    // `agent.construct` covers BUILD_INSTRUCTIONS and its retry/size/compaction suffixes; the sha tells them apart.
+    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callStructured', {
+      model: reqBody.model, purpose: 'construction', ...agentPromptIdentity('agent.construct', reqBody.instructions),
+    });
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: {
@@ -1584,6 +1602,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * `bindRunBlocksToReadback` and `runTurnCoaching`. No trigger ⇒ the user asked for the run.
      */
     let lastRun: CapturedAnalysis | undefined;
+    /** X5: set only when this turn ran a construction — see `ConstructionTrace`. */
+    let constructionTrace: ConstructionTrace | undefined;
     const capabilities = createAgentCapabilities(
       countingDispatch, proposals, callStructured, mode,
       (payload) => { lastRun = { ...payload, trigger: payload.trigger ?? 'explicit_run' }; },
@@ -1602,6 +1622,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * `currentStageEmitter()` is set only inside `/proxy/v5/turn/stream` and `/orchestrate/v2/turn/stream`;
          * every buffered turn reads `undefined` and emits nothing, so its body is untouched by construction.
          */
+        // X5 (DESIGN Q3): the construction retry's reason and outcome, for the trace only.
+        onConstructionTrace: (t) => { constructionTrace = t; },
         onModelRegistered: (raw) => {
           const emitStage = currentStageEmitter();
           if (emitStage === undefined || !Array.isArray(raw.nodes) || raw.nodes.length === 0) return;
@@ -2454,6 +2476,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           dispatches: dispatchLedger,
           dispatch_ms: dispatchLedger.reduce((a, d) => a + d.ms, 0),
         },
+        /** X5 (DESIGN Q3): why the one construction retry ran (issue classes) and what became of it. Diagnostic only. */
+        ...(constructionTrace !== undefined ? { construction: constructionTrace } : {}),
         write_claims_removed: narration.stripped.length,
         ...(leaderClaimEnforced ? { leader_claim_enforced: true } : {}),
         /** The run-turn coaching card: shown, or the typed reason it is not (for staging witnesses). */
