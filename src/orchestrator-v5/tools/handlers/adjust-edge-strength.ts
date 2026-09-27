@@ -25,6 +25,7 @@ import { z } from 'zod';
 import { AdjustEdgeStrengthHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import type { AdjustEdgeStrengthHandlerFact } from '@talchain/schemas/orchestrator';
 
+import { DEFAULT_STRENGTH_STD } from '../../../cee/constants.js';
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 import { parseEdgeAddress } from '../../compose/edge-address.js';
 import { edgeBandFromMagnitude, edgeBandStd } from '../../format/edge-strength-bands.js';
@@ -41,12 +42,47 @@ import {
 import { ADJUST_EDGE_STRENGTH_USER_GUIDANCE } from './d1-shared/user-guidance.js';
 
 export const AdjustEdgeStrengthSchema = z.number().min(-1).max(1);
+/**
+ * The top of a link's std on this writer — the bound `AdjustEdgeStrengthStdSchema` has always enforced, named once so
+ * the spread this writer derives itself (`olumiSpreadForMean`) is held to the same bound, not a second copy of it.
+ */
+export const ADJUST_EDGE_STRENGTH_STD_MAX = 0.5;
 // V5 D1 (P1-6 follow-up): EdgeStrengthV3.std requires `.positive()`,
 // so a value of 0 would pass parameter validation but fail the
 // post-mutation `GraphV3.parse`, surfacing as a misleading
 // GRAPH_INVARIANT_VIOLATED. Match the canonical schema's lower
 // bound here so the user-visible error is the right class.
-export const AdjustEdgeStrengthStdSchema = z.number().gt(0).max(0.5);
+export const AdjustEdgeStrengthStdSchema = z.number().gt(0).max(ADJUST_EDGE_STRENGTH_STD_MAX);
+
+/**
+ * ⭐ A6 — OLUMI'S SPREAD, CARRIED TO THE MEAN THE USER WROTE (AIQ N1 on #2096, 5856128077).
+ *
+ * An exact figure states a mean and no range, so the link's std stays Olumi's. It must not stay Olumi's ABSOLUTE std:
+ * that was sized for Olumi's mean. Paul's `price_sensitivity → monthly_churn` (captures `17d1cd3a` / `08bf9a1f`) kept
+ * std 0.00375 — sized for 0.0075 — on the user's 0.85, a CV of 0.4 %, so the analysis ran near-certain on a spread
+ * nobody chose. Olumi's RELATIVE spread is kept instead: std × |new| / |old| (0.00375 → 0.425, CV 0.5 either side).
+ *
+ *  - The magnitude did not move (a confirm, or a sign flip): the std is returned exactly — nothing to rescale.
+ *  - |old| > 0 and a finite std: the relative spread, computed CV-first so an exact ratio stays exact, held to the
+ *    writer's own top bound (`ADJUST_EDGE_STRENGTH_STD_MAX`).
+ *  - Otherwise — Olumi's mean was 0 (no relative spread exists), the stored std is unusable, or the new mean is 0 (a
+ *    relative spread of 0 breaks `EdgeStrengthV3.std > 0`): the estate's default spread, `DEFAULT_STRENGTH_STD`.
+ */
+export function olumiSpreadForMean(args: {
+  readonly oldMean: number;
+  readonly oldStd: number;
+  readonly newMean: number;
+}): number {
+  const oldAbs = Math.abs(args.oldMean);
+  const newAbs = Math.abs(args.newMean);
+  const usableStd = Number.isFinite(args.oldStd) && args.oldStd > 0;
+  if (usableStd && newAbs === oldAbs) return args.oldStd;
+  if (usableStd && Number.isFinite(oldAbs) && oldAbs > 0) {
+    const relative = (args.oldStd / oldAbs) * newAbs;
+    if (Number.isFinite(relative) && relative > 0) return Math.min(relative, ADJUST_EDGE_STRENGTH_STD_MAX);
+  }
+  return DEFAULT_STRENGTH_STD;
+}
 /**
  * Optional explicit direction for callers whose intent cannot be represented
  * by the sign of the numeric strength — specifically a zero-strength edge.
@@ -364,9 +400,17 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         }
         bandStd = edgeBandStd(bandAuthority);
       }
-      // EdgeStrengthV3 requires std > 0 (positive). An exact figure (no stated band) keeps the existing spread unless
-      // a fresh one was given: a figure states no range of its own.
-      const finalStd = bandStd ?? newStd ?? targetEdge.strength.std;
+      // EdgeStrengthV3 requires std > 0 (positive). A band or an explicit std states the spread. An exact figure states
+      // none, so the spread stays OLUMI'S — carried to the new mean as Olumi's relative spread, never the stale absolute
+      // std sized for Olumi's mean (A6, AIQ N1 on #2096) — and is flagged as Olumi's below (`std_defaulted`).
+      const statedStd = bandStd ?? newStd;
+      const finalStd =
+        statedStd ??
+        olumiSpreadForMean({
+          oldMean: beforeMean,
+          oldStd: targetEdge.strength.std,
+          newMean,
+        });
       const afterSnapshot = {
         from: targetEdge.from,
         to: targetEdge.to,
@@ -424,6 +468,12 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         // The per-field half is kept (`exists_defaulted`, Canonical #70 5855416983).
         if (edge.defaulted === true) edge.exists_defaulted = true;
         delete edge.defaulted;
+        // ⭐ A6 — and the SPREAD is the same kind of fact (AIQ N1 on #2096, 5856128077). A write that states it (a named
+        // band, an explicit std) makes it the user's; an exact figure states none, so the std above is still Olumi's
+        // and says so per field, as existence does. Every user write sets the flag's state, so a stale one never
+        // survives a later write that changed who chose the spread.
+        if (statedStd === undefined) edge.std_defaulted = true;
+        else delete edge.std_defaulted;
 
         return {
           before: beforeSnapshot as Record<string, unknown>,

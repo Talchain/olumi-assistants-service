@@ -6,6 +6,7 @@ import {
 } from '@talchain/schemas/boundary';
 
 import type { GraphV3T } from '../../../schemas/cee-v3.js';
+import { DEFAULT_STRENGTH_STD } from '../../../cee/constants.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { buildD1Fixture } from '../../tools/handlers/d1-shared/__tests__/fixtures.js';
@@ -110,15 +111,19 @@ describe('resolveEdgeStrengthTarget', () => {
 });
 
 describe('applyEdgeStrengthEdit — canonical adapter', () => {
-  it('sets the unique exact edge through the existing handler and preserves std', async () => {
+  // A6 (AIQ N1 on #2096): an exact figure keeps Olumi's RELATIVE spread, never the absolute std sized for 0.4.
+  it('sets the unique exact edge through the existing handler and carries Olumi’s relative spread (A6)', async () => {
     const graph = buildD1Fixture();
-    const beforeStd = edgeIn(graph).strength.std;
+    const before = edgeIn(graph).strength;
     const result = await apply(graph, eventFor());
 
     expect(result.kind).toBe('mutated');
     if (result.kind !== 'mutated') return;
     const edge = edgeIn(result.graph);
-    expect(edge.strength).toEqual({ mean: 0.7, std: beforeStd });
+    expect(edge.strength.mean).toBe(0.7);
+    expect(edge.strength.std).toBeCloseTo((before.std / Math.abs(before.mean)) * 0.7, 15);
+    expect(edge.strength.std).not.toBe(before.std);
+    expect(edge.std_defaulted).toBe(true);
     expect(edge.effect_direction).toBe('positive');
     expect(edge.provenance?.source).toBe('user_specified');
     expect(edge.provenance_display).toBe('user_set');
@@ -152,10 +157,11 @@ describe('applyEdgeStrengthEdit — canonical adapter', () => {
   });
 
   it.each(['positive', 'negative'] as const)(
-    'persists an explicit %s direction at zero without changing std',
+    // A6: a mean of 0 has no relative spread (it would be 0, and std must be > 0), so the std is
+    // Olumi's default spread, flagged — never the stale absolute std sized for the old mean.
+    'persists an explicit %s direction at zero; the std is Olumi’s default spread (A6)',
     async (direction) => {
       const graph = buildD1Fixture();
-      const beforeStd = edgeIn(graph).strength.std;
       const result = await apply(
         graph,
         eventFor({ magnitude: 0, direction_intent: direction }),
@@ -164,8 +170,9 @@ describe('applyEdgeStrengthEdit — canonical adapter', () => {
       expect(result.kind).toBe('mutated');
       if (result.kind !== 'mutated') return;
       expect(edgeIn(result.graph)).toMatchObject({
-        strength: { mean: 0, std: beforeStd },
+        strength: { mean: 0, std: DEFAULT_STRENGTH_STD },
         effect_direction: direction,
+        std_defaulted: true,
       });
     },
   );
@@ -374,6 +381,8 @@ describe('applyEdgeStrengthEdit — canonical adapter', () => {
         } = (target.provenance ?? {}) as Record<string, unknown>;
         target.provenance = { ...rest, source: 'user_specified' } as typeof target.provenance;
         target.provenance_display = 'user_set';
+        // A6: a figure confirm leaves Olumi's std, and says so per field.
+        target.std_defaulted = true;
         return after;
       }
       const guard = (before: GraphV3T, after: GraphV3T) =>

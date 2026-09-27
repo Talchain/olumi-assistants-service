@@ -3,7 +3,8 @@
  * 5855430153).
  *
  * WHY. A named band states a RANGE of |β|, so the link writer stores the band's own spread as the link's std
- * (`edgeBandStd`). An exact FIGURE states no range and keeps the spread the link already carries. Both reach the
+ * (`edgeBandStd`). An exact FIGURE states no range, so the spread stays Olumi's (rescaled to the new mean and flagged
+ * `std_defaulted`, A6). Both reach the
  * writer as the same `edge_strength_edit` event, and the event cannot say which: the UI sends it from a band pill, a
  * 0.01-step slider, a β number field and "Confirm this estimate" (DecisionGuideAI staging `507d8ef8`,
  * `buildEdgeStrengthEditEvent` / `buildEdgeStrengthConfirmEvent`), and the event is `.strict()` with no band member.
@@ -45,7 +46,7 @@ export function runWithStatedLinkBand<T>(stated: StatedLinkBand, fn: () => Promi
 /**
  * The band the user named for THIS write if — and only if — the context names this scenario and this exact
  * `(from, to)` link, and `magnitude` (the |β| the write lands on) falls in that band. Otherwise `undefined`: the
- * write is an exact figure and keeps its spread.
+ * write is an exact figure and its spread stays Olumi's.
  */
 export function statedLinkBandFor(
   scenarioId: string,
