@@ -22,7 +22,7 @@
  * own units are 0–1.
  *
  * Every miss fails toward UNDER-claiming (the figure is left unset or recorded as Olumi's, and said): word-form
- * numerals ("four percent"), a figure the Agent derived ("down a point" → 4), and a magnitude written with a suffix
+ * money and percentages ("four percent"; a plain COUNT in words IS read by `figureTheUserWroteFor`), a figure the Agent derived ("down a point" → 4), and a magnitude written with a suffix
  * the Agent dropped (£54k vs 54).
  */
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
@@ -173,12 +173,15 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
     const o = decisiveOther.some((x) => sameWord(x, w));
     return t && !o ? 'target' : o && !t ? 'other' : null;
   };
-  return findStatedAmounts(userText).some((a) => {
+  return [...findStatedAmounts(userText), ...countsInWords(userText)].some((a) => {
     const matches = a.kind === 'currency'
       ? (family === null || family === 'currency') && same(a.magnitude, value)
       : a.kind === 'percent'
         ? (family === null || family === 'percent') && (same(a.magnitude, value) || same(a.magnitude / 100, value))
-        : same(a.magnitude, value);
+        : a.kind === 'words'
+          // A count in words grounds a PLAIN figure only: "two" is never £2 or 2%, which need their written unit.
+          ? family !== 'currency' && family !== 'percent' && same(a.magnitude, value)
+          : same(a.magnitude, value);
     if (!matches) return false;
     const amountEnd = a.index + a.matchedText.length;
     const before = userText.slice(0, a.index);
@@ -202,8 +205,27 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
     // after the figure is its denominator, so it is passed over whatever unit the factor declares.
     const rate = /^\s*(?:(?:per|an?|each|every)\s+|\/\s*)[\p{L}\p{N}]+/iu.exec(after);
     const afterRate = right.slice(rate === null ? 0 : [...rate[0].matchAll(/[\p{L}\p{N}]+/gu)].length);
+    if (a.kind === 'words') {
+      // ⭐ A count in WORDS is an idiom far more often than a digit is ("That's one option we could try", "One more
+      // thing"; AIQ #70 5859477600). It is the user's only when a label word of THIS entity sits within two words of it:
+      // never by the "names nothing, so theirs" fallback below that a written digit gets.
+      const near = firstMention(afterRate.slice(0, 2)) ?? firstMention([...left].reverse().slice(0, 2));
+      return near === 'target';
+    }
     const about = firstMention(afterRate.slice(0, 2)) ?? firstMention([...left].reverse()) ?? firstMention(afterRate.slice(2));
     return about === null || about === 'target';
+  });
+}
+
+/**
+ * ⭐ A COUNT WRITTEN IN WORDS ("one senior and two juniors"), read by the repo's one cardinal grammar (no articles, no
+ * fractions), for `figureTheUserWroteFor` ONLY: it then binds clause by clause exactly as its digits would. Served
+ * journey E07 (DL pj-20260927T181846Z): the user's 1 and 2 were dropped as "not written" (Canonical #70 5859331002).
+ */
+function countsInWords(text: string): { kind: 'words'; magnitude: number; index: number; matchedText: string }[] {
+  return [...text.matchAll(CARDINAL_PHRASE)].flatMap((m) => {
+    const v = parseCardinalAmount(m[0]);
+    return v === null || m.index === undefined ? [] : [{ kind: 'words' as const, magnitude: v, index: m.index, matchedText: m[0] }];
   });
 }
 

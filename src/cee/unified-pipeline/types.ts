@@ -160,10 +160,26 @@ export interface PipelineCoachingReadyEvent {
   elapsed_ms: number;
 }
 
+/**
+ * ⭐ C6-2 (AIQ ruling #70 5858767026): the user's own GOAL and OPTIONS, copied out of a first brief a few seconds into
+ * the wait. Emitted ONLY by the agent-lane turn route (`routes/agent-v1-turn.ts`), never by the pipeline, and only
+ * before GRAPH_READY. Every string is an exact substring of the user's message (`agent-lane/brief-reading.ts`).
+ * Display-only: no leader, no ranking, never persisted.
+ */
+export interface PipelineBriefReadEvent {
+  kind: "BRIEF_READ";
+  /** The user's words for the outcome they want, or null when the brief states none. */
+  goal: string | null;
+  /** The options exactly as the user wrote them. */
+  options: readonly string[];
+  elapsed_ms: number;
+}
+
 export type PipelineStageEvent =
   | PipelineProgressEvent
   | PipelineGraphReadyEvent
-  | PipelineCoachingReadyEvent;
+  | PipelineCoachingReadyEvent
+  | PipelineBriefReadEvent;
 
 export type PipelineStageEmitter = (event: PipelineStageEvent) => void;
 

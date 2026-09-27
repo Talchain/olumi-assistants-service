@@ -1649,7 +1649,7 @@ export function createAgentCapabilities(
           const levels = projectOptionLevels(n, byIdOf(g));
           return levels.length > 0 ? { ...projectEntity(n), levels } : projectEntity(n);
         }),
-        existing_links: g.edges.map((e) => `${e.from} -> ${e.to}`),
+        // ⛔ No `existing_links`: it was `links[].from -> to` again, 1.4–1.6k chars of every given state (PJ-C1, #70 5859578339).
         // Derived by traversal of the persisted graph — facts, not estimates,
         // and the Agent may state them to the user as facts. Without these it
         // has to infer topology from an edge list, and measurably does it worse
