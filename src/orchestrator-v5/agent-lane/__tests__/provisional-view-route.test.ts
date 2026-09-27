@@ -189,19 +189,21 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
       stage: 'analyse', source: 'chip', message: 'Run analysis.', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } } });
   };
 
-  it('RED: the Run BUTTON on a withheld result → the typed view arrives on THAT turn (one forced call in parallel; the interpreter still has no tools)', async () => {
+  /**
+   * BOUNDARY (kept): the Run button's fast path is ONE interpreting call with no tools (pinned in run-fast-path,
+   * unchecked-limit-no-remedy-clause-pinned, run-answer-completeness, agent-run-reply-answer-shape). A view on THAT
+   * turn needs a second model call — a lead's call, not this slice. The view arrives on the next turn ("what would you
+   * do?", the row above) and on the Agent's own Run.
+   */
+  it('BOUNDARY: the Run BUTTON on a withheld result → exactly ONE interpreting call (no tools), no forced call, no view on that turn', async () => {
     const r = await pressRun();
     expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
     const b = r.json() as Body & { _diagnostic_trace?: { fast_path?: string } };
     expect(b._diagnostic_trace?.fast_path).toBe('run');
-    expect(b._agent.provisional_view).toEqual({ heading, ...VIEW, because });
-    expect(b.assistant_text).not.toContain(VIEW.view);
-    const forced = modelRequests.filter((q) => (q['tool_choice'] as { name?: unknown } | undefined)?.name === 'give_provisional_view');
-    expect(forced, 'exactly one forced call').toHaveLength(1);
-    expect(((forced[0]!['tools'] ?? []) as { name?: string }[]).map((t) => t.name), 'offered NOTHING else').toEqual(['give_provisional_view']);
-    const interpreter = modelRequests.filter((q) => q['tool_choice'] === 'none');
-    expect(interpreter, 'the interpreter call is unchanged: no tools').toHaveLength(1);
-    expect(interpreter[0]!['tools']).toEqual([]);
+    expect(modelRequests, 'exactly one model call').toHaveLength(1);
+    expect(modelRequests[0]!['tool_choice']).toBe('none');
+    expect(modelRequests[0]!['tools']).toEqual([]);
+    expect(Object.hasOwn(b._agent, 'provisional_view')).toBe(false);
   });
 
   it('CONTRAST: the Run button on a result that PERMITS a leader → no forced call, no view', async () => {
