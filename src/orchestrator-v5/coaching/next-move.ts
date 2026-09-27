@@ -23,6 +23,8 @@
  *                               definition, not a belief (R&C manual-test review #69 5837270934, F1/A1: the served
  *                               "Pressure-test this link" on price → MRR was the wrong intervention): the next fragile
  *                               link that is not a definition speaks; when every one is, no card (`definitional_link`).
+ *                               And NEVER a link the bound graph does not hold (`modelLinks`): the run can report a
+ *                               fragile edge its own graph lacks (served hiring, CEE 9bd3747) → no card (`link_not_in_model`).
  *   5 `near_tie`              — a first-pass near tie → which difference matters most.
  * A limit left unchecked for a cause the user cannot close (not scored, no writer) is NEVER the move: its card's
  * words are returned as a CAVEAT, for the reply to say once (`caveats`).
@@ -121,6 +123,23 @@ export function definitionalLinks(boundGraph: Record<string, unknown> | null): R
   return out;
 }
 
+/**
+ * The edge identities (`${from}→${to}`) of the bound graph: the only links a link move may name (a fragile edge the
+ * run reports but the model does not hold is not a relationship the user can be asked about). No graph → null
+ * (today's selection).
+ */
+export function modelLinks(boundGraph: Record<string, unknown> | null): ReadonlySet<string> | null {
+  const edges = boundGraph?.edges;
+  if (!Array.isArray(edges)) return null;
+  const out = new Set<string>();
+  for (const edge of edges.map(readRecord)) {
+    const from = edge?.from ?? edge?.from_id;
+    const to = edge?.to ?? edge?.to_id;
+    if (typeof from === 'string' && from.length > 0 && typeof to === 'string' && to.length > 0) out.add(composeEdgeIdentity(from, to));
+  }
+  return out;
+}
+
 function moveOf(kind: NextMoveKind, block: CoachingBlock, ids?: readonly string[]): NextMove {
   const refs = Array.isArray(block.target_refs) ? block.target_refs : [];
   return { kind, capability: NEXT_MOVE_CAPABILITY[kind], block, target_ids: ids ?? refs.map((r) => r.id) };
@@ -170,7 +189,9 @@ export function selectNextMove(args: NextMoveInputs): NextMoveSelection {
   if (estimate.block !== null) return { move: moveOf('real_figure', estimate.block), reason: null, caveats };
 
   // 4 — the user's view of the link the result rests on.
-  const built = buildFragileLinkChallenge({ ...input, definitionalLinks: definitionalLinks(boundGraph) });
+  const built = buildFragileLinkChallenge({
+    ...input, definitionalLinks: definitionalLinks(boundGraph), modelLinks: modelLinks(boundGraph),
+  });
   const chosen = built.block === null && built.reason === 'no_groundable_fragile_edge' ? buildNoFlaggedLinkCard(input) : built;
   if (chosen.block !== null) return { move: moveOf('link_view', chosen.block), reason: null, caveats };
 
