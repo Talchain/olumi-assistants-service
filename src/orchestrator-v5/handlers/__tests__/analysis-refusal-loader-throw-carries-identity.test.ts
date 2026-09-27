@@ -112,7 +112,9 @@ const CONFIGURED_GRAPH: GraphV3T = {
   nodes: [
     { id: 'dec_crm', kind: 'decision', label: 'CRM decision' },
     { id: GOAL_ID, kind: 'goal', label: 'Revenue', goal_threshold: 0.8 },
-    { id: 'fac_licence', kind: 'factor', label: 'Annual CRM Licence Cost' },
+    // placeholder-zero (48f2e12f): today's licence cost is held (the "Stay as we
+    // are" level), so the fresh draft is refused on its option values alone.
+    { id: 'fac_licence', kind: 'factor', label: 'Annual CRM Licence Cost', observed_state: { value: 0.3 } },
     { id: 'opt_hubspot', kind: 'option', label: 'Move to HubSpot', interventions: { fac_licence: 0.7 } },
     { id: 'opt_stay', kind: 'option', label: 'Stay as we are', interventions: { fac_licence: 0.3 } },
     { id: 'opt_migrate', kind: 'option', label: 'Migrate to Salesforce', interventions: { fac_licence: 0.5 } },
