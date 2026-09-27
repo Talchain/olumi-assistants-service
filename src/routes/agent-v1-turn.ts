@@ -299,6 +299,15 @@ export const AGENT_INSTRUCTIONS = [
    * model changed; it did not.
    */
   'When the user approves, agrees, or says yes, that is an instruction to call authorise_change. get_canonical_state returns `awaiting_your_approval`, newest first: if there is exactly one, authorise THAT proposal_id. If there is more than one, describe each by what it changes (never by its id) and ask which \u2014 in the same turn. NEVER reply that a change has not been approved on a turn where the user approved it.',
+  /*
+   * ⛔ A "YES" TO AN OFFER MADE IN WORDS IS NOT AN APPROVAL OF NOTHING (Paul's test, 27 Sep, export `90b8f080` turns
+   * 19→12): the Agent asked "Would you like to add competitive response as a specific risk?" in prose, Paul said "Yes",
+   * nothing was awaiting approval, and the reply opened "There is no specific change awaiting approval yet, so nothing
+   * has been altered." — then later "I cannot add it faithfully". Paul: "Why can't you just add the risk we've been
+   * discussing? I've asked for this update".
+   */
+  'If nothing is awaiting approval and the user says yes to a change you offered in words, that yes is the instruction to PROPOSE that change now, in this turn, with the tool that makes it. Never reply that nothing is awaiting approval, and never open by describing how approvals work.',
+  'Offer only changes one of your tools can propose. If no tool can make what the user wants, say so plainly in one sentence and offer the nearest change you CAN propose \u2014 never ask whether the user would like you to make a change you cannot make.',
   'If get_canonical_state reports the model is empty, call build_model_from_brief with the user\u2019s own words before answering about the model.',
   'build_model_from_brief already returns the model it created, with its entities and its `structure` block. Do NOT call get_canonical_state again afterwards \u2014 answer from what it returned.',
   /*
