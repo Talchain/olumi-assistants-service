@@ -21,7 +21,11 @@ import { statedLinkBandFor } from '../agent-lane/stated-link-band-context.js';
 import { composeToolCallResponse } from '../compose.js';
 import { composeRecoverableHandlerResponse } from '../compose/recoverable-handler-response.js';
 import { composeRecoverableValidationResponse } from '../compose/recoverable-validation-response.js';
-import { edgeBandFromMagnitude, edgeBandStd } from '../format/edge-strength-bands.js';
+import {
+  edgeBandFromMagnitude,
+  edgeBandFromStrengthBand,
+  edgeBandStd,
+} from '../format/edge-strength-bands.js';
 import type { InfluenceBand } from '../format/influence-bands.js';
 import { normaliseAbsenceOnly, projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { buildGraphLookup } from '../routing/graph-lookup-adapter.js';
@@ -188,8 +192,14 @@ const USER_WRITE_PROVENANCE_REMOVALS = ['natural_effect', 'magnitude', 'reasonin
  *   confirm on an Olumi-sized link refused (served CEE `1226b3e`, Canvas #70 5848798561);
  * - removal of `provenance.reasoning`, the model's WHY (A6c);
  * - ONLY when `statedBand` is given — the user named the band the link already sits
- *   in (the Agent's confirm; AIQ #70 5855430153) — `strength.std` becoming exactly
- *   that band's spread (`edgeBandStd`). The mean never moves.
+ *   in (the Agent's confirm, AIQ #70 5855430153; or the canvas pill's 0.60.0 `band`
+ *   on a `confirm_current`) — `strength.std` becoming exactly that band's spread
+ *   (`edgeBandStd`). The mean never moves. No band, no std change: a figure confirm.
+ * - `std_defaulted` (A6f, AIQ N1 on #2096): a FIGURE confirm states no spread, so the
+ *   kept std is still Olumi's and the flag MUST arrive `true`; a BAND confirm states
+ *   the spread, so the flag MUST be absent after (present → absent admitted). The
+ *   figure confirm's std itself never moves: its mean is kept, so Olumi's relative
+ *   spread IS the stored std.
  * Each removal is PRESENT → ABSENT only: a field added or rewritten still fails.
  * Every other byte of persisted JSON — including cosmetic/additive fields outside
  * the analysis hash — must remain deeply equal.
@@ -283,6 +293,21 @@ export function isProvenanceOnlyEdgeConfirmation(stored: {
       delete rawAfterEdge.exists_defaulted;
     }
     rawAfterEdge.defaulted = structuredClone(rawBeforeEdge.defaulted);
+  }
+
+  // ⭐ A6f — who chose the SPREAD. A figure confirm leaves Olumi's std, so the per-field
+  // flag must say so (`true`); a band confirm states the spread, so no flag may
+  // remain. Anything else (`false`, missing on a figure, kept or added on a band)
+  // fails; the before-state is restored so the byte comparison judges the rest.
+  if (args.statedBand === undefined) {
+    if (rawAfterEdge.std_defaulted !== true) return false;
+  } else if ('std_defaulted' in rawAfterEdge) {
+    return false;
+  }
+  if ('std_defaulted' in rawBeforeEdge) {
+    rawAfterEdge.std_defaulted = structuredClone(rawBeforeEdge.std_defaulted);
+  } else {
+    delete rawAfterEdge.std_defaulted;
   }
 
   // The band's spread was checked on the parsed edges above; restore the stored
@@ -475,17 +500,22 @@ export async function applyEdgeStrengthEdit(
     persistedDirection: targetEdge.effect_direction,
   });
 
-  // ⭐ A6e — is this write a BAND the user named, or an exact figure? The event
-  // cannot say (the UI's pill, slider, β field and "Confirm this estimate" all send
-  // it), so only an approval that carried the band in-process for this exact link,
-  // landing in that band, counts (`stated-link-band-context.ts`). Everything else is
-  // a figure and keeps the link's spread.
-  const statedBand = statedLinkBandFor(
-    payload.scenario_id,
-    event.from,
-    event.to,
-    event.magnitude,
-  );
+  // ⭐ Is this write a BAND the user named, or an exact figure?
+  //  - 0.60.0: the canvas band pill SAYS so on the event (`band`, the contract's
+  //    `StrengthBand` words), mapped once to CEE's band word. It goes down the same
+  //    band path as the Agent's: the handler stores the band's own spread (no
+  //    `std_defaulted`) and REFUSES a magnitude outside the named band
+  //    (PARAMETER_INVALID, nothing written) — a band the event names is never
+  //    quietly demoted to a figure.
+  //  - No `band` (the slider, the β field, "Confirm this estimate", every pre-0.60.0
+  //    client): A6e — only an approval that carried the band in-process for this
+  //    exact link, landing in that band, counts (`stated-link-band-context.ts`).
+  //    Everything else is a figure, whose spread stays Olumi's (rescaled to the new
+  //    mean, `std_defaulted`, A6f).
+  const statedBand =
+    event.band !== undefined
+      ? edgeBandFromStrengthBand(event.band)
+      : statedLinkBandFor(payload.scenario_id, event.from, event.to, event.magnitude);
 
   // `set` and `confirm_current` are intentionally different acts. A set that
   // resolves to the already-persisted scientific tuple has changed nothing,

@@ -22,7 +22,8 @@
  * user NAMED the band, and the approval carries it in-process (`stated-link-band-context.ts`). The UI sends the
  * same `edge_strength_edit` from a band pill, a 0.01-step slider, a β number field and "Confirm this estimate"
  * (DecisionGuideAI staging `507d8ef8`), and the event has no field saying which — so a write with no stated band
- * is an exact FIGURE and keeps its std. Both halves are pinned below.
+ * is an exact FIGURE, whose std stays Olumi's — rescaled to the new mean and flagged `std_defaulted` (A6f, AIQ N1;
+ * `edge-std-stays-olumis.test.ts`). Both halves are pinned below.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -154,20 +155,23 @@ describe('(1) Paul’s served edge, recorded "very strong" by the user through t
     expect(persistedEdge(await write()).effect_direction).toBe('positive');
   });
 
-  it('CONTRAST (exact FIGURE — the same event with no stated band, as the UI sends it): std is KEPT; reasoning and the existence flag still move', async () => {
+  it('CONTRAST (exact FIGURE — the same event with no stated band, as the UI sends it): std stays OLUMI’S — its relative spread, flagged (A6f); reasoning and the existence flag still move', async () => {
     const edge = persistedEdge(await apply(paulGraph(), eventFor()));
-    expect(edge.strength).toStrictEqual({ mean: 0.85, std: OLUMI_STD });
+    // A6f (AIQ N1): 0.00375 was sized for 0.0075; Olumi's CV 0.5 carried to 0.85, not the absolute std.
+    expect(edge.strength).toStrictEqual({ mean: 0.85, std: 0.425 });
+    expect(edge.std_defaulted).toBe(true);
     expect(edge.provenance).toStrictEqual({ source: 'user_specified' });
     expect(edge.exists_defaulted).toBe(true);
     expect(edge).not.toHaveProperty('defaulted');
   });
 
-  it('CONTRAST: a stated band for ANOTHER link is not this write’s band — std kept', async () => {
+  it('CONTRAST: a stated band for ANOTHER link is not this write’s band — a figure: Olumi’s spread, flagged (A6f)', async () => {
     const result = await runWithStatedLinkBand(
       { scenarioId: SCENARIO_ID, proposalId: 'p-other', from: TO, to: FROM, band: 'very strong' },
       () => apply(paulGraph(), eventFor()),
     );
-    expect(persistedEdge(result).strength.std).toBe(OLUMI_STD);
+    expect(persistedEdge(result).strength.std).toBe(0.425);
+    expect(persistedEdge(result).std_defaulted).toBe(true);
   });
 
   it('an edge that was never defaulted gets no existence flag', async () => {
@@ -212,6 +216,7 @@ describe('(2) confirm_current from a band: the mean is kept and the std is the b
     expect(result.kind === 'refused' ? result.reason : result.kind).toBe('mutated');
     const edge = persistedEdge(result);
     expect(edge.strength).toStrictEqual({ mean: 0.85, std: OLUMI_STD });
+    expect(edge.std_defaulted).toBe(true); // A6f: the kept std is Olumi's, and says so
     expect(edge.provenance).toStrictEqual({ source: 'user_specified' });
     expect(edge.exists_defaulted).toBe(true);
     if (result.kind !== 'mutated') return;
@@ -240,6 +245,8 @@ describe('(3) isProvenanceOnlyEdgeConfirmation admits the user-fact changes and 
     if (e.defaulted === true) e.exists_defaulted = true;
     delete e.defaulted;
     if (opts.bandStd !== undefined) e.strength = { ...e.strength, std: opts.bandStd };
+    // A6f: a figure confirm leaves Olumi's std and flags it; a band confirm states the spread (no flag).
+    if (opts.bandStd === undefined) e.std_defaulted = true;
     return after;
   }
   const guard = (b: RawGraph, a: RawGraph, statedBand?: InfluenceBand) =>
@@ -442,9 +449,10 @@ describe('adjust_edge_strength: the stated band is honoured only when it contain
     expect(edgeOut(await run(0.85, 'very strong')).strength).toStrictEqual({ mean: 0.85, std: edgeBandStd('very strong') });
   });
 
-  it('the Agent-less paths (an LLM or chip `adjust_edge_strength` carries a FIGURE, and can carry no band) keep the spread', async () => {
+  it('the Agent-less paths (an LLM or chip `adjust_edge_strength` carries a FIGURE, and can carry no band) keep Olumi’s RELATIVE spread, flagged (A6f)', async () => {
     const edge = edgeOut(await run(0.6));
-    expect(edge.strength).toStrictEqual({ mean: 0.6, std: OLUMI_STD });
+    expect(edge.strength).toStrictEqual({ mean: 0.6, std: 0.3 });
+    expect(edge.std_defaulted).toBe(true);
     expect(edge.provenance).toStrictEqual({ source: 'user_specified' });
     expect(edge.exists_defaulted).toBe(true);
   });

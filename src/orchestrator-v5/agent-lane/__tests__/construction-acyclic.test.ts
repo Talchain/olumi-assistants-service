@@ -36,7 +36,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
-import { buildModelFromBrief, prepareProvisionalCandidate, type CallStructuredModel } from '../runtime/build-model.js';
+import { buildModelFromBrief, prepareProvisionalCandidate, type CallStructuredModel, type ConstructionTrace } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
@@ -657,5 +657,48 @@ describe('COMBINED (#1891 × #1956): coverage gaps and a loop in one draft', () 
     expect(issues(inputs[1]!)).toEqual([GAP_ISSUE]);
     // Refused: the first draft is what registered — the retry's extra link is not there.
     expect(has(graph, DELAY, NEW_CONVERSIONS)).toBe(false);
+  });
+});
+
+
+/**
+ * X5 (DL design `tracks/c6-draft/DESIGN.md` Q3): the ONE construction retry says WHY it ran and what became of it,
+ * to an observer (the route's `_diagnostic_trace`), never to the model. Reuses this file's served draws.
+ */
+describe('X5: the construction retry reports its reason and outcome to the trace', () => {
+  async function traced(...drafts: unknown[]): Promise<ConstructionTrace[]> {
+    const seen: ConstructionTrace[] = [];
+    let i = 0;
+    const call = (async () => ({ text: JSON.stringify(drafts[Math.min(i++, drafts.length - 1)]) })) as unknown as CallStructuredModel;
+    const d: InternalDispatch = async (path) => (path.endsWith('/graph/register')
+      ? { status: 200, json: { registered: true, model_version: { version_number: 1 } } }
+      : { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } });
+    await buildModelFromBrief('77777777-7777-4777-8777-777777777777', SERVED.brief, d, call, (t) => seen.push(t));
+    return seen;
+  }
+  const repaired = () => withLinks((ls) => [...ls.filter((l) => l !== DELAY_TO_AVAIL), L('AI release delay', 'New Pro conversions', 'negative')]);
+
+  it('CONTROL: a draft with nothing to repair → told ONCE, retried: false', async () => {
+    expect(await traced(repaired())).toEqual([{ retried: false }]);
+  });
+
+  it('RED: the served looped draft → the loop is the reason, not size', async () => {
+    const [t] = await traced(servedCandidate());
+    expect(t).toMatchObject({ retried: true, reasons: { size: false, loop: 1 } });
+  });
+
+  it('RED: a retry that routes the risk on is ADOPTED', async () => {
+    const [t] = await traced(servedCandidate(), repaired());
+    expect(t).toMatchObject({ retried: true, outcome: 'adopted', reasons: { size: false, loop: 1 } });
+  });
+
+  it('RED: an oversized looped draft → size is the reason, and the loop is NOT asked (#1898 size route)', async () => {
+    const [t] = await traced(extended(servedCandidate(), speculative('risks', 5)), repaired());
+    expect(t).toMatchObject({ retried: true, outcome: 'adopted', reasons: { size: true, loop: 0 } });
+  });
+
+  it('RED: a retry whose reply cannot be read → retry_failed, and the build still stands on the first draft', async () => {
+    const [t] = await traced(servedCandidate(), 'not a model');
+    expect(t).toMatchObject({ retried: true, outcome: 'retry_failed' });
   });
 });

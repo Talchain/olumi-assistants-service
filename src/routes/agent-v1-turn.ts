@@ -29,6 +29,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
 import { OPENAI_ONLY, assertProviderAllowed, providerLedgerTruncated, recordProviderUsage, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { RESEARCH_CHIP_PREFIX, approvedQueryOf, readResearchResponse, researchChipFor, researchReplyText, researchRequestBody, type ResearchOutcome } from '../orchestrator-v5/agent-lane/runtime/public-research.js';
+import { agentPromptIdentity, conversationPromptAlias } from '../orchestrator-v5/agent-lane/runtime/prompt-identity.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
@@ -47,11 +48,12 @@ import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { answerIsIncomplete, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
+import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js';
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
 import { commitLimitEditInProcess, commitOptionLevelsInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
 import { readinessSentence, readinessViewOf, stillNeededLine } from '../orchestrator-v5/agent-lane/readiness-view.js';
-import type { CallStructuredModel } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
+import type { CallStructuredModel, ConstructionTrace } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
 import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
@@ -71,7 +73,8 @@ import { computeSurvivingPriorPendingsDetailed } from '../orchestrator-v5/commit
 import { GM_HELD_HANDLER_ID } from '../orchestrator-v5/handlers/edit-graph-referee-gate.js';
 import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
-import { currentStageEmitter } from '../cee/unified-pipeline/stage-stream-context.js';
+import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
+import { readBrief, BRIEF_READING_TIMEOUT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
 import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runDeltaBoundToReadback, runTurnNextMove, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
@@ -154,6 +157,44 @@ export const AGENT_TURN_CLAIM_WAIT = {
   totalMs: Math.min(150_000, config.proxy.browserProxyTimeoutMs - TURN_RESPONSE_HEADROOM_MS),
   everyMs: 1_000,
 };
+
+/**
+ * ⛔ THE CONSTRUCTION CALL ENDS BY ITS OWN DEADLINE, AND A TIMEOUT OF IT IS NEVER RETRIED
+ * (DL CHANGES_REQUIRED on #2113 @ 6aa4f3c2).
+ *
+ * Its only bound was the global undici Agent (`HTTP_CLIENT_TIMEOUT_MS`, 110 s headers timeout), and
+ * `onceMoreOnTransportFailure` retried that timeout. At the 12000 ceiling and the measured 76–87
+ * output tok/s, a call needing more than ~8.4–9.6k tokens timed out at 110 s, a SECOND paid call
+ * started, the browser proxy answered 504 at 125 s, and the server could register a model at ~220 s —
+ * after the user had been told the turn failed.
+ *
+ * The arithmetic, from this request's start (the origin `firstAnalysisDeadline` uses):
+ *     browserProxyTimeoutMs          125 000   the browser gives up here
+ *   − TURN_RESPONSE_HEADROOM_MS       10 000   the turn's response tail (the V5 turn budget's, as above)
+ *   − CONSTRUCTION_TAIL_RESERVE_MS    15 000   what must follow a build inside the turn: registration and
+ *                                              the Agent's one narrating hop (~10–15 s — the same hop
+ *                                              `FIRST_ANALYSIS_RESERVE_MS` reserves)
+ *   = the construction call must have ENDED by start + 100 s.
+ * Its abort budget is what remains of that when it starts (a conversation hop comes first), so it is
+ * always below 100 s and below the 110 s undici bound. A first analysis cannot start past its own,
+ * earlier deadline and says so (`first-analysis.ts`), so it needs no reserve here.
+ */
+export const CONSTRUCTION_TAIL_RESERVE_MS = 15_000;
+/** When the construction call must have ended, in a turn that began at `turnStartedAt`. */
+export function constructionDeadline(
+  turnStartedAt: number,
+  proxyTimeoutMs: number = config.proxy.browserProxyTimeoutMs,
+): number {
+  return turnStartedAt + proxyTimeoutMs - TURN_RESPONSE_HEADROOM_MS - CONSTRUCTION_TAIL_RESERVE_MS;
+}
+/** The typed reason a construction that ran out of turn budget carries — the truncation label's path. */
+export const CONSTRUCTION_TIMEOUT_REASON = 'construction_timeout';
+/** Our own abort (`AbortSignal.timeout`) and undici's own timeouts — the failures that must not be retried. */
+function isConstructionTimeout(err: unknown): boolean {
+  const e = err as { name?: unknown; cause?: { code?: unknown } } | null | undefined;
+  if (e?.name === 'TimeoutError' || e?.name === 'AbortError') return true;
+  return e?.cause?.code === 'UND_ERR_HEADERS_TIMEOUT' || e?.cause?.code === 'UND_ERR_BODY_TIMEOUT';
+}
 
 /** The conversation of record stays Olumi's; this is a per-process cache. */
 const histories = new HistoryStore();
@@ -290,7 +331,7 @@ export { BOARD_EDIT_PREFIX } from '../orchestrator-v5/agent-lane/history-store.j
 const AGENT_INSTRUCTIONS = [
   'You are Olumi, a strategic reasoning layer. Improve human strategic judgement rather than deciding for the user.',
   'Answer the user’s actual question directly and naturally.',
-  'Never invent canonical facts. Each turn opens with a CURRENT MODEL STATE input: exactly what get_canonical_state returns, read by Olumi at the start of the turn. Describe the model from it; call get_canonical_state only when that input is absent.',
+  'Never invent canonical facts. Each turn opens with a CURRENT MODEL STATE input: exactly what get_canonical_state returns, read by Olumi at the start of the turn. A tool result later in the same turn that APPLIED a change (mutated: true, the new entities, a new graph_revision, readiness_after) is newer and supersedes it for what it covers: describe the model from the latest applied result. A proposal\u2019s readiness_if_approved describes the model only IF the user approves, and never supersedes it. Call get_canonical_state only when that input is absent.',
   'Distinguish user facts and evidence from machine-authored estimates and from unknowns. An absent value is unknown, never zero.',
   /*
    * ⛔ CARRYING THE FIELD IS NOT SAYING IT. Measured 3/3 on the Agent route: the
@@ -1046,7 +1087,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * conversation calls per turn, and attributing a cache hit to the wrong one is the
      * quietest possible way to make the measurement wrong.
      */
-    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callModel', { model: budget.model, purpose: 'conversation' });
+    /**
+     * ⭐ WHICH PROMPT, NOT ONLY WHICH SITE (AIQ identity map @30c0e79c; `prompt-identity.ts`). The Run fast path's one
+     * interpreting call (`tool_choice: 'none'`) is `agent.interpret`; every other conversation call is
+     * `agent.converse`. The sha is of `req.instructions` — the SAME string the body below sends, so C5b's view line or
+     * the interpret-only constraint changes it.
+     */
+    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callModel', {
+      model: budget.model,
+      purpose: 'conversation',
+      ...agentPromptIdentity(conversationPromptAlias((req as { tool_choice?: unknown }).tool_choice), req.instructions),
+    });
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: {
@@ -1089,11 +1140,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
    */
   const callResearch = async (query: string): Promise<unknown> => {
     const model = budgetFor('gpt-5.6-terra', 'conversation').model;
-    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callResearch', { model, purpose: 'public_research' });
+    // Built once, so the ledger's sha is of the instructions this exact body sends (`RESEARCH_INSTRUCTIONS` today).
+    const researchBody = researchRequestBody(query, model);
+    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callResearch', {
+      model, purpose: 'public_research', ...agentPromptIdentity('agent.research', researchBody['instructions']),
+    });
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: { authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`, 'content-type': 'application/json' },
-      body: JSON.stringify(researchRequestBody(query, model)),
+      body: JSON.stringify(researchBody),
       // Bounded (#2042 N2): the captured search took 15 s; a hung one is said as unfinished, never waited on.
       signal: AbortSignal.timeout(60_000),
     });
@@ -1110,8 +1165,24 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
    * Structured construction call. Separate from `callModel` because it is a
    * different contract: strict `json_schema` output and its own measured budget
    * (see BANKED_BUDGETS role 'whole'), not the conversation budget.
+   *
+   * `deadlineAt` is this turn's `constructionDeadline` — every attempt, the transport retry's too, gets
+   * only what remains of it. A timeout RETURNS a typed `construction_timeout` instead of throwing, so the
+   * retry (kept for a connection-level failure, e.g. a 196 ms `fetch failed`) never repeats it, and with
+   * no answer there is nothing to register.
    */
-  const callStructured: CallStructuredModel = async (reqBody) => onceMoreOnTransportFailure('construction', async () => {
+  const callStructured = async (
+    reqBody: Parameters<CallStructuredModel>[0],
+    deadlineAt: number,
+  ): ReturnType<CallStructuredModel> => onceMoreOnTransportFailure('construction', async () => {
+    const timedOut = (budgetMs: number, err?: unknown) => {
+      log.warn({ site: 'agent-v1-turn.callStructured', purpose: 'construction', budget_ms: budgetMs, ...(err !== undefined ? { err: String(err).slice(0, 200) } : {}) },
+        'agent-lane: construction call out of turn budget; not retried, nothing registered');
+      return { text: '', status: 'incomplete', incomplete_reason: CONSTRUCTION_TIMEOUT_REASON };
+    };
+    const budgetMs = deadlineAt - Date.now();
+    // Past the deadline no call starts: it could not end before the browser gives up.
+    if (budgetMs <= 0) return timedOut(budgetMs);
     /**
      * ⭐ THE MOST EXPENSIVE CALL IN THE PRODUCT, AND IT WAS THE ONE NOT MEASURED.
      *
@@ -1125,39 +1196,52 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * ⚠ `j.usage` was ALREADY parsed and returned by this function; only the ledger
      * write was missing. Nothing new is fetched or computed here.
      */
-    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callStructured', { model: reqBody.model, purpose: 'construction' });
-    const r = await fetch(OPENAI_RESPONSES_URL, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: reqBody.model,
-        instructions: reqBody.instructions,
-        input: reqBody.input,
-        max_output_tokens: reqBody.max_output_tokens,
-        ...(reqBody.reasoning_effort !== undefined
-          ? { reasoning: { effort: reqBody.reasoning_effort } }
-          : {}),
-        text: {
-          format: {
-            type: 'json_schema',
-            name: 'whole_candidate',
-            strict: true,
-            schema: reqBody.schema,
-          },
-        },
-      }),
+    // `agent.construct` covers BUILD_INSTRUCTIONS and its retry/size/compaction suffixes; the sha tells them apart.
+    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callStructured', {
+      model: reqBody.model, purpose: 'construction', ...agentPromptIdentity('agent.construct', reqBody.instructions),
     });
-    if (!r.ok) {
-      const text = await r.text();
-      throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
-    }
-    const j = (await r.json()) as {
+    let j: {
       output?: { type?: string; content?: { type?: string; text?: string }[] }[];
       usage?: Record<string, unknown>;
+      status?: unknown;
+      incomplete_details?: { reason?: unknown } | null;
     };
+    try {
+      const r = await fetch(OPENAI_RESPONSES_URL, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: reqBody.model,
+          instructions: reqBody.instructions,
+          input: reqBody.input,
+          max_output_tokens: reqBody.max_output_tokens,
+          ...(reqBody.reasoning_effort !== undefined
+            ? { reasoning: { effort: reqBody.reasoning_effort } }
+            : {}),
+          text: {
+            format: {
+              type: 'json_schema',
+              name: 'whole_candidate',
+              strict: true,
+              schema: reqBody.schema,
+            },
+          },
+        }),
+        // The call's OWN bound (see `constructionDeadline`), below the global 110 s undici one.
+        signal: AbortSignal.timeout(budgetMs),
+      });
+      if (!r.ok) {
+        const text = await r.text();
+        throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
+      }
+      j = (await r.json()) as typeof j;
+    } catch (err) {
+      if (isConstructionTimeout(err)) return timedOut(budgetMs, err);
+      throw err;
+    }
     let text = '';
     for (const item of j.output ?? []) {
       if (item.type !== 'message') continue;
@@ -1166,8 +1250,52 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Same contract as the conversation path: never throws, and records nothing for a
     // malformed payload, so measuring a call cannot turn a successful one into a failure.
     recordProviderUsage(usageHandle, j.usage);
-    return { text, usage: j.usage };
+    // ⛔ COMPLETION STATUS IS PART OF THE CONTRACT HERE TOO (AIX-001, as `callModel`). It was dropped, so an answer the
+    // output cap cut off (served 770a477: output_tokens 6000 exactly, 2/14 first briefs) read as a parse error.
+    const incompleteReason = typeof j.incomplete_details?.reason === 'string' ? j.incomplete_details.reason : undefined;
+    if (j.status === 'incomplete') {
+      log.warn({ site: 'agent-v1-turn.callStructured', purpose: 'construction', incomplete_reason: incompleteReason ?? null, max_output_tokens: reqBody.max_output_tokens }, 'agent-lane: construction answer incomplete');
+    }
+    return {
+      text,
+      usage: j.usage,
+      ...(typeof j.status === 'string' ? { status: j.status } : {}),
+      ...(incompleteReason !== undefined ? { incomplete_reason: incompleteReason } : {}),
+    };
   }, (call, err) => log.warn({ err, call }, 'agent-lane transport failure, retrying once'));
+
+  /**
+   * ⭐ C6-2: the ONE brief-reading call (`agent-lane/brief-reading.ts`). Same provider policy and usage ledger as every
+   * Agent call, its own alias, strict JSON, temperature 0, and a hard abort: a reading that is late is no reading.
+   * No retry. It is optional display work, so a failure only means nothing is shown.
+   */
+  const callBriefReading: CallBriefReading = async (reqBody) => {
+    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callBriefReading', {
+      model: reqBody.model, purpose: 'brief_reading', ...agentPromptIdentity('agent.read_brief', reqBody.instructions),
+    });
+    const r = await fetch(OPENAI_RESPONSES_URL, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: reqBody.model,
+        instructions: reqBody.instructions,
+        input: reqBody.input,
+        temperature: 0,
+        max_output_tokens: 600,
+        text: { format: { type: 'json_schema', name: 'brief_spans', strict: true, schema: reqBody.schema } },
+      }),
+      signal: AbortSignal.timeout(BRIEF_READING_TIMEOUT_MS),
+    });
+    if (!r.ok) throw new Error(`openai_${r.status}`);
+    const j = (await r.json()) as { output?: { type?: string; content?: { type?: string; text?: string }[] }[]; usage?: unknown };
+    recordProviderUsage(usageHandle, j.usage);
+    let text = '';
+    for (const item of j.output ?? []) {
+      if (item.type !== 'message') continue;
+      for (const c of item.content ?? []) if (c.type === 'output_text') text += c.text ?? '';
+    }
+    return text;
+  };
 
   /*
    * ⛔ EVERY AGENT TURN IS OPENAI-ONLY (Paul, 23 Sep: zero Anthropic calls on the
@@ -1545,21 +1673,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // safe to release its claim (nothing sent) or must leave it (outcome unknown).
     let writesDispatched = 0;
     /**
-     * ⭐ ONE READ OF THE MODEL PER TURN WHEN NOTHING WAS WRITTEN (slice C1c; served replay of Paul's transcript on
-     * 339ed34, 27 Sep: an ordinary turn read the scenario twice — the state the Agent is given, and the readback
-     * for this response — at ~1.3 s of server time each). Only a READ-ONLY turn reuses its read: once the turn
-     * writes anything (every write goes through this dispatch or bumps `writesDispatched`) nothing is reused, and
-     * a write turn reads exactly as before — a changed model is never answered from before it changed.
+     * ⭐ ONE READ OF THE MODEL PER WRITE EPOCH (C6; widens slice C1c, which reused a read only before the first
+     * write). See `turnReadCache`: a graph read is reused while nothing else has been dispatched or written since
+     * it was taken: the epoch advances when any other dispatch or in-process writer (`readCache.around`) finishes, and a
+     * kept read carries the epoch it STARTED in. So a read after a write always sees it. Served: 22 reads at ~1.1 s in one
+     * journey; an approve made 4.
      */
-    const graphReadPath = `/assist/v1/scenarios/${scenarioId}/graph`;
-    let graphRead: Awaited<ReturnType<typeof dispatch>> | undefined;
-    const readingDispatch: typeof dispatch = async (path, body) => {
-      if (path !== graphReadPath) return dispatch(path, body);
-      if (graphRead !== undefined && writesDispatched === 0) return graphRead;
-      const res = await dispatch(path, body);
-      graphRead = res.status === 200 && writesDispatched === 0 ? res : undefined;
-      return res;
-    };
+    const readCache = turnReadCache(dispatch, `/assist/v1/scenarios/${scenarioId}/graph`);
+    const readingDispatch: typeof dispatch = readCache.dispatch;
     const countingDispatch: typeof dispatch = async (path, body) => {
       if (path.endsWith('/graph/register') || path === '/orchestrate/v2/turn') writesDispatched += 1;
       return readingDispatch(path, body);
@@ -1571,10 +1692,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * failed turn must never release its claim after one), and the witness record below.
      */
     const firstAnalysisDeadlineAt = firstAnalysisDeadline(startedAt);
+    /** The construction call's own end, from the same request start (see `constructionDeadline`). */
+    const constructionDeadlineAt = constructionDeadline(startedAt);
     let firstAnalysis: { outcome: FirstAnalysisOutcome; ms: number; constructionTurnId: string; revision: string } | undefined;
     const runFirstAnalysis = async (input: Parameters<typeof runFirstAnalysisAfterConstruction>[0]): Promise<FirstAnalysisOutcome> => {
       const t0 = Date.now();
-      const outcome = await runFirstAnalysisAfterConstruction({ ...input, onDispatch: () => { writesDispatched += 1; } });
+      const outcome = await readCache.around(() => runFirstAnalysisAfterConstruction({ ...input, onDispatch: () => { writesDispatched += 1; } }));
       firstAnalysis = { outcome, ms: Date.now() - t0, constructionTurnId: input.constructionTurnId, revision: input.revisionHash };
       return outcome;
     };
@@ -1584,8 +1707,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * `bindRunBlocksToReadback` and `runTurnCoaching`. No trigger ⇒ the user asked for the run.
      */
     let lastRun: CapturedAnalysis | undefined;
+    /** X5: set only when this turn ran a construction — see `ConstructionTrace`. */
+    let constructionTrace: ConstructionTrace | undefined;
     const capabilities = createAgentCapabilities(
-      countingDispatch, proposals, callStructured, mode,
+      countingDispatch, proposals, (reqBody) => callStructured(reqBody, constructionDeadlineAt), mode,
       (payload) => { lastRun = { ...payload, trigger: payload.trigger ?? 'explicit_run' }; },
       {
         firstAnalysis: (input) => runFirstAnalysis({ ...input, deadlineAt: firstAnalysisDeadlineAt }),
@@ -1602,6 +1727,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * `currentStageEmitter()` is set only inside `/proxy/v5/turn/stream` and `/orchestrate/v2/turn/stream`;
          * every buffered turn reads `undefined` and emits nothing, so its body is untouched by construction.
          */
+        // X5 (DESIGN Q3): the construction retry's reason and outcome, for the trace only.
+        onConstructionTrace: (t) => { constructionTrace = t; },
         onModelRegistered: (raw) => {
           const emitStage = currentStageEmitter();
           if (emitStage === undefined || !Array.isArray(raw.nodes) || raw.nodes.length === 0) return;
@@ -1621,20 +1748,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // ⭐ Whole-request atomicity (ChatGPT #70 5847200462): N option levels and their links as ONE commit, in-process.
         commitOptionLevels: async (input) => {
           writesDispatched += 1;
-          return commitOptionLevelsInProcess(input, String(req.id));
+          return readCache.around(() => commitOptionLevelsInProcess(input, String(req.id)));
         },
         // ⭐ C5: the provisional view is accepted only while the analysis withholds its leader — read from THIS route's
         // readback through the wire gate's own predicate, so the capability and the gate below cannot disagree.
-        readLeaderStanding: async (sid: string) => leaderStandingOf(await readBackState(dispatch, sid)),
+        readLeaderStanding: async (sid: string) => leaderStandingOf(await readBackState(readingDispatch, sid)),
         // ⭐ SLICE C2 (Canonical #70 5855234599): the product's add-risk door (ONE held change) and limit door (ONE commit),
         // in-process. Each commits a turn row, so each counts as a write.
         holdAddRisk: async (input) => {
           writesDispatched += 1;
-          return holdAddRiskInProcess(input, String(req.id));
+          return readCache.around(() => holdAddRiskInProcess(input, String(req.id)));
         },
         commitLimitEdit: async (input) => {
           writesDispatched += 1;
-          return commitLimitEditInProcess(input, String(req.id));
+          return readCache.around(() => commitLimitEditInProcess(input, String(req.id)));
         },
       },
     );
@@ -1756,7 +1883,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       let canonicalAfterRun: { analysis_state?: unknown; analysis_ready?: unknown; run_delta?: unknown; run_delta_absence_reason?: string } = {};
       let standingAfterRun: LeaderStanding | null = null;
       try {
-        const st = await readBackState(dispatch, scenarioId);
+        const st = await readBackState(readingDispatch, scenarioId);
         /**
          * ⭐ WHAT CHANGED SINCE THE LAST RUN REACHES THE INTERPRETER TOO (served `263dbd5`, final witness `053159Z/15`:
          * the reply said "This run does not supply a precomputed before/after delta" while the response carried one and
@@ -1889,6 +2016,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         timing: { total_ms: ms, provider_ms: ms, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: providerCalls, tool_calls: 1, hops: 0 },
       };
     }
+    /**
+     * ⭐ C6-2: open while the Agent turn runs, closed in the `finally` below — BEFORE this handler returns, so the
+     * reading can never write a frame after the turn's terminal frame. See the start point after the state read.
+     */
+    let briefReadingOpen = false;
     if (result === undefined) try {
       /**
        * ⭐ THE SERVER READS THE MODEL ONCE AND GIVES IT (slice C1). The same `get_canonical_state` result the Agent
@@ -1918,6 +2050,26 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             packet: issueContextPacket({ ...subject, captured_at_turn: 0, state: st }, secret),
             expectation: { ...subject, current_turn: 0, binding_secret: secret },
           };
+        }
+        /**
+         * ⭐ C6-2 — "READING YOUR DECISION" (X5; AIQ ruling #70 5858767026). The model is KNOWN empty (the same read
+         * the packet above binds), so this turn is a first brief: a 75–110 s wait on served CEE. In parallel with the
+         * Agent, ONE fast call copies the user's own goal and options out of THEIR message (never the Agent's
+         * restatement); each span must be an exact substring of it or it is dropped (`gateBriefReading`).
+         *   · Streamed turns only: a buffered turn has no stage emitter, so nothing starts and its body is untouched.
+         *   · Never awaited: the turn's latency and outcome cannot depend on it; a failure is simply no frame.
+         *   · Emitted only while the Agent turn is open AND before GRAPH_READY: the model supersedes the reading.
+         * Display-only: nothing is persisted, and nothing reaches the Agent or the COMPLETE body.
+         */
+        const emitStage = currentStageEmitter();
+        if (emitStage !== undefined && st.ok === true && (st as { empty?: unknown }).empty === true) {
+          briefReadingOpen = true;
+          void readBrief(message, callBriefReading).then((reading) => {
+            if (!briefReadingOpen || reading === null || graphPreviewEmitted()) return;
+            try {
+              emitStage({ kind: 'BRIEF_READ', goal: reading.goal, options: reading.options, elapsed_ms: Date.now() - startedAt });
+            } catch { /* display work never costs the turn */ }
+          });
         }
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: turn state could not be read — the Agent will read it itself');
@@ -1950,9 +2102,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         error: 'UPSTREAM_ERROR', detail: String(err).slice(0, 300),
         ...(turnId !== undefined ? { retry_safe: released } : {}),
       });
+    } finally {
+      briefReadingOpen = false;
     }
 
-    histories.set(sessionId, pruneSupersededToolOutputs(result.items));
+    // ⛔ This turn's approval results go with it ONLY on the approve chip's fast path: it puts no authorise_change in
+    // the history (only its words and Olumi's status), so they are the only record of which proposal it applied
+    // (PJ-C1). On every other turn an approval is already in `items` at its TRUE position; passing it again would
+    // place it after everything and could stub a same-id proposal made later in the turn (adversarial review F2).
+    const results = result.tool_results;
+    const chipApprovals = fastPath === 'approve'
+      ? result.tool_calls.flatMap((c, k) => (c.name === 'authorise_change' && k < results.length ? [results[k]] : []))
+      : [];
+    histories.set(sessionId, pruneSupersededToolOutputs(result.items, chipApprovals));
 
     // A hop limit is never returned as an empty answer.
     const text = result.stopped_reason === 'incomplete'
@@ -2454,6 +2616,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           dispatches: dispatchLedger,
           dispatch_ms: dispatchLedger.reduce((a, d) => a + d.ms, 0),
         },
+        /** X5 (DESIGN Q3): why the one construction retry ran (issue classes) and what became of it. Diagnostic only. */
+        ...(constructionTrace !== undefined ? { construction: constructionTrace } : {}),
         write_claims_removed: narration.stripped.length,
         ...(leaderClaimEnforced ? { leader_claim_enforced: true } : {}),
         /** The run-turn coaching card: shown, or the typed reason it is not (for staging witnesses). */

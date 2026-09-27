@@ -333,6 +333,16 @@ describe('C6-1: the agent lane streams GRAPH_READY when the first model is regis
     expect(again.frames.filter((f) => f.kind === 'GRAPH_READY')).toEqual([]);
   });
 
+  it('RED (X5, DESIGN Q3): a turn that ran a construction carries its retry trace on `_diagnostic_trace`, and only there', async () => {
+    const { body } = await firstBrief();
+    const trace = (body as unknown as { _diagnostic_trace: { construction?: { retried: boolean } } })._diagnostic_trace;
+    expect(trace.construction, 'the construction trace is on the diagnostic trace').toBeDefined();
+    expect(typeof trace.construction!.retried).toBe('boolean');
+    // Diagnostic only: nothing the model or the user reads carries it.
+    const { _diagnostic_trace: _t, ...rest } = body as unknown as Record<string, unknown>;
+    expect(JSON.stringify(rest)).not.toContain('"retried"');
+  });
+
   it('CONTRAST: the buffered turn (no stream context) is the same COMPLETE body — no key added or removed', async () => {
     const s = await firstBrief();
     expect(s.graphReady, 'control: the streamed turn emitted').toHaveLength(1);

@@ -3,11 +3,14 @@
  * 5855430153).
  *
  * WHY. A named band states a RANGE of |β|, so the link writer stores the band's own spread as the link's std
- * (`edgeBandStd`). An exact FIGURE states no range and keeps the spread the link already carries. Both reach the
+ * (`edgeBandStd`). An exact FIGURE states no range, so the spread stays Olumi's (rescaled to the new mean and flagged
+ * `std_defaulted`, A6f). Both reach the
  * writer as the same `edge_strength_edit` event, and the event cannot say which: the UI sends it from a band pill, a
  * 0.01-step slider, a β number field and "Confirm this estimate" (DecisionGuideAI staging `507d8ef8`,
- * `buildEdgeStrengthEditEvent` / `buildEdgeStrengthConfirmEvent`), and the event is `.strict()` with no band member.
- * A magnitude that equals a band midpoint is no proof either — the slider lands on 0.85 as easily as the pill does.
+ * `buildEdgeStrengthEditEvent` / `buildEdgeStrengthConfirmEvent`), and before schemas 0.60.0 the event had no band
+ * member. A magnitude that equals a band midpoint is no proof either — the slider lands on 0.85 as easily as the pill
+ * does. (0.60.0 added `edge_strength_edit.band`: the canvas pill now STATES its band on the wire and the writer reads
+ * it directly, `edge-strength-edit.ts`. This context stays the Agent's route; an event without `band` falls back to it.)
  *
  * The one producer CEE can PROVE is band-origin is the Agent's `propose_link_strength`: it runs only when the user
  * named the band in their own words (`bandTheUserWrote`), and it chooses `confirm_current` exactly when the link
@@ -45,7 +48,7 @@ export function runWithStatedLinkBand<T>(stated: StatedLinkBand, fn: () => Promi
 /**
  * The band the user named for THIS write if — and only if — the context names this scenario and this exact
  * `(from, to)` link, and `magnitude` (the |β| the write lands on) falls in that band. Otherwise `undefined`: the
- * write is an exact figure and keeps its spread.
+ * write is an exact figure and its spread stays Olumi's.
  */
 export function statedLinkBandFor(
   scenarioId: string,

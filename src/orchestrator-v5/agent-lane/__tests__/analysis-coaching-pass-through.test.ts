@@ -77,7 +77,7 @@ test('a readback result computed against another graph forwards nothing, even a 
 });
 
 // ── the no-flagged-link card (coaching/no-flagged-link-card.ts) — the second run-turn card ──
-test('RUN_TURN_COACHING_REASONS is the eight-reason gate order (C4 adds definitional_link)',()=>assert.deepEqual([...RUN_TURN_COACHING_REASONS],['no_run_this_turn','identity_mismatch','limit_repair_pending','no_groundable_fragile_edge','edge_sensitivity_not_evidenced','claim_not_usable','copy_gate','definitional_link']));
+test('RUN_TURN_COACHING_REASONS is the nine-reason gate order (C4 adds definitional_link, link_not_in_model)',()=>assert.deepEqual([...RUN_TURN_COACHING_REASONS],['no_run_this_turn','identity_mismatch','limit_repair_pending','no_groundable_fragile_edge','edge_sensitivity_not_evidenced','claim_not_usable','copy_gate','definitional_link','link_not_in_model']));
 test('a served run with no fragile link (c10) adds exactly one no-flagged-link card after the forwarded upstream card',()=>{
  const c=runTurnCase('c10','t5','explicit_run');
  const upstream={...card,block_id:'00000000-0000-4000-8000-0000000000c1',graph_hash_at_generation:c.turn.graph_hash,created_at:c.turn.analysis_state.run_state.computed_at};

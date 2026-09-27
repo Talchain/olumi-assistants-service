@@ -79,6 +79,19 @@ export interface GenerativeCall {
    * produce a negative or absurd figure.
    */
   duration_ms?: number;
+  /**
+   * ⭐ WHICH PROMPT THIS CALL SENT (AIQ identity map @30c0e79c Part 3; DL #70 5858315483 item 3). A stage name such
+   * as `agent.converse` (the Agent route's names are `AGENT_PROMPT_ALIASES`, `agent-lane/runtime/prompt-identity.ts`).
+   * Set only by a caller that passes it in `detail`: in v1 that is the Agent route's three OpenAI call sites, and
+   * every LEGACY site stays unaliased — its row carries neither this nor {@link GenerativeCall.prompt_sha256}. So an
+   * absent field means "this site is not wired yet", never "no prompt".
+   */
+  readonly prompt_alias?: string;
+  /**
+   * Lowercase hex sha256 of the FINAL composed `instructions` string the call actually sent, so a constraint or retry
+   * suffix appended under the same alias reads as a different prompt. Computed by the caller, carried verbatim.
+   */
+  readonly prompt_sha256?: string;
 }
 
 /**
@@ -246,7 +259,7 @@ export function currentProviderPolicy(): ProviderPolicy | undefined {
 export function assertProviderAllowed(
   provider: LlmProvider,
   site?: string,
-  detail?: { readonly model?: string; readonly purpose?: string },
+  detail?: { readonly model?: string; readonly purpose?: string; readonly prompt_alias?: string; readonly prompt_sha256?: string },
 ): ProviderCallHandle {
   const policy = store.getStore();
   if (policy === undefined) return undefined;
@@ -261,6 +274,9 @@ export function assertProviderAllowed(
       model: detail?.model ?? 'unknown',
       purpose: detail?.purpose ?? site ?? 'unspecified',
       outcome: allowed ? 'allowed' : 'refused_before_network',
+      // Additive: a caller that passes no prompt identity gets a row with NEITHER key, byte for byte as before.
+      ...(detail?.prompt_alias !== undefined ? { prompt_alias: detail.prompt_alias } : {}),
+      ...(detail?.prompt_sha256 !== undefined ? { prompt_sha256: detail.prompt_sha256 } : {}),
     });
   } else {
     policy.truncated = true;

@@ -16,6 +16,7 @@ import {
   OlumiResponseSchema,
 } from '@talchain/schemas/boundary';
 
+import { DEFAULT_STRENGTH_STD } from '../../../src/cee/constants.js';
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 import { computeGraphIdentityHash } from '../../../src/orchestrator-v5/context/graph-identity.js';
 import { GraphStaleWriteError } from '../../../src/orchestrator-v5/session/store.js';
@@ -350,8 +351,11 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
       result: { status: 'applied' },
     });
 
+    // A6f (AIQ N1 on #2096): the UI's exact figure keeps Olumi's RELATIVE spread (0.1 at |0.4| → 0.175 at |0.7|),
+    // flagged as Olumi's, through the real dispatcher, projection and post-commit guards.
     expect(committedEdge()).toMatchObject({
-      strength: { mean: -0.7, std: 0.1 },
+      strength: { mean: -0.7, std: 0.175 },
+      std_defaulted: true,
       effect_direction: 'negative',
       provenance: { source: 'user_specified' },
       provenance_display: 'user_set',
@@ -374,7 +378,7 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
       after: {
         from: 'f-demand',
         to: 'g-growth',
-        strength: { mean: -0.7, std: 0.1 },
+        strength: { mean: -0.7, std: 0.175 },
         effect_direction: 'negative',
       },
     });
@@ -383,7 +387,8 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
     expect(receiptEdges.find(
       (edge) => edge.from === 'f-demand' && edge.to === 'g-growth',
     )).toMatchObject({
-      strength: { mean: -0.7, std: 0.1 },
+      strength: { mean: -0.7, std: 0.175 },
+      std_defaulted: true, // A6f: the flag reaches the wire the UI reads
       effect_direction: 'negative',
       provenance: { source: 'user_specified' },
       provenance_display: 'user_set',
@@ -430,8 +435,10 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
       });
 
       expect(response.statusCode).toBe(200);
+      // A6f: a mean of 0 has no relative spread, so the std is Olumi's default spread, flagged.
       expect(committedEdge()).toMatchObject({
-        strength: { mean: 0, std: 0.1 },
+        strength: { mean: 0, std: DEFAULT_STRENGTH_STD },
+        std_defaulted: true,
         effect_direction: direction,
       });
       const body = JSON.parse(response.body) as Record<string, unknown>;
@@ -620,7 +627,7 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
     expect(response.statusCode).toBe(200);
     expect(appendMock).toHaveBeenCalledTimes(1);
     expect(committedEdge()).toMatchObject({
-      strength: { mean: -0.8, std: 0.1 },
+      strength: { mean: -0.8, std: 0.2 }, // A6f: Olumi's relative spread carried to |0.8|
       effect_direction: 'negative',
     });
     const body = JSON.parse(response.body) as Record<string, unknown>;
@@ -647,7 +654,7 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
     expect(response.statusCode).toBe(200);
     expect(loadGraphMock).toHaveBeenCalledTimes(1);
     expect(committedEdge()).toMatchObject({
-      strength: { mean: -0.7, std: 0.1 },
+      strength: { mean: -0.7, std: 0.175 }, // A6f: Olumi's relative spread carried to |0.7|
       effect_direction: 'negative',
     });
   });
@@ -1320,6 +1327,8 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
       expect(committedEdge()).not.toHaveProperty('defaulted');
       expect((committedEdge() as { provenance?: Record<string, unknown> }).provenance).not.toHaveProperty('reasoning');
       expect(edgeOf(body.draft_graph, 'f-demand', 'g-growth')).toMatchObject({ exists_defaulted: true, strength: { std: edgeBandStd('strong') } });
+      // A6f CONTRAST: the band states the spread, so the committed edge carries no `std_defaulted`.
+      expect(committedEdge()).not.toHaveProperty('std_defaulted');
     });
 
     describe('the confirmation allowlist admits exactly `defaulted` → absent on the target edge, nothing wider', () => {
@@ -1328,6 +1337,8 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
         const target = edgeOf(after, 'f-demand', 'g-growth')!;
         target.provenance = { ...(target.provenance as Record<string, unknown>), source: 'user_specified' };
         target.provenance_display = 'user_set';
+        // A6f: a figure confirm leaves Olumi's std and flags it per field.
+        target.std_defaulted = true;
         return after;
       };
       const confirm = (before: LooseGraph, after: LooseGraph) =>
@@ -1476,6 +1487,8 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
         target.provenance_display = 'user_set';
         if (target.defaulted === true) target.exists_defaulted = true;
         delete target.defaulted;
+        // A6f: a figure confirm leaves Olumi's std and flags it per field.
+        target.std_defaulted = true;
         return after;
       };
       const confirm = (before: LooseGraph, after: LooseGraph) =>
@@ -1530,6 +1543,65 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
         delete provenanceOf(after, 'f-demand', 'g-growth').natural_effect;
         expect(confirm(before, after)).toBe(false);
       });
+    });
+  });
+
+  /**
+   * THE BAND READER through the mounted route (schemas 0.60.0 `edge_strength_edit.band`): the canvas band pill's
+   * event crosses the real B1 parser, the writer stores the band's spread, and the dispatcher's post-commit receipt
+   * guard judges a band confirm by the SAME band the adapter used — or it would withhold a write that landed.
+   * Unit rows (mapping, contrast, parse): `src/orchestrator-v5/system-events/__tests__/edge-band-reader.test.ts`.
+   */
+  describe('0.60.0 `band` on the UI event (the canvas band pill)', () => {
+    it('⭐ a band SET: committed std is the band’s, no `std_defaulted`, the mean is the pill’s', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payloadFor(validEvent({ magnitude: 0.55, band: 'strong' }), 'd1'),
+      });
+
+      expect(response.statusCode, response.body).toBe(200);
+      expect(committedEdge()).toMatchObject({
+        strength: { mean: -0.55, std: edgeBandStd('strong') },
+        effect_direction: 'negative',
+        provenance: { source: 'user_specified' },
+      });
+      expect(committedEdge()).not.toHaveProperty('std_defaulted');
+    });
+
+    it('⭐ a band outside the magnitude ("slight" at 0.55): refused, no graph written, the stored graph untouched', async () => {
+      const beforeGraph = structuredClone(persisted);
+      const response = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payloadFor(validEvent({ magnitude: 0.55, band: 'slight' }), 'd2'),
+      });
+
+      expect(response.statusCode, response.body).toBe(200);
+      expect(appendMock).toHaveBeenCalledTimes(1);
+      expect(lastAppend().graph).toBeUndefined();
+      expect(lastAppend().handler_facts).toEqual([]);
+      expect(persisted).toStrictEqual(beforeGraph);
+      expect(JSON.parse(response.body)).not.toHaveProperty('draft_graph');
+    });
+
+    it('⭐ a band CONFIRM: mean kept, std becomes the band’s, the analysis hash moves, and the receipt guard admits it', async () => {
+      const beforeHash = computeAnalysisAffectingGraphHash(persisted as never);
+      const response = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payloadFor(
+          validEvent({ magnitude: 0.4, expected: { mean: -0.4, effect_direction: 'negative' }, intent: 'confirm_current', band: 'strong' }),
+          'd3',
+        ),
+      });
+
+      expect(response.statusCode, response.body).toBe(200);
+      const body = JSON.parse(response.body) as Record<string, unknown>;
+      expect(body.assistant_text).toContain('Confirmed the current strength');
+      expect(committedEdge()).toMatchObject({ strength: { mean: -0.4, std: edgeBandStd('strong') }, effect_direction: 'negative' });
+      expect(committedEdge()).not.toHaveProperty('std_defaulted');
+      expect(computeAnalysisAffectingGraphHash(lastAppend().graph as never)).not.toBe(beforeHash);
     });
   });
 

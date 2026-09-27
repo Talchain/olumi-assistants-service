@@ -36,6 +36,7 @@
  * `event: stage`, JSON `data` with `stage`, `seq` (monotonic from 0), `status`:
  *
  *   DRAFTING        in_progress  — stream opened, turn dispatched
+ *   BRIEF_READ      in_progress  — agent-lane first brief only (C6-2): the user's own `goal` + `options`
  *   PROGRESS        in_progress  — node labels from the live token stream
  *   GRAPH_READY     in_progress  — validated graph (~33 s); `graph`, `schema_version`
  *   COACHING_READY  in_progress  — coaching pass settled (~53 s); `coaching_status`
@@ -210,7 +211,8 @@ export async function streamTurnAsStagedSse(opts: StagedTurnStreamOptions): Prom
   let socketWritable = true;
 
   const writeStage = (stage: StagedFrameClass, extra?: Record<string, unknown>): void => {
-    if (!socketWritable) return;
+    // `writableEnded`: a frame after the terminal one would be a write-after-end (an async 'error' on the response).
+    if (!socketWritable || reply.raw.writableEnded) return;
     const frame = {
       stage,
       seq: seq++,
@@ -272,6 +274,13 @@ export async function streamTurnAsStagedSse(opts: StagedTurnStreamOptions): Prom
       case "COACHING_READY":
         writeStage("COACHING_READY", {
           coaching_status: event.coaching_status,
+          elapsed_ms: event.elapsed_ms,
+        });
+        break;
+      case "BRIEF_READ":
+        writeStage("BRIEF_READ", {
+          goal: event.goal,
+          options: event.options,
           elapsed_ms: event.elapsed_ms,
         });
         break;

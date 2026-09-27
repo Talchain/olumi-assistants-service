@@ -145,6 +145,8 @@ export interface AgentTurnResult {
     proposal_id?: string; outcome?: string; refusal?: string;
     /** A refused call's conflict fields — which parts of what the model sent fired (names only, never the figure). */
     conflict_fields?: readonly string[];
+    /** Why a construction ended without an answer (`max_output_tokens`, `construction_timeout`) — for exports. */
+    incomplete_reason?: string;
   }[];
   /** Full results, so Olumi can decide what it owes the user this turn. */
   readonly tool_results: readonly ToolResult[];
@@ -180,8 +182,22 @@ const conflictFieldsOf = (result: ToolResult): { conflict_fields?: readonly stri
   return names.length > 0 ? { conflict_fields: names } : {};
 };
 
-/** Opens the state item a fresh packet puts into a turn's input (and marks it, so history never keeps one). */
-export const CURRENT_MODEL_STATE_PREFIX = 'CURRENT MODEL STATE \u2014 exactly what get_canonical_state returns, read by Olumi at the start of this turn. Describe the model from it: ';
+/**
+ * Opens the state item a fresh packet puts into a turn's input (and marks it, so history never keeps one).
+ *
+ * \u26d4 IT IS THE MODEL AS THE TURN BEGAN, NOT AS IT STANDS AFTER THIS TURN'S TOOLS (C1 follow-up, CEE #2112 review,
+ * 27 Sep). The item stays in the input for EVERY hop \u2014 moving or dropping it mid-turn would change the request prefix
+ * and defeat prompt caching \u2014 while `get_canonical_state` stays withheld. It used to end "Describe the model from it",
+ * so on a first brief (#2112 gives the EMPTY model, `{empty:true, entities:[]}`) hop 2 read that instruction above an
+ * empty model straight after `build_model_from_brief` had returned the new entities and graph_revision: the Agent
+ * could say "the model is empty" about the model it had just built. The wording now says a later result supersedes
+ * it. Pinned: `turn-state-given-not-fetched.test.ts` (C1 follow-up row). Keep `CURRENT MODEL STATE` first (tests and
+ * the route prompt match the leading words) and keep `{` out of it (a test parses the state from the first `{`).
+ */
+export const CURRENT_MODEL_STATE_PREFIX = 'CURRENT MODEL STATE \u2014 exactly what get_canonical_state returns, read by Olumi at the START of this turn. '
+  + 'If a tool result later in this turn APPLIED a change (mutated: true, the new entities, a new graph_revision, readiness_after), that result is '
+  + 'newer and supersedes this for what it covers: describe the model from the latest applied result. A proposal\u2019s '
+  + 'readiness_if_approved describes the model only IF the user approves, and never supersedes this. As the turn began: ';
 
 export async function runAgentTurn(
   input: AgentTurnInput,
@@ -215,7 +231,7 @@ export async function runAgentTurn(
   ];
   /** What this turn hands on as history: everything but the state it was given. */
   const handedOn = (): unknown[] => (stateItem === undefined ? items : items.filter((i) => i !== stateItem));
-  const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; conflict_fields?: readonly string[] }[] = [];
+  const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; conflict_fields?: readonly string[]; incomplete_reason?: string }[] = [];
   const toolResults: ToolResult[] = [];
   let mutated = false;
   const now = input.now ?? (() => Date.now());
@@ -397,6 +413,7 @@ export async function runAgentTurn(
         // ⭐ What a REFUSED call sent, by field name (OpenAI Runtime #70 5859406197 item 3: the served artefacts keep no
         // tool arguments, so which part of a refused level fired could not be told). Names only, bounded.
         ...conflictFieldsOf(result),
+        ...(typeof result.incomplete_reason === 'string' ? { incomplete_reason: result.incomplete_reason } : {}),
       });
       toolResults.push(result);
       items.push({
