@@ -99,7 +99,11 @@ import { CoachingBlockSchema, type CoachingBlock } from '@talchain/schemas/bound
 
 import { deterministicBlockId } from '../compose/block-id.js';
 import type { NamedLimit } from './bound-graph.js';
-import { WITHHELD_CONSTRAINT_VERDICT } from '../compose/analysis-state-v1.js';
+import {
+  WITHHELD_CONSTRAINT_VERDICT,
+  WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT,
+  WITHHELD_NO_OPTION_MEETS_LIMIT,
+} from '../compose/analysis-state-v1.js';
 import type { ConstraintVerdictState } from '../../orchestrator/context/constraint-feasibility.js';
 import {
   FIRST_PASS_PREFIX,
@@ -119,7 +123,16 @@ export const LIMIT_UNCHECKED_SIGNAL_ID_PREFIX = 'coach:limit_unchecked:';
  * Which words the card speaks: today's disjunction, the PROVED cause, or the claim the typed verdict
  * state licenses (`unchecked` ⇐ `unevaluated`, `identity` ⇐ `identity_unresolved`).
  */
-export type LimitCardArm = 'today' | 'cause' | 'unchecked' | 'identity';
+export type LimitCardArm = 'today' | 'cause' | 'unchecked' | 'identity' | EveryOptionTier;
+
+/**
+ * F-LIMIT's two typed tiers (#2058): every option breaks the SAME limit (tier 1, `no_option_meets_limit`) or would
+ * probably break it (tier 2, `every_option_likely_breaks_limit`). Served dloop-3 (27 Sep, #70 5851348637): with tier 1
+ * on the readback, the one card was a link card, because {@link leaderWithheldForALimit} matches only
+ * `constraint_verdict_withheld`. These tiers license their own words and the Agent's own next move
+ * (`withheld-leader-fail-closed.ts`): change that limit or one of the options.
+ */
+export type EveryOptionTier = 'none_meets' | 'likely_breaks';
 
 const STATES_WITH_OWN_WORDS: ReadonlySet<ConstraintVerdictState> = new Set<ConstraintVerdictState>([
   'unevaluated', 'identity_unresolved', 'evaluated_infeasible',
@@ -139,9 +152,10 @@ export function limitCardArm(provedUnanchored: boolean, verdictState: unknown): 
 
 /** The card's block contract, as data (the shared bounds live on RUN_TURN_COACHING_CONTRACT). */
 export const LIMIT_UNCHECKED_CARD_CONTRACT = Object.freeze({
-  signal_id: `${LIMIT_UNCHECKED_SIGNAL_ID_PREFIX}<graph_hash>:<run computed_at>:<effective trigger>[:named][:unanchored|:unchecked|:identity]`,
+  signal_id: `${LIMIT_UNCHECKED_SIGNAL_ID_PREFIX}<graph_hash>:<run computed_at>:<effective trigger>[:named][:unanchored|:unchecked|:identity|:none_meets|:likely_breaks]`,
   block_id: 'deterministicBlockId(signal_id)',
   reads: "readback analysis_state.leader_claim: permitted === false && withheld_reason === 'constraint_verdict_withheld'"
+    + " | 'no_option_meets_limit' | 'every_option_likely_breaks_limit' (F-LIMIT tiers, their own words)"
     + '; for the cause, bound-graph.ts everyLimitProvedUnanchored(the bound graph, analysis_ready.options)'
     + '; for the verdict words, the readback constraintVerdictState',
   target_refs: '[]',
@@ -157,6 +171,15 @@ export const LIMIT_UNCHECKED_CARD_CONTRACT = Object.freeze({
 export function leaderWithheldForALimit(analysisState: unknown): boolean {
   const claim = readRecord(readRecord(analysisState)?.leader_claim);
   return claim?.permitted === false && claim.withheld_reason === WITHHELD_CONSTRAINT_VERDICT;
+}
+
+/** The readback's F-LIMIT tier, by exact code on a withheld claim; anything else → null. */
+export function everyOptionBreaksALimit(analysisState: unknown): EveryOptionTier | null {
+  const claim = readRecord(readRecord(analysisState)?.leader_claim);
+  if (claim?.permitted !== false) return null;
+  if (claim.withheld_reason === WITHHELD_NO_OPTION_MEETS_LIMIT) return 'none_meets';
+  if (claim.withheld_reason === WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT) return 'likely_breaks';
+  return null;
 }
 
 /**
@@ -179,6 +202,7 @@ export function composeLimitUncheckedCard(
   const which: LimitCardArm = arm === true ? 'cause' : arm === false ? 'today' : arm;
   if (which === 'cause') return composeProvedCause(firstPass, named, ASK);
   if (which === 'unchecked' || which === 'identity') return composeTypedVerdict(firstPass, named, ASK, which);
+  if (which === 'none_meets' || which === 'likely_breaks') return composeEveryOptionBreaks(firstPass, named, which);
   if (named.length >= 2) {
     const quoted = named.map((l) => `“${l.label}”${l.stated !== null ? ` (${l.stated})` : ''}`);
     const list = `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`;
@@ -312,9 +336,43 @@ function composeTypedVerdict(
   };
 }
 
+/**
+ * The F-LIMIT words: what every option does against the limit, in the tier's own register (tier 2 never says
+ * "meets"), and the one move that can change it that the Agent can PROPOSE: change an option or add one
+ * (`add_option` / `set_option_intervention`), offered for approval. ⛔ Never "change the limit": no served writer
+ * edits a limit on a non-goal node (the Agent's `set_goal_target` and the `goal_target_edit` event both refuse a
+ * node that is not the goal), so the offer would end at an approval that cannot exist. Every option breaks the SAME
+ * limit, but no typed per-limit verdict reaches this card, so with two or more limits it says "all of" (tier 1) or
+ * "one of" (tier 2) and never which. Never "run again": it cannot help.
+ */
+function composeEveryOptionBreaks(firstPass: boolean, named: readonly NamedLimit[], tier: EveryOptionTier): FragileLinkChallengeCopy {
+  const { body_max: bodyMax, action_prompt_max: promptMax } = RUN_TURN_COACHING_CONTRACT.limits;
+  const fit = (forms: readonly string[], max: number) => forms.find((f) => f.length <= max) ?? forms[forms.length - 1]!;
+  const quoted = named.map((l) => `“${l.label}”${l.stated !== null ? ` (${l.stated})` : ''}`);
+  const one = quoted.length === 1;
+  const on = one ? ` on ${quoted[0]}` : quoted.length >= 2 ? ` on ${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}` : '';
+  const whose = (who: 'your' | 'my') => (one ? `${who} limit${on}` : tier === 'none_meets' ? `all of ${who} limits${on}` : `one of ${who} limits${on}`);
+  const finding = (who: 'your' | 'my') => (tier === 'none_meets' ? `no option meets ${whose(who)}` : `every option would probably break ${whose(who)}`);
+  const where = tier === 'none_meets' ? 'In this analysis' : 'On these estimates';
+  const move = `change one of the options or add one that could stay within ${one ? 'it' : 'them'}`;
+  const CLOSE = 'If I choose, offer that change for me to approve, and change nothing until I do.';
+  return {
+    title: tier === 'none_meets'
+      ? (one ? 'No option meets your limit' : 'No option meets all your limits')
+      : (one ? 'Every option would probably break your limit' : 'Every option would probably break a limit'),
+    body: fit([`${firstPass ? `${FIRST_PASS_PREFIX}` : `${where}, `}${finding('your')}, so none is put forward.`], bodyMax),
+    action_label: 'Change or add an option',
+    action_prompt: fit([
+      `${where}, ${finding('my')}. Ask me whether to ${move}, and what that rests on. ${CLOSE}`,
+      `${where}, ${finding('my')}. Ask me whether to ${move}. ${CLOSE}`,
+    ], promptMax),
+  };
+}
+
 /** One block_id, one body: each arm's words carry their own signal suffix. */
 const ARM_SIGNAL_SUFFIX: Readonly<Record<LimitCardArm, string>> = Object.freeze({
   today: '', cause: ':unanchored', unchecked: ':unchecked', identity: ':identity',
+  none_meets: ':none_meets', likely_breaks: ':likely_breaks',
 });
 
 export type LimitUncheckedCardDecision =
@@ -334,6 +392,8 @@ export function buildLimitUncheckedCard(
   provedUnanchored = false,
   /** The readback's `constraintVerdictState` (the run's own); absent or `null` → the proof or today's words. */
   verdictState?: unknown,
+  /** {@link everyOptionBreaksALimit} on the readback: its tier's words outrank every other arm. */
+  everyOption: EveryOptionTier | null = null,
 ): LimitUncheckedCardDecision {
   // (0) identity, repeated so the builder is total on its own.
   const result = readRecord(input.analysisResult);
@@ -357,7 +417,7 @@ export function buildLimitUncheckedCard(
     ...(namedLimits === null ? [] : [namedLimits, namedLimits.map((l) => ({ label: l.label, stated: null }))]),
     undefined,
   ];
-  const licensed = limitCardArm(provedUnanchored, verdictState);
+  const licensed = everyOption ?? limitCardArm(provedUnanchored, verdictState);
   const arms: LimitCardArm[] = licensed === 'today' ? ['today'] : [licensed, 'today'];
   const chosen = arms.flatMap((arm) => nameForms.map((ls) => ({ arm, named: ls !== undefined, copy: composeLimitUncheckedCard(firstPass, ls, arm) })))
     .find((c) => copyPasses(c.copy));
