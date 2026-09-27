@@ -62,7 +62,14 @@ async function storedVerdict(graph: Json): Promise<Json> {
 describe('B5-1 at the call site: the stored verdict on Paul\'s 17d1 run', () => {
   it('stores churn as estimate_only (Olumi\'s 3 %) and a joint that is not scored', async () => {
     const v = await storedVerdict(input.graph);
-    expect(v.per_limit).toEqual([{ constraint_id: CHURN, state: 'estimate_only', reason: 'baseline_is_estimate' }]);
+    expect(v.per_limit).toEqual([{ constraint_id: CHURN, state: 'estimate_only', reason: 'level_olumi_estimate' }]);
+    expect(v.joint).toEqual({ state: 'estimate_only' });
+  });
+  it('DERIVED (churn\'s level marked as the user\'s assumption): the call site names it THEIRS, level_user_assumption', async () => {
+    const graph = clone(input.graph);
+    (graph.nodes as Json[]).find((n) => n.id === 'monthly_churn')!.observed_state.source = 'user_assumption';
+    const v = await storedVerdict(graph);
+    expect(v.per_limit).toEqual([{ constraint_id: CHURN, state: 'estimate_only', reason: 'level_user_assumption' }]);
     expect(v.joint).toEqual({ state: 'estimate_only' });
   });
   it('CONTROL (DERIVED: churn\'s level stated by the user): the same run stores churn as scored', async () => {

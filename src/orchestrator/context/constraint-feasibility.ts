@@ -31,7 +31,11 @@
  * dead on the live object wire — this module does not share that limitation.
  */
 
-import type { ConstraintVerdict as ContractConstraintVerdict } from "@talchain/schemas/orchestrator";
+import type { KnownObservedStateSourceLiteral } from "@talchain/schemas";
+import {
+  ConstraintVerdictSchema,
+  type ConstraintVerdict as ContractConstraintVerdict,
+} from "@talchain/schemas/orchestrator";
 import { EnrichmentScaleProvenanceSchema } from "@talchain/schemas/boundary";
 
 import { readOptionResultSources } from "./option-result-source.js";
@@ -432,7 +436,8 @@ export const MAY_NAME_LEADING_OPTION: Readonly<
  *     target's level is the USER's (authorship credit, the one authority `collectLeaderEstimatedTargetIds` uses).
  *     `reason` is ABSENT.
  *   · `estimate_only`: as `scored`, but (e) fails: the level is Olumi's estimate (or the leader SETS the target at a
- *     non-user level, rule (d), which folds in here). `reason: 'baseline_is_estimate'`.
+ *     non-user level, rule (d), which folds in here). `reason` names WHOSE figure it is ({@link EstimateOnlyReason}):
+ *     `level_user_assumption` or `level_olumi_estimate` (DL CR on #2146 5859853452; AI Quality 5859849355 (a)).
  *   · `unscored`: the producer published no trustworthy P. `reason` is the first failed precondition by
  *     {@link PER_LIMIT_REASON_RANK}.
  *
@@ -793,6 +798,58 @@ export function collectLeaderEstimatedTargetIds(
 }
 
 /**
+ * ⭐ B5 (a) — WHOSE FIGURE an `estimate_only` limit was checked against (DL CR on #2146 5859853452; AI Quality
+ * 5859849355 (a)). One code could not tell the user's own assumption from Olumi's estimate, which is either a
+ * misattribution or a wrong pass downstream.
+ *   · `level_user_assumption`: the level is `user_assumption`, a figure the USER supplied as a guess;
+ *   · `level_olumi_estimate`: Olumi's (`cee_hypothesis`, `cee_inference`, a `user_confirmed` estimate the user only
+ *     endorsed: "the number is still ours", `obligation-provenance.ts`), a repair's, or no readable owner.
+ */
+export type EstimateOnlyReason = 'level_user_assumption' | 'level_olumi_estimate';
+
+/** The contract literal for a figure the user marked as their assumption (0.55 `OBSERVED_STATE_SOURCE_LITERALS`). */
+const USER_ASSUMPTION_SOURCE: KnownObservedStateSourceLiteral = 'user_assumption';
+
+/**
+ * The owner of one level stamp, from the ONE authority: `classifyValueSource`. `null` = the user's own figure
+ * (`earnsAuthorshipCredit`), so the limit may be `scored`. Otherwise the {@link EstimateOnlyReason}.
+ *
+ * `classifyValueSource` puts `user_assumption` and `user_confirmed` in ONE class, `user_ratified`, because neither is
+ * authorship. They differ in whose NUMBER it is, which is the question here, so that class alone is split by its
+ * stamp. Every other class decides the owner by itself. Pure.
+ */
+export function limitLevelOwnerReason(stamp: unknown): EstimateOnlyReason | null {
+  const provenance = classifyValueSource(stamp);
+  if (earnsAuthorshipCredit(provenance)) return null;
+  return provenance === 'user_ratified' && stamp === USER_ASSUMPTION_SOURCE ? 'level_user_assumption' : 'level_olumi_estimate';
+}
+
+/**
+ * B5's per-limit input, from one walk of the analysed graph: the limits whose target's level is the user's own
+ * (`userBaselineIds`, precondition (e)) and those whose level is the user's ASSUMPTION (`userAssumptionIds`, the owner
+ * of an `estimate_only` row). A limit in neither is Olumi's or has no owner. Fails toward `estimate_only` /
+ * `level_olumi_estimate`: a missing graph, target, `observed_state` or source leaves the id out of both. Pure.
+ */
+export function collectLimitLevelOwners(
+  graph: unknown,
+  ratified: readonly RatifiedConstraint[],
+): { userBaselineIds: Set<string>; userAssumptionIds: Set<string> } {
+  const out = { userBaselineIds: new Set<string>(), userAssumptionIds: new Set<string>() };
+  const rawNodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
+  if (!Array.isArray(rawNodes)) return out;
+  for (const c of ratified) {
+    if (typeof c.node_id !== 'string' || c.node_id.length === 0) continue;
+    const node = rawNodes.find((n) => readRecord(n)?.id === c.node_id);
+    const level = readRecord(readRecord(node)?.observed_state);
+    if (level === null) continue;
+    const owner = limitLevelOwnerReason(level.source);
+    if (owner === null) out.userBaselineIds.add(c.constraint_id);
+    else if (owner === 'level_user_assumption') out.userAssumptionIds.add(c.constraint_id);
+  }
+  return out;
+}
+
+/**
  * ⭐ B5 precondition (e): the ratified limits whose TARGET'S LEVEL is the user's own figure.
  *
  * A limit is compared against its target's held level (ISL: `goal_baseline` + the option's same-draw difference; MG
@@ -810,17 +867,7 @@ export function collectUserBaselineConstraintIds(
   graph: unknown,
   ratified: readonly RatifiedConstraint[],
 ): Set<string> {
-  const out = new Set<string>();
-  const rawNodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
-  if (!Array.isArray(rawNodes)) return out;
-  for (const c of ratified) {
-    if (typeof c.node_id !== 'string' || c.node_id.length === 0) continue;
-    const node = rawNodes.find((n) => readRecord(n)?.id === c.node_id);
-    const level = readRecord(readRecord(node)?.observed_state);
-    if (level === null) continue;
-    if (earnsAuthorshipCredit(classifyValueSource(level.source))) out.add(c.constraint_id);
-  }
-  return out;
+  return collectLimitLevelOwners(graph, ratified).userBaselineIds;
 }
 
 /**
@@ -1378,10 +1425,10 @@ export function deriveConstraintVerdict(
   /** {@link collectLeaderEstimatedTargetIds}. Also folds into B5's `estimate_only` (rule (d)). */
   leaderEstimatedTargetIds?: ReadonlySet<string>,
   /**
-   * B5. `userBaselineIds` = {@link collectUserBaselineConstraintIds} over the analysed graph. OPTIONAL, and omitted is
-   * the SAFE value: no rows are attested (never a defaulted `scored`).
+   * B5. {@link collectLimitLevelOwners} over the analysed graph. OPTIONAL, and omitted is the SAFE value: no rows are
+   * attested (never a defaulted `scored`). Both sets are required when it is given, so no caller can omit the owner.
    */
-  perLimitInput?: { readonly userBaselineIds: ReadonlySet<string> },
+  perLimitInput?: { readonly userBaselineIds: ReadonlySet<string>; readonly userAssumptionIds: ReadonlySet<string> },
 ): ConstraintVerdict {
   const leaderVerdict = deriveLeaderClaimVerdict(
     envelope,
@@ -1391,7 +1438,7 @@ export function deriveConstraintVerdict(
     leaderEstimatedTargetIds,
   );
   if (perLimitInput === undefined || ratified.length === 0) return leaderVerdict;
-  const perLimit = derivePerLimitVerdicts(envelope, ratified, perLimitInput.userBaselineIds, leaderEstimatedTargetIds);
+  const perLimit = derivePerLimitVerdicts(envelope, ratified, perLimitInput, leaderEstimatedTargetIds);
   return { ...leaderVerdict, perLimit, joint: deriveJointLimitVerdict(perLimit) };
 }
 
@@ -1512,9 +1559,10 @@ const JOINT_WITHHELD_REASON = 'limit_unscored';
 function derivePerLimitVerdicts(
   envelope: Record<string, unknown>,
   ratified: readonly RatifiedConstraint[],
-  userBaselineIds: ReadonlySet<string>,
+  levels: { readonly userBaselineIds: ReadonlySet<string>; readonly userAssumptionIds: ReadonlySet<string> },
   leaderEstimatedTargetIds: ReadonlySet<string> | undefined,
 ): PerLimitVerdict[] {
+  const { userBaselineIds, userAssumptionIds } = levels;
   const seen = new Set<string>();
   const limits = ratified.filter((c) => (seen.has(c.constraint_id) ? false : (seen.add(c.constraint_id), true)));
   const filteredEntries = readProducerFilteredEntries(envelope);
@@ -1613,9 +1661,15 @@ function derivePerLimitVerdicts(
     if (reasons.length > 0) return { constraint_id: c.constraint_id, state: 'unscored', reason: firstFailed(reasons) };
     const usersOwnLevel =
       userBaselineIds.has(c.constraint_id) && leaderEstimatedTargetIds?.has(c.constraint_id) !== true;
-    return usersOwnLevel
-      ? { constraint_id: c.constraint_id, state: 'scored' }
-      : { constraint_id: c.constraint_id, state: 'estimate_only', reason: 'baseline_is_estimate' };
+    if (usersOwnLevel) return { constraint_id: c.constraint_id, state: 'scored' };
+    // (a) WHOSE figure. A level that is not the user's names its own owner. When the level IS the user's, only rule (d)
+    // leaves the row here: the leader SETS the target, at an intervention's level whose vocabulary (brief_extraction |
+    // user_specified | cee_hypothesis) holds no user assumption, so it is Olumi's or has no owner.
+    const reason: EstimateOnlyReason =
+      !userBaselineIds.has(c.constraint_id) && userAssumptionIds.has(c.constraint_id)
+        ? 'level_user_assumption'
+        : 'level_olumi_estimate';
+    return { constraint_id: c.constraint_id, state: 'estimate_only', reason };
   });
 }
 
@@ -1687,6 +1741,35 @@ export function deriveLeaderLimitRisks(
     }
   }
   return out;
+}
+
+/**
+ * B5 (DL 5859845823) — the run's stored per-limit rows and joint, read off a `run_analysis` fact's typed
+ * `constraint_verdict`: the source of the graph read's `analysis_limit_verdicts` and so of the turn's `limit_verdicts`.
+ * `null` unless the fact attests rows: absent, malformed or empty `per_limit`, or no joint (absent = not attested, never
+ * defaulted). Each half is checked by the 0.60 contract's own member schema. Pure.
+ */
+export interface StoredLimitVerdicts {
+  readonly per_limit: PerLimitVerdict[];
+  readonly joint: JointLimitVerdict;
+}
+
+const PerLimitRowsSchema = ConstraintVerdictSchema.shape.per_limit.unwrap();
+const JointVerdictSchema = ConstraintVerdictSchema.shape.joint.unwrap();
+
+/** A `{per_limit, joint}` pair the contract accepts, with at least one row; otherwise `null`. */
+export function readLimitVerdicts(value: unknown): StoredLimitVerdicts | null {
+  if (!isPlainObject(value)) return null;
+  const record = value as Record<string, unknown>;
+  const rows = PerLimitRowsSchema.safeParse(record.per_limit);
+  const joint = JointVerdictSchema.safeParse(record.joint);
+  if (!rows.success || !joint.success || rows.data.length === 0) return null;
+  return { per_limit: rows.data as PerLimitVerdict[], joint: joint.data as JointLimitVerdict };
+}
+
+export function readLimitVerdictsFromResult(result: unknown): StoredLimitVerdicts | null {
+  if (!isPlainObject(result)) return null;
+  return readLimitVerdicts((result as Record<string, unknown>).constraint_verdict);
 }
 
 /**

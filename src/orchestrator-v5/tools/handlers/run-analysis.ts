@@ -49,7 +49,7 @@ import type {
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import {
   collectLeaderEstimatedTargetIds,
-  collectUserBaselineConstraintIds,
+  collectLimitLevelOwners,
   deriveConstraintVerdict,
   readRatifiedConstraints,
   projectClaimSafety,
@@ -1852,7 +1852,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       leadingOptionId ?? null,
       undefined,
       leaderEstimatedTargetIds,
-      { userBaselineIds: collectUserBaselineConstraintIds(graphForAnalysis, ratifiedConstraints) },
+      // (a) and WHOSE figure an estimate_only row was checked against (DL CR 5859853452), from the same one walk.
+      collectLimitLevelOwners(graphForAnalysis, ratifiedConstraints),
     );
     // ⚠ NO TELEMETRY EVENT FOR THE UNMEASURED-TARGET PARTITION, AND THAT IS A
     // DISCLOSED GAP RATHER THAN AN OVERSIGHT — the same call, for the same

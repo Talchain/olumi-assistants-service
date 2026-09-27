@@ -7,7 +7,9 @@
  *
  * THE MEANING (AI Quality 5855511541 and 5856308029):
  *   · `scored`: P exists and every precondition held, including (e) the baseline is the user's. No `reason`.
- *   · `estimate_only`: (a)–(d) held, but the baseline is not the user's (`baseline_is_estimate`).
+ *   · `estimate_only`: (a)–(d) held, but the baseline is not the user's. `reason` names WHOSE figure it is (DL CR on
+ *     #2146 5859853452, AI Quality 5859849355 (a)): `level_user_assumption` (the user's own admitted guess) or
+ *     `level_olumi_estimate` (Olumi's: `cee_hypothesis`, `cee_inference`, a confirmed estimate, or no owner).
  *   · `unscored`: no P, and `reason` names the first failed precondition.
  *   · `joint`: `scored` iff every limit is scored; `estimate_only` iff none is unscored and one is estimate_only;
  *     otherwise `withheld` with `limit_unscored` and the ids. One unscoreable limit never silences another.
@@ -22,9 +24,11 @@ import { ConstraintVerdictSchema } from '@talchain/schemas/orchestrator';
 
 import {
   collectLeaderEstimatedTargetIds,
+  collectLimitLevelOwners,
   collectUserBaselineConstraintIds,
   deriveConstraintVerdict,
   projectClaimSafety,
+  readLimitVerdictsFromResult,
   readRatifiedConstraints,
   type RatifiedConstraint,
 } from '../constraint-feasibility.js';
@@ -51,10 +55,10 @@ const nodeOf = (graph: Json, id: string): Json => (graph.nodes as Json[]).find((
 function verdictFor(envelope: Json, graph: Json, leader: string) {
   const ratified = readRatifiedConstraints(graph);
   const leaderEstimated = collectLeaderEstimatedTargetIds(graph, ratified, leader);
-  return deriveConstraintVerdict(envelope, ratified, leader, undefined, leaderEstimated, {
-    userBaselineIds: collectUserBaselineConstraintIds(graph, ratified),
-  });
+  return deriveConstraintVerdict(envelope, ratified, leader, undefined, leaderEstimated, collectLimitLevelOwners(graph, ratified));
 }
+/** The per-limit input for a direct call: these ids carry the user's own level, and no level is a user assumption. */
+const usersLevel = (ids: string[]) => ({ userBaselineIds: new Set(ids), userAssumptionIds: new Set<string>() });
 const rowOf = (v: ReturnType<typeof deriveConstraintVerdict>, id: string) => v.perLimit?.find((r) => r.constraint_id === id);
 
 /** Schema 0.60.0 accepts every row and the joint, and the persisted projection parses as the stored contract field. */
@@ -111,9 +115,9 @@ describe('B5-1: 17d1 churn ≤ 4 % is estimate_only (Olumi\'s 3 %), never scored
   const env = load('17d1cd3a.plot-response.json');
   const leader = leaderOf(env.option_comparison);
 
-  it('per_limit churn = estimate_only / baseline_is_estimate; the joint is not scored', () => {
+  it('per_limit churn = estimate_only / level_olumi_estimate (Paul\'s 3 % is Olumi\'s); the joint is not scored', () => {
     const v = verdictFor(env, graph, leader);
-    expect(v.perLimit).toEqual([{ constraint_id: CHURN, state: 'estimate_only', reason: 'baseline_is_estimate' }]);
+    expect(v.perLimit).toEqual([{ constraint_id: CHURN, state: 'estimate_only', reason: 'level_olumi_estimate' }]);
     expect(v.joint).toEqual({ state: 'estimate_only' });
     expect(v.joint?.state).not.toBe('scored');
     expectContractValid(v);
@@ -153,7 +157,7 @@ describe('B5-2: a6ed1bff churn ≤ 4 %', () => {
     ];
     for (const o of env.option_comparison as Json[]) o.constraint_probabilities = { [CHURN]: 1 };
     const v = verdictFor(env, graph, leader);
-    expect(v.perLimit).toEqual([{ constraint_id: CHURN, state: 'estimate_only', reason: 'baseline_is_estimate' }]);
+    expect(v.perLimit).toEqual([{ constraint_id: CHURN, state: 'estimate_only', reason: 'level_olumi_estimate' }]);
     expect(v.joint).toEqual({ state: 'estimate_only' });
     expectContractValid(v);
   });
@@ -187,8 +191,8 @@ describe('B5-3: 0e19bb82, the spend limit refused', () => {
   it('churn keeps its own verdict while spend is unscored; the joint is withheld over spend (limit_unscored)', () => {
     const v = verdictFor(perLimitWire(), graph, leader);
     expect(rowOf(v, SPEND)).toEqual({ constraint_id: SPEND, state: 'unscored', reason: 'CONSTRAINT_NOT_CONVERTIBLE' });
-    // churn's level is `user_assumption`: the user's admitted guess, which earns no authorship credit.
-    expect(rowOf(v, CHURN)).toEqual({ constraint_id: CHURN, state: 'estimate_only', reason: 'baseline_is_estimate' });
+    // churn's level is `user_assumption`: the user's admitted guess, which earns no authorship credit, and is THEIRS.
+    expect(rowOf(v, CHURN)).toEqual({ constraint_id: CHURN, state: 'estimate_only', reason: 'level_user_assumption' });
     expect(v.joint).toEqual({ state: 'withheld', withheld_reason: 'limit_unscored', constraint_ids: [SPEND] });
     expectContractValid(v);
   });
@@ -246,7 +250,7 @@ describe('B5-4: an all-scoreable graph with user baselines is scored, and today\
     expect(JSON.stringify(rest)).toBe(JSON.stringify(today));
   });
   it('a run with NO ratified limit attests nothing: no rows, no joint, the same bytes as today', () => {
-    const v = deriveConstraintVerdict(env, [], leader, undefined, new Set(), { userBaselineIds: new Set() });
+    const v = deriveConstraintVerdict(env, [], leader, undefined, new Set(), usersLevel([]));
     expect(v.perLimit).toBeUndefined();
     expect(v.joint).toBeUndefined();
     expect(JSON.stringify(projectClaimSafety(v))).toBe(JSON.stringify(projectClaimSafety(deriveConstraintVerdict(env, [], leader))));
@@ -289,7 +293,7 @@ describe('PLoT #378 wire: a warning\'s constraint_ids and joint_withheld attribu
   it('SERVED fixed pair: churn keeps its own estimate_only row; spend is unscored; the joint is withheld over spend', () => {
     const v = verdictFor(fixed, graph, leader);
     expect(rowOf(v, SPEND)).toEqual({ constraint_id: SPEND, state: 'unscored', reason: 'CONSTRAINT_NOT_CONVERTIBLE' });
-    expect(rowOf(v, CHURN)).toEqual({ constraint_id: CHURN, state: 'estimate_only', reason: 'baseline_is_estimate' });
+    expect(rowOf(v, CHURN)).toEqual({ constraint_id: CHURN, state: 'estimate_only', reason: 'level_user_assumption' });
     expect(v.joint).toEqual({ state: 'withheld', withheld_reason: 'limit_unscored', constraint_ids: [SPEND] });
     expectContractValid(v);
   });
@@ -300,7 +304,7 @@ describe('PLoT #378 wire: a warning\'s constraint_ids and joint_withheld attribu
     env.critiques = (env.critiques as Json[]).filter((w) => !spendNodeRefusal(w));
     const v = verdictFor(env, graph, leader);
     expect(rowOf(v, SPEND)).toEqual({ constraint_id: SPEND, state: 'unscored', reason: 'CONSTRAINT_TARGET_UNRELIABLE' });
-    expect(rowOf(v, CHURN)).toEqual({ constraint_id: CHURN, state: 'estimate_only', reason: 'baseline_is_estimate' });
+    expect(rowOf(v, CHURN)).toEqual({ constraint_id: CHURN, state: 'estimate_only', reason: 'level_user_assumption' });
     expect(v.joint).toEqual({ state: 'withheld', withheld_reason: 'limit_unscored', constraint_ids: [SPEND] });
     expectContractValid(v);
   });
@@ -318,7 +322,7 @@ describe('PLoT #378 wire: a warning\'s constraint_ids and joint_withheld attribu
     const env = structuredClone(fixed);
     unreliable(env)[0]!.affected_node_ids = ['monthly_churn'];
     const v = verdictFor(env, graph, leader);
-    expect(rowOf(v, CHURN)).toEqual({ constraint_id: CHURN, state: 'estimate_only', reason: 'baseline_is_estimate' });
+    expect(rowOf(v, CHURN)).toEqual({ constraint_id: CHURN, state: 'estimate_only', reason: 'level_user_assumption' });
   });
 
   it('DERIVED (joint_withheld also names churn): the producer\'s own "unscored" is read, and only for the ids it names', () => {
@@ -332,10 +336,12 @@ describe('PLoT #378 wire: a warning\'s constraint_ids and joint_withheld attribu
   });
 
   // Byte-identity for payloads without either field. Each literal was printed by the verdict code at 6e4f9643 (before
-  // this change), from the same inputs, and is compared as bytes.
+  // this change), from the same inputs, and is compared as bytes. The ONE edit since: an estimate_only `reason` names
+  // whose figure it is (DL CR 5859853452): 17d1's churn is Olumi's `cee_inference`, the fixed pair's is the user's
+  // `user_assumption`.
   it.each([
     ['17d1 (EXEC)', () => [load('17d1cd3a.plot-response.json'), load('17d1cd3a.graph.json').graph],
-      '{"may_name_leading_option":true,"constraint_verdict_state":"evaluated_feasible","per_limit":[{"constraint_id":"agent-lane:monthly_churn:<=","state":"estimate_only","reason":"baseline_is_estimate"}],"joint":{"state":"estimate_only"}}'],
+      '{"may_name_leading_option":true,"constraint_verdict_state":"evaluated_feasible","per_limit":[{"constraint_id":"agent-lane:monthly_churn:<=","state":"estimate_only","reason":"level_olumi_estimate"}],"joint":{"state":"estimate_only"}}'],
     ['a6ed1bff (WIRE, identity-less CONSTRAINT_TARGET_UNRELIABLE)', () => [load('a6ed1bff.plot-response.json'), load('a6ed1bff.graph.json').graph],
       '{"may_name_leading_option":false,"constraint_verdict_state":"unevaluated","per_limit":[{"constraint_id":"agent-lane:monthly_churn:<=","state":"unscored","reason":"CONSTRAINT_TARGET_UNRELIABLE"}],"joint":{"state":"withheld","withheld_reason":"limit_unscored","constraint_ids":["agent-lane:monthly_churn:<="]}}'],
     ['0e19bb82 served turn (export)', () => [load('0e19bb82.served-turn.json').enrichment, graph],
@@ -347,7 +353,7 @@ describe('PLoT #378 wire: a warning\'s constraint_ids and joint_withheld attribu
       expect(unreliable(env)).toHaveLength(1);
       return [env, graph];
     },
-      '{"may_name_leading_option":false,"constraint_verdict_state":"unevaluated","per_limit":[{"constraint_id":"agent-lane:six_month_decision_spend:<=","state":"unscored","reason":"CONSTRAINT_NOT_CONVERTIBLE"},{"constraint_id":"agent-lane:monthly_churn:<=","state":"estimate_only","reason":"baseline_is_estimate"}],"joint":{"state":"withheld","withheld_reason":"limit_unscored","constraint_ids":["agent-lane:six_month_decision_spend:<="]}}'],
+      '{"may_name_leading_option":false,"constraint_verdict_state":"unevaluated","per_limit":[{"constraint_id":"agent-lane:six_month_decision_spend:<=","state":"unscored","reason":"CONSTRAINT_NOT_CONVERTIBLE"},{"constraint_id":"agent-lane:monthly_churn:<=","state":"estimate_only","reason":"level_user_assumption"}],"joint":{"state":"withheld","withheld_reason":"limit_unscored","constraint_ids":["agent-lane:six_month_decision_spend:<="]}}'],
   ] as const)('an old payload with no ids stores byte-identical bytes: %s', (_name, inputs, expected) => {
     const [env, g] = inputs() as [Json, Json];
     expect(env.joint_withheld).toBeUndefined();
@@ -365,27 +371,92 @@ describe('B5-5: the first failed precondition is named from the producer\'s mark
     ['L1', 'gc_l1', { constraint_id: 'gc_l1', state: 'unscored', reason: 'not_decision_grade' }],
     ['U2', 'gc_u2', { constraint_id: 'gc_u2', state: 'scored' }],
   ] as const)('%s → %j', (capture, id, expected) => {
-    const v = deriveConstraintVerdict(c50(capture), rat(id), LEADER, undefined, new Set(), { userBaselineIds: new Set([id]) });
+    const v = deriveConstraintVerdict(c50(capture), rat(id), LEADER, undefined, new Set(), usersLevel([id]));
     expect(v.perLimit).toEqual([expected]);
     expectContractValid(v);
   });
   it('a threshold whose range diverged from the target\'s (range_unified false) is threshold_unframed', () => {
     const env = structuredClone(c50('U2'));
     env.constraint_results[0].scale_provenance = { source: 'explicit_cap', range_unified: false, decision_grade: false };
-    const v = deriveConstraintVerdict(env, rat('gc_u2'), LEADER, undefined, new Set(), { userBaselineIds: new Set(['gc_u2']) });
+    const v = deriveConstraintVerdict(env, rat('gc_u2'), LEADER, undefined, new Set(), usersLevel(['gc_u2']));
     expect(v.perLimit).toEqual([{ constraint_id: 'gc_u2', state: 'unscored', reason: 'threshold_unframed' }]);
   });
   it('a certified score with a P missing on one option is not scored (no_score_returned)', () => {
     const env = structuredClone(c50('U2'));
     delete (env.option_comparison as Json[]).find((o) => o.option_id === 'opt_hold')!.constraint_probabilities.gc_u2;
-    const v = deriveConstraintVerdict(env, rat('gc_u2'), LEADER, undefined, new Set(), { userBaselineIds: new Set(['gc_u2']) });
+    const v = deriveConstraintVerdict(env, rat('gc_u2'), LEADER, undefined, new Set(), usersLevel(['gc_u2']));
     expect(v.perLimit).toEqual([{ constraint_id: 'gc_u2', state: 'unscored', reason: 'no_score_returned' }]);
   });
   it('the leader SETTING the target at Olumi\'s level folds in as estimate_only (rule (d))', () => {
-    const v = deriveConstraintVerdict(c50('U2'), rat('gc_u2'), LEADER, undefined, new Set(['gc_u2']), {
-      userBaselineIds: new Set(['gc_u2']),
-    });
-    expect(v.perLimit).toEqual([{ constraint_id: 'gc_u2', state: 'estimate_only', reason: 'baseline_is_estimate' }]);
+    const v = deriveConstraintVerdict(c50('U2'), rat('gc_u2'), LEADER, undefined, new Set(['gc_u2']), usersLevel(['gc_u2']));
+    // The level is the user's, so only the level the leader SETS is an estimate: an intervention's, whose vocabulary
+    // (brief_extraction | user_specified | cee_hypothesis) holds no user assumption. So it is Olumi's.
+    expect(v.perLimit).toEqual([{ constraint_id: 'gc_u2', state: 'estimate_only', reason: 'level_olumi_estimate' }]);
+  });
+  // AI Quality 5859849355 (b): no existing row pinned it. L1 carries a marker (decision_grade false) and 17d1/fixed-pair
+  // markers are certified, so "the marker ABSENT on a row that is otherwise scored" had no row until this one.
+  it.each([
+    ['the certified row keeps its figures but loses its scale_provenance marker', (env: Json) => { delete env.constraint_results[0].scale_provenance; }],
+    ['the certified row is removed entirely', (env: Json) => { env.constraint_results = []; }],
+  ] as const)('(b) the marker absent on an otherwise-scored row (%s) → unscored / not_decision_grade', (_name, strip) => {
+    const env = structuredClone(c50('U2'));
+    strip(env);
+    // Premise: every option still carries a P for the limit, and the level is the user's: only the marker is missing.
+    expect((env.option_comparison as Json[]).every((o) => typeof o.constraint_probabilities?.gc_u2 === 'number')).toBe(true);
+    const v = deriveConstraintVerdict(env, rat('gc_u2'), LEADER, undefined, new Set(), usersLevel(['gc_u2']));
+    expect(v.perLimit).toEqual([{ constraint_id: 'gc_u2', state: 'unscored', reason: 'not_decision_grade' }]);
+    expect(v.joint).toEqual({ state: 'withheld', withheld_reason: 'limit_unscored', constraint_ids: ['gc_u2'] });
+    expectContractValid(v);
+  });
+});
+
+// ── B5 (a): an estimate_only row names WHOSE figure (DL CR 5859853452; AI Quality 5859849355 (a)) ────────────────────
+describe('B5 (a): estimate_only names whose figure the limit was checked against, from classifyValueSource', () => {
+  const { graph } = load('17d1cd3a.graph.json');
+  const env = load('17d1cd3a.plot-response.json');
+  const leader = leaderOf(env.option_comparison);
+  /** DERIVED: 17d1 with churn's level stamped `source` (`null` = the key removed: no owner). */
+  const churnAt = (source: string | null): Json => {
+    const g = structuredClone(graph);
+    const level = nodeOf(g, 'monthly_churn').observed_state;
+    if (source === null) delete level.source;
+    else level.source = source;
+    return g;
+  };
+  it('precondition: the leader does not SET churn on 17d1, so the level alone decides the owner', () => {
+    expect(collectLeaderEstimatedTargetIds(graph, readRatifiedConstraints(graph), leader).size).toBe(0);
+  });
+  it.each([
+    ['user_assumption: the user\'s own admitted guess', 'user_assumption', { state: 'estimate_only', reason: 'level_user_assumption' }],
+    ['cee_hypothesis: Olumi\'s', 'cee_hypothesis', { state: 'estimate_only', reason: 'level_olumi_estimate' }],
+    ['cee_inference: Olumi\'s (Paul\'s served 17d1 3 %)', 'cee_inference', { state: 'estimate_only', reason: 'level_olumi_estimate' }],
+    ['user_confirmed: Olumi\'s figure the user endorsed', 'user_confirmed', { state: 'estimate_only', reason: 'level_olumi_estimate' }],
+    ['no owner: the level carries no source', null, { state: 'estimate_only', reason: 'level_olumi_estimate' }],
+    ['CONTROL user_stated (`user`): scored, no reason', 'user', { state: 'scored' }],
+  ] as const)('%s', (_name, source, expected) => {
+    const v = verdictFor(env, churnAt(source), leader);
+    expect(v.perLimit).toEqual([{ constraint_id: CHURN, ...expected }]);
+    expectContractValid(v);
+  });
+});
+
+// ── (c) the stored rows, read back off the run fact they were written to (the turn's `limit_verdicts` source) ──────
+describe('readLimitVerdictsFromResult: the fact\'s own per_limit + joint, or nothing', () => {
+  const { graph } = load('17d1cd3a.graph.json');
+  const env = load('17d1cd3a.plot-response.json');
+  const stored = projectClaimSafety(verdictFor(env, graph, leaderOf(env.option_comparison)));
+  it('a fact whose constraint_verdict carries per_limit → exactly its stored per_limit and joint', () => {
+    expect(stored.per_limit).toBeDefined();
+    expect(readLimitVerdictsFromResult({ constraint_verdict: stored })).toEqual({ per_limit: stored.per_limit, joint: stored.joint });
+  });
+  it.each([
+    ['no constraint_verdict', {}],
+    ['a verdict with no per_limit (every pre-B5 fact)', { constraint_verdict: { may_name_leading_option: true, constraint_verdict_state: 'evaluated_feasible' } }],
+    ['a per_limit row the contract refuses', { constraint_verdict: { ...stored, per_limit: [{ constraint_id: CHURN, state: 'bogus' }] } }],
+    ['per_limit without a joint', { constraint_verdict: { ...stored, joint: undefined } }],
+    ['an empty per_limit', { constraint_verdict: { ...stored, per_limit: [] } }],
+  ] as const)('%s → null (absent = not attested)', (_name, result) => {
+    expect(readLimitVerdictsFromResult(result)).toBeNull();
   });
 });
 
@@ -395,7 +466,7 @@ describe('the intake conjunct keeps the rows it does not own', () => {
     const persisted = {
       may_name_leading_option: true,
       constraint_verdict_state: 'evaluated_feasible' as const,
-      per_limit: [{ constraint_id: CHURN, state: 'estimate_only' as const, reason: 'baseline_is_estimate' }],
+      per_limit: [{ constraint_id: CHURN, state: 'estimate_only' as const, reason: 'level_olumi_estimate' }],
       joint: { state: 'estimate_only' as const },
     };
     const out = applyIntakeToLeaderPermission(persisted, { state: 'options_missing', mayNameLeadingOption: false, enumerated: [], missing: [] } as never);
