@@ -64,6 +64,7 @@ import { deterministicBlockId } from '../compose/block-id.js';
 import { readRatifiedConstraints } from '../../orchestrator/context/constraint-feasibility.js';
 import { sayLevel } from './bound-graph.js';
 import {
+  ELICITATION_CLOSE,
   RUN_TURN_COACHING_CONTRACT,
   copyPasses,
   isAutomaticRun,
@@ -145,6 +146,18 @@ export function estimatedLimitIn(graph: Record<string, unknown> | null): Estimat
   return level !== null && label.length > 0 ? { nodeId, kind, label, ...level } : null;
 }
 
+/**
+ * The ask plus {@link ELICITATION_CLOSE}: the first form within the contract's prompt bound (the basis clause is the
+ * one that yields), so a long label shortens the ask rather than refusing the card.
+ */
+function elicitationPrompt(lead: string): string {
+  const forms = [
+    `${lead} Ask me what the real figure is and what it rests on. ${ELICITATION_CLOSE}`,
+    `${lead} Ask me what the real figure is. ${ELICITATION_CLOSE}`,
+  ];
+  return forms.find((f) => f.length <= RUN_TURN_COACHING_CONTRACT.limits.action_prompt_max) ?? forms[forms.length - 1]!;
+}
+
 /** The card's words. */
 export function composeEstimatedLimitCard(limit: EstimatedLimit): FragileLinkChallengeCopy {
   if (limit.whose === 'ratified') {
@@ -153,8 +166,8 @@ export function composeEstimatedLimitCard(limit: EstimatedLimit): FragileLinkCha
       body: `Your limit on “${limit.label}” was checked against about ${limit.level} today, a figure recorded `
         + 'as an assumption rather than a measurement. If you know the real figure, it is worth saying.',
       action_label: 'Give the real figure',
-      action_prompt: `Olumi checked my limit on “${limit.label}” against about ${limit.level} today, a figure recorded `
-        + 'as an assumption. Ask me what the real figure is and what it rests on. Don\'t change the model or re-run anything yet.',
+      action_prompt: elicitationPrompt(`Olumi checked my limit on “${limit.label}” against about ${limit.level} today, a figure `
+        + 'recorded as an assumption.'),
     };
   }
   return {
@@ -162,8 +175,8 @@ export function composeEstimatedLimitCard(limit: EstimatedLimit): FragileLinkCha
     body: `Your limit on “${limit.label}” was checked against Olumi's estimate that it is about ${limit.level} `
       + 'today, not a figure you gave. If you know the real figure, it is worth saying.',
     action_label: 'Give the real figure',
-    action_prompt: `Olumi checked my limit on “${limit.label}” against its estimate that it is about ${limit.level} `
-      + 'today. Ask me what the real figure is and what it rests on. Don\'t change the model or re-run anything yet.',
+    action_prompt: elicitationPrompt(`Olumi checked my limit on “${limit.label}” against its estimate that it is about `
+      + `${limit.level} today.`),
   };
 }
 
