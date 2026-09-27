@@ -378,7 +378,7 @@ export function applyStructuralAddEdge(
    * on a decision→option edge, which `STRUCTURAL_EDGE_NOT_CANONICAL` treats as
    * an error. Every other pair keeps the causal defaults above, unchanged.
    */
-  const operations: PatchOperation[] = enforceStructuralEdgeDefaults(
+  const enforced: PatchOperation[] = enforceStructuralEdgeDefaults(
     [
       // `applyAddEdge` reads the id off `value`, not `path`; the `from::to` path
       // is the convention `parseEdgePath` accepts and its siblings emit.
@@ -386,6 +386,18 @@ export function applyStructuralAddEdge(
     ],
     baseGraph,
   );
+  /**
+   * ⭐ THE CAUSAL LINK'S SPREAD IS FLAGGED AS OLUMI'S (DL #2120 follow-up A). The
+   * edge is `user_specified` but `DEFAULT_STD` is not the user's number, and
+   * `adjust-edge-strength.ts` stores that same fact as `std_defaulted: true`
+   * (A6f) — one fact, one form. The enforcer returns a causal op UNCHANGED (the
+   * same `value` reference) and rewrites a topology op; a topology link's
+   * constants are not a belief and `add-option-transaction.ts` writes its
+   * topology edges unflagged, so only the unchanged op gains the flag.
+   */
+  const operations: PatchOperation[] = enforced[0].value === addedEdge
+    ? [{ ...enforced[0], value: { ...addedEdge, std_defaulted: true } }]
+    : enforced;
   // The edge the train will actually write — after the enforcer, not what the
   // client sent. The postcondition below and the dispatcher's post-commit
   // check both compare against THIS, so a topology link sent as "negative 0.7"

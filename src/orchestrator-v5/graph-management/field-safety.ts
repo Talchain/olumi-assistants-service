@@ -171,7 +171,8 @@ const PIPELINE_OWNED_MARKERS: readonly string[] = [
  *    clear it would relabel whose existence claim it is;
  *  - `std_defaulted` — the same per-field half for the link's SPREAD: an exact
  *    figure the user writes leaves `strength.std` Olumi's (edges; A6f, AIQ N1 on
- *    #2096, minted only by `adjust-edge-strength.ts`). A producer that could set
+ *    #2096, minted only by `adjust-edge-strength.ts` and, on a drawn causal link,
+ *    `structural-add-edge.ts`). A producer that could set
  *    or clear it would relabel whose uncertainty claim it is;
  *  - `origin` — creation-source stamp (edges).
  */

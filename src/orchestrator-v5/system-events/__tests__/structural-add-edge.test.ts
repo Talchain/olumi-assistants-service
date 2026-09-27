@@ -27,6 +27,7 @@ import type { SystemEventTurnPayload } from '@talchain/schemas/boundary';
 import { EditGraphHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { DEFAULT_EXISTS_PROBABILITY, DEFAULT_STD } from '@talchain/schemas';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../../orchestrator/context/constants.js';
+import { GraphV3 } from '../../../schemas/cee-v3.js';
 
 import {
   applyStructuralAddEdge,
@@ -390,5 +391,50 @@ describe('C — a topology link is written as topology', () => {
       'opt_wait',
     ) as { provenance?: { source?: string } }
     expect(edge.provenance?.source).toBe('user_specified')
+  })
+})
+
+/**
+ * ⭐ D — THE SPREAD ON A USER-DRAWN LINK IS OLUMI'S, AND SAYS SO (DL #2120 follow-up A, 27 Sep 2026).
+ *
+ * A causal link the user draws is stamped `user_specified` (B above) and carries `DEFAULT_STD`, a number the user
+ * never gave. `adjust-edge-strength.ts` stores the same fact — a user link whose std is Olumi's — with
+ * `std_defaulted: true` (A6f), so without it here one fact is stored two ways and a reader of this edge takes the
+ * spread as the user's. A topology link's constants are not a belief, and `add-option-transaction.ts` writes its
+ * topology edges with no flag, so a topology link must not gain one (C's pairs, the discriminating half).
+ */
+describe('D — the default spread on a drawn link is flagged as Olumi\'s', () => {
+  it('RED: a causal link carries std_defaulted: true beside DEFAULT_STD', () => {
+    const edge = landedEdge(run(), 'fac_churn', 'goal_revenue') as Record<string, unknown>
+    expect((edge.strength as { std: number }).std).toBe(DEFAULT_STD)
+    expect(edge.std_defaulted).toBe(true)
+  })
+
+  it('survives the one persisted form (declared on EdgeV3, not stripped by the post-add parse)', () => {
+    const r = run()
+    if (r.kind !== 'mutated') throw new Error('expected a mutation')
+    const edge = GraphV3.parse(r.graph).edges.find((e) => e.from === 'fac_churn' && e.to === 'goal_revenue')
+    expect(edge?.std_defaulted).toBe(true)
+  })
+
+  it('CONTRAST — a topology link (decision → option, option → factor) gains no flag', () => {
+    const g = persistedGraph() as { nodes: unknown[] }
+    g.nodes.push({ id: 'dec_main', kind: 'decision', label: 'When to launch' })
+    g.nodes.push({ id: 'opt_wait', kind: 'option', label: 'Wait a quarter' })
+    const dec = landedEdge(
+      run({ from: 'dec_main', to: 'opt_wait', magnitude: 1, effect_direction: 'positive', base_graph_hash: baseHashOf(g) }, g),
+      'dec_main', 'opt_wait',
+    ) as Record<string, unknown>
+    const opt = landedEdge(run({ from: 'opt_launch', to: 'fac_churn' }), 'opt_launch', 'fac_churn') as Record<string, unknown>
+    expect('std_defaulted' in dec).toBe(false)
+    expect('std_defaulted' in opt).toBe(false)
+  })
+
+  it('leaves every edge that was already there unflagged', () => {
+    const r = run()
+    if (r.kind !== 'mutated') throw new Error('expected a mutation')
+    const others = r.graph.edges.filter((e) => !(e.from === 'fac_churn' && e.to === 'goal_revenue'))
+    expect(others.length).toBeGreaterThan(0)
+    for (const e of others) expect('std_defaulted' in (e as Record<string, unknown>)).toBe(false)
   })
 })
