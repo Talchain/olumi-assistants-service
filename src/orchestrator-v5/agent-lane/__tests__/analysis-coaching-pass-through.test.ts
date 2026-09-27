@@ -890,8 +890,7 @@ test('ESTIMATED LIMIT — the level must be Olumi\'s, from ONE limit node, on th
 // Paul's served churn level is the ADOPTED starting point: observed_state.source 'user_assumption', classed
 // `user_ratified` (obligation-provenance.ts). The card keyed on 'cee_inference' only, so it was silent on HIS journey.
 // Served shape per AI Quality (PLoT request n6sq-20260926T080013Z: raw 4, unit '%'); not re-read by R&C.
-// C4 (DL #70 5855470798): a check whose limit unit is not its node's own cannot be cited as "was checked", so a
-// DERIVED level keeps the limit in the node's unit — as a checkable limit must be.
+// A DERIVED level keeps the limit in the node's unit (the served shape: limit and node share a unit).
 const withChurnLevel = (source: unknown, raw = 4, unit = '%') => {
  const x=structuredClone(PAUL_GRAPH) as Record<string, any>;
  const n=x.nodes.find((m: any)=>m.id==='monthly_churn');
@@ -950,15 +949,14 @@ test('ESTIMATED LIMIT — one next action names ONE figure: an Olumi-estimate li
 // The state is derived by PRODUCTION deriveConstraintVerdict from the graph's own readRatifiedConstraints, over a
 // minimal doctrine-B envelope shaped as in constraint-verdict-out-of-scope.test.ts: `_meta.filtered_constraints` is
 // PLoT's FilteredConstraintRecord; per-option `constraint_probabilities` are keyed by constraint_id.
-test('ESTIMATED LIMIT — C4: a check Olumi cannot cite is refused: the limit RELABELLED into another unit, or a unit that is not the node\'s (Paul 17d1cd3a, DL 5855470798)',()=>{
- // Control: the served graph's limit and node share "percent per month" — the card speaks.
- assert.equal(estCards(estCase('evaluated_feasible')).length,1);
+// ⭐ C4 CORRECTION (MG #70 5856264807, EXECUTED): on Paul's 17d1cd3a the relabelled "%" limit reached ISL as 0.04 — framed
+// correctly. Its "met with certainty" was Olumi's 3% estimate treated as exactly known, which is precisely what THIS card
+// says ("checked against Olumi's estimate"). A relabel is therefore NOT a reason to refuse the card; B5's typed
+// `per_limit[].state` ('estimate_only') is the authority when it lands.
+test('ESTIMATED LIMIT — C4 correction: a RELABELLED limit still gets the card — the relabel framed it (17d1: ISL got 0.04)',()=>{
  const relabelled=structuredClone(PAUL_GRAPH) as Record<string, any>;
  relabelled.goal_constraints[0].provenance_unit_relabelled={rule:'agent_lane_limit_unit_v1',pre_normalisation_unit:'% per month',pre_normalisation_value:10};
- assert.equal(estCards(estCase('evaluated_feasible',undefined,relabelled)).length,0,'relabelled');
- const otherUnit=structuredClone(PAUL_GRAPH) as Record<string, any>;
- otherUnit.goal_constraints[0].unit='%';
- assert.equal(estCards(estCase('evaluated_feasible',undefined,otherUnit)).length,0,'limit "%" vs node "percent per month"');
+ assert.equal(estCards(estCase('evaluated_feasible',undefined,relabelled)).length,1);
 });
 const CHURN_ID = 'agent-lane:monthly_churn:<=';
 const PRICE_ID = 'agent-lane:pro_plan_price:<=';
