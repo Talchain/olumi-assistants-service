@@ -117,6 +117,7 @@ import { pickGoalThresholdTrio } from '../../../utils/goal-threshold-trio.js';
 import { type InfluenceBand } from '../../format/influence-bands.js';
 import { CANVAS_BAND_WORD, edgeBandFromMagnitude, EDGE_STRENGTH_MIDPOINTS } from '../../format/edge-strength-bands.js';
 import { runWithApprovedAdoption } from '../approved-adoption-context.js';
+import { runWithStatedLinkBand } from '../stated-link-band-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
@@ -1590,6 +1591,10 @@ export function createAgentCapabilities(
         intent: confirm ? 'confirm_current' : 'set',
         direction_intent: confirm || args.direction === undefined ? 'preserve' : wanted,
         expected: { mean, effect_direction: current },
+        // ⭐ A6e — the band the USER named, kept on the approved proposal (content-hashed with it) and carried to the
+        // writer in-process on approval, never on the wire: a named band stores the band's own spread as the link's
+        // std (`edgeBandStd`), which the `edge_strength_edit` event cannot tell apart from an exact figure.
+        band,
       };
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
@@ -2461,12 +2466,22 @@ export function createAgentCapabilities(
       if (ops.length === 1 && ops[0]!.op === 'update_edge') {
         const op = ops[0]!;
         const [fromId, toId] = op.path.split('::') as [string, string];
-        const v = op.value as { magnitude: number; intent: 'set' | 'confirm_current'; direction_intent: 'preserve' | 'positive' | 'negative'; expected: { mean: number; effect_direction: 'positive' | 'negative' } };
+        const v = op.value as { magnitude: number; intent: 'set' | 'confirm_current'; direction_intent: 'preserve' | 'positive' | 'negative'; expected: { mean: number; effect_direction: 'positive' | 'negative' }; band?: unknown };
         const operationId = authorisationTurnId(decision.proposal.proposal_id);
-        const res = await dispatch('/orchestrate/v2/turn', {
+        const send = () => dispatch('/orchestrate/v2/turn', {
           kind: 'system_event', turn_id: operationId, scenario_id: ctx.scenario_id, stage: 'frame',
           event: { kind: 'edge_strength_edit', from: fromId, to: toId, intent: v.intent, direction_intent: v.direction_intent, magnitude: v.magnitude, expected: v.expected },
         });
+        // ⭐ A6e — THE BAND THE USER NAMED rides this verified approval in-process (`stated-link-band-context.ts`), the
+        // way an approved adoption does: only a proposal the user authored (`user_stated`) that stored a band. One
+        // restored from before the band was stored sends none, and the writer keeps the link's spread (a figure).
+        const statedBand = decision.proposal.provenance.authored_by === 'user_stated' && isInfluenceBand(v.band) ? v.band : undefined;
+        const res = statedBand !== undefined
+          ? await runWithStatedLinkBand(
+            { scenarioId: ctx.scenario_id, proposalId: decision.proposal.proposal_id, from: fromId, to: toId, band: statedBand },
+            send,
+          )
+          : await send();
         const after = await readGraph(ctx.scenario_id);
         const dir = v.direction_intent === 'preserve' ? v.expected.effect_direction : v.direction_intent;
         const want = dir === 'negative' ? -v.magnitude : v.magnitude;

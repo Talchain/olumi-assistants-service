@@ -24,7 +24,11 @@ import type {
   ExtractionMetadataT,
 } from "../../schemas/analysis-ready.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
-import { computeAnalysisReadyStatusWithReason, nameMappingNeed } from "./option-status.js";
+import {
+  adjudicateOutstandingLevels,
+  computeAnalysisReadyStatusWithReason,
+  nameMappingNeed,
+} from "./option-status.js";
 import { synthesiseDisplayValue } from "../factor-extraction/display-value.js";
 import { isLabelEcho } from "./label-echo.js";
 import {
@@ -1060,6 +1064,27 @@ export function buildAnalysisReadyPayload(
     }
   }
 
+  // ⭐⭐ SLICE A1b — `ready` MEANS COMPLETE, decided against the SAME deduped
+  // blocker set this payload publishes (so status and `blockers[]` cannot
+  // disagree). A DEMOTION only (see `adjudicateOutstandingLevels`), so the
+  // ⛔ note in the loop above — which forbids promoting this copy to `ready` —
+  // is untouched. The payload status cannot move either: any demoted option
+  // carries a `missing_value` blocker, which already makes it `needs_user_input`.
+  for (const analysisOpt of analysisOptions) {
+    const outstanding = dedupedBlockers
+      .filter((b) => b.option_id === analysisOpt.id && b.blocker_type === "missing_value")
+      .map((b) => b.factor_label ?? b.factor_id);
+    const settled = adjudicateOutstandingLevels(
+      { status: analysisOpt.status, reason: analysisOpt.status_reason ?? "" },
+      outstanding,
+      analysisOpt.is_baseline === true,
+    );
+    if (settled.status !== analysisOpt.status) {
+      analysisOpt.status = settled.status;
+      analysisOpt.status_reason = settled.reason;
+    }
+  }
+
   if (declinedFallbacks.length > 0 || dedupedBlockers.length > 0) {
     log.info({
       event: "cee.analysis_ready.fallback_declined",
@@ -1583,12 +1608,21 @@ export function validateAnalysisReadyPayload(
   // (`AnalysisReadyValidationFailed`) plus a warn log on every draft. The
   // discriminator is whether the option carries anything to encode at all: case
   // (b) has neither interventions nor raws.
+  //
+  // ⭐ SLICE A1b adds a THIRD cause: (c) a PARTIALLY configured option — it
+  // carries values, and a connected factor's level is still outstanding. It
+  // has nothing to encode either, so it is bound to its true condition: this
+  // payload's own `missing_value` blocker naming the option.
   for (const option of payload.options) {
     if (option.status === "needs_encoding") {
       const hasNothingToEncode =
         Object.keys(option.interventions ?? {}).length === 0
         && (!option.raw_interventions || Object.keys(option.raw_interventions).length === 0);
       if (hasNothingToEncode) continue;
+      const levelOutstanding = (payload.blockers ?? []).some(
+        (b) => b.option_id === option.id && b.blocker_type === "missing_value",
+      );
+      if (levelOutstanding) continue;
       // Option claims to need encoding, should have raw_interventions
       if (!option.raw_interventions || Object.keys(option.raw_interventions).length === 0) {
         errors.push({

@@ -72,3 +72,38 @@ export function edgeBandFromMagnitude(absValue: number): InfluenceBand {
   if (absValue >= EDGE_STRENGTH_CUTS.moderate) return 'moderate';
   return 'weak';
 }
+
+/**
+ * The top of |β| on CEE's side — the link writer's own bound (`AdjustEdgeStrengthSchema`, [-1, 1], and the
+ * `edge_strength_edit` event's `magnitude ≤ 1`). The canvas leaves its top band open (`max: Infinity`, its weight
+ * domain runs to 2); a stored link cannot exceed this, so it closes "very strong" for the spread below. Pinned to the
+ * handler's schema by `edge-strength-bands.test.ts`, so it cannot drift into a second copy of that bound.
+ */
+export const EDGE_STRENGTH_CEILING = 1;
+
+/** The |β| range a band names, on the cuts above: [lo, hi). */
+function edgeBandBounds(band: InfluenceBand): readonly [number, number] {
+  switch (band) {
+    case 'weak':
+      return [0, EDGE_STRENGTH_CUTS.moderate];
+    case 'moderate':
+      return [EDGE_STRENGTH_CUTS.moderate, EDGE_STRENGTH_CUTS.strong];
+    case 'strong':
+      return [EDGE_STRENGTH_CUTS.strong, EDGE_STRENGTH_CUTS.veryStrong];
+    case 'very strong':
+      return [EDGE_STRENGTH_CUTS.veryStrong, EDGE_STRENGTH_CEILING];
+  }
+}
+
+/**
+ * ⭐ THE SPREAD A NAMED BAND STATES (A6e; AIQ #70 5855345225, 5855430153). A user who says a link is "very strong"
+ * states a RANGE of |β|, not a point, so the uncertainty their statement carries is that range read as uniform:
+ * std = (hi − lo)/√12 — weak and moderate 0.0577, strong and very strong 0.0866. Derived from the same cuts the
+ * band words use, never hand-listed.
+ *
+ * Only for a BAND the user named. An exact figure the user gives keeps whatever spread the link already carries.
+ */
+export function edgeBandStd(band: InfluenceBand): number {
+  const [lo, hi] = edgeBandBounds(band);
+  return (hi - lo) / Math.sqrt(12);
+}
