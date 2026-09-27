@@ -603,12 +603,19 @@ export async function dispatchTool(
       detail: 'This preview cannot change the model. Nothing has been altered.',
     };
   }
-  let args: Record<string, unknown>;
+  let parsed: unknown;
   try {
-    args = JSON.parse(rawArgs) as Record<string, unknown>;
+    parsed = JSON.parse(rawArgs);
   } catch {
     return { ok: false, mutated: false, refusal: 'unparsable_arguments' };
   }
+  // ⛔ ARGUMENTS ARE AN OBJECT, OR NOTHING RUNS (X2 contract, Codex-Capabilities #70 5858831838): JSON `null` parsed
+  // cleanly and crashed `authorise_change` (`args.proposal_id`) and `offer_public_research` (`args.query`); an array,
+  // number or string reached every capability as its arguments. Refused here, for every tool, before any is reached.
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ok: false, mutated: false, refusal: 'unparsable_arguments', detail: 'The call\u2019s arguments were not an object. Nothing was run; call it again with its arguments as an object.' };
+  }
+  const args = parsed as Record<string, unknown>;
   switch (name) {
     case 'get_canonical_state':
       return caps.getCanonicalState(ctx);
