@@ -69,6 +69,18 @@ export interface PersistedGraphProjectionContext {
  * unchanged), so this composition cannot fail a commit on its own. A graph that
  * needs no repair is returned as the ORIGINAL reference.
  */
+/**
+ * ⭐ THE BASE A STORED-BYTES GUARD COMPARES AGAINST: the stored graph with only ABSENCE-EQUIVALENT drift removed
+ * (#2084 review, Runtime 5855308269). Two passes of the persisted form change bytes without changing any fact:
+ * a `null` the schema reads as absence (`dropNullOptionalGraphFields`) and the UI's derived `interventionKeys`
+ * index brought into step with its cells (`reindexInterventionKeys`). Staging already stores both kinds of legacy
+ * bytes, so a guard that demanded the raw bytes be a fixed point refused writes the base committed. Every OTHER
+ * pass (intercept repair, intervention promotion, options mirror) is a real repair and still refuses.
+ */
+export function normaliseAbsenceOnly<T>(graph: T): T {
+  return dropNullOptionalGraphFields(reindexInterventionKeys(graph));
+}
+
 export function projectGraphForPersistence<T>(
   graph: T,
   ctx: PersistedGraphProjectionContext = {},

@@ -19,7 +19,7 @@ vi.mock('../../utils/telemetry.js', async (importOriginal) => {
 });
 
 import { GraphV3 } from '../../schemas/cee-v3.js';
-import { projectGraphForPersistence } from '../persisted-graph-projection.js';
+import { normaliseAbsenceOnly, projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { applyEdgeStrengthEdit } from '../system-events/edge-strength-edit.js';
 import { applyFactorValueEdit } from '../system-events/factor-value-edit.js';
 import { applyOptionInterventionEdit, factorValuesPostimageIsScoped, optionInterventionPostimageIsScoped } from '../system-events/option-intervention-edit.js';
@@ -190,14 +190,29 @@ describe("a saved example's stamps survive every write", () => {
     expect(c.kind, JSON.stringify((c as { reason?: unknown }).reason ?? null)).toBe('mutated');
   });
 
-  it('CONTRAST: a base whose drift is anything but the index still refuses the option-level write', () => {
+  const levelOn = (g: Rec, requestId: string) => applyOptionInterventionEdit({ persistedGraph: g, optionId: 'opt_hybrid',
+    factorId: 'fac_market_competition', modelValue: 0.3, expectedGraphHash: computeAnalysisAffectingGraphHash(g as never)!,
+    scenarioId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', turnId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', requestId,
+    freshness: 'none', hasExistingAnalysis: false } as never);
+
+  it("⭐ LEGACY NULLS (Runtime 5855308269, B1): a stored null the schema reads as absence does not refuse writes, as at base", () => {
+    const g = structuredClone(STORED);
+    nodes(g).find((n) => n.kind === 'goal')!.threshold_source = null;
+    nodes(g)[0]!.starterId = null;
+    expect(projectGraphForPersistence(g), 'premise: the nulls are drift from the persisted form').not.toEqual(g);
+    const c = levelOn(g, 'req-legacy-null');
+    expect(c.kind, JSON.stringify(c)).toBe('candidate');
+    const after = (c as { graph: Rec }).graph;
+    expect(Object.hasOwn(nodes(after).find((n) => n.kind === 'goal')!, 'threshold_source')).toBe(false);
+  });
+
+  it('CONTRAST: a base that needs a REAL repair (an option\'s data.interventions awaiting promotion) still refuses', () => {
     const { g } = legacy();
-    const goal = nodes(g).find((n) => n.kind === 'goal')!;
-    goal.threshold_source = null;
-    const c = applyOptionInterventionEdit({ persistedGraph: g, optionId: 'opt_hybrid', factorId: 'fac_market_competition', modelValue: 0.3,
-      expectedGraphHash: computeAnalysisAffectingGraphHash(g as never)!, scenarioId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
-      turnId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', requestId: 'req-legacy-null', freshness: 'none', hasExistingAnalysis: false } as never);
-    expect(c).toEqual({ kind: 'refused', reason: 'unrelated_canonical_repair_required' });
+    const other = options(g).find((o) => o.id !== 'opt_hybrid')!;
+    const factor = nodes(g).find((n) => n.kind === 'factor' && !Object.hasOwn((other.interventions ?? {}) as Rec, n.id as string))!;
+    other.data = { interventions: { [factor.id as string]: 0.4 } };
+    expect(projectGraphForPersistence(g), 'premise: the projection repairs this base').not.toEqual(normaliseAbsenceOnly(g));
+    expect(levelOn(g, 'req-real-repair')).toEqual({ kind: 'refused', reason: 'unrelated_canonical_repair_required' });
   });
 
   it('a malformed (non-array) index is dropped as absence, never rebuilt: CEE does not mint UI state', () => {

@@ -45,7 +45,8 @@ export function interventionKeysFollowInterventions(node: unknown): boolean {
  * staging's own option-level writer added a cell and kept the index, so saved examples are ALREADY stored with stale
  * indexes (served pricing: 3 keys against 4 cells). Their only drift from the persisted form is this derived field, so
  * `optionInterventionBatchPostimageIsScoped`, `factorValuesPostimageIsScoped`, `isProvenanceOnlyEdgeConfirmation` and
- * the two writer base checks take `reindexInterventionKeys(before)` as the base. Any OTHER drift still refuses.
+ * the two writer base checks take `normaliseAbsenceOnly(before)` (this pass + the absence-only null drop) as the base.
+ * Any OTHER drift still refuses.
  */
 export function reindexInterventionKeys<T>(graph: T): T {
   if (!isRec(graph) || !Array.isArray(graph.nodes)) return graph;

@@ -20,8 +20,7 @@ import { log } from '../../utils/telemetry.js';
 import { composeToolCallResponse } from '../compose.js';
 import { composeRecoverableHandlerResponse } from '../compose/recoverable-handler-response.js';
 import { composeRecoverableValidationResponse } from '../compose/recoverable-validation-response.js';
-import { projectGraphForPersistence } from '../persisted-graph-projection.js';
-import { reindexInterventionKeys } from '../reindex-intervention-keys.js';
+import { normaliseAbsenceOnly, projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { buildGraphLookup } from '../routing/graph-lookup-adapter.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
 import type { GraphLookup } from '../routing/validator.js';
@@ -185,8 +184,8 @@ export function isProvenanceOnlyEdgeConfirmation(stored: {
   readonly from: string;
   readonly to: string;
 }): boolean {
-  // The base with the UI's derived index in step: a stale index is not this write's change (`reindexInterventionKeys`).
-  const args = { ...stored, before: reindexInterventionKeys(stored.before) };
+  // The base with absence-equivalent drift removed (`normaliseAbsenceOnly`): not this write's change.
+  const args = { ...stored, before: normaliseAbsenceOnly(stored.before) };
   const beforeParse = GraphV3.safeParse(args.before);
   const afterParse = GraphV3.safeParse(args.after);
   if (!beforeParse.success || !afterParse.success) return false;
