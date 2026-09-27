@@ -1546,6 +1546,65 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
     });
   });
 
+  /**
+   * THE BAND READER through the mounted route (schemas 0.60.0 `edge_strength_edit.band`): the canvas band pill's
+   * event crosses the real B1 parser, the writer stores the band's spread, and the dispatcher's post-commit receipt
+   * guard judges a band confirm by the SAME band the adapter used — or it would withhold a write that landed.
+   * Unit rows (mapping, contrast, parse): `src/orchestrator-v5/system-events/__tests__/edge-band-reader.test.ts`.
+   */
+  describe('0.60.0 `band` on the UI event (the canvas band pill)', () => {
+    it('⭐ a band SET: committed std is the band’s, no `std_defaulted`, the mean is the pill’s', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payloadFor(validEvent({ magnitude: 0.55, band: 'strong' }), 'd1'),
+      });
+
+      expect(response.statusCode, response.body).toBe(200);
+      expect(committedEdge()).toMatchObject({
+        strength: { mean: -0.55, std: edgeBandStd('strong') },
+        effect_direction: 'negative',
+        provenance: { source: 'user_specified' },
+      });
+      expect(committedEdge()).not.toHaveProperty('std_defaulted');
+    });
+
+    it('⭐ a band outside the magnitude ("slight" at 0.55): refused, no graph written, the stored graph untouched', async () => {
+      const beforeGraph = structuredClone(persisted);
+      const response = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payloadFor(validEvent({ magnitude: 0.55, band: 'slight' }), 'd2'),
+      });
+
+      expect(response.statusCode, response.body).toBe(200);
+      expect(appendMock).toHaveBeenCalledTimes(1);
+      expect(lastAppend().graph).toBeUndefined();
+      expect(lastAppend().handler_facts).toEqual([]);
+      expect(persisted).toStrictEqual(beforeGraph);
+      expect(JSON.parse(response.body)).not.toHaveProperty('draft_graph');
+    });
+
+    it('⭐ a band CONFIRM: mean kept, std becomes the band’s, the analysis hash moves, and the receipt guard admits it', async () => {
+      const beforeHash = computeAnalysisAffectingGraphHash(persisted as never);
+      const response = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payloadFor(
+          validEvent({ magnitude: 0.4, expected: { mean: -0.4, effect_direction: 'negative' }, intent: 'confirm_current', band: 'strong' }),
+          'd3',
+        ),
+      });
+
+      expect(response.statusCode, response.body).toBe(200);
+      const body = JSON.parse(response.body) as Record<string, unknown>;
+      expect(body.assistant_text).toContain('Confirmed the current strength');
+      expect(committedEdge()).toMatchObject({ strength: { mean: -0.4, std: edgeBandStd('strong') }, effect_direction: 'negative' });
+      expect(committedEdge()).not.toHaveProperty('std_defaulted');
+      expect(computeAnalysisAffectingGraphHash(lastAppend().graph as never)).not.toBe(beforeHash);
+    });
+  });
+
   it.each([
     ['unknown authority field', validEvent({ provenance: 'user_set' })],
     [
