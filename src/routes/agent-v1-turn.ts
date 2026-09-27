@@ -800,6 +800,38 @@ export function timedDispatch(inner: InternalDispatch, ledger: DispatchTiming[],
   };
 }
 
+/**
+ * C6 (OpenAI runtime; served replay 27 Sep, #70 5858519650: an ordinary turn spent ~0.95 s outside the model AND outside
+ * `dispatches`): one session-store call, timed. Every store call the route makes goes through this ONE timer, named by
+ * method and call site (`readCommittedTurn:claim`), so a served turn says which round trips took that time. Recorded at
+ * CALL time, so two calls in flight together keep their call order; settled when the call returns. Additive only: the
+ * call's value or error passes through untouched (a sync throw stays sync, a rejection rejects with the SAME error), and
+ * a failed call is recorded `ok: false`. Capped like the dispatch ledger. Diagnostic only: nothing reads it.
+ */
+export interface StoreCallTiming { readonly op: string; ms: number; ok: boolean }
+const STORE_LEDGER_MAX = 40;
+export function storeCallTimer(ledger: StoreCallTiming[]): <T>(op: string, call: () => Promise<T>) => Promise<T> {
+  return <T>(op: string, call: () => Promise<T>): Promise<T> => {
+    const entry: StoreCallTiming = { op, ms: 0, ok: false };
+    if (ledger.length < STORE_LEDGER_MAX) ledger.push(entry);
+    const t0 = Date.now();
+    return call().then(
+      (value) => { entry.ms = Date.now() - t0; entry.ok = true; return value; },
+      (err: unknown) => { entry.ms = Date.now() - t0; throw err; },
+    );
+  };
+}
+
+/** A read started ahead of the check that licenses its use: it settles, never rejects, so discarding it is always safe. */
+type SettledRead<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly err: unknown };
+function settledRead<T>(start: () => Promise<T>): Promise<SettledRead<T>> {
+  try {
+    return start().then((value) => ({ ok: true as const, value }), (err: unknown) => ({ ok: false as const, err }));
+  } catch (err) {
+    return Promise.resolve({ ok: false as const, err });
+  }
+}
+
 export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
@@ -1480,8 +1512,31 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * unverifiable scenario.
      */
     const store = getSessionStore();
+    // C6: every session-store call below is timed through this ONE timer (`storeCallTimer`) — see `store_calls`.
+    const storeLedger: StoreCallTiming[] = [];
+    const timedStore = storeCallTimer(storeLedger);
+    const approvedProposal = typedApprovalOf(body);
+    /**
+     * Whether this turn restores proposals from the latest answer row (see the rehydration below) — the SAME predicate,
+     * over the body and this process's own proposal store, evaluated where the read is started AND again where its
+     * result is consumed, so the read's result is used under exactly the condition it always was.
+     */
+    const needsRehydrate = (): boolean => (approvedProposal !== undefined && proposals.get(approvedProposal) === undefined)
+      || proposals.outstanding(scenarioId, userId).length === 0;
+    const readPendingForRehydrate = () =>
+      timedStore('readMostRecentPendingActions:rehydrate', () => store.readMostRecentPendingActions!(scenarioId));
+    /**
+     * ⭐ C6: THE PENDING READ STARTS BESIDE THE OWNERSHIP CHECK, NOT AFTER IT (served replay 27 Sep, #70 5858519650:
+     * ~0.95 s of an ordinary turn was store round trips, one after another). The two are independent reads, so the
+     * first no longer waits for the second. It is only STARTED here: its result is CONSUMED below, after ownership
+     * said `allow`, and only if the predicate still holds there. A refused, throwing or unverifiable check discards
+     * it unused — `settledRead` never rejects, so a discarded read is never an unhandled rejection.
+     */
+    let earlyPending: Promise<SettledRead<readonly PendingAction[]>> | undefined;
     try {
-      const owner = await store.ensureScenarioExists(scenarioId, userId);
+      const ownerRead = timedStore('ensureScenarioExists', () => store.ensureScenarioExists(scenarioId, userId));
+      if (needsRehydrate() && typeof store.readMostRecentPendingActions === 'function') earlyPending = settledRead(readPendingForRehydrate);
+      const owner = await ownerRead;
       if (scenarioAccessDecision(owner.user_id, userId) !== 'allow') {
         return reply.code(404).send({ error: 'NOT_FOUND', detail: 'No readable conversation for that scenario.' });
       }
@@ -1495,14 +1550,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
     ), dispatchLedger, scenarioId);
 
-    const approvedProposal = typedApprovalOf(body);
     const requestHash = agentTurnRequestHash(scenarioId, userId, message, approvedProposal !== undefined ? `approve:${approvedProposal}` : undefined);
     /** The response a replay returns: the ORIGINAL words, on today's state, with no model call. */
     /** The `gmh_` handles of the product's held add-options still live on the latest answer row (C52). A failed read is none. */
     const liveHeldRefs = async (sid: string): Promise<string[]> => {
       if (typeof store.readMostRecentPendingActions !== 'function') return [];
       try {
-        return (await store.readMostRecentPendingActions(sid))
+        return (await timedStore('readMostRecentPendingActions:live_refs', () => store.readMostRecentPendingActions!(sid)))
           .filter((pa) => pa.action.kind === 'apply_proposed_change'
             && (pa.action as { inline_patch?: { handler_id?: unknown } }).inline_patch?.handler_id === GM_HELD_HANDLER_ID
             && !isPendingActionExpired(pa, Date.now()))
@@ -1563,12 +1617,21 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * written, or the latest row would be that claim, which carries nothing. A failed read degrades to today's behaviour.
      */
     const approveKey = `${scenarioId}:${userId ?? ''}`;
-    if ((approvedProposal !== undefined && proposals.get(approvedProposal) === undefined)
-      || proposals.outstanding(scenarioId, userId).length === 0) {
+    if (needsRehydrate()) {
       if (typeof store.readMostRecentPendingActions === 'function') {
         try {
+          // C6: the read started beside the ownership check when this same predicate held there; otherwise it is made
+          // now, exactly as before. Either way it is consumed only here, after ownership allowed the turn.
+          let pending: readonly PendingAction[];
+          if (earlyPending !== undefined) {
+            const early = await earlyPending;
+            if (!early.ok) throw early.err;
+            pending = early.value;
+          } else {
+            pending = await readPendingForRehydrate();
+          }
           // What is restored is also carried forward by this turn's own answer row (`carrierForAnswerRow`).
-          rehydrateProposals(await store.readMostRecentPendingActions(scenarioId), proposals, { scenario_id: scenarioId, user_id: userId },
+          rehydrateProposals(pending, proposals, { scenario_id: scenarioId, user_id: userId },
             Date.now(), (carrier) => carriedProposals.remember(approveKey, carrier));
         } catch (err) {
           log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: pending proposals could not be read back — continuing without them');
@@ -1578,10 +1641,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Set only when THIS request owns the turn — used to release it if nothing ran.
     let claimHash: string | undefined;
     if (turnId !== undefined && typeof store.readCommittedTurn === 'function') {
-      const readAnswer = (): Promise<CommittedTurnRecord | null> => store.readCommittedTurn!(scenarioId, turnId);
+      const readAnswer = (op: string): Promise<CommittedTurnRecord | null> => timedStore(op, () => store.readCommittedTurn!(scenarioId, turnId));
       let prior: CommittedTurnRecord | null;
       try {
-        prior = await readAnswer();
+        prior = await readAnswer('readCommittedTurn:prior');
       } catch (err) {
         // Unknown is not absent: running the model now could repeat a turn that
         // already wrote. Nothing is run.
@@ -1598,10 +1661,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // it, so it takes no fence and no CAS; it goes through the shared floor
       // like every turn row (C8). Ownership is decided by READING IT BACK.
       const claimTurnId = claimTurnIdOf(turnId);
-      claimHash = claimHashFor(requestHash, randomUUID());
+      // A const for the timed call below: a closure does not keep the narrowing of the `let`.
+      const claimRequestHash = claimHashFor(requestHash, randomUUID());
+      claimHash = claimRequestHash;
       let owner: CommittedTurnRecord | null;
       try {
-        await appendCheckedGraphWrite({
+        await timedStore('appendCheckedGraphWrite:claim', () => appendCheckedGraphWrite({
           store,
           writesGraph: false,
           source: 'agent_turn_claim',
@@ -1610,14 +1675,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             turn_id: claimTurnId,
             turn_class: 'direct_answer',
             handler_id: null,
-            request_hash: claimHash,
+            request_hash: claimRequestHash,
             response_emitted: false,
             llm_calls_used: 0,
             duration_ms: 0,
             handler_facts: [],
           },
-        });
-        owner = await store.readCommittedTurn(scenarioId, claimTurnId);
+        }));
+        owner = await timedStore('readCommittedTurn:claim', () => store.readCommittedTurn!(scenarioId, claimTurnId));
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: turn claim failed — refusing rather than running unclaimed');
         return reply.code(503).send({ error: 'TURN_STATE_UNVERIFIABLE', detail: 'Could not reserve this turn. Nothing was run — please try again.' });
@@ -1638,7 +1703,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const deadline = Date.now() + AGENT_TURN_CLAIM_WAIT.totalMs;
         for (;;) {
           let answer: CommittedTurnRecord | null = null;
-          try { answer = await readAnswer(); } catch { answer = null; }
+          try { answer = await readAnswer('readCommittedTurn:await_answer'); } catch { answer = null; }
           if (answer !== null) {
             if (answer.request_hash !== requestHash) {
               return reply.code(409).send({ error: 'TURN_ID_REUSED', detail: 'That turn id was already used for a different message. Nothing was run or changed.' });
@@ -1744,7 +1809,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         },
         // The held add-option (C52) is confirmed against the store's LATEST answer row — the row route-v2 reads.
         ...(typeof store.readMostRecentPendingActions === 'function'
-          ? { readPendingActions: (sid: string) => store.readMostRecentPendingActions!(sid) }
+          ? { readPendingActions: (sid: string) => timedStore('readMostRecentPendingActions:capability', () => store.readMostRecentPendingActions!(sid)) }
           : {}),
         // ⭐ Whole-request atomicity (ChatGPT #70 5847200462): N option levels and their links as ONE commit, in-process.
         commitOptionLevels: async (input) => {
@@ -1774,7 +1839,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const held = histories.get(sessionId);
     if (needsDurableSeed(held) && typeof store.readRecent === 'function') {
       try {
-        const durable = historyFromDurableTurns(await store.readRecent(scenarioId));
+        const durable = historyFromDurableTurns(await timedStore('readRecent', () => store.readRecent!(scenarioId)));
         if (durable.length > 0) histories.set(sessionId, [...durable, ...held]);
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: durable conversation could not be read — continuing without it');
@@ -2098,7 +2163,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // outcome is unknown and the turn is never run twice.
       let released = false;
       if (turnId !== undefined && claimHash !== undefined && writesDispatched === 0 && typeof store.releaseTurnClaim === 'function') {
-        try { await store.releaseTurnClaim(scenarioId, claimTurnIdOf(turnId), claimHash); released = true; }
+        const heldClaimHash = claimHash;
+        try { await timedStore('releaseTurnClaim', () => store.releaseTurnClaim!(scenarioId, claimTurnIdOf(turnId), heldClaimHash)); released = true; }
         catch (e) { log.warn({ err: String(e), scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: claim release failed'); }
       }
       return reply.code(502).send({
@@ -2305,7 +2371,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let liveHolds: readonly PendingAction[] = [];
     if (typeof store.readMostRecentPendingActions === 'function') {
       try {
-        const held = (await store.readMostRecentPendingActions(scenarioId)).filter((pa) => pa.action.kind === 'apply_proposed_change'
+        const held = (await timedStore('readMostRecentPendingActions:held', () => store.readMostRecentPendingActions!(scenarioId))).filter((pa) => pa.action.kind === 'apply_proposed_change'
           && (pa.action as { inline_patch?: { handler_id?: unknown } }).inline_patch?.handler_id === GM_HELD_HANDLER_ID);
         /*
          * ⛔ CARRIED BY THE PRODUCT'S OWN SURVIVAL RULE, never copied verbatim (Canonical, #70 5841421182,
@@ -2536,7 +2602,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       try {
         // Through the SHARED persistence floor, like every turn row: the one
         // `store.append` stays inside it (C8). No graph rides on this row.
-        const outcome = await appendCheckedGraphWrite({
+        const outcome = await timedStore('appendCheckedGraphWrite:answer', () => appendCheckedGraphWrite({
           store,
           writesGraph: false,
           source: 'agent_turn',
@@ -2560,7 +2626,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // approval that reaches a restarted process, can still find them.
           ...(durablePending.length > 0 ? { pending_actions: durablePending } : {}),
           },
-        });
+        }));
         if (outcome.priorTurnConflict === true) {
           // A concurrent request with the SAME id and a DIFFERENT message won the
           // row. This answer is not the recorded one; say so rather than return it.
@@ -2570,7 +2636,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         if (outcome.replayedPriorTurn === true && turnId !== undefined && typeof store.readCommittedTurn === 'function') {
           // An identical concurrent request committed first: ITS answer is the
           // record, so it is the one returned.
-          const first = await store.readCommittedTurn(scenarioId, turnId);
+          const first = await timedStore('readCommittedTurn:replay', () => store.readCommittedTurn!(scenarioId, turnId));
           if (first !== null) return reply.code(200).send(await replayed(first));
         }
         durability = 'recorded';
@@ -2626,6 +2692,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           route_total_ms: Date.now() - startedAt,
           dispatches: dispatchLedger,
           dispatch_ms: dispatchLedger.reduce((a, d) => a + d.ms, 0),
+          // C6 (#70 5858519650): every session-store round trip this turn made, by call site, and their sum.
+          store_calls: storeLedger,
+          store_ms: storeLedger.reduce((a, c) => a + c.ms, 0),
         },
         /** X5 (DESIGN Q3): why the one construction retry ran (issue classes) and what became of it. Diagnostic only. */
         ...(constructionTrace !== undefined ? { construction: constructionTrace } : {}),
