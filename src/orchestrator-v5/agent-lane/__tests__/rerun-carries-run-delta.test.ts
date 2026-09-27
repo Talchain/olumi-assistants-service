@@ -57,6 +57,7 @@ const RESULT = { type: 'analysis_result', computed_against_hash: HASH, summary: 
 describe('a re-run on the Agent route carries the run turn\'s run_delta, bound to the run it shows', () => {
   let app: FastifyInstance;
   let modelCalls = 0;
+  let interpreterSaw: Record<string, unknown> | undefined;
   /** What the conventional run turn answered (the producer's block, or its refusal reason). */
   let runTurn: 'delta' | 'first_run' | 'blocked' = 'delta';
   /** What the final readback shows: the same run, a newer one, or a result for another graph. */
@@ -65,6 +66,12 @@ describe('a re-run on the Agent route carries the run turn\'s run_delta, bound t
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
       modelCalls += 1;
+      // What the one interpreter call (tool_choice 'none') is given: the run's tool output, as the model reads it.
+      if (body['tool_choice'] === 'none') {
+        // The LAST tool output is this turn's run; earlier ones are the scenario's history.
+        const out = [...((body['input'] ?? []) as { type?: string; output?: string }[])].reverse().find((i) => i.type === 'function_call_output');
+        interpreterSaw = out?.output !== undefined ? JSON.parse(out.output) as Record<string, unknown> : undefined;
+      }
       if (body['tool_choice'] !== 'none' && modelCalls === 1) {
         return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'run_analysis', call_id: 'c1', arguments: JSON.stringify({ reason: 'asked' }) }] }), { status: 200 });
       }
@@ -99,7 +106,7 @@ describe('a re-run on the Agent route carries the run turn\'s run_delta, bound t
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { modelCalls = 0; runTurn = 'delta'; readback = 'same'; });
+  beforeEach(() => { modelCalls = 0; interpreterSaw = undefined; runTurn = 'delta'; readback = 'same'; });
 
   const pressRun = () => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
@@ -118,6 +125,31 @@ describe('a re-run on the Agent route carries the run turn\'s run_delta, bound t
     expect(b.run_delta).toEqual(DELTA);
     // The run turn gave no refusal reason, so none is carried (Canonical #2039 N1: never invent one).
     expect(b.analysis_ready?.run_delta_absence_reason).toBeUndefined();
+  });
+
+  it('RED (served 263dbd5, 053159Z/15): the interpreter is GIVEN the same run_delta the user is shown — no "no delta supplied"', async () => {
+    const b = (await pressRun()).json() as Body;
+    expect(b.run_delta).toEqual(DELTA);
+    const cs = interpreterSaw?.canonical_state as Record<string, unknown> | undefined;
+    expect(cs?.run_delta, 'the one interpreter call reads the delta the wire carries').toEqual(DELTA);
+  });
+
+  it('RED: a first run → the interpreter is given the producer\'s reason, not a delta', async () => {
+    runTurn = 'first_run';
+    await pressRun();
+    const cs = interpreterSaw?.canonical_state as Record<string, unknown> | undefined;
+    expect(cs?.run_delta).toBeUndefined();
+    expect(cs?.run_delta_absence_reason).toBe('insufficient_runs');
+  });
+
+  it('CONTRAST (the same guard as the wire): the readback shows a NEWER run → the interpreter is given neither', async () => {
+    readback = 'newer_run';
+    const b = (await pressRun()).json() as Body;
+    expect('run_delta' in b).toBe(false);
+    const cs = interpreterSaw?.canonical_state as Record<string, unknown> | undefined;
+    expect(cs, 'PRECONDITION: the interpreter call happened and read canonical state').toBeDefined();
+    expect(cs?.run_delta).toBeUndefined();
+    expect(cs?.run_delta_absence_reason).toBeUndefined();
   });
 
   it('RED: the Agent\'s own run_analysis call (the user asked in words) carries it the same way', async () => {
