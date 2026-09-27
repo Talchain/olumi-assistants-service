@@ -241,6 +241,8 @@ describe('the Agent route runs the first analysis itself, once', () => {
     expect(st(SID).injectRuns, 'and not a second one through the turn route').toBe(0);
     expect(b._diagnostic_trace.first_analysis).toMatchObject({ ran: true });
     expect(b.suggested_actions.some((c) => c.id === RUN_CHIP_ID), 'no Run offered over the run that just happened').toBe(false);
+    // MG sweep 5851155478: nor a sentence telling the user to do what no chip offers, beside the run that just happened.
+    expect(b.assistant_text).not.toContain('The analysis can run now');
     // The readback's result is the authority, shown once.
     expect((b.blocks ?? []).filter((x) => x.type === 'analysis_result')).toEqual([expect.objectContaining({ summary: 'A provisional first pass.' })]);
   });
