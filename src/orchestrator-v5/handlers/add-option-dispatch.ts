@@ -43,6 +43,7 @@ import { TYPED_TRANSACTION_ENVELOPE_CAP, type FrameFreshness } from '../graph-ma
 import type { PendingAction } from '../session/pending-action.js';
 import {
   buildAddOptionsTransaction,
+  GM_HELD_SWITCH_FACTORS_KEY,
   MAX_OPTIONS_PER_TRANSACTION,
   type AddOptionGraphView,
   type AddOptionsSkipReason,
@@ -347,6 +348,22 @@ export function dispatchAddOptionTransaction(
     return { kind: 'skip', reason: 'not_held', governing: decision.governing };
   }
 
+  /**
+   * ⭐ THE HOLD NAMES ITS NEW SWITCHES (Canonical #70 5854919806 item 1). A switch's today-0 is CEE's own stamp, written
+   * by the confirm into the SAME apply as the option (`stampNewSwitchFactors`); R4 keeps it off the `add_node` op. This
+   * dispatch is CEE's own typed transaction, so it — and only it — records which factors those are. Only a hold that
+   * carries the executable batch gets the member (a decline-posture hold has nothing to stamp); every other hold keeps
+   * its exact bytes.
+   */
+  const switchFactorIds = built.switchFactorIds ?? [];
+  const heldPendings: readonly PendingAction[] = switchFactorIds.length === 0
+    ? decision.pendingActions
+    : decision.pendingActions.map((p) => {
+        const ip = p.action.kind === 'apply_proposed_change' ? p.action.inline_patch : null;
+        if (ip === null || !Array.isArray((ip as { operations?: unknown }).operations)) return p;
+        return { ...p, action: { ...p.action, inline_patch: { ...ip, [GM_HELD_SWITCH_FACTORS_KEY]: [...switchFactorIds] } } } as PendingAction;
+      });
+
   // Proposal-time completeness disclosure (ROADMAP 2.11 doctrine, at PROPOSAL
   // time). The CONFIGURED case gets an explicit "ready to analyse" affirmation
   // the referee gate's held copy does not carry. The UNCONFIGURED case is
@@ -432,7 +449,7 @@ export function dispatchAddOptionTransaction(
   return {
     kind: 'held',
     response,
-    pendingActions: decision.pendingActions,
+    pendingActions: heldPendings,
     optionId,
     optionLabel,
     configured,

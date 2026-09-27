@@ -69,6 +69,7 @@ import {
   type EditGmGoverningVerdict,
 } from './edit-graph-referee-gate.js';
 import { detectOptionOwnValueSubstitution } from '../routing/option-observed-state-substitution.js';
+import { GM_HELD_SWITCH_FACTORS_KEY, stampNewSwitchFactors } from '../routing/add-option-transaction.js';
 import { elideCascadeRedundantRemoveEdges } from '../graph-management/cascade-removes.js';
 import { propagateConfirmedInterventionRemovals } from '../graph-management/confirmed-intervention-removals.js';
 import type { FrameFreshness } from '../graph-management/types.js';
@@ -468,6 +469,11 @@ export type GmHeldResumeRead =
       readonly operations: readonly ValidatedPatchOperation[];
       /** (A) — the typed cap the hold was refereed under; absent → `PROPOSAL_CAP`. */
       readonly envelopeCap?: number;
+      /**
+       * The new 0/1 switches the typed add-option recorded on the hold (`GM_HELD_SWITCH_FACTORS_KEY`), whose today-0 the
+       * confirm writes in the same apply (`stampNewSwitchFactors`). Absent on every other hold.
+       */
+      readonly switchFactorIds?: readonly string[];
     };
 
 /**
@@ -485,10 +491,18 @@ export function readGmHeldResume(pending: PendingAction): GmHeldResumeRead {
   const parsed = PatchOperationsArraySchema.safeParse(patch.operations);
   if (!parsed.success) return { kind: 'no_payload' };
   const envelopeCap = boundTypedEnvelopeCap(patch.envelope_cap);
+  // A malformed switch member is a hold nothing can safely execute: declined, never applied without its today-0.
+  const rawSwitches = patch[GM_HELD_SWITCH_FACTORS_KEY];
+  if (rawSwitches !== undefined
+    && (!Array.isArray(rawSwitches) || rawSwitches.length === 0
+      || !rawSwitches.every((id) => typeof id === 'string' && id.length > 0))) {
+    return { kind: 'no_payload' };
+  }
   return {
     kind: 'ok',
     operations: parsed.data,
     ...(envelopeCap !== undefined ? { envelopeCap } : {}),
+    ...(rawSwitches !== undefined ? { switchFactorIds: [...(rawSwitches as string[])] } : {}),
   };
 }
 
@@ -500,6 +514,8 @@ export interface GmHeldExecuteInput {
   readonly operations: readonly ValidatedPatchOperation[];
   /** (A) — the hold's recorded typed cap (`readGmHeldResume`); absent → default. */
   readonly envelopeCap?: number;
+  /** The hold's new switches (`readGmHeldResume`); their today-0 lands in this apply. Absent → none. */
+  readonly switchFactorIds?: readonly string[];
   /** The CURRENT graph (persisted authority; hash-verified by the caller). */
   readonly currentGraph: unknown;
   /** Like-for-like hash of `currentGraph` (already matched the pin). */
@@ -657,6 +673,27 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
     return { status: 'referee_blocked', governing: decision.governing };
   }
 
+  // ── 2a. A new switch's today-0 (Canonical #70 5854919806 item 1) ──────
+  // CEE's own stamp, written INTO the op after the re-referee and before the
+  // apply — the carrier `stampUserEditProvenance` uses below for the user's.
+  // The factor, its today-0 (Olumi's, `cee_inference`), the option's level 1
+  // and the links therefore land in ONE apply and ONE commit. A member that
+  // does not match the batch by identity refuses the WHOLE batch: nothing is
+  // applied, and the stored graph is untouched.
+  const switchStamp = stampNewSwitchFactors(operations, input.switchFactorIds ?? []);
+  if (!switchStamp.ok) {
+    log.warn(
+      {
+        request_id: input.requestId,
+        scenario_id: input.scenarioId,
+        operations_count: operations.length,
+      },
+      'GM held-execute — the hold names a new switch its batch does not add and switch on; declining whole batch (nothing persisted)',
+    );
+    return { status: 'apply_failed', reason: 'apply_error' };
+  }
+  const stampedOperations: PatchOperation[] = switchStamp.operations;
+
   // ── 2b. Canonicalise value-op field spellings (R1 residual) ────────────
   // The confirm re-applies LOCALLY (no PLoT round-trip), so a tunable value op
   // in the edit pipeline's non-canonical field spelling (`{ data: { value } }`,
@@ -699,8 +736,8 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
   // fail-loud backstop), and this prescreen turns that into the seam's
   // honest decline instead of an unhandled error.
   const heldCanonicalisedOps = stampUserEditProvenance(
-    canonicaliseValueOps(operations, input.currentGraph).operations,
-    operations,
+    canonicaliseValueOps(stampedOperations, input.currentGraph).operations,
+    stampedOperations,
   );
   const heldAmbiguousOps = findAmbiguousScaleValueOps(heldCanonicalisedOps, input.currentGraph);
   if (heldAmbiguousOps.length > 0) {

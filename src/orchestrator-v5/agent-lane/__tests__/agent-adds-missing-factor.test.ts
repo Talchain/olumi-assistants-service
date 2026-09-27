@@ -143,3 +143,72 @@ describe('propose_new_option sends ONE change carrying the option AND the factor
     expect(sent).toEqual([]);
   });
 });
+
+/**
+ * ⭐ A1 — A NEW FACTOR THE OPTION SWITCHES ON (Canonical #70 5854919806 item 1). The Agent says so with the ONE typed
+ * member `kind: 'switch'`; the option's level on it is then exactly 1 in the same change (its today-0 is written by the
+ * confirm, as Olumi's). A figure that is not "on" contradicts the kind and is refused, never rounded to on; an unknown
+ * kind is refused, never read as either. Without `kind` the wire is byte-identical (the RED (served F4) row above).
+ */
+describe('A1 — propose_new_option sends a new SWITCH switched on, in the same change', () => {
+  const setup = () => {
+    const sent: { path: string; body: unknown }[] = [];
+    const d: InternalDispatch = async (path, body) => {
+      if (path.endsWith('/graph')) return { status: 200, json: { graph: served, graph_hash: 'h0' } };
+      sent.push({ path, body });
+      return { status: 500, json: {} };
+    };
+    return { caps: createAgentCapabilities(d, new ProposalStore()), sent };
+  };
+  const SWITCH = { label: 'AI add-on offered', kind: 'switch', affects: [{ label: 'Monthly recurring revenue (MRR)', direction: 'positive' }] };
+  const call = (level?: Record<string, unknown>, kind: unknown = 'switch') => ({
+    label: 'Keep £49 and offer a paid AI add-on',
+    acts_on: [{ factor_label: 'AI add-on offered', direction: 'positive', ...(level !== undefined ? { level } : {}) }],
+    new_factors: [{ ...SWITCH, kind }],
+    rationale: 'the user asked for it',
+  });
+  const paramsOf = (sent: { body: unknown }[]) =>
+    (sent[0]?.body as { chip?: { parameters?: Record<string, unknown> } } | undefined)?.chip?.parameters;
+
+  it('RED: the wire declares the switch and the option switches it ON (level 1) — never a null level', async () => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx, call() as never);
+    const params = paramsOf(sent);
+    expect(params, JSON.stringify(r)).toBeDefined();
+    expect(params!['new_factors']).toEqual([{ key: 'ai_add_on_offered', label: 'AI add-on offered',
+      affects: [{ node_id: 'monthly_recurring_revenue_mrr', effect_direction: 'positive' }], kind: 'switch' }]);
+    expect(params!['interventions']).toEqual([{ factor_key: 'ai_add_on_offered', value: 1, source: 'cee_hypothesis' }]);
+  });
+
+  it('RED: a level of exactly 1 is on and is sent; any other figure for a switch is refused with nothing sent', async () => {
+    const on = setup();
+    await on.caps.proposeNewOption(ctx, call({ value: 1 }) as never);
+    expect((paramsOf(on.sent)!['interventions'] as unknown[])[0]).toEqual({ factor_key: 'ai_add_on_offered', value: 1, source: 'cee_hypothesis' });
+    for (const value of [100, 50, 0, 0.5]) {
+      const { caps, sent } = setup();
+      const r = await caps.proposeNewOption(ctx, call({ value, unit: '%' }) as never) as { refusal?: string; detail?: string };
+      expect(r.refusal, String(value)).toBe('switch_level_not_on');
+      expect(r.detail).toContain('leave kind out');
+      expect(sent).toEqual([]);
+    }
+  });
+
+  it('RED: an unknown kind is refused before anything is sent — never read as switch or graded', async () => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx, call(undefined, 'boolean') as never) as { refusal?: string };
+    expect(r.refusal).toBe('new_factor_kind_invalid');
+    expect(sent).toEqual([]);
+  });
+
+  it('CONTRAST: kind "graded" is the default — the wire carries no kind and the level stays null, exactly as with kind absent', async () => {
+    const graded = setup();
+    await graded.caps.proposeNewOption(ctx, call(undefined, 'graded') as never);
+    const absent = setup();
+    await absent.caps.proposeNewOption(ctx, { ...call(), new_factors: [{ label: SWITCH.label, affects: SWITCH.affects }] } as never);
+    // The option id is minted fresh per call (`mintOptionId`); everything else must be the same bytes.
+    const withoutId = (x: Record<string, unknown> | undefined) => { const { option_id: _id, ...rest } = x ?? {}; return JSON.stringify(rest); };
+    expect(withoutId(paramsOf(graded.sent))).toBe(withoutId(paramsOf(absent.sent)));
+    expect(paramsOf(graded.sent)!['interventions']).toEqual([{ factor_key: 'ai_add_on_offered', value: null, source: 'cee_hypothesis' }]);
+    expect(JSON.stringify(paramsOf(graded.sent))).not.toContain('switch');
+  });
+});
