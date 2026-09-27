@@ -258,6 +258,26 @@ export const NodeV3 = z.object({
   threshold_source: z.string().max(64).optional().catch(undefined),
   success_threshold: z.number().finite().nullable().optional().catch(undefined),
   /**
+   * ⛔ THE SAVED-EXAMPLE STAMPS (the UI's register writes them on the nodes of a loaded saved example).
+   *
+   * THIS DECLARATION IS LOAD-BEARING, for the same reason as `threshold_source` above. The UI registers
+   * `starterId` / `starterTitle` on every node and `interventionKeys` on option nodes (served pricing
+   * example `319dde1`: 15/15, 15/15, 4 — the ONLY undeclared keys on it). Undeclared, the first D1 write's
+   * re-parse stripped them from EVERY node, and the guards that compare a write with the stored bytes then
+   * REFUSED legitimate writes on a saved example: the Agent's approved value (`value_scope_mismatch`) and
+   * the inspector's link confirm (`confirmation_would_change_non_provenance_state`) — writer audit
+   * 2026-09-27, #70 5854387709. Nothing reads them for analysis. A malformed value is dropped exactly as
+   * before (`.catch`), never a new reason to refuse a stored graph, and a stored `null` is absence
+   * (`drop-null-optional-fields.ts`).
+   *
+   * ⚠ `interventionKeys` IS NOT INERT: it is the UI's index of the option's own `interventions` keys, and
+   * writers change the cells. The persisted form re-derives it wherever present (`reindex-intervention-keys.ts`),
+   * or a delete stores it naming the deleted factor and the UI's reload proof declines the Run (#2084 review).
+   */
+  starterId: z.string().max(128).optional().catch(undefined),
+  starterTitle: z.string().max(512).optional().catch(undefined),
+  interventionKeys: z.array(z.string().max(256)).max(256).optional().catch(undefined),
+  /**
    * ⭐⭐ THE PER-FACTOR SCALE FRAME (factor nodes only) — the divisor pass 3d
    * projected this factor's baseline and every option intervention magnitude
    * onto, so within-factor ratios are exact.
@@ -590,6 +610,26 @@ export const EdgeV3 = z.object({
    * not an input to analysis.
    */
   exists_defaulted: z.boolean().optional().catch(undefined),
+  /**
+   * ⭐ A6f — THIS LINK'S SPREAD (`strength.std`) IS STILL OLUMI'S, NOT THE USER'S (AIQ N1 on #2096, 5856128077).
+   *
+   * The same per-field split as `exists_defaulted`, for the other number a user strength write does not state. An
+   * EXACT FIGURE (the canvas slider, the β field, "Confirm this estimate", an LLM or chip `adjust_edge_strength`)
+   * states a mean and no range, so the std the link keeps is Olumi's — rescaled to the new mean, never the stale
+   * absolute value (`adjust-edge-strength.ts` `olumiSpreadForMean`) — while the edge is stamped `user_specified`.
+   * Without this flag that std read as the user's.
+   *
+   * CEE-MINTED, ONE WRITER: `adjust-edge-strength.ts` sets it to `true` on every user write whose std the user did
+   * not state, and REMOVES it when the write states the spread itself (a named band, or an explicit `std`). The
+   * confirmation guard (`isProvenanceOnlyEdgeConfirmation`) admits absent → `true` on a figure confirm and present →
+   * absent on a band confirm, and nothing else. A producer cannot write it: the root is in `field-safety.ts`
+   * `CEE_ANALYSIS_OWNED_ROOTS` (update refused PIPELINE_OWNED_FIELD at any depth; an `add_node` value is stripped).
+   *
+   * ⚠ LOAD-BEARING, as `exists_defaulted` above: undeclared, the handler's own post-mutation `GraphV3` parse would
+   * silently delete it. Absence means not marked. Malformed → dropped (`.catch`). OUT of
+   * `computeAnalysisAffectingGraphHash` (a label on a value); the std it labels IS in that hash.
+   */
+  std_defaulted: z.boolean().optional().catch(undefined),
 }); // CIL Phase 1: declared fields only — unknown fields stripped with warning
 /** EdgeV3 with full ValidationMetadata typing (superset of Zod schema). */
 export type EdgeV3T = z.infer<typeof EdgeV3> & {

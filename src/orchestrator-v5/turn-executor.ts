@@ -4413,7 +4413,16 @@ export async function runTurnExecutor(
         stagesCompleted.push('compose');
         const previousEffectiveGraphForBatch = effectiveTurnGraph;
         const previousMutationObservationForBatch = handlerEmittedMutatedGraph;
-        effectiveTurnGraph = outcome.appliedGraph;
+        // ⭐ MERGED ONTO THE STORED GRAPH, LIKE EVERY OTHER D1-CLASS WRITER (writer audit
+        // 2026-09-27). The batch's applied graph is a GraphV3 parse of nodes and edges, so
+        // persisting it as-is dropped the stored limits, goal_node_id and options[].
+        const persistedBatchGraph = mergeMutatedGraphForPersistence({
+          mutatedGraph: outcome.appliedGraph as Record<string, unknown>,
+          persistedBase: baseGraph,
+          requestId: context.request_id,
+          scenarioId: context.session_id,
+        });
+        effectiveTurnGraph = persistedBatchGraph as typeof outcome.appliedGraph;
         handlerEmittedMutatedGraph = true;
         try {
           const committed = await commitTurn(appliedResponse, {
@@ -4425,7 +4434,7 @@ export async function runTurnExecutor(
             llm_calls_used: 0,
             duration_ms: Date.now() - startedAt,
             handler_facts: [batchFact],
-            graph: outcome.appliedGraph,
+            graph: persistedBatchGraph,
             consumedPendingRefs: [batchPending.chip_id],
           });
           commitPerformed = committed.performed;
@@ -4564,6 +4573,8 @@ export async function runTurnExecutor(
         const outcome = executeGmHeldResume({
           operations: read.operations,
           ...(read.envelopeCap !== undefined ? { envelopeCap: read.envelopeCap } : {}),
+          // A new switch's today-0 lands in this same apply (Canonical #70 5854919806 item 1).
+          ...(read.switchFactorIds !== undefined ? { switchFactorIds: read.switchFactorIds } : {}),
           currentGraph: gmBaseGraph,
           currentGraphHash: gmBaseHash,
           freshness: freshness?.freshness ?? 'unknown',
@@ -4813,9 +4824,11 @@ export async function runTurnExecutor(
           }
           const preStepGraph = workingGraph;
           const stepCap = reads[i]!.envelopeCap;
+          const stepSwitches = reads[i]!.switchFactorIds;
           const outcome = executeGmHeldResume({
             operations: reads[i]!.operations,
             ...(stepCap !== undefined ? { envelopeCap: stepCap } : {}),
+            ...(stepSwitches !== undefined ? { switchFactorIds: stepSwitches } : {}),
             currentGraph: preStepGraph,
             currentGraphHash: workingHash,
             freshness: freshness?.freshness ?? 'unknown',

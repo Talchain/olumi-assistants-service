@@ -492,3 +492,61 @@ describe('value batch chip click — degrade with disclosure, never a partial wr
     expect(result.response.assistant_text.length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * ⭐ THE APPLIED BATCH KEEPS WHAT IT DOES NOT OWN (writer audit 2026-09-27, #70 5854387709).
+ * The batch persisted a GraphV3 parse of nodes and edges with no merge onto the stored
+ * graph, so "Apply all N estimates" dropped the stored limits, goal_node_id and every
+ * undeclared node key. Its pending is pinned to the limited graph's own hash, so a
+ * stale-pin refusal cannot pass this row.
+ */
+describe('value batch chip click — the one commit keeps the stored graph around it', () => {
+  it('⭐ the stored limits, goal_node_id and undeclared node stamps survive the apply', async () => {
+    const goal = BATCH_GRAPH.nodes.find((n) => n.kind === 'goal')!;
+    const factor = BATCH_GRAPH.nodes.find((n) => n.kind === 'factor')!;
+    const LIMIT = { constraint_id: 'constraint_stated_limit', node_id: factor.id as string, operator: '<=', value: 0.4, label: 'stated limit', provenance: 'explicit' };
+    const limited = {
+      ...structuredClone(BATCH_GRAPH),
+      goal_node_id: goal.id as string,
+      goal_constraints: [LIMIT],
+      // As the UI's loader registers a saved example: a stamp on every node, and each option's index of its cells.
+      nodes: BATCH_GRAPH.nodes.map((n) => ({ ...structuredClone(n), starterId: 'saved-example',
+        ...(n.kind === 'option' ? { interventionKeys: Object.keys((n as Dict).interventions ?? {}) } : {}) })),
+    };
+    const hash = computeAnalysisAffectingGraphHash(GraphStateIngressSchema.parse(limited));
+    if (hash === null) throw new Error('limited fixture must have an analysis hash');
+    const assessment = assessCanonicalAnalysisReadiness(limited);
+    const cells = selectValueBatchMembership(assessment).cells;
+    const out = await prepareValueBatchOffer(
+      { assessment, graph: limited, currentGraphHash: hash, scenarioId: SCENARIO_ID, brief: undefined },
+      async () => ({
+        content: JSON.stringify({
+          estimates: cells.map((c) => ({ option_id: c.option_id, factor_id: c.factor_id, value: 0.6, reasoning: 'From the brief.', confidence: 'medium' as const })),
+        }),
+      }),
+    );
+    if (out.kind !== 'offer') throw new Error(`expected an offer on the limited graph, got ${out.kind}`);
+    graphForRead = limited;
+    pendingActionsForRead = [JSON.parse(JSON.stringify(out.offer.pending)) as PendingAction];
+
+    await runTurnExecutor(payload(), 'req-value-batch-keeps', { routingAdapter: throwingRoutingAdapter() });
+
+    expect(appendCalls).toHaveLength(1);
+    const write = appendCalls[0]!;
+    const g = write.graph as Dict | undefined;
+    expect(g, 'the batch must commit a graph').toBeDefined();
+    // Not a no-op pass: the batch still wrote its own cell.
+    expect(writtenIntervention(write, cells[0]!.option_id, cells[0]!.factor_id)?.value).toBeCloseTo(0.6);
+    expect((g!.goal_constraints as Dict[] | undefined)?.map((c) => [c.constraint_id, c.value])).toEqual([['constraint_stated_limit', 0.4]]);
+    expect(g!.goal_node_id).toBe(goal.id);
+    expect((g!.nodes as Dict[]).filter((n) => n.starterId !== 'saved-example').map((n) => n.id)).toEqual([]);
+    // The index follows the cells the batch added (#2084 review: an inert index went stale on 3/6 options).
+    const optionsAfter = (g!.nodes as Dict[]).filter((n) => n.kind === 'option');
+    const storedIndex = (id: unknown) => (limited.nodes as Dict[]).find((n) => n.id === id)!.interventionKeys as string[];
+    expect(optionsAfter.some((o) => Object.keys((o.interventions ?? {}) as Dict).length > storedIndex(o.id).length),
+      'not vacuous: the batch grew an option past its stored index').toBe(true);
+    for (const o of optionsAfter) {
+      expect([...(o.interventionKeys as string[])].sort(), String(o.id)).toEqual(Object.keys((o.interventions ?? {}) as Dict).sort());
+    }
+  });
+});

@@ -29,6 +29,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
 import { OPENAI_ONLY, assertProviderAllowed, providerLedgerTruncated, recordProviderUsage, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { RESEARCH_CHIP_PREFIX, approvedQueryOf, readResearchResponse, researchChipFor, researchReplyText, researchRequestBody, type ResearchOutcome } from '../orchestrator-v5/agent-lane/runtime/public-research.js';
+import { agentPromptIdentity, conversationPromptAlias } from '../orchestrator-v5/agent-lane/runtime/prompt-identity.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
@@ -47,9 +48,12 @@ import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { answerIsIncomplete, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
+import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js';
+import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
+import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
 import { commitLimitEditInProcess, commitOptionLevelsInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
 import { readinessSentence, readinessViewOf, stillNeededLine } from '../orchestrator-v5/agent-lane/readiness-view.js';
-import type { CallStructuredModel } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
+import type { CallStructuredModel, ConstructionTrace } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
 import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
@@ -69,6 +73,7 @@ import { computeSurvivingPriorPendingsDetailed } from '../orchestrator-v5/commit
 import { GM_HELD_HANDLER_ID } from '../orchestrator-v5/handlers/edit-graph-referee-gate.js';
 import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
+import { currentStageEmitter } from '../cee/unified-pipeline/stage-stream-context.js';
 import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runDeltaBoundToReadback, runTurnNextMove, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
@@ -94,6 +99,13 @@ import {
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
 import { deriveAnswerTextFromShape, synthesiseAnswerShapeFromText, warrantsProgressiveDisclosure } from '../orchestrator-v5/routing/answer-shape.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
+
+/**
+ * C6-1b: the revision a turn-state packet is bound to when the read found NO graph. Never a hash (a real revision
+ * is 64 hex), so it cannot match a populated model; the packet never leaves this process, and its own expectation
+ * is built from the same value in the same turn.
+ */
+const EMPTY_MODEL_REVISION = 'empty-model';
 
 /** The egress sanitiser resolves labels against a PARSED graph; an unparseable read gives it none. */
 function parsedGraphOrNull(raw: unknown): GraphV3T | null {
@@ -318,7 +330,7 @@ export { BOARD_EDIT_PREFIX } from '../orchestrator-v5/agent-lane/history-store.j
 const AGENT_INSTRUCTIONS = [
   'You are Olumi, a strategic reasoning layer. Improve human strategic judgement rather than deciding for the user.',
   'Answer the user’s actual question directly and naturally.',
-  'Never invent canonical facts. Each turn opens with a CURRENT MODEL STATE input: exactly what get_canonical_state returns, read by Olumi at the start of the turn. Describe the model from it; call get_canonical_state only when that input is absent.',
+  'Never invent canonical facts. Each turn opens with a CURRENT MODEL STATE input: exactly what get_canonical_state returns, read by Olumi at the start of the turn. A tool result later in the same turn that APPLIED a change (mutated: true, the new entities, a new graph_revision, readiness_after) is newer and supersedes it for what it covers: describe the model from the latest applied result. A proposal\u2019s readiness_if_approved describes the model only IF the user approves, and never supersedes it. Call get_canonical_state only when that input is absent.',
   'Distinguish user facts and evidence from machine-authored estimates and from unknowns. An absent value is unknown, never zero.',
   /*
    * ⛔ CARRYING THE FIELD IS NOT SAYING IT. Measured 3/3 on the Agent route: the
@@ -786,7 +798,7 @@ export function timedDispatch(inner: InternalDispatch, ledger: DispatchTiming[],
   };
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null }> {
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -814,6 +826,8 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   /** The selected run's constraint verdict state, carried with `analysisResult` (same fact); `null` = not recorded. */
   let constraintVerdictState: string | null | undefined;
   let leaderLimitRisks: readonly unknown[] | null | undefined;
+  /** A7: the read's own `not_modelled`, as read — derived by the read route over this same graph, never here. */
+  let notModelled: NotModelledManifest | undefined;
   /**
    * ⛔ THE CANVAS RENDERS FROM `draft_graph`, NOT FROM `graph_hash`.
    *
@@ -852,6 +866,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
       // `analysis_leader_limit_risks`). Only `null` or an array is carried; the card checks every element.
       const llr = after.json.analysis_leader_limit_risks;
       if (llr === null || Array.isArray(llr)) leaderLimitRisks = llr;
+      notModelled = notModelledOfRead(after.json.not_modelled);
       /**
        * ⭐ READINESS FROM THE MOMENT THE MODEL EXISTS, not from the moment
        * someone runs an analysis.
@@ -978,7 +993,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks };
+  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1071,7 +1086,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * conversation calls per turn, and attributing a cache hit to the wrong one is the
      * quietest possible way to make the measurement wrong.
      */
-    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callModel', { model: budget.model, purpose: 'conversation' });
+    /**
+     * ⭐ WHICH PROMPT, NOT ONLY WHICH SITE (AIQ identity map @30c0e79c; `prompt-identity.ts`). The Run fast path's one
+     * interpreting call (`tool_choice: 'none'`) is `agent.interpret`; every other conversation call is
+     * `agent.converse`. The sha is of `req.instructions` — the SAME string the body below sends, so C5b's view line or
+     * the interpret-only constraint changes it.
+     */
+    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callModel', {
+      model: budget.model,
+      purpose: 'conversation',
+      ...agentPromptIdentity(conversationPromptAlias((req as { tool_choice?: unknown }).tool_choice), req.instructions),
+    });
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: {
@@ -1114,11 +1139,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
    */
   const callResearch = async (query: string): Promise<unknown> => {
     const model = budgetFor('gpt-5.6-terra', 'conversation').model;
-    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callResearch', { model, purpose: 'public_research' });
+    // Built once, so the ledger's sha is of the instructions this exact body sends (`RESEARCH_INSTRUCTIONS` today).
+    const researchBody = researchRequestBody(query, model);
+    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callResearch', {
+      model, purpose: 'public_research', ...agentPromptIdentity('agent.research', researchBody['instructions']),
+    });
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: { authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`, 'content-type': 'application/json' },
-      body: JSON.stringify(researchRequestBody(query, model)),
+      body: JSON.stringify(researchBody),
       // Bounded (#2042 N2): the captured search took 15 s; a hung one is said as unfinished, never waited on.
       signal: AbortSignal.timeout(60_000),
     });
@@ -1166,7 +1195,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * ⚠ `j.usage` was ALREADY parsed and returned by this function; only the ledger
      * write was missing. Nothing new is fetched or computed here.
      */
-    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callStructured', { model: reqBody.model, purpose: 'construction' });
+    // `agent.construct` covers BUILD_INSTRUCTIONS and its retry/size/compaction suffixes; the sha tells them apart.
+    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callStructured', {
+      model: reqBody.model, purpose: 'construction', ...agentPromptIdentity('agent.construct', reqBody.instructions),
+    });
     let j: {
       output?: { type?: string; content?: { type?: string; text?: string }[] }[];
       usage?: Record<string, unknown>;
@@ -1607,21 +1639,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // safe to release its claim (nothing sent) or must leave it (outcome unknown).
     let writesDispatched = 0;
     /**
-     * ⭐ ONE READ OF THE MODEL PER TURN WHEN NOTHING WAS WRITTEN (slice C1c; served replay of Paul's transcript on
-     * 339ed34, 27 Sep: an ordinary turn read the scenario twice — the state the Agent is given, and the readback
-     * for this response — at ~1.3 s of server time each). Only a READ-ONLY turn reuses its read: once the turn
-     * writes anything (every write goes through this dispatch or bumps `writesDispatched`) nothing is reused, and
-     * a write turn reads exactly as before — a changed model is never answered from before it changed.
+     * ⭐ ONE READ OF THE MODEL PER WRITE EPOCH (C6; widens slice C1c, which reused a read only before the first
+     * write). See `turnReadCache`: a graph read is reused while nothing else has been dispatched or written since
+     * it was taken: the epoch advances when any other dispatch or in-process writer (`readCache.around`) finishes, and a
+     * kept read carries the epoch it STARTED in. So a read after a write always sees it. Served: 22 reads at ~1.1 s in one
+     * journey; an approve made 4.
      */
-    const graphReadPath = `/assist/v1/scenarios/${scenarioId}/graph`;
-    let graphRead: Awaited<ReturnType<typeof dispatch>> | undefined;
-    const readingDispatch: typeof dispatch = async (path, body) => {
-      if (path !== graphReadPath) return dispatch(path, body);
-      if (graphRead !== undefined && writesDispatched === 0) return graphRead;
-      const res = await dispatch(path, body);
-      graphRead = res.status === 200 && writesDispatched === 0 ? res : undefined;
-      return res;
-    };
+    const readCache = turnReadCache(dispatch, `/assist/v1/scenarios/${scenarioId}/graph`);
+    const readingDispatch: typeof dispatch = readCache.dispatch;
     const countingDispatch: typeof dispatch = async (path, body) => {
       if (path.endsWith('/graph/register') || path === '/orchestrate/v2/turn') writesDispatched += 1;
       return readingDispatch(path, body);
@@ -1638,7 +1663,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let firstAnalysis: { outcome: FirstAnalysisOutcome; ms: number; constructionTurnId: string; revision: string } | undefined;
     const runFirstAnalysis = async (input: Parameters<typeof runFirstAnalysisAfterConstruction>[0]): Promise<FirstAnalysisOutcome> => {
       const t0 = Date.now();
-      const outcome = await runFirstAnalysisAfterConstruction({ ...input, onDispatch: () => { writesDispatched += 1; } });
+      const outcome = await readCache.around(() => runFirstAnalysisAfterConstruction({ ...input, onDispatch: () => { writesDispatched += 1; } }));
       firstAnalysis = { outcome, ms: Date.now() - t0, constructionTurnId: input.constructionTurnId, revision: input.revisionHash };
       return outcome;
     };
@@ -1648,11 +1673,40 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * `bindRunBlocksToReadback` and `runTurnCoaching`. No trigger ⇒ the user asked for the run.
      */
     let lastRun: CapturedAnalysis | undefined;
+    /** X5: set only when this turn ran a construction — see `ConstructionTrace`. */
+    let constructionTrace: ConstructionTrace | undefined;
     const capabilities = createAgentCapabilities(
       countingDispatch, proposals, (reqBody) => callStructured(reqBody, constructionDeadlineAt), mode,
       (payload) => { lastRun = { ...payload, trigger: payload.trigger ?? 'explicit_run' }; },
       {
         firstAnalysis: (input) => runFirstAnalysis({ ...input, deadlineAt: firstAnalysisDeadlineAt }),
+        /**
+         * ⭐ C6-1: THE CANVAS DRAWS THE FIRST MODEL WHEN IT IS REGISTERED, NOT AT THE END OF THE TURN.
+         *
+         * Measured (DL C6, 25 served first briefs): ~15 s of a 79 s median first brief comes after the model is
+         * saved — reads, the first analysis, the Agent's closing calls — and the browser saw none of it until
+         * COMPLETE, because the only `GRAPH_READY` producer was the v2 engine's draft tool. The UI already draws
+         * this frame on arrival (`consumeStreamedDraftTurn`), without autosave, and checks it against COMPLETE.
+         *
+         * The committed graph as read back, through the SAME projection COMPLETE's `draft_graph` uses below, so
+         * the ids cannot drift. Structure only: at this line no analysis, leader or claim exists for this model.
+         * `currentStageEmitter()` is set only inside `/proxy/v5/turn/stream` and `/orchestrate/v2/turn/stream`;
+         * every buffered turn reads `undefined` and emits nothing, so its body is untouched by construction.
+         */
+        // X5 (DESIGN Q3): the construction retry's reason and outcome, for the trace only.
+        onConstructionTrace: (t) => { constructionTrace = t; },
+        onModelRegistered: (raw) => {
+          const emitStage = currentStageEmitter();
+          if (emitStage === undefined || !Array.isArray(raw.nodes) || raw.nodes.length === 0) return;
+          // The persisted graph as read back — the same single cast COMPLETE's readback makes (`after.json.graph`).
+          const g = raw as GraphV3T;
+          emitStage({
+            kind: 'GRAPH_READY',
+            graph: buildAppliedGraphWireField({ ...g, edges: Array.isArray(g.edges) ? g.edges : [] }),
+            schema_version: 'v3',
+            elapsed_ms: Date.now() - startedAt,
+          });
+        },
         // The held add-option (C52) is confirmed against the store's LATEST answer row — the row route-v2 reads.
         ...(typeof store.readMostRecentPendingActions === 'function'
           ? { readPendingActions: (sid: string) => store.readMostRecentPendingActions!(sid) }
@@ -1660,20 +1714,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // ⭐ Whole-request atomicity (ChatGPT #70 5847200462): N option levels and their links as ONE commit, in-process.
         commitOptionLevels: async (input) => {
           writesDispatched += 1;
-          return commitOptionLevelsInProcess(input, String(req.id));
+          return readCache.around(() => commitOptionLevelsInProcess(input, String(req.id)));
         },
         // ⭐ C5: the provisional view is accepted only while the analysis withholds its leader — read from THIS route's
         // readback through the wire gate's own predicate, so the capability and the gate below cannot disagree.
-        readLeaderStanding: async (sid: string) => leaderStandingOf(await readBackState(dispatch, sid)),
+        readLeaderStanding: async (sid: string) => leaderStandingOf(await readBackState(readingDispatch, sid)),
         // ⭐ SLICE C2 (Canonical #70 5855234599): the product's add-risk door (ONE held change) and limit door (ONE commit),
         // in-process. Each commits a turn row, so each counts as a write.
         holdAddRisk: async (input) => {
           writesDispatched += 1;
-          return holdAddRiskInProcess(input, String(req.id));
+          return readCache.around(() => holdAddRiskInProcess(input, String(req.id)));
         },
         commitLimitEdit: async (input) => {
           writesDispatched += 1;
-          return commitLimitEditInProcess(input, String(req.id));
+          return readCache.around(() => commitLimitEditInProcess(input, String(req.id)));
         },
       },
     );
@@ -1795,7 +1849,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       let canonicalAfterRun: { analysis_state?: unknown; analysis_ready?: unknown; run_delta?: unknown; run_delta_absence_reason?: string } = {};
       let standingAfterRun: LeaderStanding | null = null;
       try {
-        const st = await readBackState(dispatch, scenarioId);
+        const st = await readBackState(readingDispatch, scenarioId);
         /**
          * ⭐ WHAT CHANGED SINCE THE LAST RUN REACHES THE INTERPRETER TOO (served `263dbd5`, final witness `053159Z/15`:
          * the reply said "This run does not supply a precomputed before/after delta" while the response carried one and
@@ -1939,9 +1993,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       try {
         const st = await capabilities.getCanonicalState(toolCtx);
         const revision = (st as { graph_revision?: unknown }).graph_revision;
-        if (st.ok === true && typeof revision === 'string' && revision !== '') {
+        /**
+         * ⭐ C6-1b: AN EMPTY MODEL IS A KNOWN STATE, NOT AN UNKNOWN ONE. The graph read answers an empty scenario with
+         * `graph_hash: null` ("nothing to write against"), so the revision reads `''` — and every first brief (25/25
+         * served, DL C6) then spent a whole model call (median 1.9 s) fetching the empty model it could have been given.
+         * A read that SUCCEEDED and found no graph is bound to a typed empty revision instead. Still no packet for a
+         * failed read, or for a POPULATED graph that came back without a revision: that stays unknown, and the tool
+         * stays offered.
+         */
+        const packetRevision = st.ok === true && typeof revision === 'string'
+          ? (revision !== '' ? revision : (st as { empty?: unknown }).empty === true ? EMPTY_MODEL_REVISION : undefined)
+          : undefined;
+        if (packetRevision !== undefined) {
           const secret = contextBindingSecret();
-          const subject = { scenario_id: scenarioId, authenticated_user_id: userId ?? '', graph_revision: revision };
+          const subject = { scenario_id: scenarioId, authenticated_user_id: userId ?? '', graph_revision: packetRevision };
           canonicalContext = {
             packet: issueContextPacket({ ...subject, captured_at_turn: 0, state: st }, secret),
             expectation: { ...subject, current_turn: 0, binding_secret: secret },
@@ -2062,7 +2127,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * BEFORE the reply is composed, because the Run offer below keys on the
      * readiness this same response carries.
      */
-    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks } = await readBackState(readingDispatch, scenarioId);
+    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled } = await readBackState(readingDispatch, scenarioId);
     const fa = firstAnalysis?.outcome;
     // An analysis of THIS revision exists because this turn's construction ran it (or already had).
     const firstAnalysisExists = fa !== undefined && (fa.ran || fa.reason === 'already_ran_for_construction');
@@ -2439,8 +2504,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
     }
 
+    // A7: what of the brief the model does not carry — the final readback's own manifest, bound to its graph_hash.
+    const notModelledCarrier = notModelledTurnCarrier(notModelled, graphHash);
     return reply.code(200).send({
       ...wireBody,
+      /**
+       * ⭐ A7 (DL #70 5855437928; Canonical 5855435365): the graph read's `not_modelled`, exactly as read, beside the
+       * `graph_hash` of that same read. Derived by the read route, never here; never on the answer row; absent when the
+       * read had none. A sidecar, like `_agent` below: `OlumiResponseSchema` is `.strict()`, and the UI parser
+       * (DGAI `src/v5/responseParser.ts`) moves an undeclared root key into `__additive__` — no schemas release.
+       */
+      ...(notModelledCarrier !== undefined ? { _not_modelled: notModelledCarrier } : {}),
       /**
        * ⭐ SAY WHICH PATH SERVED THIS TURN.
        *
@@ -2473,6 +2547,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           dispatches: dispatchLedger,
           dispatch_ms: dispatchLedger.reduce((a, d) => a + d.ms, 0),
         },
+        /** X5 (DESIGN Q3): why the one construction retry ran (issue classes) and what became of it. Diagnostic only. */
+        ...(constructionTrace !== undefined ? { construction: constructionTrace } : {}),
         write_claims_removed: narration.stripped.length,
         ...(leaderClaimEnforced ? { leader_claim_enforced: true } : {}),
         /** The run-turn coaching card: shown, or the typed reason it is not (for staging witnesses). */

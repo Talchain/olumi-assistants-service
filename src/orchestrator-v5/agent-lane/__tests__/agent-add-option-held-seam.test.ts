@@ -24,6 +24,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 let n = 0;
 let SCENARIO = '';
@@ -890,5 +891,72 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const t1 = await turn({ message: 'Add an option that changes everything.' });
     expect(t1._agent.tool_calls.find((c) => c.name === 'propose_new_option')).toEqual(expect.objectContaining({ ok: false, refusal: 'too_many_links' }));
     expect(inner).toEqual([]);
+  }, 120_000);
+
+  // ─── A1 (DL build train #70 5855068711; Canonical 5854919806 item 1; AIQ 5854838919) ───────────────────────────────
+  // Paul's grandfathering add on HIS persisted graph (scenario a295e4a1, with that one transaction removed — see the
+  // fixture's `_provenance`), through the whole product: the Agent's propose → route-v2's typed hold → the UI-shaped
+  // approval → turn-executor's `commitGmHeldResume` → ONE commit.
+  const PAUL = (() => {
+    const fx = JSON.parse(readFileSync(new URL('../../routing/__tests__/fixtures/paul-a295e4a1-before-grandfathering.json', import.meta.url), 'utf8')) as Record<string, unknown>;
+    const { _provenance: _p, ...graph } = fx;
+    return graph;
+  })();
+  const GRANDFATHER = '£59 for new Pro customers; grandfather existing customers';
+  const SWITCH_FAC = 'fac_existing_customers_grandfathered';
+  const proposeGrandfathering = (kind: 'switch' | undefined) => {
+    script = [
+      () => fnCall('propose_new_option', {
+        label: GRANDFATHER,
+        acts_on: [
+          { factor_label: 'Pro plan price', direction: 'positive', level: { value: 59, unit: 'GBP per month' } },
+          { factor_label: 'Existing customers grandfathered', direction: 'positive' },
+        ],
+        new_factors: [{ label: 'Existing customers grandfathered', ...(kind !== undefined ? { kind } : {}),
+          affects: [{ label: 'Monthly churn', direction: 'negative' }, { label: 'MRR', direction: 'negative' }] }],
+        rationale: 'The user asked for it.',
+      }),
+      () => say('I would add it. Shall I?'),
+    ];
+    return turn({ message: `Let's add ${GRANDFATHER}.` });
+  };
+
+  it('[A1] RED: Paul\'s grandfathering option as a SWITCH → one hold → one click → off today (Olumi\'s), on under the option, in ONE commit', async () => {
+    graphOf.set(SCENARIO, structuredClone(PAUL));
+    const t1 = await proposeGrandfathering('switch');
+    const approve = approveChipOf(t1);
+    expect(approve?.id, JSON.stringify(t1._agent.tool_calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    const held = await heldOnLatestRow();
+    expect((held[0]!.action.inline_patch as Record<string, unknown>)['switch_factors']).toEqual([SWITCH_FAC]);
+    expect(graphNow().nodes.some((x) => x.id === SWITCH_FAC), 'nothing is written before the approval').toBe(false);
+
+    const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const g = graphNow() as unknown as { nodes: Record<string, any>[] };
+    const factor = g.nodes.find((x) => x.id === SWITCH_FAC)!;
+    expect(factor.observed_state).toEqual({ value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' });
+    const option = g.nodes.find((x) => x.kind === 'option' && x.label === GRANDFATHER)!;
+    expect(option.interventions[SWITCH_FAC].value).toBe(1);
+    // The approval said what was committed: off today is Olumi's, for the user to correct — never asked for (#2103's one ask).
+    expect(t2.assistant_text).toContain('Olumi takes it as off today and the option switches it on');
+    expect(t2.assistant_text).not.toMatch(/Tell me (its value today|today's value)/);
+    const r = await readiness() as { readiness_issues?: { code: string; option_id?: string }[] } | undefined;
+    expect((r?.readiness_issues ?? []).filter((i) => i.option_id === option.id && i.code === 'MISSING_OPTION_VALUE')).toEqual([]);
+    expect(routerCalls).toEqual([]);
+  }, 120_000);
+
+  it('[A1] CONTRAST: the same add with no kind (graded) lands exactly as before — no today value, the level asked for', async () => {
+    graphOf.set(SCENARIO, structuredClone(PAUL));
+    const t1 = await proposeGrandfathering(undefined);
+    const approve = approveChipOf(t1)!;
+    expect((((await heldOnLatestRow())[0]!.action.inline_patch) as Record<string, unknown>)['switch_factors']).toBeUndefined();
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(t2._agent.tool_calls[0]).toEqual(expect.objectContaining({ ok: true, mutated: true }));
+    const g = graphNow() as unknown as { nodes: Record<string, any>[] };
+    expect(g.nodes.find((x) => x.id === SWITCH_FAC)!.observed_state).toBeUndefined();
+    const option = g.nodes.find((x) => x.kind === 'option' && x.label === GRANDFATHER)!;
+    expect(option.interventions[SWITCH_FAC]).toBeUndefined();
+    expect(t2.assistant_text).toContain('Tell me its value today and I\'ll record it.');
+    expect(t2.assistant_text).not.toContain('Olumi takes it as off today');
   }, 120_000);
 });

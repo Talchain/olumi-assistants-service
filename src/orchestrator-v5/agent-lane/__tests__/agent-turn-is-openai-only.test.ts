@@ -99,10 +99,16 @@ describe('the Agent route is OpenAI-only, all the way down', () => {
       { site: 'agent-v1-turn.callModel', provider: 'openai', model: expect.stringMatching(/^gpt-/), purpose: 'conversation', outcome: 'allowed' },
       { site: 'agent-v1-turn.callModel', provider: 'openai', model: expect.stringMatching(/^gpt-/), purpose: 'conversation', outcome: 'allowed' },
     ]);
-    // No key beyond the purity five and the two measurement fields may appear, or this
-    // projection would hide a field nobody reviewed.
+    // No key beyond the purity five, the measurement field and the two prompt-identity
+    // fields may appear, or this projection would hide a field nobody reviewed.
+    // ⭐ prompt_alias / prompt_sha256 are INTENDED (AIQ identity map @30c0e79c; DL #70
+    // 5858315483 item 3), so they are added to the exact key set and pinned by value
+    // here — never tolerated by a looser matcher. The sha's binding to the instructions
+    // actually sent is proved in `provider-ledger-prompt-identity.test.ts`.
     for (const c of calls) {
-      expect(Object.keys(c).sort()).toEqual([...PURITY, 'duration_ms'].sort());
+      expect(Object.keys(c).sort()).toEqual([...PURITY, 'duration_ms', 'prompt_alias', 'prompt_sha256'].sort());
+      expect((c as { prompt_alias?: string }).prompt_alias).toBe('agent.converse');
+      expect((c as { prompt_sha256?: string }).prompt_sha256).toMatch(/^[0-9a-f]{64}$/);
     }
   });
 

@@ -169,6 +169,10 @@ const PIPELINE_OWNED_MARKERS: readonly string[] = [
  *    write leaves behind: the link's EXISTENCE is still Olumi's (edges; A6e,
  *    minted only by `adjust-edge-strength.ts`). A producer that could set or
  *    clear it would relabel whose existence claim it is;
+ *  - `std_defaulted` — the same per-field half for the link's SPREAD: an exact
+ *    figure the user writes leaves `strength.std` Olumi's (edges; A6f, AIQ N1 on
+ *    #2096, minted only by `adjust-edge-strength.ts`). A producer that could set
+ *    or clear it would relabel whose uncertainty claim it is;
  *  - `origin` — creation-source stamp (edges).
  */
 const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
@@ -177,6 +181,7 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
   'validation',
   'defaulted',
   'exists_defaulted',
+  'std_defaulted',
   'origin',
   // Extraction-provenance stamps (review hardening, 2026-07-07): these mark
   // HOW a value entered the model and must never be producer-writable —
@@ -185,6 +190,12 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
   'source',
   'extractiontype',
   'raw_value',
+  // The saved-example stamps, DECLARED on NodeV3 so a write keeps them (writer audit
+  // 2026-09-27). Written only by the UI's register; a producer carrying one inside an
+  // add_node payload would make a model-added node claim to be part of a saved example.
+  'starterid',
+  'startertitle',
+  'interventionkeys',
 ];
 
 /**

@@ -486,7 +486,7 @@ describe("deriveFactorScaleFrame — the single consumer, behaviour pinned", () 
  * honest; a gap invisible to it is how this class reopens.
  */
 // The combined carrier and native-intervention changes retain 46 sites across 25 files; the percent-level predicate
-// (#2034) adds one: 47 across 26.
+// (#2034) adds one: 47 across 26. A1's switch-level refusal copy (`shownSwitchLevel`) adds one: 48 across 27.
 const KNOWN_INLINE_PERCENT_EQUALITY_SITES: Readonly<Record<string, number>> = {
   "cee/compound-goal/direction-gate.ts": 3,
   "cee/compound-goal/extractor.ts": 1,
@@ -506,6 +506,10 @@ const KNOWN_INLINE_PERCENT_EQUALITY_SITES: Readonly<Record<string, number>> = {
   // OWN output, whose unit is exactly '%' (the relabel) or the verbatim input; a broader percent classifier would re-admit
   // the ambiguous "0.5 % per month" that B1 closes.
   "orchestrator-v5/agent-lane/admit-constraint.ts": 1,
+  // `shownSwitchLevel` (A1 round 2): DISPLAY ONLY — the refused figure is echoed as "1%" rather than "1 %". No scale is
+  // read or converted (the level is refused, never written); the display classifier would fold "percentage points" into
+  // "%" and change the words the user typed.
+  "orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 1,
   "orchestrator-v5/compose/validation-failure-responses.ts": 1,
   "orchestrator-v5/compose/warrant-demotion.ts": 1,
   "orchestrator-v5/context/cqe/compromise-backstop.ts": 1,

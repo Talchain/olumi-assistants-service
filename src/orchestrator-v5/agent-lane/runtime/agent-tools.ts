@@ -237,6 +237,13 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
               direction: { type: 'string', enum: ['positive', 'negative'], description: 'Whether raising this factor raises (positive) or lowers (negative) it: from the user\u2019s words, or where it is plain from the option itself (a paid add-on adds revenue); if it is unclear, ask. The preview names it so the user can correct it.' },
             }, ['label', 'direction']),
           },
+          kind: {
+            type: 'string', enum: ['switch', 'graded'],
+            description: '"switch" when the option simply turns this ON \u2014 something not in place today that the option puts in place '
+              + '(grandfathering existing customers, launching a feature). It is then added as off today, Olumi\u2019s reading for the user '
+              + 'to correct, and on under every option that acts on it: give it no level. Leave kind out for an amount or a rate '
+              + '(a price, a share of customers): its current value and the option\u2019s level are asked for.',
+          },
         }, ['label', 'affects']),
       },
       rationale: { type: 'string', description: 'Why this option is worth comparing, in the user\u2019s terms.' },
@@ -511,6 +518,18 @@ export interface ProposeLevelsInternal {
   readonly startingValues?: ReadonlyMap<string, number>;
 }
 
+/**
+ * One `acts_on` entry of `propose_new_option`, AS THE TOOL SCHEMA SENDS IT. The schema has always carried `level`
+ * (`{value, unit, estimate, basis}`) and the capability reads it (the figure an option sets, or Olumi's own estimate
+ * with its basis), but this type omitted it and dispatch passes the parsed arguments `as never` — so the compiler
+ * could not see the field the writer depends on (ChatGPT → CODEX-CAPABILITIES #70 5858459113, point 2).
+ */
+export type NewOptionActsOn = {
+  factor_label: string;
+  direction: 'positive' | 'negative';
+  level?: { value: number; unit?: string; estimate?: boolean; basis?: string } | null;
+};
+
 export interface AgentCapabilities {
   getCanonicalState(ctx: AgentToolContext): Promise<ToolResult>;
   proposeModelChange(ctx: AgentToolContext, args: {
@@ -549,9 +568,9 @@ export interface AgentCapabilities {
     assumptions: readonly { factor_label: string; value: number; unit: string; basis: string; revise?: boolean }[];
   }): Promise<ToolResult>;
   proposeNewOption(ctx: AgentToolContext, args: {
-    label?: string; acts_on?: { factor_label: string; direction: 'positive' | 'negative' }[]; rationale: string;
+    label?: string; acts_on?: NewOptionActsOn[]; rationale: string;
     /** Several options as ONE change (F4): each `{label, acts_on}`, up to 4. */
-    options?: { label: string; acts_on: { factor_label: string; direction: 'positive' | 'negative' }[] }[];
+    options?: { label: string; acts_on: NewOptionActsOn[] }[];
     /** Factors the model lacks, added in the SAME change (`planNewFactors`): each named in an option's acts_on. */
     new_factors?: readonly { label: string; affects: readonly { label: string; direction?: 'positive' | 'negative' }[] }[];
   }): Promise<ToolResult>;

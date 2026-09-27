@@ -149,16 +149,31 @@ describe('the standing reads the wire gate\'s OWN predicate and reason — never
   });
 });
 
+describe('C5b on a RERUN (served 27 Sep: the first Run carried a view, the rerun none, 2/2)', () => {
+  it('RED: the Run call asks for the view again on a rerun, and allows null only with no basis at all', async () => {
+    const { RUN_INTERPRETATION_VIEW_INSTRUCTION } = await import('../provisional-view.js');
+    expect(RUN_INTERPRETATION_VIEW_INSTRUCTION).toContain('including a rerun or after a view you gave earlier');
+    expect(RUN_INTERPRETATION_VIEW_INSTRUCTION).not.toContain('Set it to null when you have none');
+    expect(RUN_INTERPRETATION_VIEW_INSTRUCTION).toContain('Set it to null only when the model and the user’s words give you no basis for any view');
+    // Unchanged contract: never in `answer`, never ranking in `answer`.
+    expect(RUN_INTERPRETATION_VIEW_INSTRUCTION).toContain('Never write the view in `answer`.');
+    expect(RUN_INTERPRETATION_VIEW_INSTRUCTION).toContain('it never names, ranks or favours an option');
+  });
+});
+
 describe('the ROUTE\'s renderer — typed and labelled, never prose (AIC 5855633777; thin-UI ruling 5855577789)', () => {
   const because = withheldStanding().because;
 
   it('RED (mutant: remove the label): the heading is the exact label sentence with the typed reason', () => {
     expect(PROVISIONAL_VIEW_LABEL).toBe('Provisional view');
-    expect(provisionalViewHeading(because)).toBe(`Provisional view \u2014 the analysis can't confirm this yet ${because}.`);
+    expect(provisionalViewHeading()).toBe(`Provisional view \u2014 the analysis can't confirm this yet.`);
+    // AIC 27 Sep (served 770a477): the reason is said once — typed as `because`, which the chat shows in its why —
+    // never again in a four-line bold heading beside the reply that already states it.
+    expect(provisionalViewHeading()).not.toContain(because.replace(/^because /, ''));
   });
 
   it('the sidecar carries the heading, the three parts and the reason — the chat composes nothing', () => {
-    expect(provisionalViewSidecar(VIEW, because)).toEqual({ heading: provisionalViewHeading(because), ...VIEW, because });
+    expect(provisionalViewSidecar(VIEW, because)).toEqual({ heading: provisionalViewHeading(), ...VIEW, because });
   });
 
   it('CONTRAST (why it is typed): the gate strips the SAME view written as prose', () => {

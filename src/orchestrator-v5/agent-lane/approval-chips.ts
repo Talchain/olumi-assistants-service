@@ -198,12 +198,20 @@ export function figureInUserUnits(value: unknown, unit: unknown): string | null 
   return currencyPer !== null ? `${f.display}/${currencyPer[2]!.trim()}` : f.display;
 }
 
-/** `head + entity + tail` within the cap, shortening only the entity; null when it cannot fit legibly. */
+/**
+ * `head + entity + tail` within the cap, shortening only the entity, and only at a word: a clipped word
+ * ("Set Monthly n… to 60 subscriptions/month", served to Paul 27 Sep, B3) reads as a typo. Null when what is left
+ * cannot be read (fewer than {@link MIN_ENTITY_CHARS}), so the chip keeps the tool's own label.
+ */
 function fitted(head: string, entity: unknown, tail: string): string | null {
   const name = typeof entity === 'string' ? entity.trim() : '';
   const room = APPROVAL_LABEL_MAX - head.length - tail.length;
   if (name === '' || room < MIN_ENTITY_CHARS) return null;
-  return `${head}${name.length <= room ? name : `${name.slice(0, room - 1).trimEnd()}\u2026`}${tail}`;
+  if (name.length <= room) return `${head}${name}${tail}`;
+  const cut = name.slice(0, room - 1);
+  const atWord = /\s/.test(name[room - 1]!) ? cut : cut.replace(/\s*\S*$/, '');
+  const short = atWord.replace(/[\s,;:.\-\u2013\u2014]+$/, '');
+  return short.length < MIN_ENTITY_CHARS ? null : `${head}${short}\u2026${tail}`;
 }
 
 export function approvalLabelFor(tool: string, source: ApprovalLabelSource | undefined): string {

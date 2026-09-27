@@ -793,6 +793,15 @@
                         "set",
                         "confirm_current"
                       ]
+                    },
+                    "band": {
+                      "type": "string",
+                      "enum": [
+                        "very_strong",
+                        "strong",
+                        "moderate",
+                        "slight"
+                      ]
                     }
                   },
                   "required": [

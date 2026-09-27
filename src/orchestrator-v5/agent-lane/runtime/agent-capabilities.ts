@@ -18,7 +18,12 @@ import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-rece
 import { createHash, randomUUID } from 'node:crypto';
 import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
 import { AGENT_ADD_OPTION_CHIP_ID, AGENT_RUN_ANALYSIS_CHIP_ID } from '../../handlers/agent-chip-ids.js';
-import { buildAddOptionsTransaction, MAX_OPTIONS_PER_TRANSACTION } from '../../routing/add-option-transaction.js';
+import {
+  buildAddOptionsTransaction,
+  GM_HELD_SWITCH_FACTORS_KEY,
+  MAX_OPTIONS_PER_TRANSACTION,
+  NEW_SWITCH_TODAY,
+} from '../../routing/add-option-transaction.js';
 import { GM_HELD_HANDLER_ID, GM_HELD_OPERATIONS_MAX_JSON_CHARS, gmHeldProposalRef } from '../../handlers/edit-graph-referee-gate.js';
 import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../../graph-management/types.js';
 import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
@@ -131,7 +136,7 @@ import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } f
 import { defaultFrameFor, nonlinearIdentityForAgent } from '../admit-model.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
-import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel } from './build-model.js';
+import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
 import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysisInput, type FirstAnalysisOutcome } from '../first-analysis.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { howStronglyWords } from '../strength-authorship-words.js';
@@ -141,6 +146,8 @@ import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLe
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
+import { notModelledContext, notModelledOfRead } from '../not-modelled-carrier.js';
+import type { NotModelledManifest } from '../../../cee/context-integrity/not-modelled-manifest.js';
 import { FRACTION_SPELLED_UNIT } from '../../coaching/bound-graph.js';
 
 /**
@@ -296,6 +303,43 @@ const linkBandWord = (band: InfluenceBand): string => CANVAS_BAND_WORD[band];
 const STARTING_POINT_BASIS = 'a starting point \u2014 values and what each option sets \u2014 for the user to adopt or correct in one approval';
 
 /**
+ * What the Agent says about a new SWITCH before approval (Canonical #70 5854919806 item 1; AIQ 5854838919): off today is
+ * Olumi's reading of the option, recorded and shown as Olumi's estimate, and the user can correct it — so it is said,
+ * never asked as if unknown, and never presented as the user's.
+ */
+const NEW_SWITCH_NOTE = 'This change also ADDS these factors as switches the option turns on. Say so: what each changes and which way, '
+  + 'that how strongly is Olumi\u2019s estimate, and that Olumi takes each as OFF today (not in place yet) and ON under the option. '
+  + 'Say that off-today is Olumi\u2019s reading, for the user to correct if it is already partly in place; do not ask for its value today.';
+
+/**
+ * ⛔ A SWITCH HAS NO LEVEL OF ITS OWN (independent verification of A1, round 2). The option's level on a new switch is
+ * exactly 1 — ON — and nothing else, so the only level the Agent may give it is a bare 1. Anything more carries a figure
+ * the switch cannot keep: a unit (£1/month, 1%, 1 hire — a 1 in a unit is an amount, never "on"; 1% is refused just as
+ * 100% is), Olumi's estimate (the on level is not estimated), a value that is not a number
+ * ("0.5", "50%"), or a level that is not an object at all. Taken as on, the user's figure would be dropped without a word
+ * and today-0 written as Olumi's, so each is a conflict: refused, nothing sent. No level (absent, null, or one that
+ * carries nothing) is on. Returns the conflict's parts to show, or `null` when the level is on.
+ */
+function newSwitchLevelConflict(level: unknown): { value: unknown; unit?: unknown; estimate?: unknown } | null {
+  if (level === undefined || level === null) return null;
+  if (typeof level !== 'object' || Array.isArray(level)) return { value: level };
+  const { value, unit, estimate } = level as { value?: unknown; unit?: unknown; estimate?: unknown };
+  const hasValue = value !== undefined && value !== null;
+  const hasUnit = unit !== undefined && unit !== null && !(typeof unit === 'string' && unit.trim() === '');
+  const hasEstimate = estimate !== undefined && estimate !== null && estimate !== false;
+  if (!hasUnit && !hasEstimate && (!hasValue || value === 1)) return null;
+  return { value, ...(hasUnit ? { unit } : {}), ...(hasEstimate ? { estimate } : {}) };
+}
+
+/** A switch conflict's figure as the user would read it: `1 £/month`, `1%`, `"0.5"`, `1 (as Olumi's estimate)`. */
+function shownSwitchLevel(c: { value: unknown; unit?: unknown; estimate?: unknown }): string {
+  const figure = typeof c.value === 'number' ? String(c.value)
+    : c.value === undefined || c.value === null ? 'no figure' : JSON.stringify(c.value) ?? String(c.value);
+  const unit = c.unit === undefined ? '' : String(c.unit).trim() === '%' ? '%' : ` ${String(c.unit).trim()}`;
+  return `${figure}${unit}${c.estimate !== undefined ? ' (as Olumi\u2019s estimate)' : ''}`;
+}
+
+/**
  * The `observed_state.source` an adopted Olumi assumption is stored with. Typed
  * against the shared contract's vocabulary, so it cannot drift to a literal the
  * product does not know. See `applyCompound` for why it exists.
@@ -418,6 +462,8 @@ interface GraphRead {
   readonly analysis_state: unknown;
   /** The persisted graph exactly as read — every top-level carrier, not only nodes/edges. */
   readonly raw: Record<string, unknown>;
+  /** A7: the read's own `not_modelled` (derived by the read route over this graph); absent when the read had none. */
+  readonly not_modelled?: NotModelledManifest;
 }
 
 const norm = (s: unknown): string => String(s ?? '').toLowerCase().replace(/…$/, '').trim();
@@ -860,6 +906,16 @@ export function createAgentCapabilities(
   opts: {
     readonly firstAnalysis?: (input: FirstAnalysisInput) => Promise<FirstAnalysisOutcome>;
     /**
+     * ⭐ C6-1: told ONCE, the moment a construction THIS request committed is confirmed from state — before the
+     * first analysis and before the Agent's reply — with the graph exactly as read back. The route turns it into
+     * the streamed `GRAPH_READY` frame (nothing at all outside a streamed turn), so the canvas draws the model
+     * ~15 s before COMPLETE. The same committing-path gate as the first analysis: never on a refusal or a replay.
+     * An observer only — a throw here is swallowed and never costs the build. Absent ⇒ nothing is told.
+     */
+    readonly onModelRegistered?: (graph: Record<string, unknown>) => void;
+    /** X5 (DESIGN Q3): why the one construction retry ran and its outcome — for `_diagnostic_trace`, never the model. */
+    readonly onConstructionTrace?: (t: ConstructionTrace) => void;
+    /**
      * The pending actions on the scenario's LATEST answer row, as the session store returns them. The held
      * add-option proposal lives there (route-v2 minted it), so a `gmh_` approval is confirmed against what the
      * store actually holds — never against a copy this process remembered. Absent ⇒ a held approval refuses.
@@ -947,6 +1003,7 @@ export function createAgentCapabilities(
     const r = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
     if (r.status !== 200) return null;
     const g = (r.json.graph ?? {}) as Record<string, unknown>;
+    const notModelled = notModelledOfRead(r.json.not_modelled);
     return {
       graph_hash: String(r.json.graph_hash ?? ''),
       // ⛔⛔ IT IS AN ENVELOPE OBJECT, NOT A STRING. The read route emits the
@@ -965,6 +1022,7 @@ export function createAgentCapabilities(
       edges: (g.edges as GraphRead['edges']) ?? [],
       analysis_state: r.json.analysis_state,
       raw: g,
+      ...(notModelled !== undefined ? { not_modelled: notModelled } : {}),
     };
   };
 
@@ -1102,6 +1160,9 @@ export function createAgentCapabilities(
         + (estimated.length > 0 ? ` Its level for ${estimated.join(', ')} is Olumi's estimate, for you to correct.` : '')
         + (unlevelled.length > 0 ? ` It does not yet set a level for ${unlevelled.join(', ')}; tell me the figure for each and I'll set it.` : '');
     });
+    // The new switches the hold named (`GM_HELD_SWITCH_FACTORS_KEY`): their today-0 was committed with them, as Olumi's.
+    const heldSwitches = (hold.action as { inline_patch?: Record<string, unknown> }).inline_patch?.[GM_HELD_SWITCH_FACTORS_KEY];
+    const switchIds = new Set(Array.isArray(heldSwitches) ? heldSwitches.filter((x): x is string => typeof x === 'string') : []);
     // SLICE C2: a new risk, said from what was COMMITTED — what it threatens, what drives it, and who sized each link.
     for (const rid of addedRiskIds) {
       const risk = after!.nodes.find((x) => x.id === rid);
@@ -1121,7 +1182,17 @@ export function createAgentCapabilities(
       if (f === undefined) continue;
       const outgoing = after!.edges.filter((e) => e.from === fid);
       const changes = outgoing.map((e) => quoted(String(after!.nodes.find((x) => x.id === e.to)?.label ?? e.to)));
+      // Whose today is said from what was COMMITTED: a switch's off-today is Olumi's reading, never the user's.
+      const os = (f as { observed_state?: { value?: unknown; source?: unknown } }).observed_state;
+      const committedOff = switchIds.has(fid) && os?.value === 0 && os?.source === NEW_SWITCH_TODAY.observed_state.source;
       // Who sized each committed link decides the words (audit MAG-2): a flat default is a placeholder, never "Olumi's estimate".
+      // A1 × #2103: a committed switch already HAS its today (0, Olumi's), so it is said as that and is never in the
+      // one ask for today's values; every other added factor goes to that single ask (`added-factors-receipt.ts`).
+      if (committedOff) {
+        sentences.push(`Also added the factor "${String(f.label ?? fid)}", which changes ${changes.join(', ')}; ${howStronglyWords(outgoing)} `
+          + 'Olumi takes it as off today and the option switches it on; that it is off today is Olumi\'s estimate, for you to correct.');
+        continue;
+      }
       factorParts.push({ label: String(f.label ?? fid), changes, strength: howStronglyWords(outgoing) });
     }
     // One ask for today's values, naming every added factor (`added-factors-receipt.ts`).
@@ -1586,6 +1657,8 @@ export function createAgentCapabilities(
         structure: structuralFacts(g.nodes, g.edges),
         // (B) goal target, limits, links, the ONE readiness verdict, and the earlier analysis kept apart from it.
         ...projectModelContext(g),
+        // A7: what of the brief the model does NOT carry — the read's own manifest, projected; none when the read had none.
+        ...(g.not_modelled !== undefined ? { not_modelled: notModelledContext(g.not_modelled) } : {}),
         // Every proposal this user has been shown and not yet approved, newest
         // first — including a held add-option, which lives in the session store,
         // not in memory. An approval with nothing to bind to is an approval that
@@ -3915,7 +3988,7 @@ export function createAgentCapabilities(
             detail: 'The model already has entities. Propose a change instead of rebuilding it.',
           };
         }
-        built = await buildModelFromBrief(ctx.scenario_id, brief, dispatch, callStructured);
+        built = await buildModelFromBrief(ctx.scenario_id, brief, dispatch, callStructured, opts.onConstructionTrace);
         if (built.ok !== true) return built;
       }
 
@@ -3923,6 +3996,14 @@ export function createAgentCapabilities(
       const after = await readGraph(ctx.scenario_id);
       if (after === null || after.nodes.length === 0) {
         return { ok: false, mutated: false, refusal: 'model_not_readable_after_write' };
+      }
+      /**
+       * ⭐ C6-1: THE MODEL EXISTS NOW — say so before the first analysis and the reply (~15 s of the first brief).
+       * Only the request whose construction COMMITTED (the first analysis's own gate, below): a recovered version
+       * (`replayed: true`) was already shown by the turn that built it, and a refusal returned above.
+       */
+      if (built.mutated === true && built.replayed !== true) {
+        try { opts.onModelRegistered?.(after.raw); } catch { /* an observer never costs the build */ }
       }
       /**
        * ⭐ THE FIRST ANALYSIS, RUN BY OLUMI, ONCE (Paul, 5812069638) — ONLY when this request is the one
@@ -4098,6 +4179,9 @@ export function createAgentCapabilities(
       const outOfRange: { option: string; factor: string; value: number; range: number }[] = [];
       const unitMismatch: { option: string; factor: string; value: number; unit: string; factor_unit: string }[] = [];
       const levelsNotSet: { option: string; factor: string; value: number; reason: string }[] = [];
+      /** A level the Agent gave for a new SWITCH that is not a bare 1 (`newSwitchLevelConflict`): refused, nothing sent. */
+      const switchLevelConflicts: { option: string; factor: string; value: unknown; unit?: unknown; estimate?: unknown }[] = [];
+      const isNewSwitch = (key: string): boolean => newFactors.some((f) => f.key === key && f.kind === 'switch');
       /**
        * ⛔ WHOSE LINK (U3, DL 5849023213 (2)). A link with no level is written by Canonical's builder as the user's
        * unless it says otherwise (`add-option-transaction.ts` `structuralEdgeValue(…, iv.source ?? 'user_specified')`).
@@ -4166,19 +4250,42 @@ export function createAgentCapabilities(
           return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
         });
         /**
-         * A new factor starts with no level on this option: it has no range yet to read a figure against, and its
+         * A GRADED new factor starts with no level on this option: it has no range yet to read a figure against, and its
          * current value is set after it exists (Canonical's OPEN ruling). A level the user gave for it is said, not lost.
+         *
+         * ⭐ A new SWITCH (`kind: 'switch'`, Canonical #70 5854919806 item 1) is the exception: the option turns it ON, so
+         * its level here is exactly 1, in this same change, and its today-0 is Olumi's, written by the same commit. A
+         * level the Agent gave for it that is anything but a bare 1 (`newSwitchLevelConflict`) contradicts "switch" and is
+         * refused below, never rounded to on.
          */
         for (const a of plan.newActsOn) {
-          const asked = spec.acts_on.find((x) => norm(x.factor_label) === norm(a.label))?.level?.value;
+          const level: unknown = spec.acts_on.find((x) => norm(x.factor_label) === norm(a.label))?.level;
+          const asked = (level as { value?: unknown } | null | undefined)?.value;
+          if (isNewSwitch(a.key)) {
+            // Anything but a bare 1 carries a figure the switch cannot keep (a unit, an estimate, a non-number): refused.
+            const conflict = newSwitchLevelConflict(level);
+            if (conflict !== null) switchLevelConflicts.push({ option: plan.label, factor: a.label, ...conflict });
+            continue;
+          }
           if (typeof asked === 'number' && Number.isFinite(asked)) {
             levelsNotSet.push({ option: plan.label, factor: a.label, value: asked,
               reason: `"${a.label}" is new in this change and has no range yet, so its level is not set here. Once it is added, propose that level with propose_option_interventions.` });
           }
         }
-        const added = plan.newActsOn.map((a) => ({ factor_key: a.key, value: null, ...linkAuthor(a.label) }));
+        const added = plan.newActsOn.map((a) => ({ factor_key: a.key, value: isNewSwitch(a.key) ? 1 : null, ...linkAuthor(a.label) }));
         return { plan, set, entry: { label: plan.label, option_id: plan.optionId, interventions: [...interventions, ...added] } };
       });
+      if (switchLevelConflicts.length > 0) {
+        const c = switchLevelConflicts[0]!;
+        return {
+          ok: false, mutated: false, refusal: 'switch_level_not_on', switch_level_conflicts: switchLevelConflicts,
+          detail: `"${c.factor}" was added as a switch that "${c.option}" turns on, but it was given a level: ${shownSwitchLevel(c)}. `
+            + 'A switch has no level of its own \u2014 it is off today and on under this option \u2014 so that figure would be dropped, '
+            + 'and it is not taken as on. Nothing was prepared. If the option simply turns it on, call propose_new_option again '
+            + 'with no level for it, and tell the user it is on under this option. If a figure was meant (an amount, a rate or a '
+            + 'share of the customers), it is not a switch: leave kind out, and ask the user for that figure.',
+        };
+      }
       if (unitMismatch.length > 0) {
         const m = unitMismatch[0]!;
         return {
@@ -4203,6 +4310,8 @@ export function createAgentCapabilities(
         const nfWire = nf.length === 0 ? {} : { new_factors: nf.map((f) => ({
           key: f.key, label: f.label,
           affects: f.affects.map((a) => ({ node_id: a.node_id, effect_direction: a.effect_direction })),
+          // Only a switch says so: a graded factor's wire is byte-identical to before.
+          ...(f.kind === 'switch' ? { kind: 'switch' as const } : {}),
         })) };
         return es.length === 1
           ? { parent_decision_id: decision.id, ...es[0]!.entry, ...nfWire }
@@ -4322,11 +4431,16 @@ export function createAgentCapabilities(
             label: f.label,
             changes: f.affects.map((a) => `${a.label} (${a.effect_direction === 'positive' ? 'raises it' : 'lowers it'})`),
             how_strongly: 'Olumi\u2019s estimate, for the user to correct',
-            current_value: null,
+            ...(f.kind === 'switch'
+              ? { kind: 'switch', today: 'off \u2014 Olumi\u2019s reading of the option, for the user to correct', under_the_option: 'on' }
+              : { current_value: null }),
           })),
-          new_factors_note: 'This change also ADDS these factors. Say so: what each changes and which way, that how strongly is Olumi\u2019s '
-            + 'estimate, and that its current value is not set yet. Ask the user what it is today (for example, whether it is '
-            + 'offered at all yet) \u2014 nothing else will ask, and the comparison needs it; never say the analysis will ask for it.',
+          new_factors_note: keptFactors.every((f) => f.kind === 'switch')
+            ? NEW_SWITCH_NOTE
+            : 'This change also ADDS these factors. Say so: what each changes and which way, that how strongly is Olumi\u2019s '
+              + 'estimate, and that its current value is not set yet. Ask the user what it is today (for example, whether it is '
+              + 'offered at all yet) \u2014 nothing else will ask, and the comparison needs it; never say the analysis will ask for it.'
+              + (keptFactors.some((f) => f.kind === 'switch') ? ` Except the switches (kind switch): ${NEW_SWITCH_NOTE}` : ''),
         } : {}),
         note:
           `Nothing has changed yet. Show the user ${described.length === 1 ? 'the option' : `all ${described.length} options, as ONE change they approve once`}, `
