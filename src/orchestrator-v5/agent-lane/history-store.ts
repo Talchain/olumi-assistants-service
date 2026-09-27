@@ -85,6 +85,136 @@ const parsedOutput = (item: unknown): unknown => {
   try { return JSON.parse(output); } catch { return undefined; }
 };
 
+type Rec = Record<string, unknown>;
+const recordOf = (x: unknown): Rec | undefined => (x !== null && typeof x === 'object' && !Array.isArray(x) ? (x as Rec) : undefined);
+
+/**
+ * The route's final readback of the turn (`readBackState`, agent-v1-turn.ts): the scenario's canonical verdict and the
+ * result that verdict selected. `undefined` — or a readback that failed — vouches for nothing.
+ */
+export interface KeptRunReadback { readonly analysisState?: unknown; readonly analysisResult?: unknown }
+
+/** A kept run the model has moved past. */
+export const STALE_RUN_NOTE = 'The model has changed since this run, so these are not the current model’s figures: do not quote them as current. Offer to run the analysis again.';
+/** A kept run no readback could vouch for (the read failed): fail closed, never presented as current. */
+export const UNCONFIRMED_RUN_NOTE = 'Olumi could not confirm this run is of the current model, so do not quote its figures as the current model’s.';
+
+/** AIQ's permitted drops: what a follow-up question does not need from a run that may name its leader. */
+const HEAVY_WHEN_PERMITTED: ReadonlySet<string> = new Set(['robustness', 'p_win_sensitivity', 'factor_evppi', 'edge_e_values']);
+/** R&C's pinned KEY set, verbatim, matched on keys never labels; `decision_sensitivity` is the one key AIQ keeps. */
+const RE_RANKING_KEY = /confidence|near_tie|goal_fit|separation|alternative_winner|win_probabilit|sensitivity|evpi|enrichment/i;
+/** AIQ's named withheld drops the pinned set does not match (the per-option means go with the whitelist below). */
+const RE_RANKING_NAMED: ReadonlySet<string> = new Set(['probability_of_goal', 'probability_of_joint_goal', 'conditional_winners', 'flip_thresholds', 'leading_option_id', 'run_delta']);
+/** Until B5 `per_limit` lands, no key naming constraint probabilities is kept, whatever the permission. */
+const namesConstraintProbability = (key: string): boolean => /constraint/i.test(key) && /probabilit/i.test(key);
+/** What a withheld run keeps at its top level, in this order (a fixed order is what makes a re-prune byte-identical). */
+const KEPT_WHEN_WITHHELD = ['ok', 'mutated', 'ran', 'status', 'what_is_missing', 'blockers', 'options', 'result', 'claim_permissions'] as const;
+/** A compared option's identity — its id and its label, however the producer named them; nothing it scored. */
+const optionLabelOf = (o: unknown): Rec => {
+  const r = recordOf(o) ?? {};
+  const id = r.option_id ?? r.id;
+  const label = r.label ?? r.option_label;
+  return { ...(id !== undefined ? { option_id: id } : {}), ...(label !== undefined ? { label } : {}) };
+};
+
+const withoutKeys = (value: unknown, drop: (key: string) => boolean): unknown => {
+  if (Array.isArray(value)) return value.map((v) => withoutKeys(v, drop));
+  const r = recordOf(value);
+  if (r === undefined) return value;
+  const out: Rec = {};
+  for (const [k, v] of Object.entries(r)) {
+    if (k === 'decision_sensitivity') out[k] = v;
+    else if (!drop(k)) out[k] = withoutKeys(v, drop);
+  }
+  return out;
+};
+const pick = (r: Rec, keys: readonly string[]): Rec => {
+  const out: Rec = {};
+  for (const k of keys) if (r[k] !== undefined) out[k] = r[k];
+  return out;
+};
+
+/** A withheld run's result: its words, its stamp, what decides it, each option's labels, and the warnings on it. */
+function withheldResult(result: Rec): Rec {
+  // A result already projected carries these at its top level: re-projecting reads them back from there.
+  const source = recordOf(result.enrichment) ?? result;
+  const compared = Array.isArray(source.option_comparison) ? source.option_comparison : undefined;
+  return {
+    ...pick(result, ['type', 'summary', 'computed_against_hash', 'decision_sensitivity']),
+    ...(compared !== undefined ? { option_comparison: compared.map(optionLabelOf) } : {}),
+    ...(source.inference_warnings !== undefined ? { inference_warnings: source.inference_warnings } : {}),
+  };
+}
+
+/**
+ * The stale marking, re-derived from THIS readback every time (never sticky): current only when the canonical verdict
+ * is `complete_current` AND the result it selected carries this run's own stamp.
+ *
+ * ⛔ NOT THE READBACK'S WIRE `graph_hash`. That is the RAW hash of the persisted bytes, the writers' compare-and-set
+ * base (assist.v1.scenario-graph.ts); `computed_against_hash` is the run's `graph_hash_at_run` over the CANONICAL
+ * projection (`deriveDecisionContextGraphHash`). Same function, same width, and equal on a graph already in canonical
+ * shape — so the mistake would pass every unchanged-graph test — but they differ on a repaired-shape graph that has
+ * not moved (scenario-graph-analysis-read.ts, CS-AN-2), where comparing them would call a current run stale. The read
+ * route's own words: "`analysis_state.run_state` is the currency verdict". Its `analysis_result` is present only on a
+ * fresh verdict for the current graph and carries the SAME canonical stamp, so the two stamps compare in one space.
+ */
+function staleNoteFor(result: Rec, readback: KeptRunReadback | undefined): string | undefined {
+  const kind = recordOf(recordOf(readback?.analysisState)?.run_state)?.kind;
+  const hashOf = (x: unknown): string | undefined => (typeof x === 'string' && x !== '' ? x : undefined);
+  const selected = hashOf(recordOf(readback?.analysisResult)?.computed_against_hash);
+  const stamp = hashOf(result.computed_against_hash);
+  if (kind === 'complete_current' && stamp !== undefined && selected === stamp) return undefined;
+  // MOVED: the verdict says so, or the current run is of another model. A run with no stamp, or a verdict that is
+  // neither (unknown, blocked, running…), is only unconfirmed — the note says no more than is known.
+  const moved = kind === 'complete_stale' || (kind === 'complete_current' && stamp !== undefined && selected !== undefined);
+  return moved ? STALE_RUN_NOTE : UNCONFIRMED_RUN_NOTE;
+}
+
+/**
+ * ⭐ THE KEPT RUN IS A PROJECTION OF THE RUN, BY ITS OWN PERMISSION (AI Quality ruling, #70 5859279825 + 5859288025;
+ * R&C's pinned key set). The latest run's output is the one C1 keeps, and on the served A02 run its `result` is ~11.9 KB
+ * (≈3k tokens), 94% of it `enrichment` — carried in every request for 24 turns after the Run. Only this KEPT copy is
+ * projected: the prune runs when the turn is STORED, so the Run turn's own model input is unchanged.
+ *   - PERMITTED (`claim_permissions.leader_may_be_named === true`): robustness, p_win_sensitivity, factor_evppi and
+ *     edge_e_values leave `result.enrichment`; summary, win_probabilities, option_comparison, decision_brief,
+ *     inference_warnings, flip_thresholds, decision_sensitivity and computed_against_hash stay.
+ *   - WITHHELD (anything else — fail closed): NOTHING that re-ranks. A whitelist (KEPT_WHEN_WITHHELD; the result keeps
+ *     its summary, stamp, decision_sensitivity, inference_warnings and each option's LABELS; `options` keeps each one's
+ *     label and levels), then R&C's key set and AIQ's named keys are dropped at every depth as a second fence.
+ *   - BOTH: no constraint probabilities (until B5 per_limit), and `stale: true` with a one-line note unless the turn's
+ *     readback vouches for THIS run (`staleNoteFor`).
+ * ⛔ THE RUN CHIP'S `canonical_state` IS NOT KEPT, except a permitted run's `run_delta`. It is the post-run readback the
+ * fast path hands its one interpreting call (agent-v1-turn.ts, FAST PATH 3): a model snapshot, superseded by the state
+ * given with every turn exactly as `get_canonical_state` is (C1), and its `run_state: complete_current` would contradict
+ * the stale marking the moment the model moves. A withheld run's `run_delta` carries win-probability and leader deltas.
+ * Idempotent: a projected run projects to itself, byte for byte, under the same readback.
+ */
+function keptRunOf(output: unknown, readback: KeptRunReadback | undefined): Rec | undefined {
+  const run = recordOf(output);
+  const result = recordOf(run?.result);
+  if (run === undefined || result === undefined) return undefined;
+  const permitted = recordOf(run.claim_permissions)?.leader_may_be_named === true;
+  let kept: Rec;
+  if (permitted) {
+    const { stale: _s, stale_note: _n, canonical_state: canonical, ...rest } = run;
+    const enrichment = recordOf(result.enrichment);
+    const canon = recordOf(canonical);
+    const delta = canon === undefined ? {} : pick(canon, ['run_delta', 'run_delta_absence_reason']);
+    kept = {
+      ...rest,
+      result: enrichment === undefined ? result
+        : { ...result, enrichment: Object.fromEntries(Object.entries(enrichment).filter(([k]) => !HEAVY_WHEN_PERMITTED.has(k))) },
+      ...(Object.keys(delta).length > 0 ? { canonical_state: delta } : {}),
+    };
+    kept = withoutKeys(kept, namesConstraintProbability) as Rec;
+  } else {
+    kept = withoutKeys({ ...pick(run, KEPT_WHEN_WITHHELD), result: withheldResult(result) },
+      (k) => (RE_RANKING_KEY.test(k) || RE_RANKING_NAMED.has(k) || namesConstraintProbability(k))) as Rec;
+  }
+  const note = staleNoteFor(result, readback);
+  return note === undefined ? kept : { ...kept, stale: true, stale_note: note };
+}
+
 /**
  * ⭐ A SUPERSEDED SNAPSHOT IS NOT KEPT (slice C1; P3A replay of Paul's transcript, 27 Sep). Each state read added
  * 2.5–3k tokens and each run 3.1–3.6k, all carried for 24 turns — 55k of a 62.7k request was old copies of the model.
@@ -106,13 +236,19 @@ const parsedOutput = (item: unknown): unknown => {
  * tokens) with typed approvals, 28,432 → 23,160 (−18.5%, ≈1.3k) with chip approvals. ⚠ NOT ENOUGH ON ITS OWN for the
  * 15,000 cap: by the served deltas it takes journey A's last request from 22,752 to ≈20.0–20.9k. The latest run (≈3.9k
  * tokens, kept by the rule above though every approval since has changed the model) is the next largest item.
+ * ⭐ So it is now kept as its PROJECTION, marked stale once the model moves (`keptRunOf`, above; AIQ #70 5859279825):
+ * the same history measures 30,899 → 11,832 characters (−61.7%) typed, 28,432 → 12,099 (−57.4%) chip.
  *
  * ⛔ THE APPROVE CHIP LEAVES NO RECORD IN THE HISTORY. Its fast path (agent-v1-turn.ts, FAST PATH 2) appends only the
  * chip's words and Olumi's status — no call, no proposal id — and every approval in that served run was a chip. So the
  * route also passes the turn's own approval results (`approvalsThisTurn`); being this turn's, they are later than
  * every output already in the history.
  */
-export function pruneSupersededToolOutputs(items: readonly unknown[], approvalsThisTurn: readonly unknown[] = []): unknown[] {
+export function pruneSupersededToolOutputs(
+  items: readonly unknown[],
+  approvalsThisTurn: readonly unknown[] = [],
+  readback?: KeptRunReadback,
+): unknown[] {
   const nameOf = new Map<string, string>();
   for (const i of items) {
     const c = i as { type?: unknown; call_id?: unknown; name?: unknown };
@@ -142,6 +278,11 @@ export function pruneSupersededToolOutputs(items: readonly unknown[], approvalsT
     const name = outputOf(i);
     if (name === undefined) return i;
     if (SNAPSHOT_TOOLS.has(name) || (name === 'run_analysis' && k !== lastRun)) return { ...(i as object), output: SUPERSEDED_OUTPUT };
+    if (name === 'run_analysis') {
+      // The latest run: its projection, by its own permission, marked stale unless this readback vouches for it.
+      const kept = keptRunOf(parsedOutput(i), readback);
+      return kept === undefined ? i : { ...(i as object), output: JSON.stringify(kept) };
+    }
     if (name === 'authorise_change' && k !== lastApproval) return { ...(i as object), output: EARLIER_APPROVAL_OUTPUT };
     if (name.startsWith('propose_')) {
       const id = (parsedOutput(i) as { proposal_id?: unknown } | undefined)?.proposal_id;

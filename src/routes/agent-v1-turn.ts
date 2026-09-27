@@ -2106,16 +2106,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       briefReadingOpen = false;
     }
 
-    // ⛔ This turn's approval results go with it ONLY on the approve chip's fast path: it puts no authorise_change in
-    // the history (only its words and Olumi's status), so they are the only record of which proposal it applied
-    // (PJ-C1). On every other turn an approval is already in `items` at its TRUE position; passing it again would
-    // place it after everything and could stub a same-id proposal made later in the turn (adversarial review F2).
-    const results = result.tool_results;
-    const chipApprovals = fastPath === 'approve'
-      ? result.tool_calls.flatMap((c, k) => (c.name === 'authorise_change' && k < results.length ? [results[k]] : []))
-      : [];
-    histories.set(sessionId, pruneSupersededToolOutputs(result.items, chipApprovals));
-
     // A hop limit is never returned as an empty answer.
     const text = result.stopped_reason === 'incomplete'
       ? unfinishedAnswerText(result)
@@ -2197,6 +2187,24 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * readiness this same response carries.
      */
     const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled } = await readBackState(readingDispatch, scenarioId);
+
+    // ⛔ This turn's approval results go with it ONLY on the approve chip's fast path: it puts no authorise_change in
+    // the history (only its words and Olumi's status), so they are the only record of which proposal it applied
+    // (PJ-C1). On every other turn an approval is already in `items` at its TRUE position; passing it again would
+    // place it after everything and could stub a same-id proposal made later in the turn (adversarial review F2).
+    const results = result.tool_results;
+    const chipApprovals = fastPath === 'approve'
+      ? result.tool_calls.flatMap((c, k) => (c.name === 'authorise_change' && k < results.length ? [results[k]] : []))
+      : [];
+    /**
+     * ⭐ STORED AFTER THIS READBACK, AND WITH IT (AIQ #70 5859279825 (a)): the kept run is marked stale unless the
+     * readback's canonical verdict selected THAT run (`staleNoteFor`, history-store.ts), so a run an approval in this
+     * turn has moved past says so in the very next request. Its verdict and selected result — never `graphHash`, the RAW
+     * compare-and-set base, which differs from the run's canonical stamp on a repaired-shape graph that has not moved.
+     * Nothing between the turn's end and here reads the history, and `readBackState` swallows its own failures (an
+     * unreadable state stores the run as unconfirmed: fail closed). No extra read: this is the read the reply needs.
+     */
+    histories.set(sessionId, pruneSupersededToolOutputs(result.items, chipApprovals, { analysisState, analysisResult }));
     const fa = firstAnalysis?.outcome;
     // An analysis of THIS revision exists because this turn's construction ran it (or already had).
     const firstAnalysisExists = fa !== undefined && (fa.ran || fa.reason === 'already_ran_for_construction');
