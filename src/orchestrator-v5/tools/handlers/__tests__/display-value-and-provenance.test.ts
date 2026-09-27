@@ -193,13 +193,14 @@ describe('A3.1 Task 3 — adjust_edge_strength stamps edge provenance', () => {
     expect(GraphV3.safeParse(mutated).success).toBe(true);
   });
 
-  it('magnitude contract: a user-set strength DROPS Olumi\'s natural_effect and magnitude (R&C 5845818897) — a stale size never speaks', async () => {
+  it('magnitude contract: a user-set strength DROPS Olumi\'s natural_effect and magnitude (R&C 5845818897) — a stale size never speaks — and its reasoning (A6c)', async () => {
     const ingress = buildD1Fixture();
     const target = ingress.edges.find((e) => e.from === 'f-budget' && e.to === 'g-revenue');
     expect(target).toBeDefined();
     target!.provenance = {
       source: 'cee_hypothesis',
-      reasoning: 'kept-by-the-write',
+      reasoning: 'dropped-by-the-write',
+      evidence_note: 'kept-by-the-write',
       magnitude: 'olumi_estimate',
       natural_effect: { amount: 2, amount_unit: 'GBP', per_source_change: 1, per_source_change_unit: 'GBP', strength_mean: target!.strength.mean, strength_mean_frame: 'edge_strength' },
     } as never;
@@ -215,10 +216,12 @@ describe('A3.1 Task 3 — adjust_edge_strength stamps edge provenance', () => {
     expect(edge?.provenance?.source).toBe('user_specified');
     expect(edge?.provenance).not.toHaveProperty('natural_effect');
     expect(edge?.provenance).not.toHaveProperty('magnitude');
-    // Contrast: the SAME edge's other provenance key survives the write, through the schema parse.
-    expect(edge?.provenance?.reasoning).toBe('kept-by-the-write');
+    // A6c (DL #70 5855068711): Olumi's WHY goes with its size — under the user's stamp it read as theirs.
+    expect(edge?.provenance).not.toHaveProperty('reasoning');
+    // Contrast: the SAME edge's other (additive, passthrough) provenance key survives the write, through the schema parse.
+    expect((edge?.provenance as Record<string, unknown> | undefined)?.evidence_note).toBe('kept-by-the-write');
     const parsed = GraphV3.parse(mutated);
-    expect(parsed.edges.find((e) => e.from === 'f-budget' && e.to === 'g-revenue')?.provenance?.reasoning).toBe('kept-by-the-write');
+    expect((parsed.edges.find((e) => e.from === 'f-budget' && e.to === 'g-revenue')?.provenance as Record<string, unknown> | undefined)?.evidence_note).toBe('kept-by-the-write');
   });
 
   it('edge with prior provenance is updated, not duplicated', async () => {
@@ -249,9 +252,11 @@ describe('A3.1 Task 3 — adjust_edge_strength stamps edge provenance', () => {
     const edge = mutated.edges.find(
       (e) => e.from === 'f-churn' && e.to === 'g-revenue',
     );
-    expect(edge?.provenance?.source).toBe('user_specified');
-    // Prior reasoning is preserved (only source is overwritten).
-    expect(edge?.provenance?.reasoning).toBe('from the brief');
+    // One provenance object, re-stamped — not a second one alongside the old.
+    expect(edge?.provenance).toStrictEqual({ source: 'user_specified' });
+    // A6c (DL #70 5855068711): the producer's prior reasoning is NOT kept under the user's stamp — decision review
+    // would present it as the reason the user gave. (It was preserved here before; that was the defect.)
+    expect(edge?.provenance).not.toHaveProperty('reasoning');
     expect(edge?.provenance_display).toBe('user_set');
   });
 });

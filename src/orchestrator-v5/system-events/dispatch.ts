@@ -1712,6 +1712,9 @@ async function dispatchEdgeStrengthEdit(
       after: persistedGraphBytes,
       from: event.from,
       to: event.to,
+      // The adapter's own answer to "was this a band the user named?" (A6e), so the
+      // receipt is judged by the same allowance the pre-commit guard granted.
+      ...(result.statedBand !== undefined ? { statedBand: result.statedBand } : {}),
     });
   // A successful append without a trustworthy graph receipt is an ambiguous
   // transport outcome, never a 200 mutation success. Fail the route closed so
