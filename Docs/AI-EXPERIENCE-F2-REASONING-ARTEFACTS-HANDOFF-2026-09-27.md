@@ -1,0 +1,48 @@
+# F2 reasoning artefact runtime — evidence handoff
+
+**Delivery ceiling:** TESTED / UNWIRED / NOT SERVED. This branch is an off-path internal contract and test result. It does not establish product persistence, F1 integration, UI, scientific validity, or a served journey.
+
+## Source and ownership
+
+- Original CEE staging base: `772ccfc7a88c348c8ada711593f8aa64ac4f4293`.
+- Staging had advanced to `c12fa67a56dc627fcde5f1872890b2f3a76d9422` during the build. Its intervening changes do not touch this new F2 runtime/test directory. The DSK bundle blob remains `325fb4cae0dfeba5c729c9ba07d0f37d1581cf84`.
+- Branch: `codex/ai-experience-f2-reasoning-artefacts-20260927`. Ownership is limited to the new `src/orchestrator-v5/agent-lane/runtime/reasoning-artefacts/` and `tests/unit/reasoning-artefacts/` directories plus this handoff.
+- [Programme claim](https://github.com/Talchain/olumi-programme-docs/issues/70#issuecomment-5860224846) was posted before Commit A. The prior [programme review](https://github.com/Talchain/olumi-programme-docs/issues/70#issuecomment-5860173682) explicitly requires positive science-owner ratification for the recovered DSK protocol.
+
+## Archaeology and authority
+
+| Category | Finding and treatment |
+| --- | --- |
+| ALREADY EXISTS | CEE carries scenario/graph provenance and an on-path `data/dsk/v1.json` bundle. It contains `DSK-P-003 v1.0.0`, marked `deprecated:false`; this establishes presence, not current scientific ownership. |
+| REUSE | Existing canonical scenario, option, model-element, analysis graph-hash and source identity values are supplied by a host context. F2 creates no canonical IDs and no authorisation rules. |
+| ADAPT | Recovered `weightedMatrix` and `weightSensitivity` from [programme-docs recovery at `a5f5847`](https://github.com/Talchain/olumi-programme-docs/blob/a5f5847fac1cf677961929134db0bd33937cb488/openai/ai-experience/2026-09-26/recovered-capability/src/capabilities.mjs) were compared on identical valid fixtures. The amended truth contract governs missing scores, feasibility, preference confirmation and utility polarity. |
+| BUILD | An isolated explicit artefact creator, strict validators, deterministic content identity, dependency-specific currentness, weighted comparison, and an evidence/assumption map with fresh-host safe presentation. |
+| BLOCKER | No positive current scientific-owner ratification of `DSK-P-003 v1.0.0` was found. The DSK record supplies expected outputs but no executable completion rule, applicability threshold, or method-history semantics. F2c can ship only a typed fail-closed boundary until those authorities are supplied. |
+
+The F1 source-status implementation remains a draft, unmerged PR ([#2145](https://github.com/Talchain/olumi-assistants-service/pull/2145), inspected at `b046a079fb9ba33eca99d82838f96262abc36261`). F2b therefore accepts the internal host port `current | changed | revoked | unavailable`; its final F1 type binding is **UNBOUND**. F2 does not resolve provider files, retention, or source access.
+
+## Implemented boundaries
+
+- F2a retains independent calculation validity, preference ownership, constraint feasibility and ordering permission. Input utility is already preference-adjusted 0–1 desirability, with no polarity inversion or raw-unit conversion. Supplied and normalised weights remain separate. Relevant changes restrict current use while historical totals remain in the artefact.
+- F2b separates claim epistemic status from evidence items and evidence-to-claim relationships. Host attestations bind exact claim/evidence/implication content and source dependencies. Source state and model linkage remain independent. The serialised envelope is internal; saved content is presented only through a fresh-host projection that suppresses unsafe text and keeps text-free withheld metadata.
+- F2c authority and completion remain conditional on a verified current protocol reference and host-owned verdicts. Completion requires an exact governed rule identity/version/authority tuple and separately host-attested completion evidence identities. The historical DSK file was not copied, restored, modified, or made executable by this branch.
+- Proposed implications are strictly `{text, linked_element_ids, requires_review:true}`. No artefact carries an operation, patch, proposed field value, or write permission.
+
+## Validation and mutation evidence
+
+- Commits A and B: `227ca70e6e45d2a931d3241b2adfae75463acb9` and `82c9a418f79039a3162d7a508b008767f2fa1313`. Commit C is the commit containing this handoff; its exact SHA is reported in the #70 RESULT and draft PR.
+- Focused native Vitest: **49/49 passed** across three files. The recovered weighted arithmetic and one-weight sensitivity match the old implementation on an identical valid fixture. `pnpm typecheck` passed. Repository `pnpm lint` had 0 errors and 2 warnings in unchanged files; changed-file ESLint passed.
+- Scratch-only mutation verification: **10/10 killed by assertions**. Each sequence passed its baseline, failed under the mutation, passed after restoration, and checked that the repository HEAD and owned paths were unchanged. The ten controls were: missing score as zero; hard constraint compensated by utility; unconfirmed weight promoted; relevant dependency staleness ignored; stale source accepted; sourced claim without source identity; AI hypothesis promoted to fact; unknown applicability treated applicable; missing protocol version accepted; artefact invocation acquiring a canonical write side effect.
+- The repository pre-push gate passed toolchain, typecheck, changed-file lint (8 files), all 11 smoke files, stale-JS, dependency, tarball, transport, data-responsibility, Phase 0 and docs checks. The initially sparse checkout omitted tracked `Prompts/` and `supabase/` files; after adding those directories, these checks passed.
+- **Pre-push remains RED on inherited, out-of-lane production checks.** `validate-state-write-invariant.sh` flags direct `v5_handler_facts` access in `decision-records/store-adapter.ts` and seven SessionStore import lines in existing production files. The pre-push script stops there. Running the remaining checks separately found `validate-handler-ownership.sh` red on `run-analysis.ts` (a `Number.parseInt` line and a moved claim-safety verdict anchor). These flagged lines are on `origin/staging` and were not changed by F2. Phase 1.5, response-finaliser and forbidden-boundary-pattern checks passed separately. The red checks are **merge blockers**, not F2 fixes; their shared production files are outside this branch's ownership.
+- F2c adversarial test: even a target saying `99% win probability` remains `not_started` when host applicability is `unknown`. The present DSK record also produces `not_started` without a positive science ratification. Synthetic contract tests show `completed` only with an exact governed rule ID/version/authority tuple and separately host-attested completion evidence; an unbound/generated-only reference remains `completion_unverified`.
+
+## UNBOUND integration seams
+
+1. Host adapters for authenticated canonical projections, preference confirmation, constraint verdicts, analysis freshness, and per-item source/model attestations.
+2. F1 source-status type binding and a current-use presentation gate at every eventual consumer.
+3. Positive scientific-owner ratification, supersession/retirement verdict, protocol applicability authority and protocol-backed completion rule for F2c.
+4. Persistence owner to assign `artefact_id` and implement save/reload. F2 supplies deterministic serialisation, revalidation and currentness assessment only.
+5. Product invocation and later UI. The intended order is **manual invocation → persistence/reload → UI → proactive offer**.
+
+No provider calls, model routing, capability selector, weighted pros/cons, database implementation, UI/F3, merge or deployment are included.
