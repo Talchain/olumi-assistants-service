@@ -23,6 +23,7 @@ import {
 } from '../coaching/fragile-link-challenge.js';
 import { buildNoFlaggedLinkCard } from '../coaching/no-flagged-link-card.js';
 import { buildLimitUncheckedCard, everyOptionBreaksALimit, leaderWithheldForALimit } from '../coaching/limit-unchecked-card.js';
+import { buildUntestedOptionCard } from '../coaching/untested-option-card.js';
 import { everyLimitProvedUnanchored, graphBoundToHash, limitNodeLabels } from '../coaching/bound-graph.js';
 import { buildNearTieCard } from '../coaching/near-tie-card.js';
 import { buildEstimatedLimitCard } from '../coaching/estimated-limit-card.js';
@@ -301,6 +302,11 @@ export function runTurnCoaching(
     optionLabels: optionLabelsFromReady(captured.analysis_ready),
     edgeAuthorship: edgeAuthorshipIn(boundGraph),
   };
+  // (2b') ONE next action: an option the run could NOT test (its `analysis_ready` status is not `ready` and the result
+  // does not score it) is the one that could change any verdict below, and its level is the move that tests it
+  // (served dloop2x-1, 27 Sep: an added option left out, and the card said "Change or add an option" again).
+  const untested = buildUntestedOptionCard(input, captured.analysis_ready);
+  if (untested !== null) return { blocks: dedupeByBlockId([...upstream, untested]), eligibility: { eligible: true } };
   // (2c) ONE next action, TYPED: when the READBACK's leader claim is withheld for
   // a limit, the limit is the decisive caveat — the limit card is the turn's one
   // card and no link card competes with it. Read from the typed claim, never the
