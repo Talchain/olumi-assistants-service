@@ -158,7 +158,8 @@ describe('a freshly built model is admissible for a provisional first analysis (
     const { graph, out } = await registered(PRICING());
     expect(verdict(graph)).toEqual({
       willProceed: false, mode: 'none', blockers: ['OPTION_NEEDS_MAPPING', 'OPTION_NO_FACTOR_EDGES'],
-      ceeInference: ['monthly_churn_rate', 'pro_subscribers'],
+      // This brief states no price, so the £49 baseline is Olumi's and is disclosed as such (#2073 review F1).
+      ceeInference: ['pro_plan_price', 'monthly_churn_rate', 'pro_subscribers'],
     });
     // Nothing was invented to make it comparable: the arm is named as inert.
     expect(out.options_that_change_nothing).toEqual(['Keep the current price']);

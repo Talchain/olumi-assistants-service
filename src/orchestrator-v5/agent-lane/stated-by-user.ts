@@ -66,8 +66,8 @@ function baselineTheBriefStates(value: number, unit: unknown, brief: string): bo
  * hired" 0 and the salary spend £0 as the user's own figures. The brief states neither.
  *
  * THE RULE: `figureTheUserWrote` over the brief, or the same figure written in words, or "zero" for 0. Not grounded ⇒
- * the stamp is withdrawn and the value kept, in the shape an inferred factor's known baseline already has (no
- * `source`). Every miss under-claims: "no enterprise customers" is not read as 0, and the figure reads as Olumi's.
+ * the stamp becomes Olumi's (`cee_inference`) and the value is kept, so the disclosure, the canvas label and the
+ * level-limit carry all name the same author. Every miss under-claims: "no enterprise customers" is not read as 0, and the figure reads as Olumi's.
  */
 export function withdrawUnstatedBaselineStamps<N extends { readonly kind?: unknown; readonly observed_state?: unknown }>(
   nodes: readonly N[],
@@ -81,8 +81,9 @@ export function withdrawUnstatedBaselineStamps<N extends { readonly kind?: unkno
     // "cut 15%" is measured from it (review 5835754404, row 4b). Admission wrote it; the brief's own framing states it.
     if (os.unit === TODAY_UNIT && figure === TODAY_LEVEL) return n;
     if (typeof figure === 'number' && baselineTheBriefStates(figure, os.unit, brief)) return n;
-    const { source: _withdrawn, ...rest } = os;
-    return { ...n, observed_state: rest };
+    // Not the user's, so Olumi's: the ONE author the disclosure ("I supplied N values"), the canvas label and the
+    // level-limit carry (`levelHasAnAuthor`) all read. Source-less, it was nobody's (#2073 review F1, AIQ 5851906910).
+    return { ...n, observed_state: { ...os, source: 'cee_inference' } };
   });
 }
 
