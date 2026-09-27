@@ -224,6 +224,28 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(routerCalls).toEqual([]);
   }, 120_000);
 
+  /**
+   * ⭐ SLICE C1 (P3A replay of Paul's transcript, 27 Sep): an ordinary question cost two model calls, the first only
+   * to fetch `get_canonical_state`. The route now reads the model once and GIVES it; the read tool is not offered.
+   */
+  it('[C1] RED: an ordinary question → ONE model call; its request carries the CURRENT MODEL STATE (the model\'s entities) and does not offer get_canonical_state', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const bodies: Record<string, unknown>[] = [];
+    script = [(body) => { bodies.push(body); return say('Price drives revenue here.'); }];
+    const t = await turn({ message: 'What drives revenue in my model?' });
+    expect(openAiCalls, 'one model call').toBe(1);
+    const tools = ((bodies[0]!['tools'] ?? []) as { name?: string }[]).map((x) => x.name);
+    expect(tools).not.toContain('get_canonical_state');
+    const given = JSON.stringify((bodies[0]!['input'] ?? []) as unknown[]);
+    expect(given).toMatch(/CURRENT MODEL STATE/);
+    expect(given).toContain('fac_price');
+    expect(t._agent.tool_calls).toEqual([]);
+    // The next turn is given its OWN state; the earlier one is not carried in the history.
+    script = [(body) => { bodies.push(body); return say('Still price.'); }];
+    await turn({ message: 'And now?' });
+    expect((JSON.stringify(bodies[1]!['input']).match(/CURRENT MODEL STATE/g) ?? []).length, 'exactly one state item on turn 2').toBe(1);
+  }, 120_000);
+
   it('[a] RED: one option with the user\'s £54 → ONE held proposal on the typed rail → one click → linked from the decision, levelled, runnable', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const t1 = await proposeOptionC(54);
@@ -257,6 +279,32 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     // [e] OpenAI only; route-v2's router untouched on both turns.
     expect(routerCalls).toEqual([]);
     for (const b of [t1, t2]) for (const p of b._provider_calls ?? []) expect(p.provider).toBe('openai');
+  }, 120_000);
+
+  /**
+   * ⛔ B3 (Paul's test, 27 Sep 09:31Z, export user_actions[14]): the approve button read "Add option '£59 for new Pro
+   * customers; grandfather existi..." — the product's `clampLabel` cut the sentence at 57 characters and sent the whole
+   * sentence in `detail`, which the UI shows on the button; the Agent's copy of the chip dropped `detail`.
+   */
+  it('[B3] RED: a long option name → the approve button carries the product\'s FULL sentence (`detail`), never only the cut label; one click still adds it', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const LONG = '£59 for new Pro customers; grandfather existing customers';
+    script = [
+      () => fnCall('propose_new_option', { label: LONG, acts_on: [{ factor_label: 'Price', direction: 'positive' }], rationale: 'The user asked for it.' }),
+      () => say(`I would add "${LONG}". Shall I add it?`),
+    ];
+    const t1 = await turn({ message: `Add an option: ${LONG}.` });
+    const approve = approveChipOf(t1) as (Chip & { detail?: string }) | undefined;
+    expect(approve?.id, JSON.stringify({ chips: t1.suggested_actions, tools: t1._agent.tool_calls })).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    // The product still cuts its label (its own choice); the button's full words ride in `detail`.
+    expect(approve!.label, approve!.label).toMatch(/\.\.\.$/);
+    expect(approve!.label).not.toContain(LONG);
+    // The product's OWN sentence, by identity: its cut label is this sentence's first 57 characters.
+    expect(approve!.detail, JSON.stringify(approve)).toEqual(expect.stringContaining(`'${LONG}'`));
+    expect(approve!.detail!.startsWith(approve!.label.slice(0, -3)), JSON.stringify(approve)).toBe(true);
+    const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    expect(graphNow().nodes.some((x) => x.kind === 'option' && x.label === LONG), JSON.stringify(graphNow().nodes)).toBe(true);
   }, 120_000);
 
   it('[b] an option with NO stated level is linked from the decision and left honestly unset — the authority names the missing value for THAT option, and the reply names the step', async () => {

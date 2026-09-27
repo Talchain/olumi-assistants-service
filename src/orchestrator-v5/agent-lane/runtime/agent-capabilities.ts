@@ -4087,7 +4087,7 @@ export function createAgentCapabilities(
        * EVERY option WITH its decision link. Anything else is a hard failure: never retried in other words.
        */
       const ref = gmHeldProposalRef(ctx.scenario_id, `node:${kept[0]!.plan.optionId}`);
-      const offered = Array.isArray(r.json.suggested_actions) ? r.json.suggested_actions as { id?: unknown; label?: unknown; message?: unknown }[] : [];
+      const offered = Array.isArray(r.json.suggested_actions) ? r.json.suggested_actions as { id?: unknown; label?: unknown; message?: unknown; detail?: unknown }[] : [];
       const heldChip = r.status === 200 ? offered.find((c) => c?.id === ref) : undefined;
       let heldBatchOk = heldChip !== undefined;
       if (heldBatchOk && opts.readPendingActions !== undefined) {
@@ -4130,6 +4130,8 @@ export function createAgentCapabilities(
         proposal_id: ref,
         public_label: typeof heldChip!.label === 'string' && heldChip!.label.trim() !== '' ? heldChip!.label : kept[0]!.plan.publicLabel,
         held_message: typeof heldChip!.message === 'string' ? heldChip!.message : '',
+        // The product's full sentence when its chip label was cut to fit (`clampLabel`): the button shows it whole.
+        ...(typeof heldChip!.detail === 'string' && heldChip!.detail.trim() !== '' ? { held_detail: heldChip!.detail } : {}),
         base_revision: g.graph_hash,
         ...(described.length === 1
           ? { option: { label: described[0]!.label, linked_from: described[0]!.linked_from, acts_on: described[0]!.acts_on }, levels: described[0]!.levels }
