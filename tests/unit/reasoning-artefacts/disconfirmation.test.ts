@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { canonicalJson } from '../../../src/orchestrator-v5/agent-lane/runtime/reasoning-artefacts/common.js';
+import { canonicalJson, contentHash } from '../../../src/orchestrator-v5/agent-lane/runtime/reasoning-artefacts/common.js';
 import { assessReasoningArtefactCurrentness, createReasoningArtefact, serializeReasoningArtefact,
   validateReasoningArtefact } from '../../../src/orchestrator-v5/agent-lane/runtime/reasoning-artefacts/index.js';
 import {
-  assessDisconfirmationCurrentness, createDisconfirmation, validateDisconfirmation,
+  assessDisconfirmationCurrentness, createDisconfirmation, presentDisconfirmation, validateDisconfirmation,
 } from '../../../src/orchestrator-v5/agent-lane/runtime/reasoning-artefacts/disconfirmation.js';
 
 const targetHash = 'a'.repeat(64);
@@ -31,6 +31,9 @@ function fixture() {
       prerequisites: ['Host says prerequisites met'], contraindications: [] as string[] },
     existing_evidence: [] as { evidence_id: string; source_id: string; source_version: string }[],
     challenging_evidence: [] as { evidence_id: string; source_id: string; source_version: string }[],
+    generated_content_binding: null as null | { content_hash: string;
+      source_refs: { source_id: string; source_version: string }[];
+      source_independent: boolean; authority_ref: string },
     source_statuses: [] as { source_id: string; source_version: string | null; state: string }[],
     completion_evidence_bindings: [] as { evidence_id: string; attestation_ref: string }[],
     completion: null as null | {
@@ -48,6 +51,11 @@ function syntheticVerifiedFixture() {
   // A synthetic host fixture exercises the contract, not current science-owner ratification.
   host.protocol.authority_status = 'verified_current';
   host.protocol.science_ratification_ref = 'synthetic-science-review-1';
+  host.generated_content_binding = {
+    content_hash: contentHash({ counter_hypotheses: input.counter_hypotheses, questions: input.questions,
+      investigations: input.investigations, unknowns: input.unknowns }),
+    source_refs: [], source_independent: true, authority_ref: 'synthetic-source-independent-attestation',
+  };
   return { input, host };
 }
 
@@ -280,5 +288,127 @@ describe('F2c disconfirmation boundary', () => {
     expect(assessDisconfirmationCurrentness(created, input, { ...host, protocol: {
       ...host.protocol, protocol_version: undefined,
     } }).state).toBe('invalid');
+  });
+
+  it('presents a reloaded artefact only while its source is current, then withholds all display content', () => {
+    const { input, host } = syntheticVerifiedFixture();
+    host.existing_evidence.push({ evidence_id: 'private-evidence-1', source_id: 'private-source', source_version: 'v1' });
+    host.source_statuses.push({ source_id: 'private-source', source_version: 'v1', state: 'current' });
+    const saved = JSON.parse(canonicalJson(createDisconfirmation(input, host))) as unknown;
+    const current = presentDisconfirmation(saved, host);
+    expect(current.state).toBe('current');
+    if (current.state !== 'current') throw new Error('expected current projection');
+    expect(current.display.generated.counter_hypotheses).toEqual(input.counter_hypotheses);
+    expect(current.display.existing_evidence[0]?.evidence_id).toBe('private-evidence-1');
+    expect(Object.hasOwn(current, 'canonical_inputs')).toBe(false);
+
+    for (const state of ['changed', 'revoked', 'unavailable']) {
+      const fresh = structuredClone(host);
+      fresh.source_statuses[0]!.state = state;
+      fresh.source_statuses[0]!.source_version = state === 'changed' ? 'v2' : null;
+      const projection = presentDisconfirmation(saved, fresh);
+      expect(projection.state).toBe('stale');
+      expect(projection.display).toBeNull();
+      expect(JSON.stringify(projection)).not.toContain(input.counter_hypotheses[0]);
+      expect(JSON.stringify(projection)).not.toContain('private-evidence-1');
+      expect(JSON.stringify(projection)).not.toContain(host.target.text);
+      // Revalidation preserves historical bytes for internal audit without licensing their display.
+      expect(validateDisconfirmation(saved).generated.counter_hypotheses).toEqual(input.counter_hypotheses);
+    }
+  });
+
+  it('withholds a reloaded artefact when saved and fresh source states are both revoked', () => {
+    const { input, host } = syntheticVerifiedFixture();
+    host.existing_evidence.push({ evidence_id: 'private-evidence-1', source_id: 'private-source', source_version: 'v1' });
+    host.source_statuses.push({ source_id: 'private-source', source_version: null, state: 'revoked' });
+    const saved = JSON.parse(canonicalJson(createDisconfirmation(input, host))) as unknown;
+    expect(validateDisconfirmation(saved).lifecycle).toBe('not_started');
+    const projection = presentDisconfirmation(saved, host);
+    expect(projection).toEqual({
+      kind: 'disconfirmation', state: 'stale', changed_dependencies: ['source'], display: null,
+    });
+    expect(JSON.stringify(projection)).not.toContain('private-source');
+    expect(JSON.stringify(projection)).not.toContain('private-evidence-1');
+  });
+
+  it('requires exact host-attested lineage for generated text even without observed evidence refs', () => {
+    const { input, host } = syntheticVerifiedFixture();
+    expect(host.existing_evidence).toEqual([]);
+    expect(host.challenging_evidence).toEqual([]);
+    host.generated_content_binding = null;
+    expect(() => createDisconfirmation(input, host)).toThrow('generated_lineage_required');
+    const independent = syntheticVerifiedFixture();
+    independent.host.generated_content_binding!.content_hash = 'c'.repeat(64);
+    expect(() => createDisconfirmation(independent.input, independent.host)).toThrow('generated_lineage_mismatch');
+    independent.host.generated_content_binding!.content_hash = contentHash({
+      counter_hypotheses: independent.input.counter_hypotheses, questions: independent.input.questions,
+      investigations: independent.input.investigations, unknowns: independent.input.unknowns,
+    });
+    independent.host.generated_content_binding!.source_independent = false;
+    expect(() => createDisconfirmation(independent.input, independent.host)).toThrow('generated_lineage_ambiguous');
+  });
+
+  it('withholds source-conditioned generated text after revocation without an evidence reference', () => {
+    const { input, host } = syntheticVerifiedFixture();
+    host.generated_content_binding!.source_independent = false;
+    host.generated_content_binding!.source_refs = [{ source_id: 'private-source', source_version: 'v1' }];
+    host.source_statuses.push({ source_id: 'private-source', source_version: 'v1', state: 'current' });
+    expect(host.existing_evidence).toEqual([]);
+    expect(host.challenging_evidence).toEqual([]);
+    const saved = JSON.parse(canonicalJson(createDisconfirmation(input, host))) as unknown;
+    expect(presentDisconfirmation(saved, host).state).toBe('current');
+
+    const revoked = structuredClone(host);
+    revoked.source_statuses[0]!.state = 'revoked';
+    revoked.source_statuses[0]!.source_version = null;
+    const directCurrentness = assessDisconfirmationCurrentness(saved, input, revoked);
+    expect(directCurrentness.state).toBe('stale');
+    expect(directCurrentness.changed_dependencies.some((item) => item.startsWith('source:'))).toBe(true);
+    expect(assessReasoningArtefactCurrentness(saved, input, revoked).state).toBe('stale');
+    const revokedProjection = presentDisconfirmation(saved, revoked);
+    expect(revokedProjection).toEqual({
+      kind: 'disconfirmation', state: 'stale', changed_dependencies: ['source'], display: null,
+    });
+    expect(JSON.stringify(revokedProjection)).not.toContain(input.counter_hypotheses[0]);
+    expect(JSON.stringify(revokedProjection)).not.toContain('private-source');
+
+    const versionChanged = structuredClone(host);
+    versionChanged.source_statuses[0]!.source_version = 'v2';
+    expect(presentDisconfirmation(saved, versionChanged).display).toBeNull();
+    const withdrawn = structuredClone(host);
+    withdrawn.generated_content_binding = null;
+    expect(presentDisconfirmation(saved, withdrawn)).toEqual({
+      kind: 'disconfirmation', state: 'invalid', changed_dependencies: [], display: null,
+    });
+  });
+
+  it('withholds current-use content for target, protocol or scenario drift while allowing unrelated edits', () => {
+    const { input, host } = syntheticVerifiedFixture();
+    const saved = JSON.parse(canonicalJson(createDisconfirmation(input, host))) as unknown;
+    const unrelated = structuredClone(host);
+    unrelated.graph_revision = 'unrelated-graph-edit';
+    expect(presentDisconfirmation(saved, unrelated).state).toBe('current');
+
+    const targetChanged = structuredClone(host);
+    targetChanged.target.fingerprint = 'c'.repeat(64);
+    const targetProjection = presentDisconfirmation(saved, targetChanged);
+    expect(targetProjection.state).toBe('stale');
+    expect(targetProjection.display).toBeNull();
+    expect(targetProjection.changed_dependencies).toContain('claim');
+
+    const retired = structuredClone(host);
+    retired.protocol.authority_status = 'retired';
+    const protocolProjection = presentDisconfirmation(saved, retired);
+    expect(protocolProjection.state).toBe('stale');
+    expect(protocolProjection.display).toBeNull();
+    expect(protocolProjection.changed_dependencies).toContain('protocol');
+
+    const foreign = structuredClone(host);
+    foreign.scenario_id = 'different-scenario';
+    expect(presentDisconfirmation(saved, foreign)).toEqual({
+      kind: 'disconfirmation', state: 'invalid', changed_dependencies: [], display: null,
+    });
+    expect(presentDisconfirmation(saved, { ...host, protocol: { ...host.protocol, protocol_version: undefined } }))
+      .toEqual({ kind: 'disconfirmation', state: 'invalid', changed_dependencies: [], display: null });
   });
 });

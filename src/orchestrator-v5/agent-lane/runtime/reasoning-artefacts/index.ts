@@ -1,17 +1,17 @@
 import { ArtefactInputError, assessBindingCurrentness, canonicalJson, fail, keys, own, record,
   type BindingCurrentness } from './common.js';
 import {
-  createDisconfirmation, validateDisconfirmation, type DisconfirmationArtefact,
+  createDisconfirmation, presentDisconfirmation, validateDisconfirmation, type DisconfirmationArtefact,
 } from './disconfirmation.js';
 import {
   createEvidenceAssumptionMap, presentEvidenceAssumptionMap, validateEvidenceAssumptionMap,
   type EvidenceAssumptionMapArtefact,
 } from './evidence-map.js';
 import {
-  createWeightedComparison, type WeightedComparisonArtefact,
+  createWeightedComparison, presentWeightedComparison, type WeightedComparisonArtefact,
 } from './weighted-comparison.js';
 
-export { presentEvidenceAssumptionMap };
+export { presentDisconfirmation, presentEvidenceAssumptionMap, presentWeightedComparison };
 
 interface ArtefactByKind {
   weighted_comparison: WeightedComparisonArtefact;
@@ -29,7 +29,7 @@ export function createReasoningArtefact<K extends keyof ArtefactByKind>(
   return fail('unsupported_artefact_kind');
 }
 
-/** Internal saved-envelope check. Present F2b only through the fresh-host safe projection. */
+/** Internal saved-envelope check. Display only through each kind's fresh-host presentation projection. */
 export function validateReasoningArtefact(raw: unknown): WeightedComparisonArtefact | EvidenceAssumptionMapArtefact | DisconfirmationArtefact {
   const value = record(raw);
   if (own(value, 'kind') === 'evidence_assumption_map') return validateEvidenceAssumptionMap(value);

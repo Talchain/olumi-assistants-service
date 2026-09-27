@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { assessBindingCurrentness } from '../../../src/orchestrator-v5/agent-lane/runtime/reasoning-artefacts/common.js';
-import { assessReasoningArtefactCurrentness, createReasoningArtefact, serializeReasoningArtefact,
+import { assessReasoningArtefactCurrentness, createReasoningArtefact, presentWeightedComparison, serializeReasoningArtefact,
   validateReasoningArtefact } from '../../../src/orchestrator-v5/agent-lane/runtime/reasoning-artefacts/index.js';
 import { createWeightedComparison } from '../../../src/orchestrator-v5/agent-lane/runtime/reasoning-artefacts/weighted-comparison.js';
 
@@ -15,10 +15,10 @@ function fixture() {
         weight: { value: 1, provenance: 'user_stated' } },
     ],
     utilities: [
-      { option_id: 'option-a', criterion_id: 'cost', value: 0.9, origin: 'user_supplied', provenance: 'user_stated', source_refs: [] as { source_id: string; source_version: string }[] },
-      { option_id: 'option-a', criterion_id: 'fit', value: 0.6, origin: 'user_supplied', provenance: 'user_stated', source_refs: [] as { source_id: string; source_version: string }[] },
-      { option_id: 'option-b', criterion_id: 'cost', value: 0.4, origin: 'user_supplied', provenance: 'user_stated', source_refs: [] as { source_id: string; source_version: string }[] },
-      { option_id: 'option-b', criterion_id: 'fit', value: 0.8, origin: 'user_supplied', provenance: 'user_stated', source_refs: [] as { source_id: string; source_version: string }[] },
+      { option_id: 'option-a', criterion_id: 'cost', value: 0.9 as number | null, origin: 'user_supplied', provenance: 'user_stated', source_refs: [] as { source_id: string; source_version: string }[] },
+      { option_id: 'option-a', criterion_id: 'fit', value: 0.6 as number | null, origin: 'user_supplied', provenance: 'user_stated', source_refs: [] as { source_id: string; source_version: string }[] },
+      { option_id: 'option-b', criterion_id: 'cost', value: 0.4 as number | null, origin: 'user_supplied', provenance: 'user_stated', source_refs: [] as { source_id: string; source_version: string }[] },
+      { option_id: 'option-b', criterion_id: 'fit', value: 0.8 as number | null, origin: 'user_supplied', provenance: 'user_stated', source_refs: [] as { source_id: string; source_version: string }[] },
     ],
     sensitivity: null as null | { criterion_id: string; weights: number[] },
   };
@@ -38,8 +38,27 @@ function fixture() {
     source_statuses: [] as { source_id: string; source_version: string | null; state: string }[],
     analysis_identity: null as null | { scenario_id: string; graph_hash_at_run: string; computed_at: string },
     analysis_state: null as null | 'current' | 'stale' | 'unknown',
+    observed_score_attestations: [] as { option_id: string; criterion_id: string; value: number;
+      source_refs: { source_id: string; source_version: string }[];
+      approved_provenance: 'user_stated' | 'source_evidence'; authority_ref: string; approved: true }[],
+    derived_score_lineage_attestations: [] as { option_id: string; criterion_id: string;
+      origin: 'evidence_derived' | 'ai_estimate' | 'analysis_derived'; value: number;
+      source_refs: { source_id: string; source_version: string }[];
+      source_independent: boolean; authority_ref: string }[],
   };
   return { input, host };
+}
+
+function attestDerived(input: ReturnType<typeof fixture>['input'], host: ReturnType<typeof fixture>['host'],
+  utilityIndex: number, source_independent: boolean): void {
+  const utility = input.utilities[utilityIndex]!;
+  if (utility.value === null) throw new Error('test utility must be valued');
+  host.derived_score_lineage_attestations.push({
+    option_id: utility.option_id, criterion_id: utility.criterion_id,
+    origin: utility.origin as 'evidence_derived' | 'ai_estimate' | 'analysis_derived', value: utility.value,
+    source_refs: structuredClone(utility.source_refs), source_independent,
+    authority_ref: `host-lineage-${utility.option_id}-${utility.criterion_id}`,
+  });
 }
 
 describe('F2a weighted comparison', () => {
@@ -130,6 +149,7 @@ describe('F2a weighted comparison', () => {
     const { input, host } = fixture();
     input.utilities[1]!.value = null;
     input.utilities[1]!.origin = 'unknown';
+    input.utilities[1]!.provenance = 'unknown';
     const artefact = createWeightedComparison(input, host);
     expect(artefact.calculation_validity.status).toBe('incomplete');
     expect(artefact.calculation_validity.rows[0]).toEqual({
@@ -147,6 +167,7 @@ describe('F2a weighted comparison', () => {
     host.confirmed_preferences[1]!.value = 0;
     input.utilities[1]!.value = null;
     input.utilities[1]!.origin = 'unknown';
+    input.utilities[1]!.provenance = 'unknown';
     input.sensitivity = { criterion_id: 'fit', weights: [0, 0.25] };
     const artefact = createWeightedComparison(input, host);
     expect(artefact.calculation_validity.status).toBe('valid');
@@ -162,6 +183,7 @@ describe('F2a weighted comparison', () => {
     const { input, host } = fixture();
     input.utilities[1]!.value = null;
     input.utilities[1]!.origin = 'unknown';
+    input.utilities[1]!.provenance = 'unknown';
     input.sensitivity = { criterion_id: 'fit', weights: [0, 0.5] };
     const artefact = createWeightedComparison(input, host);
     expect(artefact.calculation_validity.status).toBe('incomplete');
@@ -249,6 +271,8 @@ describe('F2a weighted comparison', () => {
     expect(assessBindingCurrentness(withoutAnalysis.binding, stillIndependent.binding).state).toBe('current');
 
     input.utilities[0]!.origin = 'analysis_derived';
+    input.utilities[0]!.provenance = 'olumi_hypothesis';
+    attestDerived(input, host, 0, true);
     host.analysis_state = 'current';
     const bound = createWeightedComparison(input, host);
     expect(bound.ordering_permission.permitted).toBe(true);
@@ -270,13 +294,17 @@ describe('F2a weighted comparison', () => {
   it('ignores incidental ordering of confirmed preferences, verdicts and source statuses', () => {
     const { input, host } = fixture();
     input.utilities[0]!.origin = 'evidence_derived';
+    input.utilities[0]!.provenance = 'source_evidence';
     input.utilities[0]!.source_refs = [{ source_id: 'source-a', source_version: 'v1' }];
     input.utilities[1]!.origin = 'evidence_derived';
+    input.utilities[1]!.provenance = 'source_evidence';
     input.utilities[1]!.source_refs = [{ source_id: 'source-b', source_version: 'v2' }];
     host.source_statuses = [
       { source_id: 'source-b', source_version: 'v2', state: 'current' },
       { source_id: 'source-a', source_version: 'v1', state: 'current' },
     ];
+    attestDerived(input, host, 0, false);
+    attestDerived(input, host, 1, false);
     const first = createWeightedComparison(input, host);
     host.confirmed_preferences.reverse();
     host.constraint_verdicts.reverse();
@@ -310,5 +338,253 @@ describe('F2a weighted comparison', () => {
     expect(artefact.sensitivity?.points.map((point) => point.rows.map((row) => row.total))).toEqual([
       [0.6, 0.8], [0.75, 0.6000000000000001], [0.9, 0.4],
     ]);
+  });
+
+  it('rejects score-origin laundering across user, AI, evidence, analysis, observed and unknown states', () => {
+    const invalid = [
+      { origin: 'user_supplied', provenance: 'source_evidence', value: 0.9 },
+      { origin: 'ai_estimate', provenance: 'user_stated', value: 0.9 },
+      { origin: 'evidence_derived', provenance: 'user_stated', value: 0.9 },
+      { origin: 'analysis_derived', provenance: 'source_evidence', value: 0.9 },
+      { origin: 'observed', provenance: 'olumi_hypothesis', value: 0.9 },
+      { origin: 'unknown', provenance: 'user_stated', value: null },
+      { origin: 'unknown', provenance: 'unknown', value: 0.9 },
+    ];
+    for (const specimen of invalid) {
+      const { input, host } = fixture();
+      Object.assign(input.utilities[0]!, specimen);
+      expect(() => createWeightedComparison(input, host)).toThrow();
+    }
+    const ai = fixture();
+    ai.input.utilities[0]!.origin = 'ai_estimate';
+    ai.input.utilities[0]!.provenance = 'olumi_hypothesis';
+    attestDerived(ai.input, ai.host, 0, true);
+    expect(createWeightedComparison(ai.input, ai.host).calculation_validity.status).toBe('valid');
+
+    const analysis = fixture();
+    analysis.input.utilities[0]!.origin = 'analysis_derived';
+    analysis.input.utilities[0]!.provenance = 'olumi_hypothesis';
+    attestDerived(analysis.input, analysis.host, 0, true);
+    expect(() => createWeightedComparison(analysis.input, analysis.host)).toThrow('analysis_identity_required');
+  });
+
+  it('rejects source-derived criterion or weight provenance without an independent host source binding', () => {
+    for (const field of ['criterion', 'weight'] as const) {
+      const { input, host } = fixture();
+      // Utilities remain user-supplied and unsourced. Their provenance cannot cover a sourced preference.
+      expect(input.utilities.every((utility) => utility.source_refs.length === 0)).toBe(true);
+      host.source_statuses = [{ source_id: 'weight-note', source_version: 'v1', state: 'revoked' }];
+      if (field === 'criterion') input.criteria[0]!.provenance = 'source_evidence';
+      else input.criteria[0]!.weight.provenance = 'source_evidence';
+      expect(() => createWeightedComparison(input, host)).toThrow('source_derived_preference_unbound');
+    }
+  });
+
+  it('requires host-owned exact lineage for evidence, AI and analysis-derived scores', () => {
+    for (const origin of ['evidence_derived', 'ai_estimate', 'analysis_derived'] as const) {
+      const { input, host } = fixture();
+      input.utilities[0]!.origin = origin;
+      input.utilities[0]!.provenance = origin === 'evidence_derived' ? 'source_evidence' : 'olumi_hypothesis';
+      if (origin === 'evidence_derived') {
+        input.utilities[0]!.source_refs = [{ source_id: 'source-a', source_version: 'v1' }];
+        host.source_statuses = [{ source_id: 'source-a', source_version: 'v1', state: 'current' }];
+      }
+      if (origin === 'analysis_derived') {
+        host.analysis_identity = { scenario_id: 'scenario-1', graph_hash_at_run: 'analysis-hash', computed_at: 'time' };
+        host.analysis_state = 'current';
+      }
+      expect(() => createWeightedComparison(input, host)).toThrow('derived_score_lineage_not_attested');
+      attestDerived(input, host, 0, origin !== 'evidence_derived');
+      expect(createWeightedComparison(input, host).calculation_validity.status).toBe('valid');
+      host.derived_score_lineage_attestations[0]!.value = 0.8;
+      expect(() => createWeightedComparison(input, host)).toThrow('derived_score_lineage_not_attested');
+    }
+  });
+
+  it('rejects contradictory host claims of derived-score source independence', () => {
+    const independent = fixture();
+    independent.input.utilities[0]!.origin = 'ai_estimate';
+    independent.input.utilities[0]!.provenance = 'olumi_hypothesis';
+    attestDerived(independent.input, independent.host, 0, false);
+    expect(() => createWeightedComparison(independent.input, independent.host)).toThrow('invalid_derived_score_lineage');
+
+    const conditioned = fixture();
+    conditioned.input.utilities[0]!.origin = 'ai_estimate';
+    conditioned.input.utilities[0]!.provenance = 'olumi_hypothesis';
+    conditioned.input.utilities[0]!.source_refs = [{ source_id: 'private-source', source_version: 'v1' }];
+    conditioned.host.source_statuses = [{ source_id: 'private-source', source_version: 'v1', state: 'current' }];
+    attestDerived(conditioned.input, conditioned.host, 0, true);
+    expect(() => createWeightedComparison(conditioned.input, conditioned.host)).toThrow('invalid_derived_score_lineage');
+  });
+
+  it('allows a host-attested source-independent AI estimate despite an unrelated revoked source', () => {
+    const { input, host } = fixture();
+    input.utilities[0]!.origin = 'ai_estimate';
+    input.utilities[0]!.provenance = 'olumi_hypothesis';
+    attestDerived(input, host, 0, true);
+    host.source_statuses = [{ source_id: 'unrelated-private-source', source_version: 'v1', state: 'revoked' }];
+    const saved = createWeightedComparison(input, host);
+    expect(saved.ordering_permission.permitted).toBe(true);
+    const current = presentWeightedComparison(saved, input, host);
+    expect(current.state).toBe('current');
+    expect(current).toHaveProperty('calculation_validity.rows.0.total');
+    expect(current).not.toHaveProperty('canonical_inputs');
+  });
+
+  it('withholds a source-conditioned AI estimate after source-only revocation and reload', () => {
+    const { input, host } = fixture();
+    input.utilities[0]!.origin = 'ai_estimate';
+    input.utilities[0]!.provenance = 'olumi_hypothesis';
+    input.utilities[0]!.source_refs = [{ source_id: 'private-source', source_version: 'v1' }];
+    host.source_statuses = [{ source_id: 'private-source', source_version: 'v1', state: 'current' }];
+    attestDerived(input, host, 0, false);
+    const saved = createWeightedComparison(input, host);
+    const reloaded = validateReasoningArtefact(JSON.parse(serializeReasoningArtefact(saved)) as unknown);
+    host.source_statuses[0]!.state = 'revoked';
+    const withheld = presentWeightedComparison(reloaded, input, host);
+    expect(withheld).toMatchObject({ state: 'stale', reasons: ['relevant_dependency_changed', 'source_not_current'] });
+    expect(withheld).not.toHaveProperty('calculation_validity');
+    expect(withheld).not.toHaveProperty('source_states');
+    expect(JSON.stringify(withheld)).not.toContain('private-source');
+    expect(JSON.stringify(withheld)).not.toContain('"total"');
+  });
+
+  it('requires an exact, source-bound host attestation before an observation can be calculated', () => {
+    const { input, host } = fixture();
+    input.utilities[0]!.origin = 'observed';
+    input.utilities[0]!.provenance = 'source_evidence';
+    input.utilities[0]!.source_refs = [{ source_id: 'measurement-1', source_version: 'v1' }];
+    host.source_statuses = [{ source_id: 'measurement-1', source_version: 'v1', state: 'current' }];
+    expect(() => createWeightedComparison(input, host)).toThrow('observation_not_attested');
+    host.observed_score_attestations.push({ option_id: 'option-a', criterion_id: 'cost', value: 0.9,
+      source_refs: [{ source_id: 'measurement-1', source_version: 'v1' }],
+      approved_provenance: 'source_evidence', authority_ref: 'host-measurement-verdict-1', approved: true });
+    const attested = createWeightedComparison(input, host);
+    expect(attested.ordering_permission.permitted).toBe(true);
+    host.observed_score_attestations[0]!.value = 0.8;
+    expect(() => createWeightedComparison(input, host)).toThrow('observation_not_attested');
+    host.observed_score_attestations[0]!.value = 0.9;
+    host.observed_score_attestations[0]!.approved_provenance = 'user_stated';
+    expect(() => createWeightedComparison(input, host)).toThrow('observation_not_attested');
+    host.observed_score_attestations[0]!.approved_provenance = 'source_evidence';
+    const restored = createWeightedComparison(input, host);
+    host.observed_score_attestations.push({ option_id: 'option-b', criterion_id: 'fit', value: 0.8,
+      source_refs: [{ source_id: 'unrelated-measurement', source_version: 'v2' }],
+      approved_provenance: 'source_evidence', authority_ref: 'host-measurement-verdict-2', approved: true });
+    const withUnrelatedAttestation = createWeightedComparison(input, host);
+    expect(withUnrelatedAttestation.canonical_input_hash).toBe(restored.canonical_input_hash);
+    expect(assessBindingCurrentness(restored.binding, withUnrelatedAttestation.binding).state).toBe('current');
+  });
+
+  it('accepts a user-stated observation only when the host explicitly attests that exact provenance and score', () => {
+    const { input, host } = fixture();
+    input.utilities[0]!.origin = 'observed';
+    host.observed_score_attestations.push({ option_id: 'option-a', criterion_id: 'cost', value: 0.9,
+      source_refs: [], approved_provenance: 'user_stated', authority_ref: 'host-report-verdict-1', approved: true });
+    const accepted = createWeightedComparison(input, host);
+    expect(accepted.calculation_validity.status).toBe('valid');
+    expect(accepted.canonical_inputs.input.utilities[0]?.provenance).toBe('user_stated');
+    host.observed_score_attestations[0]!.authority_ref = 'different-host-verdict';
+    const changed = createWeightedComparison(input, host);
+    expect(assessBindingCurrentness(accepted.binding, changed.binding).changed_dependencies).toContain(
+      'utility:["option-a","cost","observation_attestation"]');
+  });
+
+  it('projects fresh calculations only while consumed inputs are current, including after reload', () => {
+    const { input, host } = fixture();
+    const saved = createWeightedComparison(input, host);
+    const reloaded = validateReasoningArtefact(JSON.parse(serializeReasoningArtefact(saved)) as unknown);
+    host.graph_revision = 'graph-unrelated';
+    const current = presentWeightedComparison(reloaded, input, host);
+    expect(current.state).toBe('current');
+    expect(current).not.toHaveProperty('canonical_inputs');
+    expect(current).toHaveProperty('calculation_validity.rows.0.total');
+
+    input.utilities[0]!.value = 0.85;
+    const stale = presentWeightedComparison(reloaded, input, host);
+    expect(stale).toMatchObject({ state: 'stale', reasons: ['relevant_dependency_changed'] });
+    expect(stale).not.toHaveProperty('canonical_inputs');
+    expect(stale).not.toHaveProperty('calculation_validity');
+    expect(stale).not.toHaveProperty('sensitivity');
+    expect(stale).not.toHaveProperty('source_states');
+    expect(stale).toHaveProperty('changed_dependency_kinds', ['utility']);
+    expect(JSON.stringify(stale)).not.toContain('"total"');
+    expect(JSON.stringify(stale)).not.toContain('"utilities"');
+  });
+
+  it('withholds historical totals when sensitivity points change without a dependency fingerprint change', () => {
+    const { input, host } = fixture();
+    input.sensitivity = { criterion_id: 'cost', weights: [0.25, 0.75] };
+    const saved = createWeightedComparison(input, host);
+    host.graph_revision = 'unrelated-graph-edit';
+    expect(presentWeightedComparison(saved, input, host).state).toBe('current');
+    input.sensitivity.weights = [0.1, 0.9];
+    const current = createWeightedComparison(input, host);
+    expect(assessBindingCurrentness(saved.binding, current.binding).state).toBe('current');
+    const withheld = presentWeightedComparison(saved, input, host);
+    expect(withheld).toMatchObject({ state: 'stale', reasons: ['canonical_input_changed'], changed_dependency_kinds: [] });
+    expect(withheld).not.toHaveProperty('calculation_validity');
+    expect(withheld).not.toHaveProperty('sensitivity');
+    expect(withheld).not.toHaveProperty('canonical_inputs');
+  });
+
+  it('withholds source-derived totals when a source is revoked or its version changes after reload', () => {
+    const { input, host } = fixture();
+    input.utilities[0]!.origin = 'evidence_derived';
+    input.utilities[0]!.provenance = 'source_evidence';
+    input.utilities[0]!.source_refs = [{ source_id: 'source-a', source_version: 'v1' }];
+    host.source_statuses = [{ source_id: 'source-a', source_version: 'v1', state: 'current' }];
+    attestDerived(input, host, 0, false);
+    const saved = createWeightedComparison(input, host);
+    const reloaded = validateReasoningArtefact(JSON.parse(serializeReasoningArtefact(saved)) as unknown);
+    host.source_statuses[0]!.state = 'revoked';
+    const revoked = presentWeightedComparison(reloaded, input, host);
+    expect(revoked).toMatchObject({ state: 'stale', reasons: ['relevant_dependency_changed', 'source_not_current'] });
+    expect(revoked).not.toHaveProperty('calculation_validity');
+    expect(revoked).not.toHaveProperty('source_states');
+    expect(JSON.stringify(revoked)).not.toContain('source-a');
+    expect(JSON.stringify(revoked)).not.toContain('"total"');
+
+    host.source_statuses[0]!.state = 'current';
+    host.source_statuses[0]!.source_version = 'v2';
+    const changed = presentWeightedComparison(reloaded, input, host);
+    expect(changed).toMatchObject({ state: 'stale', reasons: ['relevant_dependency_changed', 'source_not_current'] });
+    expect(changed).not.toHaveProperty('calculation_validity');
+    expect(changed).not.toHaveProperty('source_states');
+  });
+
+  it('withholds a sourced calculation when both saved and fresh snapshots say the source is revoked', () => {
+    const { input, host } = fixture();
+    input.utilities[0]!.origin = 'evidence_derived';
+    input.utilities[0]!.provenance = 'source_evidence';
+    input.utilities[0]!.source_refs = [{ source_id: 'source-a', source_version: 'v1' }];
+    host.source_statuses = [{ source_id: 'source-a', source_version: 'v1', state: 'revoked' }];
+    attestDerived(input, host, 0, false);
+    const saved = createWeightedComparison(input, host);
+    const fresh = createWeightedComparison(input, host);
+    expect(assessBindingCurrentness(saved.binding, fresh.binding).state).toBe('current');
+    const withheld = presentWeightedComparison(saved, input, host);
+    expect(withheld).toMatchObject({ state: 'withheld', reasons: ['source_not_current'] });
+    expect(withheld).not.toHaveProperty('calculation_validity');
+    expect(withheld).not.toHaveProperty('source_states');
+  });
+
+  it('withholds a historical observed total if fresh host approval is withdrawn', () => {
+    const { input, host } = fixture();
+    input.utilities[0]!.origin = 'observed';
+    input.utilities[0]!.provenance = 'source_evidence';
+    input.utilities[0]!.source_refs = [{ source_id: 'measurement-1', source_version: 'v1' }];
+    host.source_statuses = [{ source_id: 'measurement-1', source_version: 'v1', state: 'current' }];
+    host.observed_score_attestations.push({ option_id: 'option-a', criterion_id: 'cost', value: 0.9,
+      source_refs: [{ source_id: 'measurement-1', source_version: 'v1' }],
+      approved_provenance: 'source_evidence', authority_ref: 'host-measurement-verdict-1', approved: true });
+    const reloaded = validateReasoningArtefact(JSON.parse(serializeReasoningArtefact(
+      createWeightedComparison(input, host))) as unknown);
+    host.observed_score_attestations = [];
+    const withheld = presentWeightedComparison(reloaded, input, host);
+    expect(withheld).toMatchObject({ state: 'withheld', reasons: ['invalid_current_snapshot'] });
+    expect(withheld).not.toHaveProperty('calculation_validity');
+    expect(withheld).not.toHaveProperty('canonical_inputs');
+    expect(withheld).not.toHaveProperty('source_states');
   });
 });

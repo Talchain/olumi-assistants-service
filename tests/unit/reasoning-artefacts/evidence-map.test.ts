@@ -45,8 +45,8 @@ function fixture() {
   const host = {
     scenario_id: 'scenario-1', graph_revision: 'graph-1',
     source_statuses: [
-      { source_id: 'board-pack', source_version: 'v1', state: 'current' },
-      { source_id: 'research-note', source_version: 'v1', state: 'current' },
+      { source_id: 'board-pack', source_version: 'v1' as string | null, state: 'current' },
+      { source_id: 'research-note', source_version: 'v1' as string | null, state: 'current' },
     ],
     item_source_bindings: [
       { item_id: 'claim-price', item_content_hash: itemHash(input.items[0]), source_refs: [
@@ -60,13 +60,14 @@ function fixture() {
       { item_id: 'claim-private', item_content_hash: itemHash(input.items[4]), source_refs: [] },
     ],
     implication_source_bindings: [{ implication_index: 0,
-      implication_content_hash: contentHash(input.proposed_implications[0]), source_refs: [] }],
+      implication_content_hash: contentHash(input.proposed_implications[0]),
+      source_refs: [] as { source_id: string; source_version: string }[] }],
     item_model_bindings: input.items.map((item) => ({ item_id: item.id, item_content_hash: itemHash(item),
       linked_element_ids: [...item.linked_element_ids],
       linkage: item.linked_element_ids.length === 0 ? 'not_applicable' : 'current' })),
     model_elements: [{ element_id: 'churn', fingerprint: 'churn-content-v1', linkage: 'current' }],
     fact_verdicts: [{ claim_id: 'claim-price', claim_content_hash: itemHash(input.items[0]),
-      supported: true, basis_ref: 'attestation-1' }],
+      supported: true, basis_ref: 'attestation-1' as string | null }],
   };
   return { input, host };
 }
@@ -106,8 +107,8 @@ describe('F2b evidence and assumption map', () => {
     expect(() => createEvidenceAssumptionMap(input, host)).toThrow();
 
     const second = fixture();
-    second.input.items[1]!.source_ref.source_id = 'other-source';
-    second.input.items[1]!.source_ref.source_version = 'v2';
+    second.input.items[1]!.source_ref!.source_id = 'other-source';
+    second.input.items[1]!.source_ref!.source_version = 'v2';
     second.host.item_source_bindings[1]!.source_refs[0]!.source_id = 'other-source';
     second.host.item_source_bindings[1]!.source_refs[0]!.source_version = 'v2';
     second.host.item_source_bindings[1]!.item_content_hash = itemHash(second.input.items[1]);
@@ -361,7 +362,7 @@ describe('F2b evidence and assumption map', () => {
     reordered.host.source_statuses.reverse();
     reordered.host.item_source_bindings.reverse();
     reordered.host.item_source_bindings.find((item) => item.item_id === 'claim-price')!.source_refs.reverse();
-    reordered.input.items[0]!.source_refs.reverse();
+    reordered.input.items[0]!.source_refs!.reverse();
     expect(createEvidenceAssumptionMap(reordered.input, reordered.host).canonical_input_hash)
       .toBe(first.canonical_input_hash);
   });
