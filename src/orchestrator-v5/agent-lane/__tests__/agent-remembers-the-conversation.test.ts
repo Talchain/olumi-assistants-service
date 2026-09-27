@@ -32,7 +32,8 @@ const SCENARIO = '7a1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b';
 type Item = { role?: string; content?: unknown; type?: string };
 const textOf = (c: unknown): string => (typeof c === 'string' ? c
   : Array.isArray(c) ? c.map((p) => String((p as { text?: unknown }).text ?? '')).join('') : JSON.stringify(c));
-const texts = (input: Item[]) => input.filter((i) => typeof i.role === 'string').map((i) => `${i.role}: ${textOf(i.content)}`);
+// The conversation only: the turn's CURRENT MODEL STATE (slice C1) is a developer item Olumi gives, not something said.
+const texts = (input: Item[]) => input.filter((i) => typeof i.role === 'string' && i.role !== 'developer').map((i) => `${i.role}: ${textOf(i.content)}`);
 
 describe('after a restart, the Agent still knows the conversation the user can see', () => {
   let app: FastifyInstance;
