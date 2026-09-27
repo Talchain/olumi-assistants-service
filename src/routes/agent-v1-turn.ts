@@ -98,6 +98,13 @@ import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
 import { deriveAnswerTextFromShape, synthesiseAnswerShapeFromText, warrantsProgressiveDisclosure } from '../orchestrator-v5/routing/answer-shape.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
+/**
+ * C6-1b: the revision a turn-state packet is bound to when the read found NO graph. Never a hash (a real revision
+ * is 64 hex), so it cannot match a populated model; the packet never leaves this process, and its own expectation
+ * is built from the same value in the same turn.
+ */
+const EMPTY_MODEL_REVISION = 'empty-model';
+
 /** The egress sanitiser resolves labels against a PARSED graph; an unparseable read gives it none. */
 function parsedGraphOrNull(raw: unknown): GraphV3T | null {
   if (raw === undefined || raw === null) return null;
@@ -1893,9 +1900,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       try {
         const st = await capabilities.getCanonicalState(toolCtx);
         const revision = (st as { graph_revision?: unknown }).graph_revision;
-        if (st.ok === true && typeof revision === 'string' && revision !== '') {
+        /**
+         * ⭐ C6-1b: AN EMPTY MODEL IS A KNOWN STATE, NOT AN UNKNOWN ONE. The graph read answers an empty scenario with
+         * `graph_hash: null` ("nothing to write against"), so the revision reads `''` — and every first brief (25/25
+         * served, DL C6) then spent a whole model call (median 1.9 s) fetching the empty model it could have been given.
+         * A read that SUCCEEDED and found no graph is bound to a typed empty revision instead. Still no packet for a
+         * failed read, or for a POPULATED graph that came back without a revision: that stays unknown, and the tool
+         * stays offered.
+         */
+        const packetRevision = st.ok === true && typeof revision === 'string'
+          ? (revision !== '' ? revision : (st as { empty?: unknown }).empty === true ? EMPTY_MODEL_REVISION : undefined)
+          : undefined;
+        if (packetRevision !== undefined) {
           const secret = contextBindingSecret();
-          const subject = { scenario_id: scenarioId, authenticated_user_id: userId ?? '', graph_revision: revision };
+          const subject = { scenario_id: scenarioId, authenticated_user_id: userId ?? '', graph_revision: packetRevision };
           canonicalContext = {
             packet: issueContextPacket({ ...subject, captured_at_turn: 0, state: st }, secret),
             expectation: { ...subject, current_turn: 0, binding_secret: secret },
