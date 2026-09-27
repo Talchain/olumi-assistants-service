@@ -32,6 +32,7 @@ import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
+import { foldRiskMediators } from './risk-mediator-fold.js';
 import { sizeLink, type LinkSizing, type MagnitudeNode } from '../../cee/magnitude/link-effect.js';
 import {
   admitCandidateConstraints,
@@ -2758,7 +2759,75 @@ function admitOnce(
     );
     if (userStated?.provenance !== undefined) t.provenance = { source: userStated.provenance.source };
   }
-  const causalEdges = linkResult.edges.filter((e) => !duplicatePairs.has(`${e.from}::${e.to}`));
+  const draftedCausalEdges = linkResult.edges.filter((e) => !duplicatePairs.has(`${e.from}::${e.to}`));
+
+  /**
+   * ⛔ A4a / C5 — A RISK OLUMI DRAFTED AS A MEDIATOR IS FOLDED INTO ONE NEW LINK (`risk-mediator-fold.ts`; AI Quality
+   * #70 5854837708 and 5854861848; DL build train 5855068711 row A4). Served: Pro plan price → "Price sensitivity"
+   * (risk) → Monthly churn, and no direct link. A mediator BESIDE a direct link is left as drafted (a mixture).
+   *
+   * ⭐ WHY HERE IN THE ORDER, each reason a line of this function:
+   *  · AFTER `admitCandidateLinks` and the magnitude contract: the fold multiplies the SIZED strengths (0.5 ± 0.125 and
+   *    D6's 0.0075 ± 0.00375 on the served draft), which exist only once `linkResult` does;
+   *  · AFTER "ONE CONNECTION, ONE EDGE": parents, and the direct link that forbids a fold, are counted on the
+   *    de-duplicated causal set;
+   *  · AFTER `constraintResult`: a risk a limit names is pinned, never folded (its `node_id` would dangle);
+   *  · BEFORE `kindById`/`labelById` and the option→risk shortcut pass below: a folded risk has one FACTOR parent, so
+   *    no option→risk shortcut can touch it, and removing it here means that pass never sees it;
+   *  · BEFORE `breakLoops`, the "risk with no outgoing link → goal" repair and the reachability pass: the node is gone
+   *    from `nodes`, so the repair (which iterates `nodes`) can never re-create a link from it, and loops are judged on
+   *    the graph actually registered.
+   *
+   * ⚠ LEFT EXACTLY AS DRAFTED when anything else admission emits names the risk: the brief states it
+   * (`brief_stated_keys.nodes` would lose it), a limit or a declared identity names it, a withheld or unresolved link
+   * names it, or an option acts on it.
+   */
+  // What the user said about a link — its direction OR its size, even a size admission could not use (the sizing
+  // rule's own `user_stated` test above, D9) — is theirs, and a link carrying it is never Olumi's to fold.
+  const userSaidPairs = new Set(resolvable
+    .filter((l) => USER_AUTHORED_EDGE_SOURCES.has(String(l.provenance_source ?? '')) || l.provenance === 'explicit'
+      || (l.effect_provenance ?? l.provenance) === 'explicit')
+    .map((l) => `${l.from}::${l.to}`));
+  const olumisOwn = (e: AdmittedEdge): boolean =>
+    e.provenance?.source === 'cee_hypothesis'
+    && !USER_AUTHORED_EDGE_SOURCES.has(String(e.provenance?.source ?? ''))
+    && e.provenance?.magnitude !== 'user_stated'
+    && !userSaidPairs.has(`${e.from}::${e.to}`);
+  const pinnedRisks = new Set<string>();
+  const declaredIdentities = Array.isArray(model.identities) ? model.identities : [];
+  for (const r of nodes.filter((n) => n.kind === 'risk')) {
+    const drafted = canonicalLabel(String(r.description ?? r.label));
+    const names = (x: unknown): boolean => typeof x === 'string' && (x === r.id || canonicalLabel(x) === drafted);
+    if (inference_classes[r.id] === 'brief_stated'
+      || constraintResult.constraints.some((c) => c.node_id === r.id)
+      || [...unresolved, ...linkResult.withheld].some((w) => names(w.from) || names(w.to))
+      || declaredIdentities.some((d) => names(d?.outcome) || (Array.isArray(d?.factors) && d.factors.some(names)))
+      || [...interventionsByOption.values()].some((b) => Object.prototype.hasOwnProperty.call(b, r.id))
+      || [...actsOnByOption.values()].some((acts) => acts.has(r.id))) {
+      pinnedRisks.add(r.id);
+    }
+  }
+  const riskFold = foldRiskMediators({
+    nodes,
+    structural: topologyEdges,
+    causal: draftedCausalEdges,
+    olumisOwn,
+    pinned: pinnedRisks,
+    declined: new Set(linkResult.withheld.map((w) => `${w.from}::${w.to}`)),
+  });
+  const causalEdges = riskFold.edges;
+  const foldedRiskPairs = new Set(riskFold.folds.flatMap((f) => f.consumed));
+  for (const f of riskFold.folds) {
+    const at = nodes.findIndex((n) => n.id === f.risk_id);
+    if (at >= 0) nodes.splice(at, 1);
+    delete inference_classes[f.risk_id];
+    // A line about the node itself (a shortened label) would name what is no longer there; the fold's line says it.
+    for (let i = loss.length - 1; i >= 0; i--) {
+      const fp = String(loss[i]!.field_path ?? '');
+      if (fp === `nodes[${f.risk_id}]` || fp.startsWith(`nodes[${f.risk_id}].`)) loss.splice(i, 1);
+    }
+    loss.push(f.entry);
+  }
 
   /**
    * ⛔ AN OPTION LINKED STRAIGHT TO A RISK MAKES THE WHOLE MODEL UNANALYSABLE —
@@ -2869,7 +2938,7 @@ function admitOnce(
 
   const causalLoss = linkResult.loss.filter((l) => {
     const m = /^edges\[(.+?)\]\./.exec(String(l.field_path ?? ''));
-    return m === null || !(duplicatePairs.has(m[1]!) || foldedShortcutPairs.has(m[1]!));
+    return m === null || !(duplicatePairs.has(m[1]!) || foldedShortcutPairs.has(m[1]!) || foldedRiskPairs.has(m[1]!));
   });
   for (const pair of duplicatePairs) {
     const [from, to] = pair.split('::');

@@ -1,0 +1,440 @@
+{
+  "_provenance": {
+    "served": "Paul's staging session a295e4a1 (client build e8ba18e6), exports olumi-debug-90b8f080-20260927.json (09:41Z) and olumi-debug-17d1cd3a-20260927.json (08:57Z): payloads.cee_response.draft_graph holds the risk 'Price sensitivity' as a mediator, Pro plan price -> Price sensitivity (0.5 +/- 0.125, p 0.8, cee_hypothesis, defaulted) -> Monthly churn (0.0075 +/- 0.00375, p 0.8, cee_hypothesis, olumi_placeholder, defaulted), and NO direct Pro plan price -> Monthly churn edge.",
+    "reconstructed": "The drafter's raw candidate is not in either export, so this candidate is RECONSTRUCTED from the served draft graph: every entity, unit, range, starting figure, provenance and link direction is read off draft_graph, the churn limit off draft_graph.goal_constraints, and each link's stated size off the served open_questions (17d1cd3a __additive__._agent.open_questions: 'raising \"Price sensitivity\" by 1 raises \"Monthly churn\" by 0.02 points', '\"Pro plan price\" by 1 GBP per month raises \"MRR\" by 1500', '\"Pro paying subscribers\" by 1 subscriber raises \"MRR\" by 49') and the served natural_effect blocks. The fold test asserts that admitting it at base reproduces the served risk edges exactly, so the reconstruction is checked against the wire rather than trusted.",
+    "served_draft_edges": "payloads.cee_response.draft_graph.edges of olumi-debug-17d1cd3a-20260927.json (the first draft, 14 edges), copied verbatim; olumi-debug-90b8f080-20260927.json carries the same 14 as its first 14, then the user's later edits."
+  },
+  "candidate": {
+    "goal": {
+      "metric": "MRR",
+      "operator": ">=",
+      "value": 100000,
+      "unit": "GBP MRR",
+      "horizon_months": 12,
+      "provenance": "explicit",
+      "target_stated": true,
+      "baseline_known": true,
+      "baseline_value": 75000,
+      "baseline_provenance": "explicit",
+      "scope": {
+        "modelled": "all plans together",
+        "alternative": "the Pro plan only",
+        "stated_in_brief": false
+      }
+    },
+    "constraints": [
+      {
+        "metric": "Monthly churn",
+        "operator": "<=",
+        "value": 4,
+        "unit": "% per month",
+        "provenance": "explicit",
+        "frame": "level"
+      }
+    ],
+    "options": [
+      {
+        "label": "Keep current £49 price",
+        "provenance": "inferred",
+        "is_status_quo": true,
+        "interventions": []
+      },
+      {
+        "label": "Increase price to £59",
+        "provenance": "explicit",
+        "is_status_quo": false,
+        "interventions": [
+          {
+            "factor_label": "Pro plan price",
+            "value": 59,
+            "unit": "GBP per month",
+            "provenance": "explicit"
+          }
+        ]
+      },
+      {
+        "label": "Increase price to £54",
+        "provenance": "ai_proposed",
+        "is_status_quo": false,
+        "interventions": [
+          {
+            "factor_label": "Pro plan price",
+            "value": 54,
+            "unit": "GBP per month",
+            "provenance": "ai_proposed"
+          }
+        ]
+      }
+    ],
+    "factors": [
+      {
+        "label": "Pro plan price",
+        "role": "controllable",
+        "baseline_known": true,
+        "baseline_value": 49,
+        "unit": "GBP per month",
+        "provenance": "explicit",
+        "plausible_max": 200
+      },
+      {
+        "label": "Pro paying subscribers",
+        "role": "observable",
+        "baseline_known": false,
+        "baseline_value": 1500,
+        "unit": "subscribers",
+        "provenance": "inferred",
+        "plausible_max": 10000
+      },
+      {
+        "label": "Monthly churn",
+        "role": "observable",
+        "baseline_known": false,
+        "baseline_value": 3,
+        "unit": "% per month",
+        "provenance": "inferred",
+        "plausible_max": 100
+      },
+      {
+        "label": "Monthly new Pro subscribers",
+        "role": "observable",
+        "baseline_known": false,
+        "baseline_value": 75,
+        "unit": "subscribers per month",
+        "provenance": "inferred",
+        "plausible_max": 1000
+      },
+      {
+        "label": "Other MRR growth",
+        "role": "observable",
+        "baseline_known": false,
+        "baseline_value": 1000,
+        "unit": "GBP MRR added per month",
+        "provenance": "inferred",
+        "plausible_max": 50000
+      }
+    ],
+    "risks": [
+      {
+        "label": "Price sensitivity",
+        "provenance": "inferred"
+      }
+    ],
+    "outcomes": [],
+    "links": [
+      {
+        "from": "Pro plan price",
+        "to": "MRR",
+        "direction": "positive",
+        "provenance": "inferred",
+        "effect_amount": 1500,
+        "effect_per_source_change": 1,
+        "effect_provenance": "inferred"
+      },
+      {
+        "from": "Pro plan price",
+        "to": "Price sensitivity",
+        "direction": "positive",
+        "provenance": "inferred",
+        "effect_amount": null,
+        "effect_per_source_change": null,
+        "effect_provenance": null
+      },
+      {
+        "from": "Price sensitivity",
+        "to": "Monthly churn",
+        "direction": "positive",
+        "provenance": "inferred",
+        "effect_amount": 0.02,
+        "effect_per_source_change": 1,
+        "effect_provenance": "inferred"
+      },
+      {
+        "from": "Pro plan price",
+        "to": "Monthly new Pro subscribers",
+        "direction": "negative",
+        "provenance": "inferred",
+        "effect_amount": -2,
+        "effect_per_source_change": 1,
+        "effect_provenance": "inferred"
+      },
+      {
+        "from": "Monthly churn",
+        "to": "Pro paying subscribers",
+        "direction": "negative",
+        "provenance": "inferred",
+        "effect_amount": -15,
+        "effect_per_source_change": 1,
+        "effect_provenance": "inferred"
+      },
+      {
+        "from": "Monthly new Pro subscribers",
+        "to": "Pro paying subscribers",
+        "direction": "positive",
+        "provenance": "inferred",
+        "effect_amount": 1,
+        "effect_per_source_change": 1,
+        "effect_provenance": "inferred"
+      },
+      {
+        "from": "Pro paying subscribers",
+        "to": "MRR",
+        "direction": "positive",
+        "provenance": "inferred",
+        "effect_amount": 49,
+        "effect_per_source_change": 1,
+        "effect_provenance": "inferred"
+      },
+      {
+        "from": "Other MRR growth",
+        "to": "MRR",
+        "direction": "positive",
+        "provenance": "inferred",
+        "effect_amount": 1,
+        "effect_per_source_change": 1,
+        "effect_provenance": "inferred"
+      }
+    ],
+    "identities": []
+  },
+  "served_draft_edges": [
+    {
+      "to": "keep_current_49_price",
+      "from": "decision_mrr",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "increase_price_to_59",
+      "from": "decision_mrr",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "increase_price_to_54",
+      "from": "decision_mrr",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "pro_plan_price",
+      "from": "increase_price_to_59",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "pro_plan_price",
+      "from": "increase_price_to_54",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "pro_plan_price",
+      "from": "keep_current_49_price",
+      "origin": "repair",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis",
+        "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "mrr",
+      "from": "pro_plan_price",
+      "strength": {
+        "std": 0.25,
+        "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_placeholder",
+        "natural_effect": {
+          "amount": 3125,
+          "amount_unit": "GBP MRR",
+          "strength_mean": 0.5,
+          "per_source_change": 10,
+          "strength_mean_frame": "edge_strength",
+          "per_source_change_unit": "GBP per month"
+        }
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "price_sensitivity",
+      "from": "pro_plan_price",
+      "strength": {
+        "std": 0.125,
+        "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "monthly_churn",
+      "from": "price_sensitivity",
+      "strength": {
+        "std": 0.00375,
+        "mean": 0.0075
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_placeholder"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "monthly_new_pro_subscribers",
+      "from": "pro_plan_price",
+      "strength": {
+        "std": 0.2,
+        "mean": -0.4
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": -2,
+          "amount_unit": "subscribers per month",
+          "strength_mean": -0.4,
+          "per_source_change": 1,
+          "strength_mean_frame": "edge_strength",
+          "per_source_change_unit": "GBP per month"
+        }
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "pro_paying_subscribers",
+      "from": "monthly_churn",
+      "strength": {
+        "std": 0.075,
+        "mean": -0.15
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": -15,
+          "amount_unit": "subscribers",
+          "strength_mean": -0.15,
+          "per_source_change": 1,
+          "strength_mean_frame": "edge_strength",
+          "per_source_change_unit": "% per month"
+        }
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "pro_paying_subscribers",
+      "from": "monthly_new_pro_subscribers",
+      "strength": {
+        "std": 0.05,
+        "mean": 0.1
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": 1,
+          "amount_unit": "subscribers",
+          "strength_mean": 0.1,
+          "per_source_change": 1,
+          "strength_mean_frame": "edge_strength",
+          "per_source_change_unit": "subscribers per month"
+        }
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "mrr",
+      "from": "pro_paying_subscribers",
+      "strength": {
+        "std": 0.075,
+        "mean": 0.15
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_placeholder"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "mrr",
+      "from": "other_mrr_growth",
+      "strength": {
+        "std": 0.19999999999999998,
+        "mean": 0.39999999999999997
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": 1,
+          "amount_unit": "GBP MRR",
+          "strength_mean": 0.39999999999999997,
+          "per_source_change": 1,
+          "strength_mean_frame": "edge_strength",
+          "per_source_change_unit": "GBP MRR added per month"
+        }
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+    }
+  ]
+}
