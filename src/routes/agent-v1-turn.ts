@@ -1636,10 +1636,23 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * call. The canonical state is read back from the persisted graph after the run — the
        * SAME reader the response's final readback uses — and handed over beside the run.
        */
-      let canonicalAfterRun: { analysis_state?: unknown; analysis_ready?: unknown } = {};
+      let canonicalAfterRun: { analysis_state?: unknown; analysis_ready?: unknown; run_delta?: unknown; run_delta_absence_reason?: string } = {};
       try {
         const st = await readBackState(dispatch, scenarioId);
-        canonicalAfterRun = { ...(st.analysisState !== undefined ? { analysis_state: st.analysisState } : {}), ...(st.analysisReady !== undefined ? { analysis_ready: st.analysisReady } : {}) };
+        /**
+         * ⭐ WHAT CHANGED SINCE THE LAST RUN REACHES THE INTERPRETER TOO (served `263dbd5`, final witness `053159Z/15`:
+         * the reply said "This run does not supply a precomputed before/after delta" while the response carried one and
+         * the Reasoning tab showed it). v0.2 allows only SUPPLIED deltas, and none was supplied: the delta was bound only
+         * after this call. It is bound here by the SAME guard as the wire, on this same post-run readback, so the model
+         * is given exactly what the user is shown — and nothing when it does not bind.
+         */
+        const bound = runDeltaBoundToReadback(lastRun, { scenarioId, graphHash: st.graphHash, analysisState: st.analysisState, analysisResult: st.analysisResult });
+        canonicalAfterRun = {
+          ...(st.analysisState !== undefined ? { analysis_state: st.analysisState } : {}),
+          ...(st.analysisReady !== undefined ? { analysis_ready: st.analysisReady } : {}),
+          ...(bound.run_delta !== undefined ? { run_delta: bound.run_delta } : {}),
+          ...(bound.run_delta_absence_reason !== undefined ? { run_delta_absence_reason: bound.run_delta_absence_reason } : {}),
+        };
       } catch { canonicalAfterRun = {}; }
       const runForInterpreter = { ...ran, canonical_state: canonicalAfterRun };
       const callId = `fast_run_${req.id}`.replace(/[^A-Za-z0-9_-]/g, '_');

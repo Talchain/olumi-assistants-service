@@ -19,6 +19,7 @@ import { classifyValueSource } from '../../cee/graph-readiness/obligation-proven
 import { deriveEmittedGoalDirection } from '../goal-target/goal-direction.js';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
+import { totalUnitOfPerUnitPrice } from '../../cee/provenance/stated-amounts.js';
 
 type Node = {
   id: string; kind?: string; label?: string;
@@ -133,7 +134,10 @@ export function breakEvenFor(graph: unknown): BreakEven | null {
     options: rows,
     // MG B1: only a LEVEL target is an amount to reach; a delta ("grow MRR by £5k") is not, and an absent frame is not
     // assumed to be one.
-    ...(goal.goal_threshold_frame === 'level' && typeof targetValue === 'number' && targetValue > 0 && targetUnit.toLowerCase() === unit.toLowerCase()
+    // A target is a TOTAL, so it is compared with the total's unit: a per-subscriber price ("GBP/subscriber/month") still
+    // meets a "GBP/month" target (served `263dbd5`: the £20,000 line was silently missing).
+    ...(goal.goal_threshold_frame === 'level' && typeof targetValue === 'number' && targetValue > 0
+      && targetUnit.toLowerCase() === totalUnitOfPerUnitPrice(unit).toLowerCase()
       ? { target: { value: targetValue, needs: prices.map((p) => ({ price: p, volume: Math.ceil(targetValue / p - 1e-9) })) } }
       : {}),
   };
@@ -157,7 +161,8 @@ function money(n: number, unit: string): string {
   const symbol = m === null ? undefined : symbolForCode(m[1]!);
   if (m === null || symbol === undefined) return `${digits} ${unit}`;
   // A lettered symbol reads with a space before the figure; a sign does not.
-  return `${symbol}${/^[A-Za-z]+$/.test(symbol) ? ' ' : ''}${digits}${m[2] !== undefined ? `/${m[2]}` : ''}`;
+  // "seat per month" reads "seat/month": one separator, as the slash form writes it.
+  return `${symbol}${/^[A-Za-z]+$/.test(symbol) ? ' ' : ''}${digits}${m[2] !== undefined ? `/${m[2].replace(/\s*\bper\s+/gi, '/')}` : ''}`;
 }
 const whose = (by: FigureBy): string => (by === 'user' ? '' : by === 'approved' ? ' (an assumption you approved)' : ' (Olumi’s estimate)');
 const count = (n: number): string => n.toLocaleString('en-GB');
@@ -167,10 +172,12 @@ export function breakEvenLine(be: BreakEven): string {
   // The factor's own label, as the model spells it ("Pro paying subscribers": the plan name keeps its capital).
   const vol = be.volume_factor;
   const reading = be.identity_stated_in_brief ? '' : ` (Olumi’s reading of your goal)`;
+  // Prices are per unit; the goal and its target are totals, written without the per-unit denominator.
+  const totalUnit = totalUnitOfPerUnitPrice(be.unit);
   const parts: string[] = [
     `The arithmetic still answers part of this. If ${be.goal} is ${be.price_factor} × ${be.volume_factor}${reading}: at `
     + `${money(be.baseline_price, be.unit)}${whose(be.baseline_price_by)} and ${count(be.baseline_volume)} ${vol}${whose(be.baseline_volume_by)}, `
-    + `${be.goal} is ${money(be.baseline_goal, be.unit)} today.`,
+    + `${be.goal} is ${money(be.baseline_goal, totalUnit)} today.`,
   ];
   for (const r of be.options) {
     if (r.keep_at_least !== undefined) {
@@ -184,7 +191,7 @@ export function breakEvenLine(be: BreakEven): string {
   if (be.target !== undefined) {
     const needs = be.target.needs.map((x) => `${count(x.volume)} at ${money(x.price, be.unit)}`);
     const list = needs.length === 1 ? needs[0]! : `${needs.slice(0, -1).join(', ')} or ${needs[needs.length - 1]!}`;
-    parts.push(`${money(be.target.value, be.unit)} needs ${list}.`);
+    parts.push(`${money(be.target.value, totalUnit)} needs ${list}.`);
   }
   parts.push('This is arithmetic on these figures, not the analysis ranking the options, and it says nothing about how many will stay.');
   return parts.join(' ');

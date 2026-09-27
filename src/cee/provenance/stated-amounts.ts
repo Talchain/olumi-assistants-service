@@ -319,6 +319,25 @@ export function readCurrencyUnitWithQualifiers(unit: string | null | undefined):
 }
 
 /**
+ * THE UNIT OF A TOTAL OF A PER-UNIT PRICE (price × count): the price's unit without its per-unit denominator —
+ * "GBP/subscriber/month" → "GBP/month", "GBP per seat per month" → "GBP per month". The denominator is exactly the one
+ * `readCurrencyUnitWithQualifiers` reads (a word after "/" or "per" that is neither a currency nor a rate qualifier);
+ * a unit that is not money, or has no such word, is returned as it is. Served CEE `263dbd5` (#70 5853114059): the
+ * Agent's arithmetic wrote MRR as "£9,800/subscriber/month".
+ */
+export function totalUnitOfPerUnitPrice(unit: string): string {
+  if (readCurrencyUnitWithQualifiers(unit).kind !== "currency") return unit;
+  return unit
+    .replace(/\s*(?:\/|\bper\s)\s*([^\s/()]+)/gi, (whole: string, word: string) =>
+      // Only a plain NOUN goes ("seat", "subscriber"). A numbered period ("per 12 months", MG B1 #2083) or a compound
+      // that carries the period ("per subscriber-month") is kept as written, as are qualifiers and currencies.
+      /^[a-z]+$/i.test(word) && !CURRENCY_UNIT_QUALIFIERS.has(word.toLowerCase()) && readUnit(word).kind !== "currency" ? "" : whole)
+    .replace(/\(\s*\)/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+/**
  * Relative tolerance for the magnitude comparison. Values arrive normalised
  * and re-scaled (`0.8 × 1e6`), so binary floating point makes exact equality
  * the wrong test; 1e-9 is far tighter than any real amount collision.
