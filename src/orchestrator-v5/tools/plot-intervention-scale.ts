@@ -675,7 +675,20 @@ export function projectRequestInterventionsToWireScale(
   const encodedContractInvalid = present.filter(
     (r) => r.result.invalidEncodedContract === true,
   );
-  const demote = mixed && undemotable.length === 0;
+  /**
+   * ⛔ AN ALL-IN-RANGE REQUEST CARRYING A RAW VALUE IS READ AS UNIT SCALE (DL #70 5858285859; PLoT #373 KNOWN RESIDUAL).
+   * PLoT reads a request as raw only when some value lies outside [0,1]. "Cut churn to 0.8%" on a framed churn node
+   * ships `raw_value_used` 0.8 with nothing out of range, so PLoT read it as 80%. Such a request is demoted too, so
+   * every value reaches PLoT in the one scale it will read. (WIP: the typed refusal for an in-range raw value with no
+   * known unit form, and the RED rows, follow.)
+   */
+  const rawReadAsUnit = outsideUnitInterval.length === 0
+    ? present.filter((r) =>
+      RAW_SCALE_EMITTING_RULES.has(r.result.rule) &&
+      r.result.value !== null && r.result.value >= 0 && r.result.value <= 1 &&
+      r.result.unitIntervalEquivalent !== undefined && r.result.unitIntervalEquivalent !== r.result.value)
+    : [];
+  const demote = (mixed && undemotable.length === 0) || rawReadAsUnit.length > 0;
   const perOption: Array<Record<string, number>> = [];
   const conversions: InterventionConversion[] = [];
   const demotedFactors: string[] = [];
