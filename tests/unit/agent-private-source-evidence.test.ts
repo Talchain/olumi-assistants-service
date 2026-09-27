@@ -644,6 +644,44 @@ describe('prompt-injection containment: a document asking for writes, search or 
   });
 });
 
+/**
+ * ⚠ THE ONLY RECORDED PROVIDER CAPTURE IN THIS REPO IS NE-20260926-02, A PUBLIC WEB-SEARCH RESPONSE (gpt-5.6-terra,
+ * `web_search_call` + `url_citation`; redacted account fields only). It is replayed UNCHANGED and frozen. It proves only
+ * that a real hosted-tool envelope is refused by the private reader. It does NOT verify `input_file`/`input_image`
+ * reading, `file_citation` shape or locator semantics: no PDF/image capture (NE-03) is committed anywhere.
+ */
+describe('real capture replay (NE-20260926-02, public web search): refusal only, not PDF/image evidence', () => {
+  const NE02 = new URL('../../src/orchestrator-v5/agent-lane/__tests__/fixtures/native-research-ne02.json', import.meta.url);
+  const freezeDeep = <T>(x: T): T => {
+    if (x !== null && typeof x === 'object') { Object.values(x).forEach(freezeDeep); Object.freeze(x); }
+    return x;
+  };
+
+  it('replayed unchanged, the real envelope is refused as a hosted-tool response, keeping its real identity and no content', async () => {
+    const capture = JSON.parse(readFileSync(NE02, 'utf8')) as { _source: string; response: Record<string, unknown> & { id: string; usage: Record<string, number> } };
+    expect(capture._source).toMatch(/NATIVE capture, AI Conversation NE-20260926-02/u);
+    const before = JSON.stringify(capture.response);
+    const raw = freezeDeep(capture.response);
+    const w = world();
+    const plan = await prepare(task(['board-pack']), CFG, w.host);
+    const r = await complete(plan, raw, w.host);
+    expect(r.status).toBe('unexpected_output_or_tool');
+    expect(r.answer_parts).toEqual([]);
+    expect(r.provenance.provider_response_id).toBe(raw.id);
+    expect(r.provenance.usage).toMatchObject({ input_tokens: raw.usage.input_tokens, output_tokens: raw.usage.output_tokens });
+    expect(JSON.stringify(r)).not.toMatch(/sandhill|url_citation|https?:/u);
+    expect(JSON.stringify(raw)).toBe(before);
+  });
+
+  it('on the real envelope too, currentness comes first: a revoked source reports the revocation, not the envelope', async () => {
+    const raw = freezeDeep((JSON.parse(readFileSync(NE02, 'utf8')) as { response: unknown }).response);
+    const w = world();
+    const plan = await prepare(task(['board-pack']), CFG, w.host);
+    w.revoke('board-pack');
+    expect((await complete(plan, raw, w.host)).status).toBe('access_changed');
+  });
+});
+
 describe('privacy: host metadata stays home, and suppressed results carry no private contents', () => {
   it('RED: signed download URLs, storage paths and owner details from the resolver never reach the request or the plan', async () => {
     const plan = await prepare(task(['board-pack', 'plan', 'chart']), CFG, world().host);
