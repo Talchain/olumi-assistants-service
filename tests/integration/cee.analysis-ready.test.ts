@@ -454,9 +454,10 @@ describe("CEE Analysis-Ready Output - Test Brief Scenarios", () => {
       const payload = buildAnalysisReadyPayload(options, "goal_growth", graph);
 
       expect(payload.status).toBe("ready");
-      expect(payload.options[0].interventions.factor_action).toBe(1);
+      // A 0/1 switch the options use in both states is said as "on" / "off" (audit UF-3, #2055); the level is unchanged.
+      expect(payload.options[0].interventions.factor_action).toMatchObject({ value: 1, display_value: "on" });
       expect(payload.options[0].interventions.factor_cost).toBe(5000000);
-      expect(payload.options[1].interventions.factor_action).toBe(0);
+      expect(payload.options[1].interventions.factor_action).toMatchObject({ value: 0, display_value: "off" });
       expect(payload.options[1].interventions.factor_cost).toBe(0);
     });
   });
