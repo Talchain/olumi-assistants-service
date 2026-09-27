@@ -30,6 +30,7 @@ import {
   HELD_AWARE_DEGRADE_TEXT,
 } from '../../coaching/coaching-output-postcheck.js';
 import { findForbiddenPhraseHit } from '../../compose/forbidden-user-facing-phrases.js';
+import { describeChangeset } from '../describe-changeset.js';
 
 const GRAPH = {
   nodes: [
@@ -225,5 +226,55 @@ describe('buildGmHeldPublicCopy — wave-2 ask #20: chip detail carries the full
 
   it('no safe subject → generic copy, no detail', () => {
     expect(buildGmHeldPublicCopy(null).detail).toBeUndefined();
+  });
+});
+
+/**
+ * ⭐ ONE CHANGE PER LINE (AI Conversation, Paul's test 27 Sep; #70 5855355688). Served, the grandfathering approval's
+ * `detail` was ONE comma run of ~500 characters under the approve button. Given the SAME items the subject was
+ * joined from, `detail` is those items, one per line: the same content, nothing summarised or dropped.
+ * The ops mirror Paul's served add (export 90b8f080 user_actions[15]): an option, a factor, and its links.
+ */
+describe('buildGmHeldPublicCopy — a multi-part hold lists one change per line', () => {
+  const graph = {
+    nodes: [
+      { id: 'dec', kind: 'decision', label: 'Decision: MRR' },
+      { id: 'churn', kind: 'factor', label: 'Monthly churn' },
+      { id: 'mrr', kind: 'goal', label: 'MRR' },
+    ],
+    edges: [],
+  };
+  const OPT = '£59 for new Pro customers; grandfather existing customers';
+  const ops = [
+    { op: 'add_node', path: 'opt-gf', value: { id: 'opt-gf', kind: 'option', label: OPT } },
+    { op: 'add_node', path: 'fac-gf', value: { id: 'fac-gf', kind: 'factor', label: 'Existing customers grandfathered' } },
+    { op: 'add_edge', path: 'dec->opt-gf', value: { from: 'dec', to: 'opt-gf' } },
+    { op: 'add_edge', path: 'fac-gf->churn', value: { from: 'fac-gf', to: 'churn' } },
+    { op: 'add_edge', path: 'fac-gf->mrr', value: { from: 'fac-gf', to: 'mrr' } },
+  ];
+
+  it('RED: the clamped chip\'s detail is the items, capitalised, ONE PER LINE: the same parts as the subject, in order', () => {
+    const d = describeChangeset(ops, graph);
+    expect(d, 'positive control: the ops describe').not.toBeNull();
+    expect(d!.items.length).toBe(5);
+    const copy = buildGmHeldPublicCopy(d!.subject, d!.items);
+    expect(copy.label.endsWith('...'), 'positive control: the clamp fired').toBe(true);
+    const lines = copy.detail!.split('\n');
+    expect(lines).toEqual(d!.items.map((i) => i.charAt(0).toUpperCase() + i.slice(1)));
+    expect(lines[0]).toContain(`'${OPT}'`);
+    // Nothing summarised: every part of the subject is on a line of its own.
+    for (const item of d!.items) expect(d!.subject).toContain(item);
+    // The message still names the whole subject (exact-match routing depends on it).
+    expect(copy.message).toBe(`Yes, ${d!.subject}.`);
+  });
+
+  it('CONTROL: one item, or no items passed → the detail is the capitalised sentence, as before', () => {
+    const LONG = "add option '£59 for new Pro customers; grandfather existing customers and more words'";
+    expect(buildGmHeldPublicCopy(LONG, [LONG]).detail).toBe(LONG.charAt(0).toUpperCase() + LONG.slice(1));
+    expect(buildGmHeldPublicCopy(LONG).detail).toBe(LONG.charAt(0).toUpperCase() + LONG.slice(1));
+  });
+
+  it('a short subject still carries no detail, whatever the items', () => {
+    expect(buildGmHeldPublicCopy("update 'Marketing'", ["update 'Marketing'", 'x']).detail).toBeUndefined();
   });
 });
