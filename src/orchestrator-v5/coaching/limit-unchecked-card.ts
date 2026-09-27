@@ -104,8 +104,9 @@ import {
   WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT,
   WITHHELD_NO_OPTION_MEETS_LIMIT,
 } from '../compose/analysis-state-v1.js';
-import type { ConstraintVerdictState } from '../../orchestrator/context/constraint-feasibility.js';
+import { readRatifiedConstraints, type ConstraintVerdictState } from '../../orchestrator/context/constraint-feasibility.js';
 import {
+  ELICITATION_CLOSE,
   FIRST_PASS_PREFIX,
   RUN_TURN_COACHING_CONTRACT,
   copyPasses,
@@ -123,7 +124,7 @@ export const LIMIT_UNCHECKED_SIGNAL_ID_PREFIX = 'coach:limit_unchecked:';
  * Which words the card speaks: today's disjunction, the PROVED cause, or the claim the typed verdict
  * state licenses (`unchecked` ⇐ `unevaluated`, `identity` ⇐ `identity_unresolved`).
  */
-export type LimitCardArm = 'today' | 'cause' | 'unchecked' | 'identity' | EveryOptionTier;
+export type LimitCardArm = 'today' | 'cause' | 'unchecked' | 'identity' | 'assumed' | EveryOptionTier;
 
 /**
  * F-LIMIT's two typed tiers (#2058): every option breaks the SAME limit (tier 1, `no_option_meets_limit`) or would
@@ -152,7 +153,7 @@ export function limitCardArm(provedUnanchored: boolean, verdictState: unknown): 
 
 /** The card's block contract, as data (the shared bounds live on RUN_TURN_COACHING_CONTRACT). */
 export const LIMIT_UNCHECKED_CARD_CONTRACT = Object.freeze({
-  signal_id: `${LIMIT_UNCHECKED_SIGNAL_ID_PREFIX}<graph_hash>:<run computed_at>:<effective trigger>[:named][:unanchored|:unchecked|:identity|:none_meets|:likely_breaks]`,
+  signal_id: `${LIMIT_UNCHECKED_SIGNAL_ID_PREFIX}<graph_hash>:<run computed_at>:<effective trigger>[:named][:unanchored|:unchecked|:identity|:none_meets|:likely_breaks|:assumed]`,
   block_id: 'deterministicBlockId(signal_id)',
   reads: "readback analysis_state.leader_claim: permitted === false && withheld_reason === 'constraint_verdict_withheld'"
     + " | 'no_option_meets_limit' | 'every_option_likely_breaks_limit' (F-LIMIT tiers, their own words)"
@@ -171,6 +172,20 @@ export const LIMIT_UNCHECKED_CARD_CONTRACT = Object.freeze({
 export function leaderWithheldForALimit(analysisState: unknown): boolean {
   const claim = readRecord(readRecord(analysisState)?.leader_claim);
   return claim?.permitted === false && claim.withheld_reason === WITHHELD_CONSTRAINT_VERDICT;
+}
+
+/**
+ * ⭐ RULING 4 (DL #70 5854470460; AIQ 5854466559) — may the card say the limit was checked only against an ASSUMED
+ * level? Only on an `unevaluated` verdict whose persisted rule-(d) ids (`analysis_constraint_estimate_only_ids`,
+ * schemas 0.60.0) cover EVERY limit the SAME hash-bound graph ratifies (the verdict's own reader,
+ * `readRatifiedConstraints`). The withheld set is a subset of the ratified set, so this never claims it of a limit
+ * that was genuinely unscored. Not recorded (null/undefined) or recorded-empty → false. Pure.
+ */
+export function everyRatifiedLimitRestsOnAnAssumedLevel(boundGraph: unknown, verdictState: unknown, estimateOnlyIds: unknown): boolean {
+  if (verdictState !== 'unevaluated' || !Array.isArray(estimateOnlyIds) || estimateOnlyIds.length === 0) return false;
+  const ratified = readRatifiedConstraints(boundGraph as Parameters<typeof readRatifiedConstraints>[0]);
+  const ids = new Set(estimateOnlyIds.filter((id): id is string => typeof id === 'string'));
+  return ratified.length > 0 && ratified.every((c) => ids.has(c.constraint_id));
 }
 
 /** The readback's F-LIMIT tier, by exact code on a withheld claim; anything else → null. */
@@ -203,6 +218,7 @@ export function composeLimitUncheckedCard(
   if (which === 'cause') return composeProvedCause(firstPass, named, ASK);
   if (which === 'unchecked' || which === 'identity') return composeTypedVerdict(firstPass, named, ASK, which);
   if (which === 'none_meets' || which === 'likely_breaks') return composeEveryOptionBreaks(firstPass, named, which);
+  if (which === 'assumed') return composeAssumedLevel(firstPass, named);
   if (named.length >= 2) {
     const quoted = named.map((l) => `“${l.label}”${l.stated !== null ? ` (${l.stated})` : ''}`);
     const list = `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`;
@@ -369,10 +385,38 @@ function composeEveryOptionBreaks(firstPass: boolean, named: readonly NamedLimit
   };
 }
 
+/**
+ * RULING 4 — the assumed-figure words. OWNER-NEUTRAL (the rule-(d) set spans Olumi's draft, a figure the user adopted,
+ * a system repair and no readable owner, so "Olumi's estimate" or "your figure" would be false for some of them) and
+ * LEADER-FREE (the leader claim is withheld, so "an option", never its name). Never "met": the score restates the
+ * assumed level. The move is the real figure, through the shared elicitation close.
+ */
+function composeAssumedLevel(firstPass: boolean, named: readonly NamedLimit[]): FragileLinkChallengeCopy {
+  const { body_max: bodyMax, action_prompt_max: promptMax } = RUN_TURN_COACHING_CONTRACT.limits;
+  const fit = (forms: readonly string[], max: number) => forms.find((f) => f.length <= max) ?? forms[forms.length - 1]!;
+  const quoted = named.map((l) => `“${l.label}”${l.stated !== null ? ` (${l.stated})` : ''}`);
+  const plural = quoted.length !== 1;
+  const list = quoted.length >= 2 ? `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}` : null;
+  const which = (who: 'your' | 'my') => (list !== null ? `${who} limits on ${list}` : quoted.length === 1 ? `${who} limit on ${quoted[0]}` : `the limits on ${who === 'your' ? 'the' : 'my'} model`);
+  const against = plural ? 'only against assumed figures for what an option sets, not measured ones' : 'only against an assumed figure for what an option sets, not a measured one';
+  const REASON = ' That is one reason no option is put forward yet.';
+  const finding = `checked ${which('your')} ${against}.`;
+  const lead = firstPass ? `${FIRST_PASS_PREFIX}it ` : 'This analysis ';
+  return {
+    title: plural ? 'Your limits were checked only against assumed figures' : 'Your limit was checked only against an assumed figure',
+    body: fit([`${lead}${finding}${REASON}`, `${lead}${finding}`], bodyMax),
+    action_label: 'Give the real figure',
+    action_prompt: fit([
+      `This analysis checked ${which('my')} ${against}. Ask me what the real figure is and what it rests on. ${ELICITATION_CLOSE}`,
+      `This analysis checked ${which('my')} ${against}. Ask me what the real figure is. ${ELICITATION_CLOSE}`,
+    ], promptMax),
+  };
+}
+
 /** One block_id, one body: each arm's words carry their own signal suffix. */
 const ARM_SIGNAL_SUFFIX: Readonly<Record<LimitCardArm, string>> = Object.freeze({
   today: '', cause: ':unanchored', unchecked: ':unchecked', identity: ':identity',
-  none_meets: ':none_meets', likely_breaks: ':likely_breaks',
+  none_meets: ':none_meets', likely_breaks: ':likely_breaks', assumed: ':assumed',
 });
 
 export type LimitUncheckedCardDecision =
@@ -394,6 +438,8 @@ export function buildLimitUncheckedCard(
   verdictState?: unknown,
   /** {@link everyOptionBreaksALimit} on the readback: its tier's words outrank every other arm. */
   everyOption: EveryOptionTier | null = null,
+  /** RULING 4 — {@link everyRatifiedLimitRestsOnAnAssumedLevel} on the SAME bound graph: the assumed-figure words. */
+  assumedOnly = false,
 ): LimitUncheckedCardDecision {
   // (0) identity, repeated so the builder is total on its own.
   const result = readRecord(input.analysisResult);
@@ -417,7 +463,7 @@ export function buildLimitUncheckedCard(
     ...(namedLimits === null ? [] : [namedLimits, namedLimits.map((l) => ({ label: l.label, stated: null }))]),
     undefined,
   ];
-  const licensed = everyOption ?? limitCardArm(provedUnanchored, verdictState);
+  const licensed = everyOption ?? (assumedOnly ? 'assumed' : limitCardArm(provedUnanchored, verdictState));
   const arms: LimitCardArm[] = licensed === 'today' ? ['today'] : [licensed, 'today'];
   const chosen = arms.flatMap((arm) => nameForms.map((ls) => ({ arm, named: ls !== undefined, copy: composeLimitUncheckedCard(firstPass, ls, arm) })))
     .find((c) => copyPasses(c.copy));

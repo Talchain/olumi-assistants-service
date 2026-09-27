@@ -1883,7 +1883,7 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // never grant one the constraint verdict withheld, and it leaves
     // `constraint_verdict_state` untouched (CLAUDE.md trap 21: two authorities,
     // two questions, named apart rather than aligned).
-    expect(RUN_ANALYSIS).toContain('projectClaimSafety(constraintVerdict),');
+    expect(RUN_ANALYSIS).toContain('projectClaimSafety(constraintVerdict, { estimateOnlyRecorded: true }),');
     // C46 stage 1 (#70 5841833807): a THIRD remove-only conjunct, outermost — the leader's sign on a product the
     // analysis adds up. It leaves `constraint_verdict_state` untouched, like the intake half.
     expect(RUN_ANALYSIS).toContain(

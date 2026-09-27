@@ -170,7 +170,7 @@ describe('§1 PRODUCER + DRIFT — every newly-persisted run_analysis fact carri
     const fact = await runHandler();
     expect(fact.result.constraint_verdict).toEqual({
       may_name_leading_option: false,
-      constraint_verdict_state: 'unevaluated',
+      constraint_verdict_state: 'unevaluated', estimate_only_constraint_ids: [],
     });
   });
 
@@ -181,7 +181,7 @@ describe('§1 PRODUCER + DRIFT — every newly-persisted run_analysis fact carri
     const fact = await runHandler('constraint_out_total_cost_max');
     expect(fact.result.constraint_verdict).toEqual({
       may_name_leading_option: true,
-      constraint_verdict_state: 'evaluated_feasible',
+      constraint_verdict_state: 'evaluated_feasible', estimate_only_constraint_ids: [],
     });
   });
 

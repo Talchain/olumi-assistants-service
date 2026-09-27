@@ -328,7 +328,7 @@ describe('(b)+(c) run_analysis withholds the leader PLoT ranks first when its si
     // PLoT's leader is recorded as PLoT ranked it …
     expect(fact.result.leading_option_id).toBe('raise_pro_to_59');
     // … and the persisted permission withholds it; the constraint state is untouched (no limit set).
-    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: false, constraint_verdict_state: 'not_applicable' });
+    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: false, constraint_verdict_state: 'not_applicable', estimate_only_constraint_ids: [] });
     // The same response does not name it either (the headline goes with the stamp).
     expect(fact.result.summary).not.toMatch(/Raise Pro to £59/);
     const { state, block } = stateFor(fact, registered);
@@ -344,7 +344,7 @@ describe('(b)+(c) run_analysis withholds the leader PLoT ranks first when its si
   it('CONTROL (harness): the ADDITIVE goal — MRR = Pro MRR + Non-Pro MRR — names its leader, as today', async () => {
     const { registered } = await build(additive());
     const fact = await runOn(registered, [{ id: 'raise_pro_to_59', label: 'Raise Pro to £59', win: 0.94 }, KEEP]);
-    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: true, constraint_verdict_state: 'not_applicable' });
+    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: true, constraint_verdict_state: 'not_applicable', estimate_only_constraint_ids: [] });
     // The discriminating half: on this path the headline DOES name the leader, so its absence above is the stamp's.
     expect(fact.result.summary).toMatch(/Raise Pro to £59/);
     expect(stateFor(fact, registered).state.leader_claim).toEqual({ permitted: true, separation: 'separated' });
@@ -367,7 +367,7 @@ describe('(b)+(c) run_analysis withholds the leader PLoT ranks first when its si
     const old = structuredClone(registered);
     for (const n of old.nodes) delete n.nonlinear_identity;
     const fact = await runOn(old, [RAISE, KEEP]);
-    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: true, constraint_verdict_state: 'not_applicable' });
+    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: true, constraint_verdict_state: 'not_applicable', estimate_only_constraint_ids: [] });
     expect(fact.result.summary).toMatch(/Raise Pro to £59/);
     expect(stateFor(fact, old).state.leader_claim).toEqual({ permitted: true, separation: 'separated' });
   });
@@ -461,7 +461,7 @@ describe('(b) rule 7 on the Run: a leader whose routes through and around the pr
     const { registered } = await build(discount('negative', false));
     const fact = await runOn(registered, [DISCOUNT, SQ]);
     expect(fact.result.leading_option_id).toBe('offer_annual_discount');
-    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: false, constraint_verdict_state: 'not_applicable' });
+    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: false, constraint_verdict_state: 'not_applicable', estimate_only_constraint_ids: [] });
     expect(fact.result.summary).not.toMatch(/Offer annual discount/);
     expect(nonlinearIdentityLeaderWithhold(registered, 'offer_annual_discount')?.against).toEqual(['carry_on_as_now']);
     expect(stateFor(fact, registered).state.leader_claim.withheld_reason).toBe(WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN);
@@ -481,7 +481,7 @@ describe('(b) rule 7 on the Run: a leader whose routes through and around the pr
     const { registered } = await build(discount('positive', false));
     expect(nodeById(registered, 'mrr')).toHaveProperty('nonlinear_identity');
     const fact = await runOn(registered, [DISCOUNT, SQ]);
-    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: true, constraint_verdict_state: 'not_applicable' });
+    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: true, constraint_verdict_state: 'not_applicable', estimate_only_constraint_ids: [] });
     expect(fact.result.summary).toMatch(/Offer annual discount/);
   });
 
@@ -489,14 +489,14 @@ describe('(b) rule 7 on the Run: a leader whose routes through and around the pr
     const { registered } = await build(refunds('negative'));
     const fact = await runOn(registered, [RAISE, KEEP]);
     expect(fact.result.leading_option_id).toBe('raise_pro_to_59');
-    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: false, constraint_verdict_state: 'not_applicable' });
+    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: false, constraint_verdict_state: 'not_applicable', estimate_only_constraint_ids: [] });
     expect(nonlinearIdentityLeaderWithhold(registered, 'raise_pro_to_59')?.against).toEqual(['keep_pro_at_49']);
   });
 
   it('CONTROL (P4): refunds that RAISE MRR — both routes one way — keep £59 named', async () => {
     const { registered } = await build(refunds('positive'));
     const fact = await runOn(registered, [RAISE, KEEP]);
-    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: true, constraint_verdict_state: 'not_applicable' });
+    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: true, constraint_verdict_state: 'not_applicable', estimate_only_constraint_ids: [] });
     expect(fact.result.summary).toMatch(/Raise Pro to £59/);
   });
 });
@@ -507,7 +507,7 @@ describe('(c) precedence: the limit keeps its code and card; the unrequested fir
     const { registered, out } = await build(paul({ churnLimit: true }));
     expect((registered as unknown as { goal_constraints?: unknown[] }).goal_constraints?.length).toBe(1);
     const fact = await runOn(registered, [RAISE, KEEP]);
-    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: false, constraint_verdict_state: 'unevaluated' });
+    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: false, constraint_verdict_state: 'unevaluated', estimate_only_constraint_ids: [] });
     const { state, block } = stateFor(fact, registered);
 
     // 1. The LIMIT: `constraint_verdict_withheld` keeps the field, so the limit card fires and is built.

@@ -104,7 +104,7 @@ describe('run_analysis handler — source-bound intake identity', () => {
     const nodes = bound ? boundNodes : boundNodes.map(({ source_quote: _quote, ...node }) => node);
     const { outcome, result } = await run({ nodes, goal_constraints: churn });
     expect(result.constraint_verdict).toEqual({
-      may_name_leading_option: false, constraint_verdict_state: 'unevaluated',
+      may_name_leading_option: false, constraint_verdict_state: 'unevaluated', estimate_only_constraint_ids: [],
     });
     expect(outcome.assistant_text).toContain('Customer churn');
     expect(outcome.assistant_text).toContain('could not be checked');

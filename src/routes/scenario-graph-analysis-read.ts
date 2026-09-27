@@ -115,7 +115,7 @@ import { nodesUnderANonlinearIdentity, nonlinearIdentityLeaderClaimCause } from 
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import {
-  readConstraintVerdictStateFromResult,
+  readConstraintVerdictStateFromResult, readEstimateOnlyConstraintIdsFromResult,
   readLeaderLimitRisksFromResult,
   deriveEveryOptionLimitVerdict,
   readRatifiedConstraints,
@@ -160,6 +160,11 @@ export interface ScenarioAnalysisRead {
    * `constraint_results`, so this cannot be derived from `analysis_result`.
    */
   readonly analysis_leader_limit_risks?: LeaderLimitRisk[] | null;
+  /**
+   * RULING 4 — the SELECTED fact's rule-(d) ids (`readEstimateOnlyConstraintIdsFromResult`), under the SAME gates as
+   * `analysis_constraint_verdict_state`. `null` = not recorded; `[]` = recorded, none.
+   */
+  readonly analysis_constraint_estimate_only_ids?: readonly string[] | null;
 }
 
 const NOT_ANSWERED: ScenarioAnalysisRead = Object.freeze({
@@ -399,6 +404,7 @@ export async function readScenarioAnalysis(
         ? {
             analysis_constraint_verdict_state: readConstraintVerdictStateFromResult(fact.result),
             analysis_leader_limit_risks: readLeaderLimitRisksFromResult(fact.result, readRatifiedConstraints(params.graph)),
+            analysis_constraint_estimate_only_ids: readEstimateOnlyConstraintIdsFromResult(fact.result),
           }
         : {}),
     };

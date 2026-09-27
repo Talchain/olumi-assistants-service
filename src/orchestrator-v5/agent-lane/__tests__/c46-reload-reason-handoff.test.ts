@@ -241,7 +241,7 @@ describe('C46 on the production reload — the stamp reaches it; the REASON wait
     const graph = await build(PRODUCT_WITH_CHURN_LIMIT);
     const fact = await runOn(graph);
     expect(fact.result.leading_option_id).toBe('raise_pro_to_59');
-    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: false, constraint_verdict_state: 'unevaluated' });
+    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: false, constraint_verdict_state: 'unevaluated', estimate_only_constraint_ids: [] });
     const read = await reload(graph, fact);
     expect(read.analysis_state?.leader_claim.withheld_reason).toBe(WITHHELD_CONSTRAINT_VERDICT);
     expect(leaderWithheldForALimit(read.analysis_state)).toBe(true);

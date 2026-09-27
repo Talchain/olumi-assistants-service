@@ -36,3 +36,16 @@ describe('readBackState carries analysis_leader_limit_risks as leaderLimitRisks'
     }
   });
 });
+
+describe('RULING 4 — readBackState carries analysis_constraint_estimate_only_ids as constraintEstimateOnlyIds', () => {
+  it('⭐ an array of ids, [] and null are carried as they are', async () => {
+    expect((await readBackState(dispatchWith({ analysis_constraint_estimate_only_ids: ['gc_u3b'] }) as never, SCENARIO)).constraintEstimateOnlyIds).toEqual(['gc_u3b']);
+    expect((await readBackState(dispatchWith({ analysis_constraint_estimate_only_ids: [] }) as never, SCENARIO)).constraintEstimateOnlyIds).toEqual([]);
+    expect((await readBackState(dispatchWith({ analysis_constraint_estimate_only_ids: null }) as never, SCENARIO)).constraintEstimateOnlyIds).toBeNull();
+  });
+  it('an absent key or a malformed value carries nothing', async () => {
+    for (const json of [{}, { analysis_constraint_estimate_only_ids: 'gc_u3b' }, { analysis_constraint_estimate_only_ids: [''] }, { analysis_constraint_estimate_only_ids: [3] }]) {
+      expect((await readBackState(dispatchWith(json) as never, SCENARIO)).constraintEstimateOnlyIds, JSON.stringify(json)).toBeUndefined();
+    }
+  });
+});
