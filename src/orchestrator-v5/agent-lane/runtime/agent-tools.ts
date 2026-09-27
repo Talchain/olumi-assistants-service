@@ -206,13 +206,22 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         type: 'array',
         description: 'Factors the model does NOT have that these options change, added in this same change. Each is named in an option\u2019s acts_on.',
         items: obj({
-          label: { type: 'string', description: 'The factor in the user\u2019s words (e.g. "AI add-on price").' },
+          label: { type: 'string', description: 'The factor in the user\u2019s words (e.g. "AI add-on price"). With a stated_effect, name the thing itself (e.g. "Retention programme"), not its effect.' },
           affects: {
             type: 'array',
             description: 'What this factor changes that the model already has (the goal, an outcome, a risk, or a factor no option sets), and which way. At least one.',
             items: obj({
               label: { type: 'string', description: 'A label exactly as get_canonical_state gives it.' },
               direction: { type: 'string', enum: ['positive', 'negative'], description: 'Whether raising this factor raises (positive) or lowers (negative) it: from the user\u2019s words, or where it is plain from the option itself (a paid add-on adds revenue); if it is unclear, ask. The preview names it so the user can correct it.' },
+              stated_effect: {
+                ...obj({
+                  amount: { type: 'number', description: 'The figure the user wrote, as a positive number (3 for "cuts churn by 3 percentage points"); `direction` says which way.' },
+                  unit: { type: 'string', description: 'The unit words the user wrote beside it ("percentage points", "points"), exactly as written.' },
+                }, ['amount']),
+                description: 'ONLY when the user said HOW MUCH this new factor changes it. The factor is then added as something the '
+                  + 'option switches on (off today, on under the option), and this link carries the user\u2019s own size. Never a '
+                  + 'figure the user did not write; leave it out otherwise.',
+              },
             }, ['label', 'direction']),
           },
         }, ['label', 'affects']),
@@ -439,7 +448,10 @@ export interface AgentCapabilities {
     /** Several options as ONE change (F4): each `{label, acts_on}`, up to 4. */
     options?: { label: string; acts_on: { factor_label: string; direction: 'positive' | 'negative' }[] }[];
     /** Factors the model lacks, added in the SAME change (`planNewFactors`): each named in an option's acts_on. */
-    new_factors?: readonly { label: string; affects: readonly { label: string; direction?: 'positive' | 'negative' }[] }[];
+    new_factors?: readonly {
+      label: string;
+      affects: readonly { label: string; direction?: 'positive' | 'negative'; stated_effect?: { amount: number; unit?: string } }[];
+    }[];
   }): Promise<ToolResult>;
   proposeOptionInterventions(ctx: AgentToolContext, args: {
     interventions: readonly { option_label: string; factor_label: string; value: number; basis: string; unit?: string; user_stated?: boolean }[];

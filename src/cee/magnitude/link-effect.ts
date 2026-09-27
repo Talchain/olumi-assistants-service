@@ -266,6 +266,12 @@ export interface LinkSizing {
   readonly problem?: LinkSizeProblem;
   /** Asked where the user always sees it (`open_questions`). */
   readonly question?: string;
+  /**
+   * Why a USER's own size cannot hold, as a clause ("You said …, but <clause>."), and the one thing to ask. Set only on a
+   * `user_stated` outcome with a `problem`. `question` says "It is kept exactly as you said it" and belongs to a writer
+   * that keeps the size (D7, admission); a writer that refuses instead (the add-option transaction) says these.
+   */
+  readonly stated_conflict?: { readonly clause: string; readonly ask: string };
 }
 
 const fmt = (x: number): string => String(Number(x.toPrecision(6)));
@@ -290,6 +296,20 @@ const isPercentLevel = (node: MagnitudeNode, frame: number | undefined): boolean
   const unit = unitOf(node);
   return frame === 100 && unit !== undefined && isPercentWithPeriod(unit);
 };
+
+/**
+ * ⭐ A PERCENTAGE LEVEL ON ITS 0–100 FRAME, for a reader that must know whether "points" are this node's own unit
+ * (AI Quality #70 5854410205 item 1: "falls by 3 points" on 7% is 4%, never 7% × 0.97 and never 3% of the range). Its
+ * unit reads as a level (`isPercentWithPeriod`), or it is a percent-class unit a level limit in "%" names
+ * (`percent_level`, with `sizeLink`'s own typed guard: no option sets it below zero) — the same two routes `levelDomain`
+ * takes to a [0, 1] domain. A change stated on it in points is that many of its own units.
+ */
+export function isPercentageLevel(node: MagnitudeNode): boolean {
+  const unit = unitOf(node);
+  if (resolveMagnitudeFrame(node) !== 100 || unit === undefined) return false;
+  if (isPercentWithPeriod(unit)) return true;
+  return classifyUnitScaleClass(unit) === 'percent' && node.percent_level === true && node.option_levels.every((v) => v >= 0);
+}
 
 /**
  * A unit said after exactly ONE: its HEAD noun (the last word before any "per" or "/") goes through the estate's one
@@ -415,11 +435,16 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
   /**
    * ⭐ D4 FOR OLUMI'S OWN SIZE (AI Quality's engine-direct decomposition of the served part-2 draft, #70 5848134950):
    * an Olumi-authored β is judged against the baseline the model HOLDS — Olumi's estimate included — over the options'
-   * OWN swing. That closed row C (AI→churn set aside for the frame-aware placeholder; out-of-domain 1.3–2.2%). A
-   * USER-stated size (D7) keeps the known-baseline check: Olumi's guess never overrides what the user said.
+   * OWN swing. That closed row C (AI→churn set aside for the frame-aware placeholder; out-of-domain 1.3–2.2%).
+   *
+   * ⭐ AND A USER'S OWN SIZE IS CHECKED AGAINST IT TOO (AI Quality #70 5854410205 item 5). The known-baseline check alone
+   * skipped every user-stated size on a target whose today is Olumi's estimate — since #2081 that is every inferred
+   * baseline, Paul's churn among them — so "churn falls by 3 points" on an estimated 2% was kept with nothing said. D7
+   * still decides what happens: the user's size is never replaced, clamped or dropped by Olumi's guess. It is only SAID,
+   * naming the level as Olumi's estimate and asking what it is today.
    */
-  const judge = link.user_stated ? check : (check ?? (held !== undefined && domain !== null && swing !== null
-    && withinDomain({ lo: held, hi: held }, domain) ? { baseline: held, domain, swing, frame: targetFrame as number } : null));
+  const judge = check ?? (held !== undefined && domain !== null && swing !== null
+    && withinDomain({ lo: held, hi: held }, domain) ? { baseline: held, domain, swing, frame: targetFrame as number } : null);
   const sizeCheck = check ?? (held !== undefined && domain !== null && withinDomain({ lo: held, hi: held }, domain)
     ? { baseline: held, domain, swing: swing ?? FULL_RANGE_SWING, frame: targetFrame as number }
     : null);
@@ -434,16 +459,34 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
     const issue: LinkSizeProblem | undefined = outOfDomain ? 'out_of_domain' : Math.abs(beta) > 1 ? 'not_representable' : undefined;
     if (link.user_stated) {
       // D7: kept exactly as stated, whatever the frame says; asked about when it cannot hold.
+      // Checked against Olumi's estimate only (no known level): said as that estimate, and the bound it would cross.
+      const onEstimate = issue === 'out_of_domain' && check === null;
+      const crossing = (j: NonNullable<typeof judge>): string =>
+        domainBand(j.baseline, beta, sigma, j.swing).lo < j.domain.lo - DOMAIN_EPSILON
+          ? `below ${levelWords(j.domain.lo, target, j.frame)}`
+          : `above ${levelWords(j.domain.hi, target, j.frame)}`;
+      const conflict = issue === 'out_of_domain'
+        ? onEstimate
+          ? { clause: `at Olumi's own estimate of "${target.label}" today (${today(judge!)}), that would take it ${crossing(judge!)} across your options`,
+            ask: `What is "${target.label}" today?` }
+          : { clause: `"${target.label}" is ${today(check!)} today, so that cannot hold across your options`,
+            ask: `Should the size of that effect change, or today's level of "${target.label}"?` }
+        : issue === 'not_representable'
+          ? { clause: 'that is more than the analysis can represent on the ranges these two are measured on, so it would be cut short',
+            ask: 'Is that the size you meant?' }
+          : undefined;
       const question = issue === 'out_of_domain'
-        ? `You said ${statement}, but "${target.label}" is ${today(check!)} today, so that cannot hold across your options. `
-          + `It is kept exactly as you said it. Should the size of that effect change, or today's level of "${target.label}"?`
+        ? onEstimate
+          ? `You said ${statement}, but ${conflict!.clause}. It is kept exactly as you said it. ${conflict!.ask}`
+          : `You said ${statement}, but "${target.label}" is ${today(check!)} today, so that cannot hold across your options. `
+            + `It is kept exactly as you said it. Should the size of that effect change, or today's level of "${target.label}"?`
         : issue === 'not_representable'
           ? `You said ${statement}, ${NOT_REPRESENTABLE}: it would be cut short. It is kept exactly as you said it. Is that the size you meant?`
           : undefined;
       return {
         outcome: 'user_stated', mean: beta, std: sigma, magnitude: 'user_stated', statement, stated_strength: beta,
         ...natural(beta, per as number),
-        ...(issue !== undefined ? { problem: issue, question: question! } : {}),
+        ...(issue !== undefined ? { problem: issue, question: question!, stated_conflict: conflict! } : {}),
       };
     }
     if (issue === undefined) {

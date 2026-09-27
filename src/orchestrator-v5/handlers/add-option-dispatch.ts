@@ -75,7 +75,7 @@ export type AddOptionTransactionOutcome =
       readonly reason:
         // Every builder refusal except `too_many_options`, which is REFUSED with a sentence, not skipped —
         // including the new-factor reasons (ruling #70 5843972346).
-        | Exclude<AddOptionsSkipReason, 'too_many_options' | 'same_levels_as_existing_option'>
+        | Exclude<AddOptionsSkipReason, 'too_many_options' | 'same_levels_as_existing_option' | 'stated_effect_not_switched_on' | 'stated_effect_unusable'>
         | 'gm_not_live'
         | 'no_graph_hash'
         | 'unreadable_graph'
@@ -106,7 +106,9 @@ export type AddOptionTransactionOutcome =
        * and no pending: never a hold whose "yes" would silently decline.
        */
       readonly kind: 'refused';
-      readonly reason: 'too_many_options' | 'too_many_changes' | 'payload_too_large' | 'same_levels_as_existing_option';
+      readonly reason:
+        | 'too_many_options' | 'too_many_changes' | 'payload_too_large' | 'same_levels_as_existing_option'
+        | 'stated_effect_not_switched_on' | 'stated_effect_unusable';
       readonly response: OlumiResponse;
     };
 
@@ -204,8 +206,14 @@ function toGraphView(currentGraph: unknown): AddOptionGraphView | null {
       ...(typeof (n as { category?: unknown }).category === 'string' ? { category: (n as { category: string }).category } : {}),
       // An option's levels, so the builder can refuse a second option with the same ones.
       ...(n.kind === 'option' && n.interventions != null ? { interventions: n.interventions } : {}),
+      // The frame fields a link the user sized is read on (`sizeLink`); read only when a spec states a size.
+      ...(n.scale_frame !== undefined ? { scale_frame: n.scale_frame } : {}),
+      ...(n.observed_state !== undefined ? { observed_state: n.observed_state } : {}),
+      ...(n.goal_threshold_cap !== undefined ? { goal_threshold_cap: n.goal_threshold_cap } : {}),
+      ...(n.goal_threshold_unit !== undefined ? { goal_threshold_unit: n.goal_threshold_unit } : {}),
     })),
     edges: parsed.data.edges.map((e) => ({ from: e.from, to: e.to })),
+    ...(parsed.data.goal_constraints !== undefined ? { goal_constraints: parsed.data.goal_constraints } : {}),
   };
 }
 
@@ -250,6 +258,19 @@ export function dispatchAddOptionTransaction(
         response: refusedResponse(
           `That option would set exactly the same levels as ${twin !== undefined ? `"${twin}"` : 'an option already in the model'}, ` +
             `so the analysis could not tell them apart. I haven't added it. Change at least one of its levels to make it a different choice.`,
+          input.stage,
+        ),
+      };
+    }
+    if (built.reason === 'stated_effect_unusable' || built.reason === 'stated_effect_not_switched_on') {
+      // A SIZE THE USER STATED is refused with a sentence, never skipped: a skip falls through to the free-text edit lane,
+      // which could add the option anyway with Olumi's placeholder standing where the user's size was.
+      return {
+        kind: 'refused',
+        reason: built.reason,
+        response: refusedResponse(
+          built.said ?? ('A factor you gave a size for is added as something an option switches on, and this option does not '
+            + 'switch it on, so I haven\u2019t changed anything. Tell me whether the option turns it on.'),
           input.stage,
         ),
       };

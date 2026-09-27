@@ -34,6 +34,8 @@
 
 import { randomUUID } from 'node:crypto';
 
+import type { StatedEffectAsked } from './stated-effect.js';
+
 /** What the caller must supply. Labels, never ids — ids are never shown to a user. */
 export interface NewOptionRequest {
   readonly label: string;
@@ -50,14 +52,24 @@ export interface NewOptionRequest {
  */
 export interface NewFactorRequest {
   readonly label: string;
-  readonly affects: readonly { readonly label: string; readonly direction?: 'positive' | 'negative' }[];
+  readonly affects: readonly {
+    readonly label: string;
+    readonly direction?: 'positive' | 'negative';
+    /** How much it changes this target, as the user stated it (`stated-effect.ts` reads it). Carried, never judged here. */
+    readonly stated_effect?: StatedEffectAsked;
+  }[];
 }
 
 export interface PlannedNewFactor {
   /** The batch-local handle an intervention names it by (`factor_key`); the product derives its id. */
   readonly key: string;
   readonly label: string;
-  readonly affects: readonly { readonly node_id: string; readonly label: string; readonly effect_direction: 'positive' | 'negative' }[];
+  readonly affects: readonly {
+    readonly node_id: string;
+    readonly label: string;
+    readonly effect_direction: 'positive' | 'negative';
+    readonly stated_effect?: StatedEffectAsked;
+  }[];
 }
 
 export interface NewFactorRefusal {
@@ -242,12 +254,14 @@ export function planNewFactors(
           ? 'A new factor needs a name. Nothing was prepared.'
           : `The model already has "${String(clash!.label)}". Nothing was prepared: name it in acts_on instead of adding it again.` };
     }
-    const wanted = (r?.affects ?? []).map((a) => ({ label: String(a?.label ?? '').trim(), direction: a?.direction })).filter((a) => a.label !== '');
+    const wanted = (r?.affects ?? [])
+      .map((a) => ({ label: String(a?.label ?? '').trim(), direction: a?.direction, stated_effect: a?.stated_effect }))
+      .filter((a) => a.label !== '');
     if (wanted.length === 0) {
       return { ok: false, refusal: 'new_factor_affects_nothing',
         detail: `"${label}" would change nothing the model has, so it could not affect the comparison. Nothing was prepared. Ask the user what it changes (the goal, or something already in the model).` };
     }
-    const affects: { node_id: string; label: string; effect_direction: 'positive' | 'negative' }[] = [];
+    const affects: { node_id: string; label: string; effect_direction: 'positive' | 'negative'; stated_effect?: StatedEffectAsked }[] = [];
     for (const a of wanted) {
       const hits = nodes.filter((n) => ['goal', 'outcome', 'risk', 'factor'].includes(String(n.kind))
         && (norm(n.label) === norm(a.label) || norm(n.description) === norm(a.label)));
@@ -274,7 +288,10 @@ export function planNewFactors(
         return { ok: false, refusal: 'new_factor_direction_unstated',
           detail: `Whether "${label}" raises or lowers "${String(target.label)}" was not said. Nothing was prepared. Ask the user; never assume it.` };
       }
-      if (!affects.some((x) => x.node_id === target.id)) affects.push({ node_id: target.id, label: String(target.label ?? target.id), effect_direction: a.direction });
+      if (!affects.some((x) => x.node_id === target.id)) {
+        affects.push({ node_id: target.id, label: String(target.label ?? target.id), effect_direction: a.direction,
+          ...(a.stated_effect !== undefined && a.stated_effect !== null ? { stated_effect: a.stated_effect } : {}) });
+      }
     }
     const key = keyOf(label, keys);
     keys.add(key);

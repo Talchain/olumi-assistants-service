@@ -173,6 +173,17 @@ export function isPercentOfPopulation(unit: string): boolean {
   return head !== undefined && OF_TAIL.test(t.slice(head.length).trim());
 }
 
+/**
+ * "point" / "points" alone, then only an optional period: the SAME tail `isPercentagePointsWithPeriod` reads after a
+ * percent head. Said of a quantity that is ALREADY a percentage level ("monthly churn falls by 3 points"), the percent head
+ * is that quantity's own, so it is percentage points. Ask it only once that is established (`isPercentageLevel`): on its
+ * own, "points" names no scale.
+ */
+export function isPointsWithPeriod(unit: string): boolean {
+  const points = POINTS_TAIL.exec(norm(unit));
+  return points !== null && PERIOD_TAIL.test((points[1] ?? '').trim());
+}
+
 export function isPercentagePointsWithPeriod(unit: string): boolean {
   const t = norm(unit);
   const cls = classifyUnitScaleClass(unit);

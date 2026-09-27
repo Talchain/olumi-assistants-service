@@ -136,7 +136,8 @@ import { registrationTurnId } from '../../graph-registration/registration-identi
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel } from '../goal-current-level.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
-import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
+import { groupResizedLinks, magnitudeNodesOfGraph, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
+import { readStatedEffect } from '../stated-effect.js';
 
 /**
  * Whose figure: the labels it is FOR, and every other QUANTITY's label (`figureTheUserWroteFor`). Options and the
@@ -3871,6 +3872,29 @@ export function createAgentCapabilities(
       const planned = planNewFactors(g.nodes as never, Array.isArray(args?.new_factors) ? args.new_factors as readonly NewFactorRequest[] : []);
       if (!planned.ok) return { ok: false, mutated: false, refusal: planned.refusal, detail: planned.detail };
       const newFactors = planned.factors;
+      /**
+       * ⭐ A SIZE THE USER STATED FOR A NEW FACTOR'S LINK ("cuts monthly churn by 3 percentage points"; AI Quality #70
+       * 5854410205). Read from the user's own words (`readStatedEffect`: theirs, in points, signed by `direction`), and sent
+       * as `effect_amount`: the product adds that factor as a 0/1 switch every option here switches ON (level 1), and sizes
+       * the link from the user's figure. Anything that cannot be read is refused with what to say — nothing is sent.
+       */
+      const effectOf = new Map<string, number>();
+      const switchKeys = new Set<string>();
+      if (newFactors.some((f) => f.affects.some((a) => a.stated_effect !== undefined))) {
+        const magnitude = magnitudeNodesOfGraph(g.raw);
+        for (const f of newFactors) {
+          for (const a of f.affects) {
+            if (a.stated_effect === undefined) continue;
+            const target = magnitude.get(a.node_id);
+            if (target === undefined) return { ok: false, mutated: false, refusal: 'no_such_target', detail: `The model has nothing called "${a.label}". Nothing was prepared.` };
+            const scope = scopeIn({ nodes: [...g.nodes, ...newFactors.map((x) => ({ label: x.label, kind: 'factor' }))] }, a.label);
+            const read = readStatedEffect(a.stated_effect, a.effect_direction, f.label, target, ctx.user_text, scope);
+            if (!read.ok) return { ok: false, mutated: false, refusal: read.refusal, detail: read.detail, ...(read.say !== undefined ? { say: read.say } : {}) };
+            effectOf.set(`${f.key}::${a.node_id}`, read.effect_amount);
+            switchKeys.add(f.key);
+          }
+        }
+      }
       // Each option is planned against the model PLUS the options before it: distinct ids, and no two options by one name.
       const plans: { spec: (typeof specs)[number]; plan: Extract<ReturnType<typeof planNewOption>, { ok: true }> }[] = [];
       for (const spec of specs) {
@@ -3997,12 +4021,20 @@ export function createAgentCapabilities(
          */
         for (const a of plan.newActsOn) {
           const asked = spec.acts_on.find((x) => norm(x.factor_label) === norm(a.label))?.level?.value;
+          // A switch this option turns on has its level already: 1. A different figure is said, never used as its level.
+          if (switchKeys.has(a.key)) {
+            if (typeof asked === 'number' && Number.isFinite(asked) && asked !== 1) {
+              levelsNotSet.push({ option: plan.label, factor: a.label, value: asked,
+                reason: `"${a.label}" is something this option switches on, so its level here is 1 (on). The ${asked} given was not used as its level.` });
+            }
+            continue;
+          }
           if (typeof asked === 'number' && Number.isFinite(asked)) {
             levelsNotSet.push({ option: plan.label, factor: a.label, value: asked,
               reason: `"${a.label}" is new in this change and has no range yet, so its level is not set here. Once it is added, propose that level with propose_option_interventions.` });
           }
         }
-        const added = plan.newActsOn.map((a) => ({ factor_key: a.key, value: null, ...linkAuthor(a.label) }));
+        const added = plan.newActsOn.map((a) => ({ factor_key: a.key, value: switchKeys.has(a.key) ? 1 : null, ...linkAuthor(a.label) }));
         return { plan, set, entry: { label: plan.label, option_id: plan.optionId, interventions: [...interventions, ...added] } };
       });
       if (unitMismatch.length > 0) {
@@ -4028,7 +4060,10 @@ export function createAgentCapabilities(
         const nf = factorsOf(es);
         const nfWire = nf.length === 0 ? {} : { new_factors: nf.map((f) => ({
           key: f.key, label: f.label,
-          affects: f.affects.map((a) => ({ node_id: a.node_id, effect_direction: a.effect_direction })),
+          affects: f.affects.map((a) => {
+            const amount = effectOf.get(`${f.key}::${a.node_id}`);
+            return { node_id: a.node_id, effect_direction: a.effect_direction, ...(amount !== undefined ? { effect_amount: amount } : {}) };
+          }),
         })) };
         return es.length === 1
           ? { parent_decision_id: decision.id, ...es[0]!.entry, ...nfWire }
@@ -4044,14 +4079,16 @@ export function createAgentCapabilities(
       const notAdded: { option: string; same_levels_as: string }[] = [];
       let parameters = parametersOf(kept);
       // The product's own transaction, run here purely: a spec it would not build is never sent.
-      let built = buildAddOptionsTransaction(parameters, { nodes: g.nodes as never, edges: g.edges as never });
+      // The graph as the product's own dispatcher views it — its limits included, which a stated size is read against.
+      const view = { nodes: g.nodes as never, edges: g.edges as never, goal_constraints: (g.raw as { goal_constraints?: unknown }).goal_constraints };
+      let built = buildAddOptionsTransaction(parameters, view);
       while (!built.matched && built.reason === 'same_levels_as_existing_option' && built.sameAs !== undefined
         && kept.length > 1 && typeof built.index === 'number' && built.index >= 0 && built.index < kept.length) {
         const twinIndex = built.index;
         notAdded.push({ option: kept[twinIndex]!.plan.label, same_levels_as: built.sameAs.label });
         kept = kept.filter((_, i) => i !== twinIndex);
         parameters = parametersOf(kept);
-        built = buildAddOptionsTransaction(parameters, { nodes: g.nodes as never, edges: g.edges as never });
+        built = buildAddOptionsTransaction(parameters, view);
       }
       const keptFactors = factorsOf(kept);
       if (!built.matched || JSON.stringify(built.operations).length > GM_HELD_OPERATIONS_MAX_JSON_CHARS) {
@@ -4069,8 +4106,13 @@ export function createAgentCapabilities(
             : reason === 'same_levels_as_existing_option'
               ? ` It would set exactly the same levels as "${twin ?? 'an option already in the model'}", so the analysis could not tell the two apart: `
                 + 'say so, and ask the user which level this option should change.'
-              : '';
+              : reason === 'stated_effect_unusable'
+                ? ` The size the user gave cannot be recorded as it stands. Say this to the user, in these words, and ask what it asks: "${!built.matched && built.said !== undefined ? built.said : 'That size could not be read on the range it changes.'}" Never change, shrink or drop the size they gave.`
+                : reason === 'stated_effect_not_switched_on'
+                  ? ' A factor with a stated size is something each option acting on it switches on (level 1): name it in every such option\u2019s acts_on, with no other level.'
+                  : '';
         return { ok: false, mutated: false, refusal: 'not_prepared', ...(!built.matched ? { reason: built.reason } : {}),
+          ...(!built.matched && built.said !== undefined ? { say: built.said } : {}),
           ...(twin !== undefined ? { same_levels_as: twin } : {}),
           ...(notAdded.length > 0 ? { not_added: notAdded } : {}),
           detail: `That could not be prepared as one change, so nothing was sent or changed.${why} Tell the user plainly.` };
@@ -4142,15 +4184,31 @@ export function createAgentCapabilities(
             + 'Never promise to add it later: it is added only by a new proposal the user approves.',
         } : {}),
         ...(keptFactors.length > 0 ? {
-          new_factors: keptFactors.map((f) => ({
-            label: f.label,
-            changes: f.affects.map((a) => `${a.label} (${a.effect_direction === 'positive' ? 'raises it' : 'lowers it'})`),
-            how_strongly: 'Olumi\u2019s estimate, for the user to correct',
-            current_value: null,
-          })),
-          new_factors_note: 'This change also ADDS these factors. Say so: what each changes and which way, that how strongly is Olumi\u2019s '
-            + 'estimate, and that its current value is not set yet. Ask the user what it is today (for example, whether it is '
-            + 'offered at all yet) \u2014 nothing else will ask, and the comparison needs it; never say the analysis will ask for it.',
+          new_factors: keptFactors.map((f) => {
+            // The user's own sizes on this factor's links, as the product sized them (`statedLinks`), said as theirs.
+            const id = built.newFactors.find((x) => norm(x.label) === norm(f.label))?.id;
+            const stated = switchKeys.has(f.key) ? (built.statedLinks ?? []).filter((l) => l.from === id) : [];
+            return {
+              label: f.label,
+              changes: f.affects.map((a) => `${a.label} (${a.effect_direction === 'positive' ? 'raises it' : 'lowers it'})`),
+              how_strongly: stated.length === 0
+                ? 'Olumi\u2019s estimate, for the user to correct'
+                : stated.map((l) => `You said ${l.statement}`).join('; ')
+                  + (stated.length < f.affects.length ? '; the other links are Olumi\u2019s placeholders, for the user to correct' : ''),
+              ...(stated.length > 0 ? { switch: 'off (0) or on (1); this option switches it on (1)' } : {}),
+              current_value: null,
+            };
+          }),
+          new_factors_note: keptFactors.some((f) => switchKeys.has(f.key))
+            ? 'This change also ADDS these factors. Say so: what each changes and which way. Where how_strongly starts "You said", '
+              + 'that size is the user\u2019s own: say it as theirs, never as Olumi\u2019s estimate or a placeholder; otherwise how strongly '
+              + 'is Olumi\u2019s estimate. A factor with `switch` is on or off, and this option switches it on. Its current value is not '
+              + 'set yet. If the user already said whether it is in place today, record exactly that once this change is approved '
+              + '(0 when it is not running), with propose_assumptions; otherwise ask them \u2014 nothing else will ask, and the '
+              + 'comparison needs it; never say the analysis will ask for it.'
+            : 'This change also ADDS these factors. Say so: what each changes and which way, that how strongly is Olumi\u2019s '
+              + 'estimate, and that its current value is not set yet. Ask the user what it is today (for example, whether it is '
+              + 'offered at all yet) \u2014 nothing else will ask, and the comparison needs it; never say the analysis will ask for it.',
         } : {}),
         note:
           `Nothing has changed yet. Show the user ${described.length === 1 ? 'the option' : `all ${described.length} options, as ONE change they approve once`}, `

@@ -84,6 +84,8 @@ import { z } from 'zod';
 import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { normaliseIdBase } from '../../cee/utils/id-normalizer.js';
+import { magnitudeNodesOfGraph } from '../../cee/magnitude/frame-defaulted-links.js';
+import { sizeLink, type LinkSizing } from '../../cee/magnitude/link-effect.js';
 import { InterventionV3 } from '../../schemas/cee-v3.js';
 import type { PatchOperation } from '../../orchestrator/types.js';
 
@@ -101,8 +103,18 @@ export interface AddOptionGraphView {
     readonly category?: string;
     /** An option's levels (`NodeV3.interventions`), read only to refuse a second option with the SAME levels. */
     readonly interventions?: unknown;
+    /**
+     * The frame fields a link's size is read on (the magnitude contract, `cee/magnitude/link-effect.ts`). Read ONLY when a
+     * new factor's link carries a size the user stated (`effect_amount`); every other build ignores them.
+     */
+    readonly scale_frame?: unknown;
+    readonly observed_state?: unknown;
+    readonly goal_threshold_cap?: unknown;
+    readonly goal_threshold_unit?: unknown;
   }>;
   readonly edges: ReadonlyArray<{ readonly from: string; readonly to: string }>;
+  /** The graph's limits: a level limit in "%" makes its node a percentage level (`MagnitudeNode.percent_level`). */
+  readonly goal_constraints?: unknown;
 }
 
 /**
@@ -435,7 +447,11 @@ export type AddOptionsSkipReason =
   | 'affects_target_invalid'
   | 'new_factor_unreachable'
   | 'new_factor_not_found'
-  | 'new_factor_unused';
+  | 'new_factor_unused'
+  // A size the user stated for a new factor's link (`effect_amount`) is written as theirs or not at all: never swapped for
+  // Olumi's placeholder, never shrunk, never kept with a conflict unsaid (AI Quality #70 5854410205).
+  | 'stated_effect_not_switched_on'
+  | 'stated_effect_unusable';
 
 export type AddOptionsBuildResult =
   | {
@@ -446,8 +462,17 @@ export type AddOptionsBuildResult =
       readonly operations: PatchOperation[];
       /** Factors this batch ADDS, so a caller names them by label (the pre-edit graph does not have them). */
       readonly newFactors: ReadonlyArray<{ readonly id: string; readonly label: string }>;
+      /** Links sized from a size the user stated (`effect_amount`), with the sentence it is said in. Absent when none. */
+      readonly statedLinks?: ReadonlyArray<{ readonly from: string; readonly to: string; readonly statement: string }>;
     }
-  | { readonly matched: false; readonly reason: AddOptionsSkipReason; readonly index?: number; readonly sameAs?: SameLevelsAs };
+  | {
+      readonly matched: false;
+      readonly reason: AddOptionsSkipReason;
+      readonly index?: number;
+      readonly sameAs?: SameLevelsAs;
+      /** `stated_effect_unusable`: what the user said, why it cannot be written, and the one thing to ask — said, never dropped. */
+      readonly said?: string;
+    };
 
 // ---------------------------------------------------------------------------
 // ONE HELD CHANGE ADDS THE MISSING FACTOR AND THE OPTION
@@ -464,6 +489,19 @@ export type AddOptionsBuildResult =
  * exact way a "unit" or "current value" would vanish. There is no carrier for a value on this path (R4
  * screens `add_node` for `source`), so a factor's current value is set afterwards through the value path,
  * which records who said it.
+ *
+ * ⭐ A SIZE THE USER STATED (`effect_amount`; AI Quality #70 5854410205, design MG 5852271446 / Runtime 5852192132):
+ * "launch a retention programme that cuts monthly churn by 3 percentage points". The change in the TARGET, in the
+ * target's own unit (points for a percentage level), when this factor is switched ON. A factor with one is added as a
+ * 0/1 SWITCH: still NO current value (Canonical's OPEN ruling: set after it exists), every option acting on it sets it
+ * to exactly 1, and the link is sized by the magnitude contract's own `sizeLink` from the user's figure (per switching
+ * on, `user_stated`), never Olumi's placeholder. ISL applies an option's level as do(·), so the switch carries the effect
+ * without cutting any other link into the target. A factor without one is built exactly as before.
+ *
+ * ⚠ ITS FRAME IS ITS LEVELS, NOT A STORED `scale_frame: 1`. The magnitude contract reads frame 1 from levels that are
+ * all 0 or 1 (`resolveMagnitudeFrame`, `isSwitch`). A stored `scale_frame: 1` would make the EXISTING value writer refuse
+ * the user's own "0 today" (`factor-value-edit.ts` `scale_ambiguous`: `resolveScaleFrame` resolves only a frame above
+ * 1) — measured by `add-option-stated-effect.test.ts` item 3 — so the node is the same bare shape as any new factor.
  */
 const NewFactorSpecSchema = z
   .object({
@@ -472,7 +510,12 @@ const NewFactorSpecSchema = z
     factor_id: z.string().min(1).optional(),
     label: z.string().min(1),
     affects: z
-      .array(z.object({ node_id: z.string().min(1), effect_direction: z.enum(['positive', 'negative']) }).strict())
+      .array(z.object({
+        node_id: z.string().min(1),
+        effect_direction: z.enum(['positive', 'negative']),
+        /** The user's stated change in the target per switching this factor on, signed, in the target's own unit. */
+        effect_amount: FiniteNumber.optional(),
+      }).strict())
       .min(1)
       // ⛔ One link per target (review 5844092217 B1): a repeated `node_id` emitted two `add_edge`s to the
       // same pair — HELD, then "Edge already exists" at apply, so the user's "yes" landed nothing.
@@ -533,12 +576,48 @@ function hypothesisEdgeValue(from: string, to: string, direction: 'positive' | '
   };
 }
 
+/**
+ * ⭐ THE USER'S OWN SIZE ON THE LINK: `sizeLink`'s strength and spread, stamped `user_specified` (the user said this link
+ * and its size) with `magnitude: 'user_stated'` and the natural size it was read from. NOT `defaulted`: that flag says a
+ * default strength was applied, and every reader of it (the Agent's view, admissibility, coaching) would call the user's
+ * own figure a placeholder — exactly why the user's strength write removes it (`adjust-edge-strength.ts`).
+ */
+function statedEdgeValue(from: string, to: string, direction: 'positive' | 'negative', sizing: LinkSizing): Record<string, unknown> {
+  return {
+    from,
+    to,
+    strength: { mean: sizing.mean, std: sizing.std },
+    exists_probability: DEFAULT_EXISTS_PROBABILITY,
+    effect_direction: direction,
+    provenance: {
+      source: 'user_specified' as const,
+      magnitude: 'user_stated' as const,
+      ...(sizing.natural_effect !== undefined ? { natural_effect: sizing.natural_effect } : {}),
+    },
+  };
+}
+
+/** Why a size the user stated is not written, in the user's terms, with the one thing to ask. Nothing is changed. */
+function statedEffectRefusal(sizing: LinkSizing, source: string, target: string): string {
+  const said = sizing.statement !== undefined ? `You said ${sizing.statement}` : `You gave a size for how "${source}" changes "${target}"`;
+  if (sizing.stated_conflict !== undefined) {
+    return `${said}, but ${sizing.stated_conflict.clause}. Nothing was changed, so the size you gave is neither replaced nor cut. ${sizing.stated_conflict.ask}`;
+  }
+  if (sizing.problem === 'sign_conflict') {
+    return `${said}, which runs the other way from the direction given for that link, so nothing was changed. Which way does "${source}" change "${target}"?`;
+  }
+  return `${said}, but that could not be read on the range "${target}" is measured on, so nothing was changed. How is "${target}" measured?`;
+}
+
 type NewFactorPlan =
   | {
       readonly ok: true;
       readonly factors: ReadonlyArray<{ readonly key: string; readonly id: string; readonly label: string }>;
       readonly nodeOps: PatchOperation[];
-      readonly edgeOps: PatchOperation[];
+      /** One per factor → target link, in order; `effect_amount` only where the user stated the size. */
+      readonly links: ReadonlyArray<{ readonly from: string; readonly to: string; readonly direction: 'positive' | 'negative'; readonly effect_amount?: number }>;
+      /** New factors added as a 0/1 switch (a link of theirs carries a stated size). */
+      readonly switchIds: ReadonlySet<string>;
       readonly view: AddOptionGraphView;
     }
   | { readonly ok: false; readonly reason: AddOptionsSkipReason };
@@ -549,7 +628,8 @@ function planNewFactors(raw: unknown, graph: AddOptionGraphView): NewFactorPlan 
   let view = graph;
   const factors: { key: string; id: string; label: string }[] = [];
   const nodeOps: PatchOperation[] = [];
-  const edgeOps: PatchOperation[] = [];
+  const links: { from: string; to: string; direction: 'positive' | 'negative'; effect_amount?: number }[] = [];
+  const switchIds = new Set<string>();
   for (const spec of parsed.data) {
     if (view.nodes.some((n) => sameLabel(n.label, spec.label))) return { ok: false, reason: 'new_factor_exists' };
     let id: string;
@@ -566,17 +646,22 @@ function planNewFactors(raw: unknown, graph: AddOptionGraphView): NewFactorPlan 
       if (!isAffectsTarget(findNode(graph, a.node_id))) return { ok: false, reason: 'affects_target_invalid' };
     }
     if (!spec.affects.some((a) => reachesGoal(graph, a.node_id))) return { ok: false, reason: 'new_factor_unreachable' };
-    nodeOps.push({ op: 'add_node', path: id, value: { id, kind: 'factor', label: spec.label, category: 'controllable' } });
+    // A stated size makes it a 0/1 switch, by the levels its options set (checked below) — the node itself is the same
+    // bare shape as any new factor: no current value (Canonical's OPEN ruling), and no stored frame (see the schema).
+    if (spec.affects.some((a) => a.effect_amount !== undefined)) switchIds.add(id);
+    const node = { id, kind: 'factor', label: spec.label, category: 'controllable' };
+    nodeOps.push({ op: 'add_node', path: id, value: { ...node } });
     for (const a of spec.affects) {
-      edgeOps.push({ op: 'add_edge', path: `${id}::${a.node_id}`, value: hypothesisEdgeValue(id, a.node_id, a.effect_direction) });
+      links.push({ from: id, to: a.node_id, direction: a.effect_direction, ...(a.effect_amount !== undefined ? { effect_amount: a.effect_amount } : {}) });
     }
     factors.push({ key: spec.key, id, label: spec.label });
     view = {
-      nodes: [...view.nodes, { id, kind: 'factor', label: spec.label, category: 'controllable' }],
+      ...view,
+      nodes: [...view.nodes, node],
       edges: [...view.edges, ...spec.affects.map((a) => ({ from: id, to: a.node_id }))],
     };
   }
-  return { ok: true, factors, nodeOps, edgeOps, view };
+  return { ok: true, factors, nodeOps, links, switchIds, view };
 }
 
 /** Rewrite `{factor_key}` interventions to the batch's own ids; `null` when one names no new factor. */
@@ -650,6 +735,48 @@ export function buildAddOptionsTransaction(
   const used = new Set(built.proposals.flatMap((p) => [...p.configuredFactorIds, ...p.linkedUnvaluedFactorIds]));
   if (!plan.factors.every((f) => used.has(f.id))) return { matched: false, reason: 'new_factor_unused' };
 
+  // No stated size: every factor → target link is Olumi's default hypothesis, exactly as before.
+  const hypothesis = (l: (typeof plan.links)[number]): PatchOperation =>
+    ({ op: 'add_edge', path: `${l.from}::${l.to}`, value: hypothesisEdgeValue(l.from, l.to, l.direction) });
+  let edgeOps: PatchOperation[];
+  const statedLinks: { from: string; to: string; statement: string }[] = [];
+  if (plan.switchIds.size === 0) {
+    edgeOps = plan.links.map(hypothesis);
+  } else {
+    // ⭐ A SWITCH IS SWITCHED ON by every option that acts on it: level exactly 1. Unset, or any other level, and the
+    // stated size ("per switching on") would describe a move no option makes — refused, never guessed.
+    for (let index = 0; index < built.proposals.length; index += 1) {
+      const p = built.proposals[index]!;
+      const levels = levelsOf((p.operations[0]!.value as { interventions?: unknown }).interventions);
+      for (const id of plan.switchIds) {
+        const acts = p.configuredFactorIds.includes(id) || p.linkedUnvaluedFactorIds.includes(id);
+        if (acts && levels.get(id) !== 1) return { matched: false, reason: 'stated_effect_not_switched_on', index };
+      }
+    }
+    // Both ends read by the ONE stored-graph builder the magnitude contract uses: the switch with the level every option
+    // sets on it, and the target with its frame, today's level and its limits.
+    const magnitude = magnitudeNodesOfGraph({
+      nodes: [...plan.view.nodes, ...built.proposals.map((p) => p.operations[0]!.value)],
+      goal_constraints: graph.goal_constraints,
+    });
+    edgeOps = [];
+    for (const l of plan.links) {
+      if (l.effect_amount === undefined) { edgeOps.push(hypothesis(l)); continue; }
+      const source = magnitude.get(l.from);
+      const target = magnitude.get(l.to);
+      if (source === undefined || target === undefined) return { matched: false, reason: 'stated_effect_unusable' };
+      const sizing = sizeLink(
+        { direction: l.direction, effect_amount: l.effect_amount, effect_per_source_change: 1, user_stated: true }, source, target,
+      );
+      // Written as the user's, or not at all: a problem is SAID (the user's size is never swapped, shrunk or kept unsaid).
+      if (sizing.outcome !== 'user_stated' || sizing.problem !== undefined || sizing.statement === undefined) {
+        return { matched: false, reason: 'stated_effect_unusable', said: statedEffectRefusal(sizing, source.label, target.label) };
+      }
+      edgeOps.push({ op: 'add_edge', path: `${l.from}::${l.to}`, value: statedEdgeValue(l.from, l.to, l.direction, sizing) });
+      statedLinks.push({ from: l.from, to: l.to, statement: sizing.statement });
+    }
+  }
+
   // ORDER (pinned with Runtime, #70 5844014025): the first option's add_node (the held change's handle) →
   // every new factor node → decision→option → factor→affects → option→factor → any further options' ops.
   // Every node precedes every edge that names it.
@@ -659,8 +786,9 @@ export function buildAddOptionsTransaction(
   return {
     matched: true,
     proposals: built.proposals,
-    operations: [firstOps[0]!, ...plan.nodeOps, firstOps[1]!, ...plan.edgeOps, ...firstOps.slice(2), ...laterOps],
+    operations: [firstOps[0]!, ...plan.nodeOps, firstOps[1]!, ...edgeOps, ...firstOps.slice(2), ...laterOps],
     newFactors: plan.factors.map((f) => ({ id: f.id, label: f.label })),
+    ...(statedLinks.length > 0 ? { statedLinks } : {}),
   };
 }
 

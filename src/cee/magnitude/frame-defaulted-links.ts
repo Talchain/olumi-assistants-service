@@ -82,6 +82,16 @@ function magnitudeNodes(nodes: readonly Rec[], percentLevel: ReadonlySet<string>
   }]));
 }
 
+/**
+ * Every node of a STORED graph as the magnitude contract reads it (`MagnitudeNode`), keyed by id: its frame fields, every
+ * level an option sets on it, and `percent_level` from the graph's own level limits. The one stored-graph builder, used
+ * here and by the add-option transaction when it sizes a link the user stated.
+ */
+export function magnitudeNodesOfGraph(graph: unknown): Map<string, MagnitudeNode> {
+  if (!isRec(graph) || !Array.isArray(graph.nodes)) return new Map();
+  return magnitudeNodes((graph.nodes as unknown[]).filter(isRec), percentLevelIds(graph));
+}
+
 export interface FramedLinks<G> {
   /** The SAME object when no link changed. */
   readonly graph: G;
