@@ -34,6 +34,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { FRESH_READ } from '../turn-read-cache.js';
 import { admitCandidateModel, canonicalLabel, carryWithheldOptions, findMechanismPath, productIdentityOpenQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
@@ -1321,7 +1322,8 @@ export async function buildModelFromBrief(
    * throwing away a build we have already paid for because a READ failed would
    * cost the user their turn for no gain.
    */
-  const stillEmpty = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
+  // `fresh`: this read exists to see OTHER writers, so the turn's read cache must not answer it (turn-read-cache.ts).
+  const stillEmpty = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, { ...FRESH_READ });
   if (stillEmpty.status === 200) {
     const g = (stillEmpty.json.graph ?? {}) as { nodes?: unknown[] };
     if (Array.isArray(g.nodes) && g.nodes.length > 0) {
