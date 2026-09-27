@@ -78,3 +78,21 @@ describe('PJ-B3 on served journey E (214809Z): the unvalued #3 driver', () => {
     expect(cards(r.blocks)[0]!.title).toBe('“Current annual salary spend” has no value yet');
   });
 });
+
+describe('AIQ gap 1 (5860454709): when the figures treat the unvalued driver as a placeholder 0, the card says so', () => {
+  const ZERO = ' These figures treat it as 0 until you give it.';
+  it('E: the run\'s GOAL_ANCESTOR_DATA_GAP names current_annual_salary_spend → the sentence is on the card (short form: the full one would exceed body_max)', () => {
+    const f = load('served-pj-e-214809Z-unvalued-driver.json');
+    const codes = f.analysis_result.enrichment.inference_warnings.filter((w: Rec) => w.code === 'GOAL_ANCESTOR_DATA_GAP');
+    expect(codes).toHaveLength(1);
+    expect(codes[0].message).toContain("'current_annual_salary_spend'");
+    const body = cards(runTurnNextMove(...args(f)).blocks)[0]!.body as string;
+    // E also carries a limit caveat, composed in front (#2135), so the move's words start mid-body.
+    expect(body.endsWith(`ranks “Current annual salary spend” in its top three, but the model has no value for it yet.${ZERO}`)).toBe(true);
+    expect(body.length).toBeLessThanOrEqual(300);
+  });
+  it('C: no GOAL_ANCESTOR_DATA_GAP names the factor → no placeholder sentence', () => {
+    const f = load('served-pj-c-213830Z-unvalued-drivers.json');
+    expect(cards(runTurnNextMove(...args(f)).blocks)[0]!.body).not.toContain(ZERO.trim());
+  });
+});

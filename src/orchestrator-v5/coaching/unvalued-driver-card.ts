@@ -68,12 +68,36 @@ export function unvaluedTopDrivers(analysisResult: unknown, boundGraph: Record<s
   return out.sort((a, b) => a.rank - b.rank);
 }
 
-/** Wordings, preferred first: the full finding, then the short one when a long label pushes it past body_max. */
-export function composeUnvaluedDriverCards(label: string, firstPass: boolean): FragileLinkChallengeCopy[] {
+/** The placeholder-zero disclosure (AIQ gap 1, #70 5860454709; DL criterion 5860365834). Bound by identity in tests. */
+export const PLACEHOLDER_ZERO_SENTENCE = ' These figures treat it as 0 until you give it.';
+
+/**
+ * The factor ids the run's `GOAL_ANCESTOR_DATA_GAP` warning says "defaulted to 0.0". PLoT carries the ancestor ids only
+ * inside the warning's message, each QUOTED as its structural id ('current_annual_salary_spend'), so this reads exact
+ * quoted slug tokens only — never words. ⚠ A typed ancestor-id field on the warning would retire this read (asked of
+ * PLoT's owner on the PR).
+ */
+export function placeholderZeroFactorIds(analysisResult: unknown): ReadonlySet<string> {
+  const out = new Set<string>();
+  const warnings = readRecord(readRecord(analysisResult)?.enrichment)?.inference_warnings;
+  if (!Array.isArray(warnings)) return out;
+  for (const w of warnings.map(readRecord)) {
+    if (w?.code !== 'GOAL_ANCESTOR_DATA_GAP' || typeof w.message !== 'string') continue;
+    for (const m of w.message.matchAll(/'([a-z0-9]+(?:_[a-z0-9]+)*)'/g)) out.add(m[1]!);
+  }
+  return out;
+}
+
+/**
+ * Wordings, preferred first: the full finding, then the short one when a long label pushes it past body_max. When the
+ * run's figures treat the factor as a placeholder 0, EVERY wording says so (it is never dropped to fit).
+ */
+export function composeUnvaluedDriverCards(label: string, firstPass: boolean, placeholderZero = false): FragileLinkChallengeCopy[] {
+  const tail = placeholderZero ? PLACEHOLDER_ZERO_SENTENCE : '';
   const findings = [
     `the analysis ranks “${label}” among the three factors this result depends on most, but the model has no value `
-      + 'for it yet, so that ranking comes from how the model is built, not from your figures.',
-    `the analysis ranks “${label}” in its top three, but the model has no value for it yet.`,
+      + `for it yet, so that ranking comes from how the model is built, not from your figures.${tail}`,
+    `the analysis ranks “${label}” in its top three, but the model has no value for it yet.${tail}`,
   ];
   return findings.map((finding) => ({
     title: `“${label}” has no value yet`,
@@ -93,7 +117,8 @@ export function buildUnvaluedDriverCard(
   const top = unvaluedTopDrivers(result, boundGraph)[0];
   if (top === undefined) return null;
   const firstPass = input.trigger === 'auto_first_pass';
-  const copy = composeUnvaluedDriverCards(top.label, firstPass).find((c) => copyPasses(c));
+  const zero = placeholderZeroFactorIds(result).has(top.id);
+  const copy = composeUnvaluedDriverCards(top.label, firstPass, zero).find((c) => copyPasses(c));
   if (copy === undefined) return null;
   const signalId = `${UNVALUED_DRIVER_SIGNAL_ID_PREFIX}${input.graphHash}:${input.computedAt}:${input.trigger}:${top.id}`;
   const parsed = CoachingBlockSchema.safeParse({
