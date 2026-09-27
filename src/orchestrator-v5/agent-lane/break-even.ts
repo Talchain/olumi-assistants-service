@@ -186,3 +186,15 @@ export function breakEvenLine(be: BreakEven): string {
   parts.push('This is arithmetic on these figures, not the analysis ranking the options, and it says nothing about how many will stay.');
   return parts.join(' ');
 }
+
+/**
+ * ⭐ ANSWER FIRST (served witness `6ff7bc9`, #70 5851078813; rubric ChatGPT 5850676864 "answer/finding first"): the
+ * paragraph goes right after the reply's FIRST paragraph — the model's own lead ("Not yet…", "No option can be put
+ * forward…") — so the user reads the limitation in one line and then the arithmetic, before the bullets, the save line
+ * and the parked questions. A reply with one paragraph gets it at the end.
+ */
+export function withBreakEvenAnswer(text: string, be: BreakEven): string {
+  const cut = text.indexOf('\n\n');
+  const para = breakEvenLine(be);
+  return cut < 0 ? `${text}\n\n${para}` : `${text.slice(0, cut)}\n\n${para}${text.slice(cut)}`;
+}
