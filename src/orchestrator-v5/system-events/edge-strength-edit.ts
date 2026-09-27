@@ -21,6 +21,7 @@ import { composeToolCallResponse } from '../compose.js';
 import { composeRecoverableHandlerResponse } from '../compose/recoverable-handler-response.js';
 import { composeRecoverableValidationResponse } from '../compose/recoverable-validation-response.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
+import { reindexInterventionKeys } from '../reindex-intervention-keys.js';
 import { buildGraphLookup } from '../routing/graph-lookup-adapter.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
 import type { GraphLookup } from '../routing/validator.js';
@@ -178,12 +179,14 @@ const MAGNITUDE_CONTRACT_REMOVALS = ['natural_effect', 'magnitude'] as const;
  * Every other byte of persisted JSON — including cosmetic/additive fields outside
  * the analysis hash — must remain deeply equal.
  */
-export function isProvenanceOnlyEdgeConfirmation(args: {
+export function isProvenanceOnlyEdgeConfirmation(stored: {
   readonly before: unknown;
   readonly after: unknown;
   readonly from: string;
   readonly to: string;
 }): boolean {
+  // The base with the UI's derived index in step: a stale index is not this write's change (`reindexInterventionKeys`).
+  const args = { ...stored, before: reindexInterventionKeys(stored.before) };
   const beforeParse = GraphV3.safeParse(args.before);
   const afterParse = GraphV3.safeParse(args.after);
   if (!beforeParse.success || !afterParse.success) return false;

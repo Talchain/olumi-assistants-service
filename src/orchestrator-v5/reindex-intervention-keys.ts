@@ -23,22 +23,42 @@ function derivedIndex(node: Rec): string[] {
   return isRec(node.interventions) ? Object.keys(node.interventions) : [];
 }
 
-/** True when the node carries no index (a `null` is absence: the persisted form drops it), or exactly its cells' keys (any order). */
+/**
+ * True when the node carries no index, or exactly its cells' keys (any order). A `null` counts as no index (the
+ * persisted form drops it). A non-array is NOT in step: `reindexInterventionKeys` deletes it rather than rebuilding
+ * it, because CEE never mints UI state (and `GraphV3` reads it as absent anyway).
+ */
 export function interventionKeysFollowInterventions(node: unknown): boolean {
   if (!isRec(node) || !Object.hasOwn(node, 'interventionKeys') || node.interventionKeys === null) return true;
   const index = node.interventionKeys;
   if (!Array.isArray(index)) return false;
   const want = new Set(derivedIndex(node));
-  return index.length === want.size && index.every((k) => typeof k === 'string' && want.has(k));
+  // Exactly the cells' keys: same count, no repeats (['a','a'] against {a,b} is stale), every one a cell.
+  return index.length === want.size && new Set(index).size === index.length
+    && index.every((k) => typeof k === 'string' && want.has(k));
 }
 
-/** The graph with every present-but-stale `interventionKeys` re-derived; the ORIGINAL reference when none is. */
+/**
+ * The graph with every present-but-stale `interventionKeys` re-derived; the ORIGINAL reference when none is.
+ *
+ * ⚠ THE STORED-BYTES GUARDS COMPARE AGAINST THIS, NOT THE RAW BASE (#2084 re-review, major). Before this module,
+ * staging's own option-level writer added a cell and kept the index, so saved examples are ALREADY stored with stale
+ * indexes (served pricing: 3 keys against 4 cells). Their only drift from the persisted form is this derived field, so
+ * `optionInterventionBatchPostimageIsScoped`, `factorValuesPostimageIsScoped`, `isProvenanceOnlyEdgeConfirmation` and
+ * the two writer base checks take `reindexInterventionKeys(before)` as the base. Any OTHER drift still refuses.
+ */
 export function reindexInterventionKeys<T>(graph: T): T {
   if (!isRec(graph) || !Array.isArray(graph.nodes)) return graph;
   if (graph.nodes.every(interventionKeysFollowInterventions)) return graph;
   return {
     ...graph,
     nodes: graph.nodes.map((node) =>
-      interventionKeysFollowInterventions(node) ? node : { ...(node as Rec), interventionKeys: derivedIndex(node as Rec) }),
+      interventionKeysFollowInterventions(node) ? node : reindexed(node as Rec)),
   };
+}
+
+function reindexed(node: Rec): Rec {
+  if (Array.isArray(node.interventionKeys)) return { ...node, interventionKeys: derivedIndex(node) };
+  const { interventionKeys: _malformed, ...rest } = node;
+  return rest;
 }

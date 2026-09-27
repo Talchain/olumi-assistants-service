@@ -66,7 +66,7 @@ import { evaluateEditGraphMutations } from '../handlers/edit-graph-referee-gate.
 import { threadHoldsThroughMutatingCommit } from '../handlers/hold-thread-through.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
-import { interventionKeysFollowInterventions } from '../reindex-intervention-keys.js';
+import { interventionKeysFollowInterventions, reindexInterventionKeys } from '../reindex-intervention-keys.js';
 import { reconcileTopLevelOptionsFromNodes } from '../reconcile-top-level-options.js';
 import { APPROVED_LEVEL_ADOPTION_SOURCE, approvedLevelSourceFor, runWithApprovedAdoption } from '../agent-lane/approved-adoption-context.js';
 import { structuralEdgeValue } from '../routing/add-option-transaction.js';
@@ -148,11 +148,13 @@ export function optionInterventionPostimageIsScoped(
  * or link the batch did not declare.
  */
 export function optionInterventionBatchPostimageIsScoped(
-  before: unknown,
+  storedBefore: unknown,
   after: unknown,
   targets: readonly OptionLevelTarget[],
   addedLinks: readonly { readonly from: string; readonly to: string }[] = [],
 ): boolean {
+  // The base with the UI's derived index in step: a stale index is not the writer's change (`reindexInterventionKeys`).
+  const before = reindexInterventionKeys(storedBefore);
   if (!isEditableGraph(before) || !isEditableGraph(after)) return false;
   if (!isDeepStrictEqual(projectGraphForPersistence(before), before)) return false;
   if (targets.length === 0 || new Set(targets.map(t => `${t.optionId}::${t.factorId}`)).size !== targets.length) return false;
@@ -207,7 +209,7 @@ export function optionInterventionBatchPostimageIsScoped(
     const oldNode = before.nodes.find(node => node.id === optionId)!;
     const newNode = after.nodes.find(node => node.id === optionId)!;
     const restoredNode = restored.nodes.find(node => node.id === optionId)!;
-    if (Object.hasOwn(oldNode, 'interventionKeys') && Object.hasOwn(restoredNode, 'interventionKeys')
+    if (Object.hasOwn(oldNode, 'interventionKeys') && Array.isArray(restoredNode.interventionKeys)
       && interventionKeysFollowInterventions(newNode)) {
       restoredNode.interventionKeys = structuredClone(oldNode.interventionKeys);
     }
@@ -280,7 +282,8 @@ export function applyOptionInterventionBatch(input: OptionInterventionBatchTrans
   if (written.length === 0) return { kind: 'unchanged' };
   const before = input.persistedGraph;
   if (!isEditableGraph(before)) return refuse('canonical_graph_unavailable');
-  if (!isDeepStrictEqual(projectGraphForPersistence(before), before)) {
+  // Only a stale derived index may differ from the persisted form; the commit's projection brings it into step.
+  if (!isDeepStrictEqual(projectGraphForPersistence(before), reindexInterventionKeys(before))) {
     return refuse('unrelated_canonical_repair_required');
   }
   try {
@@ -364,7 +367,9 @@ type ValueHandlerFact = Extract<FactorValueEditResult, { kind: 'mutated' }>['han
  * node, edge, size, option or top-level field.
  */
 const VALUE_WRITER_OWNED_NODE_MEMBERS = ['observed_state', 'display_value', 'provenance', 'scale_frame'] as const;
-export function factorValuesPostimageIsScoped(before: unknown, after: unknown, factorIds: readonly string[]): boolean {
+export function factorValuesPostimageIsScoped(storedBefore: unknown, after: unknown, factorIds: readonly string[]): boolean {
+  // The base with the UI's derived index in step: a stale index is not the writer's change (`reindexInterventionKeys`).
+  const before = reindexInterventionKeys(storedBefore);
   if (!isEditableGraph(before) || !isEditableGraph(after)) return false;
   if (factorIds.length === 0 || new Set(factorIds).size !== factorIds.length) return false;
   const restored = structuredClone(after);
@@ -578,7 +583,8 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   let valueConfirmations: readonly string[] = [];
   let linksResized: readonly { from: string; to: string }[] = [];
   if (values.length + frames.length > 0) {
-    if (!isEditableGraph(before) || !isDeepStrictEqual(projectGraphForPersistence(before), before)) {
+    if (!isEditableGraph(before)
+      || !isDeepStrictEqual(projectGraphForPersistence(before), reindexInterventionKeys(before))) {
       return { kind: 'refused', reason: 'canonical_graph_unavailable' };
     }
     if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };

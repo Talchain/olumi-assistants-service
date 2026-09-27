@@ -140,6 +140,73 @@ describe("a saved example's stamps survive every write", () => {
     expect(optionInterventionPostimageIsScoped(g, tampered, target, link)).toBe(false);
   });
 
+  it('a repeated key is a stale index, never "in step": it is re-derived, and the guard refuses it', () => {
+    const g = structuredClone(STORED);
+    const opt = options(g)[0]!;
+    const cells = cellsOf(opt);
+    expect(cells.length, 'not vacuous: the option has two or more cells').toBeGreaterThan(1);
+    opt.interventionKeys = cells.map(() => cells[0]!);
+    expect(indexOf(node(projectGraphForPersistence(g) as Rec, opt.id as string))).toEqual(cells);
+  });
+
+  /**
+   * ⚠ LEGACY BYTES (#2084 re-review, major): before this PR, staging's own option-level writer added a cell and KEPT the
+   * index, so saved examples are already stored with a stale one (served pricing: 3 keys against 4 cells). The only drift
+   * is the derived index, so every write must still commit on them, exactly as it does on staging.
+   */
+  const legacy = () => {
+    const g = structuredClone(STORED);
+    const stale = options(g).find((o) => o.id !== 'opt_hybrid' && cellsOf(o).length > 1)!;
+    stale.interventionKeys = cellsOf(stale).slice(0, -1);
+    return { g, staleId: stale.id as string };
+  };
+
+  it('⭐ LEGACY: an option-level write commits on a graph stored with a stale index, and the commit brings every index into step', () => {
+    const { g, staleId } = legacy();
+    expect(projectGraphForPersistence(g), 'premise: the stored bytes are not the persisted form').not.toEqual(g);
+    const c = applyOptionInterventionEdit({ persistedGraph: g, optionId: 'opt_hybrid', factorId: 'fac_market_competition', modelValue: 0.3,
+      expectedGraphHash: computeAnalysisAffectingGraphHash(g as never)!, scenarioId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      turnId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', requestId: 'req-legacy', freshness: 'none', hasExistingAnalysis: false } as never);
+    expect(c.kind, JSON.stringify(c)).toBe('candidate');
+    const after = (c as { graph: Rec }).graph;
+    for (const o of options(after)) expect(indexOf(o), String(o.id)).toEqual(cellsOf(o));
+    expect(indexOf(node(after, staleId))).toEqual(cellsOf(node(after, staleId)));
+  });
+
+  it('⭐ LEGACY: a value write and a link confirm on it are admitted by their stored-bytes guards', async () => {
+    const { g } = legacy();
+    const event = { kind: 'factor_value_edit', target_id: TARGET, value: 0.5 };
+    const payload = { kind: 'system_event', turn_id: 'turn-value', scenario_id: 'scn-1', stage: 'analyse', event };
+    const r = await applyFactorValueEdit({ payload, event, requestId: 'req-value', persistedGraph: structuredClone(g), priorFacts: [] } as never);
+    expect(r.kind).toBe('mutated');
+    const after = projectGraphForPersistence((r as { mutatedGraph: Rec }).mutatedGraph) as Rec;
+    expect(factorValuesPostimageIsScoped(g, after, [TARGET])).toBe(true);
+    const stored = edgeOf(g, LINK.from, LINK.to);
+    const mean = (stored.strength as { mean: number }).mean;
+    const confirm = { kind: 'edge_strength_edit', ...LINK, magnitude: Math.abs(mean), direction_intent: 'preserve',
+      expected: { mean, effect_direction: stored.effect_direction }, intent: 'confirm_current' };
+    const c = await applyEdgeStrengthEdit({ payload: { ...payload, turn_id: 'turn-confirm', event: confirm }, event: confirm,
+      requestId: 'req-confirm', persistedGraph: structuredClone(g) } as never);
+    expect(c.kind, JSON.stringify((c as { reason?: unknown }).reason ?? null)).toBe('mutated');
+  });
+
+  it('CONTRAST: a base whose drift is anything but the index still refuses the option-level write', () => {
+    const { g } = legacy();
+    const goal = nodes(g).find((n) => n.kind === 'goal')!;
+    goal.threshold_source = null;
+    const c = applyOptionInterventionEdit({ persistedGraph: g, optionId: 'opt_hybrid', factorId: 'fac_market_competition', modelValue: 0.3,
+      expectedGraphHash: computeAnalysisAffectingGraphHash(g as never)!, scenarioId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      turnId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', requestId: 'req-legacy-null', freshness: 'none', hasExistingAnalysis: false } as never);
+    expect(c).toEqual({ kind: 'refused', reason: 'unrelated_canonical_repair_required' });
+  });
+
+  it('a malformed (non-array) index is dropped as absence, never rebuilt: CEE does not mint UI state', () => {
+    const g = structuredClone(STORED);
+    const opt = options(g)[0]!;
+    opt.interventionKeys = 'x';
+    expect(Object.hasOwn(node(projectGraphForPersistence(g) as Rec, opt.id as string), 'interventionKeys')).toBe(false);
+  });
+
   it('a graph whose index is in step is a fixed point of the persisted form (the stored-bytes guards accept it)', () => {
     expect(projectGraphForPersistence(STORED)).toBe(STORED);
     for (const o of options(STORED)) expect(indexOf(o), String(o.id)).toEqual(cellsOf(o));
