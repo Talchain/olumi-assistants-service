@@ -83,7 +83,6 @@ import { applyGoalTargetEdit, type GoalTargetEditResult } from './goal-target-ed
 import { applyLimitEdit } from './limit-edit.js';
 import { dispatchAddRiskTransaction } from '../handlers/add-risk-dispatch.js';
 import { buildHeldSupersessionNotice } from '../handlers/edit-graph-referee-gate.js';
-import { modelVersionMutationReceiptFromResponse } from '../model-management/mutation-receipt.js';
 import { applyStructuralDelete } from './structural-delete.js';
 import { applyStructuralAdd, findFabricatedLevel } from './structural-add.js';
 import {
@@ -2753,6 +2752,20 @@ async function dispatchOptionInterventionEdit(
 }
 
 /**
+ * The PRE-WRITE referee input: the analysis freshness of the base a writer is about to referee against, from the prior
+ * facts it already read (a degraded read is `unknown`, never a guess). ONE derivation shared by the option-level batch and
+ * the add-risk door (SLICE C2), so the second in-process writer adds no derivation seam (the anti-rederivation pin).
+ */
+function preWriteRefereeFreshness(
+  priorFactsRead: Awaited<ReturnType<typeof loadPriorFactsWithReadState>>,
+  baseGraphHash: string,
+): FrameFreshness {
+  return priorFactsRead.status === 'ok'
+    ? deriveAnalysisFreshness(priorFactsRead.facts, baseGraphHash).freshness
+    : 'unknown';
+}
+
+/**
  * ⭐ ONE USER OPERATION → ONE ATOMIC COMMIT for a WHOLE approved batch of option levels (ChatGPT #70 5847200462,
  * Runtime 5847274522). The single `option_intervention_edit` event is this with one target. The Agent reaches a
  * batch IN-PROCESS (`commitOptionLevelsInProcess`) — no wire member is added (`SystemEventSchema` is `.strict()`).
@@ -2793,10 +2806,7 @@ export async function dispatchOptionLevelsBatch(
     return { response: buildAcknowledgementResponse(payload), commitPerformed: false, graph: null };
   }
 
-  const freshness: FrameFreshness =
-    priorFactsRead.status === 'ok'
-      ? deriveAnalysisFreshness(priorFactsRead.facts, batch.base_graph_hash).freshness
-      : 'unknown';
+  const freshness: FrameFreshness = preWriteRefereeFreshness(priorFactsRead, batch.base_graph_hash);
   const hasExistingAnalysis =
     priorFactsRead.status === 'ok' && priorFactsRead.facts.some(isSuccessfulRunAnalysisFact);
 
@@ -3162,7 +3172,11 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
  */
 export type HoldAddRiskInput = {
   readonly scenario_id: string;
-  /** Deterministic per request (the Agent derives it): the idempotency key of the hold's turn row. */
+  /**
+   * The hold's own turn row (a v4 uuid). A fresh one per offer: a re-offer of the same risk after an earlier hold lapsed
+   * must write its row, and a second hold for the same risk shares its `gmh_` handle, so the carry-forward retires the
+   * older one — still ONE live hold.
+   */
   readonly turn_id: string;
   /** The analysis-space hash of the model the proposal was built against. */
   readonly base_graph_hash: string;
@@ -3213,8 +3227,7 @@ export async function holdAddRiskInProcess(input: HoldAddRiskInput, requestId: s
   // Freshness for the referee's frame gate, exactly as the option-level door reads it (a failed read is 'unknown').
   let freshness: FrameFreshness = 'unknown';
   try {
-    const facts = await loadPriorFactsWithReadState(input.scenario_id, requestId);
-    freshness = facts.status === 'ok' ? deriveAnalysisFreshness(facts.facts, currentHash).freshness : 'unknown';
+    freshness = preWriteRefereeFreshness(await loadPriorFactsWithReadState(input.scenario_id, requestId), currentHash);
   } catch {
     freshness = 'unknown';
   }
@@ -3294,7 +3307,11 @@ export type CommitLimitEditResult =
   | {
       readonly status: 'committed';
       readonly graph_hash: string;
-      readonly receipt: { readonly version: number; readonly version_id: string; readonly mutation_id: string; readonly source_turn_id: string | null } | null;
+      /**
+       * The committed response's `model_version_receipt`, passed through UNPARSED: this module is not a sanctioned
+       * Model Management call site, so the Agent reads it with the lane's one parser (`receiptSummaryOf`).
+       */
+      readonly model_version_receipt: unknown;
       /** The row exactly as the committed model holds it. */
       readonly row: { readonly constraint_id: string; readonly value: number; readonly unit?: string; readonly value_frame?: string; readonly provenance?: string };
     }
@@ -3338,17 +3355,10 @@ export async function commitLimitEditInProcess(input: CommitLimitEditInput, requ
     .filter((c) => c['node_id'] === input.node_id && c['operator'] === input.operator);
   const row = held.length === 1 ? held[0]! : undefined;
   if (row === undefined || typeof row['constraint_id'] !== 'string' || typeof row['value'] !== 'number') return { status: 'unconfirmed' };
-  let receipt: Extract<CommitLimitEditResult, { status: 'committed' }>['receipt'] = null;
-  try {
-    const parsed = modelVersionMutationReceiptFromResponse(r.response);
-    if (parsed !== null) receipt = { version: parsed.sequence, version_id: parsed.version_id, mutation_id: parsed.mutation_id, source_turn_id: parsed.source_turn_id };
-  } catch {
-    receipt = null;
-  }
   return {
     status: 'committed',
     graph_hash: graphHash,
-    receipt,
+    model_version_receipt: (r.response as { model_version_receipt?: unknown }).model_version_receipt,
     row: {
       constraint_id: row['constraint_id'],
       value: row['value'],

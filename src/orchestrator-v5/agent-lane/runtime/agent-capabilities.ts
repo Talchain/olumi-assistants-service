@@ -2652,11 +2652,13 @@ export function createAgentCapabilities(
             detail: 'The limit was written, but what the model now holds could not be confirmed. Tell the user plainly that it could not be confirmed, '
               + 'offer to check the model again, and never say it was changed or that it was not.' };
         }
-        const receipts = res.receipt !== null ? [{ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' }] : [];
+        const receipt = receiptSummaryOf({ model_version_receipt: res.model_version_receipt });
+        const receipts = receipt.summary !== null ? [receipt.summary] : [];
         proposals.markApplied(pid, receipts);
         const words = v.operator === '<=' ? 'at most' : 'at least';
         return {
           ok: true, mutated: true, applied: true, proposal_id: pid, operation_id: operationId, receipts,
+          ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
           follow_up: `The limit on "${label}" is now ${words} ${figure(v.raw_value)} (it was ${figure(v.before)}), as you stated it.`,
         };
       }
@@ -4377,7 +4379,8 @@ export function createAgentCapabilities(
       const riskId = built.proposal.riskId;
       const res = await opts.holdAddRisk({
         scenario_id: ctx.scenario_id,
-        turn_id: authorisationTurnId(`agent_add_risk:${ctx.scenario_id}:${g.graph_hash}:${JSON.stringify({ label, links })}`),
+        // A fresh row per offer (see `HoldAddRiskInput.turn_id`): a lapsed hold never blocks offering the same risk again.
+        turn_id: randomUUID(),
         base_graph_hash: g.graph_hash,
         risk: { id: riskId, label },
         links,
