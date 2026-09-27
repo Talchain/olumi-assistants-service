@@ -4573,6 +4573,8 @@ export async function runTurnExecutor(
         const outcome = executeGmHeldResume({
           operations: read.operations,
           ...(read.envelopeCap !== undefined ? { envelopeCap: read.envelopeCap } : {}),
+          // A new switch's today-0 lands in this same apply (Canonical #70 5854919806 item 1).
+          ...(read.switchFactorIds !== undefined ? { switchFactorIds: read.switchFactorIds } : {}),
           currentGraph: gmBaseGraph,
           currentGraphHash: gmBaseHash,
           freshness: freshness?.freshness ?? 'unknown',
@@ -4822,9 +4824,11 @@ export async function runTurnExecutor(
           }
           const preStepGraph = workingGraph;
           const stepCap = reads[i]!.envelopeCap;
+          const stepSwitches = reads[i]!.switchFactorIds;
           const outcome = executeGmHeldResume({
             operations: reads[i]!.operations,
             ...(stepCap !== undefined ? { envelopeCap: stepCap } : {}),
+            ...(stepSwitches !== undefined ? { switchFactorIds: stepSwitches } : {}),
             currentGraph: preStepGraph,
             currentGraphHash: workingHash,
             freshness: freshness?.freshness ?? 'unknown',

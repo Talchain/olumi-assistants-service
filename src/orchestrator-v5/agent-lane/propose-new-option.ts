@@ -51,6 +51,11 @@ export interface NewOptionRequest {
 export interface NewFactorRequest {
   readonly label: string;
   readonly affects: readonly { readonly label: string; readonly direction?: 'positive' | 'negative' }[];
+  /**
+   * The Agent's TYPED word for what the option does to it (Canonical #70 5854919806 item 1): `'switch'` when the option
+   * simply turns it on — off today, on under the option — and `'graded'` (or absent) for an amount or a rate.
+   */
+  readonly kind?: 'switch' | 'graded';
 }
 
 export interface PlannedNewFactor {
@@ -58,6 +63,8 @@ export interface PlannedNewFactor {
   readonly key: string;
   readonly label: string;
   readonly affects: readonly { readonly node_id: string; readonly label: string; readonly effect_direction: 'positive' | 'negative' }[];
+  /** Present ONLY for a switch, so a graded factor's plan is byte-identical to before. */
+  readonly kind?: 'switch';
 }
 
 export interface NewFactorRefusal {
@@ -69,7 +76,8 @@ export interface NewFactorRefusal {
     | 'no_such_target'
     | 'ambiguous_target'
     | 'target_is_a_lever'
-    | 'target_not_linkable';
+    | 'target_not_linkable'
+    | 'new_factor_kind_invalid';
   readonly detail: string;
 }
 
@@ -242,6 +250,12 @@ export function planNewFactors(
           ? 'A new factor needs a name. Nothing was prepared.'
           : `The model already has "${String(clash!.label)}". Nothing was prepared: name it in acts_on instead of adding it again.` };
     }
+    // Typed only: `switch`, `graded` or nothing. Any other word is refused, never read as either.
+    const kind: unknown = (r as { kind?: unknown } | undefined)?.kind;
+    if (kind !== undefined && kind !== 'switch' && kind !== 'graded') {
+      return { ok: false, refusal: 'new_factor_kind_invalid',
+        detail: `"${label}" was given kind "${String(kind)}". Nothing was prepared. Use kind "switch" only when the option simply turns it on; otherwise leave kind out.` };
+    }
     const wanted = (r?.affects ?? []).map((a) => ({ label: String(a?.label ?? '').trim(), direction: a?.direction })).filter((a) => a.label !== '');
     if (wanted.length === 0) {
       return { ok: false, refusal: 'new_factor_affects_nothing',
@@ -279,7 +293,7 @@ export function planNewFactors(
     const key = keyOf(label, keys);
     keys.add(key);
     // No unit here (Canonical 5844014025): with no value on this path there is nothing for it to belong to.
-    factors.push({ key, label, affects });
+    factors.push({ key, label, affects, ...(kind === 'switch' ? { kind: 'switch' as const } : {}) });
   }
   return { ok: true, factors };
 }

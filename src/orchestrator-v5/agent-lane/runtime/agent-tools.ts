@@ -237,6 +237,13 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
               direction: { type: 'string', enum: ['positive', 'negative'], description: 'Whether raising this factor raises (positive) or lowers (negative) it: from the user\u2019s words, or where it is plain from the option itself (a paid add-on adds revenue); if it is unclear, ask. The preview names it so the user can correct it.' },
             }, ['label', 'direction']),
           },
+          kind: {
+            type: 'string', enum: ['switch', 'graded'],
+            description: '"switch" when the option simply turns this ON \u2014 something not in place today that the option puts in place '
+              + '(grandfathering existing customers, launching a feature). It is then added as off today, Olumi\u2019s reading for the user '
+              + 'to correct, and on under every option that acts on it: give it no level. Leave kind out for an amount or a rate '
+              + '(a price, a share of customers): its current value and the option\u2019s level are asked for.',
+          },
         }, ['label', 'affects']),
       },
       rationale: { type: 'string', description: 'Why this option is worth comparing, in the user\u2019s terms.' },

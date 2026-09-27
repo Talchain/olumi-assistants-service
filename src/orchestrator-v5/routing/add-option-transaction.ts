@@ -435,7 +435,10 @@ export type AddOptionsSkipReason =
   | 'affects_target_invalid'
   | 'new_factor_unreachable'
   | 'new_factor_not_found'
-  | 'new_factor_unused';
+  | 'new_factor_unused'
+  // A new SWITCH (`kind: 'switch'`) that an option acting on it does not switch ON (level exactly a bare 1 — a 1 that
+  // carries a unit or a raw figure is an amount, not on): refused, never guessed (Canonical #70 5854919806 item 1).
+  | 'new_switch_not_switched_on';
 
 export type AddOptionsBuildResult =
   | {
@@ -446,6 +449,12 @@ export type AddOptionsBuildResult =
       readonly operations: PatchOperation[];
       /** Factors this batch ADDS, so a caller names them by label (the pre-edit graph does not have them). */
       readonly newFactors: ReadonlyArray<{ readonly id: string; readonly label: string }>;
+      /**
+       * The new factors this batch adds as a 0/1 SWITCH (`kind: 'switch'`), by id. Absent when there are none, so every
+       * other build is byte-identical. The hold records them (`GM_HELD_SWITCH_FACTORS_KEY`) and the confirm writes each
+       * one's today-0 in the SAME apply as the option (`stampNewSwitchFactors`).
+       */
+      readonly switchFactorIds?: readonly string[];
     }
   | { readonly matched: false; readonly reason: AddOptionsSkipReason; readonly index?: number; readonly sameAs?: SameLevelsAs };
 
@@ -462,13 +471,27 @@ export type AddOptionsBuildResult =
  *
  * STRICT on purpose: the add-option spec is non-strict, so an unknown key there is dropped silently — the
  * exact way a "unit" or "current value" would vanish. There is no carrier for a value on this path (R4
- * screens `add_node` for `source`), so a factor's current value is set afterwards through the value path,
- * which records who said it.
+ * screens `add_node` for `source`), so a GRADED factor's current value is set afterwards through the value
+ * path, which records who said it.
+ *
+ * ⭐ A SWITCH IS THE ONE EXCEPTION (Canonical #70 5854919806 item 1; AIQ 5854838919; DL 5854812811 / MG 5854956233,
+ * Paul's `90b8f080`: "£59 for new Pro customers; grandfather existing customers" landed with grandfathering unset, so
+ * the option duplicated "£59" and the factor ranked as Driver 1 over an unbounded prior). `kind: 'switch'` says the
+ * option simply turns the factor ON: every option acting on it sets it to exactly 1, and today it is 0 — OLUMI'S
+ * reading of the option's framing (`cee_inference`), never the user's and never source-less. That today-0 cannot ride
+ * the `add_node` op (R4 screens `source`/`raw_value` there, and a producer must never be let past that), so it is
+ * written by CEE's own confirm, post-referee and pre-apply, into the SAME apply as the option (`stampNewSwitchFactors`)
+ * — the carrier `stampUserEditProvenance` already uses for the user's own stamp. One approval, one commit; never a
+ * follow-up value write. Its spelling is the magnitude contract's existing switch (`isSwitch`: frame 1 read from levels
+ * that are all 0 or 1, both in use) — no `scale_frame`, no unit, no new member. `kind` absent (or `'graded'`) is the
+ * factor exactly as before: valueless, asked, never 0.
  */
 const NewFactorSpecSchema = z
   .object({
     /** The batch-local handle an option's intervention names it by (`factor_key`). */
     key: z.string().min(1),
+    /** `'switch'`: the option turns it on (see above). Absent = `'graded'`, today's behaviour byte for byte. */
+    kind: z.enum(['switch', 'graded']).optional(),
     factor_id: z.string().min(1).optional(),
     label: z.string().min(1),
     affects: z
@@ -542,6 +565,8 @@ type NewFactorPlan =
       readonly factors: ReadonlyArray<{ readonly key: string; readonly id: string; readonly label: string }>;
       readonly nodeOps: PatchOperation[];
       readonly edgeOps: PatchOperation[];
+      /** New factors declared `kind: 'switch'`, by id, in request order. */
+      readonly switchIds: readonly string[];
       readonly view: AddOptionGraphView;
     }
   | { readonly ok: false; readonly reason: AddOptionsSkipReason };
@@ -553,6 +578,7 @@ function planNewFactors(raw: unknown, graph: AddOptionGraphView): NewFactorPlan 
   const factors: { key: string; id: string; label: string }[] = [];
   const nodeOps: PatchOperation[] = [];
   const edgeOps: PatchOperation[] = [];
+  const switchIds: string[] = [];
   for (const spec of parsed.data) {
     if (view.nodes.some((n) => sameLabel(n.label, spec.label))) return { ok: false, reason: 'new_factor_exists' };
     let id: string;
@@ -569,7 +595,9 @@ function planNewFactors(raw: unknown, graph: AddOptionGraphView): NewFactorPlan 
       if (!isAffectsTarget(findNode(graph, a.node_id))) return { ok: false, reason: 'affects_target_invalid' };
     }
     if (!spec.affects.some((a) => reachesGoal(graph, a.node_id))) return { ok: false, reason: 'new_factor_unreachable' };
+    // The node op is the same bare shape for a switch: its today-0 is CEE's own stamp at the confirm (see the schema).
     nodeOps.push({ op: 'add_node', path: id, value: { id, kind: 'factor', label: spec.label, category: 'controllable' } });
+    if (spec.kind === 'switch') switchIds.push(id);
     for (const a of spec.affects) {
       edgeOps.push({ op: 'add_edge', path: `${id}::${a.node_id}`, value: hypothesisEdgeValue(id, a.node_id, a.effect_direction) });
     }
@@ -579,7 +607,7 @@ function planNewFactors(raw: unknown, graph: AddOptionGraphView): NewFactorPlan 
       edges: [...view.edges, ...spec.affects.map((a) => ({ from: id, to: a.node_id }))],
     };
   }
-  return { ok: true, factors, nodeOps, edgeOps, view };
+  return { ok: true, factors, nodeOps, edgeOps, switchIds, view };
 }
 
 /** Rewrite `{factor_key}` interventions to the batch's own ids; `null` when one names no new factor. */
@@ -652,6 +680,26 @@ export function buildAddOptionsTransaction(
   // A factor no option sets is not what this path is for: refuse rather than add a stray lever.
   const used = new Set(built.proposals.flatMap((p) => [...p.configuredFactorIds, ...p.linkedUnvaluedFactorIds]));
   if (!plan.factors.every((f) => used.has(f.id))) return { matched: false, reason: 'new_factor_unused' };
+  // ⭐ A SWITCH IS SWITCHED ON by every option that acts on it: its level is exactly 1. Unset, or any other level, and
+  // "off today, on under this option" would describe a move the option does not make — refused, never guessed.
+  // ⛔ AND ONLY A BARE 1 (independent verification of A1, round 2): a switch has no level of its own, so a 1 that carries
+  // a unit or a raw figure (£1/month, 1%, 1 hire, "0.5", "50%", 100% as 1) is an amount, never "on" — taken as on, the
+  // user's figure would be dropped without a word and today-0 written as Olumi's. Refused, never guessed.
+  for (let index = 0; index < built.proposals.length; index += 1) {
+    const p = built.proposals[index]!;
+    const bundle = (p.operations[0]!.value as { interventions?: unknown }).interventions;
+    const levels = levelsOf(bundle);
+    for (const id of plan.switchIds) {
+      const acts = p.configuredFactorIds.includes(id) || p.linkedUnvaluedFactorIds.includes(id);
+      if (!acts) continue;
+      const entry: unknown = bundle !== null && typeof bundle === 'object' ? (bundle as Record<string, unknown>)[id] : undefined;
+      const carriesUnit = entry !== null && typeof entry === 'object' && 'unit' in entry;
+      const carriesRawFigure = entry !== null && typeof entry === 'object' && 'raw_value' in entry;
+      if (levels.get(id) !== 1 || carriesUnit || carriesRawFigure) {
+        return { matched: false, reason: 'new_switch_not_switched_on', index };
+      }
+    }
+  }
 
   // ORDER (pinned with Runtime, #70 5844014025): the first option's add_node (the held change's handle) →
   // every new factor node → decision→option → factor→affects → option→factor → any further options' ops.
@@ -664,7 +712,75 @@ export function buildAddOptionsTransaction(
     proposals: built.proposals,
     operations: [firstOps[0]!, ...plan.nodeOps, firstOps[1]!, ...plan.edgeOps, ...firstOps.slice(2), ...laterOps],
     newFactors: plan.factors.map((f) => ({ id: f.id, label: f.label })),
+    ...(plan.switchIds.length > 0 ? { switchFactorIds: [...plan.switchIds] } : {}),
   };
+}
+
+// ---------------------------------------------------------------------------
+// ⭐ A NEW SWITCH'S TODAY-0, WRITTEN IN THE SAME APPLY AS THE OPTION (Canonical #70 5854919806 item 1)
+// ---------------------------------------------------------------------------
+
+/**
+ * The key the HOLD records a batch's new switches under (`inline_patch.switch_factors`). Written only by the typed
+ * add-option dispatch (CEE's own transaction — no producer mints a hold's `inline_patch`), read only by the confirm.
+ * Absent on every other hold, so their bytes are unchanged.
+ */
+export const GM_HELD_SWITCH_FACTORS_KEY = 'switch_factors';
+
+/**
+ * Today's state of a new switch: OFF, and Olumi's reading of the option's framing (AIQ 5854838919: "it CAN be wrong,
+ * e.g. partly in place already"), so it is counted in "I supplied N values", shown as Olumi's estimate and correctable.
+ * The value writer's own members, spelled as the builders spell an inferred value (`admit-model.ts`
+ * `estimatedObservedState`): `observed_state` {value, raw_value, source `cee_inference`, extractionType `inferred`} and
+ * the node's `provenance: 'ai_inferred'`. No unit and no `scale_frame`: the magnitude contract reads a switch's frame 1
+ * from its levels (`resolveMagnitudeFrame`, `isSwitch`), and a stored frame of 1 would make the value writer refuse the
+ * user's own correction.
+ */
+export const NEW_SWITCH_TODAY = Object.freeze({
+  observed_state: Object.freeze({ value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' }),
+  provenance: 'ai_inferred',
+} as const);
+
+/**
+ * Write each named new switch's today-0 INTO its `add_node` op — CEE's own stamp, run by the confirm AFTER the
+ * re-referee and BEFORE the apply, exactly where `stampUserEditProvenance` writes the user's (`gm-held-execute.ts`).
+ * The applier then writes it, and the one commit carries the factor, its today-0, the option's level 1 and the links.
+ *
+ * FAIL-CLOSED, and by identity: each id must name exactly ONE `add_node` of a FACTOR in this batch that carries no
+ * value yet, and every option this batch adds that sets a level on it must set exactly 1, with at least one doing so.
+ * Anything else is `{ ok: false }` and the caller refuses the whole batch — nothing lands. Pure and total; never
+ * mutates its inputs; with no ids, the operations come back unchanged.
+ */
+export function stampNewSwitchFactors<T extends PatchOperation>(
+  operations: readonly T[],
+  switchFactorIds: readonly string[],
+): { readonly ok: true; readonly operations: T[] } | { readonly ok: false } {
+  if (switchFactorIds.length === 0) return { ok: true, operations: [...operations] };
+  if (new Set(switchFactorIds).size !== switchFactorIds.length) return { ok: false };
+  const out = [...operations];
+  for (const id of switchFactorIds) {
+    const at = out.flatMap((o, i) => (o.op === 'add_node' && o.path === id ? [i] : []));
+    if (at.length !== 1) return { ok: false };
+    const value = out[at[0]!]!.value;
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return { ok: false };
+    const node = value as Record<string, unknown>;
+    if (node.kind !== 'factor' || node.id !== id || 'observed_state' in node || 'data' in node) return { ok: false };
+    let switchedOn = 0;
+    for (const o of out) {
+      if (o.op !== 'add_node' || o.value === null || typeof o.value !== 'object') continue;
+      const v = o.value as { kind?: unknown; interventions?: unknown };
+      if (v.kind !== 'option' || v.interventions === null || typeof v.interventions !== 'object') continue;
+      if (!Object.prototype.hasOwnProperty.call(v.interventions, id)) continue;
+      if (levelsOf(v.interventions).get(id) !== 1) return { ok: false };
+      switchedOn += 1;
+    }
+    if (switchedOn === 0) return { ok: false };
+    out[at[0]!] = {
+      ...out[at[0]!]!,
+      value: { ...node, observed_state: { ...NEW_SWITCH_TODAY.observed_state }, provenance: NEW_SWITCH_TODAY.provenance },
+    };
+  }
+  return { ok: true, operations: out };
 }
 
 function buildOptionsOnly(
