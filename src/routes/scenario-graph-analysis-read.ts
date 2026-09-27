@@ -117,10 +117,12 @@ import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/anal
 import {
   readConstraintVerdictStateFromResult,
   readLeaderLimitRisksFromResult,
+  readLimitVerdictsFromResult,
   deriveEveryOptionLimitVerdict,
   readRatifiedConstraints,
   type ConstraintVerdictState,
   type LeaderLimitRisk,
+  type StoredLimitVerdicts,
 } from '../orchestrator/context/constraint-feasibility.js';
 import { deriveAnalysisFreshness, selectRunAnalysisFact } from '../orchestrator-v5/context/freshness.js';
 import { isScenarioAnalysisReasoningAuthority } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
@@ -160,6 +162,13 @@ export interface ScenarioAnalysisRead {
    * `constraint_results`, so this cannot be derived from `analysis_result`.
    */
   readonly analysis_leader_limit_risks?: LeaderLimitRisk[] | null;
+  /**
+   * B5 (DL 5859845823): the SELECTED fact's own per-limit rows and joint (`constraint_verdict.per_limit` + `joint`),
+   * read by the one reader (`readLimitVerdictsFromResult`) under the SAME gates as `analysis_constraint_verdict_state`,
+   * so they describe exactly the run `analysis_result` came from. ABSENT when that fact attests no rows: absent = not
+   * attested, never defaulted. The Agent turn carries it as its `limit_verdicts` sidecar.
+   */
+  readonly analysis_limit_verdicts?: StoredLimitVerdicts;
 }
 
 const NOT_ANSWERED: ScenarioAnalysisRead = Object.freeze({
@@ -399,6 +408,10 @@ export async function readScenarioAnalysis(
         ? {
             analysis_constraint_verdict_state: readConstraintVerdictStateFromResult(fact.result),
             analysis_leader_limit_risks: readLeaderLimitRisksFromResult(fact.result, readRatifiedConstraints(params.graph)),
+            ...(() => {
+              const limitVerdicts = readLimitVerdictsFromResult(fact.result);
+              return limitVerdicts === null ? {} : { analysis_limit_verdicts: limitVerdicts };
+            })(),
           }
         : {}),
     };
