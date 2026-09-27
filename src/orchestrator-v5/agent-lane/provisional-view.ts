@@ -151,3 +151,56 @@ export function provisionalViewOfTurn(
   }
   return null;
 }
+
+/**
+ * ⭐ C5b — THE VIEW ON THE RUN BUTTON (DL #70 5856336579, option 1: "fold it into the ONE interpreting call"). Paul met
+ * the dead end on the Run button: all 4 Runs in `08bf9a1f` opened "No option can be put forward". Fast path 3 is ONE
+ * interpreting call with NO tools (it may explain, never act), so the view cannot be a tool call there. On a withheld
+ * completed run that same call returns a strict JSON answer instead — the reply, and the view as a typed field — and
+ * the route puts the view through the SAME checks and sidecar as the Agent's `give_provisional_view`. A permitted run
+ * is never asked for one.
+ */
+export const RUN_INTERPRETATION_FORMAT = Object.freeze({
+  type: 'json_schema',
+  name: 'run_interpretation',
+  strict: true,
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['answer', 'provisional_view'],
+    properties: {
+      answer: { type: 'string' },
+      provisional_view: {
+        anyOf: [
+          { type: 'null' },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['view', 'reasoning', 'confirm_step'],
+            properties: { view: { type: 'string' }, reasoning: { type: 'string' }, confirm_step: { type: 'string' } },
+          },
+        ],
+      },
+    },
+  },
+});
+
+/** Appended to the interpreter's instructions ONLY when the run withholds its leader. */
+export const RUN_INTERPRETATION_VIEW_INSTRUCTION =
+  'On this call you have no tools, so give_provisional_view is not available. Answer as JSON. `answer` is your reply to the user, and every rule in these instructions applies to it: it never names, ranks or favours an option. '
+  + '`provisional_view` is your own provisional view, the one give_provisional_view would carry: `view` (what you would do, at most two sentences), `reasoning` (why, from the model’s facts and the user’s own words, at most three sentences) and `confirm_step` (the ONE step that would let the analysis confirm or overturn it, one sentence). '
+  + 'Olumi shows it beneath your reply, labelled as your provisional view and never as the analysis result. Set it to null when you have none. Never write the view in `answer`.';
+
+/**
+ * The typed answer of that one call — or `null` when the text is not it (a plain-text interpretation stays the reply,
+ * exactly as before). The view is checked by the tool's own rules and refused, never repaired, when it breaks them.
+ */
+export function readRunInterpretation(text: string): { readonly answer: string; readonly view: ProvisionalView | null } | null {
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { return null; }
+  const p = parsed as { answer?: unknown; provisional_view?: unknown } | null;
+  if (p === null || typeof p !== 'object' || typeof p.answer !== 'string' || p.answer.trim() === '') return null;
+  if (p.provisional_view === null || p.provisional_view === undefined) return { answer: p.answer, view: null };
+  const checked = checkProvisionalView(p.provisional_view);
+  return { answer: p.answer, view: checked.ok ? checked.view : null };
+}

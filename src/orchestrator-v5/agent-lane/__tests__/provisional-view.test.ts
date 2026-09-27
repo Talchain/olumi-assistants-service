@@ -20,6 +20,7 @@ import {
   provisionalViewSidecar,
   provisionalViewOfTurn,
   type LeaderStanding,
+  readRunInterpretation,
 } from '../provisional-view.js';
 import { AGENT_TOOLS, MUTATION_TOOLS, dispatchTool, toolsFor, type AgentToolContext } from '../runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
@@ -180,5 +181,24 @@ describe('the ROUTE\'s renderer — typed and labelled, never prose (AIC 5855633
       [{ name: 'run_analysis', ok: true, mutated: false }, { name: 'give_provisional_view', ok: true, mutated: false }],
       [{ ok: true, mutated: false }, { ok: true, mutated: false, provisional_view: VIEW }],
     )).toEqual(VIEW);
+  });
+});
+
+describe('C5b — readRunInterpretation: the Run button\'s one call, typed', () => {
+  const V = { view: 'I would hold at £49 this quarter.', reasoning: 'Churn is the risk you named first.', confirm_step: 'Tell me the churn you expect at £59.' };
+  it('the typed answer and a valid view', () => {
+    expect(readRunInterpretation(JSON.stringify({ answer: 'No option can be put forward yet.', provisional_view: V }))).toEqual({ answer: 'No option can be put forward yet.', view: V });
+  });
+  it('a null view → the answer, no view', () => {
+    expect(readRunInterpretation(JSON.stringify({ answer: 'A.', provisional_view: null }))).toEqual({ answer: 'A.', view: null });
+  });
+  it('a view that breaks its limits is refused, never repaired', () => {
+    expect(readRunInterpretation(JSON.stringify({ answer: 'A.', provisional_view: { ...V, confirm_step: 'One. Two.' } }))).toEqual({ answer: 'A.', view: null });
+  });
+  it('not the typed answer → null (plain text, empty answer, wrong shape)', () => {
+    expect(readRunInterpretation('In the current model, the result turns on churn.')).toBeNull();
+    expect(readRunInterpretation(JSON.stringify({ answer: '  ', provisional_view: V }))).toBeNull();
+    expect(readRunInterpretation(JSON.stringify({ reply: 'A.' }))).toBeNull();
+    expect(readRunInterpretation('null')).toBeNull();
   });
 });

@@ -181,34 +181,95 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     expect(b._agent.provisional_view).toEqual({ heading, ...VIEW, because });
   });
 
-  const pressRun = () => {
+  const pressRun = (interpretation: string = REPLY.text) => {
     turnSeq += 1;
     turnId = `7a1b2c3d-4e5f-4a6b-8c7d-${String(turnSeq).padStart(12, '0')}`;
-    callModelOutputs = [[{ type: 'message', content: [{ type: 'output_text', text: REPLY.text }] }]];
+    callModelOutputs = [[{ type: 'message', content: [{ type: 'output_text', text: interpretation }] }]];
     return app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId,
       stage: 'analyse', source: 'chip', message: 'Run analysis.', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } } });
   };
 
   /**
-   * BOUNDARY (kept): the Run button's fast path is ONE interpreting call with no tools (pinned in run-fast-path,
-   * unchecked-limit-no-remedy-clause-pinned, run-answer-completeness, agent-run-reply-answer-shape). A view on THAT
-   * turn needs a second model call — a lead's call, not this slice. The view arrives on the next turn ("what would you
-   * do?", the row above) and on the Agent's own Run.
+   * ⭐ C5b — THE RUN BUTTON (DL #70 5856336579, option 1: "fold it into the ONE interpreting call"). Paul met the dead
+   * end on the Run button: all 4 Runs in `08bf9a1f` opened "No option can be put forward". The fast path stays ONE
+   * interpreting call with no tools (pinned in run-fast-path, unchecked-limit-no-remedy-clause-pinned,
+   * run-answer-completeness, agent-run-reply-answer-shape); on a WITHHELD completed run that one call returns a strict
+   * JSON `{answer, provisional_view}`, and the view goes to the SAME sidecar as the Agent's tool call, after the gate.
    */
-  it('BOUNDARY: the Run BUTTON on a withheld result → exactly ONE interpreting call (no tools), no forced call, no view on that turn', async () => {
-    const r = await pressRun();
+  const pressRunAnswering = (answer: string, view: typeof VIEW | null) => pressRun(JSON.stringify({ answer, provisional_view: view }));
+
+  it('C5b RED: the Run BUTTON on a withheld result → ONE interpreting call, no tools, a strict schema; the labelled view is typed on `_agent`, never in the prose', async () => {
+    const r = await pressRunAnswering(REPLY.text, VIEW);
     expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
     const b = r.json() as Body & { _diagnostic_trace?: { fast_path?: string } };
     expect(b._diagnostic_trace?.fast_path).toBe('run');
     expect(modelRequests, 'exactly one model call').toHaveLength(1);
     expect(modelRequests[0]!['tool_choice']).toBe('none');
     expect(modelRequests[0]!['tools']).toEqual([]);
+    const format = (modelRequests[0]!['text'] as { format?: { type?: string; strict?: boolean } } | undefined)?.format;
+    expect(format?.type, 'the one call returns a typed answer').toBe('json_schema');
+    expect(format?.strict).toBe(true);
+    // The view line is asked for, BEFORE the interpret-only line: the banked Interpreter v0.2 text stays last.
+    const { INTERPRETER_V02_BANKED, INTERPRET_ONLY_CONSTRAINT } = await import('../../../routes/agent-v1-turn.js');
+    const { RUN_INTERPRETATION_VIEW_INSTRUCTION } = await import('../provisional-view.js');
+    const instructions = String(modelRequests[0]!['instructions']);
+    expect(instructions.endsWith(`${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`)).toBe(true);
+    // No tool was called: the view is a field of the interpreting call, never a fabricated tool call.
+    expect(b._agent.tool_calls.map((c) => c.name)).toEqual(['run_analysis']);
+    // The gate is unchanged over the ANSWER: its ranking sentence is gone and the no-leader sentence is there.
+    expect(b.assistant_text).not.toContain(RANKING_SENTENCE.trim());
+    expect(b.assistant_text).toContain(noLeaderSentence);
+    // Typed only: the reply text is the answer, never the JSON and never the view.
+    expect(b.assistant_text).not.toContain('"provisional_view"');
+    expect(b.assistant_text).not.toContain(VIEW.view);
+    expect(b.assistant_text).not.toContain('Provisional view');
+    expect(b._agent.provisional_view).toEqual({ heading, ...VIEW, because });
+    expect(rows.get(turnId)?.assistant_message, 'the answer row a replay returns holds the same text').toBe(b.assistant_text);
+  });
+
+  it('C5b: a view the leader gate would NOT strip (it ranks nothing) still never reaches the prose — typed only', async () => {
+    const quiet = {
+      view: 'I would wait for one month of churn data before changing the price.',
+      reasoning: 'You said churn is the risk that worries you most, and the model cannot check your churn limit yet.',
+      confirm_step: 'Tell me the churn you expect at £59, and I can propose it so the analysis can check the limit.',
+    };
+    const b = (await pressRunAnswering('The analysis cannot put an option forward yet.', quiet)).json() as Body;
+    expect(b.assistant_text).toContain('The analysis cannot put an option forward yet.');
+    expect(b.assistant_text, 'not in the prose, even where the gate would let it through').not.toContain(quiet.view);
+    expect(b.assistant_text).not.toContain(quiet.confirm_step);
+    expect(b._agent.provisional_view).toEqual({ heading, ...quiet, because });
+  });
+
+  it('C5b: the Run button, and the model gives no view (null) → nothing added; the answer is the reply', async () => {
+    const b = (await pressRunAnswering('The analysis cannot put an option forward yet.', null)).json() as Body;
+    expect(modelRequests).toHaveLength(1);
+    expect(b.assistant_text).toContain('The analysis cannot put an option forward yet.');
+    expect(b.assistant_text, 'the reply is the answer, never the JSON').not.toContain('"answer"');
     expect(Object.hasOwn(b._agent, 'provisional_view')).toBe(false);
   });
 
-  it('CONTRAST: the Run button on a result that PERMITS a leader → no forced call, no view', async () => {
+  it('C5b: a view that breaks its own limits is refused, never repaired (3 sentences in `view`) → no view', async () => {
+    const tooLong = { ...VIEW, view: 'I would raise the price. It is stronger. It wins on MRR.' };
+    const b = (await pressRunAnswering(REPLY.text, tooLong)).json() as Body;
+    expect(Object.hasOwn(b._agent, 'provisional_view')).toBe(false);
+    expect(b.assistant_text).not.toContain('It wins on MRR');
+    expect(b.assistant_text, 'the reply is the answer, never the JSON').not.toContain('"provisional_view"');
+    expect(b.assistant_text).toContain(noLeaderSentence);
+  });
+
+  it('C5b: an interpretation that is not the typed answer (plain text) is kept as the reply, with no view', async () => {
+    const b = (await pressRun('In the current model, the result turns on churn.')).json() as Body;
+    expect(b.assistant_text).toContain('In the current model, the result turns on churn.');
+    expect(Object.hasOwn(b._agent, 'provisional_view')).toBe(false);
+  });
+
+  it('CONTRAST: the Run button on a result that PERMITS a leader → no schema is asked for, no view (even if one came back)', async () => {
     readbackState = PERMITTED_STATE;
-    const b = (await pressRun()).json() as Body;
+    const b = (await pressRunAnswering(REPLY.text, VIEW)).json() as Body;
+    expect(modelRequests).toHaveLength(1);
+    expect(modelRequests[0]!['text'], 'a permitted run asks for no view').toBeUndefined();
+    const { RUN_INTERPRETATION_VIEW_INSTRUCTION } = await import('../provisional-view.js');
+    expect(String(modelRequests[0]!['instructions'])).not.toContain(RUN_INTERPRETATION_VIEW_INSTRUCTION);
     expect(modelRequests.filter((q) => (q['tool_choice'] as { name?: unknown } | undefined)?.name === 'give_provisional_view')).toHaveLength(0);
     expect(Object.hasOwn(b._agent, 'provisional_view')).toBe(false);
   });

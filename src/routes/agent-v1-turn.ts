@@ -73,7 +73,16 @@ import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lan
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runDeltaBoundToReadback, runTurnCoaching, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
 import { breakEvenFor, goalNotCheckedLine, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
-import { leaderStandingOf, provisionalViewOfTurn, provisionalViewSidecar } from '../orchestrator-v5/agent-lane/provisional-view.js';
+import {
+  leaderStandingOf,
+  provisionalViewOfTurn,
+  provisionalViewSidecar,
+  readRunInterpretation,
+  RUN_INTERPRETATION_FORMAT,
+  RUN_INTERPRETATION_VIEW_INSTRUCTION,
+  type LeaderStanding,
+  type ProvisionalView,
+} from '../orchestrator-v5/agent-lane/provisional-view.js';
 import {
   bindRunBlocksToReadback,
   firstAnalysisDeadline,
@@ -1009,6 +1018,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         tools: req.tools,
         // Fast path 3 answers over a run Olumi already made: it may interpret, never act.
         ...((req as { tool_choice?: unknown }).tool_choice === 'none' ? { tool_choice: 'none' } : {}),
+        // C5b: on a withheld run that one call answers in a typed shape (`RUN_INTERPRETATION_FORMAT`).
+        ...((req as { text?: unknown }).text !== undefined ? { text: (req as { text?: unknown }).text } : {}),
         max_output_tokens: req.max_output_tokens,
       }),
     });
@@ -1583,6 +1594,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let fastPath: 'approve' | 'run' | 'research' | undefined;
     /** Whether the Run fast path made its one interpreting model call (a failed run makes none). */
     let runInterpreted = false;
+    /** C5b: the view the Run button's one interpreting call gave as a typed field — never composed for it. */
+    let fastPathView: ProvisionalView | null = null;
     let result: AgentTurnResult | undefined;
     if (approvedProposal !== undefined) {
       const fastStartedAt = Date.now();
@@ -1663,6 +1676,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * SAME reader the response's final readback uses — and handed over beside the run.
        */
       let canonicalAfterRun: { analysis_state?: unknown; analysis_ready?: unknown; run_delta?: unknown; run_delta_absence_reason?: string } = {};
+      let standingAfterRun: LeaderStanding | null = null;
       try {
         const st = await readBackState(dispatch, scenarioId);
         /**
@@ -1679,6 +1693,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...(bound.run_delta !== undefined ? { run_delta: bound.run_delta } : {}),
           ...(bound.run_delta_absence_reason !== undefined ? { run_delta_absence_reason: bound.run_delta_absence_reason } : {}),
         };
+        // C5b: the standing on THIS readback, through the wire gate's own predicate (as the sidecar reads it below).
+        standingAfterRun = leaderStandingOf(st);
       } catch { canonicalAfterRun = {}; }
       const runForInterpreter = { ...ran, canonical_state: canonicalAfterRun };
       const callId = `fast_run_${req.id}`.replace(/[^A-Za-z0-9_-]/g, '_');
@@ -1696,6 +1712,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * stands, and only its explanation is missing: the user is told exactly that, from
        * the run's own result, and nothing else is called.
        */
+      /**
+       * ⭐ C5b (DL #70 5856336579, option 1): ONLY a completed run that withholds its leader asks this one call for a
+       * typed answer — the reply and the Agent's provisional view as a field. Still ONE call, no tools, `tool_choice`
+       * none. A permitted run, a failed read and no run on record ask for nothing, exactly as before.
+       */
+      const askView = standingAfterRun !== null && standingAfterRun.analysis_on_record && standingAfterRun.withheld;
       const providerStartedAt = Date.now();
       let interpreted: { answer: string; messages: Record<string, unknown>[] } | undefined;
       // ⛔ A FAILED run is not explained by a model: there is no result to interpret, and the readback's stale state
@@ -1703,7 +1725,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       runInterpreted = ran.refusal !== 'run_failed';
       if (runInterpreted) try {
         const resp = await callModel({
-          instructions: `${AGENT_INSTRUCTIONS}\n\n${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
+          // C5b's line goes BEFORE the interpret-only line, so the banked Interpreter v0.2 text stays last and byte-identical.
+          instructions: `${AGENT_INSTRUCTIONS}\n\n${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
           input: priorAndRun,
           // No tools at all: acting is structurally impossible on this call (and no schema tokens
           // are spent on tools it may not use). Measured against the live API: accepted with the
@@ -1711,15 +1734,27 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           tools: [],
           max_output_tokens: budget.max_output_tokens,
           tool_choice: 'none',
+          ...(askView ? { text: { format: RUN_INTERPRETATION_FORMAT } } : {}),
         } as never);
         const out = (resp.output ?? []) as { type?: string; content?: { type?: string; text?: string }[] }[];
-        const answer = out.filter((o) => o.type === 'message').flatMap((o) => o.content ?? [])
+        const rawAnswer = out.filter((o) => o.type === 'message').flatMap((o) => o.content ?? [])
           .filter((c) => c.type === 'output_text').map((c) => c.text ?? '').join('');
+        // C5b: the typed answer, when asked for and given. A plain-text interpretation stays the reply; JSON that is
+        // not the typed answer is never shown to the user (it is treated as no interpretation).
+        const typed = askView ? readRunInterpretation(rawAnswer) : null;
+        const answer = typed !== null ? typed.answer : askView && rawAnswer.trim().startsWith('{') ? '' : rawAnswer;
+        if (typed !== null) fastPathView = typed.view;
         // ⛔ THE REASONING ITEM TRAVELS WITH ITS MESSAGE (served `f828a61`, witness c9: every turn after a
         // Run was refused "Item 'msg_…' of type 'message' was provided without its required 'reasoning'
         // item", HTTP 502). Kept in output order, exactly as the Agent loop keeps its whole output.
         if (answerIsIncomplete(resp as never)) log.warn({ scenario_id: scenarioId, incomplete_reason: (resp as { incomplete_reason?: unknown }).incomplete_reason ?? null }, 'agent-lane: fast-path interpretation incomplete — answering from the run itself');
-        else if (answer.trim().length > 0) interpreted = { answer, messages: out.filter((o) => o.type === 'reasoning' || o.type === 'message') as Record<string, unknown>[] };
+        else if (answer.trim().length > 0) {
+          interpreted = typed !== null
+            // The history keeps the ANSWER, never the JSON: one id-less assistant message, which needs no reasoning item
+            // (the f828a61 refusal is for a message WITH its id and without its reasoning).
+            ? { answer, messages: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: answer }] }] }
+            : { answer, messages: out.filter((o) => o.type === 'reasoning' || o.type === 'message') as Record<string, unknown>[] };
+        }
         else log.warn({ scenario_id: scenarioId }, 'agent-lane: fast-path interpretation was empty — answering from the run itself');
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: fast-path interpretation failed — answering from the run itself');
@@ -2191,7 +2226,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * for it) AND this FINAL readback still withholds the leader on a completed analysis, by the gate's own predicate.
      * Never in `blocks`, the analysis card or any leader field.
      */
-    const givenView = provisionalViewOfTurn(result.tool_calls, result.tool_results);
+    // C5b: on the Run button the view is the one interpreting call's typed field (`fastPathView`) — the SAME checks follow.
+    const givenView = provisionalViewOfTurn(result.tool_calls, result.tool_results) ?? fastPathView;
     const standing = givenView === null ? null : leaderStandingOf({ analysisState, analysisReady, analysisResult });
     // Typed only (never appended to `assistant_text`): see `provisionalViewSidecar`.
     const provisionalView = givenView !== null && standing !== null && standing.analysis_on_record && standing.withheld
