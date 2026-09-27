@@ -280,6 +280,21 @@ describe('the construction deadline: the arithmetic the route uses', () => {
     expect(constructionDeadline(0, 125_000)).toBe(100_000);
     expect(constructionDeadline(0, 125_000)).toBeLessThan(DEFAULT_HTTP_CLIENT_TIMEOUT_MS);
   });
+
+  /**
+   * ⛔ WHY THERE IS NO "RETRY A CUT-OFF DRAFT" BRANCH (Runtime 5859414906, DL 5859428786 (1)). The ceiling is reached only
+   * after 12000 output tokens; the fastest construction measured ran at ~91 tok/s (a Terra draw cut off at 6000 in 66 s,
+   * Sol tail screen 27 Sep), so the deadline's abort ends the call first and a construction answers `construction_timeout`,
+   * never `max_output_tokens`. A retry for the cut-off could not be reached, so none is written. If the ceiling rises, the
+   * deadline widens, or construction gets faster than this bound, this row goes RED and the question reopens.
+   */
+  it('PINNED: the SENT ceiling cannot be reached before the deadline at 120 tok/s (above the fastest measured, ~91)', async () => {
+    const { constructionDeadline } = await import('../../../routes/agent-v1-turn.js');
+    const { budgetFor } = await import('../model-budgets.js');
+    const FASTEST_ASSUMED_TOKENS_PER_SECOND = 120;
+    const msToReachCeiling = (budgetFor('gpt-5.6-terra', 'whole').max_output_tokens / FASTEST_ASSUMED_TOKENS_PER_SECOND) * 1000;
+    expect(msToReachCeiling).toBeGreaterThanOrEqual(constructionDeadline(0, 125_000));
+  }, 60_000);
 });
 
 describe('the route: a construction call that runs out of turn budget is ONE call, typed, and registers nothing', () => {
