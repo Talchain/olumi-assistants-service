@@ -101,6 +101,22 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
     expect(t!.route_total_ms).toBeGreaterThanOrEqual(t!.total_ms);
   });
 
+  it('RED (C6, #70 5857659587): the trace names every internal dispatch the turn made, timed, with the scenario id masked', async () => {
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
+    } });
+    expect(r.statusCode).toBe(200);
+    const t = (r.json() as { _diagnostic_trace: { timing?: { dispatches?: { path: string; ms: number; status: number }[]; dispatch_ms?: number } } })._diagnostic_trace.timing;
+    const d = t?.dispatches;
+    expect(Array.isArray(d), 'the ledger is on the trace').toBe(true);
+    // Identity: the graph readback and the run itself are named by their route, each once or more.
+    expect(d!.some((x) => x.path === '/assist/v1/scenarios/:scenario/graph' && x.status === 200), JSON.stringify(d)).toBe(true);
+    expect(d!.some((x) => x.path === '/orchestrate/v2/turn'), JSON.stringify(d)).toBe(true);
+    for (const x of d!) expect(typeof x.ms, x.path).toBe('number');
+    expect(JSON.stringify(d), 'the scenario id never travels in the ledger').not.toContain(SCENARIO);
+    expect(t!.dispatch_ms).toBe(d!.reduce((a, x) => a + x.ms, 0));
+  });
+
   /**
    * ⛔ The explicit Run on a WITHHELD verdict (witness c19w on 8428207: "£59 … leads … ~82%" while `leader_claim.permitted` was false):
    * the interpreter's ranking sentence is dropped at the wire whatever it calls the option — this
