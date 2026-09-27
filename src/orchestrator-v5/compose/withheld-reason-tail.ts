@@ -293,7 +293,7 @@ function composeInfeasibleText(
     return (
       ` The condition on your model was checked on this run: ${quoted(label)}. The option this ` +
       `result would otherwise have put forward does not stand up against it, ${NO_OPTION_YET}. ` +
-      'Relax that limit, or bring in an option that can meet it, and run the analysis again.'
+      'Bring in an option that can meet it, or give me a real figure you know, and run the analysis again.'
     );
   }
 
@@ -312,15 +312,15 @@ function composeInfeasibleText(
     return (
       ` The condition on your model was checked on this run, and the option this result ` +
       `would otherwise have put forward does not stand up against it, ${NO_OPTION_YET}. ` +
-      'Relax that limit, or bring in an option that can meet it, and run the analysis again.'
+      'Bring in an option that can meet it, or give me a real figure you know, and run the analysis again.'
     );
   }
 
   return (
     ` All ${constraints.length} conditions on your model were checked on this run, and the ` +
     `option this result would otherwise have put forward does not stand up against one of ` +
-    `them, ${NO_OPTION_YET}. Which one that is has not been recorded on this result. Relax ` +
-    'the limits, or bring in an option that can meet them, and run the analysis again.'
+    `them, ${NO_OPTION_YET}. Which one that is has not been recorded on this result. Bring in ` +
+    'an option that can meet them, or give me a real figure you know, and run the analysis again.'
   );
 }
 
