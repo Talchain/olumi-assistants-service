@@ -1076,17 +1076,30 @@ function admissionModeReasonCode(analysisReady: unknown): string | undefined {
  * limits in their brief that "a limit on your model was not shown to be met".
  */
 export function agentNoLeaderSentence(withheldReason: string | undefined, analysisReady: unknown, limitCauseCodes: readonly string[] = []): string {
+  return sentence(agentNoLeaderClause(withheldReason, analysisReady, limitCauseCodes));
+}
+
+/** The clause `agentNoLeaderSentence` closes on — the why and its one next action — chosen by the SAME rule. */
+function agentNoLeaderClause(withheldReason: string | undefined, analysisReady: unknown, limitCauseCodes: readonly string[] = []): string {
   const mode = permittedAnalysisModeFromAnalysisReady(analysisReady);
   if (mode !== null && mode !== 'comparative_leader') {
     const code = admissionModeReasonCode(analysisReady);
-    if (code !== undefined && BY_ADMISSION_REASON[code] !== undefined) return sentence(BY_ADMISSION_REASON[code]!);
+    if (code !== undefined && BY_ADMISSION_REASON[code] !== undefined) return BY_ADMISSION_REASON[code]!;
   }
   if (withheldReason === WITHHELD_CONSTRAINT_VERDICT) {
     const cause = limitCauseCodes.find((c) => BY_CONSTRAINT_CODE[c] !== undefined);
-    if (cause !== undefined) return sentence(BY_CONSTRAINT_CODE[cause]!);
+    if (cause !== undefined) return BY_CONSTRAINT_CODE[cause]!;
   }
-  if (withheldReason !== undefined && BY_WITHHELD_REASON[withheldReason] !== undefined) return sentence(BY_WITHHELD_REASON[withheldReason]!);
-  return sentence(REASON_NOT_RECORDED);
+  if (withheldReason !== undefined && BY_WITHHELD_REASON[withheldReason] !== undefined) return BY_WITHHELD_REASON[withheldReason]!;
+  return REASON_NOT_RECORDED;
+}
+
+/**
+ * ⭐ C5: the WHY alone — the same clause, up to its next action (every clause puts its ask after a `;`). The Agent's
+ * provisional view says why the analysis cannot confirm it in these words, so the two can never give different causes.
+ */
+export function agentNoLeaderReason(withheldReason: string | undefined, analysisReady: unknown, limitCauseCodes: readonly string[] = []): string {
+  return agentNoLeaderClause(withheldReason, analysisReady, limitCauseCodes).split(';')[0]!.trim();
 }
 
 // ── the projection ─────────────────────────────────────────────────────────────────────────────

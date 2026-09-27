@@ -441,6 +441,32 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       query: { type: 'string', description: 'The exact public search question, one line, at most 200 characters.' },
     }, ['query']),
   },
+  /**
+   * ⭐ C5 — THE AGENT'S PROVISIONAL VIEW (Paul, DL #70 5855324470: "Yes, labelled provisional"). Read-only: it changes
+   * nothing and proposes nothing. The ROUTE renders it after the leader gate, labelled (`../provisional-view.ts`).
+   */
+  {
+    type: 'function',
+    name: 'give_provisional_view',
+    description:
+      'Give YOUR OWN provisional view when the analysis cannot put an option forward yet (a leader may not be named). ' +
+      'This changes nothing. Olumi shows it beneath your reply as ONE paragraph labelled as your provisional view \u2014 ' +
+      'never as the analysis result \u2014 with why the analysis cannot confirm it yet. Call it at most once per reply, and ' +
+      'never write the view in your reply text: a reply sentence that ranks or favours an option is removed. It is refused ' +
+      'when the analysis may name a leading option (then report what the analysis says) or when no analysis has completed.',
+    parameters: obj({
+      view: { type: 'string', description: 'At most 2 sentences: what you would do, in plain words.' },
+      reasoning: {
+        type: 'string',
+        description: 'At most 3 sentences: why, from the model\u2019s own facts and the user\u2019s own words. Never quote win percentages as a ranking.',
+      },
+      confirm_step: {
+        type: 'string',
+        description: 'ONE sentence: the one thing that would let the analysis confirm or overturn this view \u2014 something the user can do, ' +
+          'or a change one of your tools can propose. Never a step that cannot help.',
+      },
+    }, ['view', 'reasoning', 'confirm_step']),
+  },
 ];
 
 export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
@@ -539,6 +565,8 @@ export interface AgentCapabilities {
   proposeGoalCurrentLevel(ctx: AgentToolContext, args: {
     goal_label: string; value: number; unit: string; goal_is: 'at_least' | 'above' | 'at_most' | 'below'; user_stated: boolean;
   }): Promise<ToolResult>;
+  /** C5: the Agent's own provisional view on a withheld turn (`../provisional-view.ts`). Optional: absent ⇒ refused plainly. */
+  giveProvisionalView?(ctx: AgentToolContext, args: { view: string; reasoning: string; confirm_step: string }): Promise<ToolResult>;
 }
 
 export async function dispatchTool(
@@ -599,6 +627,10 @@ export async function dispatchTool(
       return caps.proposeStartingPoint(ctx, args as never);
     case 'propose_goal_current_level':
       return caps.proposeGoalCurrentLevel(ctx, args as never);
+    case 'give_provisional_view':
+      return caps.giveProvisionalView !== undefined
+        ? caps.giveProvisionalView(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A provisional view cannot be given here. Nothing was shown.' };
     case 'offer_public_research': {
       // Pure: nothing is searched here. The route turns the query into the one control that can send it.
       const query = sendableQuery(args.query);

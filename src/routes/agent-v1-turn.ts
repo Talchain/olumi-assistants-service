@@ -74,6 +74,17 @@ import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/outpu
 import { runDeltaBoundToReadback, runTurnNextMove, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
 import { breakEvenFor, goalNotCheckedLine, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
 import {
+  leaderStandingOf,
+  provisionalViewOfTurn,
+  provisionalViewSidecar,
+  readRunInterpretation,
+  RUN_INTERPRETATION_FORMAT,
+  sanitiseProvisionalView,
+  RUN_INTERPRETATION_VIEW_INSTRUCTION,
+  type LeaderStanding,
+  type ProvisionalView,
+} from '../orchestrator-v5/agent-lane/provisional-view.js';
+import {
   bindRunBlocksToReadback,
   firstAnalysisDeadline,
   firstAnalysisSentence,
@@ -397,8 +408,13 @@ const AGENT_INSTRUCTIONS = [
    * framed the result in "winner" / "best option" terms — often to deny one, yet
    * the vocabulary itself casts the finding as picking an answer. The useful move is the one the science supports: point at what the
    * ordering is sensitive to, and let the user change it and see how much it matters.
+   *
+   * ⭐ C5 (Paul, DL #70 5855324470, 27 Sep: "Yes, labelled provisional"): this used to forbid any recommendation and any
+   * step to make an unchecked limit checkable. When a leader cannot be named, the Agent may now give its OWN provisional
+   * view — through `give_provisional_view`, never in its reply text — which the route shows after the leader gate,
+   * labelled, with the one step that would let the analysis confirm it. Every rule about the ANALYSIS result is unchanged.
    */
-  'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one. Name a leading option ONLY when the result you are reporting carries `claim_permissions.leader_may_be_named: true`; an earlier analysis read from get_canonical_state carries no such permission, so never name a leader from it. Otherwise do not name, rank or hint at one, and do not quote win percentages as a ranking, whatever else the result contains \u2014 say in plain words why no option can be put forward yet. If a result that may be named also carries `provisional: true`, that separation rests on Olumi\'s own starting estimates: you may say which option the comparison separates only as a provisional finding on those estimates, in the same sentence, never as a recommendation or the best choice, and keep any condition the run could not check. When `leader_may_be_named` is false, the finding you lead with is why no option can be put forward \u2014 not which option the comparison favours. Do not say, even hedged or \u201con current assumptions\u201d, that any option leads, is favoured, scores or comes out highest, strongest or best, is ahead, or wins in any share of runs; describe robustness and sensitivity without saying which option they favour. Name an assumption the ordering is sensitive to ONLY from the result\u2019s `decision_sensitivity`: when its status is `measured`, name `most_sensitive`, say whether it comes from the user or is Olumi\u2019s estimate (or that its source is not recorded), and offer to change it; when it is `none_measurable`, say that no single assumption measurably changes which option leads; otherwise make no claim about which assumption matters most. When the result is fragile or a near tie, say that this uncertainty is itself the finding. When the run says a limit cannot be checked in this model yet, say so plainly and do not suggest any step, input or model change to make it checkable.',
+  'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never presented as the analysis recommending an option. Never call an option the winner, the best option or the recommended one. Name a leading option ONLY when the result you are reporting carries `claim_permissions.leader_may_be_named: true`; an earlier analysis read from get_canonical_state carries no such permission, so never name a leader from it. Otherwise do not name, rank or hint at one, and do not quote win percentages as a ranking, whatever else the result contains \u2014 say in plain words why no option can be put forward yet. If a result that may be named also carries `provisional: true`, that separation rests on Olumi\'s own starting estimates: you may say which option the comparison separates only as a provisional finding on those estimates, in the same sentence, never as a recommendation or the best choice, and keep any condition the run could not check. When `leader_may_be_named` is false, the finding you lead with is why no option can be put forward \u2014 not which option the comparison favours. Do not say, even hedged or \u201con current assumptions\u201d, that any option leads, is favoured, scores or comes out highest, strongest or best, is ahead, or wins in any share of runs; describe robustness and sensitivity without saying which option they favour. Name an assumption the ordering is sensitive to ONLY from the result\u2019s `decision_sensitivity`: when its status is `measured`, name `most_sensitive`, say whether it comes from the user or is Olumi\u2019s estimate (or that its source is not recorded), and offer to change it; when it is `none_measurable`, say that no single assumption measurably changes which option leads; otherwise make no claim about which assumption matters most. When the result is fragile or a near tie, say that this uncertainty is itself the finding. When the run says a limit cannot be checked in this model yet, say so plainly. When a leader cannot be named, you may give your own provisional view by calling give_provisional_view once: what you would do, your reasoning from the model\u2019s facts and the user\u2019s own words, and the ONE step that would let the analysis confirm or overturn it \u2014 a step the user can take or a change one of your tools can propose, never one that cannot help. Never write that view in your reply text: Olumi shows it beneath your reply, labelled as your provisional view and never as the analysis result, and your reply text still never names, ranks or favours an option.',
   /*
    * ⭐ CHALLENGE → AUTHORISED REVISION → RERUN. Served (F) row F8 on 319dde1: asked to record a link as strong, as
    * the user's own estimate, the Agent said it could not. propose_link_strength reaches the product's own link writer.
@@ -1008,6 +1024,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         tools: req.tools,
         // Fast path 3 answers over a run Olumi already made: it may interpret, never act.
         ...((req as { tool_choice?: unknown }).tool_choice === 'none' ? { tool_choice: 'none' } : {}),
+        // C5b: on a withheld run that one call answers in a typed shape (`RUN_INTERPRETATION_FORMAT`).
+        ...((req as { text?: unknown }).text !== undefined ? { text: (req as { text?: unknown }).text } : {}),
         max_output_tokens: req.max_output_tokens,
       }),
     });
@@ -1543,6 +1561,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           writesDispatched += 1;
           return commitOptionLevelsInProcess(input, String(req.id));
         },
+        // ⭐ C5: the provisional view is accepted only while the analysis withholds its leader — read from THIS route's
+        // readback through the wire gate's own predicate, so the capability and the gate below cannot disagree.
+        readLeaderStanding: async (sid: string) => leaderStandingOf(await readBackState(dispatch, sid)),
         // ⭐ SLICE C2 (Canonical #70 5855234599): the product's add-risk door (ONE held change) and limit door (ONE commit),
         // in-process. Each commits a turn row, so each counts as a write.
         holdAddRisk: async (input) => {
@@ -1589,6 +1610,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let fastPath: 'approve' | 'run' | 'research' | undefined;
     /** Whether the Run fast path made its one interpreting model call (a failed run makes none). */
     let runInterpreted = false;
+    /** C5b: the view the Run button's one interpreting call gave as a typed field — never composed for it. */
+    let fastPathView: ProvisionalView | null = null;
     let result: AgentTurnResult | undefined;
     if (approvedProposal !== undefined) {
       const fastStartedAt = Date.now();
@@ -1669,6 +1692,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * SAME reader the response's final readback uses — and handed over beside the run.
        */
       let canonicalAfterRun: { analysis_state?: unknown; analysis_ready?: unknown; run_delta?: unknown; run_delta_absence_reason?: string } = {};
+      let standingAfterRun: LeaderStanding | null = null;
       try {
         const st = await readBackState(dispatch, scenarioId);
         /**
@@ -1685,6 +1709,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...(bound.run_delta !== undefined ? { run_delta: bound.run_delta } : {}),
           ...(bound.run_delta_absence_reason !== undefined ? { run_delta_absence_reason: bound.run_delta_absence_reason } : {}),
         };
+        // C5b: the standing on THIS readback, through the wire gate's own predicate (as the sidecar reads it below).
+        standingAfterRun = leaderStandingOf(st);
       } catch { canonicalAfterRun = {}; }
       const runForInterpreter = { ...ran, canonical_state: canonicalAfterRun };
       const callId = `fast_run_${req.id}`.replace(/[^A-Za-z0-9_-]/g, '_');
@@ -1702,6 +1728,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * stands, and only its explanation is missing: the user is told exactly that, from
        * the run's own result, and nothing else is called.
        */
+      /**
+       * ⭐ C5b (DL #70 5856336579, option 1): ONLY a completed run that withholds its leader asks this one call for a
+       * typed answer — the reply and the Agent's provisional view as a field. Still ONE call, no tools, `tool_choice`
+       * none. A permitted run, a failed read and no run on record ask for nothing, exactly as before.
+       */
+      const askView = standingAfterRun !== null && standingAfterRun.analysis_on_record && standingAfterRun.withheld;
       const providerStartedAt = Date.now();
       let interpreted: { answer: string; messages: Record<string, unknown>[] } | undefined;
       // ⛔ A FAILED run is not explained by a model: there is no result to interpret, and the readback's stale state
@@ -1709,7 +1741,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       runInterpreted = ran.refusal !== 'run_failed';
       if (runInterpreted) try {
         const resp = await callModel({
-          instructions: `${AGENT_INSTRUCTIONS}\n\n${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
+          // C5b's line goes BEFORE the interpret-only line, so the banked Interpreter v0.2 text stays last and byte-identical.
+          instructions: `${AGENT_INSTRUCTIONS}\n\n${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
           input: priorAndRun,
           // No tools at all: acting is structurally impossible on this call (and no schema tokens
           // are spent on tools it may not use). Measured against the live API: accepted with the
@@ -1717,15 +1750,27 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           tools: [],
           max_output_tokens: budget.max_output_tokens,
           tool_choice: 'none',
+          ...(askView ? { text: { format: RUN_INTERPRETATION_FORMAT } } : {}),
         } as never);
         const out = (resp.output ?? []) as { type?: string; content?: { type?: string; text?: string }[] }[];
-        const answer = out.filter((o) => o.type === 'message').flatMap((o) => o.content ?? [])
+        const rawAnswer = out.filter((o) => o.type === 'message').flatMap((o) => o.content ?? [])
           .filter((c) => c.type === 'output_text').map((c) => c.text ?? '').join('');
+        // C5b: the typed answer, when asked for and given. A plain-text interpretation stays the reply; JSON that is
+        // not the typed answer is never shown to the user (it is treated as no interpretation).
+        const typed = askView ? readRunInterpretation(rawAnswer) : null;
+        const answer = typed !== null ? typed.answer : askView && rawAnswer.trim().startsWith('{') ? '' : rawAnswer;
+        if (typed !== null) fastPathView = typed.view;
         // ⛔ THE REASONING ITEM TRAVELS WITH ITS MESSAGE (served `f828a61`, witness c9: every turn after a
         // Run was refused "Item 'msg_…' of type 'message' was provided without its required 'reasoning'
         // item", HTTP 502). Kept in output order, exactly as the Agent loop keeps its whole output.
         if (answerIsIncomplete(resp as never)) log.warn({ scenario_id: scenarioId, incomplete_reason: (resp as { incomplete_reason?: unknown }).incomplete_reason ?? null }, 'agent-lane: fast-path interpretation incomplete — answering from the run itself');
-        else if (answer.trim().length > 0) interpreted = { answer, messages: out.filter((o) => o.type === 'reasoning' || o.type === 'message') as Record<string, unknown>[] };
+        else if (answer.trim().length > 0) {
+          interpreted = typed !== null
+            // The history keeps the ANSWER, never the JSON: one id-less assistant message, which needs no reasoning item
+            // (the f828a61 refusal is for a message WITH its id and without its reasoning).
+            ? { answer, messages: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: answer }] }] }
+            : { answer, messages: out.filter((o) => o.type === 'reasoning' || o.type === 'message') as Record<string, unknown>[] };
+        }
         else log.warn({ scenario_id: scenarioId }, 'agent-lane: fast-path interpretation was empty — answering from the run itself');
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: fast-path interpretation failed — answering from the run itself');
@@ -2190,6 +2235,29 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       wireBody = { ...wireBody, assistant_text: withBreakEvenAnswer(wireBody.assistant_text, breakEven) };
     }
     /**
+     * ⭐ C5 — THE AGENT'S PROVISIONAL VIEW (Paul, DL #70 5855324470: "Yes, labelled provisional"). AFTER the leader gate
+     * on purpose: a view ranks an option, and the gate — unchanged, the truth boundary for anything presented as the
+     * analysis's result — would strip it. So it never rides in the model's prose: the Agent gives it through the typed
+     * `give_provisional_view` tool, and it is appended here as ONE server-owned paragraph that opens on its label and on
+     * why the analysis cannot confirm it (`provisional-view.ts`). Only when the Agent gave one this turn (never composed
+     * for it) AND this FINAL readback still withholds the leader on a completed analysis, by the gate's own predicate.
+     * Never in `blocks`, the analysis card or any leader field.
+     */
+    // C5b: on the Run button the view is the one interpreting call's typed field (`fastPathView`) — the SAME checks follow.
+    const rawView = provisionalViewOfTurn(result.tool_calls, result.tool_results) ?? fastPathView;
+    // The Agent's own words pass the user-facing scrub first (`sanitiseProvisionalView`); a code left refuses the view.
+    const givenView = rawView === null ? null : sanitiseProvisionalView(rawView, parsedGraphOrNull(readbackGraph));
+    if (rawView !== null && givenView === null) log.warn({ scenario_id: scenarioId }, 'agent-lane: a provisional view carried an internal code after the scrub — it is not shown');
+    const standing = givenView === null ? null : leaderStandingOf({ analysisState, analysisReady, analysisResult });
+    // Typed only (never appended to `assistant_text`): see `provisionalViewSidecar`.
+    const provisionalView = givenView !== null && standing !== null && standing.analysis_on_record && standing.withheld
+      ? provisionalViewSidecar(givenView, standing.because)
+      : null;
+    if (provisionalView === null && givenView !== null) {
+      log.warn({ scenario_id: scenarioId, analysis_on_record: standing?.analysis_on_record ?? null, withheld: standing?.withheld ?? null },
+        'agent-lane: a provisional view was given but the final readback does not withhold the leader — it is not shown');
+    }
+    /**
      * ⭐ HEADLINE FIRST ON AN ANALYSIS REPLY — see `withAnalysisAnswerShape`. HERE, and nowhere earlier:
      * this is after the last rewrite of `assistant_text` on this route (write-claim removal, disclosures,
      * proposal-id scrub, the leader gate above), so the shape is built from the prose the user receives,
@@ -2372,6 +2440,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // ⭐ AX1 (DL #70 5850280205: "a typed `break_even` state fact"): the arithmetic the paragraph above says, as
         // data — every figure, whose it is, and the target line — so a surface or a rewording never re-derives it.
         ...(breakEven !== null ? { break_even: breakEven } : {}),
+        // ⭐ C5: the Agent's provisional view — ONLY here, typed, with its heading; never in `assistant_text` (see above).
+        ...(provisionalView !== null ? { provisional_view: provisionalView } : {}),
       },
       /**
        * ⭐ EVERY GENERATIVE ATTEMPT THIS TURN MADE, off the provider policy's ledger
