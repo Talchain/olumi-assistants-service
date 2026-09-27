@@ -27,6 +27,7 @@ import type { AdjustEdgeStrengthHandlerFact } from '@talchain/schemas/orchestrat
 
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 import { parseEdgeAddress } from '../../compose/edge-address.js';
+import { edgeBandFromMagnitude, edgeBandStd } from '../../format/edge-strength-bands.js';
 import { sanitiseUserFacingText } from '../../../orchestrator/shared/output-safety.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
@@ -343,9 +344,29 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         }
         newDirection = directionParse.data;
       }
-      // EdgeStrengthV3 requires std > 0 (positive). When the existing
-      // edge has std and we don't have a fresh one, preserve it.
-      const finalStd = newStd ?? targetEdge.strength.std;
+      // ⭐ A6e — A NAMED BAND STATES A RANGE, SO ITS SPREAD IS THE LINK'S STD (AIQ #70 5855345225, 5855430153).
+      // The band rides the trusted side band, set only when the approval that sent this write carried the band the
+      // user named for this exact link (`stated-link-band-context.ts`). The std is the band of the RESULTING |mean|,
+      // whether the mean moved to the band's midpoint (`set`) or was kept (`confirm_current`); a band that does not
+      // contain the result is a contradiction and refuses rather than storing a spread for the wrong range.
+      const bandAuthority = invocation.edgeStrengthBandAuthority;
+      let bandStd: number | undefined;
+      if (bandAuthority !== undefined) {
+        if (edgeBandFromMagnitude(Math.abs(newMean)) !== bandAuthority) {
+          throw new D1HandlerError(
+            'PARAMETER_INVALID',
+            'adjust_edge_strength: the stated band does not contain the resulting strength.',
+            {
+              details: { handler_id: 'adjust_edge_strength', received: bandAuthority },
+              userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
+            },
+          );
+        }
+        bandStd = edgeBandStd(bandAuthority);
+      }
+      // EdgeStrengthV3 requires std > 0 (positive). An exact figure (no stated band) keeps the existing spread unless
+      // a fresh one was given: a figure states no range of its own.
+      const finalStd = bandStd ?? newStd ?? targetEdge.strength.std;
       const afterSnapshot = {
         from: targetEdge.from,
         to: targetEdge.to,
@@ -379,8 +400,15 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         // for the next round-trip through transformResponseToV3.
         // Olumi's sizing of the OLD strength goes with it (magnitude contract; R&C 5845818897): `natural_effect` said
         // that β in natural units and `magnitude` said who chose it — neither describes the user's own value.
-        const { natural_effect: _naturalEffect, magnitude: _magnitude, ...existingProvenance } =
-          (edge.provenance ?? {}) as Record<string, unknown>;
+        // ⭐ A6c — and so does Olumi's `reasoning`, on EVERY user write including a confirm. Kept under the user's
+        // stamp, the model's WHY for the link was read back as the user's: decision review presents it as "the
+        // producer's stated reason" (`decision-review-graph-projection.ts` `readEdgeReasoning`).
+        const {
+          natural_effect: _naturalEffect,
+          magnitude: _magnitude,
+          reasoning: _reasoning,
+          ...existingProvenance
+        } = (edge.provenance ?? {}) as Record<string, unknown>;
         edge.provenance = {
           ...existingProvenance,
           source: 'user_specified',
@@ -390,8 +418,11 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         // strength was applied (EdgeV3), and this write makes the strength the
         // user's. Left in place, the Agent's canonical view, admissibility and
         // coaching read the user's own strength as a placeholder (served (F) F8,
-        // fd4c483). A projected spread or existence probability is not re-marked
-        // separately: the provenance stamp above already claims the whole edge.
+        // fd4c483).
+        // ⭐ A6e — but `defaulted` is WHOLE-EDGE, and this write adopts only the strength: `exists_probability` is
+        // untouched and still Olumi's. Deleting the flag alone lost that, so the edge read as entirely the user's.
+        // The per-field half is kept (`exists_defaulted`, Canonical #70 5855416983).
+        if (edge.defaulted === true) edge.exists_defaulted = true;
         delete edge.defaulted;
 
         return {

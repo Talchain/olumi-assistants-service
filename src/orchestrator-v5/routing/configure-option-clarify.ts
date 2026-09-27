@@ -521,8 +521,21 @@ export function buildConfigureOptionRecoveryCopy(params: {
   // trade a false success for a false NOTICE: the same harm, opposite sign.
   // The residual (a wrong-entity write against a partially configured option
   // raises no notice) is unchanged by this lane, and still rowed.
+  //
+  // ⭐ SLICE A1b — BOUND TO THE FACT THE COPY ASSERTS, NOT TO A STATUS. This
+  // read `status !== 'needs_encoding'` alone, which stood in for "has no effect
+  // values" only while a partially configured option was `ready`. Under A1b
+  // an option with an outstanding level is `needs_encoding` AND keeps its
+  // values, so the status can no longer separate the two; `interventions` can.
   const option = readiness.options.find((o) => o.option_id === target.optionId);
-  if (option?.status !== 'needs_encoding') return decline('option_already_partially_configured');
+  if (option === undefined || Object.keys(option.interventions ?? {}).length > 0) {
+    return decline('option_already_partially_configured');
+  }
+  // The DOMAIN is otherwise unchanged, and deliberately not widened: a held
+  // baseline (`ready` with `{}` by ruling) IS compared, so "cannot compare it"
+  // would be false of it, and a `needs_user_mapping` option is asked a
+  // different question. The reason string is the pre-existing one.
+  if (option.status !== 'needs_encoding') return decline('option_already_partially_configured');
 
   // ⭐ BOUND C — MATERIAL. The copy names REAL, still-unset, linked factors or
   // it is not offered: "never invented" is this module's whole posture. Read

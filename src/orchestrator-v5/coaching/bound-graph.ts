@@ -62,7 +62,7 @@ const PREFIX_CURRENCY_SYMBOLS: ReadonlySet<string> = new Set(
  * `f-20260926T033924Z`, AI Quality 5843218716). Saying it back would put "0.1" in his mouth, so the card names the
  * limit without a figure, exactly as for a bare `fraction`.
  */
-const FRACTION_SPELLED_UNIT = /^(?:fraction|proportion|ratio|share)\b/i;
+export const FRACTION_SPELLED_UNIT = /^(?:fraction|proportion|ratio|share)\b/i;
 /** Units whose scale is ambiguous on the wire (percent vs fraction; points; basis points). */
 const PERCENT_LIKE_UNIT = /%|\bpercent\b|\bpp\b|\bbps\b|basis point/i;
 

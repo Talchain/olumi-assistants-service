@@ -70,6 +70,7 @@ import {
 import { sanitisePublicCopyOrFallback } from '../compose/proposed-change.js';
 import {
   clampLabel,
+  describeChangeset,
   describeHeldOperationsSubject,
   type HeldOpLike,
 } from './describe-changeset.js';
@@ -689,7 +690,7 @@ export function buildHeldSupersessionNotice(
  * via a bare "Yes" when several consents are live. NEVER clamp the
  * message: routing depends on it.
  */
-export function buildGmHeldPublicCopy(subject: string | null): {
+export function buildGmHeldPublicCopy(subject: string | null, items?: readonly string[]): {
   label: string;
   message: string;
   detail?: string;
@@ -702,9 +703,26 @@ export function buildGmHeldPublicCopy(subject: string | null): {
   // Wave-2 ask #20: when clamping shortened the label, the chip carries the
   // FULL sentence in `detail` (0.19.0 Action.detail) — absent when the
   // label already says everything.
-  return label === capitalised
-    ? { label, message: `Yes, ${subject}.` }
-    : { label, message: `Yes, ${subject}.`, detail: capitalised };
+  if (label === capitalised) return { label, message: `Yes, ${subject}.` };
+  // ⭐ ONE CHANGE PER LINE (AI Conversation, Paul's test 27 Sep; #70 5855355688):
+  // served, a four-part add read as ONE comma run of ~500 characters under the
+  // approve button ("Add option '…', add factor '…', link '…' to '…', …").
+  // When the caller passes the SAME items the subject was joined from
+  // (`describeChangeset(...).items`), `detail` is those items, capitalised, one
+  // per line: the same content, nothing summarised or dropped. The UI shows the
+  // line breaks as they are sent. `message` is untouched (routing matches it).
+  const multi = items !== undefined && items.length > 1 && items.every((i) => typeof i === 'string' && i.trim() !== '');
+  const lines = multi
+    ? items.map((i) => {
+        const t = i.trim();
+        return t.charAt(0).toUpperCase() + t.slice(1);
+      }).join('\n')
+    : capitalised;
+  // ⭐ A SHORT, WHOLE BUTTON (Paul, 27 Sep: "premium, intuitive"). A multi-part change clamped mid-word read
+  // "Add option '£59 for new Pro customers; grandfather existi..." on the filled approve button. The UI now shows
+  // `detail` (one change per line) ABOVE the buttons, so the button says what pressing it does and how much:
+  // "Approve 10 changes". A single change keeps its clamped label (its full sentence is the detail).
+  return { label: multi ? `Approve ${items.length} changes` : label, message: `Yes, ${subject}.`, detail: lines };
 }
 
 // ---------------------------------------------------------------------------
@@ -926,8 +944,11 @@ function buildHeldPending(
   // multi-consent disambiguation list renders distinct labels, and (c) a
   // chip click resolves via exact-match to THIS hold. Falls back to the
   // generic swept copy when no safe subject is derivable.
-  const heldSubject = describeHeldOperationsSubject(input.operations, input.currentGraph);
-  const heldPublicCopy = buildGmHeldPublicCopy(heldSubject);
+  // ONE call gives both the subject and the items it was joined from, so the
+  // chip's per-line `detail` can never describe a different change.
+  const heldChangeset = describeChangeset(input.operations, input.currentGraph);
+  const heldSubject = heldChangeset?.subject ?? null;
+  const heldPublicCopy = buildGmHeldPublicCopy(heldSubject, heldChangeset?.items);
   const pending: PendingAction = {
     id: randomUUID(),
     scenario_id: input.scenarioId,

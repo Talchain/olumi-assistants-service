@@ -18,7 +18,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { AnalysisRunStateSchema, CoachingBlockSchema, type CoachingBlock } from '@talchain/schemas/boundary';
 
-import { runTurnCoaching, type CapturedAnalysis, type RunTurnCoachingFinal } from '../../agent-lane/analysis-coaching-pass-through.js';
+import { runTurnCoaching, runTurnNextMove, type CapturedAnalysis, type RunTurnCoachingFinal } from '../../agent-lane/analysis-coaching-pass-through.js';
 import { AMEND_CHIP, approvalChipsFor, typedApprovalOf } from '../../agent-lane/approval-chips.js';
 import { REFUSAL_REASON_UNSPECIFIED } from '../../compose/analysis-state-v1.js';
 import { deterministicBlockId } from '../../compose/block-id.js';
@@ -168,14 +168,17 @@ describe('run-turn fragile-link challenge', () => {
     }
   });
 
-  it('(ii) constrained Run on B (leader withheld FOR A LIMIT) → the ONE card is the limit card; the link card B would get is leader-free: no leader words, no option label, no number', () => {
+  it('(ii) constrained Run on B (leader withheld FOR A LIMIT) → C4: the limit is the caveat, the ONE card is the link card, and it is leader-free: no leader words, no option label, no number', () => {
     const c = runTurnCase('B', 't2', 'explicit_run');
     expect(c.turn.analysis_state.leader_claim).toMatchObject({ permitted: false, withheld_reason: 'constraint_verdict_withheld' });
-    const routed = runTurnCoaching(c.captured, c.final);
+    // C4 (#70 5855068711): a limit unchecked for a cause the user cannot close is said once by the reply, never the card.
+    const routed = runTurnNextMove(c.captured, c.final);
     expect(routed.eligibility).toEqual({ eligible: true });
-    expect(routed.blocks.map((b) => b.signal_id.split(':')[1])).toEqual(['limit_unchecked']);
-    expect(fragileLinkCards(routed.blocks)).toHaveLength(0);
+    expect(routed.blocks.map((b) => b.signal_id.split(':')[1])).toEqual(['fragile_link']);
+    expect(routed.caveats.map((v) => v.block.signal_id.split(':')[1])).toEqual(['limit_unchecked']);
     const out = linkCardsOnly(c.captured, c.final);
+    // The routed card IS the leader-free link card below.
+    expect(fragileLinkCards(routed.blocks)).toEqual(fragileLinkCards(out.blocks));
     expect(out.eligibility).toEqual({ eligible: true });
     const cards = fragileLinkCards(out.blocks);
     expect(cards).toHaveLength(1);
@@ -567,13 +570,16 @@ describe('run-turn coaching — identity carries the copy variant, captures with
     for (const trigger of ['auto_first_pass', 'explicit_run'] as const) {
       const c = runTurnCase('B', 't2', trigger);
       const { analysis_state: _dropped, ...stateless } = c.captured;
-      const r = runTurnCoaching(stateless, c.final);
+      const r = runTurnNextMove(stateless, c.final);
       expect(r.eligibility).toEqual({ eligible: true });
-      // B's leader is withheld for a limit, so its one card is the limit card (limit first, #70).
-      const card = r.blocks.filter((b) => b.signal_id.startsWith('coach:limit_unchecked:'))[0]!;
-      expect(cardOf(r)).toHaveLength(0);
-      expect(card.graph_hash_at_generation).toBe(c.turn.graph_hash);
-      expect(card.created_at).toBe(c.turn.analysis_state.run_state.computed_at);
+      // B's leader is withheld for a limit: C4 says the limit as the caveat and the link card is the one card. Both bind.
+      const caveat = r.caveats[0]!.block;
+      expect(caveat.signal_id.startsWith('coach:limit_unchecked:')).toBe(true);
+      expect(cardOf(r)).toHaveLength(1);
+      for (const card of [caveat, cardOf(r)[0]!]) {
+        expect(card.graph_hash_at_generation).toBe(c.turn.graph_hash);
+        expect(card.created_at).toBe(c.turn.analysis_state.run_state.computed_at);
+      }
     }
   });
 
