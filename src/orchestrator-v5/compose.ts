@@ -80,6 +80,7 @@ import {
   mayPresentLeaderClaimForFact,
 } from './compose/unrequested-analysis-confinement.js';
 import { projectTiedOptionOrderingForTransport } from './compose/tied-option-ordering.js';
+import { projectUnanalysedDriversForTransport } from './compose/unanalysed-driver-projection.js';
 import { projectCritiquesForTransport } from './compose/sanitise-enrichment.js';
 import type { LabelResolverContext } from './compose/resolve-label.js';
 import { textAssertsLeadingOption } from './compose/leading-option-egress-guard.js';
@@ -1302,9 +1303,11 @@ function buildAnalysisResultBlockUnconfined(
   // the order there, so there is no ranking to make defensible — and
   // reinstating one would reopen the leader claim that projection exists to
   // close.
-  const transportEnrichment = mayNameLeadingOption
+  // UN-ANALYSED FACTORS ARE NOT DRIVERS — on BOTH branches: Paul's own run (`90b8f080`) was a withheld turn, and it
+  // still ranked a factor the engine never analysed as Driver 1. See compose/unanalysed-driver-projection.ts.
+  const transportEnrichment = projectUnanalysedDriversForTransport(mayNameLeadingOption
     ? (projectTiedOptionOrderingForTransport(safeTransport) as typeof safeTransport)
-    : projectTransportEnrichmentForWithheldClaim(safeTransport);
+    : projectTransportEnrichmentForWithheldClaim(safeTransport)) as typeof safeTransport;
   return {
     type: 'analysis_result',
     // F1 — THE THIRD THING EVERY WITHHELD TURN SHIPS, AND THE ONE NO

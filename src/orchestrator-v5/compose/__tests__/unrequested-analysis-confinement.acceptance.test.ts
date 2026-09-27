@@ -443,10 +443,19 @@ describe('a run nobody asked for makes no quantified leader or robustness claim'
     // Over-suppression is weighted equally with the leak. A confinement that
     // empties the panel has not contained anything — it has deleted the run.
     const enrichment = build(true).enrichment as Record<string, unknown>;
-    const factorSensitivity = enrichment.factor_sensitivity as unknown[];
-    expect(factorSensitivity.length).toBe(
-      ((capture.enrichment as Record<string, unknown>).factor_sensitivity as unknown[]).length,
-    );
+    const factorSensitivity = enrichment.factor_sensitivity as Array<Record<string, unknown>>;
+    // C4 (AIQ #70 5854893356): a factor the ENGINE says it never analysed (its own ROOT_NODE_DEFAULT_VALUE warning)
+    // and no option sets is not this run's material — it is ranked on placeholder structure alone. On this capture
+    // that is "NRR is 112%" and the quoted-uncertainty factor (099f7ecf, 4fcb676f). Everything the engine analysed ships.
+    const captured = capture.enrichment as Record<string, unknown>;
+    const unanalysed = new Set(((captured.inference_warnings ?? []) as Array<Record<string, unknown>>)
+      .filter((w) => w.code === 'ROOT_NODE_DEFAULT_VALUE' && typeof w.field === 'string')
+      .map((w) => /^nodes\[(.+)\]\.observed_state\.value$/.exec(w.field as string)?.[1]));
+    const analysed = (captured.factor_sensitivity as Array<Record<string, unknown>>)
+      .filter((r) => !(unanalysed.has(r.factor_id as string) && r.zero_reason !== 'intervention_override'))
+      .map((r) => r.factor_id);
+    expect(unanalysed).toEqual(new Set(['099f7ecf', '4fcb676f']));
+    expect(factorSensitivity.map((r) => r.factor_id)).toEqual(analysed);
 
     const optionComparison = enrichment.option_comparison as Array<Record<string, unknown>>;
     expect(optionComparison.length).toBe(

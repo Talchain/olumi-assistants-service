@@ -97,6 +97,10 @@ const ALLOWLIST = new Map<string, 'cage' | 'transport' | 'structured'>([
   // no warning content, warning prose, or numeric magnitude is returned,
   // logged, or made available to a user-facing composer.
   ['coaching/select-factor-evppi.ts', 'structured'],
+  // C4 (AIQ #70 5854893356) — transport projection: reads ONLY `inference_warnings[].code` and `.field` (the node id)
+  // to drop a factor the engine never analysed from the driver surfaces. The warnings ship unchanged; no warning
+  // prose or magnitude is read into anything a composer quotes. Claim-safety review: Canonical (DL 5854902243).
+  ['compose/unanalysed-driver-projection.ts', 'transport'],
   ['routing/post-analysis-advice-gate.ts', 'structured'],
   // ⭐ NEW SITE, AND IT IS DELIBERATELY CLASSIFIED `transport` RATHER THAN
   // `structured` — the classification that asks for the most scrutiny, because
