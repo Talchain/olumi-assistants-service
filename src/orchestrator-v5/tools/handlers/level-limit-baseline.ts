@@ -31,7 +31,7 @@
  */
 import { valuesMatch } from '../../../utils/reduction-framing.js';
 import { deriveInferredValues } from '../../coaching/inferred-value-disclosure.js';
-import { percentLimitFrameProvable, type LimitTargetScale } from '../../agent-lane/admit-constraint.js';
+import { percentLimitFrameProvable, percentPeriodsDiffer, type LimitTargetScale } from '../../agent-lane/admit-constraint.js';
 import { classifyUnitScaleClass } from '../../../cee/draft/records/unit-scale-class.js';
 
 type Rec = Record<string, unknown>;
@@ -56,6 +56,24 @@ export function levelLimitReadsOnNodeLevel(value: number, unit: string | undefin
   if (!(Number.isFinite(value) && value > 1 && value <= 100)) return false;
   if (!(os.cap === 100 || (os.cap === undefined && node.scale_frame === 100))) return false;
   return typeof os.value === 'number' && typeof os.raw_value === 'number' && valuesMatch(os.value, os.raw_value / 100);
+}
+
+/**
+ * ⛔⛔ A `"%"` LIMIT RELABELLED FROM ANOTHER PERIOD GOES OUT IN THE UNIT IT WAS STATED IN (rule1-limit-period, PLoT 22f3d94).
+ *
+ * Admission keeps a percent limit whose period differs from its node's verbatim (`canonicaliseLimitUnit`). A row stored
+ * before that, or whose node's unit was rewritten since, still holds `"%"`, and PLoT (which never reads the stamp) scores
+ * it on the node's period: "annual churn ≤ 10 %" on a monthly node read P = 1, decision-grade. The stamp says what the
+ * user stated, so the WIRE copy sends that unit — refused by PLoT with the unit named — with no stamp and no baseline.
+ * Returns the unit to send, else `undefined`. The record is untouched.
+ */
+function statedUnitAcrossPeriod(c: Rec, node: Rec | undefined): string | undefined {
+  if (node === undefined || typeof c.unit !== 'string' || c.unit.trim() !== '%') return undefined;
+  const stamp = c.provenance_unit_relabelled;
+  if (!isRec(stamp) || typeof stamp.pre_normalisation_unit !== 'string') return undefined;
+  const os = isRec(node.observed_state) ? node.observed_state : {};
+  const nodeUnit = typeof os.unit === 'string' ? os.unit : undefined;
+  return percentPeriodsDiffer(stamp.pre_normalisation_unit, nodeUnit) ? stamp.pre_normalisation_unit : undefined;
 }
 
 /** The level's author is known: the user's own figure, or Olumi's in the form the run discloses. */
@@ -88,6 +106,7 @@ export function levelLimitBaselineNodeIds(graph: unknown, goalConstraints: unkno
     const os = node.observed_state;
     if (!isRec(os) || typeof os.value !== 'number' || !Number.isFinite(os.value) || os.baseline !== undefined) continue;
     if (!levelHasAnAuthor(node, os)) continue;
+    if (statedUnitAcrossPeriod(c, node) !== undefined) continue;
     if (!levelLimitReadsOnNodeLevel(c.value, typeof c.unit === 'string' ? c.unit : undefined, node, os)) continue;
     out.add(node.id);
   }
@@ -221,13 +240,33 @@ export function unprovablePercentFrameIds(graph: unknown, goalConstraints: unkno
   });
 }
 
-/** The wire copy of `goalConstraints` with each unprovable percent frame removed. Returns the input itself when none. */
+/**
+ * The wire copy of `goalConstraints` with each unprovable percent frame removed, and each `"%"` row relabelled from
+ * another period sent in its stated unit without the stamp (`statedUnitAcrossPeriod`). Returns the input itself when none.
+ */
 export function withholdUnprovablePercentFrames<C>(graph: unknown, goalConstraints: C): C {
+  if (!Array.isArray(goalConstraints)) return goalConstraints;
   const idx = new Set(unprovablePercentFrameIndices(graph, goalConstraints));
-  if (idx.size === 0 || !Array.isArray(goalConstraints)) return goalConstraints;
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const stated = new Map<number, string>();
+  goalConstraints.forEach((c: unknown, i: number) => {
+    if (!isRec(c)) return;
+    const unit = statedUnitAcrossPeriod(c, nodes.find((n) => n.id === c.node_id));
+    if (unit !== undefined) stated.set(i, unit);
+  });
+  if (idx.size === 0 && stated.size === 0) return goalConstraints;
   return goalConstraints.map((c: unknown, i: number) => {
-    if (!idx.has(i) || !isRec(c)) return c;
-    const { value_frame: _withheld, ...rest } = c;
-    return rest;
+    if (!isRec(c) || (!idx.has(i) && !stated.has(i))) return c;
+    let out: Rec = c;
+    if (idx.has(i)) {
+      const { value_frame: _withheld, ...rest } = out;
+      out = rest;
+    }
+    const unit = stated.get(i);
+    if (unit !== undefined) {
+      const { provenance_unit_relabelled: _stamp, ...rest } = out;
+      out = { ...rest, unit };
+    }
+    return out;
   }) as C;
 }

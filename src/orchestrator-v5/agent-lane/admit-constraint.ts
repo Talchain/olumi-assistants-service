@@ -101,7 +101,16 @@ export interface AdmittedConstraint {
  */
 const PERCENT_HEADS: readonly string[] = [...(UNIT_SCALE_CLASS_TOKENS.find(([cls]) => cls === 'percent')?.[1] ?? [])]
   .sort((a, b) => b.length - a.length);
-const PERIOD_TAIL = /^(?:(?:per|a|an|each|\/)\s*(?:month|year|annum|quarter|week|day)|monthly|annually|annual|yearly|quarterly|weekly|daily|p\.?a\.?)?$/;
+// The groups name the period a match states (`periodOf`); they do not change what the grammar accepts.
+const PERIOD_TAIL = /^(?:(?:per|a|an|each|\/)\s*(month|year|annum|quarter|week|day)|(monthly|annually|annual|yearly|quarterly|weekly|daily)|(p\.?a\.?))?$/;
+/** The one period each word PERIOD_TAIL accepts names ("p.a." is a year): the grammar's own words, never a wider list. */
+const PERIOD_NAME: Readonly<Record<string, string>> = {
+  month: 'month', monthly: 'month',
+  year: 'year', annum: 'year', annual: 'year', annually: 'year', yearly: 'year',
+  quarter: 'quarter', quarterly: 'quarter',
+  week: 'week', weekly: 'week',
+  day: 'day', daily: 'day',
+};
 /** The classifier's own `percentage_points` row ("pp", "ppt", "pps"), longest first: never a private copy. */
 const POINTS_HEADS: readonly string[] = [...(UNIT_SCALE_CLASS_TOKENS.find(([cls]) => cls === 'percentage_points')?.[1] ?? [])]
   .sort((a, b) => b.length - a.length);
@@ -187,6 +196,66 @@ export function isPercentagePointsWithPeriod(unit: string): boolean {
   return points !== null && PERIOD_TAIL.test((points[1] ?? '').trim());
 }
 
+/** The period a PERIOD_TAIL match states, or `null` for the empty tail (no period). */
+function periodOf(m: RegExpExecArray): string | null {
+  if (m[3] !== undefined) return 'year';
+  const word = m[1] ?? m[2];
+  return word === undefined ? null : (PERIOD_NAME[word] ?? null);
+}
+
+/**
+ * The period a percent-LEVEL spelling states, read by the grammar that admits it: "% per month" / "%/month" / "percent
+ * monthly" → `month`; "% p.a." / "percent per annum" / "pp per year" → `year`. `null` when it states none ("%",
+ * "percent", "% of Pro subscribers"), or it is not one of these spellings. A "% of <population>" spelling states one only
+ * as its last word or two ("% of Pro subscribers per month").
+ */
+function percentLevelPeriod(unit: string): string | null {
+  const t = norm(unit);
+  const cls = classifyUnitScaleClass(unit);
+  const tailPeriod = (tail: string): string | null => {
+    const m = PERIOD_TAIL.exec(tail.trim());
+    return m === null ? null : periodOf(m);
+  };
+  if (cls === 'percentage_points') {
+    const head = POINTS_HEADS.find((h) => t.startsWith(h));
+    return head === undefined ? null : tailPeriod(t.slice(head.length));
+  }
+  if (cls !== 'percent') return null;
+  const head = PERCENT_HEADS.find((h) => t.startsWith(h));
+  if (head === undefined) return null;
+  const rest = t.slice(head.length).trim();
+  if (PERIOD_TAIL.test(rest)) return tailPeriod(rest);
+  const points = POINTS_TAIL.exec(rest);
+  if (points !== null) return tailPeriod(points[1] ?? '');
+  if (!OF_TAIL.test(rest)) return null;
+  const words = rest.split(/\s+/);
+  // "of", at least one population word, then the period: never the population word itself.
+  for (const n of [2, 1]) {
+    if (words.length < n + 2) continue;
+    const period = tailPeriod(words.slice(-n).join(' '));
+    if (period !== null) return period;
+  }
+  return null;
+}
+
+/**
+ * ⛔⛔ A PERIOD IS PART OF A PERCENT LIMIT'S MEANING (rule1-limit-period, engine-direct on PLoT 22f3d94).
+ *
+ * `"%"` is read on the NODE's period: PLoT never reads the relabel stamp. So "annual churn under 10 %" relabelled onto
+ * a `% per month` node (level 3 %/month, roughly 31 %/year) was scored as "monthly churn ≤ 10 %": P = 1 on every option,
+ * decision-grade — a wrong pass. In its own unit PLoT refuses it and names the unit: the honest outcome.
+ *
+ * True only when BOTH spellings state a period and they differ. A spelling that states none ("%", "percent") is not
+ * "different", so a bare `"%"` keeps today's reading on any node. Bound to the two units — the limit's own and the
+ * unit of the node its `node_id` names — never to the metric's words.
+ */
+export function percentPeriodsDiffer(limitUnit: string, nodeUnit: string | undefined): boolean {
+  if (nodeUnit === undefined) return false;
+  const limitPeriod = percentLevelPeriod(limitUnit);
+  const nodePeriod = percentLevelPeriod(nodeUnit);
+  return limitPeriod !== null && nodePeriod !== null && limitPeriod !== nodePeriod;
+}
+
 /**
  * True only when the node's level IS the percentage ÷ 100 — the one scale PLoT's `"%"` rung lands on. A frame of
  * exactly 100 (`cap`, else the estimate's `scale_frame` — the served agent-lane churn estimate, `{value 0.07,
@@ -260,6 +329,9 @@ export function canonicaliseLimitUnit(
       ? nodeUnit !== undefined && norm(nodeUnit) === norm(unit)
       : nodeUnit === undefined || isPercentWithPeriod(nodeUnit) || isPercentagePointsWithPeriod(nodeUnit) || isPercentOfPopulation(nodeUnit);
     if (!nodeIsPercentLevel) return verbatim;
+    // ⛔ Another period is another quantity ("10 % per year" is not "≤ 10 %" of a monthly level): verbatim, before
+    // either relabel below (`"%"`, or the capped node's own spelling), so PLoT refuses it rather than scoring it.
+    if (percentPeriodsDiffer(unit, nodeUnit)) return verbatim;
     // The same spelling on a capped node: PLoT already reconciles it against the cap.
     if (target.cap !== undefined && nodeUnit !== undefined && norm(nodeUnit) === norm(unit)) return verbatim;
     if (levelIsPercentOver100(target)) return relabel('%');
