@@ -136,7 +136,7 @@ import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } f
 import { defaultFrameFor, nonlinearIdentityForAgent } from '../admit-model.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
-import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel } from './build-model.js';
+import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
 import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysisInput, type FirstAnalysisOutcome } from '../first-analysis.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { howStronglyWords } from '../strength-authorship-words.js';
@@ -913,6 +913,8 @@ export function createAgentCapabilities(
      * An observer only — a throw here is swallowed and never costs the build. Absent ⇒ nothing is told.
      */
     readonly onModelRegistered?: (graph: Record<string, unknown>) => void;
+    /** X5 (DESIGN Q3): why the one construction retry ran and its outcome — for `_diagnostic_trace`, never the model. */
+    readonly onConstructionTrace?: (t: ConstructionTrace) => void;
     /**
      * The pending actions on the scenario's LATEST answer row, as the session store returns them. The held
      * add-option proposal lives there (route-v2 minted it), so a `gmh_` approval is confirmed against what the
@@ -3986,7 +3988,7 @@ export function createAgentCapabilities(
             detail: 'The model already has entities. Propose a change instead of rebuilding it.',
           };
         }
-        built = await buildModelFromBrief(ctx.scenario_id, brief, dispatch, callStructured);
+        built = await buildModelFromBrief(ctx.scenario_id, brief, dispatch, callStructured, opts.onConstructionTrace);
         if (built.ok !== true) return built;
       }
 

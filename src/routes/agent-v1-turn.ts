@@ -52,7 +52,7 @@ import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/ag
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
 import { commitLimitEditInProcess, commitOptionLevelsInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
 import { readinessSentence, readinessViewOf, stillNeededLine } from '../orchestrator-v5/agent-lane/readiness-view.js';
-import type { CallStructuredModel } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
+import type { CallStructuredModel, ConstructionTrace } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
 import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
@@ -1602,6 +1602,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * `bindRunBlocksToReadback` and `runTurnCoaching`. No trigger ⇒ the user asked for the run.
      */
     let lastRun: CapturedAnalysis | undefined;
+    /** X5: set only when this turn ran a construction — see `ConstructionTrace`. */
+    let constructionTrace: ConstructionTrace | undefined;
     const capabilities = createAgentCapabilities(
       countingDispatch, proposals, callStructured, mode,
       (payload) => { lastRun = { ...payload, trigger: payload.trigger ?? 'explicit_run' }; },
@@ -1620,6 +1622,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * `currentStageEmitter()` is set only inside `/proxy/v5/turn/stream` and `/orchestrate/v2/turn/stream`;
          * every buffered turn reads `undefined` and emits nothing, so its body is untouched by construction.
          */
+        // X5 (DESIGN Q3): the construction retry's reason and outcome, for the trace only.
+        onConstructionTrace: (t) => { constructionTrace = t; },
         onModelRegistered: (raw) => {
           const emitStage = currentStageEmitter();
           if (emitStage === undefined || !Array.isArray(raw.nodes) || raw.nodes.length === 0) return;
@@ -2472,6 +2476,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           dispatches: dispatchLedger,
           dispatch_ms: dispatchLedger.reduce((a, d) => a + d.ms, 0),
         },
+        /** X5 (DESIGN Q3): why the one construction retry ran (issue classes) and what became of it. Diagnostic only. */
+        ...(constructionTrace !== undefined ? { construction: constructionTrace } : {}),
         write_claims_removed: narration.stripped.length,
         ...(leaderClaimEnforced ? { leader_claim_enforced: true } : {}),
         /** The run-turn coaching card: shown, or the typed reason it is not (for staging witnesses). */
