@@ -11,8 +11,10 @@
  * ── WHAT IT READS ──────────────────────────────────────────────────────────
  * Two typed facts that must AGREE, both from the bound run: the `factor_sensitivity` row ranks ≤ 3
  * (`importance_rank`, PLoT's one canonical order) and carries NO `value_source` (the valued rows carry one); AND the
- * run's own hash-bound graph holds that factor with no numeric `observed_state.value`. An option-controlled lever
- * (`zero_reason: intervention_override`) is not this card: an option's missing level is the untested-option move.
+ * run's own hash-bound graph holds that factor with no numeric `observed_state.value`. A factor an OPTION sets is not
+ * this card (DL #2154 CHANGES_REQUIRED item 2, the readiness rule's exemption, DL 5860576042): an option-controlled lever
+ * (`zero_reason: intervention_override`), or a factor the bound graph feeds from an option node — its missing level is
+ * the untested-option move, never "give its value".
  */
 import { CoachingBlockSchema, type CoachingBlock } from '@talchain/schemas/boundary';
 
@@ -41,6 +43,21 @@ const hasNumericValue = (node: Record<string, unknown>): boolean => {
   return [os?.value, os?.raw_value].some((v) => typeof v === 'number' && Number.isFinite(v));
 };
 
+/** The factor ids an option node feeds in the bound graph (`from`/`from_id` an option → `to`/`to_id`). */
+export function optionSetFactorIds(boundGraph: Record<string, unknown> | null): ReadonlySet<string> {
+  const out = new Set<string>();
+  const nodes = boundGraph?.nodes;
+  const edges = boundGraph?.edges;
+  if (!Array.isArray(nodes) || !Array.isArray(edges)) return out;
+  const options = new Set(nodes.map(readRecord).flatMap((n) => (n?.kind === 'option' && typeof n.id === 'string' ? [n.id] : [])));
+  for (const edge of edges.map(readRecord)) {
+    const from = edge?.from ?? edge?.from_id;
+    const to = edge?.to ?? edge?.to_id;
+    if (typeof from === 'string' && options.has(from) && typeof to === 'string') out.add(to);
+  }
+  return out;
+}
+
 /** The top-ranked factors the bound run holds no value for, rank ascending. Pure; empty on anything malformed. */
 export function unvaluedTopDrivers(analysisResult: unknown, boundGraph: Record<string, unknown> | null): UnvaluedDriver[] {
   const rows = readRecord(readRecord(analysisResult)?.enrichment)?.factor_sensitivity;
@@ -50,6 +67,7 @@ export function unvaluedTopDrivers(analysisResult: unknown, boundGraph: Record<s
   for (const n of nodes.map(readRecord)) if (n !== null && typeof n.id === 'string') nodeById.set(n.id, n);
   // The mark is read only where the producer attests `value_source` at all (absent everywhere = not attested).
   if (!rows.some((r) => { const v = readRecord(r)?.value_source; return typeof v === 'string' && v.length > 0; })) return [];
+  const optionSet = optionSetFactorIds(boundGraph);
   const out: UnvaluedDriver[] = [];
   for (const row of rows.map(readRecord)) {
     if (row === null) continue;
@@ -57,7 +75,7 @@ export function unvaluedTopDrivers(analysisResult: unknown, boundGraph: Record<s
     const rank = typeof row.importance_rank === 'number' ? row.importance_rank : null;
     if (id === null || rank === null || rank > UNVALUED_DRIVER_TOP_N) continue;
     if (typeof row.value_source === 'string' && row.value_source.length > 0) continue;
-    if (row.zero_reason === 'intervention_override') continue;
+    if (row.zero_reason === 'intervention_override' || optionSet.has(id)) continue;
     const node = nodeById.get(id);
     if (node === undefined || node.kind !== 'factor' || hasNumericValue(node)) continue;
     const label = typeof node.label === 'string' && node.label.trim() !== '' ? node.label.trim()
@@ -119,6 +137,8 @@ export function buildUnvaluedDriverCard(
   const firstPass = input.trigger === 'auto_first_pass';
   const zero = placeholderZeroFactorIds(result).has(top.id);
   const copy = composeUnvaluedDriverCards(top.label, firstPass, zero).find((c) => copyPasses(c));
+  // No wording fits the card limits (a label too long for even the short form): NO card, by design — the selector
+  // moves on to its next move. Never truncate a factor's name, never fall to a lower-ranked driver. Pinned by test.
   if (copy === undefined) return null;
   const signalId = `${UNVALUED_DRIVER_SIGNAL_ID_PREFIX}${input.graphHash}:${input.computedAt}:${input.trigger}:${top.id}`;
   const parsed = CoachingBlockSchema.safeParse({

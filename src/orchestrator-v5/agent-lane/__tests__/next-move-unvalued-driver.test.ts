@@ -96,3 +96,61 @@ describe('AIQ gap 1 (5860454709): when the figures treat the unvalued driver as 
     expect(cards(runTurnNextMove(...args(f)).blocks)[0]!.body).not.toContain(ZERO.trim());
   });
 });
+
+describe('DL #2154 CHANGES_REQUIRED (5860590920): order, option-set factors, both halves pinned, no silent fallback', () => {
+  const c = load('served-pj-c-213830Z-unvalued-drivers.json');
+  // Served dloop2x-1 re-run: "Retention programme churn reduction" is PLoT's #3, unvalued, fed only by option 80206211.
+  const rerun = load('served-rerun-untested-option-20260927.json');
+  const OPT_SET = 'fac_retention_programme_churn_reduction';
+  const ADDED = 'Keep the price at £49 and launch a retention programme';
+  const withoutOptionEdge = (f: Rec): Rec => {
+    const g = JSON.parse(JSON.stringify(f));
+    g.draft_graph.edges = g.draft_graph.edges.filter((e: Rec) => e.to !== OPT_SET);
+    return g;
+  };
+
+  it('item 2 RED: a top-3 factor an OPTION feeds is never "give its value" (its missing level is the untested-option move)', () => {
+    const row = rerun.analysis_result.enrichment.factor_sensitivity.find((r: Rec) => r.factor_id === OPT_SET);
+    expect([row.importance_rank, row.value_source ?? null, node(rerun, OPT_SET).observed_state ?? null]).toEqual([3, null, null]);
+    expect(rerun.draft_graph.edges.filter((e: Rec) => e.to === OPT_SET).map((e: Rec) => node(rerun, e.from)?.kind)).toEqual(['option']);
+    expect(unvaluedTopDrivers(rerun.analysis_result, rerun.draft_graph).map((d) => d.id)).not.toContain(OPT_SET);
+  });
+
+  it('item 2 CONTRAST: the same factor with its option edge removed IS asked for (the exclusion is the option edge)', () => {
+    const g = withoutOptionEdge(rerun);
+    expect(unvaluedTopDrivers(g.analysis_result, g.draft_graph).map((d) => d.id)).toContain(OPT_SET);
+  });
+
+  it('item 1 RED: when a limit move and an unvalued driver both apply, the limit move wins', () => {
+    const g = withoutOptionEdge(rerun);
+    const optionId = g.analysis_ready.options.find((o: Rec) => o.label === ADDED).option_id;
+    g.trigger = 'explicit_run';
+    g.analysis_ready = {
+      ...g.analysis_ready,
+      options: g.analysis_ready.options.map((o: Rec) => (o.label === ADDED ? { ...o, status: 'ready' } : o)),
+      blockers: (g.analysis_ready.blockers ?? []).filter((b: Rec) => b.option_id !== optionId),
+    };
+    const r = runTurnNextMove(...args(rehash(g)));
+    expect(r.nextMove?.kind).toBe('no_option_meets_limit');
+  });
+
+  it('item 3 RED (mutant M2): a row that carries a `value_source` vetoes the card even when its node holds no value', () => {
+    const g = JSON.parse(JSON.stringify(c));
+    for (const row of g.analysis_result.enrichment.factor_sensitivity) {
+      if (row.factor_id === 'pro_paying_subscribers' || row.factor_id === 'monthly_churn') row.value_source = 'brief_extraction';
+    }
+    expect(node(g, 'pro_paying_subscribers').observed_state ?? null).toBeNull();
+    expect(unvaluedTopDrivers(g.analysis_result, g.draft_graph)).toEqual([]);
+    expect(runTurnNextMove(...args(g)).nextMove?.kind).toBe('link_view');
+  });
+
+  it('item 4: when no wording fits the card limits there is NO card and the selector moves on (never a cut name, never the #2)', () => {
+    const g = JSON.parse(JSON.stringify(c));
+    node(g, 'pro_paying_subscribers').label = `Pro paying subscribers ${'on the annual plan '.repeat(20)}`.trim();
+    const h = rehash(g);
+    expect(unvaluedTopDrivers(h.analysis_result, h.draft_graph)[0]?.id).toBe('pro_paying_subscribers');
+    const r = runTurnNextMove(...args(h));
+    expect(r.nextMove?.kind).toBe('link_view');
+    expect(cards(r.blocks).some((b) => String(b.signal_id).startsWith('coach:unvalued_driver:'))).toBe(false);
+  });
+});

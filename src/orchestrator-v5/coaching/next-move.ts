@@ -12,10 +12,11 @@
  *   0 `limit_risk_leader`     — the named leader probably breaks a limit it was scored on. Not a choice: saying it is
  *                               the CONDITION for naming the leader (AI Quality claim permission 5842498806).
  *   1 `missing_level`         — an option the run could not test for want of a level → give its level.
- *     `missing_value`         — a top-3 driver (PLoT's structural order) the model holds NO value for → give its value
- *                               (PJ-B3; `unvalued-driver-card.ts`): never presented as an analysed driver.
  *   2 `no_option_meets_limit` — a SCORED limit no option meets (F-LIMIT tiers) → change or add an option.
  *     `real_figure`           — a limit checked only against Olumi's estimate / an assumed figure → give the real one.
+ *     `missing_value`         — a top-3 driver (PLoT's structural order) the model holds NO value for, and no option
+ *                               sets → give its value (PJ-B3; `unvalued-driver-card.ts`): never presented as an
+ *                               analysed driver. After the limit moves (DL #2154 CHANGES_REQUIRED item 1).
  *   3 (reserved) value of information — NOT in this selector: AI Quality 5855170731 ruled factor EVPPI structurally
  *                               zero in today's additive engine (a root factor adds the same β·X to every option), so
  *                               it cannot truthfully select anything until B2's identity kinds land. Added then, with AIQ.
@@ -227,11 +228,6 @@ export function selectNextMove(args: NextMoveInputs): NextMoveSelection {
     return { move: withCaveatSentence(moveOf('missing_level', untested, ids), caveats), reason: null, caveats };
   }
 
-  // 1b — a factor the result depends on most (PLoT's top 3) that the model holds no value for (PJ-B3, DL 5860325629):
-  // never said as an analysed driver — said as the ask it is.
-  const unvalued = buildUnvaluedDriverCard(input, boundGraph);
-  if (unvalued !== null) return { move: withCaveatSentence(moveOf('missing_value', unvalued), caveats), reason: null, caveats };
-
   // 2 — a limit gap the user can close.
   if (noOptionMeets !== null) return { move: moveOf('no_option_meets_limit', noOptionMeets), reason: null, caveats };
   // "Checked against Olumi's estimate" presupposes the limit WAS checked: never beside a "could not be checked" caveat,
@@ -240,6 +236,11 @@ export function selectNextMove(args: NextMoveInputs): NextMoveSelection {
     ? buildEstimatedLimitCard(input, constraintVerdictState, boundGraph, runOptions)
     : { block: null };
   if (estimate.block !== null) return { move: moveOf('real_figure', estimate.block), reason: null, caveats };
+
+  // 2c — a factor the result depends on most (PLoT's top 3) that the model holds no value for (PJ-B3, DL 5860325629):
+  // never said as an analysed driver — said as the ask it is. AFTER the limit moves (DL #2154 CHANGES_REQUIRED item 1).
+  const unvalued = buildUnvaluedDriverCard(input, boundGraph);
+  if (unvalued !== null) return { move: withCaveatSentence(moveOf('missing_value', unvalued), caveats), reason: null, caveats };
 
   // 4 — the user's view of the link the result rests on.
   const built = buildFragileLinkChallenge({
