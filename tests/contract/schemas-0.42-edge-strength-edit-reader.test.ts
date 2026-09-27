@@ -189,7 +189,26 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // Controls: POSITIVE — `package.json` differs between the tarballs, so the
     // comparator sees a change; NEGATIVE — the same insertion after
     // `"feedback"` (present in 0.58) does NOT equal 0.59's literal.
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.59.0');
+    //
+    // 0.59.0 → 0.60.0 (schemas #68, gitHead `2a451c7e`), RE-DERIVED on 27 Sep
+    // against the PUBLISHED registry tarball (sha1 `e30caa38…`). THIS BUMP DOES
+    // TOUCH THE MEMBER, and the line comparator above is BLIND to it, so it is
+    // recorded rather than inferred from a zero:
+    //   the line comparator (dist lines naming `edge_strength_edit`): the FILE
+    //   SET is identical (the same five files) and every file is ZERO lost,
+    //   ZERO new — but `band` sits on its own line, which never names the kind;
+    //   a FULL diff of `dist/boundary/turn-payload.js` has ZERO removed lines
+    //   and exactly two added CODE lines — `import { StrengthBand }` and
+    //   `band: StrengthBand.optional(),` inside the strict member; the `.d.ts`
+    //   diff likewise has ZERO removed lines (it adds `band?:` only);
+    //   `SystemEventKind` (enums.d.ts / enums.js) is unchanged — no new kind;
+    //   the producer fixture gains `band: 'very_strong'` (maximality).
+    // So the member gains ONE OPTIONAL key and nothing else: every field, the
+    // intent/direction vocabularies and the root superRefine this suite
+    // exercises are unchanged, and every pre-0.60.0 event still parses.
+    // CEE does not READ `band` in this pin bump (adoption only — the band
+    // writer is a separate change); an event carrying it now parses.
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.60.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {
