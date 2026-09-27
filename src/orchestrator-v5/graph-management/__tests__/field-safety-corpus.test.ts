@@ -90,6 +90,7 @@ const OWNED_NAMES_REACHABLE_IN_THIS_REPO = [
   'validation',
   'defaulted',
   'exists_defaulted', // A6e (Canonical #70 5855416983): a user strength write's per-field existence flag
+  'std_defaulted', // A6f (AIQ N1 on #2096): the same per-field flag for the link's spread
   // src/schemas/cee-v3.ts — ObservedStateV3
   'source',
   'raw_value',
@@ -131,6 +132,7 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
  *
  * Six at 2.478; A6e (Canonical #70 5855416983) adds a seventh, `exists_defaulted`
  * — a STAMP (whose existence claim this is), so stripping it from an add is right.
+ * A6f (AIQ N1 on #2096) adds an eighth, `std_defaulted` — the same stamp for the spread.
  */
 const SIX_SMUGGLE_NAMES = [
   'provenance',
@@ -138,6 +140,7 @@ const SIX_SMUGGLE_NAMES = [
   'validation',
   'defaulted',
   'exists_defaulted',
+  'std_defaulted',
   'origin',
   'extractiontype',
   // Nine since the writer audit (2026-09-27): the saved-example stamps joined the CEE-owned roots.
@@ -146,7 +149,7 @@ const SIX_SMUGGLE_NAMES = [
   'interventionkeys',
 ] as const;
 
-describe('corpus B — the six (now seven) smuggle names, hand-written', () => {
+describe('corpus B — the six (now eight) smuggle names, hand-written', () => {
   it('each is owned by CEE and is NOT an intervention contract key', () => {
     for (const name of SIX_SMUGGLE_NAMES) {
       expect(PIPELINE_OWNED_ROOTS.has(name), `${name} owned`).toBe(true);

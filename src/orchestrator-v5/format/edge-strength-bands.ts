@@ -101,7 +101,8 @@ function edgeBandBounds(band: InfluenceBand): readonly [number, number] {
  * std = (hi − lo)/√12 — weak and moderate 0.0577, strong and very strong 0.0866. Derived from the same cuts the
  * band words use, never hand-listed.
  *
- * Only for a BAND the user named. An exact figure the user gives keeps whatever spread the link already carries.
+ * Only for a BAND the user named. An exact figure states no range: the spread stays Olumi's, carried to the new mean
+ * (`adjust-edge-strength.ts` `olumiSpreadForMean`) and flagged `std_defaulted` (A6f, AIQ N1 on #2096).
  */
 export function edgeBandStd(band: InfluenceBand): number {
   const [lo, hi] = edgeBandBounds(band);
