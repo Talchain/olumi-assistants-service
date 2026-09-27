@@ -157,8 +157,7 @@ describe('A1 — consent-all ("all of them") over two live GM holds, one of them
     expect(node('opt64')?.interventions?.pro_plan_price).toMatchObject({ value: 0.32, raw_value: 64 });
     // The switch: off today, Olumi's reading, through the value writer's own members — and on under the option.
     expect(node(FAC)?.observed_state).toEqual({ value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' });
-    // ⭐ A6b: the NODE claim is the user's (they approved adding the factor); today-0 stays Olumi's via observed_state.
-    expect(node(FAC)?.provenance).toBe('user_set');
+    expect(node(FAC)?.provenance).toBe('ai_inferred');
     expect(node(OPT)?.interventions?.[FAC]).toMatchObject({ value: 1, source: 'cee_hypothesis' });
   });
 });

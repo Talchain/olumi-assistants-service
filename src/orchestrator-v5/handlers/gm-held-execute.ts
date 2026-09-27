@@ -44,7 +44,7 @@ import { applyPatchOperations } from '../../orchestrator/patch-applier.js';
 import {
   canonicaliseValueOps,
   stampUserEditProvenance,
-  stampUserApprovedAddProvenance,
+  stampUserStatedAddProvenance,
   reconcileObservedValuePair,
   batchFullyLanded,
   findAmbiguousScaleValueOps,
@@ -70,7 +70,7 @@ import {
   type EditGmGoverningVerdict,
 } from './edit-graph-referee-gate.js';
 import { detectOptionOwnValueSubstitution } from '../routing/option-observed-state-substitution.js';
-import { GM_HELD_SWITCH_FACTORS_KEY, stampNewSwitchFactors } from '../routing/add-option-transaction.js';
+import { GM_HELD_SWITCH_FACTORS_KEY, GM_HELD_USER_STATED_NODES_KEY, stampNewSwitchFactors } from '../routing/add-option-transaction.js';
 import { elideCascadeRedundantRemoveEdges } from '../graph-management/cascade-removes.js';
 import { propagateConfirmedInterventionRemovals } from '../graph-management/confirmed-intervention-removals.js';
 import type { FrameFreshness } from '../graph-management/types.js';
@@ -475,6 +475,11 @@ export type GmHeldResumeRead =
        * confirm writes in the same apply (`stampNewSwitchFactors`). Absent on every other hold.
        */
       readonly switchFactorIds?: readonly string[];
+      /**
+       * ⭐ A6b — the nodes the hold records as SUPPLIED by the user (`GM_HELD_USER_STATED_NODES_KEY`), which the confirm
+       * stamps `user_set`. Absent on every hold with no typed authorship signal.
+       */
+      readonly userStatedNodeIds?: readonly string[];
     };
 
 /**
@@ -499,11 +504,18 @@ export function readGmHeldResume(pending: PendingAction): GmHeldResumeRead {
       || !rawSwitches.every((id) => typeof id === 'string' && id.length > 0))) {
     return { kind: 'no_payload' };
   }
+  // ⭐ A6b — who SUPPLIED which node. A malformed member is read as NO signal (nothing stamped): unlike a switch's
+  // today-0, the batch is whole without it, and a missing authorship claim only under-claims.
+  const rawStated = patch[GM_HELD_USER_STATED_NODES_KEY];
+  const userStatedNodeIds = Array.isArray(rawStated) && rawStated.length > 0
+    && rawStated.every((id) => typeof id === 'string' && id.length > 0)
+    ? [...(rawStated as string[])] : undefined;
   return {
     kind: 'ok',
     operations: parsed.data,
     ...(envelopeCap !== undefined ? { envelopeCap } : {}),
     ...(rawSwitches !== undefined ? { switchFactorIds: [...(rawSwitches as string[])] } : {}),
+    ...(userStatedNodeIds !== undefined ? { userStatedNodeIds } : {}),
   };
 }
 
@@ -517,6 +529,11 @@ export interface GmHeldExecuteInput {
   readonly envelopeCap?: number;
   /** The hold's new switches (`readGmHeldResume`); their today-0 lands in this apply. Absent → none. */
   readonly switchFactorIds?: readonly string[];
+  /**
+   * ⭐ A6b — the hold's nodes the USER supplied (`readGmHeldResume`); only these adds are stamped `user_set`. Absent →
+   * none: an approved add keeps the provenance it was proposed with.
+   */
+  readonly userStatedNodeIds?: readonly string[];
   /** The CURRENT graph (persisted authority; hash-verified by the caller). */
   readonly currentGraph: unknown;
   /** Like-for-like hash of `currentGraph` (already matched the pin). */
@@ -737,16 +754,19 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
   // fail-loud backstop), and this prescreen turns that into the seam's
   // honest decline instead of an unhandled error.
   //
-  // ⭐ A6b (DL #70 5855437928): every `add_node` the user just CONFIRMED is
-  // theirs — node `provenance: 'user_set'`, written by CEE HERE, after the
-  // re-referee (whose R4 screen refuses any producer-written `provenance` on an
-  // add, so a model can never self-stamp) and never on the normal seam, where an
-  // add applies only unapproved. See `stampUserApprovedAddProvenance`.
-  const heldCanonicalisedOps = stampUserApprovedAddProvenance(
+  // ⭐ A6b (DL CR on #2131, option (a)): only an `add_node` the hold records as
+  // SUPPLIED by the user (`userStatedNodeIds`, CEE's own member, never the
+  // payload) is stamped `user_set` — written HERE, after the re-referee (whose
+  // R4 screen refuses any producer-written `provenance` on an add). An add the
+  // user only APPROVED keeps the provenance it was proposed with, so Olumi never
+  // says "you set it yourself" of its own suggestion. See
+  // `stampUserStatedAddProvenance`.
+  const heldCanonicalisedOps = stampUserStatedAddProvenance(
     stampUserEditProvenance(
       canonicaliseValueOps(stampedOperations, input.currentGraph).operations,
       stampedOperations,
     ),
+    input.userStatedNodeIds ?? [],
   );
   const heldAmbiguousOps = findAmbiguousScaleValueOps(heldCanonicalisedOps, input.currentGraph);
   if (heldAmbiguousOps.length > 0) {

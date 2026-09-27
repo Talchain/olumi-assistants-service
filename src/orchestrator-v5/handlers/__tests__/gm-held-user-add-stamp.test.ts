@@ -1,32 +1,42 @@
 /**
- * ⭐ SLICE A6b — AN ADD THE USER REQUESTED OR APPROVED IS STAMPED `user_set`
- * (Canonical's A6 design, ratified by DL #70 5855437928).
+ * ⭐ SLICE A6b — A NODE THE USER SUPPLIED IS STAMPED `user_set`; AN OLUMI
+ * PROPOSAL THE USER ONLY APPROVED IS NOT (Canonical's A6 design, DL #70
+ * 5855437928; reworked to DL's CHANGES_REQUIRED on #2131 @ a86820f5, option (a)).
  *
- * THE DEFECT (code-read at CEE 339ed343, re-derived at 9cfdbb35). Node
- * `provenance: 'user_set'` is the ONE node spelling for "the user put this
- * here" (`NodeV3.provenance`), and only the canvas `structural_add` wrote it.
- * Every add that reached the graph through the held/confirm seam — the chip and
- * Agent add-option (option node + `new_factors`), approved `edit_graph` adds,
- * the Agent's held add-risk door (#2099), any held structural add — landed with
- * NO node provenance. Served: Paul's
- * Agent-minted option `6526b52c` (export `paul-08bf9a1f`, `draft_graph.nodes[13]`)
- * carries none, while every other option in the same graph does.
+ * THE DEFECT A6b FIXES (code-read at CEE 339ed343). Node `provenance: 'user_set'`
+ * is the ONE node spelling for "the user put this here" (`NodeV3.provenance`),
+ * and only the canvas `structural_add` wrote it: an option the user named in
+ * their own words reached the model through the held/confirm seam with NO node
+ * provenance.
  *
- * THE DESIGN THIS PINS (no new vocabulary):
- *   · CEE writes `provenance: 'user_set'` on every add the USER APPROVED, at the
- *     approval seam (`executeGmHeldResume`), AFTER the strip and the re-referee —
- *     never taken from the model's payload.
- *   · J2: a model cannot self-stamp. Its own `provenance` on an add is stripped;
- *     an add no user approved (the auto-applied normal seam) stays unstamped, and
- *     no payload literal can sit where CEE's stamp goes.
+ * THE DEFECT THE FIRST HEAD INTRODUCED (DL CR). It stamped EVERY approved add —
+ * including Olumi's own proposals. `user_set` is reserved for a node the USER
+ * supplied (`admit-model.ts`), and its readers turn it into words:
+ * `structure-origin-answer.ts` says "…because you set it yourself, not because I
+ * suggested it", and `projectEntity` shows it to the Agent as the user's. So
+ * Paul's Agent-minted option `6526b52c` — Olumi's suggestion, approved — would
+ * have made Olumi deny its own suggestion; so would MG's A1 switch factor.
+ *
+ * THE RULE THIS PINS (no new vocabulary, no "approved" marker):
+ *   · CEE stamps `user_set` ONLY on a node the hold records as SUPPLIED by the
+ *     user (`GM_HELD_USER_STATED_NODES_KEY`) — today, an option whose label the
+ *     user's own typed words name (the Agent's `propose_new_option`, carried
+ *     in-process; `userStatedOptionIds` here) — at the approval seam
+ *     (`executeGmHeldResume`), AFTER the strip and the re-referee.
+ *   · An approved OLUMI proposal keeps its provenance: an Agent-minted option,
+ *     every `new_factors` node Olumi mints (A1's switch stays `ai_inferred`), the
+ *     Agent's add-risk door (#2099, no typed authorship), an `edit_graph` add.
+ *   · J2: a model — or a client's chip `parameters` — can never set it.
  *   · Draft / repair / system adds stay unstamped.
  *   · The stamp is outside the analysis hash, and a later value write to a
  *     stamped node keeps it and passes the stored-bytes scope guards.
  *
  * HARNESS: every row mints the hold through the REAL producer (the add-option
- * dispatch, or `handleEditGraph` + the referee gate), round-trips the pending the
- * way the store does (JSONB key order, `parsePendingAction`), and confirms
- * through the REAL `executeGmHeldResume` — the loop a user's "yes" drives.
+ * dispatch, the add-risk door, or `handleEditGraph` + the referee gate),
+ * round-trips the pending the way the store does (JSONB key order,
+ * `parsePendingAction`), and confirms through the REAL `executeGmHeldResume` —
+ * the loop a user's "yes" drives. The words each reader says are read from the
+ * REAL readers (`tryStructureOriginAnswer`, `projectEntity`).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -52,7 +62,11 @@ import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { admitCandidateModel, type CandidateModel } from '../../agent-lane/admit-model.js';
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { applyPatchOperations } from '../../../orchestrator/patch-applier.js';
-import { stampUserApprovedAddProvenance } from '../../../orchestrator/canonicalise-value-ops.js';
+import { stampUserStatedAddProvenance } from '../../../orchestrator/canonicalise-value-ops.js';
+import { tryStructureOriginAnswer } from '../../../cee/context-integrity/structure-origin-answer.js';
+import { projectEntity } from '../../agent-lane/runtime/agent-capabilities.js';
+import { GM_HELD_USER_STATED_NODES_KEY } from '../../routing/add-option-transaction.js';
+import { runWithUserNamedOptions, userNamedOptionIdsFor } from '../add-option-authorship-context.js';
 import type { ConversationContext, PatchOperation } from '../../../orchestrator/types.js';
 import type { ChatResult, LLMAdapter } from '../../../adapters/llm/types.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
@@ -128,6 +142,9 @@ function confirm(pending: PendingAction, currentGraph: unknown, tag: string) {
   return executeGmHeldResume({
     operations: read.operations,
     ...(read.envelopeCap !== undefined ? { envelopeCap: read.envelopeCap } : {}),
+    ...(read.switchFactorIds !== undefined ? { switchFactorIds: read.switchFactorIds } : {}),
+    // Threaded exactly as turn-executor threads it.
+    ...(read.userStatedNodeIds !== undefined ? { userStatedNodeIds: read.userStatedNodeIds } : {}),
     currentGraph,
     currentGraphHash: hashOf(currentGraph),
     freshness: 'none',
@@ -223,11 +240,23 @@ function paulChipParameters(withNewFactor: boolean): Record<string, unknown> {
   };
 }
 
+interface ApproveOpts {
+  /** A new factor Olumi mints for the option in the same change (`new_factors`). */
+  readonly withNewFactor: boolean;
+  /**
+   * The typed authorship signal: the option ids whose label the USER'S OWN typed words named — what route-v2 passes
+   * from the Agent's in-process context (`userNamedOptionIdsFor`). Absent = the Agent proposed it (Paul's 6526b52c).
+   */
+  readonly userStatedOptionIds?: readonly string[];
+  /** Extra members a CLIENT puts in the chip's wire `parameters` (J2 at the wire). */
+  readonly wireExtras?: Record<string, unknown>;
+}
+
 /** Chip → held → store round-trip → the user's "yes" → the graph the commit writes. */
-function approvePaulOption(withNewFactor: boolean) {
+function approvePaulOption(opts: ApproveOpts) {
   const stored = paulStored();
   const held = dispatchAddOptionTransaction({
-    parameters: paulChipParameters(withNewFactor),
+    parameters: { ...paulChipParameters(opts.withNewFactor), ...(opts.wireExtras ?? {}) },
     currentGraph: stored,
     currentGraphHash: hashOf(stored),
     freshness: 'none',
@@ -236,6 +265,7 @@ function approvePaulOption(withNewFactor: boolean) {
     turnId: 'turn-a6b-paul',
     requestId: 'req-a6b-paul',
     stage: 'frame',
+    ...(opts.userStatedOptionIds !== undefined ? { userStatedOptionIds: opts.userStatedOptionIds } : {}),
   });
   expect(held.kind, JSON.stringify(held).slice(0, 400)).toBe('held');
   if (held.kind !== 'held') throw new Error('the add-option chip must hold');
@@ -249,51 +279,135 @@ function approvePaulOption(withNewFactor: boolean) {
   return { stored, pending, outcome, persisted };
 }
 
+/** The hold's CEE-written authorship member, as the next turn reads it back. */
+function statedOnHold(pending: PendingAction): unknown {
+  const patch = 'inline_patch' in pending.action ? pending.action.inline_patch : undefined;
+  return (patch as Record<string, unknown> | null | undefined)?.[GM_HELD_USER_STATED_NODES_KEY];
+}
+
+const ORIGIN_Q = (label: string) => `Why is "${label}" in my model?`;
+/** What the Agent is shown for a node (`get_canonical_state` / the given state use this one projection). */
+const agentView = (node: Node) => projectEntity(node as Parameters<typeof projectEntity>[0]);
+const USER_AUTHORSHIP_SENTENCE = /you set it yourself, not because I suggested it/;
+
+const NEW_FACTOR_ID = 'fac_launch_campaign_reach';
+
 // ---------------------------------------------------------------------------
-// (a) Agent add-option approved via the chip
+// (a) Paul's option: Olumi's proposal vs the user's own words
 // ---------------------------------------------------------------------------
-describe('(a) an Agent add-option approved via the chip is the user’s', () => {
+describe('(a) an approved add-option: the user’s only when the user supplied it', () => {
   it('CONTROL (passes at base): the fixture reproduces the served defect’s precondition — the pre-add model is a persisted fixed point and has no 6526b52c', () => {
     const stored = paulStored();
     expect(isDeepStrictEqual(projectGraphForPersistence(stored), stored), 'the stored form projects to itself').toBe(true);
     expect(stored.nodes.some((n) => n.id === PAUL_OPTION_ID)).toBe(false);
   });
 
-  it('RED: Paul’s 6526b52c, approved → the persisted option node carries provenance user_set', () => {
-    const { persisted, stored } = approvePaulOption(false);
+  it('⭐ RED (DL CR, required): Paul’s 6526b52c — the Agent PROPOSED it, the user APPROVED it → it keeps Olumi’s provenance; "why is it here?" never says "not because I suggested it"; the Agent’s view never shows it as the user’s', () => {
+    const { persisted, pending, stored } = approvePaulOption({ withNewFactor: false });
+    expect(statedOnHold(pending), 'no typed signal → nothing recorded as the user’s').toBeUndefined();
     const option = nodeOf(persisted, PAUL_OPTION_ID);
     expect(option.kind).toBe('option');
     expect(option.label).toBe(PAUL_OPTION_LABEL);
     // The served levels landed (the fixture is the served shape, not a stand-in).
     expect((option.interventions as Record<string, { raw_value?: number; value?: number }>).feature_development_spend)
       .toEqual(expect.objectContaining({ value: 0.05, raw_value: 5000 }));
-    expect(option.provenance, 'the approved option is the user’s').toBe(USER_SET);
+    // The provenance it was proposed with: none (the held add carries none, and the approval adds none).
+    expect(Object.prototype.hasOwnProperty.call(option, 'provenance'), `provenance ${String(option.provenance)}`).toBe(false);
+    // The words each reader says.
+    const answer = tryStructureOriginAnswer(ORIGIN_Q(PAUL_OPTION_LABEL), persisted);
+    expect(answer ?? '', String(answer)).not.toMatch(/not because I suggested it/);
+    expect(answer ?? '', String(answer)).not.toMatch(/you set it yourself/);
+    expect(agentView(option)['provenance'], 'the Agent’s state view').not.toBe(USER_SET);
+    // POSITIVE CONTROL, same graph, same question: the probe DOES resolve 6526b52c — stamped, the reader says the
+    // user-authorship sentence. So the absence above is the provenance, not a probe that sees nothing.
+    const stamped = structuredClone(persisted);
+    nodeOf(stamped, PAUL_OPTION_ID).provenance = USER_SET;
+    expect(tryStructureOriginAnswer(ORIGIN_Q(PAUL_OPTION_LABEL), stamped)).toMatch(USER_AUTHORSHIP_SENTENCE);
+    expect(agentView(nodeOf(stamped, PAUL_OPTION_ID))['provenance']).toBe(USER_SET);
     // NEGATIVE CONTROL, by identity: no node the user did NOT add moved its provenance.
     for (const before of stored.nodes) {
       expect(nodeOf(persisted, before.id).provenance, `pre-existing ${before.id}`).toBe(before.provenance);
     }
   });
 
-  it('RED: with a new factor in the same approval → the option AND every new_factors node carry user_set', () => {
-    const { persisted, pending, stored } = approvePaulOption(true);
+  it('⭐ RED (DL CR): the same Agent proposal WITH a new factor Olumi minted → neither the option nor the factor is user_set', () => {
+    const { persisted, pending, stored } = approvePaulOption({ withNewFactor: true });
     const added = persisted.nodes.filter((n) => !stored.nodes.some((b) => b.id === n.id));
+    expect(added.map((n) => n.id).sort()).toEqual([PAUL_OPTION_ID, NEW_FACTOR_ID].sort());
+    expect(statedOnHold(pending)).toBeUndefined();
+    for (const node of added) {
+      expect(node.provenance, `${String(node.kind)} ${node.id}`).not.toBe(USER_SET);
+    }
+  });
+
+  it('RED: the user NAMED the option in their own typed words → the hold records it by id; approved → user_set, and the answer says they set it', () => {
+    const { persisted, pending, stored } = approvePaulOption({ withNewFactor: false, userStatedOptionIds: [PAUL_OPTION_ID] });
+    expect(statedOnHold(pending), 'recorded by identity').toEqual([PAUL_OPTION_ID]);
+    const option = nodeOf(persisted, PAUL_OPTION_ID);
+    expect(option.provenance, 'the option the user supplied is theirs').toBe(USER_SET);
+    expect(tryStructureOriginAnswer(ORIGIN_Q(PAUL_OPTION_LABEL), persisted)).toMatch(USER_AUTHORSHIP_SENTENCE);
+    expect(agentView(option)['provenance']).toBe(USER_SET);
+    for (const before of stored.nodes) {
+      expect(nodeOf(persisted, before.id).provenance, `pre-existing ${before.id}`).toBe(before.provenance);
+    }
+  });
+
+  it('RED (A1 class): the user named the option, Olumi minted its new factor → the option is user_set, the factor is NOT — even when the signal names the factor’s id', () => {
+    const { persisted, pending } = approvePaulOption({
+      withNewFactor: true,
+      // A signal that (wrongly) also names the factor: only an OPTION the batch adds is ever recorded.
+      userStatedOptionIds: [PAUL_OPTION_ID, NEW_FACTOR_ID],
+    });
     const newFactorIds = heldOps(pending)
       .filter((o) => o.op === 'add_node' && (o.value as { kind?: unknown }).kind === 'factor')
       .map((o) => o.path);
-    expect(newFactorIds, 'the held batch adds the new factor').toEqual(['fac_launch_campaign_reach']);
-    expect(added.map((n) => n.id).sort()).toEqual([PAUL_OPTION_ID, ...newFactorIds].sort());
-    for (const node of added) {
-      expect(node.provenance, `${String(node.kind)} ${node.id}`).toBe(USER_SET);
-    }
-    expect(nodeOf(persisted, 'fac_launch_campaign_reach').label).toBe('Launch campaign reach');
+    expect(newFactorIds, 'the held batch adds the new factor').toEqual([NEW_FACTOR_ID]);
+    expect(statedOnHold(pending)).toEqual([PAUL_OPTION_ID]);
+    expect(nodeOf(persisted, PAUL_OPTION_ID).provenance).toBe(USER_SET);
+    expect(nodeOf(persisted, NEW_FACTOR_ID).label).toBe('Launch campaign reach');
+    expect(nodeOf(persisted, NEW_FACTOR_ID).provenance, 'Olumi minted the factor').not.toBe(USER_SET);
+    expect(tryStructureOriginAnswer(ORIGIN_Q('Launch campaign reach'), persisted) ?? '').not.toMatch(/you set it yourself/);
+  });
+
+  it('J2 at the WIRE: chip parameters that CLAIM the user named the option are never read — nothing recorded, never user_set', () => {
+    const { persisted, pending } = approvePaulOption({
+      withNewFactor: true,
+      wireExtras: {
+        [GM_HELD_USER_STATED_NODES_KEY]: [PAUL_OPTION_ID, NEW_FACTOR_ID],
+        userStatedOptionIds: [PAUL_OPTION_ID],
+        user_stated: true,
+        provenance: USER_SET,
+      },
+    });
+    expect(statedOnHold(pending)).toBeUndefined();
+    expect(nodeOf(persisted, PAUL_OPTION_ID).provenance).not.toBe(USER_SET);
+    expect(nodeOf(persisted, NEW_FACTOR_ID).provenance).not.toBe(USER_SET);
   });
 
   it('J2 at the hold: the stamp is written at APPROVAL, never carried in the held payload', () => {
-    const { pending } = approvePaulOption(true);
+    const { pending } = approvePaulOption({ withNewFactor: true, userStatedOptionIds: [PAUL_OPTION_ID] });
     const adds = heldOps(pending).filter((o) => o.op === 'add_node');
     expect(adds.length).toBe(2);
     for (const op of adds) {
       expect(Object.prototype.hasOwnProperty.call(op.value as object, 'provenance'), `held ${op.path}`).toBe(false);
+    }
+  });
+
+  it('a malformed authorship member on a stored hold is read as NO signal: the batch still executes, and nothing is stamped', () => {
+    const { pending, stored } = approvePaulOption({ withNewFactor: false, userStatedOptionIds: [PAUL_OPTION_ID] });
+    for (const bad of [PAUL_OPTION_ID, [], [''], [7], { 0: PAUL_OPTION_ID }]) {
+      const tampered = structuredClone(pending);
+      const patch = 'inline_patch' in tampered.action ? tampered.action.inline_patch : undefined;
+      if (patch === null || patch === undefined) throw new Error('the held pending must carry its inline_patch');
+      (patch as Record<string, unknown>)[GM_HELD_USER_STATED_NODES_KEY] = bad;
+      const read = readGmHeldResume(throughTheStore(tampered));
+      expect(read.kind, JSON.stringify(bad)).toBe('ok');
+      if (read.kind !== 'ok') continue;
+      expect(read.userStatedNodeIds, JSON.stringify(bad)).toBeUndefined();
+      const outcome = confirm(throughTheStore(tampered), stored, 'malformed');
+      expect(outcome.status).toBe('executed');
+      if (outcome.status !== 'executed') continue;
+      expect(nodeOf(outcome.mutatedGraph, PAUL_OPTION_ID).provenance, JSON.stringify(bad)).not.toBe(USER_SET);
     }
   });
 });
@@ -415,8 +529,8 @@ function holdEditBatch(operations: readonly PatchOperation[], tag: string): Pend
   return throughTheStore(decision.pendingActions![0]!);
 }
 
-describe('(b) an approved edit_graph add is the user’s', () => {
-  it('RED: the model’s add (carrying its own ai_inferred) is stripped, held, APPROVED → the node carries user_set, written by CEE', async () => {
+describe('(b) an approved edit_graph add is NOT the user’s — the model authored it, and the path has no typed authorship signal', () => {
+  it('RED (DL CR): the model’s add (carrying its own ai_inferred) is stripped, held, APPROVED → never user_set; the hold records no authorship', async () => {
     const result = await editGraphTurn('ai_inferred', 'b');
     const pending = holdEditBatch(result.operations!, 'b');
     // The model's literal did not survive to the hold — whatever lands next is CEE's.
@@ -424,10 +538,14 @@ describe('(b) an approved edit_graph add is the user’s', () => {
     expect(add.path).toBe('fac_risk');
     expect(Object.prototype.hasOwnProperty.call(add.value as object, 'provenance')).toBe(false);
 
+    expect(statedOnHold(pending)).toBeUndefined();
+
     const outcome = confirm(pending, EDIT_GRAPH, 'b');
     expect(outcome.status).toBe('executed');
     if (outcome.status !== 'executed') return;
-    expect(nodeOf(outcome.mutatedGraph, 'fac_risk').provenance).toBe(USER_SET);
+    const added = nodeOf(outcome.mutatedGraph, 'fac_risk');
+    expect(added.label, 'the add landed').toBe('Data Quality Risk');
+    expect(added.provenance, 'an approved model add is not the user’s').not.toBe(USER_SET);
     // NEGATIVE CONTROL, by identity: the nodes the batch only LINKED earn nothing.
     expect(nodeOf(outcome.mutatedGraph, 'opt_a').provenance).toBeUndefined();
     expect(nodeOf(outcome.mutatedGraph, 'goal_g').provenance).toBeUndefined();
@@ -467,23 +585,27 @@ describe('(d) J2 — a model cannot self-stamp', () => {
     expect(outcome.status, 'a yes never overrides a forged stamp').toBe('referee_blocked');
   });
 
-  it('RED (unit, the seam’s stamp): CEE’s literal is written LAST — no payload literal, including user_set itself, sits in its place', () => {
+  it('RED (unit, the seam’s stamp): ONLY the adds the hold names are stamped, and CEE’s literal is written LAST on them — an unnamed add keeps its own provenance, by reference', () => {
     const ops: PatchOperation[] = [
-      { op: 'add_node', path: 'a', value: { id: 'a', kind: 'factor', label: 'A', provenance: 'from_brief' } },
+      { op: 'add_node', path: 'a', value: { id: 'a', kind: 'option', label: 'A', provenance: 'from_brief' } },
       { op: 'add_node', path: 'b', value: { id: 'b', kind: 'option', label: 'B', provenance: 'ai_inferred' } },
-      { op: 'add_node', path: 'c', value: { id: 'c', kind: 'risk', label: 'C' } },
+      { op: 'add_node', path: 'c', value: { id: 'c', kind: 'factor', label: 'C' } },
     ];
     const frozen = structuredClone(ops);
-    const out = stampUserApprovedAddProvenance(ops);
-    expect(out.map((o) => (o.value as { provenance?: unknown }).provenance)).toEqual([USER_SET, USER_SET, USER_SET]);
+    const out = stampUserStatedAddProvenance(ops, ['a']);
+    expect(out.map((o) => (o.value as { provenance?: unknown }).provenance)).toEqual([USER_SET, 'ai_inferred', undefined]);
+    expect(out[1], 'an unnamed add is returned by reference').toBe(ops[1]);
+    expect(out[2]).toBe(ops[2]);
     expect(ops, 'inputs are never mutated').toEqual(frozen);
   });
 
-  it('RED (unit): only add_node is stamped — an update, an edge add and a removal are returned BY REFERENCE', () => {
+  it('RED (unit): no named node → nothing is stamped; an update, an edge add and a removal are returned BY REFERENCE even when named', () => {
+    const add: PatchOperation = { op: 'add_node', path: 'n', value: { id: 'n', kind: 'option', label: 'N' } };
+    expect(stampUserStatedAddProvenance([add], [])[0]).toBe(add);
     const update: PatchOperation = { op: 'update_node', path: 'f', value: { observed_state: { value: 0.4 } } };
     const edge: PatchOperation = { op: 'add_edge', path: 'a::b', value: { from: 'a', to: 'b' } };
     const removal: PatchOperation = { op: 'remove_node', path: 'z' };
-    const out = stampUserApprovedAddProvenance([update, edge, removal]);
+    const out = stampUserStatedAddProvenance([update, edge, removal], ['f', 'a::b', 'z']);
     expect(out[0]).toBe(update);
     expect(out[1]).toBe(edge);
     expect(out[2]).toBe(removal);
@@ -531,29 +653,31 @@ function holdValueGraph(operations: PatchOperation[], tag: string): PendingActio
   return throughTheStore(decision.pendingActions![0]!);
 }
 
-describe('(c) a held add executed on approval is the user’s', () => {
-  it('RED: a held risk add, confirmed → user_set; the existing factor it links to earns nothing', () => {
-    const outcome = confirm(holdValueGraph([RISK_ADD, RISK_LINK], 'c'), VALUE_GRAPH, 'c');
+describe('(c) a held add with no typed authorship signal, approved, keeps its own provenance', () => {
+  it('RED (DL CR): a held risk add, confirmed → NOT user_set; the existing factor it links to earns nothing', () => {
+    const pending = holdValueGraph([RISK_ADD, RISK_LINK], 'c');
+    expect(statedOnHold(pending)).toBeUndefined();
+    const outcome = confirm(pending, VALUE_GRAPH, 'c');
     expect(outcome.status).toBe('executed');
     if (outcome.status !== 'executed') return;
-    expect(nodeOf(outcome.mutatedGraph, 'risk_dq').provenance).toBe(USER_SET);
+    expect(nodeOf(outcome.mutatedGraph, 'risk_dq').label, 'the add landed').toBe('Data quality');
+    expect(nodeOf(outcome.mutatedGraph, 'risk_dq').provenance).not.toBe(USER_SET);
     expect(nodeOf(outcome.mutatedGraph, 'fac_setup').provenance).toBeUndefined();
-    // The node stamp is not a VALUE claim: the value stamp's field is untouched on the add.
     expect((nodeOf(outcome.mutatedGraph, 'risk_dq').observed_state as { source?: unknown } | undefined)?.source).toBeUndefined();
   });
 
-  it('RED: a mixed confirmed batch — the value write keeps ITS stamp and the add earns the add stamp, each on its own node', () => {
+  it('CONTRAST: a mixed confirmed batch — the user’s VALUE write keeps its own (pre-A6b) stamp; the unsigned add earns none', () => {
     const valueOp: PatchOperation = { op: 'update_node', path: 'fac_setup', value: { 'data/value': 0.5 }, old_value: { 'data/value': 0.1 } };
     const outcome = confirm(holdValueGraph([valueOp, RISK_ADD, RISK_LINK], 'c2'), VALUE_GRAPH, 'c2');
     expect(outcome.status).toBe('executed');
     if (outcome.status !== 'executed') return;
-    expect(nodeOf(outcome.mutatedGraph, 'risk_dq').provenance).toBe(USER_SET);
+    expect(nodeOf(outcome.mutatedGraph, 'risk_dq').provenance).not.toBe(USER_SET);
     const fac = nodeOf(outcome.mutatedGraph, 'fac_setup');
-    expect(fac.provenance).toBe(USER_SET);
+    expect(fac.provenance, 'the value write’s own stamp (stampUserEditProvenance)').toBe(USER_SET);
     expect((fac.observed_state as { source?: unknown }).source).toBe('user_override');
   });
 
-  it('RED (#2099, the Agent’s held add-risk door): the risk the REAL door holds, approved → the risk node is user_set; the nodes it links earn nothing; its links stay Olumi’s placeholders', () => {
+  it('RED (DL CR; #2099, the Agent’s held add-risk door): the door carries NO typed authorship, so the risk it holds, approved, is NOT user_set; its links stay Olumi’s placeholders', () => {
     const stored = structuredClone(VALUE_GRAPH);
     const held = dispatchAddRiskTransaction({
       params: {
@@ -581,6 +705,8 @@ describe('(c) a held add executed on approval is the user’s', () => {
     expect(add.path).toBe(held.riskId);
     expect(Object.prototype.hasOwnProperty.call(add.value as object, 'provenance'), 'held risk add').toBe(false);
 
+    expect(statedOnHold(pending), 'the door records no authorship').toBeUndefined();
+
     const outcome = confirm(pending, stored, 'c-risk');
     expect(outcome.status, JSON.stringify(outcome).slice(0, 400)).toBe('executed');
     if (outcome.status !== 'executed') return;
@@ -588,7 +714,9 @@ describe('(c) a held add executed on approval is the user’s', () => {
     const risk = nodeOf(after, held.riskId);
     expect(risk.kind).toBe('risk');
     expect(risk.label).toBe('Competitive response');
-    expect(risk.provenance, 'the approved risk is the user’s').toBe(USER_SET);
+    expect(risk.provenance, 'the approved risk keeps the provenance it was proposed with').not.toBe(USER_SET);
+    expect(tryStructureOriginAnswer(ORIGIN_Q('Competitive response'), after) ?? '').not.toMatch(/you set it yourself/);
+    expect(agentView(risk)['provenance']).not.toBe(USER_SET);
     // NEGATIVE CONTROL, by identity: the factor that drives it and the goal it threatens earn nothing.
     expect(nodeOf(after, 'fac_setup').provenance).toBeUndefined();
     expect(nodeOf(after, 'g_profit').provenance).toBeUndefined();
@@ -637,9 +765,10 @@ describe('(f) the stamp does not enter the analysis hash', () => {
     }),
   });
 
-  it('the approved graph hashes exactly as the same graph without the stamps (16-hex and 64-hex); the identity hash DOES move', () => {
-    const { persisted } = approvePaulOption(true);
-    const addedIds = [PAUL_OPTION_ID, 'fac_launch_campaign_reach'];
+  it('the approved graph hashes exactly as the same graph without the stamp (16-hex and 64-hex); the identity hash DOES move', () => {
+    const { persisted } = approvePaulOption({ withNewFactor: true, userStatedOptionIds: [PAUL_OPTION_ID] });
+    expect(nodeOf(persisted, PAUL_OPTION_ID).provenance, 'the stamp under test is present').toBe(USER_SET);
+    const addedIds = [PAUL_OPTION_ID];
     const unstamped = withoutAddedStamps(persisted, addedIds);
     for (const id of addedIds) expect(nodeOf(unstamped, id).provenance).toBeUndefined();
     expect(computeAnalysisAffectingGraphHash(persisted as GraphStateIngress))
@@ -652,7 +781,7 @@ describe('(f) the stamp does not enter the analysis hash', () => {
   });
 
   it('POSITIVE CONTROL: the same probe DOES see an analysis-affecting change on the same node (its level)', () => {
-    const { persisted } = approvePaulOption(false);
+    const { persisted } = approvePaulOption({ withNewFactor: false, userStatedOptionIds: [PAUL_OPTION_ID] });
     const moved = structuredClone(persisted);
     const option = nodeOf(moved, PAUL_OPTION_ID);
     (option.interventions as Record<string, { value: number }>).feature_development_spend!.value = 0.06;
@@ -664,9 +793,9 @@ describe('(f) the stamp does not enter the analysis hash', () => {
 // ---------------------------------------------------------------------------
 // (g) a later value write keeps the stamp and passes the scope guards
 // ---------------------------------------------------------------------------
-describe('(g) a later value write to a user_set node keeps the stamp and passes the stored-bytes guards', () => {
-  it('RED: an option level written on the approved 6526b52c — the writer base is a fixed point, the batch guard passes, the stamp stays', () => {
-    const { persisted } = approvePaulOption(false);
+describe('(g) a later value write keeps the stamp and passes the stored-bytes guards', () => {
+  it('RED: an option level written on the user-named 6526b52c — the writer base is a fixed point, the batch guard passes, the stamp stays', () => {
+    const { persisted } = approvePaulOption({ withNewFactor: false, userStatedOptionIds: [PAUL_OPTION_ID] });
     expect(nodeOf(persisted, PAUL_OPTION_ID).provenance).toBe(USER_SET);
     expect(isDeepStrictEqual(projectGraphForPersistence(persisted), persisted), 'writer base fixed point').toBe(true);
     const target = { optionId: PAUL_OPTION_ID, factorId: 'feature_development_spend', modelValue: 0.06 };
@@ -688,10 +817,11 @@ describe('(g) a later value write to a user_set node keeps the stamp and passes 
     expect(option.provenance, 'the level write keeps the stamp').toBe(USER_SET);
   });
 
-  it('RED: a factor value written on the approved NEW factor — the value writer’s scope guard passes, the stamp stays', async () => {
-    const { persisted } = approvePaulOption(true);
-    const factorId = 'fac_launch_campaign_reach';
-    expect(nodeOf(persisted, factorId).provenance).toBe(USER_SET);
+  it('RED: a factor value the USER writes on the NEW factor Olumi minted — the value writer’s scope guard passes; that direct edit (not the approval) is what makes the factor the user’s; the option’s stamp stays', async () => {
+    const { persisted } = approvePaulOption({ withNewFactor: true, userStatedOptionIds: [PAUL_OPTION_ID] });
+    const factorId = NEW_FACTOR_ID;
+    const factorProvenanceBefore = nodeOf(persisted, factorId).provenance;
+    expect(factorProvenanceBefore, 'Olumi minted the factor').not.toBe(USER_SET);
     const event = { kind: 'factor_value_edit' as const, target_id: factorId, value: 0.4 };
     const res = await applyFactorValueEdit({
       payload: { kind: 'system_event', turn_id: 'turn-a6b-g2', scenario_id: '11111111-1111-4111-8111-111111111111', stage: 'frame', event } as never,
@@ -705,8 +835,26 @@ describe('(g) a later value write to a user_set node keeps the stamp and passes 
     const after = projectGraphForPersistence(res.mutatedGraph);
     expect(factorValuesPostimageIsScoped(persisted, after, [factorId])).toBe(true);
     expect((nodeOf(after, factorId).observed_state as { value?: unknown }).value).toBe(0.4);
-    expect(nodeOf(after, factorId).provenance, 'the value write keeps the stamp').toBe(USER_SET);
-    // And nothing else in the model moved with it.
+    // A direct user edit IS the user's (`admit-model.ts`: "user_set is reserved for a direct user edit"): the value
+    // writer marks it so. Approving the factor did not (asserted before the write, above).
+    expect(nodeOf(after, factorId).provenance, 'the user’s own value write').toBe(USER_SET);
+    // And the user-named option's stamp did not move with it.
     expect(nodeOf(after, PAUL_OPTION_ID).provenance).toBe(USER_SET);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (h) the in-process carrier (`add-option-authorship-context.ts`)
+// ---------------------------------------------------------------------------
+describe('(h) the in-process carrier names the user’s options only for its own scenario and turn', () => {
+  it('outside the context, or for another scenario or turn, no option is the user’s', async () => {
+    expect(userNamedOptionIdsFor('scn-h', 'turn-h')).toEqual([]);
+    await runWithUserNamedOptions({ scenarioId: 'scn-h', turnId: 'turn-h', optionIds: ['opt-h'] }, async () => {
+      await Promise.resolve();
+      expect(userNamedOptionIdsFor('scn-h', 'turn-h'), 'same scenario, same turn').toEqual(['opt-h']);
+      expect(userNamedOptionIdsFor('scn-other', 'turn-h')).toEqual([]);
+      expect(userNamedOptionIdsFor('scn-h', 'turn-other')).toEqual([]);
+    });
+    expect(userNamedOptionIdsFor('scn-h', 'turn-h'), 'after the dispatch returns').toEqual([]);
   });
 });

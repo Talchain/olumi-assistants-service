@@ -4575,6 +4575,8 @@ export async function runTurnExecutor(
           ...(read.envelopeCap !== undefined ? { envelopeCap: read.envelopeCap } : {}),
           // A new switch's today-0 lands in this same apply (Canonical #70 5854919806 item 1).
           ...(read.switchFactorIds !== undefined ? { switchFactorIds: read.switchFactorIds } : {}),
+          // ⭐ A6b — only the nodes the hold records as the USER'S are stamped `user_set` (DL CR on #2131, option (a)).
+          ...(read.userStatedNodeIds !== undefined ? { userStatedNodeIds: read.userStatedNodeIds } : {}),
           currentGraph: gmBaseGraph,
           currentGraphHash: gmBaseHash,
           freshness: freshness?.freshness ?? 'unknown',
@@ -4825,10 +4827,12 @@ export async function runTurnExecutor(
           const preStepGraph = workingGraph;
           const stepCap = reads[i]!.envelopeCap;
           const stepSwitches = reads[i]!.switchFactorIds;
+          const stepStated = reads[i]!.userStatedNodeIds;
           const outcome = executeGmHeldResume({
             operations: reads[i]!.operations,
             ...(stepCap !== undefined ? { envelopeCap: stepCap } : {}),
             ...(stepSwitches !== undefined ? { switchFactorIds: stepSwitches } : {}),
+            ...(stepStated !== undefined ? { userStatedNodeIds: stepStated } : {}),
             currentGraph: preStepGraph,
             currentGraphHash: workingHash,
             freshness: freshness?.freshness ?? 'unknown',
