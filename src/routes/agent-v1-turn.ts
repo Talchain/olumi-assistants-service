@@ -1484,9 +1484,25 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Counts every call that could WRITE, so a failed turn knows whether it is
     // safe to release its claim (nothing sent) or must leave it (outcome unknown).
     let writesDispatched = 0;
+    /**
+     * ⭐ ONE READ OF THE MODEL PER TURN WHEN NOTHING WAS WRITTEN (slice C1c; served replay of Paul's transcript on
+     * 339ed34, 27 Sep: an ordinary turn read the scenario twice — the state the Agent is given, and the readback
+     * for this response — at ~1.3 s of server time each). Only a READ-ONLY turn reuses its read: once the turn
+     * writes anything (every write goes through this dispatch or bumps `writesDispatched`) nothing is reused, and
+     * a write turn reads exactly as before — a changed model is never answered from before it changed.
+     */
+    const graphReadPath = `/assist/v1/scenarios/${scenarioId}/graph`;
+    let graphRead: Awaited<ReturnType<typeof dispatch>> | undefined;
+    const readingDispatch: typeof dispatch = async (path, body) => {
+      if (path !== graphReadPath) return dispatch(path, body);
+      if (graphRead !== undefined && writesDispatched === 0) return graphRead;
+      const res = await dispatch(path, body);
+      graphRead = res.status === 200 && writesDispatched === 0 ? res : undefined;
+      return res;
+    };
     const countingDispatch: typeof dispatch = async (path, body) => {
       if (path.endsWith('/graph/register') || path === '/orchestrate/v2/turn') writesDispatched += 1;
-      return dispatch(path, body);
+      return readingDispatch(path, body);
     };
     /**
      * ⭐ THE AUTOMATIC FIRST ANALYSIS (Paul, 5812069638), handed to the build capability. The route
@@ -1885,7 +1901,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * BEFORE the reply is composed, because the Run offer below keys on the
      * readiness this same response carries.
      */
-    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks } = await readBackState(dispatch, scenarioId);
+    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks } = await readBackState(readingDispatch, scenarioId);
     const fa = firstAnalysis?.outcome;
     // An analysis of THIS revision exists because this turn's construction ran it (or already had).
     const firstAnalysisExists = fa !== undefined && (fa.ran || fa.reason === 'already_ran_for_construction');
