@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
-import { AGENT_TOOLS, NODE_SIZE_MEANS_LINK_FROM, SLIGHT_IS_WEAK } from '../runtime/agent-tools.js';
+import { AGENT_TOOLS, A_FIGURE_IS_THE_FACTORS_VALUE, NODE_SIZE_MEANS_LINK_FROM, SLIGHT_IS_WEAK } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
 
 type Edge = { from: string; to: string; strength: { mean: number; std: number }; [k: string]: unknown };
@@ -46,6 +46,15 @@ describe('PJ-C3: the size of a factor is the strength of the link out of it', ()
     expect(d).toContain(RC_RULE);
     // Contrast: the probe reads the real description (its existing band rule is there too).
     expect(d).toContain(SLIGHT_IS_WEAK.trim());
+  });
+
+  it('⭐ the carve-out rides with it: a FIGURE for the factor itself is its value, not a link (DL CR on #2153, words verbatim)', () => {
+    // Typed out, as the rule is, so the row binds the words.
+    const DL_CARVE_OUT = "A figure for the factor itself (e.g. 'churn is 6%') is its value, not a link.";
+    expect(A_FIGURE_IS_THE_FACTORS_VALUE).toBe(DL_CARVE_OUT);
+    const d = description('propose_link_strength');
+    // Directly after the rule it limits, so the model reads them as one instruction.
+    expect(d).toContain(`${RC_RULE} ${DL_CARVE_OUT}`);
   });
 
   it('on the SERVED graph (214311Z A12) the rule names one link, the expected one; the served choice was a link INTO the node', () => {

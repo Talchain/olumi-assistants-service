@@ -47,6 +47,13 @@ export const NODE_SIZE_MEANS_LINK_FROM =
   + 'what it affects: the link FROM it, to the outcome they name or imply. If it has several and they named none, ask which.';
 
 /**
+ * ⛔ THE CARVE-OUT (DL CHANGES_REQUIRED on #2153, words verbatim): "how big a factor IS" also matches a FIGURE for the
+ * factor itself ("churn is 6%"). That is the factor's value (`propose_assumptions`), never a link strength.
+ */
+export const A_FIGURE_IS_THE_FACTORS_VALUE =
+  'A figure for the factor itself (e.g. \'churn is 6%\') is its value, not a link.';
+
+/**
  * ⛔ A LEVEL'S LINK IS NOT A STRENGTH TO ASK ABOUT (AI Conversation #70 5849437163 U2b, served c35801a): the user gave
  * "it lowers Monthly churn to 6%" for an option not yet linked to churn; the model left that level out and asked "how
  * strong is that effect" — the band question that belongs to a CAUSAL link between factors. A level on an unlinked
@@ -279,7 +286,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'Record how strong an EXISTING link is, as the user\u2019s own estimate, when the user has just said it (for example '
       + '"that effect is strong", or "it actually pushes the other way"). This does NOT change anything: it prepares ONE change '
       + 'and returns its id, which you keep for authorise_change: show the user what it records, never the id, before they approve. '
-      + NODE_SIZE_MEANS_LINK_FROM + ' '
+      + NODE_SIZE_MEANS_LINK_FROM + ' ' + A_FIGURE_IS_THE_FACTORS_VALUE + ' '
       + 'The user\u2019s word is one of Olumi\u2019s strength bands. If the link already sits in that band, its strength is kept and only '
       + 'recorded as theirs; otherwise it is set to the middle of that band, and the result says the figure so you can tell them. '
       + 'Give `direction` ONLY when the user said the link pushes the other way. When they described the strength in their own words '
