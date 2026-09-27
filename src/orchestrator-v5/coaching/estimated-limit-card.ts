@@ -140,6 +140,15 @@ export function estimatedLimitIn(graph: Record<string, unknown> | null): Estimat
   const matches = graph.nodes.filter((n) => readRecord(n)?.id === nodeId);
   if (matches.length !== 1) return null;
   const node = readRecord(matches[0])!;
+  // ⛔ A check Olumi cannot cite: a limit whose unit is not the node's own (e.g. "£k" on a "£" node, ×1000) was not
+  // checked in the unit it states. A RELABELLED limit is exempt: the relabel is what framed it (MG #70 5856264807 —
+  // 17d1's "%" reached ISL as 0.04), so "checked against …" is true there (AI Quality 5856373468).
+  const row = (Array.isArray(graph.goal_constraints) ? graph.goal_constraints : [])
+    .map(readRecord).find((r) => r?.constraint_id === ratified[0]!.constraint_id);
+  const nodeUnit = readRecord(node.observed_state)?.unit;
+  const limitUnit = ratified[0]!.unit;
+  if (row?.provenance_unit_relabelled === undefined && typeof limitUnit === 'string' && typeof nodeUnit === 'string'
+    && limitUnit.trim() !== nodeUnit.trim()) return null;
   const level = levelOf(readRecord(node.observed_state));
   const label = typeof node.label === 'string' ? node.label.trim() : '';
   const kind = typeof node.kind === 'string' && TARGETABLE_NODE_KINDS.includes(node.kind) ? node.kind : null;

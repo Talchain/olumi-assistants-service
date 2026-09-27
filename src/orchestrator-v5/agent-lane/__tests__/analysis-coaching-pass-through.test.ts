@@ -958,6 +958,16 @@ test('ESTIMATED LIMIT — C4 correction: a RELABELLED limit still gets the card 
  relabelled.goal_constraints[0].provenance_unit_relabelled={rule:'agent_lane_limit_unit_v1',pre_normalisation_unit:'% per month',pre_normalisation_value:10};
  assert.equal(estCards(estCase('evaluated_feasible',undefined,relabelled)).length,1);
 });
+test('ESTIMATED LIMIT — an UN-relabelled unit mismatch ("£k" limit on a "£" node, ×1000) gets NO card: it was not checked in the unit it states (AIQ 5856373468)',()=>{
+ const same=withChurnLevel('user_assumption',4,'£') as Record<string, any>;
+ assert.equal(estCards(estCase('evaluated_feasible',undefined,same)).length,1,'control: the same limit in the node\'s own unit gets the card');
+ const mismatch=structuredClone(same);
+ for (const c of mismatch.goal_constraints) if (c.node_id==='monthly_churn') c.unit='£k';
+ assert.equal(estCards(estCase('evaluated_feasible',undefined,mismatch)).length,0);
+ const relabelled=structuredClone(mismatch);
+ relabelled.goal_constraints[0].provenance_unit_relabelled={rule:'agent_lane_limit_unit_v1',pre_normalisation_unit:'£k',pre_normalisation_value:4};
+ assert.equal(estCards(estCase('evaluated_feasible',undefined,relabelled)).length,1,'a relabelled limit is exempt: the relabel framed it');
+});
 const CHURN_ID = 'agent-lane:monthly_churn:<=';
 const PRICE_ID = 'agent-lane:pro_plan_price:<=';
 const PRICE_LIMIT = {constraint_id:PRICE_ID,node_id:'pro_plan_price',operator:'<=',value:59,label:'Pro plan price',unit:'GBP per month',provenance:'explicit'};
