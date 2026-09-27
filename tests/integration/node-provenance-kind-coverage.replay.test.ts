@@ -617,6 +617,11 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "goal_threshold_unit",
       "id",
       "intercept",
+      // Writer audit 2026-09-27 (#70 5854387709) — THE VALUE-BEARING DECISION: `interventionKeys`,
+      // `starterId` and `starterTitle` are NOT value-bearing and must NOT join `carriesValue`. They are the
+      // UI register's saved-example stamps (which factor keys an option lists; which example a node came
+      // from), declared only so a write keeps them. They assert no magnitude.
+      "interventionKeys",
       "interventions",
       "is_baseline",
       "kind",
@@ -632,6 +637,8 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "provenance",
       "scale_frame",
       "source_quote",
+      "starterId",
+      "starterTitle",
       "success_threshold",
       "threshold_source",
       "uncertainty_drivers",
