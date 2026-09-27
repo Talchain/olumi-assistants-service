@@ -112,19 +112,26 @@ export function leaderStandingOf(readback: { readonly analysisState?: unknown; r
 }
 
 /**
- * The ONE paragraph the route appends: the label and the typed reason in bold, then the Agent's view, its reasoning and
- * the one step. Server-owned words open it, so it can never read as the analysis's own finding.
+ * The EXACT sentence the view opens on — the label and the typed reason the analysis cannot confirm it. Server-owned
+ * words, so the view can never read as the analysis's own finding. The chat renders it verbatim and composes no reason
+ * of its own (AIC 5855633777, under ChatGPT's thin-UI ruling 5855577789).
  */
-export function provisionalViewBlock(v: ProvisionalView, because: string): string {
+export function provisionalViewHeading(because: string): string {
   const why = because.startsWith('because ') ? ` ${because}` : `, ${because}`;
-  return `**${PROVISIONAL_VIEW_LABEL} — the analysis can't confirm this yet${why}.** ${v.view} ${v.reasoning} To let the analysis confirm it: ${v.confirm_step}`;
+  return `${PROVISIONAL_VIEW_LABEL} \u2014 the analysis can't confirm this yet${why}.`;
 }
 
-/** Appended as the reply's LAST paragraph — call it only on text the leader gate has already seen. */
-export function withProvisionalView(text: string, v: ProvisionalView, because: string): string {
-  const body = text.trimEnd();
-  const block = provisionalViewBlock(v, because);
-  return body.length === 0 ? block : `${body}\n\n${block}`;
+/**
+ * ⭐ TYPED, NEVER PROSE (AIC 5855633777; ChatGPT 5855577789 rule 1). The view travels ONLY as `_agent.provisional_view`
+ * — `{heading, view, reasoning, confirm_step, because}` — and never in `assistant_text`: a copy in the prose would be
+ * shown twice, land behind "Show more" (the answer shape runs after every append), and invite a surface to parse prose.
+ */
+export interface ProvisionalViewSidecar extends ProvisionalView {
+  readonly heading: string;
+  readonly because: string;
+}
+export function provisionalViewSidecar(v: ProvisionalView, because: string): ProvisionalViewSidecar {
+  return { heading: provisionalViewHeading(because), ...v, because };
 }
 
 /**

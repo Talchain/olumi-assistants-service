@@ -8,7 +8,7 @@
  *
  * What must hold:
  *   - the model's ranking prose is still stripped by the gate (the truth boundary for analysis claims is unchanged);
- *   - the labelled provisional block follows the gated text, with the view, the reasoning and the ONE step;
+ *   - the labelled provisional view is TYPED on `_agent` (heading, view, reasoning, the ONE step), never in the prose;
  *   - `_agent.provisional_view` carries it typed; `blocks` / `analysis_state` / `analysis_ready` are byte-for-byte what
  *     the same turn returns WITHOUT the tool call — the view is never placed in the analysis;
  *   - with no tool call, nothing is added (never fabricated); with a permitted leader, the tool is refused.
@@ -59,6 +59,8 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 });
 
 let callModelOutputs: Record<string, unknown>[][] = [];
+/** Every model request the route sent, in order. */
+const modelRequests: Record<string, unknown>[] = [];
 
 type Body = {
   assistant_text: string;
@@ -72,9 +74,15 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
   let app: FastifyInstance;
   let noLeaderSentence: string;
   let because: string;
-  let block: string;
+  let heading: string;
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: string }) => {
+      const req = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      modelRequests.push(req);
+      // The Run turn's forced provisional-view call runs IN PARALLEL with the interpreter: answer it by content, not order.
+      if ((req['tool_choice'] as { name?: unknown } | undefined)?.name === 'give_provisional_view') {
+        return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'give_provisional_view', arguments: JSON.stringify(VIEW), call_id: 'forced' }] }), { status: 200 });
+      }
       const output = callModelOutputs.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: 'Done.' }] }];
       return new Response(JSON.stringify({ output }), { status: 200 });
     }));
@@ -84,7 +92,7 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     noLeaderSentence = (await import('../withheld-leader-fail-closed.js')).agentNoLeaderSentence('constraint_verdict_withheld', FX.state.analysis_ready);
     // Written out here, not imported from the module under test: the reason is the gate's own clause, before its ask.
     because = noLeaderSentence.replace(/^No single option can be put forward yet, /, '').split(';')[0]!.trim();
-    block = `**Provisional view \u2014 the analysis can't confirm this yet ${because}.** ${VIEW.view} ${VIEW.reasoning} To let the analysis confirm it: ${VIEW.confirm_step}`;
+    heading = `Provisional view \u2014 the analysis can't confirm this yet ${because}.`;
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
     app.post('/orchestrate/v2/turn', async () => ({
@@ -98,7 +106,7 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); });
+  beforeEach(() => { rows.clear(); modelRequests.length = 0; readbackState = WITHHELD_STATE; });
 
   let turnSeq = 0;
   let turnId = '';
@@ -127,7 +135,7 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     expect(REPLY.text.split(RANKING_SENTENCE).length).toBe(2);
   });
 
-  it('RED: a withheld Run turn — prose ranking still stripped, the labelled block follows, typed on `_agent`', async () => {
+  it('RED: a withheld Run turn — prose ranking still stripped, the labelled view is typed on `_agent`, never in the prose', async () => {
     readbackState = WITHHELD_STATE;
     const r = await runViewThenReply();
     expect(r.statusCode).toBe(200);
@@ -137,17 +145,14 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     // The gate is unchanged: the model's own ranking sentence is gone and its no-leader sentence is there.
     expect(b.assistant_text).not.toContain(RANKING_SENTENCE.trim());
     expect(b.assistant_text).toContain(noLeaderSentence);
-    // The block is the LAST paragraph, after the gate's sentence, whole — view, reasoning and the one step.
-    expect(b.assistant_text.endsWith(`\n\n${block}`)).toBe(true);
-    expect(b.assistant_text.indexOf(noLeaderSentence)).toBeLessThan(b.assistant_text.indexOf('**Provisional view'));
-    expect(block).toContain(VIEW.view);
-    expect(block).toContain(VIEW.reasoning);
-    expect(block).toContain(`To let the analysis confirm it: ${VIEW.confirm_step}`);
-    expect(b._agent.provisional_view).toEqual({ ...VIEW, because });
+    // ⭐ TYPED ONLY (AIC 5855633777): the view is on `_agent`, with its exact heading, and never in the prose.
+    expect(b.assistant_text).not.toContain(VIEW.view);
+    expect(b.assistant_text).not.toContain('Provisional view');
+    expect(b._agent.provisional_view).toEqual({ heading, ...VIEW, because });
     expect(rows.get(turnId)?.assistant_message, 'the answer row a replay returns holds the same text').toBe(b.assistant_text);
   });
 
-  it('RED: the analysis is untouched — blocks, analysis_state and analysis_ready equal the same turn WITHOUT the tool call, and the text differs ONLY by the block', async () => {
+  it('RED: the analysis is untouched — blocks, analysis_state and analysis_ready equal the same turn WITHOUT the tool call, and the text is IDENTICAL (the view is typed only)', async () => {
     readbackState = WITHHELD_STATE;
     const withView = (await runViewThenReply()).json() as Body;
     const without = (await runThenReply()).json() as Body;
@@ -157,13 +162,14 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     expect(withView.analysis_ready).toEqual(without.analysis_ready);
     expect(JSON.stringify(withView.blocks ?? null)).not.toContain('Provisional view');
     expect(JSON.stringify(withView.analysis_state ?? null)).not.toContain(VIEW.view);
-    expect(withView.assistant_text).toBe(`${without.assistant_text}\n\n${block}`);
+    expect(withView.assistant_text, 'the prose is untouched: the view is typed only').toBe(without.assistant_text);
+    expect(withView._agent.provisional_view).toEqual({ heading, ...VIEW, because });
     // No tool call → nothing added (never fabricated).
     expect(without.assistant_text).not.toContain('Provisional view');
     expect(Object.hasOwn(without._agent, 'provisional_view')).toBe(false);
   });
 
-  it('RED: an ordinary follow-up turn ("what would you do?") over the withheld result gets the block too', async () => {
+  it('RED: an ordinary follow-up turn ("what would you do?") over the withheld result gets the typed view too', async () => {
     readbackState = WITHHELD_STATE;
     callModelOutputs = [
       [{ type: 'function_call', name: 'give_provisional_view', arguments: JSON.stringify(VIEW), call_id: 'c1' }],
@@ -171,11 +177,41 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     ];
     const b = (await post('So what would you do?')).json() as Body;
     expect(callModelOutputs).toEqual([]);
-    expect(b.assistant_text).toBe(`The analysis cannot put an option forward yet. Here is my own reading, set apart below.\n\n${block}`);
-    expect(b._agent.provisional_view).toEqual({ ...VIEW, because });
+    expect(b.assistant_text).toBe('The analysis cannot put an option forward yet. Here is my own reading, set apart below.');
+    expect(b._agent.provisional_view).toEqual({ heading, ...VIEW, because });
   });
 
-  it('CONTRAST: a readback that PERMITS the leader refuses the tool — no block, the reply byte-identical', async () => {
+  const pressRun = () => {
+    turnSeq += 1;
+    turnId = `7a1b2c3d-4e5f-4a6b-8c7d-${String(turnSeq).padStart(12, '0')}`;
+    callModelOutputs = [[{ type: 'message', content: [{ type: 'output_text', text: REPLY.text }] }]];
+    return app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId,
+      stage: 'analyse', source: 'chip', message: 'Run analysis.', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } } });
+  };
+
+  it('RED: the Run BUTTON on a withheld result → the typed view arrives on THAT turn (one forced call in parallel; the interpreter still has no tools)', async () => {
+    const r = await pressRun();
+    expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
+    const b = r.json() as Body & { _diagnostic_trace?: { fast_path?: string } };
+    expect(b._diagnostic_trace?.fast_path).toBe('run');
+    expect(b._agent.provisional_view).toEqual({ heading, ...VIEW, because });
+    expect(b.assistant_text).not.toContain(VIEW.view);
+    const forced = modelRequests.filter((q) => (q['tool_choice'] as { name?: unknown } | undefined)?.name === 'give_provisional_view');
+    expect(forced, 'exactly one forced call').toHaveLength(1);
+    expect(((forced[0]!['tools'] ?? []) as { name?: string }[]).map((t) => t.name), 'offered NOTHING else').toEqual(['give_provisional_view']);
+    const interpreter = modelRequests.filter((q) => q['tool_choice'] === 'none');
+    expect(interpreter, 'the interpreter call is unchanged: no tools').toHaveLength(1);
+    expect(interpreter[0]!['tools']).toEqual([]);
+  });
+
+  it('CONTRAST: the Run button on a result that PERMITS a leader → no forced call, no view', async () => {
+    readbackState = PERMITTED_STATE;
+    const b = (await pressRun()).json() as Body;
+    expect(modelRequests.filter((q) => (q['tool_choice'] as { name?: unknown } | undefined)?.name === 'give_provisional_view')).toHaveLength(0);
+    expect(Object.hasOwn(b._agent, 'provisional_view')).toBe(false);
+  });
+
+  it('CONTRAST: a readback that PERMITS the leader refuses the tool — no view, the reply byte-identical', async () => {
     readbackState = PERMITTED_STATE;
     const r = await runViewThenReply();
     const b = r.json() as Body;

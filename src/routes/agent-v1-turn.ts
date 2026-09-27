@@ -67,13 +67,13 @@ import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compo
 import { isPendingActionExpired, PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from '../orchestrator-v5/session/pending-action.js';
 import { computeSurvivingPriorPendingsDetailed } from '../orchestrator-v5/commit.js';
 import { GM_HELD_HANDLER_ID } from '../orchestrator-v5/handlers/edit-graph-referee-gate.js';
-import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
+import { AGENT_TOOLS, dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runDeltaBoundToReadback, runTurnCoaching, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
 import { breakEvenFor, goalNotCheckedLine, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
-import { leaderStandingOf, provisionalViewOfTurn, withProvisionalView } from '../orchestrator-v5/agent-lane/provisional-view.js';
+import { checkProvisionalView, leaderStandingOf, PROVISIONAL_VIEW_TOOL, provisionalViewOfTurn, provisionalViewSidecar, type LeaderStanding, type ProvisionalView } from '../orchestrator-v5/agent-lane/provisional-view.js';
 import {
   bindRunBlocksToReadback,
   firstAnalysisDeadline,
@@ -594,13 +594,10 @@ export function leavesProposalAwaitingApproval(
  */
 export function withAnalysisAnswerShape<T extends { assistant_text?: unknown; blocks?: unknown; suggested_actions?: unknown }>(
   body: T,
-  turn: { proposalAwaitingApproval?: boolean; leaderGateEditedText?: boolean; provisionalViewShown?: boolean } = {},
+  turn: { proposalAwaitingApproval?: boolean; leaderGateEditedText?: boolean } = {},
 ): T {
   if ('_answer_shape' in body) return body;
   if (turn.proposalAwaitingApproval === true || offersApproval(body)) return body;
-  // ⛔ C5: the Agent's provisional view closes the reply with its label and its reason; a shape would put them behind
-  // "Show more", or cut the label from the view. Ship it whole, as a gate-edited reply ships.
-  if (turn.provisionalViewShown === true) return body;
   // ⛔ The leader gate rewrote this text: its no-leader sentence and next action close the reply, and a
   // shape would put them behind "Show more" (independent review of #1914, 5832549611). Ship it whole, as
   // route-v2 does when its gate edits the text.
@@ -930,6 +927,24 @@ export function agentTurnRequestHash(scenarioId: string, userId: string | null, 
   return `agent_turn:${digest}`;
 }
 
+/** The only forced tool choice `callModel` forwards: the Run turn's read-only provisional view (C5). */
+function isForcedProvisionalViewChoice(tc: unknown): boolean {
+  return tc !== null && typeof tc === 'object' && (tc as { type?: unknown }).type === 'function'
+    && (tc as { name?: unknown }).name === PROVISIONAL_VIEW_TOOL;
+}
+
+/**
+ * ⭐ C5 ON THE RUN BUTTON (Paul's ruling, DL #70 5855324470). The typed Run's interpreter call carries NO tools — acting is
+ * structurally impossible there, and that stays pinned — so the Agent could not give a view on the very turn that opens
+ * "No option can be put forward". When the post-run readback withholds the leader, ONE extra call runs IN PARALLEL with
+ * the interpreter, forced to `give_provisional_view` and offered nothing else: it adds tokens, not waiting. Its arguments
+ * are checked like the tool's, and the route still renders the view only if the FINAL readback withholds (see below).
+ */
+const PROVISIONAL_VIEW_ON_RUN = 'The user has just pressed Run and the analysis cannot put an option forward yet. Give your own '
+  + 'provisional view now through give_provisional_view: what you would do, your reasoning from the model\u2019s facts and the '
+  + 'user\u2019s own words, and the ONE step that would let the analysis confirm or overturn it \u2014 a step the user can take or a '
+  + 'change one of your tools can propose. It is shown to the user labelled as your provisional view, never as the analysis result.';
+
 export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
   if (config.proxy.agentLaneEnabled !== true) return;
 
@@ -1012,6 +1027,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         tools: req.tools,
         // Fast path 3 answers over a run Olumi already made: it may interpret, never act.
         ...((req as { tool_choice?: unknown }).tool_choice === 'none' ? { tool_choice: 'none' } : {}),
+        // C5: the Run turn's ONE forced, read-only call (`give_provisional_view`) — never any other tool.
+        ...(isForcedProvisionalViewChoice((req as { tool_choice?: unknown }).tool_choice) ? { tool_choice: (req as { tool_choice?: unknown }).tool_choice } : {}),
         max_output_tokens: req.max_output_tokens,
       }),
     });
@@ -1666,8 +1683,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * SAME reader the response's final readback uses — and handed over beside the run.
        */
       let canonicalAfterRun: { analysis_state?: unknown; analysis_ready?: unknown; run_delta?: unknown; run_delta_absence_reason?: string } = {};
+      let runStanding: LeaderStanding | undefined;
       try {
         const st = await readBackState(dispatch, scenarioId);
+        runStanding = leaderStandingOf({ analysisState: st.analysisState, analysisReady: st.analysisReady, analysisResult: st.analysisResult });
         /**
          * ⭐ WHAT CHANGED SINCE THE LAST RUN REACHES THE INTERPRETER TOO (served `263dbd5`, final witness `053159Z/15`:
          * the reply said "This run does not supply a precomputed before/after delta" while the response carried one and
@@ -1704,6 +1723,27 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // ⛔ A FAILED run is not explained by a model: there is no result to interpret, and the readback's stale state
       // invited an invented cause ("the saved graph has changed"). The user gets one true sentence (RUN_FAILED_TEXT).
       runInterpreted = ran.refusal !== 'run_failed';
+      const viewTool = AGENT_TOOLS.find((t) => t.name === PROVISIONAL_VIEW_TOOL);
+      const viewCall: Promise<ProvisionalView | null> = runInterpreted && mode === 'full' && viewTool !== undefined
+        && runStanding?.analysis_on_record === true && runStanding.withheld
+        ? callModel({
+          instructions: `${AGENT_INSTRUCTIONS}\n\n${PROVISIONAL_VIEW_ON_RUN}`,
+          input: priorAndRun,
+          tools: [viewTool],
+          max_output_tokens: budget.max_output_tokens,
+          tool_choice: { type: 'function', name: PROVISIONAL_VIEW_TOOL },
+        } as never).then((resp) => {
+          const call = ((resp.output ?? []) as { type?: string; name?: string; arguments?: string }[])
+            .find((o) => o.type === 'function_call' && o.name === PROVISIONAL_VIEW_TOOL);
+          let args: unknown;
+          try { args = JSON.parse(call?.arguments ?? 'null'); } catch { args = null; }
+          const checked = checkProvisionalView(args);
+          return checked.ok ? checked.view : null;
+        }).catch((err: unknown) => {
+          log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: the Run turn\'s provisional view call failed — none is shown');
+          return null;
+        })
+        : Promise.resolve(null);
       if (runInterpreted) try {
         const resp = await callModel({
           instructions: `${AGENT_INSTRUCTIONS}\n\n${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
@@ -1727,15 +1767,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: fast-path interpretation failed — answering from the run itself');
       }
+      const runView = await viewCall;
       fastPath = 'run';
       const ms = Date.now() - fastStartedAt;
       const providerMs = Math.min(Date.now() - providerStartedAt, ms);
       const text = interpreted?.answer ?? interpretationUnavailableText(ran);
       result = {
         assistant_text: text,
-        items: [...priorAndRun, ...(interpreted?.messages ?? [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }])],
-        tool_calls: [{ name: 'run_analysis', ok: ran.ok === true, mutated: false, ...(typeof ran.refusal === 'string' ? { refusal: ran.refusal } : {}) }],
-        tool_results: [ran],
+        items: [...priorAndRun, ...(interpreted?.messages ?? [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }]),
+          // What the user was shown as the Agent's provisional view, so the next turn knows what it said (no provider ids).
+          ...(runView !== null ? [{ type: 'message', role: 'assistant', content: [{ type: 'output_text',
+            text: `(Shown beneath my reply, labelled as my provisional view: ${runView.view} ${runView.reasoning} The step: ${runView.confirm_step})` }] }] : [])],
+        tool_calls: [{ name: 'run_analysis', ok: ran.ok === true, mutated: false, ...(typeof ran.refusal === 'string' ? { refusal: ran.refusal } : {}) },
+          ...(runView !== null ? [{ name: PROVISIONAL_VIEW_TOOL, ok: true, mutated: false }] : [])],
+        tool_results: [ran, ...(runView !== null ? [{ ok: true, mutated: false, provisional_view: runView }] : [])],
         mutated: false,
         hops: 1,
         stopped_reason: 'answered',
@@ -2196,13 +2241,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     const givenView = provisionalViewOfTurn(result.tool_calls, result.tool_results);
     const standing = givenView === null ? null : leaderStandingOf({ analysisState, analysisReady, analysisResult });
+    // Typed only (never appended to `assistant_text`): see `provisionalViewSidecar`.
     const provisionalView = givenView !== null && standing !== null && standing.analysis_on_record && standing.withheld
-      && typeof wireBody.assistant_text === 'string'
-      ? { ...givenView, because: standing.because }
+      ? provisionalViewSidecar(givenView, standing.because)
       : null;
-    if (provisionalView !== null) {
-      wireBody = { ...wireBody, assistant_text: withProvisionalView(String(wireBody.assistant_text), provisionalView, provisionalView.because) };
-    } else if (givenView !== null) {
+    if (provisionalView === null && givenView !== null) {
       log.warn({ scenario_id: scenarioId, analysis_on_record: standing?.analysis_on_record ?? null, withheld: standing?.withheld ?? null },
         'agent-lane: a provisional view was given but the final readback does not withhold the leader — it is not shown');
     }
@@ -2217,7 +2260,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     wireBody = withAnalysisAnswerShape(wireBody, {
       proposalAwaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
       leaderGateEditedText,
-      provisionalViewShown: provisionalView !== null,
     });
 
     /**
@@ -2380,7 +2422,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // ⭐ AX1 (DL #70 5850280205: "a typed `break_even` state fact"): the arithmetic the paragraph above says, as
         // data — every figure, whose it is, and the target line — so a surface or a rewording never re-derives it.
         ...(breakEven !== null ? { break_even: breakEven } : {}),
-        // ⭐ C5: the Agent's provisional view as shown above — typed, so a surface can render it apart from the analysis.
+        // ⭐ C5: the Agent's provisional view — ONLY here, typed, with its heading; never in `assistant_text` (see above).
         ...(provisionalView !== null ? { provisional_view: provisionalView } : {}),
       },
       /**

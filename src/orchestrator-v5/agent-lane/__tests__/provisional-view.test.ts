@@ -16,9 +16,9 @@ import {
   PROVISIONAL_VIEW_LABEL,
   checkProvisionalView,
   leaderStandingOf,
-  provisionalViewBlock,
+  provisionalViewHeading,
+  provisionalViewSidecar,
   provisionalViewOfTurn,
-  withProvisionalView,
   type LeaderStanding,
 } from '../provisional-view.js';
 import { AGENT_TOOLS, MUTATION_TOOLS, dispatchTool, toolsFor, type AgentToolContext } from '../runtime/agent-tools.js';
@@ -148,26 +148,21 @@ describe('the standing reads the wire gate\'s OWN predicate and reason — never
   });
 });
 
-describe('the ROUTE\'s renderer — labelled, after the gate, text only', () => {
+describe('the ROUTE\'s renderer — typed and labelled, never prose (AIC 5855633777; thin-UI ruling 5855577789)', () => {
   const because = withheldStanding().because;
-  const block = provisionalViewBlock(VIEW, because);
 
-  it('RED (mutant: remove the label): the block OPENS with the bold provisional label and the typed reason', () => {
+  it('RED (mutant: remove the label): the heading is the exact label sentence with the typed reason', () => {
     expect(PROVISIONAL_VIEW_LABEL).toBe('Provisional view');
-    expect(block.startsWith(`**Provisional view — the analysis can't confirm this yet ${because}.** `)).toBe(true);
-    expect(block).toContain(`${VIEW.view} ${VIEW.reasoning} To let the analysis confirm it: ${VIEW.confirm_step}`);
+    expect(provisionalViewHeading(because)).toBe(`Provisional view \u2014 the analysis can't confirm this yet ${because}.`);
   });
 
-  it('RED: appended AFTER the gated text, as its own paragraph — the gate\'s no-leader sentence stays where it was', () => {
+  it('the sidecar carries the heading, the three parts and the reason — the chat composes nothing', () => {
+    expect(provisionalViewSidecar(VIEW, because)).toEqual({ heading: provisionalViewHeading(because), ...VIEW, because });
+  });
+
+  it('CONTRAST (why it is typed): the gate strips the SAME view written as prose', () => {
     const gated = gate(`Here is where things stand. ${VIEW.view}`, WITHHELD_STATE).response.assistant_text;
-    expect(gated, 'CONTRAST: the gate strips the SAME view written as prose').not.toContain(VIEW.view);
-    const out = withProvisionalView(gated, VIEW, because);
-    expect(out).toBe(`${gated.trimEnd()}\n\n${block}`);
-  });
-
-  it('CONTRAST (mutant: append before the gate): the gate strips the view out of its own block', () => {
-    const early = gate(withProvisionalView('Here is where things stand.', VIEW, because), WITHHELD_STATE).response.assistant_text;
-    expect(early).not.toContain(VIEW.view);
+    expect(gated).not.toContain(VIEW.view);
   });
 
   it('never fabricated: no call, a refused call, or a malformed result → nothing to render', () => {
