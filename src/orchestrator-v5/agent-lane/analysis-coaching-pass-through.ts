@@ -22,7 +22,7 @@ import {
   type RunTurnTrigger,
 } from '../coaching/fragile-link-challenge.js';
 import { buildNoFlaggedLinkCard } from '../coaching/no-flagged-link-card.js';
-import { buildLimitUncheckedCard, leaderWithheldForALimit } from '../coaching/limit-unchecked-card.js';
+import { buildLimitUncheckedCard, everyOptionBreaksALimit, leaderWithheldForALimit } from '../coaching/limit-unchecked-card.js';
 import { everyLimitProvedUnanchored, graphBoundToHash, limitNodeLabels } from '../coaching/bound-graph.js';
 import { buildNearTieCard } from '../coaching/near-tie-card.js';
 import { buildEstimatedLimitCard } from '../coaching/estimated-limit-card.js';
@@ -306,13 +306,15 @@ export function runTurnCoaching(
   // card and no link card competes with it. Read from the typed claim, never the
   // summary: the automatic first pass replaces the prose (unrequested-analysis-
   // confinement.ts), so the prose gate above is blind there. A refused limit card
-  // fails CLOSED (no card), never back to a link card.
-  if (leaderWithheldForALimit(final.analysisState)) {
+  // fails CLOSED (no card), never back to a link card. F-LIMIT's tiers (every option breaks, or would probably
+  // break, the same limit) are withheld for a limit too, in their own words (served dloop-3, 27 Sep).
+  const everyOption = everyOptionBreaksALimit(final.analysisState);
+  if (everyOption !== null || leaderWithheldForALimit(final.analysisState)) {
     const limitLabels = boundGraph !== null ? limitNodeLabels(boundGraph) ?? undefined : undefined;
     // The cause, only on proof from the SAME bound graph and the bound run's own options.
-    const provedUnanchored = boundGraph !== null
+    const provedUnanchored = everyOption === null && boundGraph !== null
       && everyLimitProvedUnanchored(boundGraph, record(captured.analysis_ready)?.options);
-    const limit = buildLimitUncheckedCard(input, limitLabels, provedUnanchored, final.constraintVerdictState);
+    const limit = buildLimitUncheckedCard(input, limitLabels, provedUnanchored, final.constraintVerdictState, everyOption);
     if (limit.block === null) return { blocks: upstream, eligibility: { eligible: false, reason: limit.reason } };
     return { blocks: dedupeByBlockId([...upstream, limit.block]), eligibility: { eligible: true } };
   }
