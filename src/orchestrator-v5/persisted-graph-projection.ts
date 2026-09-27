@@ -35,6 +35,11 @@
  * `normaliseOptionInterventionContract` so a mirrored `options[]` entry copies
  * the already-canonical interventions bundle.
  *
+ * `reindexInterventionKeys` runs after every pass that can change a node's
+ * `interventions`, so the UI's index of them is never stored stale (#2084
+ * review: a delete left it naming a deleted factor, and the reload proof
+ * declined the Run). See `reindex-intervention-keys.ts`.
+ *
  * `dropNullOptionalGraphFields` runs LAST: a `null` on a schema-optional key
  * makes the stored bytes unreadable by every strict `GraphV3` reader (served
  * 26 Sep 2026: one UI register poisoned a scenario, and every later canvas edit
@@ -47,6 +52,7 @@ import { dropNullOptionalGraphFields } from './drop-null-optional-fields.js';
 import { repairGraphForPersistence } from './repair-graph-for-persistence.js';
 import { normaliseOptionInterventionContract } from './normalise-option-interventions.js';
 import { reconcileTopLevelOptionsFromNodes } from './reconcile-top-level-options.js';
+import { reindexInterventionKeys } from './reindex-intervention-keys.js';
 
 export interface PersistedGraphProjectionContext {
   readonly scenarioId?: string;
@@ -71,5 +77,6 @@ export function projectGraphForPersistence<T>(
   const repaired = repairGraphForPersistence(graph, ctx);
   const normalised = normaliseOptionInterventionContract(repaired, ctx);
   const reconciled = reconcileTopLevelOptionsFromNodes(normalised, ctx);
-  return dropNullOptionalGraphFields(reconciled, ctx);
+  const reindexed = reindexInterventionKeys(reconciled);
+  return dropNullOptionalGraphFields(reindexed, ctx);
 }

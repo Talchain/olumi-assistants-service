@@ -22,7 +22,9 @@ import { GraphV3 } from '../../schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { applyEdgeStrengthEdit } from '../system-events/edge-strength-edit.js';
 import { applyFactorValueEdit } from '../system-events/factor-value-edit.js';
-import { factorValuesPostimageIsScoped } from '../system-events/option-intervention-edit.js';
+import { applyOptionInterventionEdit, factorValuesPostimageIsScoped, optionInterventionPostimageIsScoped } from '../system-events/option-intervention-edit.js';
+import { applyStructuralDelete } from '../system-events/structural-delete.js';
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { mergeAppliedGraphForPersistence } from '../handlers/edit-graph-dispatch.js';
 import { applyAndValidateMutation } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
 import { refereeMutation } from '../graph-management/referee.js';
@@ -84,6 +86,75 @@ describe("a saved example's stamps survive every write", () => {
     });
     expect(node(merged, TARGET).label).toBe('Adoption friction (renamed)');
     expect(nodes(merged).every((n) => n.starterId === 'pricing-model')).toBe(true);
+  });
+
+  /**
+   * ⭐ `interventionKeys` IS AN INDEX OF THE OPTION'S CELLS, NOT A STAMP (#2084 review). Kept as an inert stamp, a
+   * delete left it naming the deleted factor on 4/4 options, and the UI's reload proof, which reads it, declined the Run.
+   */
+  const options = (g: Rec) => nodes(g).filter((n) => n.kind === 'option');
+  const indexOf = (o: Rec) => [...(o.interventionKeys as string[])].sort();
+  const cellsOf = (o: Rec) => Object.keys((o.interventions ?? {}) as Rec).sort();
+
+  it("⭐ a delete moves each option's index with its cells: none names the deleted factor", () => {
+    const GONE = 'fac_enterprise_revenue_risk';
+    expect(options(STORED).filter((o) => indexOf(o).includes(GONE)).length, 'not vacuous: the stored index names it').toBeGreaterThan(0);
+    const event = { kind: 'structural_delete', removed_node_ids: [GONE], removed_edges: [],
+      base_graph_hash: computeAnalysisAffectingGraphHash(STORED as never) };
+    const payload = { kind: 'system_event', scenario_id: '11111111-2222-3333-4444-555555555555', turn_id: 'turn-delete', stage: 'frame', event };
+    const r = applyStructuralDelete({ payload, event, requestId: 'req-delete', persistedGraph: structuredClone(STORED) } as never);
+    expect(r.kind, JSON.stringify((r as { reason?: unknown }).reason ?? null)).toBe('mutated');
+    const after = (r as { mutatedGraph: Rec }).mutatedGraph;
+    expect(options(after).length).toBe(options(STORED).length);
+    for (const o of options(after)) expect(indexOf(o), String(o.id)).toEqual(cellsOf(o));
+  });
+
+  it('⭐ a level that adds a cell commits (the scope guard admits the index moving with it), and the index names the new cell', () => {
+    const g = projectGraphForPersistence({ ...GraphV3.parse({
+      nodes: [
+        { id: 'goal', kind: 'goal', label: 'Revenue' },
+        { id: 'decision', kind: 'decision', label: 'Pricing' },
+        { id: 'option', kind: 'option', label: 'Cohort test', starterId: 'pricing-model', interventionKeys: ['churn'],
+          interventions: { churn: { value: 0.2, source: 'user_specified', target_match: { node_id: 'churn', match_type: 'exact_id', confidence: 'high' } } } },
+        { id: 'price', kind: 'factor', label: 'Price', category: 'controllable', observed_state: { value: 0.25 } },
+        { id: 'churn', kind: 'factor', label: 'Churn', observed_state: { value: 0.1 } },
+      ],
+      edges: [['decision', 'option', 1], ['option', 'churn', 1], ['price', 'goal', 0.5], ['churn', 'goal', -0.5]].map(([from, to, mean]) => ({
+        from, to, strength: { mean, std: 0.1 }, exists_probability: 1, effect_direction: (mean as number) < 0 ? 'negative' : 'positive',
+      })),
+    }), options: [] as unknown[] }) as Rec;
+    expect(node(g, 'option').interventionKeys, 'premise: the index survives the parse and projection').toEqual(['churn']);
+    const c = applyOptionInterventionEdit({ persistedGraph: g, optionId: 'option', factorId: 'price', modelValue: 0.27,
+      expectedGraphHash: computeAnalysisAffectingGraphHash(g as never)!, scenarioId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      turnId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', requestId: 'req-level', freshness: 'none', hasExistingAnalysis: false } as never);
+    expect(c.kind, JSON.stringify(c)).toBe('candidate');
+    const after = (c as { graph: Rec }).graph;
+    expect(indexOf(node(after, 'option'))).toEqual(['churn', 'price']);
+    expect(node(after, 'option').starterId).toBe('pricing-model');
+    // CONTRAST: the guard admits the index only as its cells' re-derivation, never a rewrite the level did not imply.
+    const target = { optionId: 'option', factorId: 'price', modelValue: 0.27 };
+    const link = { from: 'option', to: 'price' };
+    expect(optionInterventionPostimageIsScoped(g, after, target, link)).toBe(true);
+    const tampered = structuredClone(after);
+    node(tampered, 'option').interventionKeys = ['churn', 'price', 'invented'];
+    expect(optionInterventionPostimageIsScoped(g, tampered, target, link)).toBe(false);
+  });
+
+  it('a graph whose index is in step is a fixed point of the persisted form (the stored-bytes guards accept it)', () => {
+    expect(projectGraphForPersistence(STORED)).toBe(STORED);
+    for (const o of options(STORED)) expect(indexOf(o), String(o.id)).toEqual(cellsOf(o));
+  });
+
+  it('a null stamp or index is absence: the persisted form drops it, so a re-parse matches the stored bytes', () => {
+    const withNull = structuredClone(STORED);
+    const [first] = nodes(withNull);
+    const opt = options(withNull)[0]!;
+    first!.starterId = null;
+    opt.interventionKeys = null;
+    const p = projectGraphForPersistence(withNull) as Rec;
+    expect(Object.hasOwn(node(p, first!.id as string), 'starterId')).toBe(false);
+    expect(Object.hasOwn(node(p, opt.id as string), 'interventionKeys')).toBe(false);
+    expect(projectGraphForPersistence(p)).toBe(p);
   });
 
   it('CONTRAST (the doctrine): a key NodeV3 does not declare is still stripped by a write', () => {

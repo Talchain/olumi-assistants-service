@@ -36,7 +36,12 @@ import { log } from '../utils/telemetry.js';
 function nullDroppableKeys(shape: Record<string, ZodTypeAny>): ReadonlySet<string> {
   const keys = new Set<string>();
   for (const [key, schema] of Object.entries(shape)) {
-    if (schema.safeParse(undefined).success && !schema.safeParse(null).success) keys.add(key);
+    if (!schema.safeParse(undefined).success) continue;
+    // A `null` the strict reader REJECTS, or READS AS ABSENCE (a `.catch(undefined)` member such as the saved-example
+    // stamps), is absence: stored, it made the bytes differ from every re-parse, so the stored-bytes guards refused
+    // (#2084 review). A member that gives `null` a meaning (`.nullable()`) parses it to `null` and is kept.
+    const asNull = schema.safeParse(null);
+    if (!asNull.success || asNull.data === undefined) keys.add(key);
   }
   return keys;
 }

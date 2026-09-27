@@ -509,7 +509,9 @@ describe('value batch chip click — the one commit keeps the stored graph aroun
       ...structuredClone(BATCH_GRAPH),
       goal_node_id: goal.id as string,
       goal_constraints: [LIMIT],
-      nodes: BATCH_GRAPH.nodes.map((n) => ({ ...structuredClone(n), starterId: 'saved-example' })),
+      // As the UI's loader registers a saved example: a stamp on every node, and each option's index of its cells.
+      nodes: BATCH_GRAPH.nodes.map((n) => ({ ...structuredClone(n), starterId: 'saved-example',
+        ...(n.kind === 'option' ? { interventionKeys: Object.keys((n as Dict).interventions ?? {}) } : {}) })),
     };
     const hash = computeAnalysisAffectingGraphHash(GraphStateIngressSchema.parse(limited));
     if (hash === null) throw new Error('limited fixture must have an analysis hash');
@@ -538,5 +540,13 @@ describe('value batch chip click — the one commit keeps the stored graph aroun
     expect((g!.goal_constraints as Dict[] | undefined)?.map((c) => [c.constraint_id, c.value])).toEqual([['constraint_stated_limit', 0.4]]);
     expect(g!.goal_node_id).toBe(goal.id);
     expect((g!.nodes as Dict[]).filter((n) => n.starterId !== 'saved-example').map((n) => n.id)).toEqual([]);
+    // The index follows the cells the batch added (#2084 review: an inert index went stale on 3/6 options).
+    const optionsAfter = (g!.nodes as Dict[]).filter((n) => n.kind === 'option');
+    const storedIndex = (id: unknown) => (limited.nodes as Dict[]).find((n) => n.id === id)!.interventionKeys as string[];
+    expect(optionsAfter.some((o) => Object.keys((o.interventions ?? {}) as Dict).length > storedIndex(o.id).length),
+      'not vacuous: the batch grew an option past its stored index').toBe(true);
+    for (const o of optionsAfter) {
+      expect([...(o.interventionKeys as string[])].sort(), String(o.id)).toEqual(Object.keys((o.interventions ?? {}) as Dict).sort());
+    }
   });
 });

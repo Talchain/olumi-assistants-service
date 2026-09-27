@@ -66,6 +66,7 @@ import { evaluateEditGraphMutations } from '../handlers/edit-graph-referee-gate.
 import { threadHoldsThroughMutatingCommit } from '../handlers/hold-thread-through.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
+import { interventionKeysFollowInterventions } from '../reindex-intervention-keys.js';
 import { reconcileTopLevelOptionsFromNodes } from '../reconcile-top-level-options.js';
 import { APPROVED_LEVEL_ADOPTION_SOURCE, approvedLevelSourceFor, runWithApprovedAdoption } from '../agent-lane/approved-adoption-context.js';
 import { structuralEdgeValue } from '../routing/add-option-transaction.js';
@@ -199,6 +200,17 @@ export function optionInterventionBatchPostimageIsScoped(
       || link.exists_probability !== STRUCTURAL_EDGE_DEFAULTS.exists_probability
       || link.provenance?.source !== (owner.source ?? 'user_specified')) return false;
     restored.edges = restored.edges.filter(e => !isLink(e));
+  }
+  // The UI's index of the cells (`reindexInterventionKeys`) follows them: on a target option it may move exactly to
+  // its re-derivation, and nowhere else. It is restored only when the new index is in step with the new cells.
+  for (const optionId of new Set(targets.map(t => t.optionId))) {
+    const oldNode = before.nodes.find(node => node.id === optionId)!;
+    const newNode = after.nodes.find(node => node.id === optionId)!;
+    const restoredNode = restored.nodes.find(node => node.id === optionId)!;
+    if (Object.hasOwn(oldNode, 'interventionKeys') && Object.hasOwn(restoredNode, 'interventionKeys')
+      && interventionKeysFollowInterventions(newNode)) {
+      restoredNode.interventionKeys = structuredClone(oldNode.interventionKeys);
+    }
   }
   const expectedMirror = reconcileTopLevelOptionsFromNodes(specimen);
   if (!isDeepStrictEqual(after.options, expectedMirror.options)) return false;

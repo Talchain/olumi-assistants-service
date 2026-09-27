@@ -584,19 +584,16 @@ export const DECISIONS: readonly Decision[] = [
   // which is precisely what the deleted record said it wanted.
   //
   // The parse-survival test it cited is unaffected and still pins the strip
-  // behaviour that made the declaration necessary in the first place.  // ── saved-example stamps (writer audit 2026-09-27) ─────────────────────
-  {
-    id: "orphan:interventionKeys",
-    status: "ACCEPTED",
-    decision:
-      "ACCEPTED. `interventionKeys` is the UI register's saved-example stamp, declared on NodeV3 ONLY so a D1/edit write's re-parse keeps it (writer audit 2026-09-27, #70 5854387709): stripped, every write on a saved example was REFUSED by the stored-vs-postimage equality guards (value_scope_mismatch; confirmation_would_change_non_provenance_state). CEE reads it nowhere BY DESIGN; the UI reads it back. Producers cannot set it (field-safety CEE-owned roots).",
-  },
+  // behaviour that made the declaration necessary in the first place.
+  // ── saved-example stamps (writer audit 2026-09-27) ─────────────────────
   {
     id: "convention-outlier:interventionKeys",
     status: "ACCEPTED",
     decision:
-      "ACCEPTED. camelCase is the UI's own spelling of the bytes it stores and reads back; CEE only " +
-      "round-trips `interventionKeys` and never names it, so a snake_case twin cannot arise here. See orphan:interventionKeys.",
+      "ACCEPTED. camelCase is the UI's own spelling of the bytes it stores and reads back: its register's index of an " +
+      "option's own `interventions` keys, declared on NodeV3 so a D1 re-parse keeps it (writer audit 2026-09-27, #70 " +
+      "5854387709). CEE only keeps it in step with the cells (`reindex-intervention-keys.ts`) and never mints it, so a " +
+      "snake_case twin cannot arise here. (No orphan entry: that re-derivation reads it.)",
   },
   {
     id: "orphan:starterId",
