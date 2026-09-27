@@ -294,6 +294,39 @@ export function bandTheUserWrote(band: string, turnText: string | null | undefin
 }
 
 /**
+ * ⭐ THE USER'S OWN WORDS FOR A BAND, PROPOSED AS A READING THEY APPROVE (slice C3; ruling ChatGPT 5854968869 P3B:
+ * "ordinary language may be mapped to a proposed typed interpretation for explicit approval rather than requiring the
+ * user's exact enum wording"). Measured on Paul's served transcript (27 Sep): "price sensitivity is very high" was
+ * refused as `strength_not_stated`, and recording "very strong" took four turns.
+ *
+ * Whether `words` — the phrase the Agent says the user used — is written in `turnText` (THIS turn's typed words), as
+ * whole words (case and spacing aside; ' and \u2019 are one apostrophe), and said, neither asked about nor denied (the
+ * one `readingAt` rule the band and comparator matchers apply). The Agent cannot invent the user's words: a phrase
+ * that is not there proves nothing. Which band those words mean is the Agent's READING, shown to the user as theirs to
+ * approve \u2014 never recorded as a band they named.
+ */
+export function wordsTheUserWrote(words: unknown, turnText: string | null | undefined): boolean {
+  if (typeof words !== 'string' || typeof turnText !== 'string') return false;
+  const tokens = words.trim().split(/\s+/).filter((t) => t !== '');
+  if (tokens.length === 0 || tokens.length > 12 || !/[\p{L}\p{N}]/u.test(words)) return false;
+  const escaped = tokens.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/['\u2019]/g, "['\u2019]"));
+  const re = new RegExp(`(?<![\\p{L}\\p{N}])${escaped.join('\\s+')}(?![\\p{L}\\p{N}])`, 'giu');
+  for (const m of turnText.matchAll(re)) {
+    if (readingAt(turnText, m.index).said === 'affirmed') return true;
+  }
+  return false;
+}
+
+/**
+ * Whether `words` hold any band word at all ("strong", "very strong", "barely", …), said, asked or denied. Such a
+ * phrase is the literal matcher's alone (`bandTheUserWrote`): read as a band it could re-read a band the user named
+ * ("strong" out of "very strong") or one they denied ("not strong" as strong), so it grounds no reading.
+ */
+export function holdsABandWord(words: unknown): boolean {
+  return typeof words === 'string' && Object.values(BAND_WORDS).some((re) => [...words.matchAll(re)].length > 0);
+}
+
+/**
  * The same rule for a goal's success target: WHICH WAY it binds \u2014 at least, or at most \u2014 is recorded as the user's
  * only when the user SAID it, in THIS turn's own typed words (`user_turn_text`). The goal-target writer stamps the
  * target as the user's (`threshold_source: 'user'`), so a direction the Agent picked and the user only approved would
