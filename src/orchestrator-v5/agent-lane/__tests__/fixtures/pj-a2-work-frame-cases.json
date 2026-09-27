@@ -1,0 +1,74 @@
+[
+  {
+    "id": "pricing-a",
+    "source": "Paul export olumi-debug-17d1cd3a-20260927.json; output/olumi-handover-2026-09-25/ai-conversation/c6-effort-20260927/round3-briefs.json paulA",
+    "candidate_origin": "reconstructed from the cited brief and served graph; not captured model output",
+    "mode": "decision",
+    "brief": "Given our goal of reaching £100k MRR within 12 months [Currently 75k] while keeping monthly churn under 4%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?",
+    "framing": "should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?",
+    "goal": {
+      "metric": "MRR",
+      "operator": ">=",
+      "value": 100000,
+      "unit": "GBP",
+      "horizon_months": 12,
+      "baseline_value": 75000
+    },
+    "constraint": {
+      "metric": "Monthly churn",
+      "operator": "<",
+      "value": 4,
+      "unit": "% per month"
+    },
+    "factor": {
+      "label": "Pro plan price",
+      "baseline_value": 49,
+      "unit": "GBP",
+      "plausible_max": 100
+    }
+  },
+  {
+    "id": "midmarket",
+    "source": "Paul export olumi-debug-73d5c152-20260919.json; output/olumi-handover-2026-09-25/ai-conversation/c6-effort-20260927/round3-briefs.json midmarket (redacted)",
+    "candidate_origin": "reconstructed from the cited redacted brief; not captured model output",
+    "mode": "decision",
+    "brief": "We're a 50-person B2B SaaS company doing £3M ARR. We need to decide how to expand our product into the mid-market segment within 12 months.\nGoal: Reach 200 mid-market customers with a net revenue retention rate above 110%.\nOptions we're considering:\n1. Build a dedicated mid-market product tier with enterprise features (SSO, audit logs, custom roles)\n2. Partner with 3-4 system integrators who already serve mid-market clients\n3. Acquire a smaller competitor that already has mid-market traction\nKey factors we think matter:\n* Engineering capacity — we have 20 engineers, 8 of whom are senior\n* Sales cycle length — mid-market deals typically take 3-6 months\n* Product-market fit — we've had 12 inbound enquiries from mid-market companies in the last quarter\n* Integration complexity — mid-market buyers expect integrations with Salesforce, HubSpot, and Slack\n* Competitive pressure — two VC-backed competitors launched mid-market tiers last quarter\n* Cash runway — we have under 18 months of runway... [truncated_by: bundle_redaction, 1140 chars total]",
+    "framing": "how to expand our product into the mid-market segment within 12 months",
+    "goal": {
+      "metric": "Mid-market customers",
+      "operator": ">=",
+      "value": 200,
+      "unit": "customers",
+      "horizon_months": 12,
+      "baseline_value": null
+    },
+    "constraint": {
+      "metric": "Net revenue retention",
+      "operator": ">",
+      "value": 110,
+      "unit": "%"
+    },
+    "factor": {
+      "label": "Engineering capacity",
+      "baseline_value": 20,
+      "unit": "engineers",
+      "plausible_max": 100
+    }
+  },
+  {
+    "id": "activation-sensemaking",
+    "source": "User-specified non-decision acceptance sentence in the PJ-A2 brief, 27 Sep 2026",
+    "candidate_origin": "constructed goal-free test fixture; current strict candidate schema cannot express this work task",
+    "mode": "sensemaking",
+    "brief": "Help us understand why activation is falling and what assumptions we should investigate.",
+    "framing": "Help us understand why activation is falling and what assumptions we should investigate.",
+    "goal": null,
+    "constraint": null,
+    "factor": {
+      "label": "Onboarding friction",
+      "baseline_value": null,
+      "unit": "score",
+      "plausible_max": 100
+    }
+  }
+]
