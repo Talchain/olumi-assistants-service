@@ -1207,6 +1207,20 @@ function readCarrier(n: GraphNodeLike): NonlinearIdentityCarrier | null {
   return { operation: 'product', factor_ids: c.factor_ids as string[], stated_in_brief: c.stated_in_brief };
 }
 
+/**
+ * ⛔ F-LIMIT N1 (AI Conversation 5851022332): the nodes whose per-option limit probability comes from the ADDITIVE model
+ * C46 distrusts — every node carrying a product identity, and the goal — or none when the graph carries no identity.
+ * A limit on one of these is never named by F-LIMIT's "every option …" sentence (`deriveEveryOptionLimitVerdict`).
+ */
+export function nodesUnderANonlinearIdentity(graph: unknown): ReadonlySet<string> {
+  const rawNodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
+  if (!Array.isArray(rawNodes)) return new Set();
+  const nodes = rawNodes.filter((n): n is GraphNodeLike => n !== null && typeof n === 'object' && typeof (n as GraphNodeLike).id === 'string');
+  const carried = nodes.filter((n) => readCarrier(n) !== null).map((n) => n.id as string);
+  if (carried.length === 0) return new Set();
+  return new Set([...carried, ...nodes.filter((n) => n.kind === 'goal').map((n) => n.id as string)]);
+}
+
 /** A persisted level as `{ value }` — the stored shape is either a number or an object carrying one. */
 function levelObject(v: unknown): ConstructedLevel | undefined {
   if (typeof v === 'number' && Number.isFinite(v)) return { value: v } as ConstructedLevel;

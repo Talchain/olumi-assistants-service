@@ -104,6 +104,7 @@ import { canonicalStateFromFreshness } from './context/canonical-analysis-state.
 import { buildRunDelta, type RunDeltaRefusal } from './coaching/build-run-delta.js';
 import { selectClaimBearingRunAnalysisFact, selectRunAnalysisFact } from './context/freshness.js';
 import { deriveEveryOptionLimitVerdict, readRatifiedConstraints } from '../orchestrator/context/constraint-feasibility.js';
+import { nodesUnderANonlinearIdentity } from './agent-lane/admit-model.js';
 
 /**
  * Why the run-over-run consequence did or did not ship.
@@ -639,7 +640,10 @@ function attachAnalysisState(
     ...(() => {
       if (!hasRunToBind || selectedRun === null || ctx.priorFacts === undefined
         || selectClaimBearingRunAnalysisFact(ctx.priorFacts)?.fact !== selectedRun.fact) return {};
-      const limit = deriveEveryOptionLimitVerdict(selectedRun.fact.result, readRatifiedConstraints(ctx.graph ?? null));
+      // N1: never a limit on a node whose P the additive model gives under a nonlinear identity.
+      const distrusted = nodesUnderANonlinearIdentity(ctx.graph ?? null);
+      const limit = deriveEveryOptionLimitVerdict(selectedRun.fact.result,
+        readRatifiedConstraints(ctx.graph ?? null).filter((c) => c.node_id == null || !distrusted.has(c.node_id)));
       return limit === null ? {} : { everyOptionLimit: limit.kind };
     })(),
     // Read from the body as it will ship, not from the fact: when the
