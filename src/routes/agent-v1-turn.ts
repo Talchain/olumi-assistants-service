@@ -47,7 +47,7 @@ import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { answerIsIncomplete, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
-import { commitOptionLevelsInProcess } from '../orchestrator-v5/system-events/dispatch.js';
+import { commitLimitEditInProcess, commitOptionLevelsInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
 import { readinessSentence, readinessViewOf, stillNeededLine } from '../orchestrator-v5/agent-lane/readiness-view.js';
 import type { CallStructuredModel } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
@@ -71,7 +71,7 @@ import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
-import { runDeltaBoundToReadback, runTurnCoaching, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
+import { runDeltaBoundToReadback, runTurnNextMove, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
 import { breakEvenFor, goalNotCheckedLine, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
 import {
   leaderStandingOf,
@@ -271,7 +271,7 @@ const sessions = new SessionBindingRegistry();
 const MUTATION_INSTRUCTION =
   config.proxy.agentLanePreview === true
     ? 'This is a read-only preview: you CANNOT change the model, and there is no tool that would let you. If the user asks for a change, say plainly that this preview cannot make it and describe what you would propose instead.'
-    : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link (with the strength band the user named, or \u2014 when they described it in their own words \u2014 your reading of them, with their exact phrase as `from_words`; ask how strong first only when their words fit two bands equally or name no strength at all), propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once, propose_goal_target for the goal\u2019s success target the user has just stated (their figure, and whether they said at least or at most) \u2014 show the user exactly what it returned (in words: never print a proposal_id or any other internal id \u2014 the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
+    : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link (with the strength band the user named, or \u2014 when they described it in their own words \u2014 your reading of them, with their exact phrase as `from_words`; ask how strong first only when their words fit two bands equally or name no strength at all), propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once, propose_goal_target for the goal\u2019s success target the user has just stated (their figure, and whether they said at least or at most), propose_new_risk to add a risk the user asked for, propose_limit_change for a new figure the user has just stated for a limit the model already holds \u2014 show the user exactly what it returned (in words: never print a proposal_id or any other internal id \u2014 the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
 
 /** Marks a board edit in the Agent's history — defined beside `needsDurableSeed`, which must recognise it. */
 export { BOARD_EDIT_PREFIX } from '../orchestrator-v5/agent-lane/history-store.js';
@@ -290,6 +290,11 @@ const AGENT_INSTRUCTIONS = [
    */
   'An entity\u2019s `value` is on the model\u2019s internal normalised scale and is NOT the figure the user gave. When `raw_value` is present, quote `raw_value` with its `unit` (e.g. \u00a349/month, 9 months); never quote the normalised `value` to the user. Only when there is no `raw_value` may you describe `value`, and then say it is on a normalised scale.',
   MUTATION_INSTRUCTION,
+  /*
+   * ⛔ SLICE C2 (Paul's served test, 27 Sep, 90b8f080): the Agent OFFERED to add a risk no tool could add, he said "Yes.",
+   * and five turns later it admitted it could not. An offer is a promise only a proposing tool can keep.
+   */
+  'Offer only a change one of your tools can propose; a risk links to the goal or an outcome it threatens (and from factors that drive it), never into a factor.',
   'Never claim a change happened unless the tool result says it was applied. If a tool reports a refusal, tell the user what it said.',
   /*
    * ⭐ SAY WHAT THE CHANGE BECAME. Measured signed-in on staging 9c16e8cd: the
@@ -1558,6 +1563,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // ⭐ C5: the provisional view is accepted only while the analysis withholds its leader — read from THIS route's
         // readback through the wire gate's own predicate, so the capability and the gate below cannot disagree.
         readLeaderStanding: async (sid: string) => leaderStandingOf(await readBackState(dispatch, sid)),
+        // ⭐ SLICE C2 (Canonical #70 5855234599): the product's add-risk door (ONE held change) and limit door (ONE commit),
+        // in-process. Each commits a turn row, so each counts as a write.
+        holdAddRisk: async (input) => {
+          writesDispatched += 1;
+          return holdAddRiskInProcess(input, String(req.id));
+        },
+        commitLimitEdit: async (input) => {
+          writesDispatched += 1;
+          return commitLimitEditInProcess(input, String(req.id));
+        },
       },
     );
     // A session whose in-process history holds no user message (a restart, a
@@ -2076,7 +2091,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * without it the first pass is blank. Only the blocks the contract BUILDS are added: the run's own
      * blocks stay under `bindRunBlocksToReadback`'s rule above.
      */
-    const runCoaching = runTurnCoaching(lastRun, { scenarioId, graphHash, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks });
+    // C4: the same blocks and eligibility as `runTurnCoaching`, plus the typed move, its caveats and the science brief.
+    const runCoaching = runTurnNextMove(lastRun, { scenarioId, graphHash, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks });
     const coachingBound = [...runBound, ...runCoaching.blocks.filter((b) => !lastRunBlocks.includes(b))];
     // What changed since the last run: the run turn's own block and refusal reason, only beside that same run.
     const runDelta = runDeltaBoundToReadback(lastRun, { scenarioId, graphHash, analysisState, analysisResult });
@@ -2345,6 +2361,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(leaderClaimEnforced ? { leader_claim_enforced: true } : {}),
         /** The run-turn coaching card: shown, or the typed reason it is not (for staging witnesses). */
         coaching: runCoaching.eligibility,
+        /** C4: the run-turn card's typed move, and the limit caveats said once instead of shown (signal ids). */
+        ...(runCoaching.scienceBrief !== null
+          ? { coaching_next_move: runCoaching.nextMove?.kind ?? null, coaching_caveats: runCoaching.caveats.map((c) => c.block.signal_id) }
+          : {}),
         /**
          * ⭐ WHAT THE AUTOMATIC FIRST ANALYSIS DID, for witnesses: ran, or why not, how long it took,
          * and the (construction, revision) identity it was bound to. Absent when no construction
