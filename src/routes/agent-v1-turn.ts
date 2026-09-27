@@ -29,6 +29,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
 import { OPENAI_ONLY, assertProviderAllowed, providerLedgerTruncated, recordProviderUsage, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { RESEARCH_CHIP_PREFIX, approvedQueryOf, readResearchResponse, researchChipFor, researchReplyText, researchRequestBody, type ResearchOutcome } from '../orchestrator-v5/agent-lane/runtime/public-research.js';
+import { agentPromptIdentity, conversationPromptAlias } from '../orchestrator-v5/agent-lane/runtime/prompt-identity.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
@@ -1046,7 +1047,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * conversation calls per turn, and attributing a cache hit to the wrong one is the
      * quietest possible way to make the measurement wrong.
      */
-    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callModel', { model: budget.model, purpose: 'conversation' });
+    /**
+     * ⭐ WHICH PROMPT, NOT ONLY WHICH SITE (AIQ identity map @30c0e79c; `prompt-identity.ts`). The Run fast path's one
+     * interpreting call (`tool_choice: 'none'`) is `agent.interpret`; every other conversation call is
+     * `agent.converse`. The sha is of `req.instructions` — the SAME string the body below sends, so C5b's view line or
+     * the interpret-only constraint changes it.
+     */
+    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callModel', {
+      model: budget.model,
+      purpose: 'conversation',
+      ...agentPromptIdentity(conversationPromptAlias((req as { tool_choice?: unknown }).tool_choice), req.instructions),
+    });
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: {
@@ -1089,11 +1100,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
    */
   const callResearch = async (query: string): Promise<unknown> => {
     const model = budgetFor('gpt-5.6-terra', 'conversation').model;
-    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callResearch', { model, purpose: 'public_research' });
+    // Built once, so the ledger's sha is of the instructions this exact body sends (`RESEARCH_INSTRUCTIONS` today).
+    const researchBody = researchRequestBody(query, model);
+    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callResearch', {
+      model, purpose: 'public_research', ...agentPromptIdentity('agent.research', researchBody['instructions']),
+    });
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: { authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`, 'content-type': 'application/json' },
-      body: JSON.stringify(researchRequestBody(query, model)),
+      body: JSON.stringify(researchBody),
       // Bounded (#2042 N2): the captured search took 15 s; a hung one is said as unfinished, never waited on.
       signal: AbortSignal.timeout(60_000),
     });
@@ -1125,7 +1140,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * ⚠ `j.usage` was ALREADY parsed and returned by this function; only the ledger
      * write was missing. Nothing new is fetched or computed here.
      */
-    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callStructured', { model: reqBody.model, purpose: 'construction' });
+    // `agent.construct` covers BUILD_INSTRUCTIONS and its retry/size/compaction suffixes; the sha tells them apart.
+    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callStructured', {
+      model: reqBody.model, purpose: 'construction', ...agentPromptIdentity('agent.construct', reqBody.instructions),
+    });
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: {
