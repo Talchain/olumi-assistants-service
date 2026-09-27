@@ -83,6 +83,17 @@ const obj = (props: Record<string, unknown>, required: string[]): Record<string,
 });
 
 
+/**
+ * PJ-C1 latency (#70 5859918872): the model's own typed word that this ONE call is everything the user asked for in
+ * this message. Only then may the reply be composed from the call's result with no narrating call (proposal-reply.ts);
+ * absent or false keeps today's second call, so a message asking for two things never loses the second.
+ */
+const WHOLE_REQUEST = {
+  type: 'boolean',
+  // Words: AI Conversation #70 5860022029.
+  description: 'true ONLY when this one call does everything the user asked for in their latest message: no other change to make, no question to answer, nothing else to explain. If there is anything more, or you are unsure, false.',
+} as const;
+
 /** The factors ONE option would change — shared by the single and the several-option forms of propose_new_option. */
 const ACTS_ON = {
   type: 'array',
@@ -247,6 +258,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         }, ['label', 'affects']),
       },
       rationale: { type: 'string', description: 'Why this option is worth comparing, in the user\u2019s terms.' },
+      whole_request: WHOLE_REQUEST,
     }, ['rationale']),
   },
   {
@@ -269,6 +281,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       from_words: FROM_WORDS,
       direction: { type: 'string', enum: ['positive', 'negative'], description: 'ONLY when the user said the link pushes the other way.' },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
+      whole_request: WHOLE_REQUEST,
     }, ['from_label', 'to_label', 'strength', 'rationale']),
   },
   {
@@ -603,12 +616,19 @@ export async function dispatchTool(
       detail: 'This preview cannot change the model. Nothing has been altered.',
     };
   }
-  let args: Record<string, unknown>;
+  let parsed: unknown;
   try {
-    args = JSON.parse(rawArgs) as Record<string, unknown>;
+    parsed = JSON.parse(rawArgs);
   } catch {
     return { ok: false, mutated: false, refusal: 'unparsable_arguments' };
   }
+  // ⛔ ARGUMENTS ARE AN OBJECT, OR NOTHING RUNS (X2 contract, Codex-Capabilities #70 5858831838): JSON `null` parsed
+  // cleanly and crashed `authorise_change` (`args.proposal_id`) and `offer_public_research` (`args.query`); an array,
+  // number or string reached every capability as its arguments. Refused here, for every tool, before any is reached.
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ok: false, mutated: false, refusal: 'unparsable_arguments', detail: 'The call\u2019s arguments were not an object. Nothing was run; call it again with its arguments as an object.' };
+  }
+  const args = parsed as Record<string, unknown>;
   switch (name) {
     case 'get_canonical_state':
       return caps.getCanonicalState(ctx);

@@ -130,6 +130,7 @@ import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, factorTheUserNamed, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { derivedSplitOf, statedTotalsOf } from '../derived-split.js';
 import { figureInUserUnits } from '../approval-chips.js';
 import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
@@ -4204,6 +4205,17 @@ export function createAgentCapabilities(
           const basis = a.level?.estimate === true && typeof a.level?.basis === 'string' && a.level.basis.trim() !== '' ? a.level.basis.trim() : undefined;
           if (f !== undefined) levelById.set(f.id, { value: v, ...(typeof a.level?.unit === 'string' && a.level.unit.trim() !== '' ? { unit: a.level.unit.trim() } : {}), ...(basis !== undefined ? { estimate: basis } : {}) });
         }
+        /**
+         * ⛔ THE USER'S OWN SPLIT (AI Quality ruling #70 5859388817; served C08 "Let's spit it 50/50" of the £30,000 limit the
+         * user set). Levels the Agent proposed that are exactly the user's typed split of ONE total they stated are set, with
+         * the working as their basis (Olumi's reading until the `derived_from` slot lands, below); two totals in scope are
+         * asked, never guessed.
+         */
+        // The ratio must be typed in THIS message (condition 1): `user_turn_text`, never the session's `user_text`.
+        const split = derivedSplitOf(ctx.user_turn_text ?? '', statedTotalsOf(g.raw), plan.actsOn.flatMap((f) => {
+          const l = levelById.get(f.id);
+          return l === undefined ? [] : [{ factor_id: f.id, value: l.value, unit: l.unit ?? factorUnitOf(g.raw, g.nodes.find((x) => x.id === f.id)) }];
+        }));
         const set = new Map<string, Lvl>();
         const interventions = plan.actsOn.map((f) => {
           const lvl = levelById.get(f.id);
@@ -4220,12 +4232,25 @@ export function createAgentCapabilities(
            * was stored as the user's 0% churn). Otherwise it is Olumi's ESTIMATE only when the Agent said so, with a
            * basis, and it is recorded and shown as that (`cee_hypothesis`, C2). Anything else is left unset and said.
            */
-          const byUser = figureTheUserWroteFor(lvl.value, lvl.unit ?? factorUnit, ctx.user_text, scopeIn(g, f.label, plan.label));
+          const wrote = figureTheUserWroteFor(lvl.value, lvl.unit ?? factorUnit, ctx.user_text, scopeIn(g, f.label, plan.label));
+          const derived = !wrote && split.kind === 'derived' && split.factor_ids.includes(f.id) ? split : undefined;
+          /**
+           * INTERIM (AI Quality 5859798011): until Canonical's `derived_from` slot lands (#70 5859537590), the add-option
+           * spec drops the key, so the user's split would persist as theirs with no record of how it was derived. It is
+           * recorded as Olumi's reading of their split instead, with the working as its basis; the PR that lands the slot
+           * makes it the user's (`user_specified` + `derived_from`).
+           */
+          if (derived !== undefined) lvl.estimate = `${derived.working}, as Olumi read it`;
+          const byUser = wrote;
           if (!byUser && lvl.estimate === undefined) {
-            levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: notWrittenReason(lvl.value, f.label) });
+            const ask = split.kind === 'ask_which_total' && split.factor_ids.includes(f.id)
+              ? `The user's split could be of more than one total they set (${split.candidates.map((t) => `"${t.label}" ${t.value}${t.unit !== undefined ? ` ${t.unit}` : ''}`).join(' or ')}), so ${f.label}'s level is left unset. Ask which total they mean; never pick one.`
+              : undefined;
+            levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: ask ?? notWrittenReason(lvl.value, f.label) });
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
-          if (!byUser && contradictsItsName(lvl.value, lvl.unit ?? factorUnit, plan.label)) {
+          // The user's split's figure in the name ("50/50") is its RATIO, never a level it contradicts.
+          if (!byUser && derived === undefined && contradictsItsName(lvl.value, lvl.unit ?? factorUnit, plan.label)) {
             levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
               reason: `Olumi's estimate of ${lvl.value} for ${f.label} does not match the figure in the option's own name ("${plan.label}"), so that level is left unset. Use the figure in the name, or name the option for the figure you mean.` });
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };

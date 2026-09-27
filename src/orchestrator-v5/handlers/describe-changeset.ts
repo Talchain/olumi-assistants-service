@@ -54,6 +54,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { formatFactorValue } from '../compose/format-factor-value.js';
 import { parseEdgeTargetPath } from '../graph-management/adapters/edit-graph-producer.js';
 import { SAFETY_FORBIDDEN_TOKENS } from '../compose/proposed-change.js';
+import { isSwitch, resolveMagnitudeFrame, switchStateWords, type MagnitudeNode } from '../../cee/magnitude/link-effect.js';
 
 /** Structural view of a patch operation — enough to name its subject. */
 export interface ChangesetOpLike {
@@ -207,6 +208,83 @@ function safeEchoPath(path: string): string | null {
   return trimmed;
 }
 
+/** What a describer is told beyond the ops: the new 0/1 switches a typed add-option recorded on its hold. */
+export interface DescribeOptions {
+  readonly switchFactorIds?: readonly string[];
+}
+
+const finiteNumber = (x: unknown): number | undefined => (typeof x === 'number' && Number.isFinite(x) ? x : undefined);
+
+/**
+ * Whether a factor is a 0/1 switch once this option sets `level` on it: a new switch the hold names, or an existing
+ * factor the magnitude contract admits as one (#2055's rule: frame 1, and its held and option levels — this one
+ * included — use both 0 and 1). Anything else is a quantity and is said as its figure.
+ */
+function isSwitchAfter(factorId: string, level: number, graph: unknown, switchIds: ReadonlySet<string>): boolean {
+  if (switchIds.has(factorId)) return true;
+  const nodes = asRecord(graph).nodes;
+  if (!Array.isArray(nodes)) return false;
+  const node = nodes.map(asRecord).find((n) => n.id === factorId && n.kind === 'factor');
+  if (node === undefined) return false;
+  const levels = [level];
+  for (const n of nodes.map(asRecord)) {
+    if (n.kind !== 'option') continue;
+    const iv = asRecord(n.interventions)[factorId];
+    const v = finiteNumber(iv) ?? finiteNumber(asRecord(iv).value);
+    if (v !== undefined) levels.push(v);
+  }
+  const os = asRecord(node.observed_state);
+  const mn: MagnitudeNode = {
+    label: typeof node.label === 'string' ? node.label : factorId,
+    kind: 'factor',
+    scale_frame: node.scale_frame,
+    observed_state: os as MagnitudeNode['observed_state'],
+    option_levels: levels,
+  };
+  const used = [...(finiteNumber(os.value) !== undefined ? [os.value as number] : []), ...levels];
+  return isSwitch(mn, resolveMagnitudeFrame(mn)) && used.includes(0) && used.includes(1);
+}
+
+/**
+ * ⭐ A NEW OPTION'S LEVELS ARE PART OF WHAT THE USER APPROVES (C2 consent; AI Conversation #70 5859629053). The option's
+ * `add_node` writes its levels (`buildAddOptionTransaction`: `interventions`, valued entries only), so the sentence the
+ * user approves names each one: the factor's label, the user's own figure (`raw_value` when a range normalised it) in
+ * its unit, "(Olumi's estimate)" when stamped `cee_hypothesis`, and a switch the option turns on as "on". Shaped
+ * "with 'X' at <figure>" — never "set … to" (clause A; see the header). `null` when no level is valued.
+ */
+function optionLevelsClause(
+  interventions: unknown,
+  graph: unknown,
+  batchAdds: ReadonlyMap<string, ResolvedNode>,
+  switchIds: ReadonlySet<string>,
+): string | null {
+  const parts: string[] = [];
+  for (const [factorId, raw] of Object.entries(asRecord(interventions))) {
+    const entry = finiteNumber(raw) !== undefined ? { value: raw } : asRecord(raw);
+    const figure = entry.raw_value !== undefined && entry.raw_value !== null ? entry.raw_value : entry.value;
+    if (figure === undefined || figure === null) continue;
+    const label = resolveNode(factorId, graph, batchAdds).label;
+    const name = label !== null ? `'${label}'` : 'a factor not yet named';
+    const estimate = entry.source === 'cee_hypothesis' ? ' (Olumi\u2019s estimate)' : '';
+    const level = finiteNumber(entry.value);
+    const state = level !== undefined && isSwitchAfter(factorId, level, graph, switchIds) ? switchStateWords(level) : undefined;
+    if (state !== undefined) {
+      parts.push(`${name} ${state}`);
+      continue;
+    }
+    const nodes = asRecord(graph).nodes;
+    const factorUnit = Array.isArray(nodes)
+      ? asRecord(asRecord(nodes.map(asRecord).find((n) => n.id === factorId)).observed_state).unit
+      : undefined;
+    const shown = formatChangeValue(figure, entry.unit ?? factorUnit);
+    if (shown === null) continue;
+    parts.push(`${name} at ${shown}${estimate}`);
+  }
+  if (parts.length === 0) return null;
+  const listed = parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]!}`;
+  return `with ${listed}`;
+}
+
 /**
  * The honest fallback for an edge op whose path no pipeline parser
  * recognises: names the action and, when safe to echo, the reference —
@@ -241,6 +319,7 @@ function describeOp(
   graph: unknown,
   batchAdds: ReadonlyMap<string, ResolvedNode>,
   operations: readonly ChangesetOpLike[],
+  switchIds: ReadonlySet<string> = new Set(),
 ): string {
   switch (op.op) {
     case 'add_node': {
@@ -251,7 +330,10 @@ function describeOp(
         typeof v.label === 'string' && v.label.trim().length > 0
           ? clampLabel(v.label)
           : null;
-      if (label !== null) return `add ${withKindWord(kind, label)}`;
+      if (label !== null) {
+        const levels = kind === 'option' ? optionLevelsClause(v.interventions, graph, batchAdds, switchIds) : null;
+        return levels === null ? `add ${withKindWord(kind, label)}` : `add ${withKindWord(kind, label)}, ${levels}`;
+      }
       return kindWord !== undefined ? `add a new ${kindWord}` : 'add a new part of the model';
     }
     case 'remove_node': {
@@ -367,6 +449,7 @@ function joinItems(items: readonly string[]): string {
 export function describeChangeset(
   operations: readonly ChangesetOpLike[],
   currentGraph: unknown,
+  options?: DescribeOptions,
 ): ChangesetDescription | null {
   if (operations.length === 0) return null;
   // Pre-scan batch adds so later ops on batch-added nodes resolve labels.
@@ -385,7 +468,8 @@ export function describeChangeset(
       });
     }
   }
-  const items = operations.map((op) => describeOp(op, currentGraph, batchAdds, operations));
+  const switchIds = new Set(options?.switchFactorIds ?? []);
+  const items = operations.map((op) => describeOp(op, currentGraph, batchAdds, operations, switchIds));
   return { items, subject: joinItems(items) };
 }
 
@@ -397,6 +481,7 @@ export function describeChangeset(
 export function describeHeldOperationsSubject(
   operations: readonly ChangesetOpLike[],
   currentGraph: unknown,
+  options?: DescribeOptions,
 ): string | null {
-  return describeChangeset(operations, currentGraph)?.subject ?? null;
+  return describeChangeset(operations, currentGraph, options)?.subject ?? null;
 }
