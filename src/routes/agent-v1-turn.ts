@@ -36,7 +36,8 @@ import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { collectTurnReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
 import { withCurrentGraphHash } from '../orchestrator-v5/agent-lane/analysis-freshness-stamp.js';
-import { BOARD_EDIT_PREFIX, HistoryStore, historyFromDurableTurns, needsDurableSeed } from '../orchestrator-v5/agent-lane/history-store.js';
+import { BOARD_EDIT_PREFIX, HistoryStore, historyFromDurableTurns, needsDurableSeed, pruneSupersededToolOutputs } from '../orchestrator-v5/agent-lane/history-store.js';
+import { contextBindingSecret, issueContextPacket } from '../orchestrator-v5/agent-lane/runtime/request-assembly.js';
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
 import { log } from '../utils/telemetry.js';
@@ -268,7 +269,7 @@ export { BOARD_EDIT_PREFIX } from '../orchestrator-v5/agent-lane/history-store.j
 const AGENT_INSTRUCTIONS = [
   'You are Olumi, a strategic reasoning layer. Improve human strategic judgement rather than deciding for the user.',
   'Answer the user’s actual question directly and naturally.',
-  'Never invent canonical facts. Before describing what the model contains, call get_canonical_state.',
+  'Never invent canonical facts. Each turn opens with a CURRENT MODEL STATE input: exactly what get_canonical_state returns, read by Olumi at the start of the turn. Describe the model from it; call get_canonical_state only when that input is absent.',
   'Distinguish user facts and evidence from machine-authored estimates and from unknowns. An absent value is unknown, never zero.',
   /*
    * ⛔ CARRYING THE FIELD IS NOT SAYING IT. Measured 3/3 on the Agent route: the
@@ -1751,6 +1752,27 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       };
     }
     if (result === undefined) try {
+      /**
+       * ⭐ THE SERVER READS THE MODEL ONCE AND GIVES IT (slice C1). The same `get_canonical_state` result the Agent
+       * would ask for, read in-process before the first model call and minted into a packet only this server can
+       * verify; the loop then carries it as input and withholds the read tool (`agent-loop.ts`). A failed read gives
+       * no packet: the tool stays offered, exactly as before.
+       */
+      let canonicalContext: Parameters<typeof runAgentTurn>[0]['canonicalContext'];
+      try {
+        const st = await capabilities.getCanonicalState(toolCtx);
+        const revision = (st as { graph_revision?: unknown }).graph_revision;
+        if (st.ok === true && typeof revision === 'string' && revision !== '') {
+          const secret = contextBindingSecret();
+          const subject = { scenario_id: scenarioId, authenticated_user_id: userId ?? '', graph_revision: revision };
+          canonicalContext = {
+            packet: issueContextPacket({ ...subject, captured_at_turn: 0, state: st }, secret),
+            expectation: { ...subject, current_turn: 0, binding_secret: secret },
+          };
+        }
+      } catch (err) {
+        log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: turn state could not be read — the Agent will read it itself');
+      }
       result = await runAgentTurn(
         {
           ctx: toolCtx,
@@ -1760,6 +1782,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           maxOutputTokens: budget.max_output_tokens,
           mode,
           withheldTools: withheldToolsOf(body),
+          ...(canonicalContext !== undefined ? { canonicalContext } : {}),
         },
         capabilities,
         callModel,
@@ -1780,7 +1803,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       });
     }
 
-    histories.set(sessionId, [...result.items]);
+    histories.set(sessionId, pruneSupersededToolOutputs(result.items));
 
     // A hop limit is never returned as an empty answer.
     const text = result.stopped_reason === 'incomplete'

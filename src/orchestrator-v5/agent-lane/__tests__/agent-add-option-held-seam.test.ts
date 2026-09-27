@@ -224,6 +224,28 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(routerCalls).toEqual([]);
   }, 120_000);
 
+  /**
+   * ⭐ SLICE C1 (P3A replay of Paul's transcript, 27 Sep): an ordinary question cost two model calls, the first only
+   * to fetch `get_canonical_state`. The route now reads the model once and GIVES it; the read tool is not offered.
+   */
+  it('[C1] RED: an ordinary question → ONE model call; its request carries the CURRENT MODEL STATE (the model\'s entities) and does not offer get_canonical_state', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const bodies: Record<string, unknown>[] = [];
+    script = [(body) => { bodies.push(body); return say('Price drives revenue here.'); }];
+    const t = await turn({ message: 'What drives revenue in my model?' });
+    expect(openAiCalls, 'one model call').toBe(1);
+    const tools = ((bodies[0]!['tools'] ?? []) as { name?: string }[]).map((x) => x.name);
+    expect(tools).not.toContain('get_canonical_state');
+    const given = JSON.stringify((bodies[0]!['input'] ?? []) as unknown[]);
+    expect(given).toMatch(/CURRENT MODEL STATE/);
+    expect(given).toContain('fac_price');
+    expect(t._agent.tool_calls).toEqual([]);
+    // The next turn is given its OWN state; the earlier one is not carried in the history.
+    script = [(body) => { bodies.push(body); return say('Still price.'); }];
+    await turn({ message: 'And now?' });
+    expect((JSON.stringify(bodies[1]!['input']).match(/CURRENT MODEL STATE/g) ?? []).length, 'exactly one state item on turn 2').toBe(1);
+  }, 120_000);
+
   it('[a] RED: one option with the user\'s £54 → ONE held proposal on the typed rail → one click → linked from the decision, levelled, runnable', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const t1 = await proposeOptionC(54);
