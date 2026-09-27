@@ -141,6 +141,8 @@ import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLe
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
+import { notModelledContext, notModelledOfRead } from '../not-modelled-carrier.js';
+import type { NotModelledManifest } from '../../../cee/context-integrity/not-modelled-manifest.js';
 import { FRACTION_SPELLED_UNIT } from '../../coaching/bound-graph.js';
 
 /**
@@ -418,6 +420,8 @@ interface GraphRead {
   readonly analysis_state: unknown;
   /** The persisted graph exactly as read — every top-level carrier, not only nodes/edges. */
   readonly raw: Record<string, unknown>;
+  /** A7: the read's own `not_modelled` (derived by the read route over this graph); absent when the read had none. */
+  readonly not_modelled?: NotModelledManifest;
 }
 
 const norm = (s: unknown): string => String(s ?? '').toLowerCase().replace(/…$/, '').trim();
@@ -860,6 +864,14 @@ export function createAgentCapabilities(
   opts: {
     readonly firstAnalysis?: (input: FirstAnalysisInput) => Promise<FirstAnalysisOutcome>;
     /**
+     * ⭐ C6-1: told ONCE, the moment a construction THIS request committed is confirmed from state — before the
+     * first analysis and before the Agent's reply — with the graph exactly as read back. The route turns it into
+     * the streamed `GRAPH_READY` frame (nothing at all outside a streamed turn), so the canvas draws the model
+     * ~15 s before COMPLETE. The same committing-path gate as the first analysis: never on a refusal or a replay.
+     * An observer only — a throw here is swallowed and never costs the build. Absent ⇒ nothing is told.
+     */
+    readonly onModelRegistered?: (graph: Record<string, unknown>) => void;
+    /**
      * The pending actions on the scenario's LATEST answer row, as the session store returns them. The held
      * add-option proposal lives there (route-v2 minted it), so a `gmh_` approval is confirmed against what the
      * store actually holds — never against a copy this process remembered. Absent ⇒ a held approval refuses.
@@ -947,6 +959,7 @@ export function createAgentCapabilities(
     const r = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
     if (r.status !== 200) return null;
     const g = (r.json.graph ?? {}) as Record<string, unknown>;
+    const notModelled = notModelledOfRead(r.json.not_modelled);
     return {
       graph_hash: String(r.json.graph_hash ?? ''),
       // ⛔⛔ IT IS AN ENVELOPE OBJECT, NOT A STRING. The read route emits the
@@ -965,6 +978,7 @@ export function createAgentCapabilities(
       edges: (g.edges as GraphRead['edges']) ?? [],
       analysis_state: r.json.analysis_state,
       raw: g,
+      ...(notModelled !== undefined ? { not_modelled: notModelled } : {}),
     };
   };
 
@@ -1586,6 +1600,8 @@ export function createAgentCapabilities(
         structure: structuralFacts(g.nodes, g.edges),
         // (B) goal target, limits, links, the ONE readiness verdict, and the earlier analysis kept apart from it.
         ...projectModelContext(g),
+        // A7: what of the brief the model does NOT carry — the read's own manifest, projected; none when the read had none.
+        ...(g.not_modelled !== undefined ? { not_modelled: notModelledContext(g.not_modelled) } : {}),
         // Every proposal this user has been shown and not yet approved, newest
         // first — including a held add-option, which lives in the session store,
         // not in memory. An approval with nothing to bind to is an approval that
@@ -3923,6 +3939,14 @@ export function createAgentCapabilities(
       const after = await readGraph(ctx.scenario_id);
       if (after === null || after.nodes.length === 0) {
         return { ok: false, mutated: false, refusal: 'model_not_readable_after_write' };
+      }
+      /**
+       * ⭐ C6-1: THE MODEL EXISTS NOW — say so before the first analysis and the reply (~15 s of the first brief).
+       * Only the request whose construction COMMITTED (the first analysis's own gate, below): a recovered version
+       * (`replayed: true`) was already shown by the turn that built it, and a refusal returned above.
+       */
+      if (built.mutated === true && built.replayed !== true) {
+        try { opts.onModelRegistered?.(after.raw); } catch { /* an observer never costs the build */ }
       }
       /**
        * ⭐ THE FIRST ANALYSIS, RUN BY OLUMI, ONCE (Paul, 5812069638) — ONLY when this request is the one
