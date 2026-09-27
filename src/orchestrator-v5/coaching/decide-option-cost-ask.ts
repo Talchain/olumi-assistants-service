@@ -54,7 +54,8 @@
  *   - the target does not resolve to exactly one FACTOR node by id;
  *   - the unit is a bare ratio (`%` / `fraction`) — then the cell is already in
  *     the model's own scale and a "native value" question is meaningless;
- *   - every participating option already records a native value.
+ *   - every participating option already records a native value THE USER GAVE.
+ *     Olumi's own estimate in the limit's unit is not an answer (AIQ Q1, below).
  *
  * ## One cell at a time, by construction
  *
@@ -69,6 +70,7 @@
  */
 
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
+import { classifyValueSource, earnsAuthorshipCredit } from '../../cee/graph-readiness/obligation-provenance.js';
 import { sameUnit } from '../routing/native-quantity-operation.js';
 
 /** A graph NODE, at the shape this decision needs. Used only to resolve the target factor. */
@@ -211,7 +213,14 @@ export function decideOptionCostAsk(input: {
       // Symbol/code normalised for the same reason the writer does it: a cell
       // stored under one spelling must not read as unanswered under the other,
       // or the product re-asks a question it already has the answer to.
-      && sameUnit(nativeUnit, unit);
+      && sameUnit(nativeUnit, unit)
+      // ⛔ AND IT IS THE USER'S FIGURE (AIQ Q1, CEE #2139 5859746452). Since the one form (P2 A5), Olumi's own level
+      // carries `raw_value` + `unit` too, so "a native in this unit" stopped meaning "the user answered". Rule (d)
+      // withholds the leader's verdict whenever the level it sets is not the user's; if that same estimate also silenced
+      // this ask, the limit could never become checkable. Whose figure it is comes from the ONE authority rule (d)
+      // reads (`constraint-feasibility.ts` `collectLeaderEstimatedTargetIds`), never a second list here. The native is
+      // NOT gated anywhere else: it is the factor's own figure, and PLoT needs it whoever wrote it.
+      && earnsAuthorshipCredit(classifyValueSource(cell.source));
     if (alreadyAnswered) continue;
 
     return {

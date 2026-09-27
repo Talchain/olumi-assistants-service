@@ -159,7 +159,7 @@ describe('a limit the user states on a level is admitted on a factor that can ho
     const { graph } = await register(outcomeDraft());
     expect(edgeKeys(graph)).toEqual(edgeKeys(SERVED_OUTCOME));
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
-    const asServed = asServedBeforeOneForm(graph);
+    const asServed = asServedBeforeOneForm(graph, SERVED_OUTCOME);
     for (const s of SERVED_OUTCOME.nodes.filter((n) => n.id !== 'monthly_churn')) {
       expect(byId(asServed, s.id), s.id).toStrictEqual(asServedNow(s));
     }
@@ -232,7 +232,7 @@ describe('CONTROLS — what the rule must leave alone', () => {
   it('the served FACTOR-kind draft registers byte-identical to what was served', async () => {
     const { graph } = await register(factorDraft());
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
-    expect(asServedBeforeOneForm(graph).nodes).toStrictEqual(SERVED_FACTOR.nodes.map(asServedNow));
+    expect(asServedBeforeOneForm(graph, SERVED_FACTOR).nodes).toStrictEqual(SERVED_FACTOR.nodes.map(asServedNow));
     expect(edgeKeys(graph)).toEqual(edgeKeys(SERVED_FACTOR));
     expect(graph.goal_constraints).toStrictEqual(SERVED_FACTOR_GC_FRAMED);
   });

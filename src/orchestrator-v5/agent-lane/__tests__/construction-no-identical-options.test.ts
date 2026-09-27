@@ -273,7 +273,7 @@ describe.each([
   it('FIDELITY: the reconstruction registers the served graph exactly, apart from the Olumi-added test option', async () => {
     const { graph: sizedGraph } = await build(draft());
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
-    const graph = unsized(withoutG1(asServedBeforeOneForm(sizedGraph), G1_WITH_HORIZON));
+    const graph = unsized(withoutG1(asServedBeforeOneForm(sizedGraph, run.brief.draft_graph), G1_WITH_HORIZON));
     const served = run.brief.draft_graph;
     expect(withoutOption(graph, TEST_ID).nodes).toEqual(withoutOption(served, TEST_ID).nodes);
     expect(withoutOption(graph, TEST_ID).edges).toEqual(withoutOption(served, TEST_ID).edges);
@@ -284,7 +284,7 @@ describe.each([
     const { graph } = await build(draft());
     const base = baseGraph(key);
     expect(optionIds(base)).toContain(TEST_ID);
-    expect(JSON.stringify(unsized(withoutG1(asServedBeforeOneForm(graph), G1_WITH_HORIZON)))).toBe(JSON.stringify(framedBase(withoutOption(base, TEST_ID))));
+    expect(JSON.stringify(unsized(withoutG1(asServedBeforeOneForm(graph, base), G1_WITH_HORIZON)))).toBe(JSON.stringify(framedBase(withoutOption(base, TEST_ID))));
   });
 
   it('RED: the Olumi-added test option is not registered — no node, no edge', async () => {
@@ -356,9 +356,9 @@ describe('controls — what the rule must never touch', () => {
     const { graph, out } = await build(candidateFromServed(run.brief.draft_graph, { olumi: 'ai_proposed', horizon: null }));
     expect(optionIds(graph)).toContain(olumiId);
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
-    expect(withoutG1(asServedBeforeOneForm(graph), G1_NO_HORIZON).nodes).toEqual(olumisKnownLevels(run.brief.draft_graph.nodes));
+    expect(withoutG1(asServedBeforeOneForm(graph, run.brief.draft_graph), G1_NO_HORIZON).nodes).toEqual(olumisKnownLevels(run.brief.draft_graph.nodes));
     expect(unsized(graph).edges).toEqual(run.brief.draft_graph.edges);
-    expect(JSON.stringify(unsized(withoutG1(asServedBeforeOneForm(graph), G1_NO_HORIZON)))).toBe(JSON.stringify(framedBase(baseGraph(key))));
+    expect(JSON.stringify(unsized(withoutG1(asServedBeforeOneForm(graph, baseGraph(key)), G1_NO_HORIZON)))).toBe(JSON.stringify(framedBase(baseGraph(key))));
     expect(out).not.toHaveProperty('options_withheld');
     expect(questions(out).filter((q) => q.startsWith('I left out ') || q.startsWith('What makes '))).toEqual([]);
   });
@@ -400,7 +400,7 @@ describe('controls — what the rule must never touch', () => {
     })) } as typeof base;
     const { graph, out } = await build(draft);
     expect(optionIds(graph)).toEqual(['keep_pro_price_at_49', 'raise_pro_price_to_59', '49_until_next_quarter']);
-    expect(asServedBeforeOneForm(graph).nodes.find((n) => n.id === '49_until_next_quarter')?.interventions).toEqual({ pro_plan_price: { value: 0.245, source: 'cee_hypothesis' } });
+    expect(asServedBeforeOneForm(graph, SHAPE_2.brief.draft_graph).nodes.find((n) => n.id === '49_until_next_quarter')?.interventions).toEqual({ pro_plan_price: { value: 0.245, source: 'cee_hypothesis' } });
     expect(out).not.toHaveProperty('options_withheld');
     // The run, on the served approved model: that option set to today's price alone PROCEEDS. Since #1963 the held
     // status quo also counts, so the model without it proceeds too; the control's point is that (b) KEEPS it.
@@ -466,8 +466,10 @@ describe('fix round — an open cell can equal at most one level; the status quo
     label, provenance, changes, is_status_quo: null,
     interventions: level === undefined ? [] : [{ factor_label: level.factor, value: level.value, value_kind: 'absolute', unit: '£ per month', provenance: 'ai_proposed' }],
   });
-  // Read back in the served short form (P2 A5, `one-form-levels.ts`): these rows pin WHICH level, not its members.
-  const levelOf = (g: SGraph, id: string) => asServedBeforeOneForm(g).nodes.find((n) => n.id === id)?.interventions ?? null;
+  // Read back in the served short form (P2 A5, `one-form-levels.ts`), on the frames of the served shape each row was
+  // drafted from: these rows pin WHICH level, not its members.
+  const levelOf = (g: SGraph, id: string, served: SGraph) =>
+    asServedBeforeOneForm(g, served).nodes.find((n) => n.id === id)?.interventions ?? null;
   const registeredLabels = (g: SGraph) => g.nodes.filter((n) => n.kind === 'option').map((n) => n.description ?? n.label);
   const withheldOf = (out: Record<string, unknown>) => (out.options_withheld ?? []) as { option: string; like: string; reason: string }[];
   /** Served shape 1 with Olumi's "£54 with AI release" drafted AFTER the level-less test option. */
@@ -481,7 +483,7 @@ describe('fix round — an open cell can equal at most one level; the status quo
     expect(draft.options.map((o) => o.label)).toEqual(['Keep current pricing', '£59 with AI release', 'Test £59 with AI release', '£54 with AI release']);
     const { graph, out } = await build(draft);
     expect(optionIds(graph)).toEqual(['keep_current_pricing', '59_with_ai_release', '54_with_ai_release']);
-    expect(levelOf(graph, '54_with_ai_release')).toEqual({ pro_plan_price: { value: 0.27, source: 'cee_hypothesis' } });
+    expect(levelOf(graph, '54_with_ai_release', SHAPE_1.brief.draft_graph)).toEqual({ pro_plan_price: { value: 0.27, source: 'cee_hypothesis' } });
     expect(withheldOf(out)).toEqual([{ option: 'Test £59 with AI release', like: '£59 with AI release', reason: 'option_indistinct' }]);
     expect(questions(out).filter((q) => q.startsWith('I left out '))).toEqual([STEP_1]);
   });
@@ -509,7 +511,7 @@ describe('fix round — an open cell can equal at most one level; the status quo
     const draft = { ...base, options: [...base.options, OPT('Raise Pro Price to £54', 'inferred', ['AI Feature Value'], { factor: 'Pro Plan Price', value: 54 })] } as typeof base;
     const { graph, out } = await build(draft);
     expect(optionIds(graph)).toEqual(['keep_pro_price_at_49', 'raise_pro_price_to_59', 'raise_pro_price_to_54']);
-    expect(levelOf(graph, 'raise_pro_price_to_54')).toEqual({ pro_plan_price: { value: 0.27, source: 'cee_hypothesis' } });
+    expect(levelOf(graph, 'raise_pro_price_to_54', SHAPE_2.brief.draft_graph)).toEqual({ pro_plan_price: { value: 0.27, source: 'cee_hypothesis' } });
     expect(withheldOf(out)).toEqual([{ option: 'Test £59 With AI Release', like: 'Raise Pro Price to £59', reason: 'option_indistinct' }]);
     expect(questions(out).filter((q) => q.startsWith('I left out '))).toEqual([STEP_2]);
   });
@@ -523,7 +525,7 @@ describe('fix round — an open cell can equal at most one level; the status quo
     ] } as typeof base;
     const { graph, out } = await build(draft);
     expect(optionIds(graph)).toEqual(['keep_current_pricing', 'raise_the_pro_price_with_the_ai_release', '54_with_ai_release', '64_with_ai_release']);
-    expect([levelOf(graph, '54_with_ai_release'), levelOf(graph, '64_with_ai_release')]).toEqual([
+    expect([levelOf(graph, '54_with_ai_release', SHAPE_1.brief.draft_graph), levelOf(graph, '64_with_ai_release', SHAPE_1.brief.draft_graph)]).toEqual([
       { pro_plan_price: { value: 0.27, source: 'cee_hypothesis' } }, { pro_plan_price: { value: 0.32, source: 'cee_hypothesis' } }]);
     expect(out).not.toHaveProperty('options_withheld');
     expect(questions(out).filter((q) => q.startsWith('I left out ') || q.startsWith('What makes '))).toEqual([]);
@@ -554,7 +556,7 @@ describe('fix round — an open cell can equal at most one level; the status quo
     ]);
     const { graph, out } = await build(draft);
     expect(optionIds(graph)).toEqual(['current_setup', '59_with_ai_release', '49_with_ai_release']);
-    expect(levelOf(graph, '49_with_ai_release')).toEqual(AT_49.brief.draft_graph.nodes.find((n) => n.id === '49_with_ai_release')!.interventions);
+    expect(levelOf(graph, '49_with_ai_release', AT_49.brief.draft_graph)).toEqual(AT_49.brief.draft_graph.nodes.find((n) => n.id === '49_with_ai_release')!.interventions);
     expect(out).not.toHaveProperty('options_withheld');
   });
 

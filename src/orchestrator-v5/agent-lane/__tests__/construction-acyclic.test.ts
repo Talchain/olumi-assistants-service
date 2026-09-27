@@ -234,7 +234,7 @@ describe('the fixture IS the served model (fidelity, not a self-authored stand-i
   it('the reconstructed candidate registers the served nodes byte-for-byte, and the served edges less ONLY the withheld loop link', async () => {
     const { out, body } = await build(servedCandidate());
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
-    expect(asServedBeforeOneForm(body).nodes.map(canon)).toEqual(SERVED.draft_graph.nodes.map(asServedNow).map(canon));
+    expect(asServedBeforeOneForm(body, SERVED.draft_graph).nodes.map(canon)).toEqual(SERVED.draft_graph.nodes.map(asServedNow).map(canon));
     const withheld = new Set(loopWithheld(out));
     const servedLessWithheld = (SERVED.draft_graph.edges as unknown as Edge[]).filter((e) => !withheld.has(`${e.from}->${e.to}`));
     // PR1b sizes the served links into bounded targets; subtract that known delta and count it (magnitude-delta.ts).
