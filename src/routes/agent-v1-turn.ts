@@ -30,6 +30,7 @@ import { config } from '../config/index.js';
 import { OPENAI_ONLY, assertProviderAllowed, providerLedgerTruncated, recordProviderUsage, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { RESEARCH_CHIP_PREFIX, approvedQueryOf, readResearchResponse, researchChipFor, researchReplyText, researchRequestBody, type ResearchOutcome } from '../orchestrator-v5/agent-lane/runtime/public-research.js';
 import { agentPromptIdentity, conversationPromptAlias } from '../orchestrator-v5/agent-lane/runtime/prompt-identity.js';
+import { composeProposalReply } from '../orchestrator-v5/agent-lane/proposal-reply.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
@@ -2084,6 +2085,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           mode,
           withheldTools: withheldToolsOf(body),
           ...(canonicalContext !== undefined ? { canonicalContext } : {}),
+          // PJ-C1 latency: a lone proposal is answered from its own result, with no narrating call (proposal-reply.ts).
+          composeReply: (tool, args, toolResult) => composeProposalReply(tool, args, toolResult, message),
         },
         capabilities,
         callModel,
