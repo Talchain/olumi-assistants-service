@@ -164,6 +164,34 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
     expect(label).toMatch(/^Save £50,000 for Hire a full-time.*…$/);
     expect(label.length).toBeLessThanOrEqual(APPROVAL_LABEL_MAX);
     expect(APPROVAL_LABEL_MAX).toBe(40);
+    // Shortened at a WORD: never "…executive" cut to "execu…".
+    expect(label).toBe('Save £50,000 for Hire a full-time\u2026');
+  });
+
+  it('RED (Paul 27 Sep, B3): a factor name is shortened at a word, never mid-word — served "Set Monthly n… to 60 subscriptions/month"', async () => {
+    const name = 'Monthly new Pro subscriptions';
+    const graph = { ...PA_GRAPH, nodes: PA_GRAPH.nodes.map((n) => (n.id === 'fac_fee' ? { ...n, label: name } : n)) };
+    const { store, caps } = capsOver(graph);
+    const r = await caps.proposeAssumptions({ ...ctx, user_text: 'We get about 60 new Pro subscriptions a month.' },
+      { assumptions: [{ factor_label: name, value: 60, unit: 'subscriptions/month', basis: 'keeps the base stable' }] });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    const label = chipsFor(store, [{ name: 'propose_assumptions', result: r }])[0]!.label;
+    expect(label.length).toBeLessThanOrEqual(APPROVAL_LABEL_MAX);
+    expect(label, 'no clipped word before the ellipsis').not.toMatch(/\s\S{1,3}\u2026/);
+    expect(label).toBe('Set Monthly\u2026 to 60 subscriptions/month');
+  });
+
+  it('CONTROL: a name that fits is never shortened; a cut that leaves under 6 characters keeps the tool\u2019s own label', async () => {
+    const fits = capsOver();
+    const a = await fits.caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Recruitment fee', value: 5000, unit: 'GBP', basis: 'x' }] });
+    expect(chipsFor(fits.store, [{ name: 'propose_assumptions', result: a }])[0]!.label).toBe('Set Recruitment fee to £5,000');
+    const tiny = 'All subscriptions per month'; // the room is 10: the cut at a word leaves "All"
+    const graph = { ...PA_GRAPH, nodes: PA_GRAPH.nodes.map((n) => (n.id === 'fac_fee' ? { ...n, label: tiny } : n)) };
+    const t = capsOver(graph);
+    const b = await t.caps.proposeAssumptions({ ...ctx, user_text: 'We get about 60 new Pro subscriptions a month.' },
+      { assumptions: [{ factor_label: tiny, value: 60, unit: 'subscriptions/month', basis: 'x' }] });
+    expect(b.ok, JSON.stringify(b)).toBe(true);
+    expect(chipsFor(t.store, [{ name: 'propose_assumptions', result: b }])[0]!.label).toBe('Use as starting assumptions');
   });
 
   it('FALLBACK: a figure that cannot be shown exactly as stored, a link, and a revision of several values keep today’s label', async () => {
