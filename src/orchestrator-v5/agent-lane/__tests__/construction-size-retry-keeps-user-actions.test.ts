@@ -38,6 +38,7 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 type Iv = { factor_label: string; value: number; value_kind: 'absolute' | 'additional'; unit: string; provenance: string };
 type Opt = { label: string; provenance: string; is_status_quo: boolean | null; changes: string[]; interventions: Iv[] };
 type Link = { from: string; to: string; direction: 'positive' | 'negative' | 'unknown'; provenance: string; effect_amount?: number | null; effect_per_source_change?: number | null; effect_provenance?: string | null };
+type Limit = { metric: string; operator: '>=' | '<=' | '>' | '<'; value: number; unit: string; provenance: string; frame: 'level' | 'delta' };
 
 const SCENARIO = '66666666-6666-4666-8666-666666666666';
 const BRIEF = 'Should we hire two developers or a tech lead to lift delivery velocity?';
@@ -52,7 +53,7 @@ const est = (factor_label: string, value: number, unit: string): Iv => ({ factor
 function c22() {
   return {
     goal: { metric: GOAL, operator: '>=', target_stated: false, value: null, unit: 'points per sprint', horizon_months: null, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null },
-    constraints: [],
+    constraints: [] as Limit[],
     options: [
       { label: 'Hire Two Developers', provenance: 'explicit', is_status_quo: null, changes: ['Engineering delivery capacity', 'Hiring cost'], interventions: [] },
       { label: 'Hire a Tech Lead', provenance: 'explicit', is_status_quo: null, changes: ['Technical leadership capacity', 'Hiring cost'], interventions: [] },
@@ -841,5 +842,123 @@ describe('(4) B1\' (5845793528): a compaction may shed Olumi\'s option that reus
     expect(optionIds(kept.graph!)).toEqual(['continue_current_staffing', 'grow_to_seven_developers', 'hire_a_tech_lead', 'hire_both']);
     expect(levelOn(kept.graph!, 'hire_both', 'developer_headcount')).toEqual(USER_SEVEN_REGISTERED);
     expect(levelOn(kept.graph!, 'grow_to_seven_developers', 'developer_headcount')).toEqual(USER_SEVEN_REGISTERED);
+  });
+});
+
+/**
+ * ⛔ (5) A SIZE RETRY MAY DROP ONLY OLUMI'S STRUCTURE — NEVER A BRIEF-STATED FIGURE, OPTION OR LIMIT.
+ * AIQ ruling #70 5858990481 item 5 (MG order item 3, DL 5859393087): the rows above pin the user's ACTIONS; these pin the
+ * user's ITEMS. Served: MG sweep on 4bdf7b2, midmarket-2 got no model at birth at 32 links (limit 30), nodes within —
+ * so the shape here is LINK-oversized only: 16 nodes, 33 links, all the excess Olumi's placeholder links.
+ *
+ * `keepsEveryUserStatedIdentity` already held the user's options and relationships, and `keepsEveryUserNumber` their
+ * baselines and levels, but no adoption gate read the user's LIMITS: a retry that dropped, changed or reversed one — or
+ * shed the node it names, so admission withheld it — was adopted and registered without it. An unadoptable size retry
+ * keeps the first draft, which is oversized, so the build is refused `model_too_large` on the FIRST draft's counts and
+ * nothing is written (the existing policy). CONTRAST: a retry that drops only Olumi's placeholder links IS adopted.
+ */
+describe('(5) a link-oversized first draft: the size retry may drop Olumi\'s placeholder links, never a brief-stated figure, option or limit', () => {
+  const PLACEHOLDER = Array.from({ length: 5 }, (_, i) => `Placeholder factor ${i}`);
+  const olumiLink = (from: string, to: string): Link => ({ from, to, direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
+  /** The user's limit, stated in the brief: hiring cost at most £250,000. */
+  const USER_LIMIT: Limit = { metric: 'Hiring cost', operator: '<=', value: 250000, unit: 'GBP', provenance: 'explicit', frame: 'level' };
+  /** The user's figure: delivery capacity is 40 story points today. */
+  const USER_FIGURE = 40;
+  const withUserFigure = (baseline: number | null, known: boolean) =>
+    ({ ...factor('Engineering delivery capacity', baseline, 100, 'story points'), baseline_known: known, provenance: 'explicit' });
+
+  /** Within the limit: the user's two options, limit and figure; Olumi's option, status quo and five placeholder factors. */
+  function withinLimit(): Draft {
+    const d = covered();
+    d.constraints = [{ ...USER_LIMIT }];
+    d.factors[0] = withUserFigure(USER_FIGURE, true);
+    d.factors.push(...PLACEHOLDER.map((l) => factor(l, 5, 10, 'score')));
+    d.links.push(...PLACEHOLDER.map((l) => olumiLink(l, GOAL)));
+    return d;
+  }
+  /** The first draft: the same, plus ten Olumi placeholder links (each placeholder factor → morale and onboarding). */
+  function linkOversized(): Draft {
+    const d = withinLimit();
+    d.links.push(...PLACEHOLDER.flatMap((l) => [olumiLink(l, 'Team morale'), olumiLink(l, 'Onboarding load')]));
+    return d;
+  }
+
+  const userLimits = (g: Graph) =>
+    ((g as unknown as { goal_constraints?: Array<Record<string, unknown>> }).goal_constraints ?? [])
+      .filter((c) => c['provenance'] === 'explicit')
+      .map((c) => [c['node_id'], c['operator'], c['value'], c['unit'], c['value_frame']]);
+
+  /** Kept first: the ONE retry was spent, the first draft's own counts are refused, and nothing is written. */
+  function expectKeptFirstRefused(out: Awaited<ReturnType<typeof construct>>) {
+    expect(out.reqs, 'the one bounded retry was spent').toHaveLength(2);
+    expect(out.result.ok, JSON.stringify(out.result)).toBe(false);
+    expect(out.result.refusal).toBe('model_too_large');
+    expect(out.result.retried).toBe(true);
+    expect([out.result.nodes, out.result.edges], 'the FIRST draft\'s counts').toEqual([16, 33]);
+    expect(out.registered, 'nothing written').toEqual([]);
+    expect(out.graph).toBeUndefined();
+  }
+
+  it('PRECONDITIONS: the first draft is 16 nodes / 33 links (links only over), the retry 16 / 23; no repair issue; the limit is the user\'s and attached', () => {
+    const f = firstVerdict(linkOversized());
+    expect([f.nodes, f.edges, f.within, f.user_material_exceeds_limit]).toEqual([16, 33, false, false]);
+    expect(f.over_by).toEqual({ nodes: 0, edges: 33 - COMPACT_LIMITS.maxEdges });
+    const r = firstVerdict(withinLimit());
+    expect([r.nodes, r.edges, r.within]).toEqual([16, 23, true]);
+    const p = prepareProvisionalCandidate(linkOversized() as unknown as CandidateModel);
+    expect([...p.mechanism_issues, ...p.level_gaps, ...p.baseline_gaps]).toEqual([]);
+    const admitted = admitCandidateModel(p.candidate, {});
+    expect(admitted.goal_constraints.map((c) => [c.node_id, c.operator, c.value, c.unit, c.provenance, c.value_frame]))
+      .toEqual([['hiring_cost', '<=', 250000, 'GBP', 'explicit', 'level']]);
+    expect(f.brief_stated_keys.nodes).toEqual(expect.arrayContaining(['option:hire two developers', 'option:hire a tech lead', 'factor:engineering delivery capacity']));
+  });
+
+  it('RED: the verdict names the user\'s limit by identity (its node, bound, figure, unit and frame)', () => {
+    expect(firstVerdict(linkOversized()).brief_stated_keys.limits).toEqual(['factor:hiring cost|<=|250000|GBP|level']);
+  });
+
+  it('RED: the size retry is told the concrete overage — links only — and that links it added may go, never what the brief states', async () => {
+    const out = await construct(linkOversized(), withinLimit());
+    const retry = out.reqs[1]!.instructions;
+    expect(retry).toContain(`Your previous model was too large: 16 nodes and 33 links, ${33 - COMPACT_LIMITS.maxEdges} links over the limit.`);
+    expect(retry).not.toMatch(/\d+ nodes (and \d+ links )?over the limit/);
+    expect(retry).toContain('Remove what you ADDED beyond the brief: speculative options, secondary factors, risks, outcomes and links that are not decision-critical for this question.');
+    expect(retry).toContain('Keep EVERY option, factor, figure, constraint, horizon AND STATED RELATIONSHIP the brief gives');
+  });
+
+  it('CONTRAST: a retry that drops ONLY Olumi\'s placeholder links IS adopted, and registers the user\'s options, figure and limit', async () => {
+    const out = await construct(linkOversized(), withinLimit());
+    expect(out.reqs).toHaveLength(2);
+    expect(out.result.ok, JSON.stringify(out.result)).toBe(true);
+    expect(out.result.size_retried).toBe(true);
+    expect(out.result.within_compact_limits).toBe(true);
+    expect([out.result.nodes, out.result.edges]).toEqual([16, 23]);
+    expect(out.registered).toHaveLength(1);
+    const g = out.graph!;
+    expect(g.nodes.filter((n) => n.kind === 'option').map((n) => n.id).sort())
+      .toEqual(['continue_current_staffing', 'hire_a_tech_lead', 'hire_both', 'hire_two_developers']);
+    expect(userLimits(g)).toEqual([['hiring_cost', '<=', 250000, 'GBP', 'level']]);
+    expect((g.nodes.find((n) => n.id === 'engineering_delivery_capacity') as { observed_state?: { raw_value?: unknown } }).observed_state?.raw_value)
+      .toBe(USER_FIGURE);
+  });
+
+  it.each<[string, (d: Draft) => void]>([
+    ['RED: drops the user\'s limit', (d) => { d.constraints = []; }],
+    ['RED: changes the figure of the user\'s limit', (d) => { d.constraints = [{ ...USER_LIMIT, value: 300000 }]; }],
+    ['RED: reverses the user\'s limit', (d) => { d.constraints = [{ ...USER_LIMIT, operator: '>=' }]; }],
+    ['RED: keeps the limit but sheds the node it names, so admission withholds it', (d) => {
+      d.factors = d.factors.filter((f) => f.label !== 'Hiring cost');
+      d.options = d.options.map((o) => ({ ...o, interventions: o.interventions.filter((i) => i.factor_label !== 'Hiring cost') }));
+    }],
+    ['CONTROL (keepsEveryUserStatedIdentity): drops the user\'s option "Hire Two Developers"', (d) => { d.options = d.options.filter((o) => o.label !== 'Hire Two Developers'); }],
+    ['CONTROL (keepsEveryUserNumber): changes the user\'s figure 40', (d) => { d.factors[0] = withUserFigure(45, true); }],
+    // Held twice over: keepsEveryUserNumber, and with it disabled still refused (an acted-on factor left with no baseline).
+    ['CONTROL (existing guards): drops the user\'s figure 40', (d) => { d.factors[0] = withUserFigure(null, false); }],
+  ])('%s — while also dropping the placeholder links — is NOT adopted: kept first, refused, nothing written', async (_row, edit) => {
+    const retry = withinLimit();
+    edit(retry);
+    const r = firstVerdict(retry);
+    expect(r.nodes <= COMPACT_LIMITS.maxNodes && r.edges <= COMPACT_LIMITS.maxEdges, 'PRECONDITION: the retry itself fits the budget').toBe(true);
+    expectKeptFirstRefused(await construct(linkOversized(), retry));
   });
 });
