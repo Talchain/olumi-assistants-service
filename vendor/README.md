@@ -7,6 +7,14 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
+### `talchain-schemas-0.60.0.tgz` ← **BRANCH PIN — ⛔ A LOCAL PACK, NOT FOR STAGING**
+
+> Packed with `npm pack` from `olumi-schemas` draft PR #68 (`feat/constraint-verdict-estimate-only-ids`) for branch
+> development of ruling 4 (#70 5854446782). **Before this branch merges, #68 must publish and this file must be
+> REPLACED by the registry artefact** (only the published bytes may reach `staging`, per the #1857 rule below), with
+> its sha1/sha512/sha256 recorded here like 0.59.0's.
+
+
 ### `talchain-schemas-0.59.0.tgz` ← **THE CURRENT PIN**
 
 > **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**

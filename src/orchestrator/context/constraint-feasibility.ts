@@ -449,6 +449,15 @@ export interface ConstraintVerdict {
    */
   readonly leaderInfeasibility: WinnerConstraintFeasibility | null;
   /**
+   * ⭐ RULING 4 (DL #70 5854470460; AIQ meaning 5854466559) — the ids of the ratified limits this verdict left
+   * unverified ONLY by rule (d): scored, decision-grade, scored for the leader, and SET by the leading option (on the
+   * wire PLoT received) at a level that earns no authorship credit ({@link collectLeaderEstimatedTargetIds}). The
+   * score there restates that assumed level. `[]` (or absent, from a constructor that never evaluated rule (d)) on
+   * every other path. Persisted as `constraint_verdict.estimate_only_constraint_ids` (schemas 0.60.0) ONLY by a
+   * caller that supplied the rule-(d) set — see {@link projectClaimSafety}. Says nothing about WHOSE the level is.
+   */
+  readonly estimateOnlyConstraintIds?: readonly string[];
+  /**
    * ROADMAP 2.349 — the ratified constraints the PRODUCER DELIBERATELY REMOVED
    * before computing, disclosed by it in `_meta.filtered_constraints`.
    *
@@ -538,6 +547,7 @@ function verdict(
     leaderInfeasibility?: WinnerConstraintFeasibility | null;
     outOfScopeConstraints?: readonly RatifiedConstraint[];
     unmeasuredTargetConstraints?: readonly RatifiedConstraint[];
+    estimateOnlyConstraintIds?: readonly string[];
   } = {},
 ): ConstraintVerdict {
   return {
@@ -548,6 +558,7 @@ function verdict(
     leaderInfeasibility: parts.leaderInfeasibility ?? null,
     outOfScopeConstraints: parts.outOfScopeConstraints ?? [],
     unmeasuredTargetConstraints: parts.unmeasuredTargetConstraints ?? [],
+    estimateOnlyConstraintIds: parts.estimateOnlyConstraintIds ?? [],
   };
 }
 
@@ -1242,11 +1253,21 @@ export function deriveConstraintVerdict(
       leaderEstimatedTargetIds?.has(c.constraint_id) === true,
   );
   if (unverified.length > 0) {
+    // RULING 4: the limits withheld ONLY by (d) — every one of (a)–(c) is false for them, so the one thing wrong with
+    // the check is WHOSE level the leader set. Graph order, like `unverified`.
+    const estimateOnly = unverified
+      .filter((c) =>
+        leaderEstimatedTargetIds?.has(c.constraint_id) === true
+        && evaluated.has(c.constraint_id)
+        && !notDecisionGrade.has(c.constraint_id)
+        && (leaderScored === null || leaderScored.has(c.constraint_id)))
+      .map((c) => c.constraint_id);
     return verdict('unevaluated', {
       constraints: unverified,
       leaderInfeasibility: leader,
       outOfScopeConstraints: outOfScope,
       unmeasuredTargetConstraints: unmeasured,
+      estimateOnlyConstraintIds: estimateOnly,
     });
   }
 
@@ -1434,6 +1455,11 @@ export interface PersistedClaimSafety {
   readonly may_name_leading_option: boolean;
   /** Verbatim {@link ConstraintVerdict.state}, for telemetry and triage. */
   readonly constraint_verdict_state: ConstraintVerdictState;
+  /**
+   * {@link ConstraintVerdict.estimateOnlyConstraintIds} (schemas 0.60.0). PRESENT only when the caller supplied the
+   * rule-(d) set to {@link deriveConstraintVerdict} (then `[]` means "recorded, none"); ABSENT means "not recorded".
+   */
+  readonly estimate_only_constraint_ids?: readonly string[];
 }
 
 /**
@@ -1469,10 +1495,15 @@ void _persistedClaimSafetyMatchesContract;
  *
  * Pure.
  */
-export function projectClaimSafety(verdict: ConstraintVerdict): PersistedClaimSafety {
+export function projectClaimSafety(
+  verdict: ConstraintVerdict,
+  /** `estimateOnlyRecorded: true` ONLY from a caller that passed the rule-(d) set to {@link deriveConstraintVerdict}. */
+  opts: { readonly estimateOnlyRecorded?: boolean } = {},
+): PersistedClaimSafety {
   return {
     may_name_leading_option: verdict.mayNameLeadingOption,
     constraint_verdict_state: verdict.state,
+    ...(opts.estimateOnlyRecorded === true ? { estimate_only_constraint_ids: [...(verdict.estimateOnlyConstraintIds ?? [])] } : {}),
   };
 }
 

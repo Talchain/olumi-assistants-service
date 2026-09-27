@@ -2433,7 +2433,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // at compose, where the constraint code keeps precedence: AI Quality option (i), #70 5842615260).
         constraint_verdict: applyNonlinearIdentityToLeaderPermission(
           applyIntakeToLeaderPermission(
-            projectClaimSafety(constraintVerdict),
+            // RULING 4: this caller always supplies the rule-(d) set (`leaderEstimatedTargetIds` above), so it records it.
+            projectClaimSafety(constraintVerdict, { estimateOnlyRecorded: true }),
             intakeReconciliation,
           ),
           nonlinearIdentityWithhold,
