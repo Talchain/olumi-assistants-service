@@ -129,6 +129,8 @@ export type DerivedLevels =
   | { readonly kind: 'derived'; readonly factor_ids: readonly string[]; readonly working: string;
       readonly derived_from: { readonly op: 'split'; readonly ratio: readonly number[]; readonly base: { readonly node_id: string; readonly value: number } } }
   | { readonly kind: 'ask_which_total'; readonly factor_ids: readonly string[]; readonly candidates: readonly StatedTotal[] }
+  /** The user split a total, but the parts' factors are measured in another period of the same currency (AIQ 5860429146). */
+  | { readonly kind: 'period_mismatch'; readonly factor_ids: readonly string[]; readonly base: StatedTotal }
   | { readonly kind: 'none' };
 
 /**
@@ -156,7 +158,23 @@ export function derivedSplitOf(message: string, totals: readonly StatedTotal[], 
       factor_ids: [...new Set(inScope.flatMap((s) => s.parts.map((p) => p.factor_id)))] };
   }
   const only = inScope[0];
-  if (only === undefined) return none;
+  if (only === undefined) {
+    /**
+     * ⛔ HALF OF A SIX-MONTH TOTAL IS NOT A MONTHLY FIGURE (AI Quality 5860429146). The split is arithmetic on the base,
+     * so each part is in the BASE's unit; a factor in another period of the same currency ("GBP per month" under a
+     * total in "GBP over 6 months") is refused with its own reason, never relabelled. Converting by the period is a
+     * separate, explicit step.
+     */
+    for (const t of totals) {
+      const tk = unitKey(t.unit);
+      if (!tk.startsWith('gbp')) continue;
+      const others = proposed.filter((p) => p.factor_id !== t.node_id && unitKey(p.unit).startsWith('gbp') && unitKey(p.unit) !== tk);
+      if (others.length >= 2 && readUserSplit(message, [t], others.length).kind === 'user_split') {
+        return { kind: 'period_mismatch', factor_ids: others.map((p) => p.factor_id), base: t };
+      }
+    }
+    return none;
+  }
   const { base, parts, reading } = only;
   if (!reading.ratio.every((r) => Math.abs(r - reading.ratio[0]!) < 1e-12)) return none;
   const each = reading.parts[0]!;

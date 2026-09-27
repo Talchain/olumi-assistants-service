@@ -4233,6 +4233,13 @@ export function createAgentCapabilities(
            */
           const wrote = figureTheUserWroteFor(lvl.value, lvl.unit ?? factorUnit, ctx.user_text, scopeIn(g, f.label, plan.label));
           const derived = !wrote && split.kind === 'derived' && split.factor_ids.includes(f.id) ? split : undefined;
+          // A part of the user's split in another period is refused with its own reason, even as Olumi's estimate.
+          if (!wrote && split.kind === 'period_mismatch' && split.factor_ids.includes(f.id)) {
+            levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
+              reason: `The user's split is of ${split.base.value} ${split.base.unit ?? ''} ("${split.base.label}"), but ${f.label} is measured in ${factorUnit ?? 'another unit'}: `
+                + 'a share of that total is not its level, so it is left unset. Ask the user for the figure in its own period; never convert it.' });
+            return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
+          }
           /**
            * INTERIM (AI Quality 5859798011): until Canonical's `derived_from` slot lands (#70 5859537590), the add-option
            * spec drops the key, so the user's split would persist as theirs with no record of how it was derived. It is

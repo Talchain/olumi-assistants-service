@@ -159,6 +159,25 @@ describe('the split binds in the FACTOR\'s unit, never the Agent\'s spelling of 
     expect((await run(undefined))('incremental_feature_spend')?.raw_value).toBe(15000);
   });
 
+  it('RED (AIQ 5860429146): factors measured PER MONTH under a six-month total → unset with the period reason, even as Olumi\'s estimate', async () => {
+    const perMonth = JSON.parse(JSON.stringify(g2)) as { nodes: { id: string; observed_state?: { unit?: string } }[] };
+    for (const n of perMonth.nodes) if (n.id === 'incremental_feature_spend' || n.id === 'additional_advertising_spend') n.observed_state!.unit = 'GBP per month';
+    for (const estimate of [false, true]) {
+      const { caps, sent } = setup(perMonth);
+      const lvl = { value: 15000, unit: 'GBP', ...(estimate ? { estimate: true, basis: 'half of the £30,000' } : {}) };
+      const r = await caps.proposeNewOption(
+        { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r', user_turn_text: C08, user_text: C08 },
+        { label: 'Split £30k equally between features and advertising', rationale: 'r', acts_on: [
+          { factor_label: 'Incremental feature spend', direction: 'positive', level: lvl },
+          { factor_label: 'Additional advertising spend', direction: 'positive', level: lvl },
+        ] } as never,
+      ) as { levels_not_set?: { factor: string; reason: string }[] };
+      const ivs = ((sent[0]?.body as { chip?: { parameters?: { interventions?: Iv[] } } } | undefined)?.chip?.parameters?.interventions ?? []);
+      expect(ivs.find((x) => x.factor_id === 'incremental_feature_spend')?.value, `estimate=${estimate}`).toBeNull();
+      expect(r.levels_not_set?.find((l) => l.factor === 'Incremental feature spend')?.reason, `estimate=${estimate}`).toMatch(/measured in GBP per month.*never convert it/);
+    }
+  });
+
   it('CONTRAST: a level in another period ("GBP per month") is never a part of a six-month total', async () => {
     const iv = await run('GBP per month');
     expect(iv('incremental_feature_spend')?.value).toBeNull();
