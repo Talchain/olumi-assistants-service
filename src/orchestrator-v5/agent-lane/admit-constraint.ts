@@ -253,9 +253,12 @@ export function canonicaliseLimitUnit(
     const nodeUnit = target.unit;
     // A node that is not a plain percent (a count, a "% change") is not the limit's scale: PLoT refuses it. A node's
     // observed state is its LEVEL, so a node spelled in percentage points is a percent level (served run 2's churn).
-    // A node "% of <population>" is a percent level too, but an "of" limit only reads one of the SAME population.
-    const nodeIsPercentLevel = nodeUnit === undefined || isPercentWithPeriod(nodeUnit) || isPercentagePointsWithPeriod(nodeUnit) ||
-      (isPercentOfPopulation(nodeUnit) && (!ofLevel || norm(nodeUnit) === norm(unit)));
+    // A node "% of <population>" is a percent level too. An "of" LIMIT reads only a node in its own spelling: "% of X" can
+    // name a reference ("90% of last year's churn"), not a population, and only the node's own unit tells them apart
+    // (MG #2061 B1: on a plain-percent node that limit became "churn ≤ 90%", trivially met).
+    const nodeIsPercentLevel = ofLevel
+      ? nodeUnit !== undefined && norm(nodeUnit) === norm(unit)
+      : nodeUnit === undefined || isPercentWithPeriod(nodeUnit) || isPercentagePointsWithPeriod(nodeUnit) || isPercentOfPopulation(nodeUnit);
     if (!nodeIsPercentLevel) return verbatim;
     // The same spelling on a capped node: PLoT already reconciles it against the cap.
     if (target.cap !== undefined && nodeUnit !== undefined && norm(nodeUnit) === norm(unit)) return verbatim;
@@ -297,7 +300,7 @@ export function percentLevelFrame(value: number, unit: string | undefined, value
   const pointsLevel = valueFrame === 'level' && unit !== undefined && isPercentagePointsWithPeriod(unit);
   const frame = unitPinnedScaleFrame(unit, value) ?? (pointsLevel ? unitPinnedScaleFrame('%', value) : undefined);
   if (frame === undefined) return undefined;
-  return canonicaliseLimitUnit(value, unit, { scale_frame: frame }, valueFrame).unit === '%' ? frame : undefined;
+  return canonicaliseLimitUnit(value, unit, { scale_frame: frame, unit }, valueFrame).unit === '%' ? frame : undefined;
 }
 
 export interface ConstraintAdmissionResult {

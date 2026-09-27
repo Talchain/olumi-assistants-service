@@ -62,6 +62,13 @@ describe('the unit-spelling class: a LEVEL in "% of <population>" is a percent',
     expect(canonicaliseLimitUnit(10, 'percentage points of revenue', SCALE, 'level').unit).toBe('percentage points of revenue');
   });
 
+  // MG #2061 B1 (5851093410): "% of X" can name a reference, not a population; only the node's own spelling proves it.
+  it('B1: an "of" limit on a plain-percent or unitless node stays verbatim ("90% of last year\'s churn" is not churn ≤ 90%)', () => {
+    const limit = "% of last year's churn";
+    expect(canonicaliseLimitUnit(90, limit, { unit: '% per month', value: 0.07, raw_value: 7, scale_frame: 100 }, 'level').unit).toBe(limit);
+    expect(canonicaliseLimitUnit(90, limit, { value: 0.07 }, 'level').unit).toBe(limit);
+  });
+
   it('provability gate holds: a node not framed on 100 keeps the limit verbatim', () => {
     expect(admit(UNIT, 'level', { ...SCALE, scale_frame: 20 }).unit).toBe(UNIT);
   });
