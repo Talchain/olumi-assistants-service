@@ -186,8 +186,20 @@ const baseGraph = (key: string): SGraph => JSON.parse(BASE!.graphs[key]!) as SGr
  */
 /** PR1b's known delta subtracted (magnitude-delta.ts): the served captures pre-date bounded-target sizing. */
 const unsized = (g: SGraph): SGraph => ({ ...g, edges: subtractMagnitudeDelta(g.edges).edges });
+/**
+ * AIQ #70 5852160429: a KNOWN baseline the builder inferred is stamped Olumi's (`source: 'cee_inference'`, written
+ * last, as `framedObservedState` writes it); "100 % of today" keeps no author. The captures pre-date it, so it is
+ * their one known node delta.
+ */
+const olumisKnownLevels = (nodes: SNode[]): SNode[] => nodes.map((n) => {
+  const os = n.observed_state;
+  if (n.kind !== 'factor' || n.provenance !== 'ai_inferred' || os === undefined || os.source !== undefined) return n;
+  if (os.unit === '% of today' && (os.raw_value ?? os.value) === 100) return n;
+  return { ...n, observed_state: { ...os, source: 'cee_inference' } };
+});
 const framedBase = (g: SGraph): SGraph => ({
   ...g,
+  nodes: olumisKnownLevels(g.nodes),
   ...(g.goal_constraints === undefined ? {} : {
     goal_constraints: g.goal_constraints.map((c) => Object.fromEntries(Object.entries(c).flatMap(([k, v]) =>
       (k === 'provenance' ? [[k, v], ['value_frame', 'level']] : [[k, v]]))) as SConstraint),
@@ -325,7 +337,7 @@ describe('controls — what the rule must never touch', () => {
     expect(run.brief.may_run).toBe(true);
     const { graph, out } = await build(candidateFromServed(run.brief.draft_graph, { olumi: 'ai_proposed', horizon: null }));
     expect(optionIds(graph)).toContain(olumiId);
-    expect(graph.nodes).toEqual(run.brief.draft_graph.nodes);
+    expect(graph.nodes).toEqual(olumisKnownLevels(run.brief.draft_graph.nodes));
     expect(unsized(graph).edges).toEqual(run.brief.draft_graph.edges);
     expect(JSON.stringify(unsized(graph))).toBe(JSON.stringify(framedBase(baseGraph(key))));
     expect(out).not.toHaveProperty('options_withheld');
