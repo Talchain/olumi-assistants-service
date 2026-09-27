@@ -36,9 +36,12 @@
  *   - No new DB reads — `prior_facts` is already loaded by `buildTurnContext`
  *     for the coaching cache.
  *   - Option labels: when a fact omits enrichment we fall through to a
- *     minimal extraction from `result.win_probabilities`; option IDs stand
- *     in as labels there. The routing prompt resolves them via the
- *     ContextPack graph when the user asks about a specific option.
+ *     minimal extraction from `result.win_probabilities`. That map is keyed
+ *     by option LABEL (an id only for an unlabelled option), so on this path
+ *     its keys stand in as option ids; the declared leader is an ID and is
+ *     resolved by id (`resolveLeadingWinProbability`, A5). The routing prompt
+ *     resolves options via the ContextPack graph when the user asks about a
+ *     specific option.
  */
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
@@ -61,6 +64,10 @@ import {
 } from '../../orchestrator/context/influence-direction.js';
 import { readDriverInfluenceScore } from '../../orchestrator/context/driver-influence.js';
 import { isRecommendableTypedOption } from '../tools/handlers/recommendable-option.js';
+import {
+  isUsableWinProbability,
+  readOptionResultSources,
+} from '../../orchestrator/context/option-result-source.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 import {
   deriveConfidenceTierFromEnrichment,
@@ -507,6 +514,44 @@ export function reconcileAnalysisSummaryWithEnrichment(
 }
 
 /**
+ * A5 · result refs by label (DL #70 5855437928). The leading option's win probability, by ID.
+ *
+ * `result.win_probabilities` is a DISPLAY map keyed by option LABEL (option_id only when an option has
+ * no label — see `extractWinProbabilities` in run-analysis.ts), while `result.leading_option_id` is an
+ * option ID. Looking the id up in that map misses for every labelled option, and the minimal branch
+ * then reported the leader at an invented 0. Resolve, in order:
+ *   1. the map under the id itself (an id-keyed map, or an unlabelled option) — the exact value the old
+ *      lookup returned whenever it hit, so a found datum is unchanged;
+ *   2. the SAME result's id-bearing option records (`enrichment.option_comparison[]` first, then the
+ *      other sources the one reader `readOptionResultSources` walks), matched by id, usable probability
+ *      only — the leader-matched rule the enricher's `selectWinner` applies;
+ *   3. otherwise ABSENT: `null`, never 0. There is deliberately no join through the CURRENT graph's
+ *      labels: a label is not an identity (labels collide, and are renamed after the run).
+ *
+ * Reach: every fact the handler writes carries `enrichment`, so `buildAnalysisFromPriorFacts` answers
+ * from its enriched branch; step 2 matters only if `compactAnalysis` faults on such an envelope.
+ */
+export function resolveLeadingWinProbability(
+  winProbabilities: Readonly<Record<string, number>>,
+  leadingOptionId: string,
+  enrichment: Record<string, unknown> | null,
+): number | null {
+  const direct = winProbabilities[leadingOptionId];
+  if (typeof direct === 'number') return direct;
+  if (enrichment !== null) {
+    for (const source of readOptionResultSources(enrichment)) {
+      const record = source.find(
+        (r) => r.option_id === leadingOptionId || r.id === leadingOptionId,
+      );
+      if (record !== undefined && isUsableWinProbability(record.win_probability)) {
+        return record.win_probability;
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Scan prior facts (newest-first, same order as `readRecent`) for the most
  * recent non-noop `run_analysis` fact and project it into an
  * `AnalysisResponseSummary`. Returns null when no usable prior analysis
@@ -650,14 +695,16 @@ export function buildAnalysisFromPriorFacts(
   const leadingFromFact = result.leading_option_id;
   let winner: AnalysisResponseSummary['winner'];
   if (leadingFromFact) {
-    const leadingProb =
-      typeof winProbabilities[leadingFromFact] === 'number'
-        ? winProbabilities[leadingFromFact]
-        : 0;
     winner = {
       option_id: leadingFromFact,
       option_label: labelFor(leadingFromFact),
-      win_probability: leadingProb,
+      // A5: the map is LABEL-keyed and the leader is an ID — resolve by id, and say ABSENT (null)
+      // rather than invent a 0 when the same result carries no probability for it.
+      win_probability: resolveLeadingWinProbability(
+        winProbabilities,
+        leadingFromFact,
+        enrichmentRecord,
+      ),
     };
   } else if (sortedEntries.length > 0) {
     const [optionId, prob] = sortedEntries[0]!;

@@ -2986,6 +2986,15 @@ export function buildDedupKeptLabelResolver(
  * Returns `null` when the resulting map would be empty — the handler omits
  * `win_probabilities` entirely in that case rather than emitting an empty
  * object (matches the optional-schema shape cleanly).
+ *
+ * ⚠ A LABEL-KEYED DISPLAY MAP, NOT AN ID INDEX (A5, DL #70 5855437928; Canonical's ruling: the key stays).
+ * It rides the persisted fact and the `analysis_result` block, where the UI renders each KEY as the pill
+ * text and `untested-option-card` / `fragile-link-challenge` read keys as labels. Labels collide (two
+ * options with one label keep only the last) and are renamed after the run, and `leading_option_id`
+ * beside it is an ID — so a reader seeking an option BY ID must not index this map with it. Go to the
+ * id-bearing records on the same result instead: `enrichment.option_comparison[]` (option_id,
+ * option_label, win_probability) or `enrichment.decision_brief.options[]`, read through
+ * `readOptionResultSources` — as `resolveLeadingWinProbability` (context/analysis-fallback.ts) does.
  */
 function extractWinProbabilities(
   records: ReadonlyArray<Record<string, unknown>>,
