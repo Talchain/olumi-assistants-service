@@ -14,7 +14,7 @@ const served = JSON.parse(readFileSync(new URL('./fixtures/served-agent-lane-lim
   brief: string; graph: { goal_constraints: Record<string, unknown>[] } & Record<string, unknown>;
 };
 const item = (m: ReturnType<typeof deriveNotModelledManifest>, literal: string) =>
-  (m as { quantities?: { items: { literal: string; verdict: string; matched_node_id: string | null }[] } }).quantities?.items.find((i) => i.literal === literal);
+  (m as unknown as { quantities?: { items: { literal: string; verdict: string; matched_node_id: string | null }[] } }).quantities?.items.find((i) => i.literal === literal);
 
 describe('not_modelled: a live limit row carries its figure', () => {
   it('RED (served paul-1): the brief\'s "10%" churn limit is in the model, bound to the limit\'s own node', () => {
