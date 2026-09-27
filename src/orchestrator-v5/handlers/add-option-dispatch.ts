@@ -331,6 +331,8 @@ export function dispatchAddOptionTransaction(
     // (`MAX_OPTIONS_PER_TRANSACTION`), so the referee judges it under the typed
     // ceiling, and the hold records that cap for the confirm.
     envelopeCap: TYPED_TRANSACTION_ENVELOPE_CAP,
+    // The new switches this batch adds, so the chip says each is turned ON, never "at 1" (C2; AIC 5859629053).
+    ...(built.switchFactorIds !== undefined ? { switchFactorIds: built.switchFactorIds } : {}),
     // No userMessage: the F-3 protection-scope demotion keys on free-text
     // ("do not touch X") which a typed add_option turn does not carry, and a
     // structural add targets only the NEW option, never a protected entity.

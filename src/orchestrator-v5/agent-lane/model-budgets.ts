@@ -55,7 +55,8 @@ export const BANKED_BUDGETS: readonly CallBudget[] = [
   {
     model: 'gpt-5.6-terra',
     role: 'whole',
-    max_output_tokens: 6000,
+    // Was 6000: raised on a MEASURED truncation (see RAISED 27 Sep below), not on suspicion.
+    max_output_tokens: 12000,
     reasoning_effort: 'medium',
     evidence:
       'EFFORT: MEDIUM per OpenAI Technical Architecture ruling (#63 5798194848), measured 23 Sep ' +
@@ -75,7 +76,18 @@ export const BANKED_BUDGETS: readonly CallBudget[] = [
       'The measured output EXCEEDS the 2600 widening ceiling, so this role cannot borrow that ' +
       'budget; 6000 leaves ~1.8x margin over the measurement. ' +
       'NOTE: a one-pass vs two-pass comparison has NOT been re-derived this session \u2014 this ' +
-      'entry justifies the budget only, not a choice between the two chains.',
+      'entry justifies the budget only, not a choice between the two chains. ' +
+      'RAISED 27 Sep, 6000 -> 12000, on a MEASURED truncation: on served CEE 770a477, 2 of 14 ' +
+      'first-brief turns failed ("technical error") because this call stopped at output_tokens ' +
+      '6000 EXACTLY (reasoning 4406 and 4896): reasoning spent the budget and the strict-schema ' +
+      'JSON was cut off (DL acceptance runs pj-20260927T162124Z C01, pj-20260927T162916Z A01). ' +
+      'Across 119 banked construction calls: median out 2926 incl. 2061 reasoning, largest ' +
+      'successful out 5573, largest visible answer 2040, reasoning 0 to at least 4896. So the ' +
+      'served need is >= 4896 + 2040 = 6936, and 12000 is ~1.7x that (the ~1.8x convention ' +
+      'above). Not higher: at the measured ~76-87 output tokens/s, ~8.7k tokens is all that can ' +
+      'finish inside the 125 s browser proxy less 10 s response headroom, so a larger ceiling ' +
+      'buys spend, not a model the user receives. The ceiling costs a call that finishes below ' +
+      'it nothing; only a call that would otherwise have been cut off runs longer.',
   },
   {
     model: 'gpt-5.6-terra',

@@ -24,6 +24,7 @@ import { describe, expect, it } from 'vitest';
 import { buildModelFromBrief, constructionOperationId, type CallStructuredModel } from '../runtime/build-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
+import { turnReadCache } from '../turn-read-cache.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440000';
 const BRIEF = 'Decide whether to raise the Pro price.';
@@ -212,5 +213,56 @@ describe('a construction registers create-only — it asserts the model is still
     const out = await buildModelFromBrief(SCENARIO, BRIEF, r.d, structured);
     expect(out.ok, JSON.stringify(out)).toBe(true);
     expect(r.writes).toEqual(['CREATE']);
+  });
+});
+
+/**
+ * ⛔ THROUGH THE TURN'S READ CACHE — THE DISPATCH THE ROUTE ACTUALLY HANDS THE BUILD (my C1c regression, #2114
+ * 5858665256). The rows above call `buildModelFromBrief` with a bare dispatch, so they never met the cache: under C1c
+ * (and the epoch rule) the re-check was answered from the read taken BEFORE the ~57 s construction, and a model another
+ * tab created meanwhile was invisible. Here the caller's own read is taken first, THROUGH the cache, and the other writer
+ * lands while the model is thinking — outside this turn, so the epoch does not move.
+ */
+describe('the re-check sees other writers through the turn\u2019s read cache', () => {
+  const GRAPH = `/assist/v1/scenarios/${SCENARIO}/graph`;
+  function cached() {
+    const bodies: unknown[] = [];
+    let populated = false;
+    let registers = 0;
+    const inner: InternalDispatch = async (path, body) => {
+      if (path.endsWith('/graph/register')) { registers += 1; return { status: 200, json: { model_version: { version_number: 1, version_id: 'v1', mutation_id: 'm1' } } }; }
+      if (path.endsWith('/versions')) return { status: 200, json: { versions: [] } };
+      bodies.push(body);
+      return { status: 200, json: populated
+        ? { graph: { nodes: [{ id: 'mine', kind: 'factor', label: 'A factor I added myself' }], edges: [] }, graph_hash: 'moved' }
+        : { graph: { nodes: [], edges: [] }, graph_hash: null } };
+    };
+    const cache = turnReadCache(inner, GRAPH);
+    return { cache, bodies, registers: () => registers, writeElsewhere: () => { populated = true; } };
+  }
+
+  it('RED: a model created by another writer DURING construction → refused before any register, through the cache', async () => {
+    const c = cached();
+    await c.cache.dispatch(GRAPH, {}); // the turn's own read, before the build (the given-state packet / the caller's guard)
+    const racing: CallStructuredModel = async () => { c.writeElsewhere(); return { text: JSON.stringify(CANDIDATE) }; };
+    const r = await buildModelFromBrief(SCENARIO, BRIEF, c.cache.dispatch, racing);
+    expect(r.refusal, JSON.stringify(r)).toBe('model_already_exists');
+    expect(c.registers(), 'the construction wrote over another writer\u2019s model').toBe(0);
+  });
+
+  it('the fresh marker never reaches the route (its body parser owns what it accepts)', async () => {
+    const c = cached();
+    await c.cache.dispatch(GRAPH, {});
+    await buildModelFromBrief(SCENARIO, BRIEF, c.cache.dispatch, structured);
+    expect(c.bodies.length, 'control: the re-check really went to the route').toBeGreaterThanOrEqual(2);
+    for (const b of c.bodies) expect(Object.keys((b ?? {}) as object)).not.toContain('fresh');
+  });
+
+  it('POSITIVE CONTROL: undisturbed, through the cache, the build still registers once', async () => {
+    const c = cached();
+    await c.cache.dispatch(GRAPH, {});
+    const r = await buildModelFromBrief(SCENARIO, BRIEF, c.cache.dispatch, structured);
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(c.registers()).toBe(1);
   });
 });

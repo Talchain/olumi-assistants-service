@@ -22,6 +22,14 @@ export interface TurnReadCache {
 }
 
 type Read = Awaited<ReturnType<InternalDispatch>>;
+/** The body marker for a graph read that must not be served from the turn's cache (see `dispatch`). */
+export const FRESH_READ = { fresh: true } as const;
+const isFreshRead = (body: unknown): boolean =>
+  body !== null && typeof body === 'object' && (body as { fresh?: unknown }).fresh === true;
+const withoutFresh = (body: unknown): Record<string, unknown> => {
+  const { fresh: _fresh, ...rest } = body as Record<string, unknown>;
+  return rest;
+};
 const copy = (r: Read): Read => ({ ...r, json: structuredClone(r.json) });
 
 export function turnReadCache(inner: InternalDispatch, graphReadPath: string): TurnReadCache {
@@ -38,9 +46,14 @@ export function turnReadCache(inner: InternalDispatch, graphReadPath: string): T
 
   const dispatch: InternalDispatch = async (path, body) => {
     if (path !== graphReadPath) return around(() => inner(path, body));
-    if (kept !== undefined && kept.epoch === epoch) return copy(kept.read);
+    // ⛔ A read that must SEE OTHER WRITERS asks for it: `{ fresh: true }` bypasses the kept read (and refreshes it).
+    // The epoch only moves for THIS turn's writes, so a model another tab created during a long construction is
+    // invisible to a reused read — the construction's own concurrency guard (`build-model.ts`, `stillEmpty`) went
+    // blind that way under C1c and would stay blind under the epoch rule. The marker never reaches the route.
+    const fresh = isFreshRead(body);
+    if (!fresh && kept !== undefined && kept.epoch === epoch) return copy(kept.read);
     const startedAt = epoch;
-    const read = await inner(path, body);
+    const read = await inner(path, fresh ? withoutFresh(body) : body);
     kept = read.status === 200 ? { read: copy(read), epoch: startedAt } : undefined;
     return read;
   };
