@@ -93,12 +93,17 @@ const ACTS_ON = {
       type: 'string', enum: ['positive', 'negative'],
       description: 'Whether this option pushes the factor up or down. State it; never guess it for the user.',
     },
-    level: obj({
-      value: { type: 'number', description: 'The figure the user stated FOR THIS FACTOR, in the factor\u2019s own units (e.g. 54 for \u00a354 on a price). A figure given for something else (a price, when this factor is a churn rate) is never this factor\u2019s level: leave level out. With no figure from the user, leave level out \u2014 never 0 or any placeholder to mean \u201cnot set\u201d \u2014 unless it is your OWN suggested figure for an option you suggested: then set estimate.' },
-      unit: { type: 'string', description: 'The unit the user stated, if any.' },
-      estimate: { type: 'boolean', description: 'true ONLY when this figure is your own suggestion, not the user\u2019s (an option you proposed, at the figure you proposed). It is recorded and shown as Olumi\u2019s estimate, never as the user\u2019s. Needs basis.' },
-      basis: { type: 'string', description: 'With estimate: why this figure, in plain words the user can check.' },
-    }, ['value']),
+    level: {
+      ...obj({
+        value: { type: 'number', description: 'The figure the user stated FOR THIS FACTOR, in the factor\u2019s own units (e.g. 54 for \u00a354 on a price). A figure given for something else (a price, when this factor is a churn rate) is never this factor\u2019s level: leave level out. With no figure from the user, leave level out \u2014 never 0 or any placeholder to mean \u201cnot set\u201d \u2014 unless it is your OWN suggested figure for an option you suggested: then set estimate.' },
+        unit: { type: 'string', description: 'The unit the user stated, if any.' },
+        estimate: { type: 'boolean', description: 'true ONLY when this figure is your own suggestion, not the user\u2019s (an option you proposed, at the figure you proposed). It is recorded and shown as Olumi\u2019s estimate, never as the user\u2019s. Needs basis.' },
+        basis: { type: 'string', description: 'With estimate: why this figure, in plain words the user can check.' },
+      }, ['value']),
+      // ⛔ Where the model writes a level (OpenAI Runtime #70 5859406197): the switch rule sat only on new_factors.kind.
+      description: 'The level this option sets the factor to. Never give a level for a factor you add in new_factors with '
+        + 'kind \'switch\': a switch has no level of its own \u2014 the option turns it on.',
+    },
   }, ['factor_label', 'direction']),
 };
 

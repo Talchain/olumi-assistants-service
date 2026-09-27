@@ -108,7 +108,7 @@ vi.mock('../../../adapters/llm/prompt-loader.js', () => ({ getSystemPrompt: asyn
 
 type Chip = { id: string; label: string; message: string };
 type Body = { assistant_text: string; suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string }; _provider_calls?: { provider: string; outcome?: string }[];
-  _agent: { tool_calls: { name: string; ok: boolean; mutated?: boolean; refusal?: string; proposal_id?: string }[] } };
+  _agent: { tool_calls: { name: string; ok: boolean; mutated?: boolean; refusal?: string; proposal_id?: string; conflict_fields?: string[] }[] } };
 
 /**
  * A decision, a goal, one factor with a declared scale, two linked options: runnable before anything is added.
@@ -1016,5 +1016,92 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(g.nodes.find((x) => x.id === SWITCH_FAC)!.observed_state).toEqual({ value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' });
     expect(g.nodes.find((x) => x.kind === 'option' && x.label === GRANDFATHER)!.interventions[SWITCH_FAC].value).toBe(1);
     expect(routerCalls).toEqual([]);
+  }, 120_000);
+
+  /**
+   * ⛔ [A1] SERVED (OpenAI Runtime #70 5859406197; X3 on CEE cd489f1): journey A's add-two-options was NOT DONE in 3/3
+   * runs — `propose_new_option` refused `switch_level_not_on`, the Agent retried with a level, refused again. Suspected
+   * (UNVERIFIED: no tool arguments are kept) `{ value: 1, estimate: true }` after "just add them with your assumptions".
+   * A numeric 1 with no unit is ON: one hold, one click, each option switches its own switch on, and each switch's
+   * today-0 is Olumi's (`cee_inference`) — through the real route-v2, as served.
+   */
+  const ANNUAL_OPT = '£54 for new Pro customers; offer an annual plan';
+  const ANNUAL_FAC = 'fac_annual_plan_offered';
+  const proposeTwoSwitchOptions = (level: unknown, graded = false) => {
+    script = [
+      () => fnCall('propose_new_option', {
+        options: [
+          { label: GRANDFATHER, acts_on: [
+            { factor_label: 'Pro plan price', direction: 'positive', level: { value: 59, unit: 'GBP per month' } },
+            { factor_label: 'Existing customers grandfathered', direction: 'positive', level }] },
+          { label: ANNUAL_OPT, acts_on: [
+            { factor_label: 'Pro plan price', direction: 'positive', level: { value: 54, unit: 'GBP per month' } },
+            { factor_label: 'Annual plan offered', direction: 'positive', level }] },
+        ],
+        new_factors: [
+          { label: 'Existing customers grandfathered', ...(graded ? {} : { kind: 'switch' }),
+            affects: [{ label: 'Monthly churn', direction: 'negative' }, { label: 'MRR', direction: 'negative' }] },
+          { label: 'Annual plan offered', ...(graded ? {} : { kind: 'switch' }),
+            affects: [{ label: 'Monthly churn', direction: 'negative' }] },
+        ],
+        rationale: 'The user asked for both, with Olumi\u2019s assumptions.',
+      }),
+      () => say('I would add both. Shall I?'),
+    ];
+    return turn({ message: `Add two options: ${GRANDFATHER}, and ${ANNUAL_OPT}. Just add them with your assumptions.` });
+  };
+
+  it('[A1] RED (served shape): two options, each a new switch at { value: 1, estimate: true } → ONE proposal, 0 refusals → one click → both on, both today-0 as cee_inference', async () => {
+    graphOf.set(SCENARIO, structuredClone(PAUL));
+    const t1 = await proposeTwoSwitchOptions({ value: 1, estimate: true, basis: 'the option turns it on' });
+    const calls = t1._agent.tool_calls;
+    expect(calls.filter((c) => c.name === 'propose_new_option'), JSON.stringify(calls)).toEqual([expect.objectContaining({ ok: true })]);
+    expect(calls.filter((c) => c.refusal !== undefined), JSON.stringify(calls)).toEqual([]);
+    const approve = approveChipOf(t1);
+    expect(approve?.id, JSON.stringify(calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    expect((((await heldOnLatestRow())[0]!.action.inline_patch) as Record<string, unknown>)['switch_factors']).toEqual([SWITCH_FAC, ANNUAL_FAC]);
+    const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const g = graphNow() as unknown as { nodes: Record<string, any>[] };
+    for (const id of [SWITCH_FAC, ANNUAL_FAC]) {
+      expect(g.nodes.find((x) => x.id === id)?.observed_state, id).toEqual({ value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' });
+    }
+    expect(g.nodes.find((x) => x.kind === 'option' && x.label === GRANDFATHER)!.interventions[SWITCH_FAC].value).toBe(1);
+    expect(g.nodes.find((x) => x.kind === 'option' && x.label === ANNUAL_OPT)!.interventions[ANNUAL_FAC].value).toBe(1);
+    expect(routerCalls).toEqual([]);
+  }, 120_000);
+
+  /**
+   * [A1] WHAT THE MODEL SENT reaches `_agent.tool_calls`: a refused call carries its conflict fields, so the next served
+   * run shows which part of the level fired (unit, estimate, a non-number, a number other than 1) — names only, no payload.
+   */
+  it.each([
+    ["{ 1, '%' }", { value: 1, unit: '%' }, ['unit']],
+    ["'0.5'", { value: '0.5' }, ['non_number']],
+    ['{ 2, estimate: true }', { value: 2, estimate: true, basis: 'a guess' }, ['not_one', 'estimate']],
+  ])('[A1] RED: a refused switch level %s → nothing sent to route-v2, and its _agent.tool_calls entry carries conflict_fields', async (_name, level, fields) => {
+    graphOf.set(SCENARIO, structuredClone(PAUL));
+    const before = keyed(graphNow());
+    const t1 = await proposeTwoSwitchOptions(level);
+    expect(t1._agent.tool_calls.find((c) => c.name === 'propose_new_option'), JSON.stringify(t1._agent.tool_calls))
+      .toEqual(expect.objectContaining({ ok: false, refusal: 'switch_level_not_on', conflict_fields: fields }));
+    expect(inner).toEqual([]);
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(keyed(graphNow())).toBe(before);
+  }, 120_000);
+
+  it('[A1] CONTRAST: the same two options with GRADED new factors → committed with no level and no today value — never 0', async () => {
+    graphOf.set(SCENARIO, structuredClone(PAUL));
+    const t1 = await proposeTwoSwitchOptions({ value: 1, estimate: true, basis: 'a guess' }, true);
+    const approve = approveChipOf(t1);
+    expect(approve?.id, JSON.stringify(t1._agent.tool_calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    const g = graphNow() as unknown as { nodes: Record<string, any>[] };
+    for (const id of [SWITCH_FAC, ANNUAL_FAC]) {
+      expect(g.nodes.find((x) => x.id === id), id).toBeDefined();
+      expect(g.nodes.find((x) => x.id === id)!.observed_state, id).toBeUndefined();
+    }
+    expect(g.nodes.find((x) => x.kind === 'option' && x.label === GRANDFATHER)!.interventions[SWITCH_FAC]).toBeUndefined();
+    expect(g.nodes.find((x) => x.kind === 'option' && x.label === ANNUAL_OPT)!.interventions[ANNUAL_FAC]).toBeUndefined();
   }, 120_000);
 });

@@ -312,26 +312,45 @@ const NEW_SWITCH_NOTE = 'This change also ADDS these factors as switches the opt
   + 'Say that off-today is Olumi\u2019s reading, for the user to correct if it is already partly in place; do not ask for its value today.';
 
 /**
- * ⛔ A SWITCH HAS NO LEVEL OF ITS OWN (independent verification of A1, round 2). The option's level on a new switch is
- * exactly 1 — ON — and nothing else, so the only level the Agent may give it is a bare 1. Anything more carries a figure
- * the switch cannot keep: a unit (£1/month, 1%, 1 hire — a 1 in a unit is an amount, never "on"; 1% is refused just as
- * 100% is), Olumi's estimate (the on level is not estimated), a value that is not a number
- * ("0.5", "50%"), or a level that is not an object at all. Taken as on, the user's figure would be dropped without a word
- * and today-0 written as Olumi's, so each is a conflict: refused, nothing sent. No level (absent, null, or one that
- * carries nothing) is on. Returns the conflict's parts to show, or `null` when the level is on.
+ * Which parts of a refused new-switch level were not a bare 1 — names only, never the figure — so a served run shows
+ * what the model sent (`_agent.tool_calls[].conflict_fields`; OpenAI Runtime #70 5859406197 item 3).
  */
-function newSwitchLevelConflict(level: unknown): { value: unknown; unit?: unknown; estimate?: unknown } | null {
+type SwitchConflictField = 'unit' | 'non_number' | 'not_one' | 'estimate' | 'not_object';
+
+/**
+ * ⛔ A SWITCH HAS NO LEVEL OF ITS OWN (independent verification of A1, round 2). The option's level on a new switch is
+ * exactly 1 — ON — and nothing else, so the only level the Agent may give it is a 1 with no unit. Anything more carries a
+ * figure the switch cannot keep: a unit (£1/month, 1%, 1 hire — a 1 in a unit is an amount, never "on"; 1% is refused
+ * just as 100% is), a number other than 1 (as the user's figure or as Olumi's estimate), a value that is not a number
+ * ("0.5", "50%"), an estimate with no figure, or a level that is not an object at all. Taken as on, the figure would be
+ * dropped without a word and today-0 written as Olumi's, so each is a conflict: refused, nothing sent. No level (absent,
+ * null, or one that carries nothing) is on.
+ *
+ * ⭐ `{ value: 1, estimate: true }` IS ON (OpenAI Runtime #70 5859406197): refusing it left journey A's add-two-options
+ * NOT DONE in 3/3 served runs — refused, retried with a level, refused again. The option turns the switch on whoever's
+ * word the 1 is, and the switch's today-0 stays Olumi's own stamp (`stampNewSwitchFactors`), so nothing is dropped.
+ * Returns the conflict's parts to show and the fields that fired, or `null` when the level is on.
+ */
+function newSwitchLevelConflict(level: unknown): { value: unknown; unit?: unknown; estimate?: unknown; fields: SwitchConflictField[] } | null {
   if (level === undefined || level === null) return null;
-  if (typeof level !== 'object' || Array.isArray(level)) return { value: level };
+  if (typeof level !== 'object' || Array.isArray(level)) return { value: level, fields: ['not_object'] };
   const { value, unit, estimate } = level as { value?: unknown; unit?: unknown; estimate?: unknown };
   const hasValue = value !== undefined && value !== null;
   const hasUnit = unit !== undefined && unit !== null && !(typeof unit === 'string' && unit.trim() === '');
   const hasEstimate = estimate !== undefined && estimate !== null && estimate !== false;
   if (!hasUnit && !hasEstimate && (!hasValue || value === 1)) return null;
-  return { value, ...(hasUnit ? { unit } : {}), ...(hasEstimate ? { estimate } : {}) };
+  // Olumi's estimate of exactly 1, with no unit: on.
+  if (!hasUnit && estimate === true && value === 1) return null;
+  const fields: SwitchConflictField[] = [
+    ...(hasUnit ? ['unit' as const] : []),
+    ...(hasValue && typeof value !== 'number' ? ['non_number' as const] : []),
+    ...(typeof value === 'number' && value !== 1 ? ['not_one' as const] : []),
+    ...(hasEstimate ? ['estimate' as const] : []),
+  ];
+  return { value, ...(hasUnit ? { unit } : {}), ...(hasEstimate ? { estimate } : {}), fields };
 }
 
-/** A switch conflict's figure as the user would read it: `1 £/month`, `1%`, `"0.5"`, `1 (as Olumi's estimate)`. */
+/** A switch conflict's figure as the user would read it: `1 £/month`, `1%`, `"0.5"`, `2 (as Olumi's estimate)`. */
 function shownSwitchLevel(c: { value: unknown; unit?: unknown; estimate?: unknown }): string {
   const figure = typeof c.value === 'number' ? String(c.value)
     : c.value === undefined || c.value === null ? 'no figure' : JSON.stringify(c.value) ?? String(c.value);
@@ -4177,8 +4196,10 @@ export function createAgentCapabilities(
       const outOfRange: { option: string; factor: string; value: number; range: number }[] = [];
       const unitMismatch: { option: string; factor: string; value: number; unit: string; factor_unit: string }[] = [];
       const levelsNotSet: { option: string; factor: string; value: number; reason: string }[] = [];
-      /** A level the Agent gave for a new SWITCH that is not a bare 1 (`newSwitchLevelConflict`): refused, nothing sent. */
+      /** A level the Agent gave for a new SWITCH that is not a 1 with no unit (`newSwitchLevelConflict`): refused, nothing sent. */
       const switchLevelConflicts: { option: string; factor: string; value: unknown; unit?: unknown; estimate?: unknown }[] = [];
+      /** Every field that fired across them, in first-seen order (names only): carried to `_agent.tool_calls`. */
+      const switchConflictFields: SwitchConflictField[] = [];
       const isNewSwitch = (key: string): boolean => newFactors.some((f) => f.key === key && f.kind === 'switch');
       /**
        * ⛔ WHOSE LINK (U3, DL 5849023213 (2)). A link with no level is written by Canonical's builder as the user's
@@ -4253,8 +4274,8 @@ export function createAgentCapabilities(
          *
          * ⭐ A new SWITCH (`kind: 'switch'`, Canonical #70 5854919806 item 1) is the exception: the option turns it ON, so
          * its level here is exactly 1, in this same change, and its today-0 is Olumi's, written by the same commit. A
-         * level the Agent gave for it that is anything but a bare 1 (`newSwitchLevelConflict`) contradicts "switch" and is
-         * refused below, never rounded to on.
+         * level the Agent gave for it that is anything but a 1 with no unit (`newSwitchLevelConflict`) contradicts
+         * "switch" and is refused below, never rounded to on.
          */
         for (const a of plan.newActsOn) {
           // ⛔ EVERY entry that names this factor (VERIFIER-S1 on A1 r2): reading only the first let a bare entry followed
@@ -4262,10 +4283,13 @@ export function createAgentCapabilities(
           const named = spec.acts_on.filter((x) => norm(x.factor_label) === norm(a.label));
           const asked = (named[0]?.level as { value?: unknown } | null | undefined)?.value;
           if (isNewSwitch(a.key)) {
-            // Anything but a bare 1 carries a figure the switch cannot keep (a unit, an estimate, a non-number): refused.
+            // Anything but a 1 with no unit carries a figure the switch cannot keep (a unit, another number, a non-number): refused.
             for (const x of named) {
               const conflict = newSwitchLevelConflict(x.level);
-              if (conflict !== null) switchLevelConflicts.push({ option: plan.label, factor: a.label, ...conflict });
+              if (conflict === null) continue;
+              const { fields, ...shown } = conflict;
+              switchLevelConflicts.push({ option: plan.label, factor: a.label, ...shown });
+              for (const f of fields) if (!switchConflictFields.includes(f)) switchConflictFields.push(f);
             }
             continue;
           }
@@ -4281,6 +4305,7 @@ export function createAgentCapabilities(
         const c = switchLevelConflicts[0]!;
         return {
           ok: false, mutated: false, refusal: 'switch_level_not_on', switch_level_conflicts: switchLevelConflicts,
+          conflict_fields: switchConflictFields,
           detail: `"${c.factor}" was added as a switch that "${c.option}" turns on, but it was given a level: ${shownSwitchLevel(c)}. `
             + 'A switch has no level of its own \u2014 it is off today and on under this option \u2014 so that figure would be dropped, '
             + 'and it is not taken as on. Nothing was prepared. If the option simply turns it on, call propose_new_option again '
