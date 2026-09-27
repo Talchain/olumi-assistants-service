@@ -24,7 +24,7 @@ interface ServedOption {
   label: string;
   interventions: Record<string, number>;
   raw_interventions?: Record<string, number>;
-  served_intervention_details: Record<string, { display_value: string }> | null;
+  served_intervention_details: Record<string, { display_value: string; raw_value?: number; unit?: string }> | null;
 }
 interface Served {
   goal_node_id: string;
@@ -69,13 +69,15 @@ describe("UF-3 — a switch's state is said as on / off", () => {
     expect(detail(build(B), release.option_id, "next_ai_feature_released")).toBe("on");
   });
 
-  it("[served B F1] control: every non-switch detail is byte-identical to what was served", () => {
+  it("[served B F1] control: every non-switch detail is what was served, save #2060's currency-rate spelling", () => {
     const payload = build(B);
     let compared = 0;
     for (const o of B.options) {
       for (const [fid, d] of Object.entries(o.served_intervention_details ?? {})) {
         if (fid === "next_ai_feature_released") continue;
-        expect(detail(payload, o.option_id, fid)).toBe(d.display_value);
+        // #2060: a price in "GBP/month" reads "£59/month"; every other detail renders exactly as served.
+        const expected = d.unit === "GBP/month" ? `£${d.raw_value}/month` : d.display_value;
+        expect(detail(payload, o.option_id, fid)).toBe(expected);
         compared++;
       }
     }

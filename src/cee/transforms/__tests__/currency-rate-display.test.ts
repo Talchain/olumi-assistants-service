@@ -73,14 +73,18 @@ describe("UF-3 (price) — a currency rate is said as £59/month", () => {
     });
   }
 
-  it("[served, all four] control: every other detail is byte-identical to what was served", () => {
+  it("[served, all four] control: every other detail is what was served, save #2055's switch words", () => {
     let compared = 0;
     for (const c of Object.values(FIXTURE.captures)) {
       const payload = build(c);
       for (const o of c.options) {
         for (const [fid, d] of Object.entries(o.served_intervention_details ?? {})) {
           if (fid === "pro_plan_price") continue;
-          expect(detail(payload, o.option_id, fid)).toBe(d.display_value);
+          // #2055: a switch held at 0 that an option sets to 1 reads "on"; with no held level it stays "1" (both states).
+          const held = (c.graph.nodes as Array<{ id: string; observed_state?: { value?: number } }>)
+            .find((n) => n.id === fid)?.observed_state?.value;
+          const expected = d.display_value === "1" && held === 0 ? "on" : d.display_value;
+          expect(detail(payload, o.option_id, fid)).toBe(expected);
           compared++;
         }
       }
