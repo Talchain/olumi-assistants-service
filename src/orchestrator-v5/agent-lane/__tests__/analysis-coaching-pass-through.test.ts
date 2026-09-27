@@ -844,6 +844,7 @@ test('ESTIMATED LIMIT — a limit checked (evaluated_feasible) against Olumi\'s 
  assert.equal(est.length,1);
  assert.equal(CoachingBlockSchema.safeParse(est[0]).success,true);
  assert.equal(est[0].signal_id,`${EST_CARD}449b882e043ae3e3:2026-09-25T17:27:54.315Z:auto_first_pass`);
+ assert.equal(est[0].title,"“Monthly churn” limit checked against Olumi's estimate of 7 percent per month");
  assert.equal(est[0].body,"Your limit on “Monthly churn” was checked against Olumi's estimate that it is about 7 percent per month today, not a figure you gave. If you know the real figure, it is worth saying.");
  assert.deepEqual(est[0].target_refs,[{kind:'factor',id:'monthly_churn',label:'Monthly churn'}]);
  assert.match(est[0].action_prompt,/Ask me what the real figure is and what it rests on\. If I answer, offer to record my answer for me to approve, and change nothing until I do\.$/);
@@ -894,6 +895,7 @@ test('ESTIMATED LIMIT — RATIFIED: Paul\'s served churn level (user_assumption,
  assert.equal(est.length,1);
  assert.equal(CoachingBlockSchema.safeParse(est[0]).success,true);
  assert.match(est[0].signal_id,/^coach:limit_estimate:[0-9a-f]+:2026-09-25T17:27:54\.315Z:auto_first_pass:ratified$/);
+ assert.equal(est[0].title,'Your “Monthly churn” limit was checked against an assumed 4%');
  assert.equal(est[0].body,'Your limit on “Monthly churn” was checked against about 4% today, a figure recorded as an assumption rather than a measurement. If you know the real figure, it is worth saying.');
  assert.equal(est[0].action_prompt,'Olumi checked my limit on “Monthly churn” against about 4% today, a figure recorded as an assumption. Ask me what the real figure is and what it rests on. If I answer, offer to record my answer for me to approve, and change nothing until I do.');
  assert.deepEqual(est[0].target_refs,[{kind:'factor',id:'monthly_churn',label:'Monthly churn'}]);
