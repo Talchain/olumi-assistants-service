@@ -4417,7 +4417,7 @@ export async function runTurnExecutor(
         // 2026-09-27). The batch's applied graph is a GraphV3 parse of nodes and edges, so
         // persisting it as-is dropped the stored limits, goal_node_id and options[].
         const persistedBatchGraph = mergeMutatedGraphForPersistence({
-          mutatedGraph: outcome.appliedGraph as unknown as Record<string, unknown>,
+          mutatedGraph: outcome.appliedGraph as Record<string, unknown>,
           persistedBase: baseGraph,
           requestId: context.request_id,
           scenarioId: context.session_id,
