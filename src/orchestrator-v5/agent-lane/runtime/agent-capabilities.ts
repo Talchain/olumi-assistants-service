@@ -141,6 +141,8 @@ import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLe
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
+import { notModelledContext, notModelledOfRead } from '../not-modelled-carrier.js';
+import type { NotModelledManifest } from '../../../cee/context-integrity/not-modelled-manifest.js';
 import { FRACTION_SPELLED_UNIT } from '../../coaching/bound-graph.js';
 
 /**
@@ -418,6 +420,8 @@ interface GraphRead {
   readonly analysis_state: unknown;
   /** The persisted graph exactly as read — every top-level carrier, not only nodes/edges. */
   readonly raw: Record<string, unknown>;
+  /** A7: the read's own `not_modelled` (derived by the read route over this graph); absent when the read had none. */
+  readonly not_modelled?: NotModelledManifest;
 }
 
 const norm = (s: unknown): string => String(s ?? '').toLowerCase().replace(/…$/, '').trim();
@@ -955,6 +959,7 @@ export function createAgentCapabilities(
     const r = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
     if (r.status !== 200) return null;
     const g = (r.json.graph ?? {}) as Record<string, unknown>;
+    const notModelled = notModelledOfRead(r.json.not_modelled);
     return {
       graph_hash: String(r.json.graph_hash ?? ''),
       // ⛔⛔ IT IS AN ENVELOPE OBJECT, NOT A STRING. The read route emits the
@@ -973,6 +978,7 @@ export function createAgentCapabilities(
       edges: (g.edges as GraphRead['edges']) ?? [],
       analysis_state: r.json.analysis_state,
       raw: g,
+      ...(notModelled !== undefined ? { not_modelled: notModelled } : {}),
     };
   };
 
@@ -1594,6 +1600,8 @@ export function createAgentCapabilities(
         structure: structuralFacts(g.nodes, g.edges),
         // (B) goal target, limits, links, the ONE readiness verdict, and the earlier analysis kept apart from it.
         ...projectModelContext(g),
+        // A7: what of the brief the model does NOT carry — the read's own manifest, projected; none when the read had none.
+        ...(g.not_modelled !== undefined ? { not_modelled: notModelledContext(g.not_modelled) } : {}),
         // Every proposal this user has been shown and not yet approved, newest
         // first — including a held add-option, which lives in the session store,
         // not in memory. An approval with nothing to bind to is an approval that
