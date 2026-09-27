@@ -35,6 +35,8 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
         { option: 'Raise Pro to £54', price: 54, price_by: 'olumi', keep_at_least: 273 },
       ],
       target: { value: 20_000, needs: [{ price: 59, volume: 339 }, { price: 54, volume: 371 }, { price: 49, volume: 409 }] },
+      // The options agree on the AI release (all 1; 0 today) and the count is an approved assumption: Olumi asks for it.
+      stated: { ask: { today: true } },
     });
   });
 
@@ -71,6 +73,7 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
 
   it('CONTRAST (the other served run, 053639Z/01, price GBP/month): the paragraph is byte-identical to what the wire carried', () => {
     const f = JSON.parse(readFileSync(new URL('./fixtures/served-per-month-price-263dbd5.json', import.meta.url), 'utf8')) as { served_paragraph: string; nodes: unknown[]; edges: unknown[] };
+    // Byte-identical: its options set the AI release, whose level today is unknown and cannot be named — fail closed.
     expect(breakEvenLine(breakEvenFor(f)!)).toBe(f.served_paragraph);
   });
 
