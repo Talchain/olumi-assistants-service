@@ -191,7 +191,12 @@ export const RUN_INTERPRETATION_FORMAT = Object.freeze({
 export const RUN_INTERPRETATION_VIEW_INSTRUCTION =
   'On this call you have no tools, so give_provisional_view is not available. Answer as JSON. `answer` is your reply to the user, and every rule in these instructions applies to it: it never names, ranks or favours an option. '
   + '`provisional_view` is your own provisional view, the one give_provisional_view would carry: `view` (what you would do, at most two sentences), `reasoning` (why, from the model’s facts and the user’s own words, at most three sentences) and `confirm_step` (the ONE step that would let the analysis confirm or overturn it, one sentence). '
-  + 'Olumi shows it beneath your reply, labelled as your provisional view and never as the analysis result. Set it to null when you have none. Never write the view in `answer`.';
+  + 'Olumi shows it beneath your reply, labelled as your provisional view and never as the analysis result. '
+  // Served 27 Sep (pj-timing-2104, pj-dispatch-2106r): the FIRST Run carried a view, and the RERUN after the user's
+  // challenge carried none, 2/2 (its output was the answer alone). The user lost Olumi's view just when they had changed
+  // the model. The call is made only when the analysis withholds the leader, which is when Paul's ruling wants the view.
+  + 'This call is made only because the analysis cannot put an option forward, so give your view on every such run, including a rerun or after a view you gave earlier: say it again, updated for this run. '
+  + 'Set it to null only when the model and the user’s words give you no basis for any view. Never write the view in `answer`.';
 
 /**
  * The typed answer of that one call — or `null` when the text is not it (a plain-text interpretation stays the reply,
