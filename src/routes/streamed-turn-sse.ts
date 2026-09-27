@@ -281,6 +281,7 @@ export async function streamTurnAsStagedSse(opts: StagedTurnStreamOptions): Prom
         writeStage("BRIEF_READ", {
           goal: event.goal,
           options: event.options,
+          limits: event.limits,
           elapsed_ms: event.elapsed_ms,
         });
         break;
