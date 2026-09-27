@@ -72,7 +72,11 @@ describe('provisional hiring construction uses real admission and registration p
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(calls).toBe(1);
     const option = graph?.nodes.find((n) => n.label === 'Hire two developers');
-    expect(option?.interventions).toEqual({ developers: { value: 0.35, source: 'cee_hypothesis' } });
+    // P2 A5: the level names the factor it is keyed by. "Developers" is an ESTIMATED baseline, framed only by the node's
+    // scale_frame, so the level carries no native pair (`one-intervention-form.test.ts` row c).
+    expect(option?.interventions).toEqual({
+      developers: { value: 0.35, source: 'cee_hypothesis', target_match: { node_id: 'developers', match_type: 'exact_id', confidence: 'high' } },
+    });
     expect(graph?.nodes.find((n) => n.kind === 'goal')).not.toHaveProperty('goal_threshold_raw');
     // RC fix (1): the current-state option carries NO levels — it is held (#1838), not set to the baselines.
     expect(graph?.nodes.find((n) => n.id === 'maintain_current_staffing')).not.toHaveProperty('interventions');

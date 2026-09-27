@@ -28,6 +28,7 @@ import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js
 import { labelMatchesBaseline } from '../../../cee/transforms/analysis-ready.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { subtractMagnitudeDelta } from './magnitude-delta.js';
+import { asServedBeforeOneForm } from './fixtures/one-form-levels.js';
 
 // ── the served corpus ────────────────────────────────────────────────────────
 type Level = { value: number; source?: string };
@@ -255,7 +256,8 @@ describe.each([
 
   it('FIDELITY: the reconstruction registers the served graph exactly, apart from the Olumi-added test option', async () => {
     const { graph: sizedGraph } = await build(draft());
-    const graph = unsized(sizedGraph);
+    // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
+    const graph = unsized(asServedBeforeOneForm(sizedGraph));
     const served = run.brief.draft_graph;
     expect(withoutOption(graph, TEST_ID).nodes).toEqual(withoutOption(served, TEST_ID).nodes);
     expect(withoutOption(graph, TEST_ID).edges).toEqual(withoutOption(served, TEST_ID).edges);
@@ -266,7 +268,7 @@ describe.each([
     const { graph } = await build(draft());
     const base = baseGraph(key);
     expect(optionIds(base)).toContain(TEST_ID);
-    expect(JSON.stringify(unsized(graph))).toBe(JSON.stringify(framedBase(withoutOption(base, TEST_ID))));
+    expect(JSON.stringify(unsized(asServedBeforeOneForm(graph)))).toBe(JSON.stringify(framedBase(withoutOption(base, TEST_ID))));
   });
 
   it('RED: the Olumi-added test option is not registered — no node, no edge', async () => {
@@ -337,9 +339,10 @@ describe('controls — what the rule must never touch', () => {
     expect(run.brief.may_run).toBe(true);
     const { graph, out } = await build(candidateFromServed(run.brief.draft_graph, { olumi: 'ai_proposed', horizon: null }));
     expect(optionIds(graph)).toContain(olumiId);
-    expect(graph.nodes).toEqual(olumisKnownLevels(run.brief.draft_graph.nodes));
+    // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
+    expect(asServedBeforeOneForm(graph).nodes).toEqual(olumisKnownLevels(run.brief.draft_graph.nodes));
     expect(unsized(graph).edges).toEqual(run.brief.draft_graph.edges);
-    expect(JSON.stringify(unsized(graph))).toBe(JSON.stringify(framedBase(baseGraph(key))));
+    expect(JSON.stringify(unsized(asServedBeforeOneForm(graph)))).toBe(JSON.stringify(framedBase(baseGraph(key))));
     expect(out).not.toHaveProperty('options_withheld');
     expect(questions(out).filter((q) => q.startsWith('I left out ') || q.startsWith('What makes '))).toEqual([]);
   });
@@ -381,7 +384,7 @@ describe('controls — what the rule must never touch', () => {
     })) } as typeof base;
     const { graph, out } = await build(draft);
     expect(optionIds(graph)).toEqual(['keep_pro_price_at_49', 'raise_pro_price_to_59', '49_until_next_quarter']);
-    expect(graph.nodes.find((n) => n.id === '49_until_next_quarter')?.interventions).toEqual({ pro_plan_price: { value: 0.245, source: 'cee_hypothesis' } });
+    expect(asServedBeforeOneForm(graph).nodes.find((n) => n.id === '49_until_next_quarter')?.interventions).toEqual({ pro_plan_price: { value: 0.245, source: 'cee_hypothesis' } });
     expect(out).not.toHaveProperty('options_withheld');
     // The run, on the served approved model: that option set to today's price alone PROCEEDS. Since #1963 the held
     // status quo also counts, so the model without it proceeds too; the control's point is that (b) KEEPS it.
@@ -447,7 +450,8 @@ describe('fix round — an open cell can equal at most one level; the status quo
     label, provenance, changes, is_status_quo: null,
     interventions: level === undefined ? [] : [{ factor_label: level.factor, value: level.value, value_kind: 'absolute', unit: '£ per month', provenance: 'ai_proposed' }],
   });
-  const levelOf = (g: SGraph, id: string) => g.nodes.find((n) => n.id === id)?.interventions ?? null;
+  // Read back in the served short form (P2 A5, `one-form-levels.ts`): these rows pin WHICH level, not its members.
+  const levelOf = (g: SGraph, id: string) => asServedBeforeOneForm(g).nodes.find((n) => n.id === id)?.interventions ?? null;
   const registeredLabels = (g: SGraph) => g.nodes.filter((n) => n.kind === 'option').map((n) => n.description ?? n.label);
   const withheldOf = (out: Record<string, unknown>) => (out.options_withheld ?? []) as { option: string; like: string; reason: string }[];
   /** Served shape 1 with Olumi's "£54 with AI release" drafted AFTER the level-less test option. */

@@ -280,10 +280,66 @@ export interface WidenerAdditions {
  * only the writer, on a user's approved change, mints that stamp.
  */
 export type ConstructedLevelSource = Exclude<InterventionV3T['source'], 'user_specified'>;
-export interface ConstructedLevel { value: number; source: ConstructedLevelSource }
+export interface ConstructedLevel {
+  value: number;
+  source: ConstructedLevelSource;
+  /** The factor this level is keyed by — `InterventionV3.target_match`, which the contract requires. */
+  target_match?: { node_id: string; match_type: 'exact_id'; confidence: 'high' };
+  /** The drafter's own figure, present exactly when `value` is that figure read on the factor's `observed_state.cap`. */
+  raw_value?: number;
+  /** The factor's own `observed_state.unit`, beside `raw_value`. */
+  unit?: string;
+}
 
 const levelSourceFor = (provenance: string): ConstructedLevelSource =>
   provenance === 'explicit' ? 'brief_extraction' : 'cee_hypothesis';
+
+/**
+ * ⭐ ONE FORM FOR AN OPTION'S LEVEL, WHICHEVER WRITER WROTE IT (P2 A5; DL #70 order 5858777018 item 3).
+ *
+ * MEASURED on served CEE 523e18d (journey A, `build_model_from_brief` at A01): this writer stored "Raise Pro to £59"
+ * as `{ value: 0.295, source }`. The brief's 59, the factor's unit and the factor match were all in hand here and all
+ * dropped, while the add-option writer stores the same level on the same factor as
+ * `{ value, raw_value: 59, unit, source, target_match }` (A06). Every `{source, value}` level on the five fresh journeys
+ * (18 of them) came from the one line that calls this.
+ *
+ * EVERY MEMBER COMES FROM THIS CONSTRUCTION — nothing is guessed, and nothing is filled later at projection (which runs
+ * on every write, and would rewrite cells nobody touched):
+ *  · `target_match` names the key the level is stored under, exactly as the encoder synthesises it for an entry that
+ *    lacks one (`encode-option-interventions.ts` `buildInterventionV3`) and the add-option writer writes it;
+ *  · `raw_value` is the drafter's figure itself, and `unit` is the FACTOR's own `observed_state.unit` (the contract:
+ *    "should match target factor's observed_state.unit"), never the option's spelling of it. Both are written ONLY when
+ *    the level was divided by the cap the factor's own `observed_state` stores, so `raw_value / cap === value` is
+ *    re-checkable from the stored bytes.
+ *
+ * ⚠ AND ONLY THEN, DELIBERATELY:
+ *  · an UNFRAMED level (no range; the level is its own figure) keeps `{ value, source, target_match }` —
+ *    `InterventionV3`: "value = raw_value (or raw_value omitted)";
+ *  · a level framed ONLY by the node's `scale_frame` (no baseline, or an estimated one) keeps no native pair either.
+ *    Measured through the real egress (`projectRequestInterventionsToWireScale`): today such a level ships its unit
+ *    value (`no_cap`); with `raw_value` it would ship the raw figure, undemoted, to a node that has no cap for PLoT to
+ *    divide by. That is a change to the analysis, and it needs a science ruling, not a shape fix. On an
+ *    `observed_state.cap` factor both forms reach PLoT as the same numbers (`one-intervention-form.test.ts` row f).
+ */
+function constructedLevel(
+  factorId: string,
+  figure: number,
+  cap: number | undefined,
+  source: ConstructedLevelSource,
+  factor: Pick<AdmittedNode, 'observed_state'> | undefined,
+): ConstructedLevel {
+  const level: ConstructedLevel = {
+    value: cap !== undefined ? figure / cap : figure,
+    source,
+    target_match: { node_id: factorId, match_type: 'exact_id', confidence: 'high' },
+  };
+  const os = factor?.observed_state;
+  if (cap !== undefined && os?.cap === cap) {
+    level.raw_value = figure;
+    if (typeof os.unit === 'string' && os.unit.trim() !== '') level.unit = os.unit;
+  }
+  return level;
+}
 
 export interface AdmittedNode {
   /** The full text, when the label had to be shortened to stay editable. */
@@ -2582,7 +2638,7 @@ function admitOnce(
         continue;
       }
       const cap = capByFactorId.get(factorId);
-      bundle[factorId] = { value: cap !== undefined ? iv.value / cap : iv.value, source: levelSourceFor(iv.provenance) };
+      bundle[factorId] = constructedLevel(factorId, iv.value, cap, levelSourceFor(iv.provenance), nodes.find((n) => n.id === factorId));
     }
     if (Object.keys(bundle).length > 0) interventionsByOption.set(optionId, bundle);
   }
