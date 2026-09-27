@@ -65,7 +65,7 @@ describe('C4: the limit caveat is said once, on the move card (served Paul, CEE 
 describe('CONTRASTS', () => {
   it('no caveat (served hiring, CEE 9bd3747): the move card body is untouched', () => {
     const h = load('served-hiring-9bd3747-link-not-in-model.json');
-    const withEdge = { ...h, draft_graph: { ...h.draft_graph, edges: [...h.draft_graph.edges, { ...h.draft_graph.edges.find((e: Rec) => e.to === 'delivery_capacity'), from: 'tech_lead_hires_change_from_today', to: 'delivery_capacity' }] } };
+    const withEdge: Rec = { ...h, draft_graph: { ...h.draft_graph, edges: [...h.draft_graph.edges, { ...h.draft_graph.edges.find((e: Rec) => e.to === 'delivery_capacity'), from: 'tech_lead_hires_change_from_today', to: 'delivery_capacity' }] } };
     withEdge.graph_hash = computeAnalysisAffectingGraphHash(withEdge.draft_graph as never);
     const r = runTurnNextMove(...args(withEdge));
     expect(r.caveats).toEqual([]);
