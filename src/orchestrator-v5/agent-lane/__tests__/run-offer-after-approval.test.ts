@@ -170,7 +170,8 @@ describe('the explicit Run is offered after a change the canonical readiness adm
   it('OPPOSITE CONTROL (C6 turnReadCache): after a VERIFIED commit the route answers from that verified read — it makes no second post-write read that could fail', async () => {
     // Before C6 the route re-read the model after the capability had already read it back, and this control failed
     // that second read to prove "unknown is not a refusal". With nothing written between the two, the route now reuses
-    // the verified read, so that unknown state cannot arise here. The unknown-readiness rule itself is the REPLAY row below.
+    // the verified read, so that unknown state cannot arise here. The unknown-readiness rule at the approval is pinned by
+    // the seam row `agent-writer-doors-seam.test.ts` (7c): an in-process write, then every read fails (DL #2114 Q4).
     readiness = { status: 'ready', may_run: true };
     failReadbackAfterWrite = true; // any SECOND post-write read would be refused
     const b = await proposeThenApprove() as unknown as { suggested_actions: Chip[]; _agent: { tool_calls: { name: string; mutated: boolean }[] } };

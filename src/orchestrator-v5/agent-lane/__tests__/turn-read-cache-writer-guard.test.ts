@@ -26,7 +26,13 @@ function sources(dir: string): string[] {
 }
 
 /** VALUE imports of a module that can write the model (a `import type` carries no writer). */
-const WRITER_IMPORT = /^import\s+(?!type\b)[^;]*from\s+'[^']*(?:persist-graph-write|system-events\/dispatch|session\/index|session\/store|collab\/store)(?:\.js)?'/m;
+const WRITER_IMPORT = /^import\s+(?!type\b)[^;]*from\s+'[^']*(?:persist-graph-write|system-events\/dispatch|session\/index|session\/store|collab\/store|handlers\/chip-click-dispatch)(?:\.js)?'/m;
+/**
+ * The ONE agent-lane module allowed a writer import (DL CHANGES_REQUIRED on #2114, minor): `first-analysis.ts` runs the
+ * analysis through `handlers/chip-click-dispatch`. It is safe only because its entry's one caller, the route, runs it
+ * inside `readCache.around` (row 3); the last row pins that nothing else in the lane calls that entry.
+ */
+const FIRST_ANALYSIS = 'src/orchestrator-v5/agent-lane/first-analysis.ts';
 
 describe('the read cache sees every write the Agent turn can make', () => {
   it('CONTRAST: the matcher finds the writers the ROUTE imports (so a zero below is not a blind probe)', () => {
@@ -36,8 +42,16 @@ describe('the read cache sees every write the Agent turn can make', () => {
   it('no agent-lane module imports a writer: its only write channels are the dispatch and the doors it is handed', () => {
     const files = sources(join(ROOT, 'src/orchestrator-v5/agent-lane'));
     expect(files.length, 'control: the lane has sources').toBeGreaterThan(20);
-    const offenders = files.filter((f) => WRITER_IMPORT.test(readFileSync(f, 'utf8'))).map((f) => f.slice(ROOT.length + 1));
-    expect(offenders).toEqual([]);
+    const matched = files.filter((f) => WRITER_IMPORT.test(readFileSync(f, 'utf8'))).map((f) => f.slice(ROOT.length + 1));
+    expect(matched, 'CONTRAST: the widened matcher sees first-analysis\'s chip-click-dispatch import').toContain(FIRST_ANALYSIS);
+    expect(matched.filter((f) => f !== FIRST_ANALYSIS)).toEqual([]);
+  });
+
+  it('the first analysis\'s entry is called by the route alone, so its writer import only runs inside readCache.around', () => {
+    const files = sources(join(ROOT, 'src/orchestrator-v5/agent-lane'));
+    const callers = files.filter((f) => f !== join(ROOT, FIRST_ANALYSIS) && /\brunFirstAnalysisAfterConstruction\b/.test(readFileSync(f, 'utf8')));
+    expect(callers.map((f) => f.slice(ROOT.length + 1))).toEqual([]);
+    expect(ROUTE, 'control: the route does call it').toMatch(/readCache\.around\(\(\) => runFirstAnalysisAfterConstruction\(/);
   });
 
   it('every in-process door and the first analysis run inside readCache.around', () => {
