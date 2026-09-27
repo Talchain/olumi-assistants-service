@@ -1,0 +1,73 @@
+{
+ "_provenance": {
+  "source": "served staging CEE, MG construction sweep factorzero-1 (27 Sep), POST /assist/v1/scenarios/:id/graph after an agent-lane build",
+  "scenario_id": "b0a767b6-a1ae-4a4e-b2f2-0729258cb16c",
+  "build": "f99d0a5",
+  "kept": "factor nodes only"
+ },
+ "brief": "We have 0 channel partners and three account executives today. Should we sign up channel partners or hire two more account executives to reach \u00a350k of new ARR within 12 months?",
+ "nodes": [
+  {
+   "id": "channel_partner_count",
+   "kind": "factor",
+   "label": "Channel partner count",
+   "category": "controllable",
+   "provenance": "from_brief",
+   "observed_state": {
+    "cap": 50,
+    "unit": "count",
+    "value": 0,
+    "source": "brief_extraction",
+    "raw_value": 0,
+    "declared_scale": "unit_interval"
+   }
+  },
+  {
+   "id": "account_executive_headcount",
+   "kind": "factor",
+   "label": "Account executive headcount",
+   "category": "controllable",
+   "provenance": "from_brief",
+   "observed_state": {
+    "cap": 20,
+    "unit": "count",
+    "value": 0.15,
+    "source": "brief_extraction",
+    "raw_value": 3,
+    "declared_scale": "unit_interval"
+   }
+  },
+  {
+   "id": "annual_new_arr_per_channel_partner",
+   "kind": "factor",
+   "label": "Annual new ARR per channel\u2026",
+   "category": "observable",
+   "provenance": "ai_inferred",
+   "description": "Annual new ARR per channel partner",
+   "scale_frame": 50000,
+   "observed_state": {
+    "unit": "GBP per partner per 12 months",
+    "value": 0.1,
+    "source": "cee_inference",
+    "raw_value": 5000,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "annual_new_arr_per_account_executive",
+   "kind": "factor",
+   "label": "Annual new ARR per account\u2026",
+   "category": "observable",
+   "provenance": "ai_inferred",
+   "description": "Annual new ARR per account executive",
+   "scale_frame": 100000,
+   "observed_state": {
+    "unit": "GBP per account executive per 12 months",
+    "value": 0.1,
+    "source": "cee_inference",
+    "raw_value": 10000,
+    "extractionType": "inferred"
+   }
+  }
+ ]
+}

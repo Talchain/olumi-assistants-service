@@ -103,7 +103,8 @@ async function construct(...drafts: ReturnType<typeof c22>[]) {
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
   const result = await buildModelFromBrief('32edf657-e3f7-44a5-b80a-ec6a4e00d149',
-    'Should we hire two developers or a tech lead to lift delivery velocity?', dispatch,
+    // States the 40 story points the rows below call the user's (a baseline is theirs only when the brief states it).
+    'Should we hire two developers or a tech lead to lift delivery velocity? Capacity today is 40 story points.', dispatch,
     async (req) => {
       inputs.push(String((req as { input: unknown }).input));
       return { text: JSON.stringify(drafts[Math.min(inputs.length - 1, drafts.length - 1)]) };

@@ -26,6 +26,8 @@
  * the Agent dropped (£54k vs 54).
  */
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
+import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_CONTINUATION, parseCardinalAmount } from '../../utils/cardinal-words.js';
+import { TODAY_LEVEL, TODAY_UNIT } from './admit-model.js';
 import { unitPhraseFamily } from './unit-conflict.js';
 
 const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
@@ -39,6 +41,48 @@ export function figureTheUserWrote(value: number, unit: unknown, userText: strin
     // "40%" is 40 on a percentage, or 0.4 on a share kept as 0–1: the Agent passes the factor's own units.
     if (a.kind === 'percent') return (family === null || family === 'percent') && (same(a.magnitude, value) || same(a.magnitude / 100, value));
     return same(a.magnitude, value);
+  });
+}
+
+/** A number the text writes in words ("three engineers"), read by the repo's one cardinal grammar; a fraction refuses. */
+const CARDINAL_PHRASE = new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})${CARDINAL_FRACTION_CONTINUATION}\\b`, 'gi');
+
+/** Whether the brief states `value` as today's level: `figureTheUserWrote`, a number written in words, or "zero". */
+function baselineTheBriefStates(value: number, unit: unknown, brief: string): boolean {
+  if (figureTheUserWrote(value, unit, brief)) return true;
+  if (value === 0) return /\bzero\b/i.test(brief);
+  return [...brief.matchAll(CARDINAL_PHRASE)].some((m) => {
+    const v = parseCardinalAmount(m[0]);
+    return v !== null && same(v, value);
+  });
+}
+
+/**
+ * ⛔ A FACTOR'S BASELINE IS THE USER'S (`brief_extraction`) ONLY WHEN THE BRIEF STATES IT (DL #70 5851742282).
+ *
+ * Admission stamps `observed_state.source: 'brief_extraction'` from the FACTOR's provenance, and "explicit" there means
+ * the brief NAMES the factor, not that it states today's level. Served eng-hiring (MG construction sweep, 27 Sep): the
+ * brief "hire two senior engineers or four junior engineers … salary spend under £400k" registered "Senior engineers
+ * hired" 0 and the salary spend £0 as the user's own figures. The brief states neither.
+ *
+ * THE RULE: `figureTheUserWrote` over the brief, or the same figure written in words, or "zero" for 0. Not grounded ⇒
+ * the stamp is withdrawn and the value kept, in the shape an inferred factor's known baseline already has (no
+ * `source`). Every miss under-claims: "no enterprise customers" is not read as 0, and the figure reads as Olumi's.
+ */
+export function withdrawUnstatedBaselineStamps<N extends { readonly kind?: unknown; readonly observed_state?: unknown }>(
+  nodes: readonly N[],
+  brief: string,
+): N[] {
+  return nodes.map((n) => {
+    const os = n.observed_state as Record<string, unknown> | null | undefined;
+    if (n.kind !== 'factor' || os === null || typeof os !== 'object' || os.source !== 'brief_extraction') return n;
+    const figure = typeof os.raw_value === 'number' ? os.raw_value : os.value;
+    // A signed change restated on "% of today" (`restateSignedPercentChanges`) is 100 today BY DEFINITION: the user's
+    // "cut 15%" is measured from it (review 5835754404, row 4b). Admission wrote it; the brief's own framing states it.
+    if (os.unit === TODAY_UNIT && figure === TODAY_LEVEL) return n;
+    if (typeof figure === 'number' && baselineTheBriefStates(figure, os.unit, brief)) return n;
+    const { source: _withdrawn, ...rest } = os;
+    return { ...n, observed_state: rest };
   });
 }
 
