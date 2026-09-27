@@ -40,7 +40,7 @@ function setup(graph: unknown) {
   return { caps: createAgentCapabilities(d, new ProposalStore()), sent };
 }
 
-async function propose(message: string, levels: { features?: number; ads?: number; total?: number }, graph: unknown = cGraph, sessionText?: string) {
+async function propose(message: string, levels: { features?: number; ads?: number; total?: number }, graph: unknown = cGraph, sessionText?: string, label = 'Split it 50/50 at this stage') {
   const { caps, sent } = setup(graph);
   const acts = [
     { factor_label: FEATURES, direction: 'positive', ...(levels.features !== undefined ? { level: { value: levels.features, unit: 'GBP' } } : {}) },
@@ -49,7 +49,7 @@ async function propose(message: string, levels: { features?: number; ads?: numbe
   ];
   const r = await caps.proposeNewOption(
     { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r', user_turn_text: message, user_text: sessionText ?? message },
-    { label: 'Split it 50/50 at this stage', acts_on: acts, rationale: 'The user asked for it.' } as never,
+    { label, acts_on: acts, rationale: 'The user asked for it.' } as never,
   ) as { ok?: boolean; levels?: Lv[]; levels_not_set?: { factor: string; reason: string }[] };
   const ivs = ((sent[0]?.body as { chip?: { parameters?: { interventions?: Iv[] } } } | undefined)?.chip?.parameters?.interventions ?? []);
   return { r, iv: (id: string) => ivs.find((x) => x.factor_id === id), lv: (f: string) => r.levels?.find((l) => l.factor === f), sent };
@@ -73,6 +73,12 @@ describe('C08: "50/50" of the £30,000 the user set → £15,000 each, set, with
     for (const f of [FEATURES, ADS]) {
       expect(lv(f)).toMatchObject({ stated_by: 'olumi_estimate', basis: '£15,000 each: half of your £30,000, as Olumi read it' });
     }
+  });
+
+  it('RED: an option named for the whole ("Split the £30,000 50/50") still sets the parts: the name\'s figure is the total, not a level', async () => {
+    const { iv } = await propose(C08, { features: 15000, ads: 15000 }, cGraph, undefined, 'Split the £30,000 50/50');
+    expect(iv('incremental_feature_investment_6_months')?.raw_value).toBe(15000);
+    expect(iv('incremental_advertising_spend_6_months')?.raw_value).toBe(15000);
   });
 
   it('the total itself is not a part of its own split: a level the user did not write for it stays unset', async () => {
