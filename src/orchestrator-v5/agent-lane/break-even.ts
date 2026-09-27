@@ -147,9 +147,12 @@ export function breakEvenFor(graph: unknown): BreakEven | null {
 const symbolForCode = (code: string): string | undefined =>
   Object.entries(CURRENCY_SYMBOL_TO_CODE).find(([, c]) => c === code.toUpperCase())?.[0];
 
-/** A money figure in the price's unit ("GBP/month" → "£14,700/month"); otherwise the number and the unit. */
+/**
+ * A money figure in the price's unit ("GBP/month" → "£14,700/month"); otherwise the number and the unit. "GBP per month"
+ * reads the same (served `0592c43`: the goal line said "20,000 GBP per month" beside the reply's own "£20k/month").
+ */
 function money(n: number, unit: string): string {
-  const m = /^([A-Za-z]{3})\s*(?:\/\s*(.+))?$/.exec(unit);
+  const m = /^([A-Za-z]{3})\s*(?:(?:\/|\bper\s)\s*(.+))?$/i.exec(unit);
   const digits = n.toLocaleString('en-GB', { maximumFractionDigits: 2 });
   const symbol = m === null ? undefined : symbolForCode(m[1]!);
   if (m === null || symbol === undefined) return `${digits} ${unit}`;

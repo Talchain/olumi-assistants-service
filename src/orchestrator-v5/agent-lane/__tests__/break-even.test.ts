@@ -126,6 +126,16 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
     expect(said).not.toContain('no current');
   });
 
+  it('RED (served 0592c43): a target stored as "GBP per month" reads as the reply\'s own money, not "20,000 GBP per month"', () => {
+    expect(goalNotCheckedLine(graph((ns) => { node(ns, 'mrr').goal_threshold_unit = 'GBP per month'; }), NOT_CONVERTIBLE))
+      .toBe('Your MRR target of \u00a320,000/month is not checked yet: the model has no current MRR figure to measure it against.');
+  });
+
+  it('CONTRAST: a unit that is not a known currency is written as stored, "per" and all', () => {
+    expect(goalNotCheckedLine(graph((ns) => { node(ns, 'mrr').goal_threshold_unit = 'seats per month'; }), NOT_CONVERTIBLE))
+      .toBe('Your MRR target of 20,000 seats per month is not checked yet: the model has no current MRR figure to measure it against.');
+  });
+
   it('CONTRAST (F3): no typed reason, or no stated target, says nothing — never a guess', () => {
     expect(goalNotCheckedLine(graph(), { type: 'analysis_result', enrichment: { decision_brief: { warning_codes: ['EVPI_UNAVAILABLE'] } } })).toBeNull();
     expect(goalNotCheckedLine(graph((ns) => { delete node(ns, 'mrr').goal_threshold_raw; }), NOT_CONVERTIBLE)).toBeNull();
