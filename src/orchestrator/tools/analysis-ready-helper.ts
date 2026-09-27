@@ -16,6 +16,8 @@ import {
   labelMatchesBaseline,
 } from "../../cee/transforms/analysis-ready.js";
 import { nameMappingNeed } from "../../cee/transforms/option-status.js";
+import { isSwitch, resolveMagnitudeFrame } from "../../cee/magnitude/link-effect.js";
+import type { MagnitudeNode } from "../../cee/magnitude/link-effect.js";
 import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 // The PUBLISHED blocker contract, used to decide which rows the refusal carrier
 // may keep. Imported rather than restated: a hand-copied field list here would
@@ -84,6 +86,7 @@ export type CanonicalReadinessIssueCode =
   | 'MISSING_OPTION_CONNECTION'
   | 'CONSTRAINT_REVIEW_REQUIRED'
   | 'UNREACHABLE_CONTROLLABLE_FACTOR'
+  | 'MISSING_FACTOR_LEVEL'
   | 'INTERNAL_ERROR';
 
 export interface CanonicalReadinessIssue {
@@ -1178,6 +1181,126 @@ function relationshipAsk(option: unknown): string | undefined {
   return questions.join(' ');
 }
 
+/**
+ * ⭐ PLACEHOLDER-ZERO (P0, AI Quality #70 5860353792): the goal's root
+ * ancestors that the engine would sample at 0.0 because nothing gives them a
+ * status-quo level.
+ *
+ * MIRRORS ISL, IT DOES NOT RE-THEORISE IT (`robustness_analyzer_v2.py`,
+ * staging c7d750ba: `defaulted_root_node_ids` and `_defaulted_roots_reaching`):
+ *   · ROOT = no causal parent. PLoT strips every edge incident to an
+ *     option/decision/constraint node before the engine sees the graph, so
+ *     those edges never make a node non-root.
+ *   · DEFAULTED = no finite `observed_state.value` and no sampled `prior`
+ *     (`hasSampledPrior`) — PLoT's only two ParameterUncertainty sources — and not
+ *     intervened on by EVERY option in the run. "Some option sets it" is NOT
+ *     an exemption: the status quo and every other arm still read 0.0.
+ *   · REACHES THE GOAL = a directed causal path on which no node is pinned by
+ *     every run option.
+ * The run's options are the valued ones plus the held status quo, the set
+ * `resolveRunAdmission` submits.
+ *
+ * ONE DELIBERATE DEPARTURE: a switch (`isSwitch`, levels only 0/1) is
+ * exempt, because 0 is a real status-quo level for it ("not done"), not a
+ * placeholder. Risks and other non-factor kinds are out of scope here: their
+ * missing input is a likelihood, a different ask.
+ */
+function goalRootsWithoutStatusQuoLevel(
+  graph: GraphV3T,
+  payload: AnalysisReadyPayload,
+): Array<{ id: string; label: string }> {
+  const kindOf = new Map<string, string>(graph.nodes.map((node) => [node.id, node.kind]));
+  const nonCausal = (id: string): boolean => {
+    const kind = kindOf.get(id);
+    return kind === 'option' || kind === 'decision' || kind === 'constraint';
+  };
+  const parents = new Map<string, number>();
+  const children = new Map<string, string[]>();
+  for (const edge of graph.edges) {
+    if (nonCausal(edge.from) || nonCausal(edge.to)) continue;
+    parents.set(edge.to, (parents.get(edge.to) ?? 0) + 1);
+    children.set(edge.from, [...(children.get(edge.from) ?? []), edge.to]);
+  }
+  const runOptions = payload.options.filter(
+    (option) => Object.keys(option.interventions ?? {}).length > 0
+      || (option as { is_baseline?: boolean }).is_baseline === true,
+  );
+  const pinnedEverywhere = (id: string): boolean =>
+    runOptions.length > 0
+    && runOptions.every((option) => (option.interventions ?? {})[id] !== undefined);
+  const levelsOf = (id: string): number[] =>
+    payload.options
+      .map((option) => (option.interventions ?? {})[id])
+      .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+  const reachesGoal = (rootId: string): boolean => {
+    const stack = [rootId];
+    const seen = new Set([rootId]);
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      for (const child of children.get(current) ?? []) {
+        if (seen.has(child)) continue;
+        seen.add(child);
+        if (pinnedEverywhere(child)) continue;
+        if (child === payload.goal_node_id) return true;
+        stack.push(child);
+      }
+    }
+    return false;
+  };
+  // One gap, one ask: a factor the producer already blocks on its own (the
+  // unreachable-controllable rule, `cee/transforms/analysis-ready.ts`) keeps
+  // that ask; it already refuses the Run, since neither waiver reads a
+  // factor-only blocker.
+  const alreadyFactorBlocked = new Set(
+    ((payload.blockers ?? []) as unknown[])
+      .filter(isPlainObject)
+      .filter((blocker) => readNonEmptyString(blocker.option_id) === null)
+      .map((blocker) => readNonEmptyString(blocker.factor_id)),
+  );
+  const gaps: Array<{ id: string; label: string }> = [];
+  for (const node of graph.nodes) {
+    if (node.kind !== 'factor' || node.id === payload.goal_node_id) continue;
+    if (alreadyFactorBlocked.has(node.id)) continue;
+    if ((parents.get(node.id) ?? 0) > 0) continue;
+    const observed = (node as { observed_state?: { value?: unknown } }).observed_state;
+    if (typeof observed?.value === 'number' && Number.isFinite(observed.value)) continue;
+    // A spread with no value is NOT a level: PLoT emits an uncertainty only
+    // around a finite `observed_state.value` (translator-v3.ts first pass), so
+    // ISL still centres the factor on 0.0.
+    if (hasSampledPrior((node as { prior?: unknown }).prior)) continue;
+    if (pinnedEverywhere(node.id)) continue;
+    const magnitudeNode: MagnitudeNode = {
+      label: node.label ?? node.id,
+      kind: 'factor',
+      scale_frame: (node as { scale_frame?: unknown }).scale_frame,
+      observed_state: observed as MagnitudeNode['observed_state'],
+      option_levels: levelsOf(node.id),
+    };
+    if (isSwitch(magnitudeNode, resolveMagnitudeFrame(magnitudeNode))) continue;
+    if (!reachesGoal(node.id)) continue;
+    gaps.push({ id: node.id, label: node.label ?? node.id });
+  }
+  return gaps;
+}
+
+/**
+ * True only for a `prior` PLoT turns into a sampled ParameterUncertainty
+ * (plot-lite-service staging 22f3d94, `translator-v3.ts` second pass):
+ * `distribution: 'uniform'` with finite, distinct `range_min`/`range_max`.
+ * Any other prior is skipped there (unsupported family, non-finite, or a
+ * degenerate point), and the factor falls back to ISL's 0.0 default.
+ */
+function hasSampledPrior(prior: unknown): boolean {
+  if (!isPlainObject(prior) || prior.distribution !== 'uniform') return false;
+  const { range_min: min, range_max: max } = prior;
+  return typeof min === 'number' && Number.isFinite(min)
+    && typeof max === 'number' && Number.isFinite(max)
+    && min !== max;
+}
+
+const statusQuoLevelAsk = (label: string): string =>
+  `What is "${label}" today, before any option changes it? Without a current level the analysis would treat it as zero.`;
+
 function appendSemanticIssues(
   payload: AnalysisReadyPayload | undefined,
   out: CanonicalReadinessIssue[],
@@ -1419,6 +1542,21 @@ export function assessCanonicalAnalysisReadiness(
       blockingIssues,
       repairWiredFactorCountByOption(parsed.data),
     );
+    // PLACEHOLDER-ZERO: factor-scoped, so neither admission waiver (both need an
+    // option id) can answer it — excluding options does not give the remaining
+    // arms a status-quo level.
+    const levelGaps = semantic ? goalRootsWithoutStatusQuoLevel(parsed.data, semantic) : [];
+    levelGaps.forEach((gap, index) => {
+      blockingIssues.push({
+        issue_id: `level_${index + 1}`,
+        code: 'MISSING_FACTOR_LEVEL',
+        category: 'option_values',
+        message: statusQuoLevelAsk(gap.label),
+        repairability: 'human_input_required',
+        factor_id: gap.id,
+        factor_label: gap.label,
+      });
+    });
 
     // ⭐ INV-P6 — stamp provenance + obligation on EVERY issue, at the one point
     // where the complete issue set exists.
@@ -1471,6 +1609,21 @@ export function assessCanonicalAnalysisReadiness(
     const analysisReady = semantic
       ? {
           ...semantic,
+          ...(levelGaps.length > 0
+            ? {
+                status: 'needs_user_input',
+                blockers: [
+                  ...(semantic.blockers ?? []),
+                  ...levelGaps.map((gap) => ({
+                    factor_id: gap.id,
+                    factor_label: gap.label,
+                    blocker_type: 'missing_value' as const,
+                    message: statusQuoLevelAsk(gap.label),
+                    suggested_action: 'add_value' as const,
+                  })),
+                ],
+              }
+            : {}),
           ...(hardBlocked
             ? { status: 'blocked', blocked_reason: blockingIssues[0]?.code ?? 'INTERNAL_ERROR' }
             : {}),
