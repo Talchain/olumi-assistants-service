@@ -83,6 +83,17 @@ const obj = (props: Record<string, unknown>, required: string[]): Record<string,
 });
 
 
+/**
+ * PJ-C1 latency (#70 5859918872): the model's own typed word that this ONE call is everything the user asked for in
+ * this message. Only then may the reply be composed from the call's result with no narrating call (proposal-reply.ts);
+ * absent or false keeps today's second call, so a message asking for two things never loses the second.
+ */
+const WHOLE_REQUEST = {
+  type: 'boolean',
+  // Words: AI Conversation #70 5860022029.
+  description: 'true ONLY when this one call does everything the user asked for in their latest message: no other change to make, no question to answer, nothing else to explain. If there is anything more, or you are unsure, false.',
+} as const;
+
 /** The factors ONE option would change — shared by the single and the several-option forms of propose_new_option. */
 const ACTS_ON = {
   type: 'array',
@@ -247,6 +258,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         }, ['label', 'affects']),
       },
       rationale: { type: 'string', description: 'Why this option is worth comparing, in the user\u2019s terms.' },
+      whole_request: WHOLE_REQUEST,
     }, ['rationale']),
   },
   {
@@ -269,6 +281,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       from_words: FROM_WORDS,
       direction: { type: 'string', enum: ['positive', 'negative'], description: 'ONLY when the user said the link pushes the other way.' },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
+      whole_request: WHOLE_REQUEST,
     }, ['from_label', 'to_label', 'strength', 'rationale']),
   },
   {
