@@ -267,7 +267,10 @@ export type CallStructuredModel = (req: {
   reasoning_effort?: 'low' | 'medium' | 'high';
 }) => Promise<{
   text: string; usage?: Record<string, unknown>;
-  /** The Responses API's own completion status (AIX-001), e.g. `incomplete` with reason `max_output_tokens`. */
+  /**
+   * The Responses API's own completion status (AIX-001), e.g. `incomplete` with reason `max_output_tokens` —
+   * or the route's own `incomplete` / `construction_timeout`: the call ran out of turn budget, no answer came.
+   */
   status?: string; incomplete_reason?: string;
 }>;
 
@@ -1005,8 +1008,12 @@ export async function buildModelFromBrief(
     if (out.status === 'incomplete') cutOff = out.incomplete_reason ?? 'unspecified';
     if (out.text.length === 0) {
       // Measured failure mode: at too small a budget, reasoning consumes the
-      // whole allowance and no structured answer is emitted at all.
-      return { ok: false, mutated: false, refusal: 'no_structured_output' };
+      // whole allowance and no structured answer is emitted at all. A call that ended with NO answer (the route's own
+      // `construction_timeout`, or a cut-off before any text) carries the same typed label as a cut-off answer.
+      return {
+        ok: false, mutated: false, refusal: 'no_structured_output',
+        ...(cutOff !== undefined ? { incomplete_reason: cutOff, detail: `incomplete: ${cutOff}` } : {}),
+      };
     }
     candidate = JSON.parse(out.text) as CandidateModel;
   } catch (err) {

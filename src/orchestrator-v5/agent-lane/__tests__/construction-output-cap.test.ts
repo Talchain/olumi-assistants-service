@@ -33,6 +33,13 @@ import { narrateWriteOutcome, withWriteOutcome } from '../write-outcome.js';
 const MAX_OBSERVED_CONSTRUCTION_REASONING = 4896;
 const MAX_OBSERVED_CONSTRUCTION_ANSWER = 2040;
 const SERVED_CONSTRUCTION_NEED = MAX_OBSERVED_CONSTRUCTION_REASONING + MAX_OBSERVED_CONSTRUCTION_ANSWER;
+/**
+ * ⭐ THE CHOSEN CEILING, PINNED FROM ABOVE TOO (DL #2113 N2: 6937 or 100000 also passed a lower bound alone).
+ * 12000 ≈ 1.7× the served need of 6936 — the ~1.8x margin convention of `BANKED_BUDGETS`. Not higher: the call's
+ * own deadline (`constructionDeadline`, start + 100 s at the served 125 s proxy) lets at most ~8.7k tokens finish at the
+ * measured 76–87 tok/s, so a larger ceiling buys spend, never a model the user receives.
+ */
+const PINNED_CONSTRUCTION_CEILING = 12_000;
 
 const SCENARIO = '11111111-1111-4111-8111-111111111111';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'req-1' };
@@ -79,6 +86,7 @@ describe('(a) the construction call has room for the reasoning the served corpus
       `the construction ceiling (${seen[0]}) must leave room for ${MAX_OBSERVED_CONSTRUCTION_REASONING} reasoning + ` +
         `${MAX_OBSERVED_CONSTRUCTION_ANSWER} answer tokens — at 6000, 2/14 served first briefs were cut off`,
     ).toBeGreaterThan(SERVED_CONSTRUCTION_NEED);
+    expect(seen[0], 'the chosen ceiling, pinned from above: see PINNED_CONSTRUCTION_CEILING').toBe(PINNED_CONSTRUCTION_CEILING);
   });
 });
 
@@ -132,7 +140,16 @@ vi.mock('../../build-turn-context.js', async (importOriginal) => {
 });
 
 const BRIEF = 'Should we raise the Pro plan price to £59 to reach £20k MRR, keeping churn under 4%?';
-let constructionMode: 'cut_off' | 'malformed' = 'cut_off';
+/**
+ * `hang`: the FIRST construction call never answers (it ends only when its own signal aborts, else the stub gives up
+ * with a plain transport failure after STUB_GIVE_UP_MS). `headers_timeout`: the first call fails the way undici's 110 s
+ * headers timeout does. In both, any SECOND call answers at once with a valid model — the late model the DL found
+ * registered after the user was told the turn failed.
+ */
+let constructionMode: 'cut_off' | 'malformed' | 'hang' | 'headers_timeout' = 'cut_off';
+const STUB_GIVE_UP_MS = 8_000;
+/** How many hanging construction calls ended because THEIR OWN signal aborted (not the stub giving up). */
+let abortedBySignal = 0;
 let constructionBodies: Record<string, unknown>[] = [];
 let modelBodies: Record<string, unknown>[] = [];
 let script: Record<string, unknown>[] = [];
@@ -156,11 +173,29 @@ const constructionResponse = () => constructionMode === 'cut_off'
     usage: { input_tokens: 4584, output_tokens: 1200, output_tokens_details: { reasoning_tokens: 900 } },
   };
 
+const VALID_ANSWER = {
+  status: 'completed',
+  output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(CANDIDATE) }] }],
+  usage: { input_tokens: 4584, output_tokens: 2900, output_tokens_details: { reasoning_tokens: 2000 } },
+};
+
 function installFetch() {
-  vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
+  vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string; signal?: AbortSignal }) => {
     const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> & { text?: { format?: { type?: string } } };
     if (body.text?.format?.type === 'json_schema') {
       constructionBodies.push(body);
+      if (constructionMode === 'hang' || constructionMode === 'headers_timeout') {
+        if (constructionBodies.length > 1) return new Response(JSON.stringify(VALID_ANSWER), { status: 200 });
+        if (constructionMode === 'headers_timeout') {
+          throw Object.assign(new TypeError('fetch failed'), {
+            cause: Object.assign(new Error('Headers Timeout Error'), { name: 'HeadersTimeoutError', code: 'UND_ERR_HEADERS_TIMEOUT' }),
+          });
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          const giveUp = setTimeout(() => reject(new TypeError('fetch failed (stub: the call was never bounded)')), STUB_GIVE_UP_MS);
+          init?.signal?.addEventListener('abort', () => { clearTimeout(giveUp); abortedBySignal += 1; reject(init.signal!.reason); }, { once: true });
+        });
+      }
       return new Response(JSON.stringify(constructionResponse()), { status: 200 });
     }
     modelBodies.push(body);
@@ -233,4 +268,90 @@ describe('the route: the construction call as it goes over the wire', () => {
     expect(String(seen.detail)).toMatch(/SyntaxError/);
     expect(registered).toBe(0);
   });
+});
+
+// ─── DL CHANGES_REQUIRED on #2113 @ 6aa4f3c2: the construction call's OWN deadline, no retry of a timeout ──────────
+
+describe('the construction deadline: the arithmetic the route uses', () => {
+  it('ends the call by start + proxy − TURN_RESPONSE_HEADROOM_MS − CONSTRUCTION_TAIL_RESERVE_MS: 100 s at the served 125 s, under undici’s 110 s', async () => {
+    const { constructionDeadline, CONSTRUCTION_TAIL_RESERVE_MS } = await import('../../../routes/agent-v1-turn.js');
+    const { TURN_RESPONSE_HEADROOM_MS, DEFAULT_HTTP_CLIENT_TIMEOUT_MS } = await import('../../../config/timeouts.js');
+    expect(constructionDeadline(0, 125_000)).toBe(125_000 - TURN_RESPONSE_HEADROOM_MS - CONSTRUCTION_TAIL_RESERVE_MS);
+    expect(constructionDeadline(0, 125_000)).toBe(100_000);
+    expect(constructionDeadline(0, 125_000)).toBeLessThan(DEFAULT_HTTP_CLIENT_TIMEOUT_MS);
+  });
+});
+
+describe('the route: a construction call that runs out of turn budget is ONE call, typed, and registers nothing', () => {
+  /** 28 000 − 10 000 − 15 000 ⇒ the construction must end 3 s after the turn starts. */
+  const PROXY_MS = 28_000;
+  const WINDOW_MS = PROXY_MS - 10_000 - 15_000;
+  let app: FastifyInstance;
+  let n = 0;
+  const sid = () => `7b1e2d3c-4a5f-4e6d-8c7b-8a9f0e1d3c${String(n).padStart(2, '0')}`;
+  const turn = async () => {
+    script = [callTool('build_model_from_brief', { brief: BRIEF })];
+    const t0 = Date.now();
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: sid(), message: BRIEF } });
+    const ms = Date.now() - t0;
+    expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
+    return { ms, body: r.json() as { _agent: { tool_calls: Record<string, unknown>[] } } };
+  };
+  const expectTypedTimeout = (b: { _agent: { tool_calls: Record<string, unknown>[] } }) => {
+    // N1: the reason is where exports see it, not only in the Agent's tool result.
+    // No answer arrived, so the refusal is the no-answer one (its user words unchanged); the typed label is the truncation's.
+    expect(b._agent.tool_calls).toMatchObject([{ name: 'build_model_from_brief', ok: false, mutated: false, refusal: 'no_structured_output', incomplete_reason: 'construction_timeout' }]);
+    expect(buildResultSeenByTheModel()).toMatchObject({ refusal: 'no_structured_output', incomplete_reason: 'construction_timeout', detail: 'incomplete: construction_timeout' });
+  };
+
+  beforeAll(async () => {
+    installFetch();
+    process.env.AGENT_LANE_ENABLED = 'true';
+    process.env.AGENT_LANE_PREVIEW = 'false';
+    process.env.BROWSER_PROXY_TIMEOUT_MS = String(PROXY_MS);
+    app = await buildApp();
+  }, 120_000);
+  afterAll(async () => {
+    await app.close(); vi.unstubAllGlobals();
+    delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; delete process.env.BROWSER_PROXY_TIMEOUT_MS;
+  });
+  beforeEach(() => { n += 1; constructionBodies = []; modelBodies = []; script = []; registered = 0; abortedBySignal = 0; });
+
+  it('RED: a construction call that never answers is aborted at the deadline — exactly ONE call, typed `construction_timeout`, nothing registered', async () => {
+    constructionMode = 'hang';
+    const { ms, body } = await turn();
+    expect(constructionBodies, 'exactly one paid construction call — never a second after the timeout').toHaveLength(1);
+    expectTypedTimeout(body);
+    expect(registered, 'no model registered after the turn has failed').toBe(0);
+    expect(ms, `the turn answered inside the proxy less headroom (${PROXY_MS - 10_000} ms)`).toBeLessThan(PROXY_MS - 10_000);
+    expect(ms, 'the call was held to its deadline, not cut short').toBeGreaterThanOrEqual(WINDOW_MS - 1_000);
+    // Bound by the call's OWN abort, not by another bound (a stub give-up, a retry that finds the deadline spent).
+    expect(abortedBySignal, 'the construction call ended because its own signal fired').toBe(1);
+    expect(ms, `answered at the ${WINDOW_MS} ms deadline, not after the ${STUB_GIVE_UP_MS} ms stub give-up`).toBeLessThan(STUB_GIVE_UP_MS);
+  }, 60_000);
+
+  it('RED: undici’s headers timeout on the construction call is NOT transport-retried — one call, typed, the late second model never registered', async () => {
+    constructionMode = 'headers_timeout';
+    const { body } = await turn();
+    expect(constructionBodies, 'a timeout is not retried: no second paid call').toHaveLength(1);
+    expectTypedTimeout(body);
+    expect(registered, 'the second call’s model would register here').toBe(0);
+  }, 60_000);
+
+  it('RED: past the deadline no construction call starts at all — zero calls, typed `construction_timeout`', async () => {
+    // 25 000 − 10 000 − 15 000 ⇒ the deadline IS the turn's start.
+    process.env.BROWSER_PROXY_TIMEOUT_MS = '25000';
+    const { _resetConfigCache } = await import('../../../config/index.js');
+    _resetConfigCache();
+    try {
+      constructionMode = 'hang';
+      const { body } = await turn();
+      expect(constructionBodies, 'no paid call that cannot end before the browser gives up').toHaveLength(0);
+      expectTypedTimeout(body);
+      expect(registered).toBe(0);
+    } finally {
+      process.env.BROWSER_PROXY_TIMEOUT_MS = String(PROXY_MS);
+      _resetConfigCache();
+    }
+  }, 60_000);
 });

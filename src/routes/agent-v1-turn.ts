@@ -145,6 +145,44 @@ export const AGENT_TURN_CLAIM_WAIT = {
   everyMs: 1_000,
 };
 
+/**
+ * ⛔ THE CONSTRUCTION CALL ENDS BY ITS OWN DEADLINE, AND A TIMEOUT OF IT IS NEVER RETRIED
+ * (DL CHANGES_REQUIRED on #2113 @ 6aa4f3c2).
+ *
+ * Its only bound was the global undici Agent (`HTTP_CLIENT_TIMEOUT_MS`, 110 s headers timeout), and
+ * `onceMoreOnTransportFailure` retried that timeout. At the 12000 ceiling and the measured 76–87
+ * output tok/s, a call needing more than ~8.4–9.6k tokens timed out at 110 s, a SECOND paid call
+ * started, the browser proxy answered 504 at 125 s, and the server could register a model at ~220 s —
+ * after the user had been told the turn failed.
+ *
+ * The arithmetic, from this request's start (the origin `firstAnalysisDeadline` uses):
+ *     browserProxyTimeoutMs          125 000   the browser gives up here
+ *   − TURN_RESPONSE_HEADROOM_MS       10 000   the turn's response tail (the V5 turn budget's, as above)
+ *   − CONSTRUCTION_TAIL_RESERVE_MS    15 000   what must follow a build inside the turn: registration and
+ *                                              the Agent's one narrating hop (~10–15 s — the same hop
+ *                                              `FIRST_ANALYSIS_RESERVE_MS` reserves)
+ *   = the construction call must have ENDED by start + 100 s.
+ * Its abort budget is what remains of that when it starts (a conversation hop comes first), so it is
+ * always below 100 s and below the 110 s undici bound. A first analysis cannot start past its own,
+ * earlier deadline and says so (`first-analysis.ts`), so it needs no reserve here.
+ */
+export const CONSTRUCTION_TAIL_RESERVE_MS = 15_000;
+/** When the construction call must have ended, in a turn that began at `turnStartedAt`. */
+export function constructionDeadline(
+  turnStartedAt: number,
+  proxyTimeoutMs: number = config.proxy.browserProxyTimeoutMs,
+): number {
+  return turnStartedAt + proxyTimeoutMs - TURN_RESPONSE_HEADROOM_MS - CONSTRUCTION_TAIL_RESERVE_MS;
+}
+/** The typed reason a construction that ran out of turn budget carries — the truncation label's path. */
+export const CONSTRUCTION_TIMEOUT_REASON = 'construction_timeout';
+/** Our own abort (`AbortSignal.timeout`) and undici's own timeouts — the failures that must not be retried. */
+function isConstructionTimeout(err: unknown): boolean {
+  const e = err as { name?: unknown; cause?: { code?: unknown } } | null | undefined;
+  if (e?.name === 'TimeoutError' || e?.name === 'AbortError') return true;
+  return e?.cause?.code === 'UND_ERR_HEADERS_TIMEOUT' || e?.cause?.code === 'UND_ERR_BODY_TIMEOUT';
+}
+
 /** The conversation of record stays Olumi's; this is a per-process cache. */
 const histories = new HistoryStore();
 const proposals = new ProposalStore();
@@ -1097,8 +1135,24 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
    * Structured construction call. Separate from `callModel` because it is a
    * different contract: strict `json_schema` output and its own measured budget
    * (see BANKED_BUDGETS role 'whole'), not the conversation budget.
+   *
+   * `deadlineAt` is this turn's `constructionDeadline` — every attempt, the transport retry's too, gets
+   * only what remains of it. A timeout RETURNS a typed `construction_timeout` instead of throwing, so the
+   * retry (kept for a connection-level failure, e.g. a 196 ms `fetch failed`) never repeats it, and with
+   * no answer there is nothing to register.
    */
-  const callStructured: CallStructuredModel = async (reqBody) => onceMoreOnTransportFailure('construction', async () => {
+  const callStructured = async (
+    reqBody: Parameters<CallStructuredModel>[0],
+    deadlineAt: number,
+  ): ReturnType<CallStructuredModel> => onceMoreOnTransportFailure('construction', async () => {
+    const timedOut = (budgetMs: number, err?: unknown) => {
+      log.warn({ site: 'agent-v1-turn.callStructured', purpose: 'construction', budget_ms: budgetMs, ...(err !== undefined ? { err: String(err).slice(0, 200) } : {}) },
+        'agent-lane: construction call out of turn budget; not retried, nothing registered');
+      return { text: '', status: 'incomplete', incomplete_reason: CONSTRUCTION_TIMEOUT_REASON };
+    };
+    const budgetMs = deadlineAt - Date.now();
+    // Past the deadline no call starts: it could not end before the browser gives up.
+    if (budgetMs <= 0) return timedOut(budgetMs);
     /**
      * ⭐ THE MOST EXPENSIVE CALL IN THE PRODUCT, AND IT WAS THE ONE NOT MEASURED.
      *
@@ -1113,40 +1167,48 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * write was missing. Nothing new is fetched or computed here.
      */
     const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callStructured', { model: reqBody.model, purpose: 'construction' });
-    const r = await fetch(OPENAI_RESPONSES_URL, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: reqBody.model,
-        instructions: reqBody.instructions,
-        input: reqBody.input,
-        max_output_tokens: reqBody.max_output_tokens,
-        ...(reqBody.reasoning_effort !== undefined
-          ? { reasoning: { effort: reqBody.reasoning_effort } }
-          : {}),
-        text: {
-          format: {
-            type: 'json_schema',
-            name: 'whole_candidate',
-            strict: true,
-            schema: reqBody.schema,
-          },
-        },
-      }),
-    });
-    if (!r.ok) {
-      const text = await r.text();
-      throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
-    }
-    const j = (await r.json()) as {
+    let j: {
       output?: { type?: string; content?: { type?: string; text?: string }[] }[];
       usage?: Record<string, unknown>;
       status?: unknown;
       incomplete_details?: { reason?: unknown } | null;
     };
+    try {
+      const r = await fetch(OPENAI_RESPONSES_URL, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: reqBody.model,
+          instructions: reqBody.instructions,
+          input: reqBody.input,
+          max_output_tokens: reqBody.max_output_tokens,
+          ...(reqBody.reasoning_effort !== undefined
+            ? { reasoning: { effort: reqBody.reasoning_effort } }
+            : {}),
+          text: {
+            format: {
+              type: 'json_schema',
+              name: 'whole_candidate',
+              strict: true,
+              schema: reqBody.schema,
+            },
+          },
+        }),
+        // The call's OWN bound (see `constructionDeadline`), below the global 110 s undici one.
+        signal: AbortSignal.timeout(budgetMs),
+      });
+      if (!r.ok) {
+        const text = await r.text();
+        throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
+      }
+      j = (await r.json()) as typeof j;
+    } catch (err) {
+      if (isConstructionTimeout(err)) return timedOut(budgetMs, err);
+      throw err;
+    }
     let text = '';
     for (const item of j.output ?? []) {
       if (item.type !== 'message') continue;
@@ -1571,6 +1633,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * failed turn must never release its claim after one), and the witness record below.
      */
     const firstAnalysisDeadlineAt = firstAnalysisDeadline(startedAt);
+    /** The construction call's own end, from the same request start (see `constructionDeadline`). */
+    const constructionDeadlineAt = constructionDeadline(startedAt);
     let firstAnalysis: { outcome: FirstAnalysisOutcome; ms: number; constructionTurnId: string; revision: string } | undefined;
     const runFirstAnalysis = async (input: Parameters<typeof runFirstAnalysisAfterConstruction>[0]): Promise<FirstAnalysisOutcome> => {
       const t0 = Date.now();
@@ -1585,7 +1649,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     let lastRun: CapturedAnalysis | undefined;
     const capabilities = createAgentCapabilities(
-      countingDispatch, proposals, callStructured, mode,
+      countingDispatch, proposals, (reqBody) => callStructured(reqBody, constructionDeadlineAt), mode,
       (payload) => { lastRun = { ...payload, trigger: payload.trigger ?? 'explicit_run' }; },
       {
         firstAnalysis: (input) => runFirstAnalysis({ ...input, deadlineAt: firstAnalysisDeadlineAt }),

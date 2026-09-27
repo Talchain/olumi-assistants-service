@@ -143,6 +143,8 @@ export interface AgentTurnResult {
   readonly tool_calls: readonly {
     name: string; ok: boolean; mutated: boolean;
     proposal_id?: string; outcome?: string; refusal?: string;
+    /** Why a construction ended without an answer (`max_output_tokens`, `construction_timeout`) — for exports. */
+    incomplete_reason?: string;
   }[];
   /** Full results, so Olumi can decide what it owes the user this turn. */
   readonly tool_results: readonly ToolResult[];
@@ -205,7 +207,7 @@ export async function runAgentTurn(
   ];
   /** What this turn hands on as history: everything but the state it was given. */
   const handedOn = (): unknown[] => (stateItem === undefined ? items : items.filter((i) => i !== stateItem));
-  const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string }[] = [];
+  const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; incomplete_reason?: string }[] = [];
   const toolResults: ToolResult[] = [];
   let mutated = false;
   const now = input.now ?? (() => Date.now());
@@ -384,6 +386,7 @@ export async function runAgentTurn(
         ...(typeof result.proposal_id === 'string' ? { proposal_id: result.proposal_id } : {}),
         ...(typeof result.outcome === 'string' ? { outcome: result.outcome } : {}),
         ...(typeof result.refusal === 'string' ? { refusal: result.refusal } : {}),
+        ...(typeof result.incomplete_reason === 'string' ? { incomplete_reason: result.incomplete_reason } : {}),
       });
       toolResults.push(result);
       items.push({
