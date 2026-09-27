@@ -27,6 +27,7 @@
  * never blocks readiness itself: a readiness reader for D7's conflict belongs to the readiness owner.
  */
 
+import { pluraliseUnit } from '../../orchestrator-v5/tools/handlers/d1-shared/format-confirmation.js';
 import { STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 import type { EdgeProvenanceV3T } from '../../schemas/cee-v3.js';
 import { classifyUnitScaleClass, unitPinnedScaleFrame } from '../draft/records/unit-scale-class.js';
@@ -290,11 +291,22 @@ const isPercentLevel = (node: MagnitudeNode, frame: number | undefined): boolean
   return frame === 100 && unit !== undefined && isPercentWithPeriod(unit);
 };
 
+/**
+ * A unit said after exactly ONE: its HEAD noun (the last word before any "per" or "/") goes through the estate's one
+ * singular rule, `pluraliseUnit` ("1 subscriber", "1 enterprise customer per AE per 12 months", "1 hire/month"). Served
+ * on Paul's first reply as "by 1 subscribers" (AI Conversation #70 5852012649). The rest of the unit is kept as written.
+ */
+function unitAfterOne(unit: string): string {
+  const cut = unit.search(/\s+per\s|\s*\//i);
+  if (cut < 0) return pluraliseUnit(unit, 1);
+  return `${pluraliseUnit(unit.slice(0, cut), 1)}${unit.slice(cut)}`;
+}
+
 function amountWords(amount: number, target: MagnitudeNode, frame: number | undefined): string {
   const n = Math.abs(amount);
   if (isPercentLevel(target, frame)) return `${fmt(n)} point${n === 1 ? '' : 's'}`;
   const unit = unitOf(target);
-  return `${fmt(n)}${unit === undefined ? '' : ` ${unit}`}`;
+  return `${fmt(n)}${unit === undefined ? '' : ` ${n === 1 ? unitAfterOne(unit) : unit}`}`;
 }
 
 function levelWords(level: number, target: MagnitudeNode, frame: number): string {

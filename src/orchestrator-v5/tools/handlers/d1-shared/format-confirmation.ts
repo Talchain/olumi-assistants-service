@@ -51,9 +51,10 @@ export function formatValueWithUnit(value: number, unit?: string): string {
  * untouched: rare in the decision domain and better readable-but-imperfect
  * than mangled. Only the documented "1 months" → "1 month" class is fixed.
  */
-function pluraliseUnit(unit: string, value: number): string {
+export function pluraliseUnit(unit: string, value: number): string {
   if (Math.abs(value) !== 1) return unit;
-  if (/[a-z]{3,}s$/i.test(unit) && !/(?:ss|us|is)$/i.test(unit)) {
+  // "-ies", "-ses", "-xes", "-zes", "-ches", "-shes" are left whole: dropping the "s" would print "deliverie" or "boxe".
+  if (/[a-z]{3,}s$/i.test(unit) && !/(?:ss|us|is|ies|ses|xes|zes|ches|shes)$/i.test(unit)) {
     return unit.replace(/s$/i, '');
   }
   return unit;
