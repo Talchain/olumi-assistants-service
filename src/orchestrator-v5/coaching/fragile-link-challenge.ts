@@ -95,6 +95,15 @@ const CLAIM_FIELD = 'robustness';
  * `CoachingBlockSchema.safeParse` enforces them again, so a drift REFUSES the
  * card rather than shipping an over-long one.
  */
+/**
+ * ⭐ HOW A CARD THAT ASKS FOR THE USER'S FIGURE OR BELIEF ENDS (served 27 Sep, R&C dloop-2). It offers the authorised
+ * revision the question leads to, and still changes nothing without approval. The open-ended "Don't change the model
+ * or re-run anything yet." made the Agent refuse the user's NEXT message ("Our monthly churn is actually 12%" → "I have
+ * not changed or re-run anything", no proposal). The click turn itself stays write-free by typed authority
+ * (`chip-click-withholds-authority`), not by these words. Explain-only cards keep their no-change clause.
+ */
+export const ELICITATION_CLOSE = 'If I answer, offer to record my answer for me to approve, and change nothing until I do.';
+
 export const RUN_TURN_COACHING_CONTRACT = Object.freeze({
   version: 'run-turn-coaching/v1',
   block: Object.freeze({
@@ -213,10 +222,9 @@ export function composeAssumedLinkChallenge(
   const bodies = assumedLinkBodyForms(fromLabel, toLabel, firstPass);
   const prompts = [
     `Some of the numbers on the link from ${fromLabel} to ${toLabel} are Olumi's starting assumptions, and the `
-      + 'robustness check flagged the link as sensitive. Ask me what I believe about it and what that rests on. '
-      + 'Don\'t change the model or re-run anything yet.',
+      + `robustness check flagged the link as sensitive. Ask me what I believe about it and what that rests on. ${ELICITATION_CLOSE}`,
     `Some numbers on the link from ${fromLabel} to ${toLabel} are Olumi's starting assumptions. Ask me what I `
-      + 'believe about it and what that rests on. Don\'t change the model or re-run anything yet.',
+      + `believe about it and what that rests on. ${ELICITATION_CLOSE}`,
   ];
   return {
     title: 'Check an assumption Olumi made',
