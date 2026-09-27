@@ -11,7 +11,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { breakEvenFor, breakEvenLine, withBreakEvenAnswer } from '../break-even.js';
+import { breakEvenFor, breakEvenLine, goalNotCheckedLine, withBreakEvenAnswer } from '../break-even.js';
 import { deriveEmittedGoalDirection } from '../../goal-target/goal-direction.js';
 
 const served = JSON.parse(readFileSync(new URL('./fixtures/served-f8-run-graph-d6b09c0.json', import.meta.url), 'utf8')) as { nodes: Record<string, unknown>[]; edges: unknown[] };
@@ -108,5 +108,26 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
   it('CONTRAST: a one-paragraph reply gets the arithmetic at the end, and nothing is lost', () => {
     const para = breakEvenLine(breakEvenFor(graph())!);
     expect(withBreakEvenAnswer('No option can be put forward on MRR yet.', breakEvenFor(graph())!)).toBe(`No option can be put forward on MRR yet.\n\n${para}`);
+  });
+
+  /** F3 (DL #70 5851710093): the run brief's typed reason, as the served `013636Z/01` carried it. */
+  const NOT_CONVERTIBLE = { type: 'analysis_result', enrichment: { decision_brief: {
+    warning_codes: ['CONSTRAINT_NOT_CONVERTIBLE', 'GOAL_THRESHOLD_NOT_CONVERTIBLE'],
+    warnings: [{ code: 'GOAL_THRESHOLD_NOT_CONVERTIBLE', field: 'nodes[mrr].observed_state.baseline' }] } } };
+
+  it('RED (F3, served 013636Z): an unscored goal target is named, with why, from the typed reason and the stored target', () => {
+    expect(goalNotCheckedLine(graph(), NOT_CONVERTIBLE))
+      .toBe('Your MRR target of \u00a320,000/month is not checked yet: the model has no current MRR figure to measure it against.');
+  });
+
+  it('CONTRAST (F3, R&C B1): a goal that HAS a current figure is named with no cause — the code has seven reasons', () => {
+    const said = goalNotCheckedLine(graph((ns) => { node(ns, 'mrr').observed_state = { baseline: 0.49, raw_value: 9800, unit: 'GBP/month' }; }), NOT_CONVERTIBLE);
+    expect(said).toBe('Your MRR target of \u00a320,000/month was not checked in this analysis.');
+    expect(said).not.toContain('no current');
+  });
+
+  it('CONTRAST (F3): no typed reason, or no stated target, says nothing — never a guess', () => {
+    expect(goalNotCheckedLine(graph(), { type: 'analysis_result', enrichment: { decision_brief: { warning_codes: ['EVPI_UNAVAILABLE'] } } })).toBeNull();
+    expect(goalNotCheckedLine(graph((ns) => { delete node(ns, 'mrr').goal_threshold_raw; }), NOT_CONVERTIBLE)).toBeNull();
   });
 });

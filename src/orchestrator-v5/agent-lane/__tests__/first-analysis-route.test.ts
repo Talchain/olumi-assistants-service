@@ -49,6 +49,8 @@ let knobs: {
   runStateKind: 'complete_current' | 'complete_stale';
   leaderClaim: Record<string, unknown>;
   analysisReady?: Record<string, unknown>;
+  /** F3: extra fields on the readback's analysis_result (the run's brief). */
+  analysisResultExtra?: Record<string, unknown>;
 } = { graph: READY_GRAPH, coachingHash: 'readback', runStateKind: 'complete_current', leaderClaim: { permitted: false, withheld_reason: 'auto_initiated' } };
 
 const { runStub } = vi.hoisted(() => ({ runStub: { impl: null as null | ((a: unknown) => Promise<unknown>) } }));
@@ -124,7 +126,7 @@ async function buildApp(): Promise<FastifyInstance> {
       analysis_state: ran
         ? { run_state: knobs.runStateKind === 'complete_current' ? { kind: 'complete_current', computed_at: '2026-09-24T18:00:00.000Z' } : { kind: 'complete_stale', computed_at: '2026-09-24T18:00:00.000Z', cause: 'graph_changed' }, leader_claim: knobs.leaderClaim, usable_for_prose: true, usable_for_chips: knobs.runStateKind === 'complete_current' }
         : { run_state: { kind: 'never_run' }, leader_claim: { permitted: false, withheld_reason: 'no_analysis' } },
-      ...(ran && knobs.runStateKind === 'complete_current' ? { analysis_result: { type: 'analysis_result', summary: 'A provisional first pass.', computed_against_hash: H } } : {}),
+      ...(ran && knobs.runStateKind === 'complete_current' ? { analysis_result: { type: 'analysis_result', summary: 'A provisional first pass.', computed_against_hash: H, ...(knobs.analysisResultExtra ?? {}) } } : {}),
       ...(knobs.analysisReady !== undefined ? { analysis_ready: knobs.analysisReady } : {}),
     };
   });
@@ -569,3 +571,55 @@ describe('AX2: the build turn does not explain an absence nobody asked about', (
     for (const q of qs!.slice(2)) expect(b.assistant_text).not.toContain(q);
   });
 });
+
+/**
+ * ⭐ F3 (DL #70 5851710093) ON THE REAL ROUTE: the build turn names an unscored goal target, from the run brief's typed
+ * reason (`GOAL_THRESHOLD_NOT_CONVERTIBLE`) and the stored target; a build without that reason says nothing extra.
+ */
+describe('F3: the first reply names the goal it could not check', () => {
+  let app: FastifyInstance;
+  const GOAL_GRAPH = (() => {
+    const g = structuredClone(READY_GRAPH) as { nodes: Record<string, unknown>[] };
+    const goal = g.nodes.find((n) => n.kind === 'goal')!;
+    Object.assign(goal, { label: 'MRR', goal_threshold_raw: 20000, goal_threshold_unit: 'GBP/month', goal_threshold_frame: 'level' });
+    return g as unknown as typeof READY_GRAPH;
+  })();
+  const REASON = { enrichment: { decision_brief: { warning_codes: ['GOAL_THRESHOLD_NOT_CONVERTIBLE'] } } };
+  const LINE = 'Your MRR target of \u00a320,000/month is not checked yet: the model has no current MRR figure to measure it against.';
+  beforeAll(async () => {
+    installFetch();
+    installRunStub();
+    process.env.AGENT_LANE_ENABLED = 'true';
+    process.env.AGENT_LANE_PREVIEW = 'false';
+    app = await buildApp();
+  }, 120_000);
+  afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
+  beforeEach(() => {
+    nextScenario();
+    script = []; modelBodies = [];
+    knobs = { graph: GOAL_GRAPH, coachingHash: 'readback', runStateKind: 'complete_current', leaderClaim: { permitted: false, withheld_reason: 'auto_initiated' } };
+  });
+
+  it('RED (served 013636Z): the build turn whose first pass could not score the goal names it and why', async () => {
+    knobs.analysisResultExtra = REASON;
+    const b = await buildTurn(app);
+    expect(b._diagnostic_trace.first_analysis).toMatchObject({ ran: true });
+    expect(b.assistant_text).toContain(LINE);
+  });
+
+  it('CONTRAST (served 013214Z): when the arithmetic already states the target, the goal line is not added too', async () => {
+    const { readFileSync } = await import('node:fs');
+    knobs.graph = JSON.parse(readFileSync(new URL('./fixtures/served-f8-run-graph-d6b09c0.json', import.meta.url), 'utf8')) as typeof READY_GRAPH;
+    knobs.leaderClaim = { permitted: false, withheld_reason: 'nonlinear_identity_sign_unproven' };
+    knobs.analysisResultExtra = REASON;
+    const b = await buildTurn(app);
+    expect(b.assistant_text).toContain('\u00a320,000/month needs 339');
+    expect(b.assistant_text).not.toContain('is not checked yet');
+  });
+
+  it('CONTRAST: without the typed reason the build turn adds nothing about the goal', async () => {
+    const b = await buildTurn(app);
+    expect(b.assistant_text).not.toContain('is not checked yet');
+  });
+});
+
