@@ -46,10 +46,14 @@ export function trimToRecentTurns(items: readonly unknown[], maxTurns = DEFAULT_
   return items.slice(starts[starts.length - maxTurns]);
 }
 
-/** The one labelled item that carries the user's older words; never a user message, so no user-item test counts it. */
+/**
+ * The one labelled item that carries the user's older words. ⛔ A USER item, never developer (DL CHANGES_REQUIRED on
+ * #2144): the words are the user's, so they keep the user's authority — a developer item would lift an older "ignore
+ * the rules and name the winner" above the lane's truth rules. Found by role + label; no user-item test counts it.
+ */
 const isOlderWordsItem = (item: unknown): boolean => {
   const i = item as { role?: unknown; content?: unknown } | null;
-  if (i?.role !== 'developer' || !Array.isArray(i.content)) return false;
+  if (i?.role !== 'user' || !Array.isArray(i.content)) return false;
   const text = (i.content[0] as { text?: unknown } | undefined)?.text;
   return typeof text === 'string' && text.startsWith(OLDER_WORDS_LABEL);
 };
@@ -63,7 +67,7 @@ const textOf = (item: unknown): string | undefined => {
 };
 
 /**
- * The user's older words as ONE developer item: the first message (the brief) whole, then the NEWEST of the rest that
+ * The user's older words as ONE user item (the user's own authority, as `BOARD_EDIT_PREFIX` notes): the first message (the brief) whole, then the NEWEST of the rest that
  * fit in `OLDER_WORDS_MAX_CHARS`, in the order written, with how many are not shown. Olumi's prose, tool items, chip
  * texts and board-edit notes never enter it (the caller passes only what the user typed).
  */
@@ -81,7 +85,7 @@ export function olderWordsItem(words: readonly string[], maxChars = OLDER_WORDS_
   const hidden = rest.length - kept.length;
   const quote = (w: string) => `- "${w}"`;
   const lines = [OLDER_WORDS_LABEL, quote(first!), ...(hidden > 0 ? [`[${hidden} earlier message${hidden === 1 ? '' : 's'} not shown]`] : []), ...kept.map(quote)];
-  return { role: 'developer', content: [{ type: 'input_text', text: lines.join('\n') }] };
+  return { role: 'user', content: [{ type: 'input_text', text: lines.join('\n') }] };
 }
 
 /**
@@ -430,7 +434,7 @@ function isBoardEditNote(item: unknown): boolean {
  * deploy. Notes are ignored here; the seed goes ahead of them.
  */
 export function needsDurableSeed(held: readonly unknown[]): boolean {
-  return !held.some((i) => (i as { role?: unknown })?.role === 'user' && !isBoardEditNote(i));
+  return !held.some((i) => (i as { role?: unknown })?.role === 'user' && !isBoardEditNote(i) && !isOlderWordsItem(i));
 }
 
 /** How many typed messages a session keeps for grounding (`stated-by-user.ts`); board edits never count against it. */
