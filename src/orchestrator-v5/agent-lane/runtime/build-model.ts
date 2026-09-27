@@ -265,7 +265,11 @@ export type CallStructuredModel = (req: {
   model: string; instructions: string; input: string;
   max_output_tokens: number; schema: Record<string, unknown>;
   reasoning_effort?: 'low' | 'medium' | 'high';
-}) => Promise<{ text: string; usage?: Record<string, unknown> }>;
+}) => Promise<{
+  text: string; usage?: Record<string, unknown>;
+  /** The Responses API's own completion status (AIX-001), e.g. `incomplete` with reason `max_output_tokens`. */
+  status?: string; incomplete_reason?: string;
+}>;
 
 /**
  * ⭐ THE CONSTRUCTION'S OPERATION IDENTITY — derived, never minted.
@@ -986,6 +990,9 @@ export async function buildModelFromBrief(
 ): Promise<ToolResult> {
   const budget = budgetFor('gpt-5.6-terra', 'whole');
   let candidate: CandidateModel;
+  // ⛔ A CUT-OFF ANSWER IS SAID AS ONE, NEVER AS THE PARSE ERROR IT CAUSES (served 770a477: 2/14 first briefs stopped
+  // at output_tokens 6000 exactly and the refusal carried a SyntaxError). Same user words (`construction_failed`).
+  let cutOff: string | undefined;
   try {
     const out = await callStructured({
       model: budget.model,
@@ -995,6 +1002,7 @@ export async function buildModelFromBrief(
       reasoning_effort: budget.reasoning_effort,
       schema: buildCandidateSchema(),
     });
+    if (out.status === 'incomplete') cutOff = out.incomplete_reason ?? 'unspecified';
     if (out.text.length === 0) {
       // Measured failure mode: at too small a budget, reasoning consumes the
       // whole allowance and no structured answer is emitted at all.
@@ -1002,6 +1010,9 @@ export async function buildModelFromBrief(
     }
     candidate = JSON.parse(out.text) as CandidateModel;
   } catch (err) {
+    if (cutOff !== undefined) {
+      return { ok: false, mutated: false, refusal: 'construction_failed', incomplete_reason: cutOff, detail: `incomplete: ${cutOff}` };
+    }
     return { ok: false, mutated: false, refusal: 'construction_failed', detail: String(err).slice(0, 200) };
   }
 

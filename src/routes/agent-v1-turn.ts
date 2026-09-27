@@ -1144,6 +1144,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const j = (await r.json()) as {
       output?: { type?: string; content?: { type?: string; text?: string }[] }[];
       usage?: Record<string, unknown>;
+      status?: unknown;
+      incomplete_details?: { reason?: unknown } | null;
     };
     let text = '';
     for (const item of j.output ?? []) {
@@ -1153,7 +1155,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Same contract as the conversation path: never throws, and records nothing for a
     // malformed payload, so measuring a call cannot turn a successful one into a failure.
     recordProviderUsage(usageHandle, j.usage);
-    return { text, usage: j.usage };
+    // ⛔ COMPLETION STATUS IS PART OF THE CONTRACT HERE TOO (AIX-001, as `callModel`). It was dropped, so an answer the
+    // output cap cut off (served 770a477: output_tokens 6000 exactly, 2/14 first briefs) read as a parse error.
+    const incompleteReason = typeof j.incomplete_details?.reason === 'string' ? j.incomplete_details.reason : undefined;
+    if (j.status === 'incomplete') {
+      log.warn({ site: 'agent-v1-turn.callStructured', purpose: 'construction', incomplete_reason: incompleteReason ?? null, max_output_tokens: reqBody.max_output_tokens }, 'agent-lane: construction answer incomplete');
+    }
+    return {
+      text,
+      usage: j.usage,
+      ...(typeof j.status === 'string' ? { status: j.status } : {}),
+      ...(incompleteReason !== undefined ? { incomplete_reason: incompleteReason } : {}),
+    };
   }, (call, err) => log.warn({ err, call }, 'agent-lane transport failure, retrying once'));
 
   /*
