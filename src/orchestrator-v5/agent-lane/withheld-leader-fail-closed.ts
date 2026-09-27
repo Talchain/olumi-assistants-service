@@ -970,12 +970,14 @@ const BY_WITHHELD_REASON: Readonly<Record<string, string>> = {
   // no graph, so the limit is not named here, and no figure (a comparative reads as ranking); it says what is true and
   // asks what to change — never "run again", which cannot help.
   [WITHHELD_NO_OPTION_MEETS_LIMIT]:
-    'because no option meets one of your limits on this run; tell me whether to change that limit or one of the options',
+    // ⛔ Only moves a served writer can make (DL 5851485153): no writer edits a limit on a non-goal node, so never
+    // "change that limit" — change or add an option, or give a figure the user knows (set_factor_value).
+    'because no option meets one of your limits on this run; tell me whether to change one of the options or add one that could stay within it, or give me a real figure you know',
   // F-LIMIT tier 2: each option under AI Quality's 0.5 rule on the same limit (ruling 5842498806: "more likely than not
   // … on these estimates", never "meets"). Said as "would probably break": this module's own guard reads the
   // comparative "more likely than" as ranking the options.
   [WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT]:
-    'because on these estimates every option would probably break one of your limits; tell me whether to change that limit or one of the options',
+    'because on these estimates every option would probably break one of your limits; tell me whether to change one of the options or add one, or give me a real figure you know',
   // C46 (H7): the goal and factors are named by the Agent's `claim_permissions.nonlinear_identity.say`; this
   // deterministic clause names the missing capability without them, and never asks for a re-run that cannot help.
   // ⛔ WHOSE READING (C46 N-c, `admit-model.ts` `productIdentityClause`): this map has no graph, so it cannot see

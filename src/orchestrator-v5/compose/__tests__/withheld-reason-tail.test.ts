@@ -115,6 +115,21 @@ describe('composeWithheldReasonTail — it answers, for every state that withhol
     expect(answer!.text).toContain('Which one that is has not been recorded');
   });
 
+  // DL 5851485153 (a): offer only moves a served writer can make. No writer edits a limit on a non-goal node, so
+  // "Relax that limit" promised an approval that cannot exist (R&C 5851522996 found both copies, :296 and :315).
+  it('never asks the user to relax or change the limit itself — only to bring in an option or give a real figure', () => {
+    for (const state of WITHHOLDING_STATES) {
+      for (const constraints of [[], ONE, TWO, UNLABELLED]) {
+        const text = composeWithheldReasonTail(state, constraints)?.text ?? '';
+        expect(text, `${state} ${JSON.stringify(constraints)}`).not.toMatch(/(relax|change|raise|loosen) (that|the|your) limits?/i);
+      }
+    }
+    for (const constraints of [ONE, UNLABELLED]) {
+      const text = composeWithheldReasonTail('evaluated_infeasible', constraints)!.text;
+      expect(text).toMatch(/Bring in an option that can meet it, or give me a real figure you know/);
+    }
+  });
+
   it('evaluated_infeasible never claims that NO option satisfies the condition', () => {
     // The brief's premise, refuted at the code:
     // `deriveWinnerConstraintInfeasibility` evaluates ONLY the winner, so a
