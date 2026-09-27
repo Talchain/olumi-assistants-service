@@ -10,6 +10,8 @@
  * move together, that the given state never enters the history, and that superseded snapshots are pruned.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { runAgentTurn } from '../runtime/agent-loop.js';
 import { issueContextPacket } from '../runtime/request-assembly.js';
 import * as historyStore from '../history-store.js';
@@ -180,5 +182,16 @@ describe('C1 — a superseded snapshot is not kept in the history', () => {
     expect(pruned).toHaveLength(items.length);
     const callIds = new Set(pruned.filter((i) => (i as { type?: string }).type === 'function_call').map((i) => (i as { call_id: string }).call_id));
     for (const o of pruned.filter((i) => (i as { type?: string }).type === 'function_call_output')) expect(callIds.has((o as { call_id: string }).call_id)).toBe(true);
+  });
+});
+
+describe('C1 follow-up — the route\u2019s own system prompt says the same as the given item', () => {
+  it('RED: the Agent instructions line about CURRENT MODEL STATE says a later tool result in the turn supersedes it', () => {
+    // AGENT_INSTRUCTIONS is module-private; the line is read from the route source, as the estate's scanner tests do.
+    const src = readFileSync(fileURLToPath(new URL('../../../routes/agent-v1-turn.ts', import.meta.url)), 'utf8');
+    const lines = src.split('\n').filter((l) => l.includes('Each turn opens with a CURRENT MODEL STATE input'));
+    expect(lines, 'control: exactly one instructions line names the given state').toHaveLength(1);
+    expect(lines[0]).toContain('supersedes it');
+    expect(lines[0]).toContain('describe the model from the latest');
   });
 });
