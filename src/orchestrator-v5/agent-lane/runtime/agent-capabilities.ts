@@ -860,6 +860,14 @@ export function createAgentCapabilities(
   opts: {
     readonly firstAnalysis?: (input: FirstAnalysisInput) => Promise<FirstAnalysisOutcome>;
     /**
+     * ⭐ C6-1: told ONCE, the moment a construction THIS request committed is confirmed from state — before the
+     * first analysis and before the Agent's reply — with the graph exactly as read back. The route turns it into
+     * the streamed `GRAPH_READY` frame (nothing at all outside a streamed turn), so the canvas draws the model
+     * ~15 s before COMPLETE. The same committing-path gate as the first analysis: never on a refusal or a replay.
+     * An observer only — a throw here is swallowed and never costs the build. Absent ⇒ nothing is told.
+     */
+    readonly onModelRegistered?: (graph: Record<string, unknown>) => void;
+    /**
      * The pending actions on the scenario's LATEST answer row, as the session store returns them. The held
      * add-option proposal lives there (route-v2 minted it), so a `gmh_` approval is confirmed against what the
      * store actually holds — never against a copy this process remembered. Absent ⇒ a held approval refuses.
@@ -3923,6 +3931,14 @@ export function createAgentCapabilities(
       const after = await readGraph(ctx.scenario_id);
       if (after === null || after.nodes.length === 0) {
         return { ok: false, mutated: false, refusal: 'model_not_readable_after_write' };
+      }
+      /**
+       * ⭐ C6-1: THE MODEL EXISTS NOW — say so before the first analysis and the reply (~15 s of the first brief).
+       * Only the request whose construction COMMITTED (the first analysis's own gate, below): a recovered version
+       * (`replayed: true`) was already shown by the turn that built it, and a refusal returned above.
+       */
+      if (built.mutated === true && built.replayed !== true) {
+        try { opts.onModelRegistered?.(after.raw); } catch { /* an observer never costs the build */ }
       }
       /**
        * ⭐ THE FIRST ANALYSIS, RUN BY OLUMI, ONCE (Paul, 5812069638) — ONLY when this request is the one

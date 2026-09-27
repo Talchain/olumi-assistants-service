@@ -38,9 +38,12 @@
  * The store holds a `void`-returning emitter plus a read-only-to-consumers
  * observation record (ROADMAP 2.735 — whether a GRAPH_READY frame was emitted).
  * It cannot be read by anything that does not import this module. Complete
- * consumer manifest, derived by grep at 2026-08-06:
+ * consumer manifest, derived by grep at 2026-08-06, extended 2026-09-27 (C6-1):
  *   · `orchestrator/tools/draft-graph.ts`      → `currentStageEmitter()`
  *   · `orchestrator/route-v2.ts`               → `graphPreviewEmitted()`
+ *   · `routes/agent-v1-turn.ts`                → `currentStageEmitter()` — ONE
+ *     `GRAPH_READY` when the agent lane's construction commits (the
+ *     `onModelRegistered` hook), before its first analysis and reply
  * It is set only for the duration of one streamed turn, so a concurrent
  * buffered turn — which runs in its own async context — reads `undefined` and
  * behaves exactly as it did before this lane. That is the mechanism behind
@@ -82,7 +85,8 @@ const stageStreamStore = new AsyncLocalStorage<StageStreamContext>();
  *
  * ROADMAP 2.735: the installed emitter is a RECORDING WRAPPER around the
  * caller's. Because `currentStageEmitter()` is the only way to reach the
- * ambient emitter (complete consumer manifest: `orchestrator/tools/draft-graph.ts`),
+ * ambient emitter (complete consumer manifest: `orchestrator/tools/draft-graph.ts`
+ * and `routes/agent-v1-turn.ts`),
  * every stage event the pipeline emits on a streamed turn passes through this
  * wrapper — so {@link graphPreviewEmitted} is DERIVED from the emissions
  * themselves and cannot drift from them. The flag is set BEFORE delegating, so

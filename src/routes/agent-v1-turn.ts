@@ -69,6 +69,7 @@ import { computeSurvivingPriorPendingsDetailed } from '../orchestrator-v5/commit
 import { GM_HELD_HANDLER_ID } from '../orchestrator-v5/handlers/edit-graph-referee-gate.js';
 import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
+import { currentStageEmitter } from '../cee/unified-pipeline/stage-stream-context.js';
 import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runDeltaBoundToReadback, runTurnNextMove, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
@@ -1576,6 +1577,31 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       (payload) => { lastRun = { ...payload, trigger: payload.trigger ?? 'explicit_run' }; },
       {
         firstAnalysis: (input) => runFirstAnalysis({ ...input, deadlineAt: firstAnalysisDeadlineAt }),
+        /**
+         * ⭐ C6-1: THE CANVAS DRAWS THE FIRST MODEL WHEN IT IS REGISTERED, NOT AT THE END OF THE TURN.
+         *
+         * Measured (DL C6, 25 served first briefs): ~15 s of a 79 s median first brief comes after the model is
+         * saved — reads, the first analysis, the Agent's closing calls — and the browser saw none of it until
+         * COMPLETE, because the only `GRAPH_READY` producer was the v2 engine's draft tool. The UI already draws
+         * this frame on arrival (`consumeStreamedDraftTurn`), without autosave, and checks it against COMPLETE.
+         *
+         * The committed graph as read back, through the SAME projection COMPLETE's `draft_graph` uses below, so
+         * the ids cannot drift. Structure only: at this line no analysis, leader or claim exists for this model.
+         * `currentStageEmitter()` is set only inside `/proxy/v5/turn/stream` and `/orchestrate/v2/turn/stream`;
+         * every buffered turn reads `undefined` and emits nothing, so its body is untouched by construction.
+         */
+        onModelRegistered: (raw) => {
+          const emitStage = currentStageEmitter();
+          if (emitStage === undefined || !Array.isArray(raw.nodes) || raw.nodes.length === 0) return;
+          // The persisted graph as read back — the same single cast COMPLETE's readback makes (`after.json.graph`).
+          const g = raw as GraphV3T;
+          emitStage({
+            kind: 'GRAPH_READY',
+            graph: buildAppliedGraphWireField({ ...g, edges: Array.isArray(g.edges) ? g.edges : [] }),
+            schema_version: 'v3',
+            elapsed_ms: Date.now() - startedAt,
+          });
+        },
         // The held add-option (C52) is confirmed against the store's LATEST answer row — the row route-v2 reads.
         ...(typeof store.readMostRecentPendingActions === 'function'
           ? { readPendingActions: (sid: string) => store.readMostRecentPendingActions!(sid) }
