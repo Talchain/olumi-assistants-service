@@ -73,6 +73,7 @@ import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lan
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runDeltaBoundToReadback, runTurnCoaching, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
 import { breakEvenFor, goalNotCheckedLine, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
+import { leaderStandingOf, provisionalViewOfTurn, withProvisionalView } from '../orchestrator-v5/agent-lane/provisional-view.js';
 import {
   bindRunBlocksToReadback,
   firstAnalysisDeadline,
@@ -392,8 +393,13 @@ const AGENT_INSTRUCTIONS = [
    * framed the result in "winner" / "best option" terms — often to deny one, yet
    * the vocabulary itself casts the finding as picking an answer. The useful move is the one the science supports: point at what the
    * ordering is sensitive to, and let the user change it and see how much it matters.
+   *
+   * ⭐ C5 (Paul, DL #70 5855324470, 27 Sep: "Yes, labelled provisional"): this used to forbid any recommendation and any
+   * step to make an unchecked limit checkable. When a leader cannot be named, the Agent may now give its OWN provisional
+   * view — through `give_provisional_view`, never in its reply text — which the route shows after the leader gate,
+   * labelled, with the one step that would let the analysis confirm it. Every rule about the ANALYSIS result is unchanged.
    */
-  'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one. Name a leading option ONLY when the result you are reporting carries `claim_permissions.leader_may_be_named: true`; an earlier analysis read from get_canonical_state carries no such permission, so never name a leader from it. Otherwise do not name, rank or hint at one, and do not quote win percentages as a ranking, whatever else the result contains \u2014 say in plain words why no option can be put forward yet. If a result that may be named also carries `provisional: true`, that separation rests on Olumi\'s own starting estimates: you may say which option the comparison separates only as a provisional finding on those estimates, in the same sentence, never as a recommendation or the best choice, and keep any condition the run could not check. When `leader_may_be_named` is false, the finding you lead with is why no option can be put forward \u2014 not which option the comparison favours. Do not say, even hedged or \u201con current assumptions\u201d, that any option leads, is favoured, scores or comes out highest, strongest or best, is ahead, or wins in any share of runs; describe robustness and sensitivity without saying which option they favour. Name an assumption the ordering is sensitive to ONLY from the result\u2019s `decision_sensitivity`: when its status is `measured`, name `most_sensitive`, say whether it comes from the user or is Olumi\u2019s estimate (or that its source is not recorded), and offer to change it; when it is `none_measurable`, say that no single assumption measurably changes which option leads; otherwise make no claim about which assumption matters most. When the result is fragile or a near tie, say that this uncertainty is itself the finding. When the run says a limit cannot be checked in this model yet, say so plainly and do not suggest any step, input or model change to make it checkable.',
+  'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never presented as the analysis recommending an option. Never call an option the winner, the best option or the recommended one. Name a leading option ONLY when the result you are reporting carries `claim_permissions.leader_may_be_named: true`; an earlier analysis read from get_canonical_state carries no such permission, so never name a leader from it. Otherwise do not name, rank or hint at one, and do not quote win percentages as a ranking, whatever else the result contains \u2014 say in plain words why no option can be put forward yet. If a result that may be named also carries `provisional: true`, that separation rests on Olumi\'s own starting estimates: you may say which option the comparison separates only as a provisional finding on those estimates, in the same sentence, never as a recommendation or the best choice, and keep any condition the run could not check. When `leader_may_be_named` is false, the finding you lead with is why no option can be put forward \u2014 not which option the comparison favours. Do not say, even hedged or \u201con current assumptions\u201d, that any option leads, is favoured, scores or comes out highest, strongest or best, is ahead, or wins in any share of runs; describe robustness and sensitivity without saying which option they favour. Name an assumption the ordering is sensitive to ONLY from the result\u2019s `decision_sensitivity`: when its status is `measured`, name `most_sensitive`, say whether it comes from the user or is Olumi\u2019s estimate (or that its source is not recorded), and offer to change it; when it is `none_measurable`, say that no single assumption measurably changes which option leads; otherwise make no claim about which assumption matters most. When the result is fragile or a near tie, say that this uncertainty is itself the finding. When the run says a limit cannot be checked in this model yet, say so plainly. When a leader cannot be named, you may give your own provisional view by calling give_provisional_view once: what you would do, your reasoning from the model\u2019s facts and the user\u2019s own words, and the ONE step that would let the analysis confirm or overturn it \u2014 a step the user can take or a change one of your tools can propose, never one that cannot help. Never write that view in your reply text: Olumi shows it beneath your reply, labelled as your provisional view and never as the analysis result, and your reply text still never names, ranks or favours an option.',
   /*
    * ⭐ CHALLENGE → AUTHORISED REVISION → RERUN. Served (F) row F8 on 319dde1: asked to record a link as strong, as
    * the user's own estimate, the Agent said it could not. propose_link_strength reaches the product's own link writer.
@@ -588,10 +594,13 @@ export function leavesProposalAwaitingApproval(
  */
 export function withAnalysisAnswerShape<T extends { assistant_text?: unknown; blocks?: unknown; suggested_actions?: unknown }>(
   body: T,
-  turn: { proposalAwaitingApproval?: boolean; leaderGateEditedText?: boolean } = {},
+  turn: { proposalAwaitingApproval?: boolean; leaderGateEditedText?: boolean; provisionalViewShown?: boolean } = {},
 ): T {
   if ('_answer_shape' in body) return body;
   if (turn.proposalAwaitingApproval === true || offersApproval(body)) return body;
+  // ⛔ C5: the Agent's provisional view closes the reply with its label and its reason; a shape would put them behind
+  // "Show more", or cut the label from the view. Ship it whole, as a gate-edited reply ships.
+  if (turn.provisionalViewShown === true) return body;
   // ⛔ The leader gate rewrote this text: its no-leader sentence and next action close the reply, and a
   // shape would put them behind "Show more" (independent review of #1914, 5832549611). Ship it whole, as
   // route-v2 does when its gate edits the text.
@@ -1538,6 +1547,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           writesDispatched += 1;
           return commitOptionLevelsInProcess(input, String(req.id));
         },
+        // ⭐ C5: the provisional view is accepted only while the analysis withholds its leader — read from THIS route's
+        // readback through the wire gate's own predicate, so the capability and the gate below cannot disagree.
+        readLeaderStanding: async (sid: string) => leaderStandingOf(await readBackState(dispatch, sid)),
       },
     );
     // A session whose in-process history holds no user message (a restart, a
@@ -2174,6 +2186,27 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       wireBody = { ...wireBody, assistant_text: withBreakEvenAnswer(wireBody.assistant_text, breakEven) };
     }
     /**
+     * ⭐ C5 — THE AGENT'S PROVISIONAL VIEW (Paul, DL #70 5855324470: "Yes, labelled provisional"). AFTER the leader gate
+     * on purpose: a view ranks an option, and the gate — unchanged, the truth boundary for anything presented as the
+     * analysis's result — would strip it. So it never rides in the model's prose: the Agent gives it through the typed
+     * `give_provisional_view` tool, and it is appended here as ONE server-owned paragraph that opens on its label and on
+     * why the analysis cannot confirm it (`provisional-view.ts`). Only when the Agent gave one this turn (never composed
+     * for it) AND this FINAL readback still withholds the leader on a completed analysis, by the gate's own predicate.
+     * Never in `blocks`, the analysis card or any leader field.
+     */
+    const givenView = provisionalViewOfTurn(result.tool_calls, result.tool_results);
+    const standing = givenView === null ? null : leaderStandingOf({ analysisState, analysisReady, analysisResult });
+    const provisionalView = givenView !== null && standing !== null && standing.analysis_on_record && standing.withheld
+      && typeof wireBody.assistant_text === 'string'
+      ? { ...givenView, because: standing.because }
+      : null;
+    if (provisionalView !== null) {
+      wireBody = { ...wireBody, assistant_text: withProvisionalView(String(wireBody.assistant_text), provisionalView, provisionalView.because) };
+    } else if (givenView !== null) {
+      log.warn({ scenario_id: scenarioId, analysis_on_record: standing?.analysis_on_record ?? null, withheld: standing?.withheld ?? null },
+        'agent-lane: a provisional view was given but the final readback does not withhold the leader — it is not shown');
+    }
+    /**
      * ⭐ HEADLINE FIRST ON AN ANALYSIS REPLY — see `withAnalysisAnswerShape`. HERE, and nowhere earlier:
      * this is after the last rewrite of `assistant_text` on this route (write-claim removal, disclosures,
      * proposal-id scrub, the leader gate above), so the shape is built from the prose the user receives,
@@ -2184,6 +2217,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     wireBody = withAnalysisAnswerShape(wireBody, {
       proposalAwaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
       leaderGateEditedText,
+      provisionalViewShown: provisionalView !== null,
     });
 
     /**
@@ -2346,6 +2380,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // ⭐ AX1 (DL #70 5850280205: "a typed `break_even` state fact"): the arithmetic the paragraph above says, as
         // data — every figure, whose it is, and the target line — so a surface or a rewording never re-derives it.
         ...(breakEven !== null ? { break_even: breakEven } : {}),
+        // ⭐ C5: the Agent's provisional view as shown above — typed, so a surface can render it apart from the analysis.
+        ...(provisionalView !== null ? { provisional_view: provisionalView } : {}),
       },
       /**
        * ⭐ EVERY GENERATIVE ATTEMPT THIS TURN MADE, off the provider policy's ledger

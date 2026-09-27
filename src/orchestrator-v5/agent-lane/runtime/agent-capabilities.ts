@@ -136,6 +136,7 @@ import { howStronglyWords } from '../strength-authorship-words.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel } from '../goal-current-level.js';
+import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
 
@@ -850,6 +851,12 @@ export function createAgentCapabilities(
      * and `model_version_receipt`). Absent ⇒ unavailable.
      */
     readonly commitOptionLevels?: (input: CommitOptionLevelsInput) => Promise<CommitOptionLevelsResult>;
+    /**
+     * ⭐ C5: whether the scenario's current analysis withholds its leader, read by the ROUTE from its own readback
+     * through the wire gate's own predicate (`leaderStandingOf`) — so this capability and the gate cannot disagree.
+     * Absent, `null` or throwing ⇒ the provisional view is refused (fail closed).
+     */
+    readonly readLeaderStanding?: (scenarioId: string) => Promise<LeaderStanding | null>;
   } = {},
 ): AgentCapabilities {
   const readOnly = mode === 'preview';
@@ -4216,6 +4223,51 @@ export function createAgentCapabilities(
     async proposeGoalCurrentLevel(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       return proposeGoalCurrentLevel({ readGraph, proposals }, ctx, args);
+    },
+
+    /**
+     * ⭐ C5 — THE AGENT'S PROVISIONAL VIEW (Paul, DL #70 5855324470). Read-only, and never a claim about the analysis:
+     * it is accepted only while the current analysis WITHHOLDS its leader, and the route renders it after the leader
+     * gate, labelled (`../provisional-view.ts`). When a leader may be named there is nothing provisional to add — the
+     * analysis speaks, under its own permission.
+     */
+    async giveProvisionalView(ctx, args): Promise<ToolResult> {
+      const checked = checkProvisionalView(args);
+      if (!checked.ok) {
+        return {
+          ok: false, mutated: false, refusal: 'invalid_provisional_view', field: checked.field, problem: checked.problem,
+          ...(checked.limit !== undefined ? { limit: checked.limit } : {}),
+          detail: 'Nothing was shown. The view is at most 2 sentences, the reasoning at most 3 and the confirming step ONE; '
+            + `\`${checked.field}\` was ${checked.problem.replace(/_/g, ' ')}. Call give_provisional_view again with it fixed.`,
+        };
+      }
+      let standing: LeaderStanding | null = null;
+      try { standing = opts.readLeaderStanding === undefined ? null : await opts.readLeaderStanding(ctx.scenario_id); } catch { standing = null; }
+      if (standing === null) {
+        return {
+          ok: false, mutated: false, refusal: 'standing_unreadable',
+          detail: 'Olumi could not read whether the analysis may name an option, so no provisional view is shown. Do not give one in your reply text.',
+        };
+      }
+      if (!standing.analysis_on_record) {
+        return {
+          ok: false, mutated: false, refusal: 'no_analysis',
+          detail: 'No analysis of this model has completed, so there is nothing for a provisional view to stand beside. Nothing was '
+            + 'shown. Say what the analysis still needs, or offer to run it.',
+        };
+      }
+      if (!standing.withheld) {
+        return {
+          ok: false, mutated: false, refusal: 'not_withheld',
+          detail: 'The current analysis may name a leading option, so there is nothing provisional to add. Nothing was shown: report '
+            + 'what the analysis says, under its own permission.',
+        };
+      }
+      return {
+        ok: true, mutated: false, provisional_view: checked.view,
+        detail: 'Olumi shows this beneath your reply as one paragraph, labelled as your provisional view, with why the analysis '
+          + 'cannot confirm it yet. Do not repeat it, and do not rank or favour an option in your reply text.',
+      };
     },
 
     async runAnalysis(ctx, args): Promise<ToolResult> {

@@ -24,9 +24,22 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
   return { ...actual, resolveUserIdentity: async () => ({ mode: 'off' }) };
 });
 
-/** The measured clause, as the model reads it. */
+/**
+ * The clause, as the model reads it. ⭐ C5 (Paul's ruling, DL #70 5855324470, 27 Sep: "Yes, labelled provisional"):
+ * the measured prohibition — "and do not suggest any step, input or model change to make it checkable" — is REPLACED.
+ * The limit is still said plainly; a step now reaches the user only as the ONE confirming step of the Agent's typed
+ * provisional view (`give_provisional_view`), rendered after the leader gate, and it must be one the user can take or
+ * a tool can propose — never one that cannot help (the futile-step failure the prohibition was measured against).
+ */
 const CLAUSE =
-  'When the run says a limit cannot be checked in this model yet, say so plainly and do not suggest any step, input or model change to make it checkable.';
+  'When the run says a limit cannot be checked in this model yet, say so plainly. When a leader cannot be named, you may give your own '
+  + 'provisional view by calling give_provisional_view once: what you would do, your reasoning from the model\u2019s facts and the '
+  + 'user\u2019s own words, and the ONE step that would let the analysis confirm or overturn it \u2014 a step the user can take or a '
+  + 'change one of your tools can propose, never one that cannot help. Never write that view in your reply text: Olumi shows it '
+  + 'beneath your reply, labelled as your provisional view and never as the analysis result, and your reply text still never names, '
+  + 'ranks or favours an option.';
+/** The prohibition Paul's ruling replaced — it must not reach the model beside the clause that replaced it. */
+const REPLACED = 'do not suggest any step, input or model change to make it checkable';
 /** The rule it follows — its placement is part of what was measured. */
 const ANCHOR = 'When the result is fragile or a near tie, say that this uncertainty is itself the finding.';
 
@@ -69,6 +82,7 @@ describe('the unchecked-limit clause reaches the model on every reply-writing ca
     const instructions = String(modelBodies[0]!['instructions']);
     expect(instructions).toContain(`${ANCHOR} ${CLAUSE}`);
     expect(instructions.split(CLAUSE), 'stated once, not repeated').toHaveLength(2);
+    expect(instructions).not.toContain(REPLACED);
   });
 
   it('RED: the Agent’s own call (words, not the Run chip) carries the same clause', async () => {
@@ -77,5 +91,8 @@ describe('the unchecked-limit clause reaches the model on every reply-writing ca
     const agentCall = modelBodies.find((b) => b['tool_choice'] !== 'none');
     expect(agentCall, 'the Agent made its own call').toBeDefined();
     expect(String(agentCall!['instructions'])).toContain(`${ANCHOR} ${CLAUSE}`);
+    expect(String(agentCall!['instructions'])).not.toContain(REPLACED);
+    // The tool the clause names is offered on this call.
+    expect((agentCall!['tools'] as { name?: string }[]).map((t) => t.name)).toContain('give_provisional_view');
   });
 });
