@@ -112,6 +112,8 @@ permissions:
 jobs:
   graph-evaluator:
     name: Graph Evaluator (advisory)
+    # Advisory: not run on pull requests (Paul 27 Sep: streamline CI; DL #70). Still runs on every staging push.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
