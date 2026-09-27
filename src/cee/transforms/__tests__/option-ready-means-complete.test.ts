@@ -259,16 +259,53 @@ const RECORDED_WITH_RULE_OFF = {
   ],
 } as const;
 
+/**
+ * placeholder-zero (48f2e12f): the served graph gives `fac_existing_customers_grandfathered` — a goal root no
+ * option sets — no status-quo level, so readiness now also refuses the Run on it, which is not what A1b is about.
+ * This test therefore holds it at 0 (today no existing customer is grandfathered; that is what the new option
+ * would change). A disclosed in-test patch: the fixture file is not edited.
+ *
+ * That one input moves exactly two things in the record, and neither is the verdict: the graph's hash, and the
+ * missing-value ask, which now quotes the level (`analysis-ready.ts`: "is currently N. What should option … set it
+ * to?"). Everything else must still be byte-identical to the 339ed343 record. The hash below is the same hash
+ * function on the patched graph — the CONTROL in the test pins that the unpatched graph still hashes to the
+ * recorded value, so the two are comparable.
+ */
+const GRANDFATHER_STATUS_QUO_LEVEL = 0;
+const GRANDFATHER_LEVELLED_ASK =
+  'Factor "Existing customers grandfathered" is currently 0. What should option "£59 for new Pro customers; grandfather existing customers" set it to?';
+const RECORDED_WITH_STATUS_QUO_LEVEL = {
+  ...RECORDED_WITH_RULE_OFF,
+  analysis_admission: {
+    ...RECORDED_WITH_RULE_OFF.analysis_admission,
+    missing_important_inputs: [
+      { ...RECORDED_WITH_RULE_OFF.analysis_admission.missing_important_inputs[0], why_it_matters: GRANDFATHER_LEVELLED_ASK },
+    ],
+    graph_hash: "7cb3e2432dd50a75b47aaba9c447ffd1badace055e38566b049b0813d60ca342",
+  },
+  readiness_issues: [{ ...RECORDED_WITH_RULE_OFF.readiness_issues[0], message: GRANDFATHER_LEVELLED_ASK }],
+} as const;
+
+function servedGraphWithGrandfatherLevel(): Fixture["graph"] {
+  const graph = servedGraph();
+  const factor = graph.nodes.find((n) => n.id === GRANDFATHER_FACTOR && n.kind === "factor");
+  if (factor === undefined) throw new Error(`factor ${GRANDFATHER_FACTOR} absent`);
+  factor.observed_state = { value: GRANDFATHER_STATUS_QUO_LEVEL };
+  return graph;
+}
+
 describe("A1b — the model-level Run verdict does not move", () => {
   it("may_run, analysis_admission, readiness_issues and payload status are byte-identical to the rule-off record", () => {
-    const r = canonical(servedGraph());
+    // CONTROL: the hash function is the one the record was taken with.
+    expect(canonical(servedGraph()).analysis_admission?.graph_hash).toBe(RECORDED_WITH_RULE_OFF.analysis_admission.graph_hash);
+    const r = canonical(servedGraphWithGrandfatherLevel());
     // The demotion really happened in this run — otherwise identity is vacuous.
     expect(optionRow(r, GRANDFATHER_OPTION).status).toBe("needs_encoding");
     expect(r.may_run).toBe(true);
-    expect(JSON.stringify(r.may_run)).toBe(JSON.stringify(RECORDED_WITH_RULE_OFF.may_run));
-    expect(JSON.stringify(r.analysis_admission)).toBe(JSON.stringify(RECORDED_WITH_RULE_OFF.analysis_admission));
-    expect(JSON.stringify(r.readiness_issues)).toBe(JSON.stringify(RECORDED_WITH_RULE_OFF.readiness_issues));
-    expect(r.status).toBe(RECORDED_WITH_RULE_OFF.status);
+    expect(JSON.stringify(r.may_run)).toBe(JSON.stringify(RECORDED_WITH_STATUS_QUO_LEVEL.may_run));
+    expect(JSON.stringify(r.analysis_admission)).toBe(JSON.stringify(RECORDED_WITH_STATUS_QUO_LEVEL.analysis_admission));
+    expect(JSON.stringify(r.readiness_issues)).toBe(JSON.stringify(RECORDED_WITH_STATUS_QUO_LEVEL.readiness_issues));
+    expect(r.status).toBe(RECORDED_WITH_STATUS_QUO_LEVEL.status);
   });
 });
 

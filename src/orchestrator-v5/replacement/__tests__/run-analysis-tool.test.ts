@@ -49,7 +49,9 @@ import type { ToolResponseBlock } from '../../../adapters/llm/types.js';
 
 const DECISION = { id: 'dec_1', kind: 'decision', label: 'Which way' };
 const GOAL = { id: 'goal_1', kind: 'goal', label: 'Result', goal_threshold: 0.8 };
-const FACTOR = { id: 'fac_1', kind: 'factor', label: 'Unit Cost' };
+// placeholder-zero (48f2e12f): the factor holds a status-quo level, so the fresh
+// draft's questions are its three option values and not an unvalued goal root.
+const FACTOR = { id: 'fac_1', kind: 'factor', label: 'Unit Cost', observed_state: { value: 0.5 } };
 
 const edge = (from: string, to: string, mean: number, exists = 0.9) => ({
   from,

@@ -1191,24 +1191,36 @@ function relationshipAsk(option: unknown): string | undefined {
  *   · ROOT = no causal parent. PLoT strips every edge incident to an
  *     option/decision/constraint node before the engine sees the graph, so
  *     those edges never make a node non-root.
- *   · DEFAULTED = no finite `observed_state.value` and no sampled `prior`
- *     (`hasSampledPrior`) — PLoT's only two ParameterUncertainty sources — and not
- *     intervened on by EVERY option in the run. "Some option sets it" is NOT
- *     an exemption: the status quo and every other arm still read 0.0.
- *   · REACHES THE GOAL = a directed causal path on which no node is pinned by
- *     every run option.
- * The run's options are the valued ones plus the held status quo, the set
- * `resolveRunAdmission` submits.
+ *   · DEFAULTED = no finite level (`observed_state.value`, else the V1
+ *     `data.value` PLoT's normaliser promotes) and no sampled `prior`
+ *     (`hasSampledPrior`) — PLoT's only two ParameterUncertainty sources.
+ *   · REACHES THE GOAL = any directed causal path.
  *
- * ONE DELIBERATE DEPARTURE: a switch (`isSwitch`, levels only 0/1) is
- * exempt, because 0 is a real status-quo level for it ("not done"), not a
- * placeholder. Risks and other non-factor kinds are out of scope here: their
- * missing input is a likelihood, a different ask.
+ * TWO DELIBERATE DEPARTURES FROM ISL:
+ *   · ISL does not flag a root that EVERY option intervenes on. It is flagged
+ *     here: the status quo is the un-intervened world, which still reads the
+ *     root at 0.0, and B1a reports every level as `o + (option − status quo)`.
+ *     MEASURED on served PLoT 22f3d94 + ISL d1cef9a (AI Quality #72
+ *     5860802299): such a root unvalued gave carry-on £80,358.51, and the same
+ *     root valued at £49 gave the correct £75,000.00. The walk to the goal does
+ *     not stop at an everywhere-pinned node for the same reason.
+ *   · A switch (`isSwitch`, levels only 0/1) is exempt, because 0 is a real
+ *     status-quo level for it ("not done"), not a placeholder.
+ * Risks and other non-factor kinds are out of scope here: their missing input
+ * is a likelihood, a different ask.
  */
 function goalRootsWithoutStatusQuoLevel(
   graph: GraphV3T,
   payload: AnalysisReadyPayload,
+  rawGraph: unknown,
 ): Array<{ id: string; label: string }> {
+  // The V1 `data.value` level lives on the RAW node: GraphV3 does not keep `data`.
+  const rawNodes = isPlainObject(rawGraph) && Array.isArray(rawGraph.nodes) ? rawGraph.nodes : [];
+  const legacyLevel = new Map<string, unknown>(
+    rawNodes
+      .filter(isPlainObject)
+      .map((node) => [readNonEmptyString(node.id) ?? '', isPlainObject(node.data) ? node.data.value : undefined]),
+  );
   const kindOf = new Map<string, string>(graph.nodes.map((node) => [node.id, node.kind]));
   const nonCausal = (id: string): boolean => {
     const kind = kindOf.get(id);
@@ -1221,13 +1233,6 @@ function goalRootsWithoutStatusQuoLevel(
     parents.set(edge.to, (parents.get(edge.to) ?? 0) + 1);
     children.set(edge.from, [...(children.get(edge.from) ?? []), edge.to]);
   }
-  const runOptions = payload.options.filter(
-    (option) => Object.keys(option.interventions ?? {}).length > 0
-      || (option as { is_baseline?: boolean }).is_baseline === true,
-  );
-  const pinnedEverywhere = (id: string): boolean =>
-    runOptions.length > 0
-    && runOptions.every((option) => (option.interventions ?? {})[id] !== undefined);
   const levelsOf = (id: string): number[] =>
     payload.options
       .map((option) => (option.interventions ?? {})[id])
@@ -1240,7 +1245,6 @@ function goalRootsWithoutStatusQuoLevel(
       for (const child of children.get(current) ?? []) {
         if (seen.has(child)) continue;
         seen.add(child);
-        if (pinnedEverywhere(child)) continue;
         if (child === payload.goal_node_id) return true;
         stack.push(child);
       }
@@ -1263,12 +1267,15 @@ function goalRootsWithoutStatusQuoLevel(
     if (alreadyFactorBlocked.has(node.id)) continue;
     if ((parents.get(node.id) ?? 0) > 0) continue;
     const observed = (node as { observed_state?: { value?: unknown } }).observed_state;
-    if (typeof observed?.value === 'number' && Number.isFinite(observed.value)) continue;
+    // PLoT reads the level from `observed_state.value`, else from the V1
+    // `data.value` passthrough (graph-normaliser.ts, 22f3d94), as CEE's own
+    // readiness does (`cee/transforms/analysis-ready.ts`).
+    const level = observed?.value !== undefined ? observed.value : legacyLevel.get(node.id);
+    if (typeof level === 'number' && Number.isFinite(level)) continue;
     // A spread with no value is NOT a level: PLoT emits an uncertainty only
     // around a finite `observed_state.value` (translator-v3.ts first pass), so
     // ISL still centres the factor on 0.0.
     if (hasSampledPrior((node as { prior?: unknown }).prior)) continue;
-    if (pinnedEverywhere(node.id)) continue;
     const magnitudeNode: MagnitudeNode = {
       label: node.label ?? node.id,
       kind: 'factor',
@@ -1545,7 +1552,7 @@ export function assessCanonicalAnalysisReadiness(
     // PLACEHOLDER-ZERO: factor-scoped, so neither admission waiver (both need an
     // option id) can answer it — excluding options does not give the remaining
     // arms a status-quo level.
-    const levelGaps = semantic ? goalRootsWithoutStatusQuoLevel(parsed.data, semantic) : [];
+    const levelGaps = semantic ? goalRootsWithoutStatusQuoLevel(parsed.data, semantic, graph) : [];
     levelGaps.forEach((gap, index) => {
       blockingIssues.push({
         issue_id: `level_${index + 1}`,

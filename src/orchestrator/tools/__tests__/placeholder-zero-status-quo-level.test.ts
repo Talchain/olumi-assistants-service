@@ -52,9 +52,11 @@ const levelIssueFactorIds = (graph: unknown): string[] =>
     .sort();
 
 const wireFactorOnlyMissingValue = (graph: unknown): string[] =>
-  (buildCanonicalAnalysisReadyFromGraph(graph)?.blockers ?? [])
+  ((buildCanonicalAnalysisReadyFromGraph(graph)?.blockers ?? []) as Array<{
+    blocker_type?: string; option_id?: string; factor_id?: string;
+  }>)
     .filter((b) => b.blocker_type === 'missing_value' && b.option_id === undefined)
-    .map((b) => b.factor_id)
+    .map((b) => b.factor_id ?? '')
     .sort();
 
 describe('placeholder-zero — a goal root ancestor with no status-quo level blocks the Run', () => {
@@ -94,6 +96,38 @@ describe('placeholder-zero — a goal root ancestor with no status-quo level blo
     it('the Run is refused: excluding the options cannot waive a level every remaining arm reads', () => {
       const admission = resolveRunAdmission(fx.graph);
       expect(admission.willProceed).toBe(false);
+    });
+  });
+
+  // R&C 5860728395 and Canonical 5860714282: journey A's other final runs, where
+  // the roots' existing blockers carry option ids and the exclusion waiver admitted
+  // the Run. Bound to admission, not `status` (already needs_user_input at base).
+  describe.each([
+    ['journey-a-run2-final-214809Z', 'pj-20260927T214809Z/A15'],
+    ['journey-a-run2-final-213830Z', 'pj-20260927T213830Z/A17'],
+  ])('journey A %s (%s): the waiver admitted a Run over placeholder roots', (name) => {
+    const fx = load(name);
+    const withRootsValued = (): unknown => ({
+      ...fx.graph,
+      nodes: (fx.graph.nodes as Array<Record<string, unknown>>).map((node) =>
+        fx.served.isl_goal_ancestor_data_gap.includes(String(node.id))
+          ? { ...node, observed_state: { ...(node.observed_state as object | undefined), value: 1 } }
+          : node),
+    });
+
+    it('precondition: served may_run true while ISL named its placeholder roots', () => {
+      expect(fx.served.may_run).toBe(true);
+      expect(fx.served.isl_goal_ancestor_data_gap.length).toBeGreaterThan(0);
+    });
+
+    it('readiness names exactly ISL\'s roots, and the Run is refused', () => {
+      expect(levelIssueFactorIds(fx.graph)).toEqual([...fx.served.isl_goal_ancestor_data_gap].sort());
+      expect(resolveRunAdmission(fx.graph).willProceed).toBe(false);
+    });
+
+    it('CONTRAST: the same graph with those roots valued — the Run proceeds', () => {
+      expect(levelIssueFactorIds(withRootsValued())).toEqual([]);
+      expect(resolveRunAdmission(withRootsValued()).willProceed).toBe(true);
     });
   });
 
@@ -159,8 +193,46 @@ describe('placeholder-zero — a goal root ancestor with no status-quo level blo
       ['a normal prior (PLoT skips the family)', { prior: { distribution: 'normal', range_min: 49, range_max: 69 } }, true],
       ['a degenerate range (PLoT declines a point)', { prior: { distribution: 'uniform', range_min: 59, range_max: 59 } }, true],
       ['a stated value', { observed_state: { value: 59 } }, false],
+      ['a V1 data.value level (the PLoT normaliser promotes it)', { data: { value: 59 } }, false],
     ])('%s → level gap: %s', (_name, patch, gap) => {
       expect(levelIssueFactorIds(withNode(patch)).includes(FACTOR)).toBe(gap);
+    });
+  });
+
+  describe('EVERY OPTION SETS IT is not a level (AI Quality #72 5860802299, served PLoT 22f3d94 + ISL d1cef9a)', () => {
+    // AIQ's EXEC: carry-on read £80,358.51 with such a root unvalued, £75,000.00 with it valued at £49.
+    const fx = load('journey-a-run1-control-214311Z');
+    const ROOT = 'new_customer_price';
+    const withRootSetEverywhere = (observed?: { value: number }): Record<string, unknown> => {
+      const nodes = (fx.graph.nodes as Array<Record<string, unknown>>).map((node) =>
+        node.kind === 'option'
+          ? { ...node, interventions: { ...(node.interventions as object | undefined), [ROOT]: { value: 0.245, source: 'brief_extraction' } } }
+          : node);
+      const optionIds = nodes.filter((node) => node.kind === 'option').map((node) => String(node.id));
+      // Each option→root edge copies the capture's own option→factor edge shape.
+      const edges = fx.graph.edges as Array<Record<string, unknown>>;
+      const optionEdge = edges.find((edge) => optionIds.includes(String(edge.from)))!;
+      return {
+        ...fx.graph,
+        nodes: [...nodes, { id: ROOT, kind: 'factor', label: 'New customer price', ...(observed ? { observed_state: observed } : {}) }],
+        edges: [
+          ...edges,
+          ...optionIds.map((id) => ({ ...optionEdge, from: id, to: ROOT })),
+          { from: ROOT, to: 'mrr', strength: { mean: 0.3, std: 0.05 }, exists_probability: 1, effect_direction: 'positive' },
+        ],
+      };
+    };
+
+    it('A: unvalued and set by every option, the status quo still reads it at 0, so it blocks the Run', () => {
+      const graph = withRootSetEverywhere();
+      expect(levelIssueFactorIds(graph)).toEqual([ROOT]);
+      expect(resolveRunAdmission(graph).willProceed).toBe(false);
+    });
+
+    it('B (control): the same root with a stated level — no level blocker, and the Run proceeds', () => {
+      const graph = withRootSetEverywhere({ value: 0.245 });
+      expect(levelIssueFactorIds(graph)).toEqual([]);
+      expect(resolveRunAdmission(graph).willProceed).toBe(true);
     });
   });
 });
