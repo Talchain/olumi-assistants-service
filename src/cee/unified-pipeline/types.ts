@@ -172,6 +172,8 @@ export interface PipelineBriefReadEvent {
   goal: string | null;
   /** The options exactly as the user wrote them. */
   options: readonly string[];
+  /** v2: limits the user set, each carrying its own comparator cue, never a goal's or an option's words. */
+  limits: readonly string[];
   elapsed_ms: number;
 }
 

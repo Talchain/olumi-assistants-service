@@ -260,6 +260,13 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
     expect(kinds.indexOf('BRIEF_READ'), 'before the model').toBeLessThan(kinds.indexOf('GRAPH_READY'));
   });
 
+  it('v2: the frame carries the limits the user set, in their words; an uncued span never becomes one', async () => {
+    readingReply = { status: 200, text: JSON.stringify({ goal: GOAL, options: OPTIONS, limits: ['£20k budget', 'monthly churn under 4%', 'within 6 months'] }) };
+    const { briefRead } = await firstBrief();
+    expect(briefRead()).toHaveLength(1);
+    expect(briefRead()[0]!.limits).toEqual(['£20k budget', 'monthly churn under 4%']);
+  });
+
   it('RED: the call is on the turn\'s OpenAI-only ledger, as brief_reading under its own prompt alias', async () => {
     const { body } = await firstBrief();
     const rows = (body._provider_calls ?? []).filter((c) => c.purpose === 'brief_reading');
