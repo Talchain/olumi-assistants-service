@@ -732,9 +732,11 @@ export const GM_HELD_SWITCH_FACTORS_KEY = 'switch_factors';
  * e.g. partly in place already"), so it is counted in "I supplied N values", shown as Olumi's estimate and correctable.
  * The value writer's own members, spelled as the builders spell an inferred value (`admit-model.ts`
  * `estimatedObservedState`): `observed_state` {value, raw_value, source `cee_inference`, extractionType `inferred`} and
- * the node's `provenance: 'ai_inferred'`. No unit and no `scale_frame`: the magnitude contract reads a switch's frame 1
- * from its levels (`resolveMagnitudeFrame`, `isSwitch`), and a stored frame of 1 would make the value writer refuse the
- * user's own correction.
+ * the node's `provenance: 'ai_inferred'`. ⭐ A6b (DL #70 5855437928): at the confirm that NODE member is superseded by
+ * `user_set` (`stampUserApprovedAddProvenance`, spread last) — the user approved adding the factor; today-0 stays
+ * Olumi's through `observed_state`, which every CEE authorship reader reads. No unit and no `scale_frame`: the
+ * magnitude contract reads a switch's frame 1 from its levels (`resolveMagnitudeFrame`, `isSwitch`), and a stored
+ * frame of 1 would make the value writer refuse the user's own correction.
  */
 export const NEW_SWITCH_TODAY = Object.freeze({
   observed_state: Object.freeze({ value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' }),

@@ -140,8 +140,13 @@ describe('PRECONDITION — the fixture and this path reproduce Paul\'s wire', ()
     const persisted = PROVENANCE.persisted_after_transaction.nodes as Json[];
     const wireOption = persisted.find((n) => n.id === OPT)!;
     const wireFactor = persisted.find((n) => n.id === FAC)!;
+    // ⭐ A6b (DL #70 5855437928): the one byte the approval now adds is CEE's NODE stamp — the user approved this
+    // factor, so it is `user_set` (Paul's wire predates A6b and carries none). Every other byte is Paul's wire.
+    const { provenance: a6bStamp, ...committedFactor } = nodeOf(executed.mutatedGraph, FAC)!;
+    expect(a6bStamp).toBe('user_set');
+    expect(wireFactor.provenance).toBeUndefined();
     // Key-order-insensitive: the persisted copy went through JSONB.
-    expect(canonical(nodeOf(executed.mutatedGraph, FAC))).toBe(canonical(wireFactor));
+    expect(canonical(committedFactor)).toBe(canonical(wireFactor));
     expect(canonical(nodeOf(executed.mutatedGraph, OPT)!.interventions)).toBe(canonical(wireOption.interventions));
     expect(Object.keys(wireOption.interventions)).toEqual(['pro_plan_price']);
     expect(wireFactor.observed_state).toBeUndefined();
@@ -168,7 +173,10 @@ describe('R1 — Paul\'s grandfathering add: the factor is a switch, off today a
     expect(executed.status).toBe('executed');
     const factor = nodeOf(executed.mutatedGraph, FAC)!;
     expect(factor.observed_state).toEqual({ value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' });
-    expect(factor.provenance).toBe('ai_inferred');
+    // ⭐ A6b: the NODE claim is the user's — they approved adding this factor (`user_set`, CEE's stamp at the confirm,
+    // spread over NEW_SWITCH_TODAY's node member). Today-0 stays Olumi's through `observed_state` above, which is what
+    // every CEE authorship reader reads (R2 below); `NodeV3.provenance` is not a value claim.
+    expect(factor.provenance).toBe('user_set');
     expect(factor.scale_frame).toBeUndefined();
     const option = nodeOf(executed.mutatedGraph, OPT)!;
     expect(option.interventions[FAC]).toMatchObject({ value: 1, source: 'cee_hypothesis', target_match: { node_id: FAC } });
@@ -344,6 +352,25 @@ describe('R3 — a refusal leaves the stored graph byte-identical (key-order-ins
 });
 
 describe('CONTRAST — everything that is not a new switch is byte-identical to base 770a477c', () => {
+  /**
+   * ⭐ A6b (DL #70 5855437928): the approval now stamps every node the held batch ADDS `user_set` (CEE, at the confirm).
+   * Base 770a477c predates that, so the contrast removes exactly that stamp — by identity, only on the batch's own
+   * adds, and only after asserting it is exactly `user_set` — and holds every other byte identical to the recording.
+   */
+  const withoutA6bAddStamps = (graph: Json, operations: Json[]): Json => {
+    const added = new Set(operations.filter((o) => o.op === 'add_node').map((o) => o.path));
+    expect(added.size, 'the batch adds at least one node').toBeGreaterThan(0);
+    return {
+      ...graph,
+      nodes: (graph.nodes as Json[]).map((n) => {
+        if (!added.has(n.id)) return n;
+        expect(n.provenance, `A6b stamp on ${String(n.id)}`).toBe('user_set');
+        const { provenance: _a6bStamp, ...rest } = n;
+        return rest;
+      }),
+    };
+  };
+
   const headOutputs = (spec: Json): Json => {
     const built = buildAddOptionsTransaction(structuredClone(spec), STORED as never);
     const held = hold(structuredClone(spec));
@@ -359,7 +386,7 @@ describe('CONTRAST — everything that is not a new switch is byte-identical to 
         currentGraph: STORED, currentGraphHash: HASH, freshness: 'none', hasExistingAnalysis: false,
         scenarioId: 's', turnId: 't2', requestId: 'r2' }) as Json;
       out.execute_status = ex.status;
-      if (ex.status === 'executed') out.mutatedGraph = ex.mutatedGraph;
+      if (ex.status === 'executed') out.mutatedGraph = withoutA6bAddStamps(ex.mutatedGraph, read.operations);
     }
     return out;
   };

@@ -560,6 +560,12 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(g.edges.some((e) => e.from === 'dec_x' && e.to === opt!.id), 'linked from the decision').toBe(true);
     expect(g.edges.some((e) => e.from === opt!.id && e.to === fac!.id), 'the option acts on the new factor').toBe(true);
     expect(g.edges.some((e) => e.from === fac!.id && e.to === 'goal_x'), 'the new factor reaches the goal').toBe(true);
+    // ⭐ A6b (DL #70 5855437928): the STORED graph after the real commit — the option and the new factor the user
+    // approved are the user's (`user_set`, written by CEE at the approval seam); the options already there are not.
+    const provenanceOf = (id: string) => (g.nodes.find((x) => x.id === id) as { provenance?: unknown } | undefined)?.provenance;
+    expect(provenanceOf(opt!.id), 'the approved option').toBe('user_set');
+    expect(provenanceOf(fac!.id), 'the approved new factor').toBe('user_set');
+    expect(provenanceOf('opt_a'), 'an option the user did not add in this approval').toBeUndefined();
     expect(t2.assistant_text, t2.assistant_text).toMatch(/Also added the factor "AI add-on price", which changes "Revenue"/);
     expect(t2.assistant_text, 'the factor is never reported as an option').not.toMatch(/Added "AI add-on price"/);
     // Audit MAG-2 (served 201724Z steps 06–07): the new factor's link is the flat default, so its size is a placeholder,

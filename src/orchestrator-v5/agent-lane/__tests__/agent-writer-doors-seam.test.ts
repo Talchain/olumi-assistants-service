@@ -276,6 +276,11 @@ describe('SLICE C2 — the Agent reaches the product\'s own writers: a new risk 
     const g = graphNow();
     expect(g.edges.some((e) => e.from === 'fac_price' && e.to === risk!.id)).toBe(true);
     expect(g.edges.some((e) => e.from === risk!.id && e.to === 'goal_x')).toBe(true);
+    // ⭐ A6b (DL #70 5855437928): the STORED risk the user approved is theirs — `user_set`, CEE's stamp at the
+    // approval seam; the factor it is driven by and the goal it threatens are not.
+    expect(risk!['provenance'], 'the approved risk').toBe('user_set');
+    expect(g.nodes.find((x) => x.id === 'fac_price')!['provenance'], 'the factor that drives it').toBeUndefined();
+    expect(g.nodes.find((x) => x.id === 'goal_x')!['provenance'], 'the goal it threatens').toBeUndefined();
     expect(await heldOnLatestRow(), 'the hold is consumed').toEqual([]);
     expect(t2.assistant_text, t2.assistant_text).toContain('Added "Competitive response" as a risk, affecting "Revenue" and driven by "Price"');
     expect(t2.assistant_text, t2.assistant_text).toMatch(/placeholder strength, not an estimate/);

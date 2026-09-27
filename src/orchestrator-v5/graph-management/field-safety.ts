@@ -513,6 +513,10 @@ function screenPayload(value: unknown, ctx: PayloadContext): FieldSafetyResult {
 // is refused outright — and stripping the model's self-asserted `source` is
 // CORRECT regardless, because authorship is precisely what a producer must not
 // self-certify. Granting adds a sanctioned authorship stamp is separate work.
+// ⭐ A6b (DL #70 5855437928) granted the NODE half: an add the user APPROVES is
+// stamped `provenance: 'user_set'` by CEE at the confirm seam, AFTER this strip
+// (`stampUserApprovedAddProvenance`, gm-held-execute.ts). The VALUE half —
+// `observed_state.source` on an added node — is still not stamped.
 //
 // WHY STRIPPING IS THE RIGHT ANSWER AND NOT A WEAKENING. These keys were never
 // the producer's to set: `PIPELINE_OWNED_ROOTS` is precisely the set CEE
