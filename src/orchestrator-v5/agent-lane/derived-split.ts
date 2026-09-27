@@ -44,7 +44,7 @@ function typedShares(message: string, partCount: number): number[] | null {
   if (m !== null) {
     if (PROBABILITY_IDIOM.test(message.slice(m.index + m[0].length))) return null;
     const shares = [m[1], m[2], m[3]].filter((x): x is string => x !== undefined).map(Number);
-    if (shares.some((s) => !(s > 0)) || shares.reduce((a, b) => a + b, 0) !== 100) return null;
+    // Never normalised: "60/30" stays 0.6 + 0.3, and the re-sum guard in `readUserSplit` refuses it (ONE guard).
     return shares.map((s) => s / 100);
   }
   if (/\bhalf\s+(?:each|and\s+half)\b|\bhalves\b/i.test(message)) return partCount === 2 ? [0.5, 0.5] : null;

@@ -28,6 +28,7 @@ describe('the user\'s split: all three conditions hold', () => {
     expect(readUserSplit('Go 70/30.', [SPEND], 2)).toMatchObject({ kind: 'user_split', parts: [21000, 9000] });
     expect(readUserSplit('A third each across the three.', [SPEND], 3)).toMatchObject({ kind: 'user_split', ratio: [1 / 3, 1 / 3, 1 / 3] });
     expect(readUserSplit('Split it evenly.', [SPEND], 2)).toMatchObject({ kind: 'user_split', parts: [15000, 15000] });
+    expect(readUserSplit('All of it into ads: 100/0.', [SPEND], 2), 'an exact split with an empty part is still exact').toMatchObject({ kind: 'user_split', parts: [30000, 0] });
   });
 
   it('the parts always re-sum to the base (thirds of £20,000 are not rounded into £20,000.01)', () => {
