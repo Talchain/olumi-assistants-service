@@ -33,12 +33,21 @@ describe('a count written in words grounds exactly as its digits do', () => {
     expect(figureTheUserWroteFor(2, 'engineers', WORDS, JUNIOR)).toBe(true);
   });
 
-  it('parity: every (figure, entity) pair reads the same in words as in digits', () => {
+  it('words never ground a pair the digits do not (a count in words is held to a TIGHTER binding)', () => {
     for (const v of [1, 2, 3]) for (const scope of [SENIOR, JUNIOR]) {
-      expect(figureTheUserWroteFor(v, 'engineers', WORDS, scope), `${v} for ${scope.target[0]}`)
-        .toBe(figureTheUserWroteFor(v, 'engineers', DIGITS, scope));
+      if (figureTheUserWroteFor(v, 'engineers', WORDS, scope)) {
+        expect(figureTheUserWroteFor(v, 'engineers', DIGITS, scope), `${v} for ${scope.target[0]}`).toBe(true);
+      }
     }
     expect(figureTheUserWroteFor(1, 'engineers', DIGITS, SENIOR), 'control: the digits ground').toBe(true);
+  });
+
+  it('RED (AIQ 5859477600): an idiomatic "one" beside no label word of the entity is never its 1; the digit form is unchanged', () => {
+    const only = { target: ['New senior engineers hired'], others: [] as string[] };
+    expect(figureTheUserWroteFor(1, 'engineers', "That's one option we could try.", only)).toBe(false);
+    expect(figureTheUserWroteFor(1, 'engineers', 'One more thing: we need a senior engineer.', only)).toBe(false);
+    expect(figureTheUserWroteFor(1, 'engineers', "That's 1 option we could try.", only), 'contrast: a written digit keeps today\'s reading').toBe(true);
+    expect(figureTheUserWroteFor(1, 'engineers', 'We need one senior engineer.', only), 'control: beside its label word it grounds').toBe(true);
   });
 
   it('a figure the user did not write is still not theirs (3 is in neither form)', () => {

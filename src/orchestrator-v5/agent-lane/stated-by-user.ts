@@ -205,6 +205,13 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
     // after the figure is its denominator, so it is passed over whatever unit the factor declares.
     const rate = /^\s*(?:(?:per|an?|each|every)\s+|\/\s*)[\p{L}\p{N}]+/iu.exec(after);
     const afterRate = right.slice(rate === null ? 0 : [...rate[0].matchAll(/[\p{L}\p{N}]+/gu)].length);
+    if (a.kind === 'words') {
+      // ⭐ A count in WORDS is an idiom far more often than a digit is ("That's one option we could try", "One more
+      // thing"; AIQ #70 5859477600). It is the user's only when a label word of THIS entity sits within two words of it:
+      // never by the "names nothing, so theirs" fallback below that a written digit gets.
+      const near = firstMention(afterRate.slice(0, 2)) ?? firstMention([...left].reverse().slice(0, 2));
+      return near === 'target';
+    }
     const about = firstMention(afterRate.slice(0, 2)) ?? firstMention([...left].reverse()) ?? firstMention(afterRate.slice(2));
     return about === null || about === 'target';
   });
