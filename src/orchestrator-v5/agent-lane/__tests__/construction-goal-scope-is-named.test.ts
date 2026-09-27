@@ -59,6 +59,7 @@ function pricing(metric: string, scope: Scope, unknowns: string[] = []): Record<
     ],
     identities: [],
     unknowns,
+    decision_question: null,
   };
 }
 

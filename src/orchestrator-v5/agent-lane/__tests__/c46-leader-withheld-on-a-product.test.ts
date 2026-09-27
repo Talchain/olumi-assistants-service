@@ -109,6 +109,7 @@ function paul(opts: { identities?: Identity[]; churnLimit?: boolean } = {}): Rec
     ],
     identities: opts.identities ?? [MRR_IS_PRICE_TIMES_SUBSCRIBERS],
     unknowns: [],
+    decision_question: null,
   };
 }
 
@@ -161,6 +162,7 @@ function sameSign(options?: unknown[]): Record<string, unknown> {
     ],
     identities: [{ outcome: 'Pro MRR', operation: 'product', factors: ['Revenue per Pro user', 'Pro subscribers'], provenance: 'inferred' }],
     unknowns: [],
+    decision_question: null,
   };
 }
 const oneLever = () => sameSign([CARRY_ON, ADD_ON,
@@ -436,6 +438,7 @@ describe('(b) rule 7 on the Run: a leader whose routes through and around the pr
       ],
       identities: [MRR_IS_PRICE_TIMES_SUBSCRIBERS],
       unknowns: [],
+      decision_question: null,
     };
   }
   function refunds(direction: Dir): Record<string, unknown> {

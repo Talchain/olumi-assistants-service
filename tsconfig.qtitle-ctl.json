@@ -1,0 +1,1 @@
+{ "extends": "./tsconfig.json", "include": [], "files": ["src/orchestrator-v5/agent-lane/__tests__/decision-question-is-the-briefs-own.test.ts", "src/orchestrator-v5/agent-lane/__tests__/zz-qtitle-typecontrol.ts", "src/orchestrator-v5/agent-lane/admit-model.ts", "src/orchestrator-v5/agent-lane/runtime/build-model.ts"] }
