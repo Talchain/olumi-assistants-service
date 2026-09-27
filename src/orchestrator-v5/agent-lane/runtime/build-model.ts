@@ -1213,7 +1213,7 @@ export async function buildModelFromBrief(
    * mentioned.
    */
   const parked = (candidate as { unknowns?: unknown }).unknowns;
-  const openQuestions = Array.isArray(parked) ? parked.filter((q): q is string => typeof q === 'string' && q.trim() !== '') : [];
+  const openQuestions = userFacingDrafterQuestions(parked);
   // ⭐ THE MAGNITUDE CONTRACT (D5–D8): a size Olumi set aside, a user's size that cannot hold, or a placeholder sized to
   // the target's range is ASKED where the user always sees it — ahead of the drafter's own questions, and behind
   // every question placed below. Admission writes each as a `.magnitude_question` ledger entry (`admit-candidate.ts`).
@@ -1462,4 +1462,25 @@ export async function buildModelFromBrief(
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };
+}
+
+/**
+ * ⛔ A FIELD PATH IS NOT USER COPY (AIC #70 5852012649, DL 5852023249; served on CEE `5668902`, Paul's brief): a drafter
+ * item read "The current MRR level was not stated, so goal.baseline_value is intentionally null rather than estimated." —
+ * a note, not a question, and the UI now shows every open question verbatim. The DRAFTER's (model-written) items that
+ * carry an internal identifier are dropped here; the code-authored questions added after this carry none.
+ *
+ * The class is the UI's `sanitiseStatusReason` (DGAI `src/utils/sanitiseStatusReason.ts`), mirrored verbatim — node-id
+ * prefixes and 3+-segment snake_case — plus the one shape that class does not cover and the served note used: a dotted
+ * path with an underscore in it. A syntax test on code tokens, not a reading of meaning ("e.g." never matches).
+ */
+const UI_NODE_ID_RE = /\b(?:fac|opt|goal|outcome|edge|node|constraint)_[a-z0-9_]+\b/i;
+const UI_SNAKE_ID_RE = /\b[a-z][a-z0-9]*(?:_[a-z0-9]+){2,}\b/;
+const carriesFieldPath = (q: string): boolean => UI_NODE_ID_RE.test(q) || UI_SNAKE_ID_RE.test(q)
+  || (q.match(/\b[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+\b/g) ?? []).some((t) => t.includes('_'));
+
+export function userFacingDrafterQuestions(parked: unknown): string[] {
+  return Array.isArray(parked)
+    ? parked.filter((q): q is string => typeof q === 'string' && q.trim() !== '' && !carriesFieldPath(q))
+    : [];
 }
