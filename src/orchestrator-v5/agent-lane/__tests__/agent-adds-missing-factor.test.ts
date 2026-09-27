@@ -244,4 +244,70 @@ describe('A1 — propose_new_option sends a new SWITCH switched on, in the same 
     expect(paramsOf(graded.sent)!['interventions']).toEqual([{ factor_key: 'ai_add_on_offered', value: null, source: 'cee_hypothesis' }]);
     expect(JSON.stringify(paramsOf(graded.sent))).not.toContain('switch');
   });
+
+  /**
+   * ⛔ EVERY ENTRY THAT NAMES THE SWITCH IS READ, AND A FACTOR IS NAMED ONCE PER OPTION (independent verification of A1
+   * round 2, VERIFIER-S1 at the r2 head; the same line is on staging, CEE #2107). The level check read only the FIRST
+   * acts_on entry naming the switch (`.find`): a bare entry followed by `{ value: 1, unit: '%' }` was sent, held,
+   * approved and committed — today-0 written as Olumi's, the option at a bare 1, the user's "1%" dropped without a word —
+   * while the reverse order was refused. The result hung on entry order.
+   */
+  it.each([
+    ['bare first, then 1%', [{}, { level: { value: 1, unit: '%' } }]],
+    ['1% first, then bare', [{ level: { value: 1, unit: '%' } }, {}]],
+    ['bare 1 first, then 1%', [{ level: { value: 1 } }, { level: { value: 1, unit: '%' } }]],
+  ])('RED: the switch named twice (%s) is refused as a switch conflict naming the 1%, nothing sent — whatever the order', async (_name, entries) => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx, { ...call(), acts_on: (entries as Record<string, unknown>[]).map((e) => ({ factor_label: 'AI add-on offered', direction: 'positive', ...e })) } as never) as
+      { ok?: boolean; refusal?: string; detail?: string; switch_level_conflicts?: unknown[] };
+    expect(r.refusal, JSON.stringify(r)).toBe('switch_level_not_on');
+    expect(r.switch_level_conflicts).toEqual([{ option: 'Keep £49 and offer a paid AI add-on', factor: 'AI add-on offered', value: 1, unit: '%' }]);
+    expect(r.detail).toContain('it was given a level: 1%.');
+    expect(sent).toEqual([]);
+  });
+
+  /**
+   * ⛔ ONE ENTRY PER FACTOR IN ONE OPTION — refused whatever the entries say, even two identical bare 1s. The planner keeps
+   * the FIRST entry's direction and the level reader the LAST entry's figure, so for any factor, whichever the Agent wrote
+   * second decided silently. The only order-free rule is one entry per factor; the refusal costs one more call and sends
+   * nothing. Bound by the factor each entry RESOLVES to, never by its spelling.
+   */
+  it.each([
+    ['the new switch, two bare 1s', [
+      { factor_label: 'AI add-on offered', direction: 'positive', level: { value: 1 } },
+      { factor_label: 'AI add-on offered', direction: 'positive', level: { value: 1 } }], 'AI add-on offered'],
+    ['the new switch, twice with no level', [
+      { factor_label: 'AI add-on offered', direction: 'positive' },
+      { factor_label: ' ai ADD-ON offered ', direction: 'positive' }], 'AI add-on offered'],
+    ['an existing factor with two figures (the last one used to win)', [
+      { factor_label: 'AI add-on offered', direction: 'positive' },
+      { factor_label: 'Pro plan price', direction: 'positive', level: { value: 54, unit: 'GBP per month' } },
+      { factor_label: 'Pro plan price', direction: 'positive', level: { value: 59, unit: 'GBP per month' } }], 'Pro plan price'],
+    ['an existing factor spelt two ways, opposite directions (the first one used to win)', [
+      { factor_label: 'AI add-on offered', direction: 'positive' },
+      { factor_label: 'Pro plan price', direction: 'positive' },
+      { factor_label: '  pro plan PRICE', direction: 'negative' }], 'Pro plan price'],
+  ])('RED: a factor named twice in one option (%s) is refused as duplicate_acts_on, nothing sent', async (_name, actsOn, factor) => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx, { ...call(), acts_on: actsOn } as never) as { ok?: boolean; refusal?: string; detail?: string; duplicate_acts_on?: unknown[] };
+    expect(r.refusal, JSON.stringify(r)).toBe('duplicate_acts_on');
+    expect(r.duplicate_acts_on).toEqual([{ option: 'Keep £49 and offer a paid AI add-on', factor, entries: 2 }]);
+    expect(r.detail).toContain(`"${factor}" is named 2 times in "Keep £49 and offer a paid AI add-on"`);
+    expect(r.detail).toContain('Nothing was prepared.');
+    expect(sent).toEqual([]);
+  });
+
+  it('CONTRAST: the same factor in two DIFFERENT options is not a duplicate — one change is sent carrying both', async () => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx, { options: [
+      { label: 'Keep £49 and offer a paid AI add-on', acts_on: [{ factor_label: 'AI add-on offered', direction: 'positive' }, { factor_label: 'Pro plan price', direction: 'positive' }] },
+      { label: 'Push AI adoption at the current price', acts_on: [{ factor_label: 'Pro plan price', direction: 'positive' }, { factor_label: 'AI feature adoption rate', direction: 'positive' }] },
+    ], new_factors: [SWITCH], rationale: 'x' } as never) as { refusal?: string };
+    expect(r.refusal, JSON.stringify(r)).not.toBe('duplicate_acts_on');
+    const options = paramsOf(sent)?.['options'] as { label: string; interventions: { factor_id?: string; factor_key?: string; value: unknown }[] }[] | undefined;
+    expect(options?.map((o) => o.label), JSON.stringify(r)).toEqual(['Keep £49 and offer a paid AI add-on', 'Push AI adoption at the current price']);
+    // Pro plan price is linked once in EACH option; the switch is on (1) in the one that names it.
+    expect(options!.map((o) => o.interventions.filter((i) => i.factor_id === 'pro_plan_price').length)).toEqual([1, 1]);
+    expect(options![0]!.interventions.filter((i) => i.factor_key === 'ai_add_on_offered')).toEqual([{ factor_key: 'ai_add_on_offered', value: 1, source: 'cee_hypothesis' }]);
+  });
 });

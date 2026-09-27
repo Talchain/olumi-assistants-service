@@ -4257,12 +4257,16 @@ export function createAgentCapabilities(
          * refused below, never rounded to on.
          */
         for (const a of plan.newActsOn) {
-          const level: unknown = spec.acts_on.find((x) => norm(x.factor_label) === norm(a.label))?.level;
-          const asked = (level as { value?: unknown } | null | undefined)?.value;
+          // ⛔ EVERY entry that names this factor (VERIFIER-S1 on A1 r2): reading only the first let a bare entry followed
+          // by `{1, '%'}` through — held, approved, committed with the user's figure dropped — while the reverse was refused.
+          const named = spec.acts_on.filter((x) => norm(x.factor_label) === norm(a.label));
+          const asked = (named[0]?.level as { value?: unknown } | null | undefined)?.value;
           if (isNewSwitch(a.key)) {
             // Anything but a bare 1 carries a figure the switch cannot keep (a unit, an estimate, a non-number): refused.
-            const conflict = newSwitchLevelConflict(level);
-            if (conflict !== null) switchLevelConflicts.push({ option: plan.label, factor: a.label, ...conflict });
+            for (const x of named) {
+              const conflict = newSwitchLevelConflict(x.level);
+              if (conflict !== null) switchLevelConflicts.push({ option: plan.label, factor: a.label, ...conflict });
+            }
             continue;
           }
           if (typeof asked === 'number' && Number.isFinite(asked)) {
@@ -4282,6 +4286,38 @@ export function createAgentCapabilities(
             + 'and it is not taken as on. Nothing was prepared. If the option simply turns it on, call propose_new_option again '
             + 'with no level for it, and tell the user it is on under this option. If a figure was meant (an amount, a rate or a '
             + 'share of the customers), it is not a switch: leave kind out, and ask the user for that figure.',
+        };
+      }
+      /**
+       * ⛔ ONE ENTRY PER FACTOR IN ONE OPTION (VERIFIER-S1 on A1 r2). Two acts_on entries for one factor are two answers to
+       * one question: `planNewOption` keeps the FIRST entry's direction and the level reader above the LAST entry's figure,
+       * so whichever the Agent wrote second decided, silently. Refused with nothing sent, whatever the entries say — even
+       * two identical ones: one entry per factor is the only rule that does not hang on their order. Bound by the factor
+       * each entry RESOLVES to (as `planNewOption` resolves it), never by its spelling. The same factor in two DIFFERENT
+       * options is not this. Checked after the switch conflicts, so a figure a switch cannot keep is named first.
+       */
+      const duplicateActsOn: { option: string; factor: string; entries: number }[] = [];
+      for (const { spec, plan } of plans) {
+        const seen = new Map<string, { factor: string; entries: number }>();
+        for (const x of spec.acts_on) {
+          const wanted = norm(x.factor_label);
+          if (wanted === '') continue;
+          const f = rawNodes.find((n) => n.kind === 'factor' && (norm(n.label) === wanted || norm(n.description) === wanted));
+          const nf = f === undefined ? newFactors.find((n) => norm(n.label) === wanted) : undefined;
+          const id = f !== undefined ? `factor:${f.id}` : nf !== undefined ? `new:${nf.key}` : undefined;
+          if (id === undefined) continue;
+          seen.set(id, { factor: f !== undefined ? String(f.label ?? f.id) : nf!.label, entries: (seen.get(id)?.entries ?? 0) + 1 });
+        }
+        for (const d of seen.values()) if (d.entries > 1) duplicateActsOn.push({ option: plan.label, ...d });
+      }
+      if (duplicateActsOn.length > 0) {
+        const d = duplicateActsOn[0]!;
+        return {
+          ok: false, mutated: false, refusal: 'duplicate_acts_on', duplicate_acts_on: duplicateActsOn,
+          detail: `"${d.factor}" is named ${d.entries} times in "${d.option}". An option acts on each factor once, with one direction `
+            + 'and at most one level, so which entry was meant cannot be told from their order. Nothing was prepared. Call '
+            + `propose_new_option again with ONE entry for "${d.factor}" in that option, with the direction and the level the user `
+            + 'gave (no level if they gave none). If the user gave two different figures for it, ask which one they mean.',
         };
       }
       if (unitMismatch.length > 0) {

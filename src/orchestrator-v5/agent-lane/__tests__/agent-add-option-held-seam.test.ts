@@ -959,4 +959,62 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(t2.assistant_text).toContain('Tell me its value today and I\'ll record it.');
     expect(t2.assistant_text).not.toContain('Olumi takes it as off today');
   }, 120_000);
+
+  /**
+   * ⛔ [A1] EVERY ENTRY NAMING THE SWITCH IS READ; A FACTOR IS NAMED ONCE PER OPTION (independent verification of A1 r2,
+   * VERIFIER-S1; staging CEE #2107). Through the whole product: a bare entry for the switch followed by `{1, '%'}` was
+   * held, approved and committed — today-0 as Olumi's, the option at a bare 1, the user's "1%" dropped — while the
+   * reverse order was refused. Both orders are now refused before anything reaches route-v2; so is a factor named twice.
+   */
+  const keyed = (x: unknown): string => {
+    const sort = (v: unknown): unknown => (Array.isArray(v) ? v.map(sort)
+      : v !== null && typeof v === 'object' ? Object.fromEntries(Object.keys(v as Record<string, unknown>).sort().map((k) => [k, sort((v as Record<string, unknown>)[k])])) : v);
+    return JSON.stringify(sort(x));
+  };
+  const proposeSwitchEntries = (switchEntries: Record<string, unknown>[]) => {
+    script = [
+      () => fnCall('propose_new_option', {
+        label: GRANDFATHER,
+        acts_on: [
+          { factor_label: 'Pro plan price', direction: 'positive', level: { value: 59, unit: 'GBP per month' } },
+          ...switchEntries.map((e) => ({ factor_label: 'Existing customers grandfathered', direction: 'positive', ...e })),
+        ],
+        new_factors: [{ label: 'Existing customers grandfathered', kind: 'switch',
+          affects: [{ label: 'Monthly churn', direction: 'negative' }, { label: 'MRR', direction: 'negative' }] }],
+        rationale: 'The user asked for it.',
+      }),
+      () => say('I could not add it as asked.'),
+    ];
+    return turn({ message: `Let's add ${GRANDFATHER}.` });
+  };
+
+  it.each([
+    ['bare first, then 1%', [{}, { level: { value: 1, unit: '%' } }], 'switch_level_not_on'],
+    ['1% first, then bare', [{ level: { value: 1, unit: '%' } }, {}], 'switch_level_not_on'],
+    ['two bare 1s', [{ level: { value: 1 } }, { level: { value: 1 } }], 'duplicate_acts_on'],
+  ])('[A1] RED: the switch named twice (%s) → refused, nothing sent to route-v2, no hold, the stored graph byte-identical', async (_name, entries, refusal) => {
+    graphOf.set(SCENARIO, structuredClone(PAUL));
+    const before = keyed(graphNow());
+    const t1 = await proposeSwitchEntries(entries as Record<string, unknown>[]);
+    expect(t1._agent.tool_calls.find((c) => c.name === 'propose_new_option'), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, refusal }));
+    expect(inner).toEqual([]);
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(approveChipOf(t1)).toBeUndefined();
+    expect(keyed(graphNow())).toBe(before);
+    expect(routerCalls).toEqual([]);
+  }, 120_000);
+
+  it('[A1] CONTRAST: ONE entry for the switch with a bare level 1 → held, approved, committed: off today as cee_inference, on (1) under the option', async () => {
+    graphOf.set(SCENARIO, structuredClone(PAUL));
+    const t1 = await proposeSwitchEntries([{ level: { value: 1 } }]);
+    const approve = approveChipOf(t1);
+    expect(approve?.id, JSON.stringify(t1._agent.tool_calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    expect((((await heldOnLatestRow())[0]!.action.inline_patch) as Record<string, unknown>)['switch_factors']).toEqual([SWITCH_FAC]);
+    const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const g = graphNow() as unknown as { nodes: Record<string, any>[] };
+    expect(g.nodes.find((x) => x.id === SWITCH_FAC)!.observed_state).toEqual({ value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' });
+    expect(g.nodes.find((x) => x.kind === 'option' && x.label === GRANDFATHER)!.interventions[SWITCH_FAC].value).toBe(1);
+    expect(routerCalls).toEqual([]);
+  }, 120_000);
 });
