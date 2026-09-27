@@ -96,9 +96,14 @@ describe('the six zero-reader smuggle names — enumerated at the bytes', () => 
       'defaulted',
       'exists_defaulted',
       'extractiontype',
+      // + the three saved-example stamps, CEE-owned since the writer audit (2026-09-27): declared on
+      // NodeV3 so writes keep them, so a producer must never be able to set them.
+      'interventionkeys',
       'origin',
       'provenance',
       'provenance_display',
+      'starterid',
+      'startertitle',
       'validation',
     ]);
   });
@@ -110,9 +115,10 @@ describe('the six zero-reader smuggle names — enumerated at the bytes', () => 
     expect(PIPELINE_OWNED_ROOTS.has('raw_value')).toBe(true);
   });
 
-  it('the J2 union adds five MORE names the same screen now kills (12 total with A6e, not 7)', () => {
+  it('the J2 union adds five MORE names the same screen now kills (15 total with A6e + A5, not 10)', () => {
     const all = [...PIPELINE_OWNED_ROOTS].filter((k) => !INTERVENTION_CONTRACT_KEYS.has(k)).sort();
-    expect(all.length).toBe(12);
+    // 10 CEE-owned smuggle names (6 + A6e's `exists_defaulted` + A5's three saved-example stamps) + the 5 J2 names.
+    expect(all.length).toBe(15);
     expect(all.filter((k) => !SMUGGLE_NAMES.includes(k))).toEqual([
       'beliefexistssource',
       'directionsource',

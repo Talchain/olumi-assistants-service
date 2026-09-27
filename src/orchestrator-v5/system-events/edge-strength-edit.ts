@@ -23,7 +23,7 @@ import { composeRecoverableHandlerResponse } from '../compose/recoverable-handle
 import { composeRecoverableValidationResponse } from '../compose/recoverable-validation-response.js';
 import { edgeBandFromMagnitude, edgeBandStd } from '../format/edge-strength-bands.js';
 import type { InfluenceBand } from '../format/influence-bands.js';
-import { projectGraphForPersistence } from '../persisted-graph-projection.js';
+import { normaliseAbsenceOnly, projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { buildGraphLookup } from '../routing/graph-lookup-adapter.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
 import type { GraphLookup } from '../routing/validator.js';
@@ -194,7 +194,7 @@ const USER_WRITE_PROVENANCE_REMOVALS = ['natural_effect', 'magnitude', 'reasonin
  * Every other byte of persisted JSON — including cosmetic/additive fields outside
  * the analysis hash — must remain deeply equal.
  */
-export function isProvenanceOnlyEdgeConfirmation(args: {
+export function isProvenanceOnlyEdgeConfirmation(stored: {
   readonly before: unknown;
   readonly after: unknown;
   readonly from: string;
@@ -202,6 +202,8 @@ export function isProvenanceOnlyEdgeConfirmation(args: {
   /** The band the user named for this confirm, if it is one; absent = a confirm of the exact figure. */
   readonly statedBand?: InfluenceBand;
 }): boolean {
+  // The base with absence-equivalent drift removed (`normaliseAbsenceOnly`): not this write's change.
+  const args = { ...stored, before: normaliseAbsenceOnly(stored.before) };
   const beforeParse = GraphV3.safeParse(args.before);
   const afterParse = GraphV3.safeParse(args.after);
   if (!beforeParse.success || !afterParse.success) return false;

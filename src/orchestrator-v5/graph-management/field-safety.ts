@@ -185,6 +185,12 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
   'source',
   'extractiontype',
   'raw_value',
+  // The saved-example stamps, DECLARED on NodeV3 so a write keeps them (writer audit
+  // 2026-09-27). Written only by the UI's register; a producer carrying one inside an
+  // add_node payload would make a model-added node claim to be part of a saved example.
+  'starterid',
+  'startertitle',
+  'interventionkeys',
 ];
 
 /**

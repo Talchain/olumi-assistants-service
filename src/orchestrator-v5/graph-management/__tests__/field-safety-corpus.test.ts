@@ -108,6 +108,10 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
     expect(extra).toEqual([
       'beliefexistssource',
       'directionsource',
+      // The saved-example stamps: CEE-owned and deliberately unread here (writer audit 2026-09-27).
+      'interventionkeys',
+      'starterid',
+      'startertitle',
       'strengthstdsource',
       'threshold_source',
       'weightsource',
@@ -136,6 +140,10 @@ const SIX_SMUGGLE_NAMES = [
   'exists_defaulted',
   'origin',
   'extractiontype',
+  // Nine since the writer audit (2026-09-27): the saved-example stamps joined the CEE-owned roots.
+  'starterid',
+  'startertitle',
+  'interventionkeys',
 ] as const;
 
 describe('corpus B — the six (now seven) smuggle names, hand-written', () => {

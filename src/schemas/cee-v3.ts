@@ -258,6 +258,26 @@ export const NodeV3 = z.object({
   threshold_source: z.string().max(64).optional().catch(undefined),
   success_threshold: z.number().finite().nullable().optional().catch(undefined),
   /**
+   * ⛔ THE SAVED-EXAMPLE STAMPS (the UI's register writes them on the nodes of a loaded saved example).
+   *
+   * THIS DECLARATION IS LOAD-BEARING, for the same reason as `threshold_source` above. The UI registers
+   * `starterId` / `starterTitle` on every node and `interventionKeys` on option nodes (served pricing
+   * example `319dde1`: 15/15, 15/15, 4 — the ONLY undeclared keys on it). Undeclared, the first D1 write's
+   * re-parse stripped them from EVERY node, and the guards that compare a write with the stored bytes then
+   * REFUSED legitimate writes on a saved example: the Agent's approved value (`value_scope_mismatch`) and
+   * the inspector's link confirm (`confirmation_would_change_non_provenance_state`) — writer audit
+   * 2026-09-27, #70 5854387709. Nothing reads them for analysis. A malformed value is dropped exactly as
+   * before (`.catch`), never a new reason to refuse a stored graph, and a stored `null` is absence
+   * (`drop-null-optional-fields.ts`).
+   *
+   * ⚠ `interventionKeys` IS NOT INERT: it is the UI's index of the option's own `interventions` keys, and
+   * writers change the cells. The persisted form re-derives it wherever present (`reindex-intervention-keys.ts`),
+   * or a delete stores it naming the deleted factor and the UI's reload proof declines the Run (#2084 review).
+   */
+  starterId: z.string().max(128).optional().catch(undefined),
+  starterTitle: z.string().max(512).optional().catch(undefined),
+  interventionKeys: z.array(z.string().max(256)).max(256).optional().catch(undefined),
+  /**
    * ⭐⭐ THE PER-FACTOR SCALE FRAME (factor nodes only) — the divisor pass 3d
    * projected this factor's baseline and every option intervention magnitude
    * onto, so within-factor ratios are exact.

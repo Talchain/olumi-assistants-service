@@ -65,7 +65,8 @@ import { buildEditGraphHandlerFact } from '../handlers/edit-graph-fact-builder.j
 import { evaluateEditGraphMutations } from '../handlers/edit-graph-referee-gate.js';
 import { threadHoldsThroughMutatingCommit } from '../handlers/hold-thread-through.js';
 import type { FrameFreshness } from '../graph-management/types.js';
-import { projectGraphForPersistence } from '../persisted-graph-projection.js';
+import { normaliseAbsenceOnly, projectGraphForPersistence } from '../persisted-graph-projection.js';
+import { interventionKeysFollowInterventions } from '../reindex-intervention-keys.js';
 import { reconcileTopLevelOptionsFromNodes } from '../reconcile-top-level-options.js';
 import { APPROVED_LEVEL_ADOPTION_SOURCE, approvedLevelSourceFor, runWithApprovedAdoption } from '../agent-lane/approved-adoption-context.js';
 import { structuralEdgeValue } from '../routing/add-option-transaction.js';
@@ -147,11 +148,13 @@ export function optionInterventionPostimageIsScoped(
  * or link the batch did not declare.
  */
 export function optionInterventionBatchPostimageIsScoped(
-  before: unknown,
+  storedBefore: unknown,
   after: unknown,
   targets: readonly OptionLevelTarget[],
   addedLinks: readonly { readonly from: string; readonly to: string }[] = [],
 ): boolean {
+  // The base with absence-equivalent drift removed (`normaliseAbsenceOnly`): not the writer's change.
+  const before = normaliseAbsenceOnly(storedBefore);
   if (!isEditableGraph(before) || !isEditableGraph(after)) return false;
   if (!isDeepStrictEqual(projectGraphForPersistence(before), before)) return false;
   if (targets.length === 0 || new Set(targets.map(t => `${t.optionId}::${t.factorId}`)).size !== targets.length) return false;
@@ -199,6 +202,17 @@ export function optionInterventionBatchPostimageIsScoped(
       || link.exists_probability !== STRUCTURAL_EDGE_DEFAULTS.exists_probability
       || link.provenance?.source !== (owner.source ?? 'user_specified')) return false;
     restored.edges = restored.edges.filter(e => !isLink(e));
+  }
+  // The UI's index of the cells (`reindexInterventionKeys`) follows them: on a target option it may move exactly to
+  // its re-derivation, and nowhere else. It is restored only when the new index is in step with the new cells.
+  for (const optionId of new Set(targets.map(t => t.optionId))) {
+    const oldNode = before.nodes.find(node => node.id === optionId)!;
+    const newNode = after.nodes.find(node => node.id === optionId)!;
+    const restoredNode = restored.nodes.find(node => node.id === optionId)!;
+    if (Object.hasOwn(oldNode, 'interventionKeys') && Array.isArray(restoredNode.interventionKeys)
+      && interventionKeysFollowInterventions(newNode)) {
+      restoredNode.interventionKeys = structuredClone(oldNode.interventionKeys);
+    }
   }
   const expectedMirror = reconcileTopLevelOptionsFromNodes(specimen);
   if (!isDeepStrictEqual(after.options, expectedMirror.options)) return false;
@@ -268,7 +282,8 @@ export function applyOptionInterventionBatch(input: OptionInterventionBatchTrans
   if (written.length === 0) return { kind: 'unchanged' };
   const before = input.persistedGraph;
   if (!isEditableGraph(before)) return refuse('canonical_graph_unavailable');
-  if (!isDeepStrictEqual(projectGraphForPersistence(before), before)) {
+  // Only absence-equivalent drift may differ from the persisted form; the commit's projection removes it.
+  if (!isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
     return refuse('unrelated_canonical_repair_required');
   }
   try {
@@ -352,7 +367,9 @@ type ValueHandlerFact = Extract<FactorValueEditResult, { kind: 'mutated' }>['han
  * node, edge, size, option or top-level field.
  */
 const VALUE_WRITER_OWNED_NODE_MEMBERS = ['observed_state', 'display_value', 'provenance', 'scale_frame'] as const;
-export function factorValuesPostimageIsScoped(before: unknown, after: unknown, factorIds: readonly string[]): boolean {
+export function factorValuesPostimageIsScoped(storedBefore: unknown, after: unknown, factorIds: readonly string[]): boolean {
+  // The base with absence-equivalent drift removed (`normaliseAbsenceOnly`): not the writer's change.
+  const before = normaliseAbsenceOnly(storedBefore);
   if (!isEditableGraph(before) || !isEditableGraph(after)) return false;
   if (factorIds.length === 0 || new Set(factorIds).size !== factorIds.length) return false;
   const restored = structuredClone(after);
@@ -566,7 +583,8 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   let valueConfirmations: readonly string[] = [];
   let linksResized: readonly { from: string; to: string }[] = [];
   if (values.length + frames.length > 0) {
-    if (!isEditableGraph(before) || !isDeepStrictEqual(projectGraphForPersistence(before), before)) {
+    if (!isEditableGraph(before)
+      || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
       return { kind: 'refused', reason: 'canonical_graph_unavailable' };
     }
     if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };

@@ -35,6 +35,11 @@
  * `normaliseOptionInterventionContract` so a mirrored `options[]` entry copies
  * the already-canonical interventions bundle.
  *
+ * `reindexInterventionKeys` runs after every pass that can change a node's
+ * `interventions`, so the UI's index of them is never stored stale (#2084
+ * review: a delete left it naming a deleted factor, and the reload proof
+ * declined the Run). See `reindex-intervention-keys.ts`.
+ *
  * `dropNullOptionalGraphFields` runs LAST: a `null` on a schema-optional key
  * makes the stored bytes unreadable by every strict `GraphV3` reader (served
  * 26 Sep 2026: one UI register poisoned a scenario, and every later canvas edit
@@ -47,6 +52,7 @@ import { dropNullOptionalGraphFields } from './drop-null-optional-fields.js';
 import { repairGraphForPersistence } from './repair-graph-for-persistence.js';
 import { normaliseOptionInterventionContract } from './normalise-option-interventions.js';
 import { reconcileTopLevelOptionsFromNodes } from './reconcile-top-level-options.js';
+import { reindexInterventionKeys } from './reindex-intervention-keys.js';
 
 export interface PersistedGraphProjectionContext {
   readonly scenarioId?: string;
@@ -63,6 +69,18 @@ export interface PersistedGraphProjectionContext {
  * unchanged), so this composition cannot fail a commit on its own. A graph that
  * needs no repair is returned as the ORIGINAL reference.
  */
+/**
+ * ⭐ THE BASE A STORED-BYTES GUARD COMPARES AGAINST: the stored graph with only ABSENCE-EQUIVALENT drift removed
+ * (#2084 review, Runtime 5855308269). Two passes of the persisted form change bytes without changing any fact:
+ * a `null` the schema reads as absence (`dropNullOptionalGraphFields`) and the UI's derived `interventionKeys`
+ * index brought into step with its cells (`reindexInterventionKeys`). Staging already stores both kinds of legacy
+ * bytes, so a guard that demanded the raw bytes be a fixed point refused writes the base committed. Every OTHER
+ * pass (intercept repair, intervention promotion, options mirror) is a real repair and still refuses.
+ */
+export function normaliseAbsenceOnly<T>(graph: T): T {
+  return dropNullOptionalGraphFields(reindexInterventionKeys(graph));
+}
+
 export function projectGraphForPersistence<T>(
   graph: T,
   ctx: PersistedGraphProjectionContext = {},
@@ -71,5 +89,6 @@ export function projectGraphForPersistence<T>(
   const repaired = repairGraphForPersistence(graph, ctx);
   const normalised = normaliseOptionInterventionContract(repaired, ctx);
   const reconciled = reconcileTopLevelOptionsFromNodes(normalised, ctx);
-  return dropNullOptionalGraphFields(reconciled, ctx);
+  const reindexed = reindexInterventionKeys(reconciled);
+  return dropNullOptionalGraphFields(reindexed, ctx);
 }
