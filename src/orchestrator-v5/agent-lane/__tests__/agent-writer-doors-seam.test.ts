@@ -352,6 +352,29 @@ describe('SLICE C2 — the Agent reaches the product\'s own writers: a new risk 
     expect(bytes()).toBe(before);
   }, 120_000);
 
+  it('(6) a DEAD-END risk (what it hurts never reaches the goal) is refused, and the refusal NAMES the missing link type — risk → goal — nothing held', async () => {
+    const g = seedGraph();
+    graphOf.set(SCENARIO, { ...g, nodes: [...g.nodes, { id: 'out_trust', kind: 'outcome', label: 'Brand trust' }] });
+    const before = bytes();
+    let out: Record<string, unknown> = {};
+    script = [
+      () => fnCall('propose_new_risk', { label: 'Competitive response', affects: [{ target_label: 'Brand trust', direction: 'negative' }], rationale: 'x' }),
+      (body) => { out = toolOutputIn(body); return say('That risk would not reach the goal as the model stands.'); },
+    ];
+    const t1 = await turn({ message: 'Add a competitive response risk that would damage brand trust.' });
+    expect(t1._agent.tool_calls.find((c) => c.name === 'propose_new_risk'), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false }));
+    expect(out['reason'], JSON.stringify(out)).toBe('risk_unreachable');
+    const detail = String(out['detail']);
+    expect(detail, detail).toContain('The missing link is risk → goal');
+    expect(detail).toContain('"Brand trust" does not lead to "Revenue"');
+    expect(detail).toContain('propose it again with "Revenue" in affects');
+    // The outcome → goal link is not an Agent move: named as the canvas's, never offered.
+    expect(detail).toMatch(/added on the canvas, not here — never offer to add it/);
+    expect(approveChipOf(t1)).toBeUndefined();
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(bytes()).toBe(before);
+  }, 120_000);
+
   // ── limit edit ───────────────────────────────────────────────────────────
 
   const spendRows = () => (graphNow().goal_constraints ?? []).filter((c) => c['node_id'] === SPEND);
@@ -458,5 +481,78 @@ describe('SLICE C2 — the Agent reaches the product\'s own writers: a new risk 
       node_id: 'opt_a', operator: '<=', raw_value: 5000 }, 'req-option');
     expect(r2).toEqual(expect.objectContaining({ status: 'refused', reason: 'target_is_option' }));
     expect(bytes()).toBe(before);
+  }, 120_000);
+
+  /**
+   * Canonical 5856206675 F1: the pricing example's REAL NRR row, stored as a FRACTION (1.1, shown as 110%). The writer
+   * stores the figure as given, in the row's unit, and `figureTheUserWrote` accepts 115 for "115%": without the check,
+   * "at least 115%" lands as 115 'fraction' — 11,500%. Refused by the proposer AND the door; the stored graph is
+   * byte-identical. The percent → fraction conversion is A3's (unit/frame), not this path's.
+   */
+  const NRR_ROW = {
+    constraint_id: 'constraint_out_nrr_min', node_id: 'out_nrr', operator: '>=', value: 1.1, unit: 'fraction',
+    label: 'net revenue retention floor', source_quote: 'net revenue retention above 110%', provenance: 'explicit',
+    provenance_unit_normalised: { rule: 'percent_to_fraction', original_value: 110, original_unit: '%' },
+  };
+  const nrrGraph = (): G => {
+    const g = seedGraph();
+    return {
+      ...g,
+      nodes: [...g.nodes, { id: 'out_nrr', kind: 'outcome', label: 'Net revenue retention' }],
+      edges: [...g.edges, { from: 'out_nrr', to: 'goal_x', strength: { mean: 0.4, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' }],
+      goal_constraints: [...(g.goal_constraints ?? []), NRR_ROW],
+    };
+  };
+
+  it('(12) RED: "NRR at least 115%" on a row stored as a FRACTION is refused by the proposer in plain words — nothing prepared, no button, byte-identical', async () => {
+    graphOf.set(SCENARIO, nrrGraph());
+    const before = bytes();
+    let out: Record<string, unknown> = {};
+    script = [
+      () => fnCall('propose_limit_change', { limit_label: 'Net revenue retention', operator: '>=', new_value: 115, rationale: 'x' }),
+      (body) => { out = toolOutputIn(body); return say('That limit cannot be changed here.'); },
+    ];
+    const t1 = await turn({ message: 'Make net revenue retention at least 115%.' });
+    expect(t1._agent.tool_calls.find((c) => c.name === 'propose_limit_change'), JSON.stringify(t1._agent.tool_calls))
+      .toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'limit_stored_as_fraction' }));
+    expect(String(out['detail']), JSON.stringify(out)).toContain('stored as a fraction');
+    expect(approveChipOf(t1)).toBeUndefined();
+    expect(bytes()).toBe(before);
+  }, 120_000);
+
+  it('(12b) RED: the DOOR refuses the fraction row on its own — no row appended, byte-identical (never 115 as a fraction)', async () => {
+    graphOf.set(SCENARIO, nrrGraph());
+    const before = bytes();
+    const { commitLimitEditInProcess } = await import('../../system-events/dispatch.js');
+    const rowsBefore = order.length;
+    const r = await commitLimitEditInProcess({ scenario_id: SCENARIO, turn_id: randomUUID(), base_graph_hash: await hashNow(),
+      node_id: 'out_nrr', operator: '>=', raw_value: 115 }, 'req-nrr');
+    expect(r).toEqual(expect.objectContaining({ status: 'refused', reason: 'limit_stored_as_fraction' }));
+    expect(order.length, 'no row appended').toBe(rowsBefore);
+    expect(bytes()).toBe(before);
+    expect((graphNow().goal_constraints ?? []).find((c) => c['constraint_id'] === 'constraint_out_nrr_min')).toEqual(NRR_ROW);
+  }, 120_000);
+
+  it('(13) the % row: an edit 4% → 5% keeps the unit and DROPS the old unit audit — no stale "original 4" survives the new figure', async () => {
+    const g = seedGraph();
+    const churnRow = {
+      constraint_id: 'gc-churn-1', node_id: 'fac_churn', operator: '<=', value: 4, unit: '%', value_frame: 'level',
+      label: 'Monthly churn', provenance: 'explicit',
+      provenance_unit_relabelled: { rule: 'percent_word_to_symbol', pre_normalisation_value: 4, pre_normalisation_unit: 'percent per month' },
+    };
+    graphOf.set(SCENARIO, {
+      ...g,
+      nodes: [...g.nodes, { id: 'fac_churn', kind: 'factor', label: 'Monthly churn', category: 'external', observed_state: { value: 0.04, raw_value: 4, unit: '%', cap: 100 } }],
+      edges: [...g.edges, { from: 'fac_churn', to: 'goal_x', strength: { mean: 0.3, std: 0.1 }, exists_probability: 1, effect_direction: 'negative' }],
+      goal_constraints: [...(g.goal_constraints ?? []), churnRow],
+    });
+    const { commitLimitEditInProcess } = await import('../../system-events/dispatch.js');
+    const r = await commitLimitEditInProcess({ scenario_id: SCENARIO, turn_id: randomUUID(), base_graph_hash: await hashNow(),
+      node_id: 'fac_churn', operator: '<=', raw_value: 5 }, 'req-churn');
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ status: 'committed' }));
+    const written = (graphNow().goal_constraints ?? []).filter((c) => c['node_id'] === 'fac_churn');
+    expect(written, JSON.stringify(graphNow().goal_constraints)).toHaveLength(1);
+    expect(written[0]).toEqual(expect.objectContaining({ constraint_id: 'gc-churn-1', value: 5, unit: '%', value_frame: 'level', provenance: 'explicit' }));
+    expect(Object.keys(written[0]!).filter((k) => k.startsWith('provenance_unit_')), JSON.stringify(written[0])).toEqual([]);
   }, 120_000);
 });

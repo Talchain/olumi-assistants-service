@@ -138,6 +138,7 @@ import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel } from '../goal-current-level.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
+import { FRACTION_SPELLED_UNIT } from '../../coaching/bound-graph.js';
 
 /**
  * Whose figure: the labels it is FOR, and every other QUANTITY's label (`figureTheUserWroteFor`). Options and the
@@ -760,6 +761,24 @@ const AMBIGUOUS_NOTE =
   'guess was made. Ask the user which one they mean, describing each candidate by what tells it apart (its full ' +
   'label, current value, what it is connected to), never by its id. Then propose again, passing that entity’s ' +
   '`id` exactly as given here in place of its label.';
+
+/**
+ * Why a new risk reaches nothing (Canonical 5856206675: "the refusal must name the missing link type so the Agent can
+ * propose it"). What it would hurt does not lead to the goal, so it cannot change the comparison. The one link the
+ * Agent CAN propose is risk → goal (an `affects` entry naming the goal); a link from that outcome to the goal is not
+ * an Agent move, so it is named as the canvas's, never offered.
+ */
+function riskUnreachableWhy(g: Pick<GraphRead, 'nodes'>, risk: string, links: readonly { to_id?: string }[]): string {
+  const goal = g.nodes.find((n) => n.kind === 'goal');
+  const hurt = [...new Set(links.flatMap((l) => {
+    const n = l.to_id !== undefined ? g.nodes.find((x) => x.id === l.to_id) : undefined;
+    return n !== undefined ? [`"${n.label}"`] : [];
+  }))].join(' and ');
+  const goalName = goal !== undefined ? `"${goal.label}"` : 'the goal';
+  return ` The missing link is risk → goal: in the model, ${hurt || 'what it would hurt'} does not lead to ${goalName}, so "${risk}" could not `
+    + `change the comparison. Ask the user whether "${risk}" would also hurt ${goalName} directly; if they say so, propose it again with ${goalName} in affects. `
+    + `A link from ${hurt || 'that outcome'} to ${goalName} is added on the canvas, not here — never offer to add it.`;
+}
 
 /** A goal target's direction, in words (the product's own receipt says "at least" / "at most"). */
 const DIRECTION_WORDS = { at_least: 'at least', at_most: 'at most' } as const;
@@ -4371,7 +4390,7 @@ export function createAgentCapabilities(
         const why = built.reason === 'kind_pair_not_allowed'
           ? ` ${RISK_LINKS_RULE}`
           : built.reason === 'risk_unreachable'
-            ? ' Nothing it would affect leads to the goal, so it could not change the comparison: ask the user what it would hurt.'
+            ? riskUnreachableWhy(g, label, links)
             : '';
         return { ok: false, mutated: false, refusal: 'not_prepared', reason: built.reason,
           detail: `That risk could not be prepared as one change, so nothing was sent or changed.${why} Tell the user plainly.` };
@@ -4474,6 +4493,13 @@ export function createAgentCapabilities(
       }
       const row = matching[0]!;
       const unit = typeof row['unit'] === 'string' && row['unit'] !== '' ? row['unit'] : null;
+      // ⛔ A limit stored as a FRACTION of one (shown as a percent): the user's percent would be written 100× too large.
+      // The door refuses it too (`limit-edit.ts`); saying so here means nothing is offered that cannot be approved.
+      if (unit !== null && FRACTION_SPELLED_UNIT.test(unit)) {
+        return { ok: false, mutated: false, refusal: 'limit_stored_as_fraction',
+          detail: `The limit on "${node.label}" is stored as a fraction, and this path cannot yet change a limit stored that way, so nothing was prepared. `
+            + 'Tell the user plainly that it can be changed on the canvas, and never offer to change it here.' };
+      }
       const figureOf = (x: number): string => (unit !== null ? targetFigure(x, unit) : String(x));
       // ⛔ A figure in another kind of unit is never this limit's (the lane's one family check).
       if (typeof args?.unit === 'string' && args.unit.trim() !== '' && unitsConflict(args.unit.trim(), unit ?? undefined) !== null) {

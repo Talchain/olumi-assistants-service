@@ -27,6 +27,7 @@ import type { SystemEventTurnPayload } from '@talchain/schemas/boundary';
 import { GraphV3 } from '../../schemas/cee-v3.js';
 import { log } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { FRACTION_SPELLED_UNIT } from '../coaching/bound-graph.js';
 import { BASE_HASH_DIVERGED } from '../graph-management/reason-codes.js';
 import {
   applyConstraintEditThroughAddConstraint,
@@ -97,6 +98,10 @@ export async function applyLimitEdit(params: ApplyLimitEditParams): Promise<Goal
   if (rows.length > 1) return refused('limit_ambiguous');
   const row = rows[0]!;
   const unit = typeof row.unit === 'string' && row.unit !== '' ? row.unit : undefined;
+  // ⛔ A row stored as a FRACTION of one (the pricing example's NRR: 1.1 'fraction', shown as 110%). The writer stores
+  // the figure as given, in the row's unit, and the user states a percent: 115 would land as 11,500%. The percent →
+  // fraction conversion is the unit/frame slice's (A3); until then this path refuses, and nothing is written.
+  if (unit !== undefined && FRACTION_SPELLED_UNIT.test(unit)) return refused('limit_stored_as_fraction');
   const label = typeof row.label === 'string' && row.label !== '' ? row.label : undefined;
   const frame = typeof row.value_frame === 'string' ? (row.value_frame as NonNullable<Parameters<typeof applyConstraintEditThroughAddConstraint>[0]['confirmedConstraintValueFrame']>) : undefined;
 
