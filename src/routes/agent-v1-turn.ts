@@ -1968,10 +1968,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       });
     }
 
-    // ⛔ This turn's approval results go with it: the approve chip's fast path puts no authorise_change in the history
-    // (only its words and Olumi's status), so they are the only record of which proposal it applied (PJ-C1).
+    // ⛔ This turn's approval results go with it ONLY on the approve chip's fast path: it puts no authorise_change in
+    // the history (only its words and Olumi's status), so they are the only record of which proposal it applied
+    // (PJ-C1). On every other turn an approval is already in `items` at its TRUE position; passing it again would
+    // place it after everything and could stub a same-id proposal made later in the turn (adversarial review F2).
     const results = result.tool_results;
-    histories.set(sessionId, pruneSupersededToolOutputs(result.items, result.tool_calls.flatMap((c, k) => (c.name === 'authorise_change' && k < results.length ? [results[k]] : []))));
+    const chipApprovals = fastPath === 'approve'
+      ? result.tool_calls.flatMap((c, k) => (c.name === 'authorise_change' && k < results.length ? [results[k]] : []))
+      : [];
+    histories.set(sessionId, pruneSupersededToolOutputs(result.items, chipApprovals));
 
     // A hop limit is never returned as an empty answer.
     const text = result.stopped_reason === 'incomplete'

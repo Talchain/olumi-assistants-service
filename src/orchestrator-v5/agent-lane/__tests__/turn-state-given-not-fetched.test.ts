@@ -257,6 +257,20 @@ describe('an applied proposal and an earlier approval are not kept in the histor
     expect(outputOf(prune(chipTurn), 'p1')).toBe(JSON.stringify(OPTION));
   });
 
+  it('CONTROL (adversarial review F1): a SAME-ID proposal made AFTER its own applied approval is pending — kept verbatim', () => {
+    // `gmh_` handles are hash(scenario, node key): add option X, the user deletes it on the canvas, asks again → the
+    // Agent re-proposes with the SAME handle. Only an approval LATER than the output may stub it.
+    const again = { ...OPTION, note: 'Re-proposed: nothing has changed yet.' };
+    const hist = [
+      user('add the £59 option'), call('p1', 'propose_new_option', { options: [] }), out('p1', OPTION),
+      user('yes'), call('z1', 'authorise_change', { proposal_id: 'prop_1' }), out('z1', applied('prop_1')),
+      user('I deleted it — add it again'), call('p3', 'propose_new_option', { options: [] }), out('p3', again),
+    ];
+    const pruned = prune(hist);
+    expect(outputOf(pruned, 'p1'), 'the first proposal was applied by z1').toMatch(/superseded/);
+    expect(outputOf(pruned, 'p3'), 'the re-proposal awaits a yes: byte-identical').toBe(JSON.stringify(again));
+  });
+
   it('CONTROL: a proposal still awaiting a yes is byte-identical — never proposed, refused, or only part-applied', () => {
     const refused = { ok: false, mutated: false, applied: false, refusal: 'superseded', proposal_id: 'prop_1' };
     // ProposalStore.markApplied only when every level landed (agent-capabilities.ts :3139, :3704): part-landed stays outstanding.
