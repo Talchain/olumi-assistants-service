@@ -1,0 +1,795 @@
+{
+ "_provenance": {
+  "source": "served staging CEE, MG construction sweep (27 Sep): the persisted graph from GET /assist/v1/scenarios/:id/graph after an agent-lane build (reload.json), brief from the run summary; plus one MG served-corpus entry (/private/tmp/mg-corpus.json, src f-20260925T234945Z)",
+  "kept": "every node; fields id, kind, label, observed_state, interventions, is_baseline only (option levels are encoded on the factor frame, as admission writes them)",
+  "why": "F2 (AI Quality on CEE #2073): a baseline number the brief writes as an OPTION level, or for ANOTHER quantity, must not make it the user's. Rows restamp named factors to model the defect shape on these served graphs."
+ },
+ "graphs": {
+  "enghiring_hybrid": {
+   "run": "enghiring-3",
+   "scenario_id": "701ade39-51cf-4c04-b503-a30fae0ff3c3",
+   "build": "3c4d9cc",
+   "brief": "Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under £400k?",
+   "nodes": [
+    {
+     "id": "decision_ship_the_new_platform_by_q3",
+     "kind": "decision",
+     "label": "Decision: ship the new platform…"
+    },
+    {
+     "id": "ship_the_new_platform_by_q3",
+     "kind": "goal",
+     "label": "ship the new platform by Q3"
+    },
+    {
+     "id": "hire_two_senior_engineers",
+     "kind": "option",
+     "label": "Hire two senior engineers",
+     "interventions": {
+      "senior_engineers_hired": {
+       "value": 0.2,
+       "source": "brief_extraction"
+      }
+     }
+    },
+    {
+     "id": "hire_four_junior_engineers",
+     "kind": "option",
+     "label": "Hire four junior engineers",
+     "interventions": {
+      "junior_engineers_hired": {
+       "value": 0.2,
+       "source": "brief_extraction"
+      }
+     }
+    },
+    {
+     "id": "carry_on_as_now",
+     "kind": "option",
+     "label": "Carry on as now",
+     "is_baseline": true
+    },
+    {
+     "id": "hire_one_senior_and_two_juniors",
+     "kind": "option",
+     "label": "Hire one senior and two juniors",
+     "interventions": {
+      "junior_engineers_hired": {
+       "value": 0.1,
+       "source": "cee_hypothesis"
+      },
+      "senior_engineers_hired": {
+       "value": 0.1,
+       "source": "cee_hypothesis"
+      }
+     }
+    },
+    {
+     "id": "senior_engineers_hired",
+     "kind": "factor",
+     "label": "Senior engineers hired",
+     "observed_state": {
+      "cap": 10,
+      "unit": "engineers",
+      "value": 0,
+      "source": "brief_extraction",
+      "raw_value": 0,
+      "declared_scale": "unit_interval"
+     }
+    },
+    {
+     "id": "junior_engineers_hired",
+     "kind": "factor",
+     "label": "Junior engineers hired",
+     "observed_state": {
+      "cap": 20,
+      "unit": "engineers",
+      "value": 0,
+      "source": "brief_extraction",
+      "raw_value": 0,
+      "declared_scale": "unit_interval"
+     }
+    },
+    {
+     "id": "existing_platform_engineering_capacity",
+     "kind": "factor",
+     "label": "Existing platform engineering…",
+     "observed_state": {
+      "unit": "FTE-equivalent engineers",
+      "value": 0.15,
+      "source": "cee_inference",
+      "raw_value": 3,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "recruitment_lead_time",
+     "kind": "factor",
+     "label": "Recruitment lead time",
+     "observed_state": {
+      "unit": "months",
+      "value": 0.16666666666666666,
+      "source": "cee_inference",
+      "raw_value": 2,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "annual_salary_spend",
+     "kind": "factor",
+     "label": "Annual salary spend",
+     "observed_state": {
+      "unit": "GBP per year",
+      "value": 0,
+      "source": "user_assumption",
+      "raw_value": 0
+     }
+    },
+    {
+     "id": "senior_hiring_shortfall",
+     "kind": "risk",
+     "label": "Senior hiring shortfall"
+    },
+    {
+     "id": "junior_onboarding_burden",
+     "kind": "risk",
+     "label": "Junior onboarding burden"
+    },
+    {
+     "id": "effective_platform_delivery_capacity",
+     "kind": "outcome",
+     "label": "Effective platform delivery…"
+    }
+   ]
+  },
+  "enghiring_digits": {
+   "run": "enghiring-2",
+   "scenario_id": "5ed5728e-92f1-4b23-b86f-ea3e438432ea",
+   "build": "e7d28fd",
+   "brief": "Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under £400k?",
+   "nodes": [
+    {
+     "id": "decision_ship_the_new_platform_by_q3",
+     "kind": "decision",
+     "label": "Decision: ship the new platform…"
+    },
+    {
+     "id": "ship_the_new_platform_by_q3",
+     "kind": "goal",
+     "label": "ship the new platform by Q3"
+    },
+    {
+     "id": "hire_2_senior_engineers",
+     "kind": "option",
+     "label": "Hire 2 senior engineers",
+     "interventions": {
+      "annual_salary_spend": {
+       "value": 0.4,
+       "source": "cee_hypothesis"
+      },
+      "senior_engineers_hired": {
+       "value": 0.2,
+       "source": "brief_extraction"
+      }
+     }
+    },
+    {
+     "id": "hire_4_junior_engineers",
+     "kind": "option",
+     "label": "Hire 4 junior engineers",
+     "interventions": {
+      "annual_salary_spend": {
+       "value": 0.4,
+       "source": "cee_hypothesis"
+      },
+      "junior_engineers_hired": {
+       "value": 0.26666666666666666,
+       "source": "brief_extraction"
+      }
+     }
+    },
+    {
+     "id": "keep_current_staffing",
+     "kind": "option",
+     "label": "Keep current staffing",
+     "is_baseline": true
+    },
+    {
+     "id": "senior_engineers_hired",
+     "kind": "factor",
+     "label": "Senior engineers hired",
+     "observed_state": {
+      "cap": 10,
+      "unit": "engineers",
+      "value": 0,
+      "source": "brief_extraction",
+      "raw_value": 0,
+      "declared_scale": "unit_interval"
+     }
+    },
+    {
+     "id": "junior_engineers_hired",
+     "kind": "factor",
+     "label": "Junior engineers hired",
+     "observed_state": {
+      "cap": 15,
+      "unit": "engineers",
+      "value": 0,
+      "source": "brief_extraction",
+      "raw_value": 0,
+      "declared_scale": "unit_interval"
+     }
+    },
+    {
+     "id": "annual_salary_spend",
+     "kind": "factor",
+     "label": "Annual salary spend",
+     "observed_state": {
+      "cap": 600000,
+      "unit": "GBP/year",
+      "value": 0,
+      "source": "brief_extraction",
+      "raw_value": 0,
+      "declared_scale": "unit_interval"
+     }
+    },
+    {
+     "id": "added_delivery_capacity",
+     "kind": "factor",
+     "label": "Added delivery capacity",
+     "observed_state": {
+      "cap": 10,
+      "unit": "FTE-equivalent engineers",
+      "value": 0,
+      "raw_value": 0,
+      "declared_scale": "unit_interval"
+     }
+    },
+    {
+     "id": "senior_hiring_lead_time_risk",
+     "kind": "risk",
+     "label": "Senior hiring lead-time risk"
+    },
+    {
+     "id": "junior_ramp_up_risk",
+     "kind": "risk",
+     "label": "Junior ramp-up risk"
+    },
+    {
+     "id": "budget_cap_risk",
+     "kind": "risk",
+     "label": "Budget-cap risk"
+    }
+   ]
+  },
+  "statedzero": {
+   "run": "statedzero-1",
+   "scenario_id": "bb14231d-79e5-4f90-9c5e-919dc4ab11a5",
+   "build": "f99d0a5",
+   "brief": "We have three account executives and 0 enterprise customers today. Should we hire two more account executives or build a partner channel to reach 10 enterprise customers within 12 months, while keeping new annual spend under £300k?",
+   "nodes": [
+    {
+     "id": "decision_enterprise_customers",
+     "kind": "decision",
+     "label": "Decision: enterprise customers"
+    },
+    {
+     "id": "enterprise_customers",
+     "kind": "goal",
+     "label": "enterprise customers",
+     "observed_state": {
+      "cap": 12.5,
+      "unit": "customers",
+      "value": 0,
+      "source": "brief_extraction",
+      "baseline": 0,
+      "raw_value": 0
+     }
+    },
+    {
+     "id": "hire_two_aes",
+     "kind": "option",
+     "label": "Hire two AEs",
+     "interventions": {
+      "new_annual_spend": {
+       "value": 0.36,
+       "source": "cee_hypothesis"
+      },
+      "account_executives": {
+       "value": 0.25,
+       "source": "cee_hypothesis"
+      }
+     }
+    },
+    {
+     "id": "build_partner_channel",
+     "kind": "option",
+     "label": "Build partner channel",
+     "interventions": {
+      "new_annual_spend": {
+       "value": 0.3,
+       "source": "cee_hypothesis"
+      },
+      "active_channel_partners": {
+       "value": 0.15,
+       "source": "cee_hypothesis"
+      }
+     }
+    },
+    {
+     "id": "partner_channel_pilot",
+     "kind": "option",
+     "label": "Partner-channel pilot",
+     "interventions": {
+      "new_annual_spend": {
+       "value": 0.12,
+       "source": "cee_hypothesis"
+      },
+      "active_channel_partners": {
+       "value": 0.05,
+       "source": "cee_hypothesis"
+      }
+     }
+    },
+    {
+     "id": "carry_on_as_now",
+     "kind": "option",
+     "label": "Carry on as now",
+     "is_baseline": true
+    },
+    {
+     "id": "account_executives",
+     "kind": "factor",
+     "label": "Account executives",
+     "observed_state": {
+      "cap": 20,
+      "unit": "AEs",
+      "value": 0.15,
+      "source": "brief_extraction",
+      "raw_value": 3,
+      "declared_scale": "unit_interval"
+     }
+    },
+    {
+     "id": "active_channel_partners",
+     "kind": "factor",
+     "label": "Active channel partners",
+     "observed_state": {
+      "unit": "partners",
+      "value": 0,
+      "source": "cee_inference",
+      "raw_value": 0,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "ae_enterprise_sales_productivity",
+     "kind": "factor",
+     "label": "AE enterprise sales productivity",
+     "observed_state": {
+      "unit": "enterprise customers per AE per 12 months",
+      "value": 0.15,
+      "source": "cee_inference",
+      "raw_value": 1.5,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "partner_enterprise_sales_productivity",
+     "kind": "factor",
+     "label": "Partner enterprise sales…",
+     "observed_state": {
+      "unit": "enterprise customers per partner per 12 months",
+      "value": 0.15,
+      "source": "cee_inference",
+      "raw_value": 1.5,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "new_annual_spend",
+     "kind": "factor",
+     "label": "New annual spend",
+     "observed_state": {
+      "cap": 500000,
+      "unit": "GBP per year",
+      "value": 0,
+      "raw_value": 0,
+      "declared_scale": "unit_interval"
+     }
+    },
+    {
+     "id": "hiring_ramp_up_risk",
+     "kind": "risk",
+     "label": "Hiring ramp-up risk"
+    },
+    {
+     "id": "partner_enablement_risk",
+     "kind": "risk",
+     "label": "Partner enablement risk"
+    },
+    {
+     "id": "ae_sourced_enterprise_customers",
+     "kind": "outcome",
+     "label": "AE-sourced enterprise customers"
+    },
+    {
+     "id": "partner_sourced_enterprise_customers",
+     "kind": "outcome",
+     "label": "Partner-sourced enterprise…"
+    }
+   ]
+  },
+  "factorzero": {
+   "run": "factorzero-1",
+   "scenario_id": "b0a767b6-a1ae-4a4e-b2f2-0729258cb16c",
+   "build": "f99d0a5",
+   "brief": "We have 0 channel partners and three account executives today. Should we sign up channel partners or hire two more account executives to reach £50k of new ARR within 12 months?",
+   "nodes": [
+    {
+     "id": "decision_new_arr",
+     "kind": "decision",
+     "label": "Decision: new ARR"
+    },
+    {
+     "id": "new_arr",
+     "kind": "goal",
+     "label": "new ARR"
+    },
+    {
+     "id": "sign_channel_partners",
+     "kind": "option",
+     "label": "Sign channel partners",
+     "interventions": {
+      "channel_partner_count": {
+       "value": 0.1,
+       "source": "cee_hypothesis"
+      }
+     }
+    },
+    {
+     "id": "hire_two_account_executives",
+     "kind": "option",
+     "label": "Hire two account executives",
+     "interventions": {
+      "account_executive_headcount": {
+       "value": 0.25,
+       "source": "cee_hypothesis"
+      }
+     }
+    },
+    {
+     "id": "maintain_current_team",
+     "kind": "option",
+     "label": "Maintain current team",
+     "is_baseline": true
+    },
+    {
+     "id": "channel_partner_count",
+     "kind": "factor",
+     "label": "Channel partner count",
+     "observed_state": {
+      "cap": 50,
+      "unit": "count",
+      "value": 0,
+      "source": "brief_extraction",
+      "raw_value": 0,
+      "declared_scale": "unit_interval"
+     }
+    },
+    {
+     "id": "account_executive_headcount",
+     "kind": "factor",
+     "label": "Account executive headcount",
+     "observed_state": {
+      "cap": 20,
+      "unit": "count",
+      "value": 0.15,
+      "source": "brief_extraction",
+      "raw_value": 3,
+      "declared_scale": "unit_interval"
+     }
+    },
+    {
+     "id": "annual_new_arr_per_channel_partner",
+     "kind": "factor",
+     "label": "Annual new ARR per channel…",
+     "observed_state": {
+      "unit": "GBP per partner per 12 months",
+      "value": 0.1,
+      "source": "cee_inference",
+      "raw_value": 5000,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "annual_new_arr_per_account_executive",
+     "kind": "factor",
+     "label": "Annual new ARR per account…",
+     "observed_state": {
+      "unit": "GBP per account executive per 12 months",
+      "value": 0.1,
+      "source": "cee_inference",
+      "raw_value": 10000,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "partner_ramp_up_risk",
+     "kind": "risk",
+     "label": "Partner ramp-up risk"
+    },
+    {
+     "id": "channel_sourced_new_arr",
+     "kind": "outcome",
+     "label": "Channel-sourced new ARR"
+    },
+    {
+     "id": "account_executive_sourced_new_arr",
+     "kind": "outcome",
+     "label": "Account-executive-sourced new ARR"
+    }
+   ]
+  },
+  "pro_hold_49": {
+   "run": "paul-w2073",
+   "scenario_id": "7695df8f-ba7d-4a9e-ad45-9c7c3380cf2e",
+   "build": "5668902",
+   "brief": "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 10%, should we increase the Pro plan price from £49 to £59 per month with the next AI feature release?",
+   "nodes": [
+    {
+     "id": "decision_mrr",
+     "kind": "decision",
+     "label": "Decision: MRR"
+    },
+    {
+     "id": "mrr",
+     "kind": "goal",
+     "label": "MRR"
+    },
+    {
+     "id": "keep_current_plan",
+     "kind": "option",
+     "label": "Keep current plan",
+     "is_baseline": true
+    },
+    {
+     "id": "release_ai_at_49",
+     "kind": "option",
+     "label": "Release AI at £49",
+     "interventions": {
+      "pro_plan_price": {
+       "value": 0.245,
+       "source": "brief_extraction"
+      },
+      "ai_feature_availability": {
+       "value": 1,
+       "source": "brief_extraction"
+      }
+     }
+    },
+    {
+     "id": "release_ai_at_59",
+     "kind": "option",
+     "label": "Release AI at £59",
+     "interventions": {
+      "pro_plan_price": {
+       "value": 0.295,
+       "source": "brief_extraction"
+      },
+      "ai_feature_availability": {
+       "value": 1,
+       "source": "brief_extraction"
+      }
+     }
+    },
+    {
+     "id": "pro_plan_price",
+     "kind": "factor",
+     "label": "Pro plan price",
+     "observed_state": {
+      "cap": 200,
+      "unit": "GBP per month",
+      "value": 0.245,
+      "source": "brief_extraction",
+      "raw_value": 49,
+      "declared_scale": "unit_interval"
+     }
+    },
+    {
+     "id": "ai_feature_availability",
+     "kind": "factor",
+     "label": "AI feature availability",
+     "observed_state": {
+      "unit": "indicator",
+      "value": 0
+     }
+    },
+    {
+     "id": "ai_feature_adoption",
+     "kind": "factor",
+     "label": "AI feature adoption",
+     "observed_state": {
+      "cap": 100,
+      "unit": "percent",
+      "value": 0,
+      "raw_value": 0,
+      "declared_scale": "unit_interval"
+     }
+    },
+    {
+     "id": "pro_paying_subscribers",
+     "kind": "factor",
+     "label": "Pro paying subscribers",
+     "observed_state": {
+      "unit": "subscribers",
+      "value": 0.1,
+      "source": "cee_inference",
+      "raw_value": 200,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "monthly_churn",
+     "kind": "factor",
+     "label": "Monthly churn",
+     "observed_state": {
+      "unit": "percent",
+      "value": 0.08,
+      "source": "cee_inference",
+      "raw_value": 8,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "price_sensitivity",
+     "kind": "risk",
+     "label": "Price sensitivity"
+    }
+   ]
+  },
+  "pro_rate_label": {
+   "run": "mg-corpus f-20260925T234945Z",
+   "brief": "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 10%, should we increase the Pro plan price from £49 to £59 per month with the next AI feature release?",
+   "nodes": [
+    {
+     "id": "decision_mrr",
+     "kind": "decision",
+     "label": "Decision: MRR"
+    },
+    {
+     "id": "mrr",
+     "kind": "goal",
+     "label": "MRR"
+    },
+    {
+     "id": "raise_to_59_with_ai_release",
+     "kind": "option",
+     "label": "Raise to £59 with AI release",
+     "interventions": {
+      "pro_plan_price": {
+       "value": 0.295,
+       "source": "brief_extraction"
+      },
+      "ai_feature_release_availability": {
+       "value": 1,
+       "source": "cee_hypothesis"
+      }
+     }
+    },
+    {
+     "id": "keep_49_with_ai_release",
+     "kind": "option",
+     "label": "Keep £49 with AI release",
+     "interventions": {
+      "pro_plan_price": {
+       "value": 0.245,
+       "source": "cee_hypothesis"
+      },
+      "ai_feature_release_availability": {
+       "value": 1,
+       "source": "cee_hypothesis"
+      }
+     }
+    },
+    {
+     "id": "raise_to_54_with_ai_release",
+     "kind": "option",
+     "label": "Raise to £54 with AI release",
+     "interventions": {
+      "pro_plan_price": {
+       "value": 0.27,
+       "source": "cee_hypothesis"
+      },
+      "ai_feature_release_availability": {
+       "value": 1,
+       "source": "cee_hypothesis"
+      }
+     }
+    },
+    {
+     "id": "carry_on_as_now",
+     "kind": "option",
+     "label": "Carry on as now",
+     "is_baseline": true
+    },
+    {
+     "id": "pro_plan_price",
+     "kind": "factor",
+     "label": "Pro plan price",
+     "observed_state": {
+      "cap": 200,
+      "unit": "GBP/month",
+      "value": 0.245,
+      "source": "brief_extraction",
+      "raw_value": 49,
+      "declared_scale": "unit_interval"
+     }
+    },
+    {
+     "id": "ai_feature_release_availability",
+     "kind": "factor",
+     "label": "AI feature release availability"
+    },
+    {
+     "id": "ai_feature_adoption_rate",
+     "kind": "factor",
+     "label": "AI feature adoption rate",
+     "observed_state": {
+      "unit": "%",
+      "value": 0.4,
+      "source": "cee_inference",
+      "raw_value": 40,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "monthly_churn_rate",
+     "kind": "factor",
+     "label": "Monthly churn rate",
+     "observed_state": {
+      "unit": "%",
+      "value": 0.07,
+      "source": "cee_inference",
+      "raw_value": 7,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "new_pro_subscriptions_per_month",
+     "kind": "factor",
+     "label": "New Pro subscriptions per month",
+     "observed_state": {
+      "unit": "subscriptions/month",
+      "value": 0.04,
+      "source": "cee_inference",
+      "raw_value": 20,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "active_pro_subscribers",
+     "kind": "factor",
+     "label": "Active Pro subscribers",
+     "observed_state": {
+      "unit": "subscribers",
+      "value": 0.125,
+      "source": "cee_inference",
+      "raw_value": 250,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "price_sensitivity",
+     "kind": "risk",
+     "label": "Price sensitivity"
+    },
+    {
+     "id": "ai_feature_uptake_risk",
+     "kind": "risk",
+     "label": "AI feature uptake risk"
+    }
+   ]
+  }
+ }
+}

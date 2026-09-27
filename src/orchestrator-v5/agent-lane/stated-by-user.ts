@@ -25,36 +25,94 @@
  * numerals ("four percent"), a figure the Agent derived ("down a point" → 4), and a magnitude written with a suffix
  * the Agent dropped (£54k vs 54).
  */
-import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
+import { findStatedAmounts, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_CONTINUATION, parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { TODAY_LEVEL, TODAY_UNIT } from './admit-model.js';
 import { unitPhraseFamily } from './unit-conflict.js';
 
 const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
 
+/** Whether a written amount is `value` in a unit of `family`: "£49" only on money, "4%" only on a percentage, "7" on any. */
+function writesFigure(a: StatedAmount, value: number, family: ReturnType<typeof unitPhraseFamily>): boolean {
+  if (a.kind === 'currency') return (family === null || family === 'currency') && same(a.magnitude, value);
+  // "40%" is 40 on a percentage, or 0.4 on a share kept as 0–1: the Agent passes the factor's own units.
+  if (a.kind === 'percent') return (family === null || family === 'percent') && (same(a.magnitude, value) || same(a.magnitude / 100, value));
+  return same(a.magnitude, value);
+}
+
 /** Whether `value`, in `unit`, is a figure written in `userText`. No text (or none bound) proves nothing: false. */
 export function figureTheUserWrote(value: number, unit: unknown, userText: string | null | undefined): boolean {
   if (typeof value !== 'number' || !Number.isFinite(value)) return false;
   const family = unitPhraseFamily(unit);
-  return findStatedAmounts(userText).some((a) => {
-    if (a.kind === 'currency') return (family === null || family === 'currency') && same(a.magnitude, value);
-    // "40%" is 40 on a percentage, or 0.4 on a share kept as 0–1: the Agent passes the factor's own units.
-    if (a.kind === 'percent') return (family === null || family === 'percent') && (same(a.magnitude, value) || same(a.magnitude / 100, value));
-    return same(a.magnitude, value);
-  });
+  return findStatedAmounts(userText).some((a) => writesFigure(a, value, family));
 }
 
 /** A number the text writes in words ("three engineers"), read by the repo's one cardinal grammar; a fraction refuses. */
 const CARDINAL_PHRASE = new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})${CARDINAL_FRACTION_CONTINUATION}\\b`, 'gi');
 
-/** Whether the brief states `value` as today's level: `figureTheUserWrote`, a number written in words, or "zero". */
-function baselineTheBriefStates(value: number, unit: unknown, brief: string): boolean {
-  if (figureTheUserWrote(value, unit, brief)) return true;
-  if (value === 0) return /\bzero\b/i.test(brief);
-  return [...brief.matchAll(CARDINAL_PHRASE)].some((m) => {
+/** Where the text writes `value`: digits in a compatible kind (`figureTheUserWrote`), a number in words, or "zero" for 0. */
+function placesWritten(value: number, unit: unknown, text: string): { readonly end: number }[] {
+  const family = unitPhraseFamily(unit);
+  const at = findStatedAmounts(text).filter((a) => writesFigure(a, value, family)).map((a) => ({ end: a.index + a.matchedText.length }));
+  for (const m of text.matchAll(CARDINAL_PHRASE)) {
     const v = parseCardinalAmount(m[0]);
-    return v !== null && same(v, value);
+    if (v !== null && same(v, value)) at.push({ end: m.index + m[0].length });
+  }
+  if (value === 0) for (const m of text.matchAll(/\bzero\b/gi)) at.push({ end: m.index + m[0].length });
+  return at;
+}
+
+/** The word a written number counts: the first word after it in its clause, past its own rate ("£59 per month with" → with). */
+function wordCounted(text: string, end: number): string | null {
+  const after = text.slice(end);
+  const rate = RATE_AFTER.exec(after);
+  const m = /^[^\p{L}\p{N}.!?;,:\n\u2013\u2014]*([\p{L}\p{N}]+)/u.exec(rate === null ? after : after.slice(rate[0].length));
+  return m === null ? null : m[1]!.toLowerCase();
+}
+
+/** The levels the model's options set on a factor, in its own units: admission divides each by the factor's `cap`. */
+function optionLevelsOn(nodes: readonly { readonly kind?: unknown; readonly interventions?: unknown }[], factorId: unknown, cap: unknown): number[] {
+  return nodes.flatMap((o) => {
+    if (o.kind !== 'option' || typeof factorId !== 'string' || o.interventions === null || typeof o.interventions !== 'object') return [];
+    const level = (o.interventions as Record<string, unknown>)[factorId];
+    const v = level !== null && typeof level === 'object' ? (level as { value?: unknown }).value : undefined;
+    if (typeof v !== 'number' || !Number.isFinite(v)) return [];
+    return [typeof cap === 'number' && Number.isFinite(cap) ? v * cap : v];
   });
+}
+
+type ModelNode = { readonly id?: unknown; readonly kind?: unknown; readonly label?: unknown; readonly observed_state?: unknown; readonly interventions?: unknown };
+
+/**
+ * Whether the brief states `value` as TODAY's level of `factor` — typed numbers and the model's own labels, no word list.
+ *
+ * WRITTEN FOR THIS FACTOR: a place the brief writes the figure (`placesWritten`) counts unless the word it counts names
+ * ANOTHER quantity of the model ("0 enterprise customers" is no factor's 0 but the one about enterprise customers; F2 (b),
+ * AI Quality on #2073). Only that one word is read: a figure with no such word, or a word two labels share, still counts.
+ *
+ * NOT AN OPTION'S LEVEL (F2 (a)): "hire two senior engineers" is the level the option sets, not today's. The figure is
+ * the options' when options set it on this factor at least as many times as the brief writes it, and the brief writes no
+ * other level an option sets there. "from £49 to £59" beside an option held at £49 stays the user's: the brief writes
+ * the £59 as well, so the £49 is where it moves from. KNOWN LIMIT, failing toward Olumi's: a figure written once, only
+ * as an option that holds it ("keep the price at £49 and add an AI tier", no other price option), reads as Olumi's.
+ */
+function baselineTheBriefStates(factor: ModelNode, value: number, unit: unknown, cap: unknown, nodes: readonly ModelNode[], brief: string): boolean {
+  const label = typeof factor.label === 'string' ? factor.label : '';
+  const others = nodes
+    .filter((n) => n.kind !== 'option' && n.kind !== 'decision')
+    .map((n) => (typeof n.label === 'string' ? n.label : ''))
+    .filter((l) => l !== '' && l !== label);
+  const mentionOf = mentionReader({ target: label === '' ? [] : [label], others }, unit);
+  const writtenFor = (v: number): number => placesWritten(v, unit, brief).filter((p) => {
+    const w = wordCounted(brief, p.end);
+    return w === null || mentionOf(w) !== 'other';
+  }).length;
+  const written = writtenFor(value);
+  if (written === 0) return false;
+  const levels = optionLevelsOn(nodes, factor.id, cap);
+  const asLevel = levels.filter((l) => same(l, value)).length;
+  if (asLevel === 0 || written > asLevel) return true;
+  return levels.some((l) => !same(l, value) && writtenFor(l) > 0);
 }
 
 /**
@@ -65,11 +123,12 @@ function baselineTheBriefStates(value: number, unit: unknown, brief: string): bo
  * brief "hire two senior engineers or four junior engineers … salary spend under £400k" registered "Senior engineers
  * hired" 0 and the salary spend £0 as the user's own figures. The brief states neither.
  *
- * THE RULE: `figureTheUserWrote` over the brief, or the same figure written in words, or "zero" for 0. Not grounded ⇒
- * the stamp becomes Olumi's (`cee_inference`) and the value is kept, so the disclosure, the canvas label and the
- * level-limit carry all name the same author. Every miss under-claims: "no enterprise customers" is not read as 0, and the figure reads as Olumi's.
+ * THE RULE (`baselineTheBriefStates`): the brief writes the figure — in digits of a compatible kind, in words, or "zero"
+ * for 0 — for THIS factor, and not only as an option's level on it. Not grounded ⇒ the stamp becomes Olumi's
+ * (`cee_inference`) and the value is kept, so the disclosure, the canvas label and the level-limit carry all name the
+ * same author. Every miss under-claims: "no enterprise customers" is not read as 0, and the figure reads as Olumi's.
  */
-export function withdrawUnstatedBaselineStamps<N extends { readonly kind?: unknown; readonly observed_state?: unknown }>(
+export function withdrawUnstatedBaselineStamps<N extends ModelNode>(
   nodes: readonly N[],
   brief: string,
 ): N[] {
@@ -80,7 +139,7 @@ export function withdrawUnstatedBaselineStamps<N extends { readonly kind?: unkno
     // A signed change restated on "% of today" (`restateSignedPercentChanges`) is 100 today BY DEFINITION: the user's
     // "cut 15%" is measured from it (review 5835754404, row 4b). Admission wrote it; the brief's own framing states it.
     if (os.unit === TODAY_UNIT && figure === TODAY_LEVEL) return n;
-    if (typeof figure === 'number' && baselineTheBriefStates(figure, os.unit, brief)) return n;
+    if (typeof figure === 'number' && baselineTheBriefStates(n, figure, os.unit, os.cap, nodes, brief)) return n;
     // Not the user's, so Olumi's: the ONE author the disclosure ("I supplied N values"), the canvas label and the
     // level-limit carry (`levelHasAnAuthor`) all read. Source-less, it was nobody's (#2073 review F1, AIQ 5851906910).
     return { ...n, observed_state: { ...os, source: 'cee_inference' } };
@@ -141,6 +200,31 @@ export function factorTheUserNamed(
 }
 
 /**
+ * Which entity one word names, read with the model's OWN labels: the target's, another quantity's, or neither (a word the
+ * target and another label share, a word under three letters, or a word of the figure's own unit).
+ */
+function mentionReader(scope: EntityScope, unit: unknown): (w: string) => 'target' | 'other' | null {
+  const targetWords = [...new Set(scope.target.flatMap(wordsOf))];
+  const otherWords = [...new Set(scope.others.flatMap(wordsOf))];
+  const decisiveTarget = targetWords.filter((t) => !otherWords.some((o) => sameWord(t, o)));
+  const decisiveOther = otherWords.filter((o) => !targetWords.some((t) => sameWord(t, o)));
+  // The figure's own unit names no entity (R&C #2013 B1): "£59 per month" in GBP/month is not about "Monthly churn".
+  const unitWords = typeof unit === 'string' ? wordsOf(unit) : [];
+  return (w: string): 'target' | 'other' | null => {
+    if (w.length < 3) return null;
+    if (unitWords.some((u) => sameWord(u, w))) return null;
+    const t = decisiveTarget.some((x) => sameWord(x, w));
+    const o = decisiveOther.some((x) => sameWord(x, w));
+    return t && !o ? 'target' : o && !t ? 'other' : null;
+  };
+}
+
+// The figure's own RATE names no entity either (AI Conversation #70 5848429576): "£10 per month" on a factor with
+// no declared unit read "month" as "Monthly churn rate". A "per X", "/X", "a X", "each X" or "every X" written right
+// after the figure is its denominator, so it is passed over whatever unit the factor declares.
+const RATE_AFTER = /^\s*(?:(?:per|an?|each|every)\s+|\/\s*)[\p{L}\p{N}]+/iu;
+
+/**
  * ⛔ A FIGURE IS THE USER'S FOR AN ENTITY ONLY WHERE THEY WROTE IT ABOUT THAT ENTITY (ChatGPT #70 5845853364: numeric
  * grounding binds figure + entity + unit + source context, not the same numeral anywhere in the conversation).
  * "Our MRR is £12,000." grounds £12,000 for MRR, never for the Pro plan price; `figureTheUserWrote` alone accepted it
@@ -160,26 +244,9 @@ export function factorTheUserNamed(
 export function figureTheUserWroteFor(value: number, unit: unknown, userText: string | null | undefined, scope: EntityScope): boolean {
   if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return false;
   const family = unitPhraseFamily(unit);
-  const targetWords = [...new Set(scope.target.flatMap(wordsOf))];
-  const otherWords = [...new Set(scope.others.flatMap(wordsOf))];
-  const decisiveTarget = targetWords.filter((t) => !otherWords.some((o) => sameWord(t, o)));
-  const decisiveOther = otherWords.filter((o) => !targetWords.some((t) => sameWord(t, o)));
-  // The figure's own unit names no entity (R&C #2013 B1): "£59 per month" in GBP/month is not about "Monthly churn".
-  const unitWords = typeof unit === 'string' ? wordsOf(unit) : [];
-  const mentionOf = (w: string): 'target' | 'other' | null => {
-    if (w.length < 3) return null;
-    if (unitWords.some((u) => sameWord(u, w))) return null;
-    const t = decisiveTarget.some((x) => sameWord(x, w));
-    const o = decisiveOther.some((x) => sameWord(x, w));
-    return t && !o ? 'target' : o && !t ? 'other' : null;
-  };
+  const mentionOf = mentionReader(scope, unit);
   return findStatedAmounts(userText).some((a) => {
-    const matches = a.kind === 'currency'
-      ? (family === null || family === 'currency') && same(a.magnitude, value)
-      : a.kind === 'percent'
-        ? (family === null || family === 'percent') && (same(a.magnitude, value) || same(a.magnitude / 100, value))
-        : same(a.magnitude, value);
-    if (!matches) return false;
+    if (!writesFigure(a, value, family)) return false;
     const amountEnd = a.index + a.matchedText.length;
     const before = userText.slice(0, a.index);
     const after = userText.slice(amountEnd);
@@ -197,10 +264,7 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
       for (const w of ws) { const k = mentionOf(w); if (k !== null) return k; }
       return null;
     };
-    // The figure's own RATE names no entity either (AI Conversation #70 5848429576): "£10 per month" on a factor with
-    // no declared unit read "month" as "Monthly churn rate". A "per X", "/X", "a X", "each X" or "every X" written right
-    // after the figure is its denominator, so it is passed over whatever unit the factor declares.
-    const rate = /^\s*(?:(?:per|an?|each|every)\s+|\/\s*)[\p{L}\p{N}]+/iu.exec(after);
+    const rate = RATE_AFTER.exec(after);
     const afterRate = right.slice(rate === null ? 0 : [...rate[0].matchAll(/[\p{L}\p{N}]+/gu)].length);
     const about = firstMention(afterRate.slice(0, 2)) ?? firstMention([...left].reverse()) ?? firstMention(afterRate.slice(2));
     return about === null || about === 'target';

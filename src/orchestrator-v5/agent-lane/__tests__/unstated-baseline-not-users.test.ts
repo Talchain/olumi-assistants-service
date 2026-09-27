@@ -74,6 +74,18 @@ describe('a baseline is the user\'s only when the brief states it', () => {
     expect(unstated['Developers hired']!.source).toBe('cee_inference');
   });
 
+  // AI Quality F2 on #2073: "two developers" is the level the option "Hire Two Developers" sets, not today's headcount.
+  it('RED (F2, option level): the brief\'s "two developers" is the option\'s level, so a baseline of 2 is Olumi\'s', async () => {
+    const os = await registeredBaselines(UNSTATED, { 'Developers hired': 2 });
+    expect(figureOf(os['Developers hired']!)).toBe(2);
+    expect(os['Developers hired']!.source).toBe('cee_inference');
+  });
+
+  it('CONTROL (F2): "We have two developers today" writes 2 once more than the option explains, so it stays the user\'s', async () => {
+    const os = await registeredBaselines(`We have two developers today. ${UNSTATED}`, { 'Developers hired': 2 });
+    expect(os['Developers hired']!.source).toBe('brief_extraction');
+  });
+
   it('SERVED eng-hiring: the three unstated zeros become Olumi\'s; the inferred factor is untouched', () => {
     const f = fixture('served-enghiring-unstated-zero-baselines.json') as { brief: string; nodes: { id: string; kind: string; observed_state?: Record<string, unknown> }[] };
     const out = withdrawUnstatedBaselineStamps(f.nodes, f.brief);
