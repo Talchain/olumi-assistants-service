@@ -1999,9 +1999,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // A Run writes nothing: its interpretation is never passed through the WRITE narrator, whose
     // completion-claim stripper would delete a sentence and append a false write-status line
     // (finding 3 on #1786, 5807230197).
-    const narration = fastPath === 'run' || fastPath === 'research'
+    // ⭐ F3 (DL #70 5851710093): on the build turn, the user's goal is named even when it could not be scored — unless the
+    // arithmetic below already states the target. Pure reads of this turn's readback; the same inputs AX1 uses.
+    const targetStatedByArithmetic = (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
+      && breakEvenFor(readbackGraph)?.target !== undefined;
+    const goalLine = fa?.ran === true && fastPath !== 'run' && !targetStatedByArithmetic ? goalNotCheckedLine(readbackGraph, analysisResult) : null;
+    const narrated = fastPath === 'run' || fastPath === 'research'
       ? { text, status: null as string | null, stripped: [] as string[] }
       : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null });
+    // The goal line leads the server's own lines (it outranks the save line), so it rides the status it precedes.
+    const narration = goalLine === null ? narrated : { ...narrated, status: [goalLine, narrated.status].filter((x): x is string => typeof x === 'string' && x !== '').join(' ') };
     // (B) A write landed on this turn → say whether the model can run now, from the readback's one verdict.
     const wroteThisTurn = fastPath !== 'run'
       && result.tool_results.some((r) => (r as { mutated?: unknown; applied?: unknown } | undefined)?.mutated === true || (r as { applied?: unknown } | undefined)?.applied === true);
@@ -2015,18 +2022,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // the "can run" sentence goes; a "can't run yet" reason is always said.
     const firstPassRan = fa?.ran === true;
     const readinessLine = (staleLine !== null || firstPassRan) && (analysisReady as { may_run?: unknown } | undefined)?.may_run === true ? null : postWriteReadiness;
-    // ⭐ F3 (DL #70 5851710093): on the build turn, the user's goal is named even when it could not be scored — unless the
-    // arithmetic below already states the target. Pure reads of this turn's readback; the same inputs AX1 uses.
-    const targetStatedByArithmetic = (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
-      && breakEvenFor(readbackGraph)?.target !== undefined;
-    const goalLine = fa?.ran === true && fastPath !== 'run' && !targetStatedByArithmetic ? goalNotCheckedLine(readbackGraph, analysisResult) : null;
     const composed = composeDirectAnswerResponse({
       // ⛔ A proposal id is a binding for authorise_change, never text a user reads or
       // types (display-ids.ts). Applied here, before the answer row is written, so a
       // replay returns exactly what the user first saw.
       // Olumi's own status, plus what any proposal this turn LEFT OUT — both deterministic (#1800).
       assistant_text: withoutProposalIds(withWriteOutcome(withDisclosures(narration.text, owed),
-        [goalLine, narration.status, notAdoptedLine(result.tool_calls, result.tool_results), staleLine, readinessLine, askLine].filter((x): x is string => x !== null && x !== '').join(' ') || null)),
+        [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), staleLine, readinessLine, askLine].filter((x): x is string => x !== null && x !== '').join(' ') || null)),
       stage: 'frame',
       answerKind: 'substantive',
       // One click approves the ONE proposal just offered — the same words as typing "yes".
