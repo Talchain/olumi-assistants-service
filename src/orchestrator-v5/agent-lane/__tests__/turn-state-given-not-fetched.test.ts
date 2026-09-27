@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { runAgentTurn } from '../runtime/agent-loop.js';
 import { issueContextPacket } from '../runtime/request-assembly.js';
 import * as historyStore from '../history-store.js';
-import { journeyItems, journeyTurns, RUN_RESULT } from './fixtures/a-journey-history.js';
+import { journeyItems, journeyTurns, RUN_RESULT, RUN_RESULT_PERMITTED, SERVED_READBACK } from './fixtures/a-journey-history.js';
 
 const SCENARIO = '11111111-1111-1111-1111-111111111111';
 const USER = 'user-a';
@@ -291,8 +291,13 @@ describe('an applied proposal and an earlier approval are not kept in the histor
    * bytes (−25.9%, ≈2.0k tokens at ~4 bytes a token), chip approvals 28,432 → 23,160 (−18.5%, ≈1.3k). ⚠ The 30% first
    * aimed for is NOT reached: the kept run is half of what is left. The floors below sit just under the measurement,
    * so keeping any one applied proposal or earlier approval turns this row red.
+   * ⭐ RE-MEASURED once the kept run became its projection (AIQ #70 5859279825; the served run is WITHHELD, and no
+   * readback is given here, so it is also marked unconfirmed): typed 30,899 → 11,832 characters (−61.7%), chip
+   * 28,432 → 12,099 (−57.4%). The floors move up to sit under THAT measurement: keeping the smallest applied proposal
+   * (the risk, +761 characters over its stub) takes typed to −59.2% and chip to −54.8%, and the smallest earlier
+   * approval (+818) takes typed to −59.1% — each red.
    */
-  it('SIZE: a journey-A-shaped history (served run, 3 proposals, 3 approvals) shrinks ≥25% (typed) and ≥18% (chip); every call stays paired', () => {
+  it('SIZE: a journey-A-shaped history (served run, 3 proposals, 3 approvals) shrinks ≥60% (typed) and ≥56% (chip); every call stays paired', () => {
     const paired = (h: readonly unknown[]) => {
       const calls = h.filter((i) => (i as { type?: string }).type === 'function_call').map((i) => (i as { call_id: string }).call_id);
       const outs = h.filter((i) => (i as { type?: string }).type === 'function_call_output').map((i) => (i as { call_id: string }).call_id);
@@ -305,7 +310,7 @@ describe('an applied proposal and an earlier approval are not kept in the histor
     let chip: unknown[] = [];
     for (const t of journeyTurns('chip')) chip = prune([...chip, ...t.items], t.approvals);
     const chipRaw = journeyItems('chip');
-    for (const [label, raw, pruned, floor] of [['composer', composer, composerPruned, 0.25], ['chip', chipRaw, chip, 0.18]] as const) {
+    for (const [label, raw, pruned, floor] of [['composer', composer, composerPruned, 0.6], ['chip', chipRaw, chip, 0.56]] as const) {
       const before = JSON.stringify(raw).length;
       const after = JSON.stringify(pruned).length;
       expect(after, `${label}: ${before} → ${after} bytes`).toBeLessThanOrEqual(before * (1 - floor));
@@ -314,11 +319,172 @@ describe('an applied proposal and an earlier approval are not kept in the histor
       // Messages are never touched.
       expect(pruned.filter((i) => (i as { type?: string }).type !== 'function_call_output'), label)
         .toEqual(raw.filter((i) => (i as { type?: string }).type !== 'function_call_output'));
-      // The run is the latest: kept verbatim.
-      expect(outputOf(pruned, 'call_run'), label).toBe(JSON.stringify(RUN_RESULT));
+      // The run is the latest: kept, as its projection — a withheld run, so without its win shares — and still stamped.
+      const keptRun = JSON.parse(outputOf(pruned, 'call_run')) as { result: { computed_against_hash?: unknown }; claim_permissions: unknown };
+      expect(keptRun.result.computed_against_hash, label).toBe((RUN_RESULT.result as { computed_against_hash: string }).computed_against_hash);
+      expect(keptRun.claim_permissions, label).toEqual(RUN_RESULT.claim_permissions);
+      expect(outputOf(pruned, 'call_run'), label).not.toContain('win_probabilit');
     }
     // Pruning a pruned history changes nothing (the store re-prunes what it holds every turn).
     expect(prune(composerPruned)).toEqual(composerPruned);
     expect(prune(chip)).toEqual(chip);
+  });
+});
+
+/**
+ * ⭐ THE KEPT RUN IS A PROJECTION OF THE RUN, BY ITS OWN PERMISSION (AI Quality ruling, #70 5859279825 + 5859288025;
+ * R&C's pinned key set). C1 keeps the LATEST run's output, and on the served A02 run its `result` is ~11.9 KB — 94% of
+ * it `enrichment` (option_comparison 2.4K, robustness 2.4K, p_win_sensitivity 1.5K, decision_brief 1.1K, factor_evppi
+ * 1.1K, inference_warnings 0.9K, edge_e_values 0.8K, flip_thresholds 0.6K) — riding in every request for 24 turns.
+ * Only the KEPT copy is projected: the prune runs when the turn is STORED, so the Run turn's own input is unchanged.
+ *   - PERMITTED (`claim_permissions.leader_may_be_named === true`): robustness, p_win_sensitivity, factor_evppi and
+ *     edge_e_values leave `result.enrichment`; the comparison itself stays.
+ *   - WITHHELD (anything else: fail closed): NOTHING that re-ranks — asserted on KEYS, at every depth.
+ *   - BOTH: no constraint probabilities (until B5 per_limit lands), and a run the model has moved past says so.
+ */
+describe('the kept run is compacted by its own permission, and marked stale once the model moves', () => {
+  type Readback = { analysisState?: unknown; analysisResult?: unknown };
+  type Prune = (items: readonly unknown[], approvalsThisTurn?: readonly unknown[], readback?: Readback) => unknown[];
+  const prune = (items: readonly unknown[], readback?: Readback) =>
+    (historyStore as unknown as { pruneSupersededToolOutputs: Prune }).pruneSupersededToolOutputs(items, [], readback);
+  const call = (id: string, name: string, args: unknown) => ({ type: 'function_call', call_id: id, name, arguments: JSON.stringify(args) });
+  const out = (id: string, result: unknown) => ({ type: 'function_call_output', call_id: id, output: JSON.stringify(result) });
+  const user = (text: string) => ({ role: 'user', content: [{ type: 'input_text', text }] });
+  const outputOf = (items: readonly unknown[], id: string) =>
+    (items.find((i) => (i as { type?: string }).type === 'function_call_output' && (i as { call_id?: string }).call_id === id) as { output: string }).output;
+  /** A Run, Olumi's reply, and the user's next message: the history the NEXT request carries. */
+  const afterRun = (run: unknown) => [
+    user('Run the analysis'), call('call_run', 'run_analysis', { reason: 'the user asked to run it' }), out('call_run', run),
+    { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'The analysis cannot put any price option forward yet.' }] },
+    user('What would change that?'),
+  ];
+  const keptRun = (items: readonly unknown[]) => JSON.parse(outputOf(items, 'call_run')) as Record<string, any>;
+  /** Every KEY in a value, at any depth. */
+  const keysOf = (v: unknown): string[] => Array.isArray(v) ? v.flatMap(keysOf)
+    : v !== null && typeof v === 'object' ? Object.entries(v).flatMap(([k, x]) => [k, ...keysOf(x)]) : [];
+  /** R&C's pinned KEY set, verbatim; `decision_sensitivity` is the one matching key AIQ keeps. */
+  const RC_KEYS = /confidence|near_tie|goal_fit|separation|alternative_winner|win_probabilit|sensitivity|evpi|enrichment/i;
+  /** AIQ's named withheld drops the pinned set does not match: outcome means, goal probabilities, conditional winners, flips. */
+  const AIQ_KEYS = ['mean', 'gap', 'probability_of_goal', 'probability_of_joint_goal', 'conditional_winners', 'flip_thresholds', 'run_delta'];
+  const reRankingKeys = (v: unknown) => keysOf(v).filter((k) => (RC_KEYS.test(k) && k !== 'decision_sensitivity') || AIQ_KEYS.includes(k));
+  const namesConstraintProbability = (k: string) => /constraint/i.test(k) && /probabilit/i.test(k);
+  const RAW = RUN_RESULT.result as Record<string, any>;
+  const STAMP = RAW.computed_against_hash as string;
+  const HEAVY = ['robustness', 'p_win_sensitivity', 'factor_evppi', 'edge_e_values'];
+  /** The Run chip's fast path keeps the post-run readback beside the run (agent-v1-turn.ts, FAST PATH 3). */
+  const viaRunChip = (run: object) => ({ ...run, canonical_state: {
+    analysis_state: SERVED_READBACK.analysisState, analysis_ready: SERVED_READBACK.analysisReady, run_delta_absence_reason: 'unrequested_run_in_pair',
+  } });
+  /** The model after an approved edit: the read route's verdict turns stale and it ships no result (scenario-graph-analysis-read.ts). */
+  const EDITED: Readback = {
+    analysisState: { ...(SERVED_READBACK.analysisState as object), run_state: { kind: 'complete_stale', computed_at: '2026-09-27T18:20:03.050Z', cause: 'graph_changed' }, requires_rerun: true },
+    analysisResult: undefined,
+  };
+
+  it('RED (row 1): a WITHHELD served run, then a later turn — no re-ranking KEY at any depth; labels, levels, summary, decision_sensitivity and the withheld reason stay', () => {
+    expect(RUN_RESULT.claim_permissions.leader_may_be_named, 'control: the served A02 run withheld its leader').toBe(false);
+    // CONTRAST: the probe sees each family in the run as served, so an empty list below is not a blind probe.
+    const raw = reRankingKeys(RUN_RESULT);
+    for (const k of ['enrichment', 'win_probabilities', 'win_probability', 'confidence', 'near_tie', 'gap', 'goal_fit', 'alternative_winner_label',
+      'mean', 'probability_of_goal', 'probability_of_joint_goal', 'conditional_winners', 'flip_thresholds']) expect(raw, `control: the served run carries ${k}`).toContain(k);
+    expect(reRankingKeys(viaRunChip(RUN_RESULT)), 'control: the fast path’s readback carries the leader claim’s separation').toContain('separation');
+    for (const [label, run] of [['the Agent’s own call', RUN_RESULT], ['the Run chip’s fast path', viaRunChip(RUN_RESULT)]] as const) {
+      const kept = keptRun(prune(afterRun(run), SERVED_READBACK));
+      expect(reRankingKeys(kept), label).toEqual([]);
+      expect(kept.result.summary, label).toBe(RAW.summary);
+      expect(kept.result.decision_sensitivity, label).toEqual(RAW.decision_sensitivity);
+      expect(kept.result.inference_warnings, label).toEqual(RAW.enrichment.inference_warnings);
+      expect(kept.result.computed_against_hash, `${label}: stamped with the hash it was computed against`).toBe(STAMP);
+      expect(kept.result.option_comparison.map((o: { label: string }) => o.label), `${label}: each option's label`)
+        .toEqual(RAW.enrichment.option_comparison.map((o: { label: string }) => o.label));
+      expect(kept.options, `${label}: each option's label and levels`).toEqual(RUN_RESULT.options);
+      expect(kept.claim_permissions, `${label}: the leader withheld, with its reason`).toEqual(RUN_RESULT.claim_permissions);
+      expect(kept.claim_permissions.withheld_reason).toBe('nonlinear_identity_sign_unproven');
+      expect(kept.what_is_missing, label).toBe(RUN_RESULT.what_is_missing);
+      expect(kept.blockers, label).toEqual(RUN_RESULT.blockers);
+    }
+  });
+
+  it('RED (row 2): a PERMITTED run keeps win_probabilities and option_comparison, and drops the four heavy fields', () => {
+    expect(RUN_RESULT_PERMITTED.claim_permissions.leader_may_be_named, 'control: the permitted variant may name a leader').toBe(true);
+    for (const k of HEAVY) expect(Object.keys(RAW.enrichment), `control: the served run carries ${k}`).toContain(k);
+    const kept = keptRun(prune(afterRun(RUN_RESULT_PERMITTED), SERVED_READBACK));
+    expect(kept.result.win_probabilities).toEqual(RAW.win_probabilities);
+    expect(kept.result.enrichment.option_comparison.map((o: { label: string; win_probability: number; outcome: unknown }) => [o.label, o.win_probability, o.outcome]))
+      .toEqual(RAW.enrichment.option_comparison.map((o: { label: string; win_probability: number; outcome: unknown }) => [o.label, o.win_probability, o.outcome]));
+    for (const k of HEAVY) expect(Object.keys(kept.result.enrichment), k).not.toContain(k);
+    for (const k of ['decision_brief', 'inference_warnings', 'flip_thresholds']) expect(kept.result.enrichment[k], k).toEqual(RAW.enrichment[k]);
+    expect(kept.result.summary).toBe(RAW.summary);
+    expect(kept.result.decision_sensitivity).toEqual(RAW.decision_sensitivity);
+    expect(kept.result.computed_against_hash).toBe(STAMP);
+    expect(kept.claim_permissions).toEqual(RUN_RESULT_PERMITTED.claim_permissions);
+  });
+
+  it('RED (row 3): a model edit after the run marks the kept run stale; the same history with no edit does not', () => {
+    for (const run of [RUN_RESULT, RUN_RESULT_PERMITTED, viaRunChip(RUN_RESULT_PERMITTED)]) {
+      const current = keptRun(prune(afterRun(run), SERVED_READBACK));
+      expect(current.stale, 'no edit: the readback selected this very run').toBeUndefined();
+      expect(current.stale_note).toBeUndefined();
+      const edited = keptRun(prune(afterRun(run), EDITED));
+      expect(edited.stale, 'edited: the canonical run state is complete_stale').toBe(true);
+      expect(edited.stale_note).toMatch(/changed since this run/);
+      expect(edited.stale_note).toMatch(/not the current model/);
+      // A LATER run of a different model is current, and this one is not it.
+      const otherRun = keptRun(prune(afterRun(run), { ...SERVED_READBACK, analysisResult: { ...(SERVED_READBACK.analysisResult as object), computed_against_hash: 'f00dfeedf00dfeed' } }));
+      expect(otherRun.stale, 'a current run of ANOTHER model').toBe(true);
+      // Fail closed: a readback that could not be read, or none at all, cannot vouch for the run.
+      for (const unknown of [undefined, { analysisState: undefined, analysisResult: undefined }]) {
+        const k = keptRun(prune(afterRun(run), unknown));
+        expect(k.stale, 'no readback: never presented as current').toBe(true);
+        expect(k.stale_note).toMatch(/could not confirm/);
+      }
+      // Re-derived each turn, never sticky: stale after the edit, current again once the readback selects it again.
+      expect(keptRun(prune(prune(afterRun(run), EDITED), SERVED_READBACK)).stale).toBeUndefined();
+    }
+  });
+
+  it('CONTROL (hash spaces): a current run whose readback wire graph_hash differs (a repaired-shape graph) is NOT stale — the canonical verdict decides', () => {
+    // The read route's wire `graph_hash` is the RAW compare-and-set base; `computed_against_hash` is the CANONICAL
+    // projection's (scenario-graph-analysis-read.ts CS-AN-2). They differ on a repaired-shape graph that has not moved.
+    const repaired = { ...SERVED_READBACK, graphHash: '0123456789abcdef' };
+    expect(repaired.graphHash, 'control: the wire hash differs from the stamp').not.toBe(STAMP);
+    expect(keptRun(prune(afterRun(RUN_RESULT), repaired)).stale).toBeUndefined();
+  });
+
+  it('RED (row 4): constraint_probabilities is dropped from the kept run, whatever its permission', () => {
+    expect(keysOf(RUN_RESULT_PERMITTED), 'control: the served run carries them').toContain('constraint_probabilities');
+    for (const run of [RUN_RESULT, RUN_RESULT_PERMITTED, viaRunChip(RUN_RESULT_PERMITTED)]) {
+      const kept = keptRun(prune(afterRun(run), SERVED_READBACK));
+      expect(keysOf(kept).filter(namesConstraintProbability)).toEqual([]);
+    }
+    // CONTRAST: the sibling per-option constraint fields stay on a permitted run — only the probabilities go.
+    const permitted = keptRun(prune(afterRun(RUN_RESULT_PERMITTED), SERVED_READBACK));
+    expect(permitted.result.enrichment.option_comparison[0].constraint_margins).toEqual(RAW.enrichment.option_comparison[0].constraint_margins);
+  });
+
+  it('pairing, idempotence and the latest-run-only rule hold for the projected run', () => {
+    for (const run of [RUN_RESULT, RUN_RESULT_PERMITTED, viaRunChip(RUN_RESULT), viaRunChip(RUN_RESULT_PERMITTED)]) {
+      for (const readback of [SERVED_READBACK, EDITED, undefined]) {
+        const once = prune(afterRun(run), readback);
+        expect(prune(once, readback), 'pruning twice changes nothing').toEqual(once);
+        expect(outputOf(prune(once, readback), 'call_run')).toBe(outputOf(once, 'call_run'));
+        expect(once).toHaveLength(afterRun(run).length);
+        expect(once.filter((i) => (i as { type?: string }).type !== 'function_call_output')).toEqual(afterRun(run).filter((i) => (i as { type?: string }).type !== 'function_call_output'));
+      }
+    }
+    // An EARLIER run is still a stub; the projection applies to the latest alone.
+    const twice = [...afterRun(RUN_RESULT_PERMITTED), call('call_run2', 'run_analysis', { reason: 'again' }), out('call_run2', RUN_RESULT)];
+    const pruned = prune(twice, SERVED_READBACK);
+    expect(outputOf(pruned, 'call_run')).toBe(historyStore.SUPERSEDED_OUTPUT);
+    expect(reRankingKeys(JSON.parse(outputOf(pruned, 'call_run2')))).toEqual([]);
+  });
+
+  /**
+   * SIZE, on the served A02 run: the floor sits under the measurement, so keeping any one heavy field turns it red.
+   */
+  it('RED (row 5): the kept WITHHELD run shrinks by at least 70% in bytes', () => {
+    const raw = Buffer.byteLength(outputOf(afterRun(RUN_RESULT), 'call_run'), 'utf8');
+    const kept = Buffer.byteLength(outputOf(prune(afterRun(RUN_RESULT), SERVED_READBACK), 'call_run'), 'utf8');
+    expect(kept, `withheld: ${raw} → ${kept} bytes`).toBeLessThanOrEqual(raw * 0.3);
   });
 });
