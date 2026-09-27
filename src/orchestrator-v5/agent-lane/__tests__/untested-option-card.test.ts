@@ -45,10 +45,17 @@ const run = (opts: { ready?: Served['analysis_ready']; result?: Served['analysis
     /^coach:(fragile_link|no_flagged_link|limit_unchecked|near_tie|limit_estimate|untested_option):/.test((b as { signal_id: string }).signal_id),
   ) as Array<{ signal_id: string; title: string; body: string; action_label: string; action_prompt: string }>;
 };
-const withStatus = (status: string) => ({
-  ...served.analysis_ready,
-  options: served.analysis_ready.options.map((o) => (o.label === ADDED ? { ...o, status } : o)),
-});
+// A truly ready option carries no `missing_value` blocker either (B1 limb, Paul's export 90b8f080): `ready` drops the
+// served blocker for that option, so "ready" means ready on both typed facts.
+const withStatus = (status: string) => {
+  const id = served.analysis_ready.options.find((o) => o.label === ADDED)?.option_id;
+  const blockers = (served.analysis_ready as { blockers?: Array<{ option_id?: string }> }).blockers ?? [];
+  return {
+    ...served.analysis_ready,
+    options: served.analysis_ready.options.map((o) => (o.label === ADDED ? { ...o, status } : o)),
+    ...(status === 'ready' ? { blockers: blockers.filter((b) => b.option_id !== id) } : {}),
+  };
+};
 
 describe('an option the run could not test is the one next move', () => {
   it('precondition: the served run left the added option out (needs_encoding, not scored)', () => {

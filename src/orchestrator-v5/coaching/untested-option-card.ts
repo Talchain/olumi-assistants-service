@@ -13,10 +13,10 @@
  * is the one that could change it, and the move that tests it is its level.
  *
  * ── WHAT IT READS ──────────────────────────────────────────────────────────
- * Two typed facts that must AGREE, both from the bound run: the option's `status` in the run's own
+ * Two typed facts that must AGREE, both from the bound run: the option is not ready — its `status` in the run's own
  * `analysis_ready.options` is not `ready` (`ProductReadiness`, @talchain/schemas: `needs_encoding` |
- * `needs_user_mapping`), AND its label is not a key of the bound result's `win_probabilities` (the result is keyed
- * by option label). Either alone is not enough: a `ready` status quo is absent from `win_probabilities` too.
+ * `needs_user_mapping`), or a `missing_value` blocker in the same `analysis_ready.blockers` names it (Paul-hit B1) —
+ * AND its label is not a key of the bound result's `win_probabilities` (the result is keyed by option label). Either alone is not enough: a `ready` status quo is absent from `win_probabilities` too.
  * Explicit runs only: the automatic first pass carries its own approval step for missing figures.
  */
 import { CoachingBlockSchema, type CoachingBlock } from '@talchain/schemas/boundary';
@@ -39,16 +39,38 @@ export interface UntestedOption {
   readonly label: string;
 }
 
-/** The options the bound run could not test, in `analysis_ready` order. Pure; empty on anything malformed. */
+/**
+ * The option ids CEE's readiness authority names as MISSING A LEVEL: `analysis_ready.blockers[]` entries with
+ * `blocker_type: 'missing_value'` (the typed "Factor X needs a numeric value for option Y"). Pure.
+ */
+function optionsMissingALevel(analysisReady: unknown): ReadonlySet<string> {
+  const blockers = readRecord(analysisReady)?.blockers;
+  if (!Array.isArray(blockers)) return new Set();
+  return new Set(blockers.flatMap((b) => {
+    const r = readRecord(b);
+    return r?.blocker_type === 'missing_value' && typeof r.option_id === 'string' && r.option_id.length > 0 ? [r.option_id] : [];
+  }));
+}
+
+/**
+ * The options the bound run could not test, in `analysis_ready` order. Pure; empty on anything malformed.
+ *
+ * Untested = the bound result does not score it AND (its status is not `ready` OR a `missing_value` blocker names it).
+ * ⭐ The blocker limb (Paul-hit B1, AIC #70 5854805501, Paul's export `90b8f080`): an added option whose new factor's
+ * level was never recorded carries only the price intervention it shares with another option, so it reads `ready` —
+ * yet the run left it out, and CEE's readiness authority had already typed why.
+ */
 export function untestedOptions(analysisReady: unknown, analysisResult: unknown): UntestedOption[] {
   const options = readRecord(analysisReady)?.options;
   const scored = readRecord(readRecord(analysisResult)?.win_probabilities);
   if (!Array.isArray(options) || scored === null) return [];
+  const missingALevel = optionsMissingALevel(analysisReady);
   return options.flatMap((o): UntestedOption[] => {
     const r = readRecord(o);
     const id = typeof r?.option_id === 'string' && r.option_id.length > 0 ? r.option_id : null;
     const label = typeof r?.label === 'string' ? r.label.trim() : '';
-    if (r === null || id === null || label === '' || typeof r.status !== 'string' || r.status === 'ready') return [];
+    if (r === null || id === null || label === '' || typeof r.status !== 'string') return [];
+    if (r.status === 'ready' && !missingALevel.has(id)) return [];
     return Object.prototype.hasOwnProperty.call(scored, label) ? [] : [{ id, label }];
   });
 }
