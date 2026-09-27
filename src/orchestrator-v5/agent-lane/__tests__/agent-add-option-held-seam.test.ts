@@ -139,6 +139,8 @@ const seedGraph = (factorCount = 1, decisions = 1, priceFrame: 'cap' | 'scale_fr
   };
 };
 
+/** How many times the scenario graph was read (slice C1c). */
+let graphReads = 0;
 /** Scripted OpenAI: each Agent model call takes the next reply; anything that is not OpenAI throws. */
 let script: ((body: Record<string, unknown>) => unknown)[] = [];
 let openAiCalls = 0;
@@ -161,6 +163,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     a.addHook('preHandler', async (req) => { if (req.url === '/orchestrate/v2/turn') { inner.push(req.body as Record<string, unknown>); onInner?.(req.body as Record<string, unknown>); } });
     a.addHook('onSend', async (req, _reply, payload) => { if (req.url === '/orchestrate/v2/turn') onInnerSent?.(req.body as Record<string, unknown>); return payload; });
     a.post('/assist/v1/scenarios/:id/graph', async (req) => {
+      graphReads += 1;
       const g = graphOf.get((req.params as { id: string }).id) ?? null;
       return { graph: g, graph_hash: g === null ? null : computeAnalysisAffectingGraphHash(g as never) };
     });
@@ -246,6 +249,29 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect((JSON.stringify(bodies[1]!['input']).match(/CURRENT MODEL STATE/g) ?? []).length, 'exactly one state item on turn 2').toBe(1);
   }, 120_000);
 
+  /**
+   * ⭐ SLICE C1c (served replay on 339ed34): an ordinary turn read the scenario twice at ~1.3 s of server time each —
+   * the state the Agent is given and the readback for the response. With nothing written, the first read serves both.
+   */
+  it('[C1c] RED: an ordinary question reads the scenario ONCE', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    script = [() => say('Price drives revenue here.')];
+    graphReads = 0;
+    await turn({ message: 'What drives revenue in my model?' });
+    expect(graphReads, 'one read serves the given state and the readback').toBe(1);
+  }, 120_000);
+
+  it('[C1c] CONTRAST: a turn that WRITES reads again after the write — its readback is the changed model, never the one before', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const t1 = await proposeOptionC(54);
+    const approve = approveChipOf(t1)!;
+    graphReads = 0;
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(graphReads).toBeGreaterThanOrEqual(2);
+    // The response's readiness is the POST-write verdict (the option now exists and the model can run).
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/The analysis can run now\./);
+  }, 120_000);
+
   it('[a] RED: one option with the user\'s £54 → ONE held proposal on the typed rail → one click → linked from the decision, levelled, runnable', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const t1 = await proposeOptionC(54);
@@ -296,12 +322,13 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const t1 = await turn({ message: `Add an option: ${LONG}.` });
     const approve = approveChipOf(t1) as (Chip & { detail?: string }) | undefined;
     expect(approve?.id, JSON.stringify({ chips: t1.suggested_actions, tools: t1._agent.tool_calls })).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
-    // The product still cuts its label (its own choice); the button's full words ride in `detail`.
-    expect(approve!.label, approve!.label).toMatch(/\.\.\.$/);
+    // A multi-part change: the button is short and whole ("Approve N changes"); the full words ride in `detail`,
+    // one change per line, and the UI shows them above the button (UI #2194).
+    expect(approve!.label, approve!.label).toMatch(/^Approve \d+ changes$/);
     expect(approve!.label).not.toContain(LONG);
-    // The product's OWN sentence, by identity: its cut label is this sentence's first 57 characters.
+    // The product's OWN sentence, by identity: its first line names the option whole.
     expect(approve!.detail, JSON.stringify(approve)).toEqual(expect.stringContaining(`'${LONG}'`));
-    expect(approve!.detail!.startsWith(approve!.label.slice(0, -3)), JSON.stringify(approve)).toBe(true);
+    expect(approve!.detail!.split('\n')[0], JSON.stringify(approve)).toContain(`'${LONG}'`);
     const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
     expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
     expect(graphNow().nodes.some((x) => x.kind === 'option' && x.label === LONG), JSON.stringify(graphNow().nodes)).toBe(true);

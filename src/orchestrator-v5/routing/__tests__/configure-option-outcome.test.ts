@@ -35,7 +35,10 @@ import {
   projectOptionLabels,
 } from '../configure-option-intent.js';
 import { buildConfigureOptionAdvisedFormat } from '../../configure-option-chip-text.js';
-import { computeStructuralReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
+import {
+  buildCanonicalAnalysisReadyFromGraph,
+  computeStructuralReadiness,
+} from '../../../orchestrator/tools/analysis-ready-helper.js';
 import type { GraphV3T } from '../../../schemas/cee-v3.js';
 
 // ---------------------------------------------------------------------------
@@ -350,6 +353,39 @@ describe('ROADMAP 2.427 — recorded configure phrasings stay untouched', () => 
       matched: false,
       reason: 'option_already_partially_configured',
     });
+  });
+
+  /**
+   * ⭐ SLICE A1b — THE BOUND IS THE EFFECT VALUES, NOT THE STATUS STRING.
+   *
+   * Under A1b an option with an outstanding level is never `ready`, so the
+   * partially configured option above now reads `needs_encoding` on the
+   * canonical projection — the SAME status as the wholly unconfigured one. The
+   * status can therefore no longer tell the two apart, and the copy's claim
+   * ("X has no effect values yet") is decided by the only fact that makes it
+   * true or false: whether `interventions` is empty. Both halves are pinned
+   * with the status held EQUAL, so only the interventions can discriminate.
+   */
+  it('COPY DOMAIN BOUND (A1b): declines BECAUSE the option has effect values — the status is needs_encoding either way', () => {
+    const partial = captureGraph({ cloudNativeInterventions: { fac_platform_cost: 0.2 } });
+    const unconfigured = captureGraph();
+    const statusOf = (g: GraphV3T) =>
+      buildCanonicalAnalysisReadyFromGraph(g)?.options.find((o) => o.option_id === 'opt_cloud_native');
+
+    // PRECONDITION: the status cannot be the discriminator — it is the same.
+    expect(statusOf(partial)?.status).toBe('needs_encoding');
+    expect(statusOf(unconfigured)?.status).toBe('needs_encoding');
+    expect(Object.keys(statusOf(partial)?.interventions ?? {})).toEqual(['fac_platform_cost']);
+    expect(Object.keys(statusOf(unconfigured)?.interventions ?? {})).toEqual([]);
+
+    const copyFor = (g: GraphV3T) =>
+      buildConfigureOptionRecoveryCopy({
+        message: T12C,
+        detection: detectConfigureOptionIntent(T12C, projectOptionLabels(g.nodes)),
+        graph: g,
+      });
+    expect(copyFor(partial)).toEqual({ matched: false, reason: 'option_already_partially_configured' });
+    expect(copyFor(unconfigured)).toMatchObject({ matched: true, optionId: 'opt_cloud_native' });
   });
 });
 

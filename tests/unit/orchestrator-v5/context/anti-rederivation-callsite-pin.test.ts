@@ -299,6 +299,10 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // post-commit reply freshness through the same `deriveWriteReplyFreshness`
     // helper (durable set + restore marker), so it adds no reference. Its
     // pre-rebase form added a ninth call over the 20-row window alone.
+    // 2026-09-27 SLICE C2 add-risk door (`holdAddRiskInProcess`, Canonical #70 5855234599): +0 — its PRE-WRITE
+    // referee input is the option-level batch's own derivation, extracted unchanged into `preWriteRefereeFreshness`
+    // and shared by both writers (same prior-facts read, `unknown` on a degraded read). The limit-edit door shares
+    // goal_target_edit's body, so it adds none either. Its first cut added a sixth reference; this pin caught it.
     'src/orchestrator-v5/system-events/dispatch.ts': 5,
     // 2026-09-24 MG&Q: +1 (one call) — `dispatchFactorValueEdit` now derives the
     // wire freshness for a factor-value edit, exactly as the edge_strength_edit

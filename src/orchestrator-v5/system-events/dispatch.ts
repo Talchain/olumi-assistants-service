@@ -79,7 +79,10 @@ import {
   type EdgeStrengthEditAuthorityConflict,
 } from './edge-strength-edit.js';
 import { applyFactorValueEdit } from './factor-value-edit.js';
-import { applyGoalTargetEdit } from './goal-target-edit.js';
+import { applyGoalTargetEdit, type GoalTargetEditResult } from './goal-target-edit.js';
+import { applyLimitEdit } from './limit-edit.js';
+import { dispatchAddRiskTransaction } from '../handlers/add-risk-dispatch.js';
+import { buildHeldSupersessionNotice } from '../handlers/edit-graph-referee-gate.js';
 import { applyStructuralDelete } from './structural-delete.js';
 import { applyStructuralAdd, findFabricatedLevel } from './structural-add.js';
 import {
@@ -1712,6 +1715,9 @@ async function dispatchEdgeStrengthEdit(
       after: persistedGraphBytes,
       from: event.from,
       to: event.to,
+      // The adapter's own answer to "was this a band the user named?" (A6e), so the
+      // receipt is judged by the same allowance the pre-commit guard granted.
+      ...(result.statedBand !== undefined ? { statedBand: result.statedBand } : {}),
     });
   // A successful append without a trustworthy graph receipt is an ambiguous
   // transport outcome, never a 200 mutation success. Fail the route closed so
@@ -2749,6 +2755,20 @@ async function dispatchOptionInterventionEdit(
 }
 
 /**
+ * The PRE-WRITE referee input: the analysis freshness of the base a writer is about to referee against, from the prior
+ * facts it already read (a degraded read is `unknown`, never a guess). ONE derivation shared by the option-level batch and
+ * the add-risk door (SLICE C2), so the second in-process writer adds no derivation seam (the anti-rederivation pin).
+ */
+function preWriteRefereeFreshness(
+  priorFactsRead: Awaited<ReturnType<typeof loadPriorFactsWithReadState>>,
+  baseGraphHash: string,
+): FrameFreshness {
+  return priorFactsRead.status === 'ok'
+    ? deriveAnalysisFreshness(priorFactsRead.facts, baseGraphHash).freshness
+    : 'unknown';
+}
+
+/**
  * ⭐ ONE USER OPERATION → ONE ATOMIC COMMIT for a WHOLE approved batch of option levels (ChatGPT #70 5847200462,
  * Runtime 5847274522). The single `option_intervention_edit` event is this with one target. The Agent reaches a
  * batch IN-PROCESS (`commitOptionLevelsInProcess`) — no wire member is added (`SystemEventSchema` is `.strict()`).
@@ -2789,10 +2809,7 @@ export async function dispatchOptionLevelsBatch(
     return { response: buildAcknowledgementResponse(payload), commitPerformed: false, graph: null };
   }
 
-  const freshness: FrameFreshness =
-    priorFactsRead.status === 'ok'
-      ? deriveAnalysisFreshness(priorFactsRead.facts, batch.base_graph_hash).freshness
-      : 'unknown';
+  const freshness: FrameFreshness = preWriteRefereeFreshness(priorFactsRead, batch.base_graph_hash);
   const hasExistingAnalysis =
     priorFactsRead.status === 'ok' && priorFactsRead.facts.some(isSuccessfulRunAnalysisFact);
 
@@ -3138,6 +3155,221 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
   const receipt = r.committedVersion ?? null;
   return { status: 'committed', graph_hash: graphHash, receipt, already_applied: false, committed_levels: committedLevels,
     links_resized: (r.linksResized ?? []).map(l => ({ from: l.from, to: l.to })) };
+}
+
+/**
+ * SLICE C2 — the Agent's ADD-RISK door (Canonical State ruling #70 5855234599). IN-PROCESS, with no wire member: the
+ * schemas `Intent` enum has no `add_risk` and strict ingress refuses a new chip intent (`route-v2-preflight.ts`), so
+ * this mirrors the typed add-option's hold step (`route-v2.ts`, the `isAddOptionIntentChip` branch) the way
+ * `commitOptionLevelsInProcess` mirrors a system event: the caller is an already-authorised, scenario-owning request
+ * (the Agent route's ownership pre-flight); this grants nothing new.
+ *
+ *   1. read the PERSISTED graph and the latest row's live holds (both strict: a failed read writes nothing);
+ *   2. the proposal's base must BE the stored model's analysis hash — else `stale`, and nothing is written;
+ *   3. `dispatchAddRiskTransaction` builds the batch (kind pairs refused THERE) and referees it into ONE held pending
+ *      pinned to that hash;
+ *   4. that ONE hold is committed with the turn row (`commitDirectAnswer`, no graph), prior live holds carried.
+ *
+ * The confirm is the product's existing one: the hold's own chip → `executeGmHeldResume` → ONE `commitTurn` under CAS.
+ * Every outcome but `held` leaves the stored graph and the latest row untouched.
+ */
+export type HoldAddRiskInput = {
+  readonly scenario_id: string;
+  /**
+   * The hold's own turn row (a v4 uuid). A fresh one per offer: a re-offer of the same risk after an earlier hold lapsed
+   * must write its row, and a second hold for the same risk shares its `gmh_` handle, so the carry-forward retires the
+   * older one — still ONE live hold.
+   */
+  readonly turn_id: string;
+  /** The analysis-space hash of the model the proposal was built against. */
+  readonly base_graph_hash: string;
+  readonly risk: { readonly id?: string; readonly label: string };
+  /** Each link names ONE end: `from_id` (a factor driving the risk) or `to_id` (the goal or an outcome it threatens). */
+  readonly links: readonly { readonly from_id?: string; readonly to_id?: string; readonly effect_direction: 'positive' | 'negative' }[];
+};
+export type HoldAddRiskResult =
+  | {
+      readonly status: 'held';
+      /** The hold's `gmh_` handle — `gmHeldProposalRef(scenario, 'node:<risk_id>')`. */
+      readonly proposal_id: string;
+      readonly risk_id: string;
+      /** The product's own confirm copy: its (clamped) label, its exact message, and the full sentence when clamped. */
+      readonly public_label: string;
+      readonly held_message: string;
+      readonly detail?: string;
+    }
+  | { readonly status: 'stale' }
+  | { readonly status: 'refused'; readonly reason: string };
+
+export async function holdAddRiskInProcess(input: HoldAddRiskInput, requestId: string): Promise<HoldAddRiskResult> {
+  const startedAt = Date.now();
+  const logBase = { request_id: requestId, scenario_id: input.scenario_id, event: 'v5.agent.add_risk_hold' };
+  let persistedGraph: unknown;
+  let priorPendings: readonly PendingAction[];
+  try {
+    [persistedGraph, priorPendings] = await Promise.all([
+      loadPersistedGraphStrict(input.scenario_id),
+      loadMostRecentPendingActionsIntegrityStrict(input.scenario_id, requestId),
+    ]);
+  } catch (err) {
+    log.error({ ...logBase, err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) } },
+      'add-risk hold — authoritative graph/pending read failed; nothing held');
+    return { status: 'refused', reason: 'read_failed' };
+  }
+  if (persistedGraph === null || persistedGraph === undefined) return { status: 'refused', reason: 'no_persisted_graph' };
+  let currentHash: string | null;
+  try {
+    currentHash = computeAnalysisAffectingGraphHash(persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0]);
+  } catch {
+    currentHash = null;
+  }
+  if (currentHash === null) return { status: 'refused', reason: 'no_graph_hash' };
+  // The model moved since the proposal was built: nothing is held against a model the user did not see.
+  if (currentHash !== input.base_graph_hash) return { status: 'stale' };
+
+  // Freshness for the referee's frame gate, exactly as the option-level door reads it (a failed read is 'unknown').
+  let freshness: FrameFreshness = 'unknown';
+  try {
+    freshness = preWriteRefereeFreshness(await loadPriorFactsWithReadState(input.scenario_id, requestId), currentHash);
+  } catch {
+    freshness = 'unknown';
+  }
+
+  const outcome = dispatchAddRiskTransaction({
+    params: { risk: input.risk, links: input.links },
+    currentGraph: persistedGraph,
+    currentGraphHash: currentHash,
+    freshness,
+    mode: config.features.graphManagementMode,
+    scenarioId: input.scenario_id,
+    turnId: input.turn_id,
+    requestId,
+    stage: 'frame',
+  });
+  if (outcome.kind === 'refused') {
+    log.info({ ...logBase, reason: outcome.reason, governing: outcome.governing }, 'add-risk hold — refused; nothing held');
+    return { status: 'refused', reason: outcome.reason };
+  }
+  // Honest supersession, as the add-option hold says it (route-v2): appended BEFORE the commit so stored == offered.
+  const notice = buildHeldSupersessionNotice(outcome.pendingActions[0]!, priorPendings, Date.now());
+  const response: OlumiResponse = notice === null
+    ? outcome.response
+    : { ...outcome.response, assistant_text: appendLapseNotice(outcome.response.assistant_text, notice) };
+  const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
+    kind: 'agent_add_risk', risk: input.risk, links: input.links, base_graph_hash: input.base_graph_hash })).digest('hex').slice(0, 32)}`;
+  try {
+    await commitDirectAnswer(response, {
+      scenario_id: input.scenario_id,
+      turn_id: input.turn_id,
+      turn_class: 'direct_answer',
+      handler_id: null,
+      request_hash: requestHash,
+      llm_calls_used: 0,
+      duration_ms: Date.now() - startedAt,
+      handler_facts: [],
+      pending_actions: [...outcome.pendingActions],
+      // Prior live holds are carried, never silently wiped (the same-target one is retired by the carry-forward).
+      priorPendingActions: priorPendings,
+      coaching_state: null,
+    });
+  } catch (err) {
+    // The hold could not be persisted, so the confirm would have nothing to resume: never offered.
+    log.warn({ ...logBase, err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) } },
+      'add-risk hold — commit failed; nothing offered');
+    return { status: 'refused', reason: 'commit_failed' };
+  }
+  return {
+    status: 'held',
+    proposal_id: outcome.chip.id,
+    risk_id: outcome.riskId,
+    public_label: outcome.chip.label,
+    held_message: outcome.chip.message,
+    ...(outcome.chip.detail !== undefined ? { detail: outcome.chip.detail } : {}),
+  };
+}
+
+/**
+ * SLICE C2 — the Agent's LIMIT-EDIT door (Canonical State ruling #70 5855234599): a new figure the user approved for a
+ * limit the model ALREADY holds. `goal_target_edit`'s machinery (`dispatchAddConstraintEdit`, one CAS commit through
+ * `add_constraint`) with its goal-only check replaced by `applyLimitEdit`'s: one existing (node_id, operator) row on a
+ * non-option, non-goal node, its unit, label and value_frame kept, the value stamped as the user's. In-process, no wire
+ * member; the caller is the Agent route's already-authorised request.
+ */
+export type CommitLimitEditInput = {
+  readonly scenario_id: string;
+  /** `authorisationTurnId(proposal_id)`: the idempotency key. */
+  readonly turn_id: string;
+  /** The proposal's base; a mismatch is `stale`, and nothing is written. */
+  readonly base_graph_hash: string;
+  readonly node_id: string;
+  readonly operator: '<=' | '>=';
+  /** The user's figure, in the row's own unit. */
+  readonly raw_value: number;
+};
+export type CommitLimitEditResult =
+  | {
+      readonly status: 'committed';
+      readonly graph_hash: string;
+      /**
+       * The committed response's `model_version_receipt`, passed through UNPARSED: this module is not a sanctioned
+       * Model Management call site, so the Agent reads it with the lane's one parser (`receiptSummaryOf`).
+       */
+      readonly model_version_receipt: unknown;
+      /** The row exactly as the committed model holds it. */
+      readonly row: { readonly constraint_id: string; readonly value: number; readonly unit?: string; readonly value_frame?: string; readonly provenance?: string };
+    }
+  | { readonly status: 'stale' }
+  | { readonly status: 'refused'; readonly reason: string }
+  /** The commit was attempted and could not be read back: say it could not be confirmed, never "not saved". */
+  | { readonly status: 'unconfirmed' };
+
+export async function commitLimitEditInProcess(input: CommitLimitEditInput, requestId: string): Promise<CommitLimitEditResult> {
+  const turn = { scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame' as const };
+  const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
+    kind: 'agent_limit_edit', node_id: input.node_id, operator: input.operator, raw_value: input.raw_value, base_graph_hash: input.base_graph_hash }))
+    .digest('hex').slice(0, 32)}`;
+  const r = await dispatchAddConstraintEdit(
+    {
+      turn,
+      requestHash,
+      eventKind: 'limit_edit',
+      logFields: { node_id: input.node_id, operator: input.operator },
+      committedLogFields: { node_id: input.node_id, operator: input.operator },
+      committedMessage: 'V5 limit_edit committed — the existing limit row rewritten through add_constraint, hash recomputed',
+      dispatchPath: 'agent_lane.limit_edit',
+      apply: (persistedGraph, priorFacts) => applyLimitEdit({
+        payload: turn,
+        request: { node_id: input.node_id, operator: input.operator, raw_value: input.raw_value, base_graph_hash: input.base_graph_hash },
+        requestId,
+        persistedGraph,
+        priorFacts,
+      }),
+      reportRefusalReason: true,
+    },
+    requestId,
+    Date.now(),
+  );
+  if (r.graphConflict !== undefined) return { status: 'stale' };
+  if (r.commitSkippedReason === 'refused_no_write') return { status: 'refused', reason: r.refusal?.reason ?? 'refused' };
+  const graphHash = (r.response as { graph_hash?: unknown }).graph_hash;
+  if (!r.commitPerformed || typeof graphHash !== 'string' || graphHash.length === 0) return { status: 'unconfirmed' };
+  const held = (Array.isArray((r.graph as { goal_constraints?: unknown } | null)?.goal_constraints)
+    ? (r.graph as { goal_constraints: Record<string, unknown>[] }).goal_constraints : [])
+    .filter((c) => c['node_id'] === input.node_id && c['operator'] === input.operator);
+  const row = held.length === 1 ? held[0]! : undefined;
+  if (row === undefined || typeof row['constraint_id'] !== 'string' || typeof row['value'] !== 'number') return { status: 'unconfirmed' };
+  return {
+    status: 'committed',
+    graph_hash: graphHash,
+    model_version_receipt: (r.response as { model_version_receipt?: unknown }).model_version_receipt,
+    row: {
+      constraint_id: row['constraint_id'],
+      value: row['value'],
+      ...(typeof row['unit'] === 'string' ? { unit: row['unit'] } : {}),
+      ...(typeof row['value_frame'] === 'string' ? { value_frame: row['value_frame'] } : {}),
+      ...(typeof row['provenance'] === 'string' ? { provenance: row['provenance'] } : {}),
+    },
+  };
 }
 
 async function dispatchStructuralRename(
@@ -4257,6 +4489,46 @@ async function dispatchGoalTargetEdit(
   requestId: string,
   startedAt: number,
 ): Promise<DispatchSystemEventResult> {
+  return dispatchAddConstraintEdit(
+    {
+      turn: { scenario_id: payload.scenario_id, turn_id: payload.turn_id, stage: payload.stage },
+      requestHash: computeRequestHash(payload),
+      eventKind: event.kind,
+      logFields: { goal_node_id: event.goal_node_id },
+      committedLogFields: { goal_node_id: event.goal_node_id, constraint_type: event.constraint_type },
+      committedMessage: 'V5 goal_target_edit committed — graph written through add_constraint, hash recomputed',
+      dispatchPath: 'system_event.goal_target_edit',
+      apply: (persistedGraph, priorFacts) => applyGoalTargetEdit({ payload, event, requestId, persistedGraph, priorFacts }),
+    },
+    requestId,
+    startedAt,
+  );
+}
+
+/**
+ * The shared body of the two structured `add_constraint` writers — `goal_target_edit` (the wire event) and the
+ * Agent's in-process limit edit (SLICE C2, `commitLimitEditInProcess`). It was `dispatchGoalTargetEdit`'s body,
+ * moved here unchanged; only the adapter (`apply`) and the log names differ between the two.
+ */
+async function dispatchAddConstraintEdit(
+  spec: {
+    readonly turn: Pick<SystemEventTurnPayload, 'scenario_id' | 'turn_id' | 'stage'>;
+    readonly requestHash: string;
+    /** The writer's name in its logs and the hold-threading read. */
+    readonly eventKind: string;
+    readonly logFields: Readonly<Record<string, unknown>>;
+    readonly committedLogFields: Readonly<Record<string, unknown>>;
+    readonly committedMessage: string;
+    readonly dispatchPath: string;
+    readonly apply: (persistedGraph: unknown, priorFacts: readonly HandlerFact[]) => Promise<GoalTargetEditResult>;
+    /** Carry the adapter's refusal reason on the result (the in-process limit edit only). */
+    readonly reportRefusalReason?: boolean;
+  },
+  requestId: string,
+  startedAt: number,
+): Promise<DispatchSystemEventResult> {
+  const payload = spec.turn;
+  const event = { kind: spec.eventKind };
   let persistedGraph: unknown;
   try {
     persistedGraph = await loadPersistedGraphStrict(payload.scenario_id);
@@ -4269,7 +4541,7 @@ async function dispatchGoalTargetEdit(
         scenario_id: payload.scenario_id,
         err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
       },
-      'V5 goal_target_edit — persisted-graph read failed; refusing the write (fail closed)',
+      `V5 ${event.kind} — persisted-graph read failed; refusing the write (fail closed)`,
     );
     return { response: buildAcknowledgementResponse(payload), commitPerformed: false, graph: null };
   }
@@ -4281,15 +4553,9 @@ async function dispatchGoalTargetEdit(
   const factsRead = await loadWriteReplyAnalysisInputs(payload.scenario_id, requestId);
   const priorFactsRead = factsRead.hotWindow;
 
-  let result: Awaited<ReturnType<typeof applyGoalTargetEdit>>;
+  let result: GoalTargetEditResult;
   try {
-    result = await applyGoalTargetEdit({
-      payload,
-      event,
-      requestId,
-      persistedGraph,
-      priorFacts: priorFactsRead.facts,
-    });
+    result = await spec.apply(persistedGraph, priorFactsRead.facts);
   } catch (err) {
     // A malformed-but-present persisted graph (corruption, not absence) or an
     // unexpected handler throw. Retryable 500 with no append.
@@ -4300,7 +4566,7 @@ async function dispatchGoalTargetEdit(
         scenario_id: payload.scenario_id,
         err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
       },
-      'V5 goal_target_edit — adapter failed before commit',
+      `V5 ${event.kind} — adapter failed before commit`,
     );
     return { response: buildAcknowledgementResponse(payload), commitPerformed: false, graph: null };
   }
@@ -4324,15 +4590,17 @@ async function dispatchGoalTargetEdit(
         request_id: requestId,
         event_kind: event.kind,
         scenario_id: payload.scenario_id,
-        goal_node_id: event.goal_node_id,
+        ...spec.logFields,
         refusal_reason: result.reason,
       },
-      'V5 goal_target_edit — refused, nothing written',
+      `V5 ${event.kind} — refused, nothing written`,
     );
     return {
       response: buildAcknowledgementResponse(payload),
       commitPerformed: false,
       commitSkippedReason: 'refused_no_write',
+      // The adapter's reason, for the in-process caller only (the wire carries none; goal_target_edit is unchanged).
+      ...(spec.reportRefusalReason === true ? { refusal: { reason: result.reason } } : {}),
       graph: null,
     };
   }
@@ -4359,7 +4627,7 @@ async function dispatchGoalTargetEdit(
       // `add_constraint` turn commits.
       turn_class: 'handler',
       handler_id: 'add_constraint',
-      request_hash: computeRequestHash(payload),
+      request_hash: spec.requestHash,
       llm_calls_used: 0,
       duration_ms: Date.now() - startedAt,
       handler_facts: result.handlerFacts,
@@ -4383,7 +4651,7 @@ async function dispatchGoalTargetEdit(
           scenario_id: payload.scenario_id,
           conflict_category: err.conflict_category,
         },
-        'V5 goal_target_edit — atomic graph CAS conflict; refresh and reconfirm',
+        `V5 ${event.kind} — atomic graph CAS conflict; refresh and reconfirm`,
       );
       return {
         response: buildAcknowledgementResponse(payload),
@@ -4403,10 +4671,10 @@ async function dispatchGoalTargetEdit(
         request_id: requestId,
         event_kind: event.kind,
         scenario_id: payload.scenario_id,
-        goal_node_id: event.goal_node_id,
+        ...spec.logFields,
         err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
       },
-      'V5 goal_target_edit — mutation commit failed',
+      `V5 ${event.kind} — mutation commit failed`,
     );
     return { response: buildAcknowledgementResponse(payload), commitPerformed: false, graph: null };
   }
@@ -4416,10 +4684,9 @@ async function dispatchGoalTargetEdit(
       request_id: requestId,
       event_kind: event.kind,
       scenario_id: payload.scenario_id,
-      goal_node_id: event.goal_node_id,
-      constraint_type: event.constraint_type,
+      ...spec.committedLogFields,
     },
-    'V5 goal_target_edit committed — graph written through add_constraint, hash recomputed',
+    spec.committedMessage,
   );
 
   // Hash, postimage, readiness and freshness all describe the bytes that
@@ -4437,7 +4704,7 @@ async function dispatchGoalTargetEdit(
   emitFreshnessTelemetry(freshness, {
     request_id: requestId,
     scenario_id: payload.scenario_id,
-    dispatch_path: 'system_event.goal_target_edit',
+    dispatch_path: spec.dispatchPath,
   });
   return {
     response,

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
-import { CoachingBlockSchema } from '@talchain/schemas/boundary';
-import { currentAnalysisCoaching, runTurnCoaching, type CapturedAnalysis, type RunTurnCoachingFinal } from '../analysis-coaching-pass-through.js';
+import { CoachingBlockSchema, type CoachingBlock } from '@talchain/schemas/boundary';
+import { currentAnalysisCoaching, runTurnCoaching, runTurnNextMove, type CapturedAnalysis, type RunTurnCoachingFinal, type RunTurnNextMoveResult } from '../analysis-coaching-pass-through.js';
 import { RUN_TURN_COACHING_REASONS } from '../../coaching/fragile-link-challenge.js';
 import { runTurnCase } from '../../coaching/__tests__/fragile-link-challenge-fixtures.js';
 import { buildConstraintDisclosureFromState } from '../../coaching/constraint-gap-disclosure.js';
@@ -53,12 +53,13 @@ test('runTurnCoaching without a trigger forwards upstream coaching and makes no 
 const nearTieState = {...state, leader_claim: {permitted:false, withheld_reason:'options_do_not_separate', separation:'near_tie'}};
 const nearTie = {capture:{...capture, analysis_state:nearTieState}, final:{...final, analysisState:nearTieState}};
 test('runTurnCoaching with a trigger but no robustness keeps upstream and says why (leader not withheld for a limit)',()=>assert.deepEqual(runTurnCoaching({...nearTie.capture,trigger:'explicit_run'},nearTie.final),{blocks:[card],eligibility:{eligible:false,reason:'edge_sensitivity_not_evidenced'}}));
-test('runTurnCoaching with a trigger and a leader withheld FOR A LIMIT keeps upstream and adds the one limit card, robustness or not',()=>{
- const out=runTurnCoaching({...capture,trigger:'explicit_run'},final);
- assert.deepEqual(out.eligibility,{eligible:true});
- assert.equal(out.blocks.length,2);
- assert.strictEqual(out.blocks[0],card);
- assert.ok(out.blocks[1]!.signal_id.startsWith('coach:limit_unchecked:'));
+test('runTurnCoaching with a trigger and a leader withheld FOR A LIMIT keeps upstream; C4: the limit is the CAVEAT, never a card',()=>{
+ const out=runTurnNextMove({...capture,trigger:'explicit_run'},final);
+ // No robustness, so no link move either: the link path's own reason stands.
+ assert.deepEqual(out.eligibility,{eligible:false,reason:'edge_sensitivity_not_evidenced'});
+ assert.deepEqual(out.blocks,[card]);
+ assert.equal(out.caveats.length,1);
+ assert.ok(out.caveats[0]!.block.signal_id.startsWith('coach:limit_unchecked:'));
 });
 test('runTurnCoaching on a foreign graph forwards nothing and says identity_mismatch',()=>assert.deepEqual(runTurnCoaching({...capture,trigger:'explicit_run'},{...final,graphHash:'fedcba9876543210'}),{blocks:[],eligibility:{eligible:false,reason:'identity_mismatch'}}));
 test('currentAnalysisCoaching is runTurnCoaching(...).blocks',()=>{for(const c of [capture,{...capture,trigger:'auto_first_pass' as const}]) assert.deepEqual(currentAnalysisCoaching(c,final),runTurnCoaching(c,final).blocks)});
@@ -76,7 +77,7 @@ test('a readback result computed against another graph forwards nothing, even a 
 });
 
 // ── the no-flagged-link card (coaching/no-flagged-link-card.ts) — the second run-turn card ──
-test('RUN_TURN_COACHING_REASONS is the seven-reason gate order',()=>assert.deepEqual([...RUN_TURN_COACHING_REASONS],['no_run_this_turn','identity_mismatch','limit_repair_pending','no_groundable_fragile_edge','edge_sensitivity_not_evidenced','claim_not_usable','copy_gate']));
+test('RUN_TURN_COACHING_REASONS is the eight-reason gate order (C4 adds definitional_link)',()=>assert.deepEqual([...RUN_TURN_COACHING_REASONS],['no_run_this_turn','identity_mismatch','limit_repair_pending','no_groundable_fragile_edge','edge_sensitivity_not_evidenced','claim_not_usable','copy_gate','definitional_link']));
 test('a served run with no fragile link (c10) adds exactly one no-flagged-link card after the forwarded upstream card',()=>{
  const c=runTurnCase('c10','t5','explicit_run');
  const upstream={...card,block_id:'00000000-0000-4000-8000-0000000000c1',graph_hash_at_generation:c.turn.graph_hash,created_at:c.turn.analysis_state.run_state.computed_at};
@@ -212,6 +213,13 @@ test('CONTROL: a summary with no limit sentence keeps the card (c10 no-flagged-l
 const LIMIT_CARD = 'coach:limit_unchecked:';
 const runTurnCards = <T extends {signal_id: string}>(blocks: readonly T[]): T[] =>
  blocks.filter((b) => /^coach:(fragile_link|no_flagged_link|limit_unchecked|near_tie):/.test(b.signal_id));
+// ⭐ C4 (#70 5855068711, `coaching/next-move.ts`): a limit unchecked for a cause the user cannot close is a CAVEAT the
+// reply says once — no longer the run-turn card. The LIMIT / NAMED / STATED / PROVED / TYPED VERDICT rows below keep
+// pinning the limit card's OWN words, now read from `caveats`; `limitCards` also pins that no limit card is rendered.
+const limitCards = (out: RunTurnNextMoveResult): CoachingBlock[] => {
+ assert.equal(out.blocks.filter((b)=>b.signal_id.startsWith(LIMIT_CARD)).length,0,'C4: no limit card is rendered');
+ return out.caveats.map((c)=>c.block);
+};
 const statelessCapture = (c: CapturedAnalysis): CapturedAnalysis => { const {analysis_state: _s, ...rest} = c; return rest; };
 const claimOf = (f: RunTurnCoachingFinal) => (f.analysisState as {leader_claim?: {withheld_reason?: string}}).leader_claim;
 
@@ -222,9 +230,9 @@ test('LIMIT FIRST — Paul 1a298d6d (served bdd43f4, automatic first pass): the 
  assert.equal(claimOf(c.final)?.withheld_reason,'constraint_verdict_withheld');
  // The automatic pass hands over a capture with NO analysis_state (the stateless bind); the stateful shape binds too.
  for (const captured of [statelessCapture(c.captured), c.captured]) {
-  const out=runTurnCoaching(captured,c.final);
+  const out=runTurnNextMove(captured,c.final);
   assert.deepEqual(out.eligibility,{eligible:true});
-  const cards=runTurnCards(out.blocks);
+  const cards=limitCards(out);
   assert.equal(cards.length,1);
   assert.equal(cards[0]!.signal_id,`${LIMIT_CARD}449b882e043ae3e3:2026-09-25T17:27:54.315Z:auto_first_pass`);
  }
@@ -233,9 +241,9 @@ for (const [turn, trigger] of [['t1','auto_first_pass'],['t2','explicit_run']] a
  const c=runTurnCase('pricing',turn,trigger);
  assert.ok(c.turn.served_run_turn_cards?.[0]?.startsWith('coach:fragile_link:'));
  assert.equal(claimOf(c.final)?.withheld_reason,'constraint_verdict_withheld');
- const out=runTurnCoaching(trigger==='auto_first_pass'?statelessCapture(c.captured):c.captured,c.final);
+ const out=runTurnNextMove(trigger==='auto_first_pass'?statelessCapture(c.captured):c.captured,c.final);
  assert.deepEqual(out.eligibility,{eligible:true});
- const cards=runTurnCards(out.blocks);
+ const cards=limitCards(out);
  assert.equal(cards.length,1);
  assert.ok(cards[0]!.signal_id.startsWith(`${LIMIT_CARD}c247337beab725ed:${c.turn.analysis_state.run_state.computed_at}:`));
  assert.ok(cards[0]!.signal_id.endsWith(`:${trigger}`));
@@ -251,7 +259,7 @@ for (const [turn, trigger, why] of [['t1','auto_first_pass','withheld only becau
 });
 test('LIMIT FIRST — the limit card is a well-formed run-turn card: bound, leader-free, number-free, no badge, no write intent',()=>{
  const c=runTurnCase('paul','t1','auto_first_pass');
- const card=runTurnCards(runTurnCoaching(statelessCapture(c.captured),c.final).blocks)[0]!;
+ const card=limitCards(runTurnNextMove(statelessCapture(c.captured),c.final))[0]!;
  assert.ok(card.signal_id.startsWith(LIMIT_CARD));
  assert.equal(card.type,'coaching');
  assert.equal(card.coaching_kind,'assumption_check');
@@ -269,9 +277,9 @@ test('LIMIT FIRST — the limit card is a well-formed run-turn card: bound, lead
  }
  // It must not promise a write the Agent cannot make, nor ask for a number the engine may not be able to use.
  assert.match(card.action_prompt??'',/Don't change the model or re-run anything/);
- // Deterministic: the same run gives the same card, and an upstream copy of it is emitted once.
- const again=runTurnCoaching({...c.captured,blocks:[...c.captured.blocks!,card]},c.final);
- assert.deepEqual(runTurnCards(again.blocks).map(b=>b.block_id),[card.block_id]);
+ // Deterministic: the same run gives the same caveat block.
+ const again=runTurnNextMove(statelessCapture(c.captured),c.final);
+ assert.deepEqual(limitCards(again).map(b=>b.block_id),[card.block_id]);
 });
 test('LIMIT FIRST — the prose repair step still wins: a summary asking the user to restate a limit gives limit_repair_pending and NO card',()=>{
  const c=runTurnCase('pricing','t2','explicit_run');
@@ -301,9 +309,9 @@ test('NAMED LIMIT — Paul 1a298d6d: with its own hash-bound graph the one card 
  const c=runTurnCase('paul','t1','auto_first_pass');
  // Present control: the graph's one limit row joins to the node "Monthly churn".
  assert.deepEqual((PAUL_GRAPH.goal_constraints as {node_id: string}[]).map(r=>r.node_id),['monthly_churn']);
- const out=runTurnCoaching(statelessCapture(c.captured),{...c.final,graph:PAUL_GRAPH});
+ const out=runTurnNextMove(statelessCapture(c.captured),{...c.final,graph:PAUL_GRAPH});
  assert.deepEqual(out.eligibility,{eligible:true});
- const cards=runTurnCards(out.blocks);
+ const cards=limitCards(out);
  assert.equal(cards.length,1);
  // Churn is worked out from price and adoption on this graph, so the card says the PROVED cause (see PROVED CAUSE).
  assert.equal(cards[0]!.signal_id,`${LIMIT_CARD}449b882e043ae3e3:2026-09-25T17:27:54.315Z:auto_first_pass:named:unanchored`);
@@ -315,7 +323,7 @@ test('NAMED LIMIT — Paul 1a298d6d: with its own hash-bound graph the one card 
 });
 test('NAMED LIMIT — the second brief (pricing explicit Run, served 06325c6) names its limit too',()=>{
  const c=runTurnCase('pricing','t2','explicit_run');
- const cards=runTurnCards(runTurnCoaching(c.captured,{...c.final,graph:PRICING_T2_GRAPH}).blocks);
+ const cards=limitCards(runTurnNextMove(c.captured,{...c.final,graph:PRICING_T2_GRAPH}));
  assert.equal(cards.length,1);
  assert.ok(cards[0]!.signal_id.endsWith(':explicit_run:named:unanchored'));
  assert.match(cards[0]!.body,/^This analysis could not check your limit on “Monthly churn”/);
@@ -339,7 +347,7 @@ test('NAMED LIMITS — two limit nodes → the card names BOTH, never one of the
  two.goal_constraints=[...two.goal_constraints,{...two.goal_constraints[0],constraint_id:'agent-lane:mrr:>=',node_id:'mrr',operator:'>=',label:'MRR'}];
  const hash=computeAnalysisAffectingGraphHash(unproved(two) as never)!;
  const result={...(c.final.analysisResult as object),computed_against_hash:hash};
- const cards=runTurnCards(runTurnCoaching({...statelessCapture(c.captured),blocks:[result]},{...c.final,graphHash:hash,analysisResult:result,graph:two}).blocks);
+ const cards=limitCards(runTurnNextMove({...statelessCapture(c.captured),blocks:[result]},{...c.final,graphHash:hash,analysisResult:result,graph:two}));
  assert.equal(cards.length,1);
  assert.ok(cards[0]!.signal_id.endsWith(':auto_first_pass:named'));
  assert.equal(cards[0]!.title,'Check your limits before relying on this');
@@ -359,7 +367,7 @@ test('NAMED LIMIT — the served fraction spelling (0.1 proportion/month, (F) f-
  Object.assign(g.goal_constraints[0],{value:0.1,unit:'proportion/month'});
  const c=runTurnCase('paul','t1','auto_first_pass');
  const {captured,final}=rebind(c,unproved(g));
- const cards=runTurnCards(runTurnCoaching(captured,final).blocks);
+ const cards=limitCards(runTurnNextMove(captured,final));
  assert.equal(cards.length,1);
  assert.match(cards[0]!.body,/your limit on “Monthly churn”: it was not checked or not met\./);
  for (const t of [cards[0]!.title,cards[0]!.body,cards[0]!.action_label,cards[0]!.action_prompt]) assert.doesNotMatch(String(t),/0\.1|proportion/);
@@ -410,7 +418,7 @@ test('STATED THRESHOLD — two rows on one node: the node is named, no threshold
  const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
  g.goal_constraints=[g.goal_constraints[0],{...g.goal_constraints[0],constraint_id:'agent-lane:monthly_churn:>=',operator:'>=',value:1}];
  const {captured,final}=rebind(c,unproved(g));
- const card=runTurnCards(runTurnCoaching(captured,final).blocks)[0]!;
+ const card=limitCards(runTurnNextMove(captured,final))[0]!;
  assert.match(card.body,/your limit on “Monthly churn”: it was not checked or not met\./);
  assert.doesNotMatch(card.body,/\d/);
 });
@@ -419,7 +427,7 @@ test('STATED THRESHOLD — a threshold the copy gates refuse (a raw decimal) fal
  const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
  g.goal_constraints=[{...g.goal_constraints[0],value:0.5,unit:''}];
  const {captured,final}=rebind(c,unproved(g));
- const card=runTurnCards(runTurnCoaching(captured,final).blocks)[0]!;
+ const card=limitCards(runTurnNextMove(captured,final))[0]!;
  // Present control: the stated form exists and is refused by the gates.
  assert.equal(statedThreshold(g.goal_constraints[0]),'0.5');
  assert.ok(card.signal_id.endsWith(':named'));
@@ -433,26 +441,26 @@ const withLimitsOn = (nodeIds: string[]) => {
 };
 test('NAMED LIMITS — three limit nodes are all named, in the rows\' order; four → the generic words',()=>{
  const c=runTurnCase('paul','t1','auto_first_pass');
- const three=runTurnCards(runTurnCoaching(rebind(c,withLimitsOn(['monthly_churn','pro_subscribers','mrr'])).captured,rebind(c,withLimitsOn(['monthly_churn','pro_subscribers','mrr'])).final).blocks)[0]!;
+ const three=limitCards(runTurnNextMove(rebind(c,withLimitsOn(['monthly_churn','pro_subscribers','mrr'])).captured,rebind(c,withLimitsOn(['monthly_churn','pro_subscribers','mrr'])).final))[0]!;
  assert.match(three.body,/your limits on “Monthly churn”, “Pro subscribers” and “MRR”: at least one was not checked or not met\. That is one reason/);
  // The long prompt would exceed the 300-char bound here, so the short form ships: every name, and the no-write ask.
  assert.match(three.action_prompt??'',/my limits on “Monthly churn”, “Pro subscribers” and “MRR”: at least one was not checked or was not met\. Explain/);
  assert.match(three.action_prompt??'',/Don't change the model or re-run anything yet\.$/);
  assert.ok(three.signal_id.endsWith(':named'));
  const four=rebind(c,withLimitsOn(['monthly_churn','pro_subscribers','mrr','pro_plan_price']));
- const generic=runTurnCards(runTurnCoaching(four.captured,four.final).blocks)[0]!;
+ const generic=limitCards(runTurnNextMove(four.captured,four.final))[0]!;
  assert.ok(generic.signal_id.endsWith(':auto_first_pass'));
  assert.doesNotMatch(generic.body,/“/);
 });
 test('NAMED LIMITS — two rows on ONE node name it once (singular); two nodes sharing a label → the generic words',()=>{
  const c=runTurnCase('paul','t1','auto_first_pass');
  const same=rebind(c,withLimitsOn(['monthly_churn','monthly_churn']));
- const one=runTurnCards(runTurnCoaching(same.captured,same.final).blocks)[0]!;
+ const one=limitCards(runTurnNextMove(same.captured,same.final))[0]!;
  assert.match(one.body,/your limit on “Monthly churn”: it was not checked or not met\./);
  const g=withLimitsOn(['monthly_churn','pro_subscribers']);
  (g.nodes as {id: string; label: string}[]).find(n=>n.id==='pro_subscribers')!.label='Monthly churn';
  const dup=rebind(c,g);
- const card=runTurnCards(runTurnCoaching(dup.captured,dup.final).blocks)[0]!;
+ const card=limitCards(runTurnNextMove(dup.captured,dup.final))[0]!;
  assert.ok(card.signal_id.endsWith(':auto_first_pass'));
  assert.doesNotMatch(card.body,/“/);
 });
@@ -461,7 +469,7 @@ test('NAMED LIMIT — the name is the NODE\'s label (joined by node_id), never t
  const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
  g.goal_constraints=[{...g.goal_constraints[0],label:'Churn ceiling I typed'}];
  const {captured,final}=rebind(c,unproved(g));
- const card=runTurnCards(runTurnCoaching(captured,final).blocks)[0]!;
+ const card=limitCards(runTurnNextMove(captured,final))[0]!;
  assert.match(card.body,/“Monthly churn”/);
  assert.doesNotMatch(card.body,/Churn ceiling I typed/);
 });
@@ -470,7 +478,7 @@ test('NAMED LIMIT — a user\'s own figure in the label ("Churn ≤ 4%") is quot
  const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
  const node=g.nodes.find((n: {id: string})=>n.id==='monthly_churn'); node.label='Churn ≤ 4%';
  const {captured,final}=rebind(c,unproved(g));
- const card=runTurnCards(runTurnCoaching(captured,final).blocks)[0]!;
+ const card=limitCards(runTurnNextMove(captured,final))[0]!;
  assert.ok(card.signal_id.endsWith(':auto_first_pass:named'));
  for (const words of [card.body, card.action_prompt??'']) {
   assert.match(words,/“Churn ≤ 4%” \(10 percent per month\)/);
@@ -483,9 +491,9 @@ test('NAMED LIMIT — a node label the copy gates refuse (a raw decimal) ships t
  const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
  const node=g.nodes.find((n: {id: string})=>n.id==='monthly_churn'); node.label='Churn at 0.5 per month';
  const {captured,final}=rebind(c,unproved(g));
- const out=runTurnCoaching(captured,final);
+ const out=runTurnNextMove(captured,final);
  assert.deepEqual(out.eligibility,{eligible:true});
- const cards=runTurnCards(out.blocks);
+ const cards=limitCards(out);
  assert.equal(cards.length,1);
  assert.ok(cards[0]!.signal_id.endsWith(':auto_first_pass'));
  assert.doesNotMatch(cards[0]!.body,/“/);
@@ -513,9 +521,9 @@ test('PROVED CAUSE — Paul 1a298d6d (served bdd43f4 first pass): the card says 
  assert.ok(opts.length>=2);
  assert.deepEqual(opts.map(o=>o.interventions),[{},{pro_plan_price:0.295},{pro_plan_price:0.27}]);
  assert.ok(opts.every(o=>!Object.prototype.hasOwnProperty.call(o.interventions,'monthly_churn')));
- const out=runTurnCoaching(captured,{...c.final,graph:PAUL_GRAPH});
+ const out=runTurnNextMove(captured,{...c.final,graph:PAUL_GRAPH});
  assert.deepEqual(out.eligibility,{eligible:true});
- const cards=runTurnCards(out.blocks);
+ const cards=limitCards(out);
  assert.equal(cards.length,1);
  const card=cards[0]!;
  assert.equal(card.signal_id,`${LIMIT_CARD}449b882e043ae3e3:2026-09-25T17:27:54.315Z:auto_first_pass:named:unanchored`);
@@ -529,7 +537,7 @@ test('PROVED CAUSE — Paul 1a298d6d (served bdd43f4 first pass): the card says 
 });
 test('PROVED CAUSE — the explicit Run (pricing, served 06325c6) says the same cause after "This analysis"',()=>{
  const c=runTurnCase('pricing','t2','explicit_run');
- const card=runTurnCards(runTurnCoaching(c.captured,{...c.final,graph:PRICING_T2_GRAPH}).blocks)[0]!;
+ const card=limitCards(runTurnNextMove(c.captured,{...c.final,graph:PRICING_T2_GRAPH}))[0]!;
  assert.ok(card.signal_id.endsWith(':explicit_run:named:unanchored'));
  assert.match(card.body,/^This analysis could not check your limit on “Monthly churn”[^:]*: Olumi works that out from other parts of your model and cannot yet test a limit on a quantity like that\./);
 });
@@ -539,7 +547,7 @@ test('PROVED CAUSE — two limits, BOTH on worked-out parts: both named, the plu
  const row=g.goal_constraints[0];
  g.goal_constraints=[row,{...row,constraint_id:'agent-lane:mrr:>=',node_id:'mrr',operator:'>='}];
  const {captured,final}=rebind(c,g);
- const card=runTurnCards(runTurnCoaching(captured,final).blocks)[0]!;
+ const card=limitCards(runTurnNextMove(captured,final))[0]!;
  assert.ok(card.signal_id.endsWith(':auto_first_pass:named:unanchored'));
  assert.equal(card.title,'This model cannot check your limits yet');
  assert.equal(card.body,'Before relying on this first pass on Olumi\'s estimates, note that it could not check your limits on “Monthly churn” (10 percent per month) and “MRR” (10 percent per month): Olumi works those out from other parts of your model and cannot yet test a limit on quantities like those.');
@@ -551,7 +559,7 @@ test('PROVED CAUSE — a label the gates refuse keeps the CAUSE in the generic w
  const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
  g.nodes.find((n: {id: string})=>n.id==='monthly_churn').label='Churn at 0.5 per month';
  const {captured,final}=rebind(c,g);
- const card=runTurnCards(runTurnCoaching(captured,final).blocks)[0]!;
+ const card=limitCards(runTurnNextMove(captured,final))[0]!;
  assert.ok(card.signal_id.endsWith(':auto_first_pass:unanchored'));
  assert.equal(card.title,'This model cannot check the limits yet');
  assert.match(card.body,/it could not check the limits on the model: they point at parts Olumi works out from other parts of your model, and it cannot yet test a limit on quantities like those\./);
@@ -559,7 +567,7 @@ test('PROVED CAUSE — a label the gates refuse keeps the CAUSE in the generic w
 });
 test('PROVED CAUSE — CONTROLS: the same served turn keeps today\'s words whenever the proof does not hold',()=>{
  const c=runTurnCase('paul','t1','auto_first_pass');
- const cardOf=(captured: CapturedAnalysis, final: RunTurnCoachingFinal)=>runTurnCards(runTurnCoaching(captured,final).blocks)[0]!;
+ const cardOf=(captured: CapturedAnalysis, final: RunTurnCoachingFinal)=>limitCards(runTurnNextMove(captured,final))[0]!;
  const plain=statelessCapture(c.captured) as CapturedAnalysis & {analysis_ready: {options: Record<string, any>[]}};
  // (a) churn a ROOT (no directed link in).
  { const {captured,final}=rebind(c,unproved(structuredClone(PAUL_GRAPH) as Record<string, any>));
@@ -608,9 +616,9 @@ test('TYPED VERDICT — limitCardArm is the whole truth table',()=>{
 test('TYPED VERDICT — unevaluated on a limit NOT proved (churn a root): "could not check your limit", definite, no cause',()=>{
  const c=runTurnCase('paul','t1','auto_first_pass');
  const {captured,final}=rebind(c,unproved(structuredClone(PAUL_GRAPH) as Record<string, any>));
- const today=runTurnCards(runTurnCoaching(captured,final).blocks)[0]!;
+ const today=limitCards(runTurnNextMove(captured,final))[0]!;
  assert.match(today.body,TODAYS_WORDS);
- const card=runTurnCards(runTurnCoaching(captured,{...final,constraintVerdictState:'unevaluated'}).blocks)[0]!;
+ const card=limitCards(runTurnNextMove(captured,{...final,constraintVerdictState:'unevaluated'}))[0]!;
  assert.ok(card.signal_id.endsWith(':auto_first_pass:named:unchecked'));
  assert.notEqual(card.block_id,today.block_id);
  assert.equal(card.title,'Your limit could not be checked');
@@ -621,18 +629,18 @@ test('TYPED VERDICT — unevaluated on a limit NOT proved (churn a root): "could
 test('TYPED VERDICT — unevaluated on several limits says "at least one of" (the state proves at least one, never all)',()=>{
  const c=runTurnCase('paul','t1','auto_first_pass');
  const two=rebind(c,withLimitsOn(['monthly_churn','pro_subscribers']));
- const card=runTurnCards(runTurnCoaching(two.captured,{...two.final,constraintVerdictState:'unevaluated'}).blocks)[0]!;
+ const card=limitCards(runTurnNextMove(two.captured,{...two.final,constraintVerdictState:'unevaluated'}))[0]!;
  assert.equal(card.title,'Not every limit could be checked');
  assert.match(card.body,/could not check at least one of your limits on “Monthly churn” \(10 percent per month\) and “Pro subscribers” \(10 percent per month\)\./);
  const four=rebind(c,withLimitsOn(['monthly_churn','pro_subscribers','mrr','pro_plan_price']));
- const generic=runTurnCards(runTurnCoaching(four.captured,{...four.final,constraintVerdictState:'unevaluated'}).blocks)[0]!;
+ const generic=limitCards(runTurnNextMove(four.captured,{...four.final,constraintVerdictState:'unevaluated'}))[0]!;
  assert.ok(generic.signal_id.endsWith(':auto_first_pass:unchecked'));
  assert.match(generic.body,/could not check at least one of the limits on the model\./);
 });
 test('TYPED VERDICT — identity_unresolved says neither checked nor unchecked: "could not tell whether … was checked", even when proved',()=>{
  const c=runTurnCase('paul','t1','auto_first_pass');
  const plain=statelessCapture(c.captured);
- const card=runTurnCards(runTurnCoaching(plain,{...c.final,graph:PAUL_GRAPH,constraintVerdictState:'identity_unresolved'}).blocks)[0]!;
+ const card=limitCards(runTurnNextMove(plain,{...c.final,graph:PAUL_GRAPH,constraintVerdictState:'identity_unresolved'}))[0]!;
  assert.ok(card.signal_id.endsWith(':auto_first_pass:named:identity'));
  assert.match(card.body,/could not tell whether your limit on “Monthly churn” \(10 percent per month\) was checked\./);
  assert.doesNotMatch(card.body,/could not check|not met|Olumi works/);
@@ -641,11 +649,11 @@ test('TYPED VERDICT — the proof fails CLOSED against a recorded state that dis
  const c=runTurnCase('paul','t1','auto_first_pass');
  const plain=statelessCapture(c.captured);
  // Present control: with no state the same served turn speaks the proved cause.
- assert.ok(runTurnCards(runTurnCoaching(plain,{...c.final,graph:PAUL_GRAPH}).blocks)[0]!.signal_id.endsWith(':unanchored'));
- assert.ok(runTurnCards(runTurnCoaching(plain,{...c.final,graph:PAUL_GRAPH,constraintVerdictState:null}).blocks)[0]!.signal_id.endsWith(':unanchored'));
- assert.ok(runTurnCards(runTurnCoaching(plain,{...c.final,graph:PAUL_GRAPH,constraintVerdictState:'unevaluated'}).blocks)[0]!.signal_id.endsWith(':unanchored'));
+ assert.ok(limitCards(runTurnNextMove(plain,{...c.final,graph:PAUL_GRAPH}))[0]!.signal_id.endsWith(':unanchored'));
+ assert.ok(limitCards(runTurnNextMove(plain,{...c.final,graph:PAUL_GRAPH,constraintVerdictState:null}))[0]!.signal_id.endsWith(':unanchored'));
+ assert.ok(limitCards(runTurnNextMove(plain,{...c.final,graph:PAUL_GRAPH,constraintVerdictState:'unevaluated'}))[0]!.signal_id.endsWith(':unanchored'));
  for (const state of ['evaluated_infeasible','foo']) {
-  const card=runTurnCards(runTurnCoaching(plain,{...c.final,graph:PAUL_GRAPH,constraintVerdictState:state}).blocks)[0]!;
+  const card=limitCards(runTurnNextMove(plain,{...c.final,graph:PAUL_GRAPH,constraintVerdictState:state}))[0]!;
   assert.ok(card.signal_id.endsWith(':auto_first_pass:named'),state);
   assert.match(card.body,TODAYS_WORDS,state);
  }
@@ -738,7 +746,7 @@ const retie = (mutate: (r: {computed_against_hash: string; enrichment: Record<st
  const state=structuredClone(c.final.analysisState) as Record<string, any>;
  mutate(result,state);
  const captured={...statelessCapture(c.captured),blocks:[result],trigger} as CapturedAnalysis;
- return runTurnCoaching(captured,{...c.final,analysisResult:result,analysisState:state});
+ return runTurnNextMove(captured,{...c.final,analysisResult:result,analysisState:state});
 };
 test('NEAR TIE — served hiring 3829c96 first pass (near tie, 0 fragile links, NO card served) → ONE card asking which difference matters most',()=>{
  const {c,captured,final}=tieCase();
@@ -787,15 +795,15 @@ test('NEAR TIE — conditions 1 and 4: no tie, a flagged link, a missing or part
  // Present control: the unmutated turn does fire (the loop above is not vacuous).
  assert.equal(runTurnCards(retie(()=>{}).blocks).filter(b=>b.signal_id.startsWith(TIE_CARD)).length,1);
 });
-test('NEAR TIE — a flagged link on the same tie keeps the LINK card; a limit keeps the LIMIT card (the tie never outranks them)',()=>{
+test('NEAR TIE — a flagged link on the same tie keeps the LINK card; C4: a limit is the caveat and the tie card is the move beside it',()=>{
  const {c}=tieCase();
  const robust=tieResult(c.final).enrichment.robustness.robust_edges[0];
  const withLink=retie((r)=>{r.enrichment.robustness.fragile_edges=[{...robust,alternative_winner_id:null,alternative_winner_label:null}];});
  assert.equal(runTurnCards(withLink.blocks).filter(b=>b.signal_id.startsWith(TIE_CARD)).length,0);
  const withLimit=retie((_r,s)=>{s.leader_claim={permitted:false,withheld_reason:'constraint_verdict_withheld'};});
- const cards=runTurnCards(withLimit.blocks);
- assert.equal(cards.length,1);
- assert.ok(cards[0]!.signal_id.startsWith(LIMIT_CARD));
+ // C4: the limit is the caveat the reply says once; the run's own typed near tie (no number said) is the one move.
+ assert.equal(runTurnCards(withLimit.blocks).filter(b=>b.signal_id.startsWith(TIE_CARD)).length,1);
+ assert.ok(limitCards(withLimit)[0]!.signal_id.startsWith(LIMIT_CARD));
 });
 test('NEAR TIE — an EXPLICIT Run on the same tie gets no near-tie card (the permission covers the automatic first pass)',()=>{
  const out=retie((r)=>{delete r.enrichment.run_provenance;},'explicit_run');
@@ -828,7 +836,7 @@ const estCase = (verdict: unknown, claim: Record<string, unknown> = {permitted:f
  const c=runTurnCase('paul','t1','auto_first_pass');
  const state={...(c.final.analysisState as Record<string, unknown>),leader_claim:claim};
  const {captured,final}=graph===PAUL_GRAPH?{captured:statelessCapture(c.captured),final:{...c.final,graph}}:rebind(c,graph);
- return runTurnCoaching(captured,{...final,analysisState:state,...(verdict===undefined?{}:{constraintVerdictState:verdict as RunTurnCoachingFinal['constraintVerdictState']})});
+ return runTurnNextMove(captured,{...final,analysisState:state,...(verdict===undefined?{}:{constraintVerdictState:verdict as RunTurnCoachingFinal['constraintVerdictState']})});
 };
 const estCards = (out: {blocks: readonly {signal_id: string}[]}) => out.blocks.filter((b)=>b.signal_id.startsWith(EST_CARD));
 test('ESTIMATED LIMIT — a limit checked (evaluated_feasible) against Olumi\'s estimate of its level → ONE card naming that estimate, outranking the link card',()=>{
@@ -844,6 +852,7 @@ test('ESTIMATED LIMIT — a limit checked (evaluated_feasible) against Olumi\'s 
  assert.equal(est.length,1);
  assert.equal(CoachingBlockSchema.safeParse(est[0]).success,true);
  assert.equal(est[0].signal_id,`${EST_CARD}449b882e043ae3e3:2026-09-25T17:27:54.315Z:auto_first_pass`);
+ assert.equal(est[0].title,"“Monthly churn” limit checked against Olumi's estimate of 7 percent per month");
  assert.equal(est[0].body,"Your limit on “Monthly churn” was checked against Olumi's estimate that it is about 7 percent per month today, not a figure you gave. If you know the real figure, it is worth saying.");
  assert.deepEqual(est[0].target_refs,[{kind:'factor',id:'monthly_churn',label:'Monthly churn'}]);
  assert.match(est[0].action_prompt,/Ask me what the real figure is and what it rests on\. If I answer, offer to record my answer for me to approve, and change nothing until I do\.$/);
@@ -854,9 +863,10 @@ test('ESTIMATED LIMIT — only on the typed evaluated_feasible verdict; never de
  for (const v of [undefined,null,'unevaluated','identity_unresolved','not_applicable','evaluated_infeasible','EVALUATED_FEASIBLE',true]) {
   assert.equal(estCards(estCase(v)).length,0,String(v));
  }
- // A limit-withheld claim keeps the LIMIT card first (limit first), whatever the verdict field says.
+ // A limit-withheld claim is the limit CAVEAT (C4), whatever the verdict field says; and no estimate card, which would
+ // say the limit WAS checked beside a caveat saying it could not be.
  const out=estCase('evaluated_feasible',{permitted:false,withheld_reason:'constraint_verdict_withheld'});
- assert.ok(runTurnCards(out.blocks as any)[0]!.signal_id.startsWith(LIMIT_CARD));
+ assert.ok(limitCards(out)[0]!.signal_id.startsWith(LIMIT_CARD));
  assert.equal(estCards(out).length,0);
 });
 test('ESTIMATED LIMIT — the level must be Olumi\'s, from ONE limit node, on the run\'s own graph',()=>{
@@ -880,10 +890,12 @@ test('ESTIMATED LIMIT — the level must be Olumi\'s, from ONE limit node, on th
 // Paul's served churn level is the ADOPTED starting point: observed_state.source 'user_assumption', classed
 // `user_ratified` (obligation-provenance.ts). The card keyed on 'cee_inference' only, so it was silent on HIS journey.
 // Served shape per AI Quality (PLoT request n6sq-20260926T080013Z: raw 4, unit '%'); not re-read by R&C.
+// A DERIVED level keeps the limit in the node's unit (the served shape: limit and node share a unit).
 const withChurnLevel = (source: unknown, raw = 4, unit = '%') => {
  const x=structuredClone(PAUL_GRAPH) as Record<string, any>;
  const n=x.nodes.find((m: any)=>m.id==='monthly_churn');
  n.observed_state={...n.observed_state,raw_value:raw,unit};
+ for (const c of x.goal_constraints) if (c.node_id==='monthly_churn') c.unit=unit;
  if (source===undefined) delete n.observed_state.source; else n.observed_state.source=source;
  return x;
 };
@@ -894,6 +906,7 @@ test('ESTIMATED LIMIT — RATIFIED: Paul\'s served churn level (user_assumption,
  assert.equal(est.length,1);
  assert.equal(CoachingBlockSchema.safeParse(est[0]).success,true);
  assert.match(est[0].signal_id,/^coach:limit_estimate:[0-9a-f]+:2026-09-25T17:27:54\.315Z:auto_first_pass:ratified$/);
+ assert.equal(est[0].title,'Your “Monthly churn” limit was checked against an assumed 4%');
  assert.equal(est[0].body,'Your limit on “Monthly churn” was checked against about 4% today, a figure recorded as an assumption rather than a measurement. If you know the real figure, it is worth saying.');
  assert.equal(est[0].action_prompt,'Olumi checked my limit on “Monthly churn” against about 4% today, a figure recorded as an assumption. Ask me what the real figure is and what it rests on. If I answer, offer to record my answer for me to approve, and change nothing until I do.');
  assert.deepEqual(est[0].target_refs,[{kind:'factor',id:'monthly_churn',label:'Monthly churn'}]);
@@ -936,6 +949,25 @@ test('ESTIMATED LIMIT — one next action names ONE figure: an Olumi-estimate li
 // The state is derived by PRODUCTION deriveConstraintVerdict from the graph's own readRatifiedConstraints, over a
 // minimal doctrine-B envelope shaped as in constraint-verdict-out-of-scope.test.ts: `_meta.filtered_constraints` is
 // PLoT's FilteredConstraintRecord; per-option `constraint_probabilities` are keyed by constraint_id.
+// ⭐ C4 CORRECTION (MG #70 5856264807, EXECUTED): on Paul's 17d1cd3a the relabelled "%" limit reached ISL as 0.04 — framed
+// correctly. Its "met with certainty" was Olumi's 3% estimate treated as exactly known, which is precisely what THIS card
+// says ("checked against Olumi's estimate"). A relabel is therefore NOT a reason to refuse the card; B5's typed
+// `per_limit[].state` ('estimate_only') is the authority when it lands.
+test('ESTIMATED LIMIT — C4 correction: a RELABELLED limit still gets the card — the relabel framed it (17d1: ISL got 0.04)',()=>{
+ const relabelled=structuredClone(PAUL_GRAPH) as Record<string, any>;
+ relabelled.goal_constraints[0].provenance_unit_relabelled={rule:'agent_lane_limit_unit_v1',pre_normalisation_unit:'% per month',pre_normalisation_value:10};
+ assert.equal(estCards(estCase('evaluated_feasible',undefined,relabelled)).length,1);
+});
+test('ESTIMATED LIMIT — an UN-relabelled unit mismatch ("£k" limit on a "£" node, ×1000) gets NO card: it was not checked in the unit it states (AIQ 5856373468)',()=>{
+ const same=withChurnLevel('user_assumption',4,'£') as Record<string, any>;
+ assert.equal(estCards(estCase('evaluated_feasible',undefined,same)).length,1,'control: the same limit in the node\'s own unit gets the card');
+ const mismatch=structuredClone(same);
+ for (const c of mismatch.goal_constraints) if (c.node_id==='monthly_churn') c.unit='£k';
+ assert.equal(estCards(estCase('evaluated_feasible',undefined,mismatch)).length,0);
+ const relabelled=structuredClone(mismatch);
+ relabelled.goal_constraints[0].provenance_unit_relabelled={rule:'agent_lane_limit_unit_v1',pre_normalisation_unit:'£k',pre_normalisation_value:4};
+ assert.equal(estCards(estCase('evaluated_feasible',undefined,relabelled)).length,1,'a relabelled limit is exempt: the relabel framed it');
+});
 const CHURN_ID = 'agent-lane:monthly_churn:<=';
 const PRICE_ID = 'agent-lane:pro_plan_price:<=';
 const PRICE_LIMIT = {constraint_id:PRICE_ID,node_id:'pro_plan_price',operator:'<=',value:59,label:'Pro plan price',unit:'GBP per month',provenance:'explicit'};
@@ -1055,7 +1087,7 @@ const riskCase = (o: {verdict?: unknown; claim?: unknown; risks?: unknown; graph
  const state={...(c.final.analysisState as Record<string, unknown>),leader_claim:claim};
  const graph=o.graph??PAUL_GRAPH;
  const {captured,final}=graph===PAUL_GRAPH?{captured:statelessCapture(c.captured),final:{...c.final,graph}}:rebind(c,graph);
- return runTurnCoaching(captured,{...final,analysisState:state,
+ return runTurnNextMove(captured,{...final,analysisState:state,
   constraintVerdictState:('verdict' in o?o.verdict:'evaluated_feasible') as RunTurnCoachingFinal['constraintVerdictState'],leaderLimitRisks:'risks' in o?o.risks:[CHURN_RISK]});
 };
 const riskCards = (out: {blocks: readonly {signal_id: string}[]}) => out.blocks.filter((b)=>b.signal_id.startsWith(RISK_CARD)) as any[];
@@ -1093,9 +1125,9 @@ test('LEADER LIMIT RISK — only on evaluated_feasible, a PERMITTED leader and a
  }
  // The threshold is the predicate's, never re-applied here: whatever the ONE predicate returned is the evidence.
  assert.equal(riskCards(riskCase({risks:[{...CHURN_RISK,probability:0.49}]})).length,1);
- // A limit-withheld claim keeps the LIMIT card (the leader is not named, so there is no leader to warn about).
+ // A limit-withheld claim is the limit CAVEAT (C4; the leader is not named, so there is no leader to warn about).
  const withheld=riskCase({claim:{permitted:false,withheld_reason:'constraint_verdict_withheld'}});
- assert.ok(runTurnCards(withheld.blocks as any)[0]!.signal_id.startsWith(LIMIT_CARD));
+ assert.ok(limitCards(withheld)[0]!.signal_id.startsWith(LIMIT_CARD));
  assert.equal(riskCards(withheld).length,0);
 });
 test('LEADER LIMIT RISK — limits are named only by identity on the run\'s own graph; otherwise the card speaks without a name',()=>{
@@ -1128,6 +1160,7 @@ test('sayLevel — EVERY key of the canonical currency map: an all-letter key fo
 test('ESTIMATED LIMIT — the level is said by the ONE shared formatter (bound-graph sayLevel): a currency estimate reads "£5,000"',()=>{
  const x=structuredClone(PAUL_GRAPH) as Record<string, any>;
  Object.assign(x.nodes.find((n: any)=>n.id==='monthly_churn').observed_state,{raw_value:5000,unit:'£'});
+ x.goal_constraints[0].unit='£';
  const est=estCards(estCase('evaluated_feasible',undefined,x)) as any[];
  assert.equal(est.length,1);
  assert.match(est[0].body,/Olumi's estimate that it is about £5,000 today/);
