@@ -13,6 +13,7 @@ import type { CandidateModel } from '../admit-model.js';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
+import { deriveInferredValues } from '../../coaching/inferred-value-disclosure.js';
 
 const SCENARIO = '66666666-6666-4666-8666-666666666666';
 const UNSTATED = 'Should I hire a Tech lead or two developers to increase velocity?';
@@ -55,7 +56,7 @@ describe('a baseline is the user\'s only when the brief states it', () => {
   it('RED: an unstated 0 on a factor the brief names is kept, and is not the user\'s', async () => {
     const os = await registeredBaselines(UNSTATED, { 'Tech leads hired': 0 });
     expect(figureOf(os['Tech leads hired']!)).toBe(0);
-    expect(os['Tech leads hired']!.source).toBeUndefined();
+    expect(os['Tech leads hired']!.source).toBe('cee_inference');
   });
 
   it('CONTROL: a 0 the brief states, in digits or as "zero", stays the user\'s', async () => {
@@ -70,19 +71,29 @@ describe('a baseline is the user\'s only when the brief states it', () => {
     expect(stated['Developers hired']!.source).toBe('brief_extraction');
     const unstated = await registeredBaselines(UNSTATED, { 'Developers hired': 3 });
     expect(figureOf(unstated['Developers hired']!)).toBe(3);
-    expect(unstated['Developers hired']!.source).toBeUndefined();
+    expect(unstated['Developers hired']!.source).toBe('cee_inference');
   });
 
-  it('SERVED eng-hiring: the three unstated zeros lose the stamp; the inferred factor is untouched', () => {
+  it('SERVED eng-hiring: the three unstated zeros become Olumi\'s; the inferred factor is untouched', () => {
     const f = fixture('served-enghiring-unstated-zero-baselines.json') as { brief: string; nodes: { id: string; kind: string; observed_state?: Record<string, unknown> }[] };
     const out = withdrawUnstatedBaselineStamps(f.nodes, f.brief);
     const byId = Object.fromEntries(out.map((n) => [n.id, n.observed_state ?? {}]));
     for (const id of ['senior_engineers_hired', 'junior_engineers_hired', 'annual_salary_spend']) {
-      expect(byId[id]!.source, id).toBeUndefined();
+      expect(byId[id]!.source, id).toBe('cee_inference');
       expect(byId[id]!.raw_value, id).toBe(0);
       expect(byId[id]!.cap, id).toBe(f.nodes.find((n) => n.id === id)!.observed_state!.cap);
     }
     expect(out.find((n) => n.id === 'added_delivery_capacity')).toBe(f.nodes.find((n) => n.id === 'added_delivery_capacity'));
+  });
+
+  // #2073 review F1 (AIQ 5851906910): source-less, a withdrawn baseline was NOBODY's. "I supplied N values" skipped it,
+  // the canvas could say "no source", and the level-limit carry (`levelHasAnAuthor`) refused it. It is Olumi's.
+  it('SERVED eng-hiring: every withdrawn baseline is disclosed as Olumi\'s (the one author the disclosure reads)', () => {
+    const f = fixture('served-enghiring-unstated-zero-baselines.json') as { brief: string; nodes: { id: string; kind: string; observed_state?: Record<string, unknown> }[] };
+    const withdrawn = ['senior_engineers_hired', 'junior_engineers_hired', 'annual_salary_spend'];
+    const disclosed = deriveInferredValues({ nodes: withdrawUnstatedBaselineStamps(f.nodes, f.brief) }).map((r) => r.factor_id);
+    for (const id of withdrawn) expect(disclosed, id).toContain(id);
+    expect(deriveInferredValues({ nodes: f.nodes }).map((r) => r.factor_id).filter((id) => withdrawn.includes(id))).toEqual([]);
   });
 
   it('SERVED stated 0: "0 channel partners" and "three account executives" stay the user\'s; every node is returned unchanged', () => {
