@@ -23,6 +23,7 @@ import { composeProposalReply } from '../proposal-reply.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { breakEvenFor, breakEvenLine } from '../break-even.js';
 
 type Node = Record<string, unknown> & { id: string };
 type Served = { message: string; graph: { nodes: Node[]; goal_constraints?: Array<Record<string, unknown>> } & Record<string, unknown> };
@@ -132,5 +133,33 @@ describe('⭐ a consent subject says a figure as the user writes it', () => {
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true }));
     expect(String(r.public_label)).toMatch(/Advertising spend: £[\d,]+ over 6 months → £15,000 over 6 months/);
     expect(String(r.public_label)).not.toMatch(RAW);
+  });
+});
+
+/**
+ * A COUNT WITH A FRACTIONAL STORED VALUE (DL #72 5866480722; MG 5866456413, served run 3 on `63e060e`): after #2214 the
+ * re-derived subscriber estimate is the exact quotient 72,000 / 49 = 1,469.388…, and the arithmetic said "1,469.388 Pro
+ * paying subscribers" and "a loss of at most 248.388". A count is said as a whole number; the stored level is untouched.
+ */
+describe('⭐ a count is said as a whole number, whatever the stored quotient', () => {
+  const F8 = JSON.parse(readFileSync(new URL('./fixtures/served-f8-run-graph-d6b09c0.json', import.meta.url), 'utf8')) as { nodes: unknown[]; edges: unknown[] };
+  const served = breakEvenFor(F8)!;
+
+  it('RED (served run 3 shape): "about 1,469" and "about 248", never 1,469.388 or 248.388', () => {
+    const v0 = 72_000 / 49;
+    const keep = Math.ceil(72_000 / 59 - 1e-9);
+    const be = { ...served, baseline_volume: v0, baseline_volume_by: 'olumi' as const, baseline_goal: 72_000,
+      options: [{ option: 'Raise Pro to £59', option_id: 'raise_pro_to_59', price: 59, price_by: 'user' as const, keep_at_least: keep }] };
+    const { target: _t, ...noTarget } = be;
+    const said = breakEvenLine(noTarget);
+    expect(said).toContain('at £49/month and about 1,469 Pro paying subscribers (Olumi’s estimate), MRR is £72,000/month today.');
+    expect(said).toContain('At £59/month, MRR stays at least that while 1,221 or more of about 1,469 stay (a loss of at most about 248).');
+    expect(said).not.toMatch(/\d\.\d{3}/);
+  });
+
+  it('CONTROL (served F8, whole counts): said exactly as before', () => {
+    const said = breakEvenLine(served);
+    expect(said).toContain('at £49/month and 300 Pro paying subscribers (an assumption you approved), MRR is £14,700/month today.');
+    expect(said).toContain('At £59/month, MRR stays at least that while 250 or more of the 300 stay (a loss of at most 50).');
   });
 });
