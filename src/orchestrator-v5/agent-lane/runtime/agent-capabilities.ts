@@ -5305,7 +5305,11 @@ export function createAgentCapabilities(
       }
       // ⭐ A2 follow-up (DL verdict on #2180): the comparator the user STATED in this message, typed, when they stated one.
       // It must be in the limit's own direction (the held `operator` names the row); absent, the limit keeps its own.
-      const statedArg: unknown = args?.stated_operator;
+      // ⛔ ONLY WHEN THE USER'S OWN WORDS SAY ONE (served 593362a, journey C run 3): for "we have £30,000 to spend" the
+      // model sent ">=" against the at-most budget, and the change was refused twice — two turns for a figure given plainly.
+      // With no comparator in THIS turn's typed words (`comparatorTheUserWrote`, the goal-target writer's own reader), the
+      // model's is not the user's: the limit keeps its own. One the user wrote against the limit's direction still refuses.
+      const statedArg: unknown = comparatorTheUserWrote(ctx.user_turn_text) === null ? undefined : args?.stated_operator;
       const stated = statedArg === '<' || statedArg === '<=' || statedArg === '>' || statedArg === '>=' ? statedArg : undefined;
       if (statedArg !== undefined && statedArg !== null
         && (stated === undefined || (stated === '<' || stated === '<=' ? '<=' : '>=') !== operator)) {
