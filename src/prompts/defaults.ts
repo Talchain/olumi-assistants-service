@@ -228,6 +228,9 @@ Only these edge types are valid (closed-world assumption):
 | factor   | risk     | Factor influences this risk          | No          |
 | outcome  | goal     | Outcome contributes to goal (+)      | No          |
 | risk     | goal     | Risk detracts from goal (-)          | No          |
+| outcome  | outcome  | Outcome drives another outcome       | No          |
+| outcome  | risk     | Outcome raises or lowers a risk      | No          |
+| risk     | outcome  | Risk's impact on an outcome          | No          |
 
 Constraint: factor→factor edges are allowed only when the TARGET factor is uncontrollable (no incoming option edges).
 
@@ -247,9 +250,6 @@ These edge types are NEVER valid:
 - option → goal (options work through factors)
 - factor → goal (factors must flow through outcomes/risks)
 - factor → controllable factor (controllable factors only receive option edges)
-- outcome → outcome (no outcome chains)
-- outcome → risk (no outcome→risk)
-- risk → outcome (no risk→outcome)
 - risk → risk (no risk chains)
 - goal → anything (goal is terminal)
 
@@ -1796,12 +1796,13 @@ ALLOWED EDGE PATTERNS:
 - factor→factor (causal, only to observable targets, clear mediating mechanism)
 - factor→outcome, factor→risk (causal influence)
 - outcome→goal, risk→goal (bridge edges)
+- outcome→outcome, outcome→risk, risk→outcome (causal: mediation, and a risk's impact)
 - factor→factor (bidirected: unmeasured confounder, sentinel params only)
 
 ALL OTHER PATTERNS ARE FORBIDDEN. Common mistakes:
 - option→outcome (insert mediating factor)
 - factor→goal (insert outcome/risk between)
-- outcome→outcome, risk→risk (not allowed)
+- risk→risk (not allowed)
 - goal→anything (goal is terminal)
 
 ACYCLICITY: No directed cycles. If an edit would create one, return

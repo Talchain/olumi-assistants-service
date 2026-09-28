@@ -312,7 +312,17 @@ export const ALLOWED_EDGES: AllowedEdgeRule[] = [
   { fromKind: "factor", toKind: "risk" },
   { fromKind: "outcome", toKind: "goal" },
   { fromKind: "risk", toKind: "goal" },
+  // R10 (AI Quality #72 5872082179; DL GO 5872437724): mediation and a risk's impact are LEGAL causal links.
+  // PLoT forwards them as drawn (#397). THIS is the one grammar: repair.ts, v3-validator and the
+  // classifier suggestion are derived from it, and tests/unit/r10-one-edge-kind-table.test.ts locks the parity.
   { fromKind: "risk", toKind: "outcome" },
+  { fromKind: "outcome", toKind: "outcome" },
+  { fromKind: "outcome", toKind: "risk" },
+];
+
+/** The table's distinct kind pairs, for the copies that check kinds only (category rules stay in `validateGraph`). */
+export const ALLOWED_EDGE_KIND_PAIRS: ReadonlyArray<{ from: string; to: string }> = [
+  ...new Map(ALLOWED_EDGES.map((r) => [`${r.fromKind}→${r.toKind}`, { from: r.fromKind, to: r.toKind }])).values(),
 ];
 
 /**

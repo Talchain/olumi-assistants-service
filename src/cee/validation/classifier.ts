@@ -1,5 +1,6 @@
 import type { components } from "../../generated/openapi.d.ts";
 import { log } from "../../utils/telemetry.js";
+import { ALLOWED_EDGE_KIND_PAIRS } from "../../validators/graph-validator.types.js";
 
 // Shared CEE types from OpenAPI
 export type CEEValidationIssue = components["schemas"]["CEEValidationIssue"];
@@ -228,7 +229,8 @@ const SUGGESTION_MAP: Record<string, string> = {
   INVALID_OPTION_ID: "Use option IDs with only lowercase letters, numbers, underscores, colons, and hyphens",
   OPTION_NOT_READY: "Complete the option configuration or set status to 'needs_user_mapping'",
   INVALID_INTERVENTION_TARGET: "Ensure intervention targets an existing factor node",
-  INVALID_EDGE_TYPE: "Use only allowed edge patterns: decision→option, option→factor, factor→outcome/risk/factor, outcome/risk→goal",
+  // R10: derived from the ONE typed table, so the advice cannot disagree with the check.
+  INVALID_EDGE_TYPE: `Use only allowed edge patterns: ${ALLOWED_EDGE_KIND_PAIRS.map((p) => `${p.from}→${p.to}`).join(", ")}`,
   INVALID_FACTOR_TO_CONTROLLABLE: "Controllable factors should only be set by interventions, not influenced by other factors",
   STRENGTH_OUT_OF_RANGE: "Clamp value to [-1, +1] range",
 

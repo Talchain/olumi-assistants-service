@@ -4,7 +4,7 @@
  * A single graph containing ALL of these violations simultaneously:
  * 1. A cycle (factor A → factor B → factor A)
  * 2. A fuzzy intervention ref ("fac_churn" when node is "fac_churn_rate")
- * 3. A forbidden edge (outcome→outcome)
+ * 3. A forbidden edge (risk→risk; outcome→outcome is legal since R10)
  * 4. A missing controllable baseline (factor with no data.value)
  * 5. A structural edge with exists_probability: 0.33
  *
@@ -100,7 +100,8 @@ function makeMinimalStageContext(graph: GraphT): StageContext {
  *
  * 1. Cycle: fac_retention → fac_satisfaction → fac_retention
  * 2. Fuzzy intervention ref: option has intervention key "fac_churn" but node is "fac_churn_rate"
- * 3. Forbidden edge: out_revenue → out_growth (outcome→outcome)
+ * 3. Forbidden edge: risk_competitor → risk_price_war (risk→risk). R10 (AI Quality #72 5872082179): the
+ *    out_revenue → out_growth mediation link (outcome→outcome) is LEGAL and must survive the sweep.
  * 4. Missing controllable baseline: fac_price has no data.value
  * 5. Structural edge: dec_pricing → opt_raise has exists_probability: 0.33
  */
@@ -127,6 +128,8 @@ function buildMixedViolationGraph(): GraphT {
       { id: "out_revenue", kind: "outcome", label: "Revenue" },
       { id: "out_growth", kind: "outcome", label: "Growth" },
       { id: "goal_mrr", kind: "goal", label: "Achieve MRR Target" },
+      { id: "risk_competitor", kind: "risk", label: "Competitor Entry" },
+      { id: "risk_price_war", kind: "risk", label: "Price War" },
     ],
     edges: [
       // VIOLATION 5: structural decision→option edge with exists_probability: 0.33
@@ -144,8 +147,12 @@ function buildMixedViolationGraph(): GraphT {
       { from: "fac_satisfaction", to: "fac_retention", strength_mean: 0.3, strength_std: 0.1, belief_exists: 0.4, effect_direction: "positive" },
       // Connect cycle participants to goal path
       { from: "fac_retention", to: "out_revenue", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.8, effect_direction: "positive" },
-      // VIOLATION 3: forbidden outcome→outcome edge
+      // R10: a legal outcome→outcome mediation link (kept)
       { from: "out_revenue", to: "out_growth", strength_mean: 0.7, strength_std: 0.1, belief_exists: 0.9, effect_direction: "positive" },
+      // VIOLATION 3: forbidden risk→risk edge
+      { from: "fac_price", to: "risk_competitor", strength_mean: 0.3, strength_std: 0.1, belief_exists: 0.7, effect_direction: "positive" },
+      { from: "risk_competitor", to: "risk_price_war", strength_mean: 0.6, strength_std: 0.1, belief_exists: 0.8, effect_direction: "positive" },
+      { from: "risk_price_war", to: "goal_mrr", strength_mean: -0.4, strength_std: 0.1, belief_exists: 0.8, effect_direction: "negative" },
       { from: "out_growth", to: "goal_mrr", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.8, effect_direction: "positive" },
     ],
     meta: { roots: [], leaves: [], suggested_positions: {}, source: "test" as const },
@@ -198,16 +205,10 @@ describe("Mixed-fixture deterministic sweep regression", () => {
     expect(optRaise.data.interventions).toHaveProperty("fac_churn_rate");
     expect(optRaise.data.interventions).not.toHaveProperty("fac_churn");
 
-    // 3. Forbidden outcome→outcome edge removed
+    // 3. Forbidden risk→risk edge removed; the legal outcome→outcome link (R10) is kept
     expect(repairCodes).toContain("FORBIDDEN_EDGE_AUTO_FIXED");
-    const hasOutcomeToOutcome = graph.edges.some(
-      (e) => {
-        const fromKind = graph.nodes.find((n) => n.id === e.from)?.kind;
-        const toKind = graph.nodes.find((n) => n.id === e.to)?.kind;
-        return fromKind === "outcome" && toKind === "outcome";
-      },
-    );
-    expect(hasOutcomeToOutcome).toBe(false);
+    expect(graph.edges.some((e) => e.from === "risk_competitor" && e.to === "risk_price_war")).toBe(false);
+    expect(graph.edges.some((e) => e.from === "out_revenue" && e.to === "out_growth")).toBe(true);
 
     // 4. Missing controllable baseline defaulted to 0.5
     expect(repairCodes).toContain("CONTROLLABLE_MISSING_DATA");
