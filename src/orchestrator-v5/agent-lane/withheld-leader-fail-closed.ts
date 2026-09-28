@@ -100,6 +100,7 @@ import {
 import { splitIntoRedactableUnits } from '../compose/redactable-units.js';
 import { WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL } from '../compose/withheld-explanation-answer.js';
 import { claimPermissionsFrom } from './first-analysis.js';
+import type { StoredLimitVerdicts } from '../../orchestrator/context/constraint-feasibility.js';
 
 /** The blanking token — the shared enforcer's own choice: not a word character, not whitespace. */
 const BLANK = '#';
@@ -998,6 +999,36 @@ const BY_CONSTRAINT_CODE: Readonly<Record<string, string>> = {
     'because on this run the model\u2019s figures put the figure your limit is on at levels it cannot actually take, so your limit could not be tested; that is about the model\u2019s figures, not your limit, and running the analysis again as it stands will not change that, so ask me which of the model\u2019s figures cause it',
 };
 
+/**
+ * ⭐ EVERY LIMIT WAS CHECKED, ON OLUMI'S ESTIMATES (served 651a7fd, journey C run 1): the run's per-limit rows
+ * (`limit_verdicts`, the fact the run result's `limit_checks` reads) say each limit WAS checked, only against Olumi's
+ * figures. The default "ask me what the limit needs before it can be checked" contradicted the reply's own "were checked",
+ * and a rerun cannot change the verdict; a real figure from the user can (`set_factor_value`). Only when EVERY row is
+ * `estimate_only` on `level_olumi_estimate`: an `unscored` limit really does need something first, and a figure the user
+ * accepted as an assumption is not Olumi's.
+ */
+const estimateOnlyClauseFor = (count: number): string =>
+  `because your ${count === 1 ? 'limit was' : 'limits were'} checked only against Olumi’s estimates, not figures you gave, and running the analysis again as it stands will not change that; give me a real figure you know`;
+
+function estimateOnlyClause(limitVerdicts: StoredLimitVerdicts | undefined): string | undefined {
+  const rows = limitVerdicts?.per_limit ?? [];
+  if (rows.length === 0 || !rows.every((r) => r.state === 'estimate_only' && r.reason === 'level_olumi_estimate')) return undefined;
+  return estimateOnlyClauseFor(rows.length);
+}
+
+/**
+ * A run state that says, by TYPE, that no result exists (`composeRunState`). `never_run` still carries
+ * `leader_claim.withheld_reason: constraint_verdict_withheld` by default (`composeLeaderClaim`), so a reason keyed on the
+ * claim said a limit "was not shown to be met on this run" about a Run PLoT refused (served 651a7fd, journey C run 2).
+ * Absent and `unknown_degraded` are not listed: they do not prove there is no result.
+ */
+const NO_RESULT_RUN_KINDS: ReadonlySet<string> = new Set(['never_run', 'refused', 'blocked', 'running']);
+
+function runStateSaysNoResult(analysisState: unknown): boolean {
+  const kind = (analysisState as { run_state?: { kind?: unknown } } | null | undefined)?.run_state?.kind;
+  return typeof kind === 'string' && NO_RESULT_RUN_KINDS.has(kind);
+}
+
 /** The typed warning codes the run's own `analysis_result` block carries (`decision_brief.warnings[].code`). */
 export function limitCauseCodesOf(blocks: unknown): readonly string[] {
   if (!Array.isArray(blocks)) return [];
@@ -1027,7 +1058,8 @@ const sentence = (clause: string): string => `${NO_LEADER_OPENING}, ${clause}.`;
 
 /** Every sentence this module can append — the build-time probe and the idempotence check read this. */
 export const AGENT_NO_LEADER_SENTENCES: readonly string[] = [
-  ...new Set([...Object.values(BY_WITHHELD_REASON), ...Object.values(BY_CONSTRAINT_CODE), ...Object.values(BY_ADMISSION_REASON), REASON_NOT_RECORDED].map(sentence)),
+  ...new Set([...Object.values(BY_WITHHELD_REASON), ...Object.values(BY_CONSTRAINT_CODE), ...Object.values(BY_ADMISSION_REASON),
+    estimateOnlyClauseFor(1), estimateOnlyClauseFor(2), REASON_NOT_RECORDED].map(sentence)),
 ];
 
 /**
@@ -1066,6 +1098,14 @@ function admissionModeReasonCode(analysisReady: unknown): string | undefined {
   return typeof r?.code === 'string' ? r.code : undefined;
 }
 
+/** The admission's own clause, when the admission refused the comparison; `undefined` otherwise. */
+function admissionClause(analysisReady: unknown): string | undefined {
+  const mode = permittedAnalysisModeFromAnalysisReady(analysisReady);
+  if (mode === null || mode === 'comparative_leader') return undefined;
+  const code = admissionModeReasonCode(analysisReady);
+  return code !== undefined ? BY_ADMISSION_REASON[code] : undefined;
+}
+
 /**
  * The ONE sentence appended when something was dropped: the ADMISSION's reason first when the
  * admission refused the comparison, then the typed claim reason, then "not recorded".
@@ -1075,20 +1115,23 @@ function admissionModeReasonCode(analysisReady: unknown): string | undefined {
  * automatic first run's "every estimate is Olumi's" — so reading the token first told a user with no
  * limits in their brief that "a limit on your model was not shown to be met".
  */
-export function agentNoLeaderSentence(withheldReason: string | undefined, analysisReady: unknown, limitCauseCodes: readonly string[] = []): string {
-  return sentence(agentNoLeaderClause(withheldReason, analysisReady, limitCauseCodes));
+export function agentNoLeaderSentence(
+  withheldReason: string | undefined, analysisReady: unknown, limitCauseCodes: readonly string[] = [], limitVerdicts?: StoredLimitVerdicts,
+): string {
+  return sentence(agentNoLeaderClause(withheldReason, analysisReady, limitCauseCodes, limitVerdicts));
 }
 
 /** The clause `agentNoLeaderSentence` closes on — the why and its one next action — chosen by the SAME rule. */
-function agentNoLeaderClause(withheldReason: string | undefined, analysisReady: unknown, limitCauseCodes: readonly string[] = []): string {
-  const mode = permittedAnalysisModeFromAnalysisReady(analysisReady);
-  if (mode !== null && mode !== 'comparative_leader') {
-    const code = admissionModeReasonCode(analysisReady);
-    if (code !== undefined && BY_ADMISSION_REASON[code] !== undefined) return BY_ADMISSION_REASON[code]!;
-  }
+function agentNoLeaderClause(
+  withheldReason: string | undefined, analysisReady: unknown, limitCauseCodes: readonly string[] = [], limitVerdicts?: StoredLimitVerdicts,
+): string {
+  const admission = admissionClause(analysisReady);
+  if (admission !== undefined) return admission;
   if (withheldReason === WITHHELD_CONSTRAINT_VERDICT) {
     const cause = limitCauseCodes.find((c) => BY_CONSTRAINT_CODE[c] !== undefined);
     if (cause !== undefined) return BY_CONSTRAINT_CODE[cause]!;
+    const estimateOnly = estimateOnlyClause(limitVerdicts);
+    if (estimateOnly !== undefined) return estimateOnly;
   }
   if (withheldReason !== undefined && BY_WITHHELD_REASON[withheldReason] !== undefined) return BY_WITHHELD_REASON[withheldReason]!;
   return REASON_NOT_RECORDED;
@@ -1098,8 +1141,10 @@ function agentNoLeaderClause(withheldReason: string | undefined, analysisReady: 
  * ⭐ C5: the WHY alone — the same clause, up to its next action (every clause puts its ask after a `;`). The Agent's
  * provisional view says why the analysis cannot confirm it in these words, so the two can never give different causes.
  */
-export function agentNoLeaderReason(withheldReason: string | undefined, analysisReady: unknown, limitCauseCodes: readonly string[] = []): string {
-  return agentNoLeaderClause(withheldReason, analysisReady, limitCauseCodes).split(';')[0]!.trim();
+export function agentNoLeaderReason(
+  withheldReason: string | undefined, analysisReady: unknown, limitCauseCodes: readonly string[] = [], limitVerdicts?: StoredLimitVerdicts,
+): string {
+  return agentNoLeaderClause(withheldReason, analysisReady, limitCauseCodes, limitVerdicts).split(';')[0]!.trim();
 }
 
 // ── the projection ─────────────────────────────────────────────────────────────────────────────
@@ -1467,6 +1512,8 @@ export function enforceAgentLaneLeaderClaimsAtWire(
      * A reply the drop would leave EMPTY still gets it — never a silent turn. Omitted ⇒ `true` (every other caller).
      */
     readonly sayWhyWithheld?: boolean;
+    /** The run's per-limit rows from the SAME readback (`readBackState`'s `limitVerdicts`); absent = not attested. */
+    readonly limitVerdicts?: StoredLimitVerdicts;
   },
 ): WireLeaderClaimEnforcementResult {
   let next = response;
@@ -1479,10 +1526,19 @@ export function enforceAgentLaneLeaderClaimsAtWire(
         droppedSentences = projected.droppedSentences;
         const withheldReason = claimPermissionsFrom((response as { analysis_state?: unknown }).analysis_state, opts.analysisReady).withheld_reason
           ?? opts.leaderClaimWithheldReason;
-        const closing = agentNoLeaderSentence(withheldReason, opts.analysisReady, limitCauseCodesOf((response as { blocks?: unknown }).blocks));
+        /**
+         * ⛔ NO "ON THIS RUN" WHEN NOTHING RAN (served 651a7fd, journey C run 2): on a run state that proves there is no
+         * result, only the admission's reason (a fact about the model) may be appended. A reason read off the claim
+         * speaks about a run, so the ranking is dropped and nothing is added, as on the build turn (AX2). A reply the
+         * drop would leave empty gets the one sentence that claims no run.
+         */
+        const noResult = runStateSaysNoResult((response as { analysis_state?: unknown }).analysis_state) && admissionClause(opts.analysisReady) === undefined;
+        const closing = noResult
+          ? sentence(REASON_NOT_RECORDED)
+          : agentNoLeaderSentence(withheldReason, opts.analysisReady, limitCauseCodesOf((response as { blocks?: unknown }).blocks), opts.limitVerdicts);
         const body = projected.text.trimEnd();
         const alreadySaid = closing === PRODUCT_IDENTITY_SENTENCE && replyAlreadySaysProductReason(body, opts.graph);
-        next = { ...response, assistant_text: body.length === 0 ? closing : opts.sayWhyWithheld === false || alreadySaid ? body : `${body}\n\n${closing}` } as OlumiResponse;
+        next = { ...response, assistant_text: body.length === 0 ? closing : opts.sayWhyWithheld === false || noResult || alreadySaid ? body : `${body}\n\n${closing}` } as OlumiResponse;
         log.info(
           {
             event: 'agent_lane.withheld_leader_ranking_dropped',
@@ -1490,6 +1546,7 @@ export function enforceAgentLaneLeaderClaimsAtWire(
             exit_path: opts.exitPath,
             dropped_sentences: droppedSentences,
             withheld_reason: withheldReason ?? null,
+            no_result_run: noResult,
             // Lengths only, never the prose: this is the user's own decision content.
             original_length: text.length,
             projected_length: next.assistant_text.length,

@@ -2483,6 +2483,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // Nor was a research answer (served `5668902`: a public source's ranking was dropped, and the closing about the
         // user's model followed a reply about public evidence).
         sayWhyWithheld: fastPath !== 'research' && !(fa !== undefined && fastPath !== 'run' && !result.tool_calls.some((c) => c.name === 'run_analysis')),
+        // The run's per-limit rows from the SAME readback: an estimate-only limit is said to have been checked.
+        ...(limitVerdicts !== undefined ? { limitVerdicts } : {}),
       });
       if (enforced.changed) {
         leaderClaimEnforced = true;
@@ -2523,7 +2525,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // The Agent's own words pass the user-facing scrub first (`sanitiseProvisionalView`); a code left refuses the view.
     const givenView = rawView === null ? null : sanitiseProvisionalView(rawView, parsedGraphOrNull(readbackGraph));
     if (rawView !== null && givenView === null) log.warn({ scenario_id: scenarioId }, 'agent-lane: a provisional view carried an internal code after the scrub — it is not shown');
-    const standing = givenView === null ? null : leaderStandingOf({ analysisState, analysisReady, analysisResult });
+    const standing = givenView === null ? null : leaderStandingOf({ analysisState, analysisReady, analysisResult, limitVerdicts });
     // Typed only (never appended to `assistant_text`): see `provisionalViewSidecar`.
     const provisionalView = givenView !== null && standing !== null && standing.analysis_on_record && standing.withheld
       ? provisionalViewSidecar(givenView, standing.because)
