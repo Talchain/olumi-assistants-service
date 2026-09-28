@@ -158,7 +158,6 @@ describe('R8 — a 1 in a unit that names the switch\'s STATE is on; a 1 in a qu
     ["{ 1, 'enabled users' } (a state word beside a count)", { value: 1, unit: 'enabled users' }, ['unit']],
     ["{ 1, 'customers' } (a count the unit classifier does not list)", { value: 1, unit: 'customers' }, ['unit']],
     ["{ 1, 'per month' } (a rate)", { value: 1, unit: 'per month' }, ['unit']],
-    ["{ 1, '0/1' } (digits: fails closed)", { value: 1, unit: '0/1' }, ['unit']],
     ["{ 2, 'binary' } (not one)", { value: 2, unit: 'binary' }, ['unit', 'not_one']],
     ["{ 0.5, 'enabled' } (a partial state)", { value: 0.5, unit: 'enabled' }, ['unit', 'not_one']],
   ])('R8 CONTRAST: a new switch at %s → refused as before, nothing sent', async (_name, level, fields) => {
@@ -204,6 +203,47 @@ describe('R10 — a unit that spells its own states ("0=no, 1=yes") names the sw
     ['{ 1, "1 hire (0=no, 1=yes)" } (a figure outside the glossary)', { value: 1, unit: '1 hire (0=no, 1=yes)' }, ['unit']],
     ['{ 2, "binary (0=no, 1=yes)" } (not one)', { value: 2, unit: 'binary (0=no, 1=yes)' }, ['unit', 'not_one']],
   ])('R10 CONTRAST: a new switch at %s → refused as before, nothing sent', async (_name, level, fields) => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx as never, withLevel(level) as never) as Result;
+    expect(r.refusal, JSON.stringify(r)).toBe('switch_level_not_on');
+    expect(r.conflict_fields).toEqual(fields);
+    expect(sent).toEqual([]);
+  });
+});
+
+// ⭐ SWITCH-LOOP STEP 6 (OpenAI Runtime #72 5867407187; served g2224 run 2 A07–A08 on 9096610, OpenAI): the model named
+// the switch's two states as a PAIR inside the unit — `{1, unit: "enabled (0/1)", estimate: true}` — and the digit test
+// read the pair's own 0 and 1 as an amount: refused ×8 (`["unit","estimate"]`, 30.6 s). A 0 and a 1 standing together,
+// joined by "/", "-", "|", "..", "or" or "to" (either order), are the switch's states; every other digit still refuses.
+describe('R11 — a unit that names its two states as a pair ("0/1") names the switch; its 1 is on', () => {
+  it.each([
+    ['{ 1, "enabled (0/1)", estimate: true } (served Runtime g2224 run 2 A07, ×8)', { value: 1, unit: 'enabled (0/1)', estimate: true }],
+    ['{ 1, "binary 0-1" }', { value: 1, unit: 'binary 0-1' }],
+    ['{ 1, "flag (0 or 1)" }', { value: 1, unit: 'flag (0 or 1)' }],
+    ['{ 1, "on/off (1/0)" }', { value: 1, unit: 'on/off (1/0)' }],
+    ['{ 1, "boolean (0|1)" }', { value: 1, unit: 'boolean (0|1)' }],
+    ['{ 1, "enabled, 0 to 1" }', { value: 1, unit: 'enabled, 0 to 1' }],
+    ['{ true, "enabled (0/1)" }', { value: true, unit: 'enabled (0/1)' }],
+    // Moved from R8's contrasts ("digits: fails closed"): a bare "0/1" is the same state pair as "enabled (0/1)".
+    ["{ 1, '0/1' } (the pair alone)", { value: 1, unit: '0/1' }],
+  ])('R11 RED: a new switch at %s → accepted in ONE call; the option turns it on at 1 with no source', async (_name, level) => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx as never, withLevel(level) as never) as Result;
+    expect(r.refusal, JSON.stringify(r)).not.toBe('switch_level_not_on');
+    expect(sent).toHaveLength(1);
+    expect(switchLevelSent(sent), JSON.stringify(r)).toEqual([{ factor_key: SWITCH_KEY, value: 1 }]);
+  });
+
+  it.each([
+    ['{ 1, "hires (0/1)" } (a count beside its pair)', { value: 1, unit: 'hires (0/1)' }, ['unit']],
+    ['{ 1, "GBP (0/1)" } (a currency beside its pair)', { value: 1, unit: 'GBP (0/1)' }, ['unit']],
+    ['{ 1, "(0/1) per month" } (a rate beside its pair)', { value: 1, unit: '(0/1) per month' }, ['unit']],
+    ['{ 1, "0/12" } (a figure, not the pair)', { value: 1, unit: '0/12' }, ['unit']],
+    ['{ 1, "10/1" } (a figure, not the pair)', { value: 1, unit: '10/1' }, ['unit']],
+    ['{ 1, "enabled (0.5/1)" } (a partial state)', { value: 1, unit: 'enabled (0.5/1)' }, ['unit']],
+    ['{ 1, "enabled (0/2)" } (a code that is not 0 and 1)', { value: 1, unit: 'enabled (0/2)' }, ['unit']],
+    ['{ 2, "enabled (0/1)" } (not one)', { value: 2, unit: 'enabled (0/1)' }, ['unit', 'not_one']],
+  ])('R11 CONTRAST: a new switch at %s → refused as before, nothing sent', async (_name, level, fields) => {
     const { caps, sent } = setup();
     const r = await caps.proposeNewOption(ctx as never, withLevel(level) as never) as Result;
     expect(r.refusal, JSON.stringify(r)).toBe('switch_level_not_on');
