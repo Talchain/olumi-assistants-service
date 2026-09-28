@@ -3144,6 +3144,24 @@ export function createAgentCapabilities(
                   : `could not attach a range: http ${reg.status}`,
               });
               framedHere.length = 0;
+            } else {
+              /**
+               * ⛔ THE RANGE WRITE IS A COMMIT OF ITS OWN, SO ITS RECEIPT IS THIS APPROVAL'S TOO (writer audit
+               * 27 Sep, finding 8). It was never collected: a signed-in approval minted a version here and the
+               * result named only the levels' — or, when the levels did not land, none at all. The register
+               * route's `model_version` block (`assist.v1.scenario-graph-register.ts`), mapped to the same shape
+               * the levels receipt takes below. Absent for a guest (no version is written) and for the skipped
+               * write above: nothing is invented. The route reports no turn id for a write sent without an
+               * `operation_id`, so `source_turn_id` is the levels path's own "not reported" value.
+               */
+              const mv = reg.json.model_version as { version_number?: unknown; version_id?: unknown; mutation_id?: unknown } | undefined;
+              if (mv !== undefined && mv !== null && typeof mv.version_id === 'string' && mv.version_id !== ''
+                && typeof mv.version_number === 'number' && Number.isFinite(mv.version_number)) {
+                receipts.push({
+                  version: mv.version_number, version_id: mv.version_id,
+                  mutation_id: typeof mv.mutation_id === 'string' ? mv.mutation_id : '', source_turn_id: '',
+                });
+              }
             }
           }
         }
@@ -3299,6 +3317,31 @@ export function createAgentCapabilities(
           }
         }
         const landed = applied.filter((a) => a.recorded !== null);
+        if (landed.length === 0 && framedHere.length > 0) {
+          /**
+           * ⛔⛔ "LEFT THE MODEL UNCHANGED" WAS FALSE HERE (writer audit 27 Sep, finding 8). The range write above
+           * had already COMMITTED — the model moved, and a signed-in user got a version — before the levels were
+           * refused or found stale. So the approval DID change the model: say so, with the range write's receipt
+           * and the factors it framed, and the revision the model is now at. Not `applied` and never
+           * `markApplied`: the levels the user approved did not land. `partially_applied`, as `applyCompound`
+           * names a refusal after part of an approval landed — "not_applied" beside `mutated: true` would read
+           * "Partly saved: none of it was applied".
+           */
+          return {
+            ok: false, mutated: true, applied: false, refusal: 'partially_applied',
+            proposal_id: decision.proposal.proposal_id,
+            receipts,
+            detail:
+              'This approval attached a range where the analysis needed one, so the model did change: ' +
+              framedHere.map((f) => `${f.factor} 0 to ${f.range}`).join(', ') +
+              ' (taken from the figure itself, a unit of measurement, not a forecast). But none of the levels were ' +
+              'recorded. Read the model again before describing it: someone else may have changed it meanwhile.',
+            failures, interventions: applied,
+            ranges_added_for_analysis: framedHere,
+            revision_before: before.graph_hash,
+            revision_after: afterSet?.graph_hash ?? baseHash,
+          };
+        }
         if (landed.length === 0) {
           return {
             ok: false, mutated: false, applied: false, refusal: 'not_applied',
