@@ -14,7 +14,7 @@ import {
 } from '../../../format/influence-bands.js';
 import { edgeBandFromMagnitude } from '../../../format/edge-strength-bands.js';
 import type { PendingAction } from '../../../session/pending-action.js';
-import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../../../agent-lane/admit-constraint.js';
+import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../../../agent-lane/limit-operator-words.js';
 import {
   durationNotEvaluatedSentence,
   UNMEASURED_TARGET_CONSEQUENCE_AT_WRITE,
