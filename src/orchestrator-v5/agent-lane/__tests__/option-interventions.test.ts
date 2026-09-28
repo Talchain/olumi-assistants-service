@@ -124,7 +124,7 @@ describe('the value is read against the factor’s declared range', () => {
         recorded_on_model_scale: 54 / 200, model_range: 200, basis: 'the user said a staged rise to £54 first', stated_by: 'olumi_estimate' },
     ]);
     // The label the user sees quotes THEIR number, never the normalised one.
-    expect(String(r.public_label)).toMatch(/sets Pro plan price to 54 GBP\/month/);
+    expect(String(r.public_label)).toMatch(/sets Pro plan price to £54\/month/);
   });
 
   it('DERIVES a range for a valued factor that has none, and discloses it', async () => {
