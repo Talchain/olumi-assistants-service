@@ -100,6 +100,19 @@ describe('C4 on Paul 08bf9a1f (explicit Run): a definition is never the move —
     expect(r.caveats.map((c) => c.block.signal_id)).toEqual(f.served_card_signal_ids);
     expect(r.blocks.some((b) => b.signal_id.startsWith(LIMIT))).toBe(false);
   });
+  // ⛔ DL #2229 follow-up: the card read the DECLARED set, the writers refuse only an identity the Run kept IN USE.
+  const withRun = (extra: Rec): Rec => ({ ...f, analysis_result: { ...f.analysis_result, enrichment: { ...f.analysis_result.enrichment, ...extra } } });
+  it('RED: when the Run WITHDREW MRR\'s identity it used price → MRR\'s strength, so THAT link is the move (the writers take an edit to it)', () => {
+    const notForwarded = withRun({ _meta: { ...f.analysis_result.enrichment._meta,
+      identities_not_forwarded: [{ node_id: 'mrr', reason: 'inferred_identity_frame_unresolved', frameless_node_ids: ['pro_plan_price'] }] } });
+    expect(runTurnNextMove(...args(notForwarded)).nextMove).toMatchObject({ kind: 'link_view', capability: 'propose_link_strength', target_ids: ['pro_plan_price→mrr'] });
+    const notEvaluated = withRun({ identity_evaluations: [{ node_id: 'mrr', evaluated: false }] });
+    expect(runTurnNextMove(...args(notEvaluated)).nextMove?.target_ids).toEqual(['pro_plan_price→mrr']);
+  });
+  it('CONTROL: the Run EVALUATED MRR\'s identity → the definition is still never the move', () => {
+    const evaluated = withRun({ identity_evaluations: [{ node_id: 'mrr', evaluated: true }] });
+    expect(runTurnNextMove(...args(evaluated)).nextMove?.target_ids).toEqual(['pro_plan_price→price_sensitivity']);
+  });
   it('CONTRAST: when the model declares EVERY fragile link a definition → no card, and the reason says so', () => {
     const all = fragile();
     const everyEdgeInto = { ...f.draft_graph, nodes: f.draft_graph.nodes.map((n: Rec) => {

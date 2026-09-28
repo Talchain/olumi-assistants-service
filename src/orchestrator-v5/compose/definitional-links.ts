@@ -87,8 +87,16 @@ export function identityRunUseFromFacts(facts: readonly unknown[]): IdentityRunU
   // identity decisions, and must not re-refuse the edit.
   const selected = selectRunAnalysisFact(facts as readonly HandlerFact[]);
   if (selected === null) return null;
-  const run = rec(selected.fact);
-  const enrichment = rec(rec(run?.result)?.enrichment);
+  return identityRunUseOfResult(rec(selected.fact)?.result);
+}
+
+/**
+ * What ONE Run's result did with the declared identities: the fact reader above and the coaching card (which holds its
+ * own Run's result) read the same fields, so the card never offers a link the writers would refuse, or hides one they
+ * would take. Pure; a result with no enrichment withdrew nothing.
+ */
+export function identityRunUseOfResult(result: unknown): IdentityRunUse {
+  const enrichment = rec(rec(result)?.enrichment);
   const withdrawn = new Set<string>();
   const notForwarded = rec(enrichment?._meta)?.identities_not_forwarded;
   for (const row of Array.isArray(notForwarded) ? notForwarded : []) {
@@ -116,8 +124,18 @@ export function definitionalLinkInUse(graph: unknown, from: string, to: string, 
 
 /** Every definitional edge, keyed by the card's own edge identity (`composeEdgeIdentity`). No graph → empty. */
 export function definitionalLinks(graph: unknown): ReadonlySet<string> {
+  return definitionalLinksInUse(graph, null);
+}
+
+/**
+ * Every definitional edge the Run keeps IN USE — the set the writers refuse on (`definitionalLinkInUse`), keyed as
+ * `definitionalLinks`. An identity the Run withdrew leaves its links ordinary beliefs whose strength that Run used, so
+ * they are not in it (DL #2229 follow-up: the card read the declared set). No Run → every declared one.
+ */
+export function definitionalLinksInUse(graph: unknown, lastRun: IdentityRunUse | null): ReadonlySet<string> {
   const out = new Set<string>();
   for (const d of declaredIdentities(graph)) {
+    if (lastRun !== null && lastRun.withdrawn.has(d.carrier_id)) continue;
     for (const from of [...d.operand_ids, ...d.addend_ids]) out.add(composeEdgeIdentity(from, d.carrier_id));
   }
   return out;
