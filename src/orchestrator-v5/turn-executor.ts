@@ -3483,8 +3483,14 @@ export async function runTurnExecutor(
           contextGraphSelection.status === 'canonical'
             ? projectFactorValueRecord(contextGraphForReasoning)
             : undefined,
-        analysis: analysisSummary,
-        analysisStalenessReason,
+        // ⭐ Canonical ruling, 28 Sep (parity case B): when the durable scenario fact set is the authority, the pack's
+        // `analysis` is built from it — the SAME fact set and selected fact as `display_analysis`. The hot-window
+        // projection lost any Run older than the last 20 turns, so handlers were told "no analysis" while the model
+        // was shown one. Without that authority (degraded durable read, non-canonical graph) the hot window stays,
+        // exactly as the read route falls back to it.
+        analysis: analysisAuthority !== undefined ? promptAnalysisSummary : analysisSummary,
+        analysisStalenessReason:
+          analysisAuthority !== undefined ? promptAnalysisStalenessReason : analysisStalenessReason,
         displayAnalysisSource: promptAnalysisSummary,
         // One already-derived claim-safety verdict governs every model-facing
         // analysis channel. The assembler applies this before its single
@@ -3504,7 +3510,12 @@ export async function runTurnExecutor(
         // its comparative material and gains the qualification — it is not
         // pushed into `withheld`, which would apply #1254's rule to Paul's
         // population and delete the material the person asked about.
-        modelFacingClaimSafety: !mayNameLeadingOptionForRun
+        // ⭐ AND FRESHNESS (Canonical ruling, 28 Sep, parity case E): the pack must not name the leader of an
+        // OUT-OF-DATE run. Entitlement is read off the run's own verdict and ignores freshness, so on an edited model
+        // the pack named the leader while the read route and the turn payload withheld it as
+        // `analysis_out_of_date`. Read off the SAME durable derivation `display_analysis` is built from; the run's
+        // real verdict state is passed so the no-cause note is chosen, exactly as on the admission arm below.
+        modelFacingClaimSafety: !mayNameLeadingOptionForRun || promptAnalysisFreshness?.freshness === 'stale'
           ? {
               status: 'withheld',
               constraintVerdictState: constraintVerdictStateForRun,
