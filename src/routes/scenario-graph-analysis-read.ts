@@ -40,8 +40,9 @@
  *                       status so an unreadable store yields `unknown /
  *                       derivation_failed` rather than the positive claim
  *                       "this scenario has never been analysed".
- *   the verdict         `canonicalStateFromFreshness` + `composeAnalysisStateV1`
- *                       — the same pair the finaliser calls, so the five
+ *   the verdict         `selectCanonicalAnalysisState` + `composeAnalysisStateV1`
+ *                       — the fact-based canonical state a turn builds (with
+ *                       degraded-Run detection), so the five
  *                       usability predicates and the contradiction list cannot
  *                       disagree with a turn's.
  *   the result block    `buildAnalysisResultBlock` — the one builder, which
@@ -112,9 +113,10 @@ import {
 } from '../orchestrator-v5/compose/unrequested-analysis-confinement.js';
 // C46 stage 1: WHY a persisted fact's leader was withheld, when the reason is a product the analysis adds up.
 import { evaluatedIdentityNodeIds, nodesUnderANonlinearIdentity, nonlinearIdentityLeaderClaimCause } from '../orchestrator-v5/agent-lane/admit-model.js';
-import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
+import { selectCanonicalAnalysisState } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import {
+  readMayNameLeadingOptionFromResult,
   readConstraintVerdictStateFromResult,
   readLeaderLimitRisksFromResult,
   readLimitVerdictsFromResult,
@@ -124,7 +126,7 @@ import {
   type LeaderLimitRisk,
   type StoredLimitVerdicts,
 } from '../orchestrator/context/constraint-feasibility.js';
-import { deriveAnalysisFreshness, selectRunAnalysisFact } from '../orchestrator-v5/context/freshness.js';
+import { deriveAnalysisFreshness, selectClaimBearingRunAnalysisFact, selectRunAnalysisFact } from '../orchestrator-v5/context/freshness.js';
 import { isScenarioAnalysisReasoningAuthority } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import { log } from '../utils/telemetry.js';
@@ -309,6 +311,14 @@ export async function readScenarioAnalysis(
         ? (selected.fact as RunAnalysisHandlerFact)
         : null;
     const analysisResult = fact !== null ? buildAnalysisResultBlock(fact) : null;
+    // ⭐ #730's SHADOW CASE (Canonical, single-projection parity C2): a NEWER claim-bearing Run (partial or degraded —
+    // the refusal marker makes no claim, `selectClaimBearingRunAnalysisFact`) that withheld the leader is never
+    // overridden by the older success displayed here. The turn's entitlement reads that same claim; without this the
+    // reload named the leader a newer Run had withheld.
+    const claimBearing = selectClaimBearingRunAnalysisFact(facts);
+    const newerClaimWithholds = fact !== null && claimBearing !== null && claimBearing.fact !== fact
+      && claimBearing.fact.fact_type === 'run_analysis'
+      && !readMayNameLeadingOptionFromResult((claimBearing.fact as RunAnalysisHandlerFact).result);
 
     // ⭐ (B) THE ONE ADMISSION VERDICT — the SAME authority and the SAME
     // threading the turn replies use (`route-v2.ts` passes
@@ -335,10 +345,17 @@ export async function readScenarioAnalysis(
 
     const analysisState =
       composeAnalysisStateV1({
-        canonical: canonicalStateFromFreshness(
-          derivation,
-          analysisReady !== undefined ? { readiness: analysisReady } : {},
-        ),
+        // ⭐ THE FACT-BASED CANONICAL STATE (Canonical ruling, 28 Sep): the SAME function a turn uses, over the SAME
+        // fact set and read status `derivation` was built from, so degraded detection (a newer refused/failed Run →
+        // trust downgrade → `requires_rerun`) is not lost here. `canonicalStateFromFreshness` hard-codes
+        // `degradedStatus: null`, which made a reload say `requires_rerun: false` where the turn said `true`.
+        canonical: selectCanonicalAnalysisState({
+          priorFacts: facts,
+          currentGraphHash,
+          ...(analysisReady !== undefined ? { readiness: analysisReady } : {}),
+          priorFactsReadOk: factsReadOk,
+          analysisInvalidatedAt,
+        }),
         freshness: derivation,
         ...(analysisReady !== undefined ? { readiness: analysisReady } : {}),
         ...(historical === null ? {} : {
@@ -365,7 +382,7 @@ export async function readScenarioAnalysis(
         // grants the UI permission to name one. Same fact, same second, two
         // answers. The shared admission is the fix; copying the conjunction here
         // would have been the mirror.
-        mayNameLeadingOption: fact !== null ? mayPresentLeaderClaimForFact(fact) : false,
+        mayNameLeadingOption: fact !== null ? mayPresentLeaderClaimForFact(fact) && !newerClaimWithholds : false,
         // WHY it is withheld, when the fact can prove it: its own constraint verdict
         // permitted a leader and nobody asked for this run (the automatic first
         // pass). Otherwise the constraint token stands (#63 5825404689).

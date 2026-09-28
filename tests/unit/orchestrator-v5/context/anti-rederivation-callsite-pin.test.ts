@@ -373,6 +373,13 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // chips/recovery/finalisation policy owned by System A. No new caller file
     // or selector implementation is introduced.
     'src/orchestrator-v5/turn-executor.ts': 4,
+    // 2026-09-28 Canonical ruling (single-projection parity, rule 1): +2 (import + one call). The scenario-graph READ
+    // leg (the same non-turn seam approved under `deriveAnalysisFreshness` above) builds its verdict through THE
+    // fact-based canonical state, over the same fact set and read status as its freshness derivation, instead of
+    // `canonicalStateFromFreshness` — which hard-codes `degradedStatus: null`, so a reload said `requires_rerun:
+    // false` beside a newer refused Run while the turn said `true`. It replaces a canonical-state construction; it
+    // adds no new kind of derivation. Not precedent for a turn-path caller.
+    'src/routes/scenario-graph-analysis-read.ts': 2,
   },
   projectRecentChanges: {
     'src/orchestrator-v5/context/recent-changes.ts': 1, // authority (definition)
