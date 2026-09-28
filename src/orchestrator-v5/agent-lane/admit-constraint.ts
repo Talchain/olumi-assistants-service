@@ -330,8 +330,17 @@ export function canonicaliseLimitUnit(
   // PP: a LEVEL limit in percentage points is that percent (`isPercentagePointsWithPeriod`); the same gates as P follow.
   const pointsLevel = frame === 'level' && isPercentagePointsWithPeriod(unit);
   const ofLevel = frame === 'level' && isPercentOfPopulation(unit);
+  /**
+   * ⭐ THE NODE'S OWN PERCENT SPELLING (DL #72 5868320182, AIQ ACK 5868356303; served journey A run 2 A14): the drafter wrote
+   * churn "% monthly churn" on BOTH the node and its ≤ 4 level limit — a percent head, a period, the node's name. Neither
+   * rule above reads that tail, so the limit reached PLoT verbatim, missed its exact-token '%' rung, and 4 was clamped on
+   * [0,1] and refused (`CONSTRAINT_REFUSED_FRAME_FIDELITY`). A LEVEL limit spelled EXACTLY as its node's own percent unit
+   * is on that node's scale by construction — the "of" rule's own guard — so it is that percent, under the same gates.
+   */
+  const ownSpellingLevel = frame === 'level' && !pointsLevel && !ofLevel && !isPercentWithPeriod(unit)
+    && target?.unit !== undefined && norm(target.unit) === norm(unit) && classifyUnitScaleClass(unit) === 'percent';
 
-  if ((isPercentWithPeriod(unit) || pointsLevel || ofLevel) && Math.abs(value) >= 1 && Math.abs(value) <= 100) {
+  if ((isPercentWithPeriod(unit) || pointsLevel || ofLevel || ownSpellingLevel) && Math.abs(value) >= 1 && Math.abs(value) <= 100) {
     // A rewrite onto the spelling the limit already has is no rewrite: nothing to stamp.
     const relabel = (to: string): UnitCanonical =>
       to === unit
@@ -340,7 +349,8 @@ export function canonicaliseLimitUnit(
             value,
             unit: to,
             provenance_unit_relabelled: {
-              rule: pointsLevel ? 'agent_lane_limit_pp_level_v1' : ofLevel ? 'agent_lane_limit_pct_of_level_v1' : 'agent_lane_limit_unit_v1',
+              rule: pointsLevel ? 'agent_lane_limit_pp_level_v1' : ofLevel ? 'agent_lane_limit_pct_of_level_v1'
+                : ownSpellingLevel ? 'agent_lane_limit_pct_own_spelling_level_v1' : 'agent_lane_limit_unit_v1',
               pre_normalisation_value: value,
               pre_normalisation_unit: unit,
             },
@@ -352,7 +362,7 @@ export function canonicaliseLimitUnit(
     // A node "% of <population>" is a percent level too. An "of" LIMIT reads only a node in its own spelling: "% of X" can
     // name a reference ("90% of last year's churn"), not a population, and only the node's own unit tells them apart
     // (MG #2061 B1: on a plain-percent node that limit became "churn ≤ 90%", trivially met).
-    const nodeIsPercentLevel = ofLevel
+    const nodeIsPercentLevel = ofLevel || ownSpellingLevel
       ? nodeUnit !== undefined && norm(nodeUnit) === norm(unit)
       : nodeUnit === undefined || isPercentWithPeriod(nodeUnit) || isPercentagePointsWithPeriod(nodeUnit) || isPercentOfPopulation(nodeUnit);
     if (!nodeIsPercentLevel) return verbatim;
