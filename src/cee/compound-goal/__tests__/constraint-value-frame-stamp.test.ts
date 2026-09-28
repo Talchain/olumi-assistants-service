@@ -79,7 +79,9 @@ describe('2.855 — the frame is stamped from the MINTING ARITHMETIC, per branch
   it('the contract enum is the single vocabulary (no local literal union — trap 12)', () => {
     // Derived from the vendored package, so a contract change fails loud here
     // rather than drifting silently against a hand-copied union.
-    expect(GoalThresholdFrame.options.slice().sort()).toEqual(['delta', 'level']);
+    // 0.61.0 (R1, schemas #69): `change_abs` and `change_rel` APPENDED; `delta` keeps its
+    // meaning (a change from the MODEL'S ORIGIN) and gains no new writers.
+    expect(GoalThresholdFrame.options.slice().sort()).toEqual(['change_abs', 'change_rel', 'delta', 'level']);
   });
 
   it("REDUCTION ('reduce X by N%') mints a DELTA and is stamped 'delta'", () => {

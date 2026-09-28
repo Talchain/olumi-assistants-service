@@ -208,7 +208,17 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // exercises are unchanged, and every pre-0.60.0 event still parses.
     // The pin bump itself was adoption only; CEE now READS `band` — the band
     // reader (`system-events/edge-strength-edit.ts`, `edge-band-reader.test.ts`).
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.60.0');
+    //
+    // 0.60.0 → 0.61.0 (schemas #69, main `4d039fab`, R1), RE-DERIVED on 28 Sep
+    // against the PUBLISHED tarball (sha1 `caba31ec…`): the FILE SET naming
+    // `edge_strength_edit` is identical (the same five files); `turn-payload.js`,
+    // `enums.js` and `enums.d.ts` are byte-unchanged (so `SystemEventKind` is too);
+    // `turn-payload.d.ts` changes 36 removed / 72 added lines, EVERY one a node
+    // field inlined 36× (`goal_threshold_frame` gains `change_abs`/`change_rel`,
+    // `quantity_frame` is new) and NONE names a strength, band, intent or
+    // magnitude; the fixtures add only `quantity_frame` and `frame_verdict`.
+    // Control: `package.json` differs between the tarballs. The member is untouched.
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.61.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {
