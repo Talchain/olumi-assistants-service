@@ -20,6 +20,7 @@ import type { CandidateModel } from '../admit-model.js';
 import { buildCandidateSchema, buildModelFromBrief, prepareProvisionalCandidate } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { limitedLevelAsks } from '../limited-level-ask.js';
 import { readFileSync } from 'node:fs';
 import {
   collectLeaderEstimatedTargetIds, collectLimitLevelOwners, deriveConstraintVerdict, readRatifiedConstraints,
@@ -204,5 +205,23 @@ describe('condition 1 — the limit verdict on Olumi\'s level is estimate_only, 
     const { graph } = await construct(stated, journeyC(3, 'level', true));
     const { id, v } = verdictOn(graph);
     expect(v.perLimit).toEqual([{ constraint_id: id, state: 'scored' }]);
+  });
+});
+
+describe('the ask says a money figure the way the user writes it (DL copy nit on #2205, 5864058391)', () => {
+  const graph = (unit: string, limitUnit: string) => ({
+    nodes: [{ id: 'spend', kind: 'factor', label: 'Total spend', observed_state: { value: 0.3, raw_value: 30000, unit, source: 'cee_inference' } }],
+    goal_constraints: [{ constraint_id: 'c:spend:<=', node_id: 'spend', operator: '<=', value: 20000, unit: limitUnit, value_frame: 'level' as const }],
+  });
+  it.each([
+    ['GBP', 'GBP', 'at most £20,000', '£30,000'],
+    ['£', '£', 'at most £20,000', '£30,000'],
+    ['GBP per month', 'GBP per month', 'at most £20,000 per month', '£30,000 per month'],
+    ['USD', 'USD', 'at most $20,000', '$30,000'],
+    ['%', '%', 'at most 20,000%', '30,000%'],
+    ['subscribers', 'subscribers', 'at most 20,000 subscribers', '30,000 subscribers'],
+  ])('unit %s', (unit, limitUnit, limit, level) => {
+    const [ask] = limitedLevelAsks(graph(unit, limitUnit));
+    expect(ask!.question).toBe(`What is "Total spend" today? Your limit (${limit}) can only be checked against Olumi's estimate of ${level}, not a figure you gave, until you give yours.`);
   });
 });
