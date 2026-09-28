@@ -254,7 +254,14 @@ export function stampNewUserTodayLevels<T extends PatchOperation>(
     if (value === null || typeof value !== 'object' || Array.isArray(value)) return { ok: false };
     const node = value as Record<string, unknown>;
     if (node.kind !== 'factor' || node.id !== l.factor_id || 'observed_state' in node || 'data' in node) return { ok: false };
-    out[at[0]!] = { ...out[at[0]!]!, value: { ...node, observed_state: { ...l.observed_state } } };
+    // ⭐ R11 × #2235 (DL APPROVE 5872416793 follow-up; ACK 5872437724): HOW this figure became the user's is kept ON
+    // the node, in the same field family as a link's `provenance.reviewed_by_user` — a pairing Olumi read from their
+    // words and they CONFIRMED on the approval card carries that card's quote. `ObservedStateV3` is passthrough, so it
+    // survives the save and every reload; a figure written about this factor alone (`written_about`) records nothing.
+    const confirmedPairing = l.basis === 'confirmed_by_approval' && typeof l.quote === 'string'
+      ? { reviewed_by_user: { intent: 'confirm_pairing', quote: l.quote } }
+      : {};
+    out[at[0]!] = { ...out[at[0]!]!, value: { ...node, observed_state: { ...l.observed_state, ...confirmedPairing } } };
   }
   return { ok: true, operations: out };
 }
