@@ -410,9 +410,17 @@ const tokenReadsAsQuantity = (t: string): boolean => unitFamilyOf(t) !== null ||
  * ("1 hire (0=no, 1=yes)", "GBP (1=£1)", a code 2), and so does a pair whose word is a count ("1=customer").
  */
 const STATE_GLOSSARY_PAIR = /(?<![\p{L}\p{N}.])(?:[01]\s*[=:]\s*(\p{L}+)|(\p{L}+)\s*[=:]\s*[01])(?![\p{L}\p{N}.])/gu;
+/**
+ * ⭐ A UNIT THAT NAMES ITS TWO STATES AS A PAIR IS NO AMOUNT (MG, switch-loop step 6; OpenAI Runtime #72 5867407187,
+ * served g2224 run 2 A07–A08 on 9096610): `{1, unit: "enabled (0/1)", estimate: true}` was refused ×8 — the digit test
+ * read the pair's own 0 and 1 as a figure. A 0 and a 1 standing together, joined by "/", "-", "–", "|", "..", "or" or
+ * "to" (either order), are the switch's two states: set aside like a glossary pair. Every other digit still reads as a
+ * figure ("0/12", "10/1", "0.5/1", "0/2"), and what is left is read by the same tests ("hires (0/1)", "GBP (0/1)").
+ */
+const STATE_RANGE_PAIR = /(?<![\p{L}\p{N}.,])(?:0\s*(?:\/|-|–|\||\.\.|or|to)\s*1|1\s*(?:\/|-|–|\||\.\.|or|to)\s*0)(?![\p{L}\p{N}.,])/gu;
 function withoutStateGlossary(unit: string): string {
   return unit.replace(STATE_GLOSSARY_PAIR, (pair: string, after?: string, before?: string) =>
-    (tokenReadsAsQuantity(after ?? before ?? '') ? pair : ' '));
+    (tokenReadsAsQuantity(after ?? before ?? '') ? pair : ' ')).replace(STATE_RANGE_PAIR, ' ');
 }
 
 
