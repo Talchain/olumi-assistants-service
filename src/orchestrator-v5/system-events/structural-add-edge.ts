@@ -394,9 +394,15 @@ export function applyStructuralAddEdge(
    * same `value` reference) and rewrites a topology op; a topology link's
    * constants are not a belief and `add-option-transaction.ts` writes its
    * topology edges unflagged, so only the unchanged op gains the flag.
+   *
+   * `exists_defaulted` (AIQ meaning ruling, #2161 5860718957): drawing the link
+   * makes its EXISTENCE the user's claim, but the user gave no number for how
+   * likely it is, so `DEFAULT_EXISTS_PROBABILITY` is Olumi's quantification —
+   * the same fact class as `DEFAULT_STD`, flagged the same way and on the same
+   * op. A label, not an input: no sampling or hash reads it.
    */
   const operations: PatchOperation[] = enforced[0].value === addedEdge
-    ? [{ ...enforced[0], value: { ...addedEdge, std_defaulted: true } }]
+    ? [{ ...enforced[0], value: { ...addedEdge, std_defaulted: true, exists_defaulted: true } }]
     : enforced;
   // The edge the train will actually write — after the enforcer, not what the
   // client sent. The postcondition below and the dispatcher's post-commit

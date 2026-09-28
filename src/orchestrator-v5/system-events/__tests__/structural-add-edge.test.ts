@@ -437,4 +437,37 @@ describe('D — the default spread on a drawn link is flagged as Olumi\'s', () =
     expect(others.length).toBeGreaterThan(0)
     for (const e of others) expect('std_defaulted' in (e as Record<string, unknown>)).toBe(false)
   })
+
+  /**
+   * AIQ meaning ruling (#2161 5860718957): the link's EXISTENCE is the user's claim, its 0.8 is not. The user gave no
+   * number for how likely the link is, so `exists_probability` is Olumi's — flagged `exists_defaulted: true` beside it,
+   * on the causal op only. Sampling is unchanged (the edge still carries 0.8).
+   */
+  it('D5 (RED): a causal link carries exists_defaulted: true beside the default exists_probability, in the persisted form', () => {
+    const edge = landedEdge(run(), 'fac_churn', 'goal_revenue') as Record<string, unknown>
+    expect(edge.exists_probability).toBe(0.8)
+    expect(edge.exists_defaulted).toBe(true)
+    const r = run()
+    if (r.kind !== 'mutated') throw new Error('expected a mutation')
+    const parsed = GraphV3.parse(r.graph).edges.find((e) => e.from === 'fac_churn' && e.to === 'goal_revenue')
+    expect(parsed?.exists_defaulted).toBe(true)
+    expect(parsed?.exists_probability).toBe(0.8)
+  })
+
+  it('D6 CONTRAST — a topology link (decision → option, option → factor) gains no exists_defaulted, and no prior edge does', () => {
+    const g = persistedGraph() as { nodes: unknown[] }
+    g.nodes.push({ id: 'dec_main', kind: 'decision', label: 'When to launch' })
+    g.nodes.push({ id: 'opt_wait', kind: 'option', label: 'Wait a quarter' })
+    const dec = landedEdge(
+      run({ from: 'dec_main', to: 'opt_wait', magnitude: 1, effect_direction: 'positive', base_graph_hash: baseHashOf(g) }, g),
+      'dec_main', 'opt_wait',
+    ) as Record<string, unknown>
+    const opt = landedEdge(run({ from: 'opt_launch', to: 'fac_churn' }), 'opt_launch', 'fac_churn') as Record<string, unknown>
+    expect('exists_defaulted' in dec).toBe(false)
+    expect('exists_defaulted' in opt).toBe(false)
+    const r = run()
+    if (r.kind !== 'mutated') throw new Error('expected a mutation')
+    const others = r.graph.edges.filter((e) => !(e.from === 'fac_churn' && e.to === 'goal_revenue'))
+    for (const e of others) expect('exists_defaulted' in (e as Record<string, unknown>)).toBe(false)
+  })
 })
