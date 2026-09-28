@@ -118,8 +118,10 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
 import { planNewFactors, planNewOption, type NewFactorRequest } from '../propose-new-option.js';
 import { createProposal, ProposalStore, type ProposalInterpretation, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
-import type { CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
+import type { CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
 import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
+import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isNewFactorTarget, MAX_FACTORS_PER_ADD, readUserTodayMember, USER_TODAY_SOURCE, type UserTodayBasis } from '../../routing/add-factor-transaction.js';
+import { readCurrencyUnitWithQualifiers } from '../../../cee/provenance/stated-amounts.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
 import { readinessViewOf, withoutCantRunOpening } from '../readiness-view.js';
@@ -129,13 +131,13 @@ import { CANVAS_BAND_WORD, edgeBandFromMagnitude, EDGE_STRENGTH_MIDPOINTS } from
 import { runWithApprovedAdoption } from '../approved-adoption-context.js';
 import { runWithStatedLinkBand } from '../stated-link-band-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
-import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
+import { factorUnitOf, unitPhraseFamily, unitsConflict } from '../unit-conflict.js';
 import { classifyUnitScaleClass } from '../../../cee/draft/records/unit-scale-class.js';
 import { unitFamilyOf } from '../../routing/value-unit-resolution.js';
 import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
 import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, quoteOfFigure, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { figureInUserUnits } from '../approval-chips.js';
 import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -173,6 +175,36 @@ function scopeIn(g: { readonly nodes: readonly { readonly label?: unknown; reado
     .map((n) => (typeof n.label === 'string' ? n.label : ''))
     .filter((l) => l !== '' && !target.includes(l));
   return { target, others };
+}
+
+/**
+ * ⛔ THE ADD-FACTOR DOOR'S SCOPE (PJ-E-FIG, DL CHANGES_REQUIRED on #2235): whose figure a NEW factor's value is. Target: the
+ * new factor's own label. Others: every quantity in the model (`scopeIn`) PLUS the other new factors in this call — so on
+ * "Senior engineers cost £120k a year each and juniors £65k a year each" a swap (senior 65000) or the £400k limit is never
+ * this factor's. RIVALS (`EntityScope.rivals`): the others that could HOLD this figure. A factor measured in another kind
+ * of unit ("New senior engineers hired", engineers, for a £ figure) and a risk (a likelihood, for any figure not a
+ * percentage) cannot, so the words they share with the target ("senior") stay the target's; every word of their own
+ * still marks a figure as not the target's. STRICT (`EntityScope.strict`): journey E's typed "£120,000 per senior engineer
+ * and £65,000 per junior engineer" binds each figure to its owner, and a figure nobody's words own, among two or more, is refused.
+ */
+function newFactorScopeIn(
+  g: { readonly raw?: unknown; readonly nodes: readonly { readonly id?: unknown; readonly label?: unknown; readonly kind?: unknown; readonly observed_state?: unknown }[] },
+  target: string,
+  figureUnit: string,
+  inCall: readonly { readonly label: string; readonly unit: string }[],
+): EntityScope {
+  const percentOrUnknown = ((f) => f === null || f === 'percent')(unitPhraseFamily(figureUnit));
+  const quantities = g.nodes.filter((n) => n.kind !== 'option' && n.kind !== 'decision' && typeof n.label === 'string' && n.label !== '' && n.label !== target);
+  const siblings = inCall.filter((s) => s.label !== '' && s.label !== target);
+  const couldHold = (n: (typeof quantities)[number]): boolean => (n.kind === 'risk' ? percentOrUnknown
+    : n.kind !== 'factor' || unitsConflict(figureUnit, factorUnitOf(g.raw, n as { id?: unknown; observed_state?: unknown })) === null);
+  return {
+    target: [target],
+    others: [...quantities.map((n) => n.label as string), ...siblings.map((s) => s.label)],
+    rivals: [...quantities.filter(couldHold).map((n) => n.label as string), ...siblings.filter((s) => unitsConflict(figureUnit, s.unit) === null).map((s) => s.label)],
+    // The strict reading (DL ruling on the #2235 re-review): this door alone; every other door reads as before.
+    strict: true,
+  };
 }
 
 /**
@@ -743,6 +775,8 @@ interface GraphRead {
     /** The drafter's status-quo declaration, read only through `readIsBaseline` (`statusQuoOptionId`). */
     is_baseline?: unknown;
     data?: unknown;
+    /** Read by the add-factor door's target rule (`isNewFactorTarget`): a lever the options set is never a target. */
+    category?: unknown;
   }[];
   /** `origin` is read only to recognise a repair-authored edge (`isRepairAuthoredOptionFactorEdge`). */
   readonly edges: {
@@ -1151,6 +1185,9 @@ function riskUnreachableWhy(g: Pick<GraphRead, 'nodes'>, risk: string, links: re
     + `A link from ${hurt || 'that outcome'} to ${goalName} is added on the canvas, not here — never offer to add it.`;
 }
 
+/** How strongly a new factor's one link acts, as the add-factor door says it: Olumi's placeholder, never an estimate. */
+const FACTOR_PLACEHOLDER_STRENGTH = 'not known yet: Olumi uses a placeholder strength for the link, not an estimate';
+
 /** A goal target's direction, in words (the product's own receipt says "at least" / "at most"). */
 const DIRECTION_WORDS = { at_least: 'at least', at_most: 'at most' } as const;
 /**
@@ -1266,6 +1303,12 @@ export function createAgentCapabilities(
      * ONE `gmh_` hold pinned to the base hash, confirmed by the product's own held resume. Absent ⇒ unavailable.
      */
     readonly holdAddRisk?: (input: HoldAddRiskInput) => Promise<HoldAddRiskResult>;
+    /**
+     * ⭐ PJ-E-FIG (DL #72 5866036457): the product's add-factor door, reached in-process (`holdAddFactorInProcess`): ONE
+     * `gmh_` hold carrying the user's figures, pinned to the base hash, confirmed by the product's own held resume.
+     * Absent ⇒ unavailable.
+     */
+    readonly holdAddFactor?: (input: HoldAddFactorInput) => Promise<HoldAddFactorResult>;
     /**
      * ⭐ SLICE C2: the product's limit door (`commitLimitEditInProcess`): a new figure for an EXISTING limit row, its unit
      * and frame kept, stamped as the user's, ONE CAS commit with the base-hash gate. Absent ⇒ unavailable.
@@ -1512,6 +1555,13 @@ export function createAgentCapabilities(
         + (into.length > 0 ? ` and driven by ${into.map((e) => labelOf(e.from)).join(', ')}` : '')
         + `; ${howStronglyWords([...out, ...into])}`);
     }
+    // ⭐ PJ-E-FIG: the factors the add-factor door added, each with the user's figure (`GM_HELD_USER_TODAY_KEY`).
+    const userTodayMember = readUserTodayMember((hold.action as { inline_patch?: Record<string, unknown> }).inline_patch?.[GM_HELD_USER_TODAY_KEY]) ?? [];
+    const userTodayIds = new Set(userTodayMember.map((l) => l.factor_id));
+    // A pairing the user confirmed on the card (DL ruling on #2235) is said as that: they approved Olumi's reading of their words.
+    const confirmedIds = new Set(userTodayMember.filter((l) => l.basis === 'confirmed_by_approval').map((l) => l.factor_id));
+    /** The range Olumi chose for each such figure, said ONCE — here, on the turn that writes it (`ranges_added_for_analysis`). */
+    const rangesAdded: { factor: string; value: number; range: number }[] = [];
     const factorParts: AddedFactorPart[] = [];
     for (const fid of addedFactorIds) {
       const f = after!.nodes.find((x) => x.id === fid);
@@ -1531,6 +1581,16 @@ export function createAgentCapabilities(
       }
       // ⭐ PJ-A1 £49: a new graded factor committed WITH the today level the user stated is said as that, never asked again.
       const statedRaw = (os as { raw_value?: unknown } | undefined)?.raw_value ?? os?.value;
+      // ⭐ PJ-E-FIG: a factor the add-factor door committed WITH the user's figure — said as theirs, never asked again; its
+      // range (Olumi's) is disclosed once below, never re-framed later (`levelFrameOf` reads the stored cap).
+      if (userTodayIds.has(fid) && os?.source === USER_TODAY_SOURCE && typeof statedRaw === 'number') {
+        const u = (os as { unit?: unknown }).unit;
+        const cap = (os as { cap?: unknown }).cap;
+        sentences.push(`Added "${String(f.label ?? fid)}" as a factor, affecting ${changes.join(', ')}; ${howStronglyWords(outgoing)} `
+          + `Its value today is ${statedRaw}${typeof u === 'string' && u !== '' ? ` ${u}` : ''}, ${confirmedIds.has(fid) ? 'as you confirmed' : 'as you said'}.`);
+        if (typeof cap === 'number' && Number.isFinite(cap) && cap > 1) rangesAdded.push({ factor: String(f.label ?? fid), value: statedRaw, range: cap });
+        continue;
+      }
       if (todayIds.has(fid) && os?.source === 'brief_extraction' && typeof statedRaw === 'number') {
         const u = (os as { unit?: unknown }).unit;
         sentences.push(`Also added the factor "${String(f.label ?? fid)}", which changes ${changes.join(', ')}; ${howStronglyWords(outgoing)} `
@@ -1546,6 +1606,7 @@ export function createAgentCapabilities(
       receipts: summary !== null ? [summary] : [],
       ...(unreadable ? { receipt_unreadable: true } : {}),
       follow_up: sentences.join(' '),
+      ...(rangesAdded.length > 0 ? { ranges_added_for_analysis: rangesAdded } : {}),
     };
   };
 
@@ -5311,6 +5372,207 @@ export function createAgentCapabilities(
         },
         note: 'Nothing has changed yet. Tell the user it will add the risk, what it threatens and what drives it, and that how strongly '
           + 'is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.',
+      };
+    },
+
+    /**
+     * ⭐ PJ-E-FIG — NEW FACTORS CARRYING THE FIGURES THE USER STATED, HELD ON THE PRODUCT'S OWN SEAM (Delivery Lead #72
+     * 5866036457, on Canonical 5866021645). Journey E: "Senior engineers cost £120k a year each and juniors £65k a year
+     * each." — the Agent had no path to hold those figures. The add-risk door's twin: labels resolve by `resolveNamed`; the
+     * batch is built purely first (`buildAddFactorTransaction`); then the product's add-factor door holds it as ONE `gmh_`
+     * pending pinned to the model this read saw. ALL OR NOTHING: 1..3 factors, each with the user's figure, in one hold.
+     *
+     * THE FIGURE is taken ONLY when the user's own words in THIS message write it about THIS factor (`figureTheUserWroteFor`
+     * on `newFactorScopeIn`: never the other factor's figure, never the limit's); otherwise the whole call is refused and
+     * said (`today_not_set`), nothing held. It is
+     * framed by the ONE rule (`framedObservedState` on `defaultFrameFor`, the statedToday block in `proposeNewOption`), then
+     * stamped as the user's (`USER_TODAY_SOURCE`). The range is Olumi's: said ONCE, by the confirm that writes it.
+     */
+    async proposeNewFactor(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      if (opts.holdAddFactor === undefined) {
+        return { ok: false, mutated: false, refusal: 'unavailable', detail: 'A factor cannot be added here. Nothing was changed. Tell the user plainly.' };
+      }
+      const requested = Array.isArray(args?.factors) ? args.factors as readonly unknown[] : [];
+      if (requested.length === 0 || requested.length > MAX_FACTORS_PER_ADD) {
+        return { ok: false, mutated: false, refusal: 'no_factors',
+          detail: `Nothing was prepared: one change adds 1 to ${MAX_FACTORS_PER_ADD} new factors. Tell the user plainly.` };
+      }
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const planned: { label: string; unit: string; value: number; to_id: string; direction: 'positive' | 'negative'; observed_state: Record<string, unknown>; basis: UserTodayBasis; quote: string }[] = [];
+      const todayNotSet: { factor: string; value: unknown; reason: string }[] = [];
+      const ambiguous: AmbiguousTarget[] = [];
+      const recordOf = (x: unknown): Record<string, unknown> => (x !== null && typeof x === 'object' && !Array.isArray(x) ? x as Record<string, unknown> : {});
+      // Every new factor named in THIS call, with its declared unit: each one's figure is never another's (`newFactorScopeIn`).
+      const inCall = requested.map((x) => recordOf(x)).map((x) => ({
+        label: typeof x.label === 'string' ? x.label.trim() : '',
+        unit: typeof x.unit === 'string' ? x.unit.trim() : '',
+      }));
+      // ⛔ HUMAN CONTROL IS THE PROVENANCE GATE (DL ruling on #2235, 14:05Z 28 Sep). When this message writes two figures or
+      // more, or the change adds two factors or more, WHOSE each figure is cannot be read from word proximity: three review
+      // rounds moved the failure from one common phrasing to the next. So nothing is credited by the words alone: each
+      // figure must be WRITTEN in this message (in its kind of unit), and Olumi's pairing is shown on the approval card with
+      // the user's own sentence (`quoteOfFigure`) — their approval makes it theirs (`confirmed_by_approval`, on the hold).
+      // One figure for one new factor: the strict match decides, as before (`written_about`).
+      const turnText = ctx.user_turn_text ?? '';
+      const confirmPairing = inCall.length >= 2 || figuresWrittenIn(turnText) >= 2;
+      for (const raw of requested) {
+        const f = recordOf(raw);
+        const label = typeof f.label === 'string' ? f.label.trim() : '';
+        if (label === '') {
+          return { ok: false, mutated: false, refusal: 'unreadable_factor', detail: 'A new factor needs a name, in the user’s words. Nothing was prepared.' };
+        }
+        if (g.nodes.some((n) => norm(n.label) === norm(label))) {
+          return { ok: false, mutated: false, refusal: 'factor_exists',
+            detail: `The model already has something called "${label}", so nothing was prepared. A value for a factor the model `
+              + 'already has is set with propose_assumptions (revise: true when it already holds one), not added again.' };
+        }
+        if (planned.some((p) => norm(p.label) === norm(label)) || todayNotSet.some((t) => norm(t.factor) === norm(label))) {
+          return { ok: false, mutated: false, refusal: 'duplicate_factor', detail: `"${label}" is named twice in one change, so nothing was prepared.` };
+        }
+        const unit = typeof f.unit === 'string' && f.unit.trim() !== '' ? f.unit.trim() : '';
+        if (unit === '') {
+          return { ok: false, mutated: false, refusal: 'unit_not_stated',
+            detail: `Nothing was prepared: give the unit of "${label}" as the user gave it (for example GBP/year per engineer).` };
+        }
+        const asked = String(f.affects ?? '');
+        const res = resolveNamed(g, asked, (n) => isNewFactorTarget({ kind: n.kind, ...(typeof n.category === 'string' ? { category: n.category } : {}) }));
+        if (res.kind === 'ambiguous') { ambiguous.push(describeAmbiguity(g, asked, res.candidates)); continue; }
+        if (res.kind === 'other' && res.node.kind === 'factor') {
+          return { ok: false, mutated: false, refusal: 'target_is_a_lever',
+            detail: `Nothing was prepared: "${res.node.label}" is set by the options, so nothing else may drive it. Link "${label}" to `
+              + 'the outcome or the non-lever factor (one no option sets) it affects instead, from the user’s words; if it is unclear, ask.' };
+        }
+        if (res.kind !== 'one') {
+          return { ok: false, mutated: false, refusal: res.kind === 'none' ? 'target_not_found' : 'target_not_allowed',
+            detail: res.kind === 'none'
+              ? `The model has nothing called "${asked}", so nothing was prepared. A new factor drives an outcome or a non-lever factor (one no option sets).`
+              : `"${asked}" is ${res.node.kind === 'option' ? 'an option' : `a ${res.node.kind}`}, so nothing was prepared. A new factor drives an outcome or a non-lever factor (one no option sets) — never the goal, a risk, an option or a decision.` };
+        }
+        const direction = f.direction === 'positive' || f.direction === 'negative' ? f.direction : null;
+        if (direction === null) {
+          return { ok: false, mutated: false, refusal: 'direction_not_stated',
+            detail: `Nothing was prepared: say whether more "${label}" raises or lowers "${res.node.label}", from the user’s words; if it is unclear, ask.` };
+        }
+        const t = recordOf(f.today);
+        const todayUnit = typeof t.unit === 'string' && t.unit.trim() !== '' ? t.unit.trim() : unit;
+        const shown = `${typeof t.value === 'number' ? t.value : JSON.stringify(t.value ?? null)} ${todayUnit}`;
+        if (typeof t.value !== 'number' || !Number.isFinite(t.value) || t.value < 0) {
+          todayNotSet.push({ factor: label, value: t.value ?? null,
+            reason: `${shown} is not a level "${label}" can hold, so it was not taken. Ask the user what it is.` });
+          continue;
+        }
+        // ⛔ A figure in another kind of unit is never this factor's value (`unit-conflict.ts`): £120k is not a level for a
+        // factor measured in engineers. Refused whole and said (review finding 3), never the declared unit silently dropped.
+        if (unitsConflict(todayUnit, unit) !== null) {
+          todayNotSet.push({ factor: label, value: t.value,
+            reason: `${shown} is not the kind of figure "${label}" holds (it is measured in ${unit}), so it was not taken. Ask the user which they meant.` });
+          continue;
+        }
+        const scaled = readCurrencyUnitWithQualifiers(todayUnit);
+        if (scaled.kind === 'currency' && Number.isFinite(scaled.multiplier) && scaled.multiplier > 1) {
+          todayNotSet.push({ factor: label, value: t.value,
+            reason: `${shown} is in a scaled unit; give the figure in whole units (120000 for £120k) in the user's own unit.` });
+          continue;
+        }
+        // The lane's SCOPED matcher, over THIS message's words (Canonical, on the door's review F4; DL CHANGES_REQUIRED on
+        // #2235): the figure must be written ABOUT this factor. Over the whole conversation, or anywhere in the message, a
+        // figure typed about anything else — the £400k LIMIT, the other factor's figure (a swap) — could be committed as
+        // this new factor's value, as the user's. A factor the user is adding now is one they state now, beside its name.
+        const quote = quoteOfFigure(t.value, todayUnit, turnText);
+        const ownsIt = quote !== null
+          && (confirmPairing || figureTheUserWroteFor(t.value, todayUnit, turnText, newFactorScopeIn(g, label, todayUnit, inCall)));
+        if (!ownsIt || quote === null) {
+          todayNotSet.push({ factor: label, value: t.value,
+            reason: `The user's own words in this message do not state ${shown} for "${label}", so it was not prepared: a new factor's value is never taken from Olumi's words, a guess, or a figure said about something else (another factor, a limit, an earlier message). Ask the user what it is.` });
+          continue;
+        }
+        // THE ONE FRAMING RULE (ruling point 3; `proposeNewOption` statedToday): Olumi's default range over the largest
+        // figure this change carries for the factor — its own — then stamped as the user's.
+        const v = t.value;
+        const observed = { ...framedObservedState({ baseline_value: v, unit: todayUnit, provenance: 'explicit',
+          plausible_max: v > 1 ? defaultFrameFor(Math.abs(v)) : null }), source: USER_TODAY_SOURCE };
+        planned.push({ label, unit: todayUnit, value: v, to_id: res.node.id, direction, observed_state: observed,
+          basis: confirmPairing ? 'confirmed_by_approval' : 'written_about', quote });
+      }
+      if (ambiguous.length > 0) {
+        return { ok: false, mutated: false, refusal: 'ambiguous_target', ambiguous_targets: ambiguous, detail: AMBIGUOUS_NOTE };
+      }
+      if (todayNotSet.length > 0) {
+        return { ok: false, mutated: false, refusal: 'today_not_set', today_not_set: todayNotSet,
+          detail: 'Nothing was prepared or held: every new factor in one change carries the value the user stated, or none is '
+            + 'added. Tell the user plainly which figure is missing and ask for it; never supply one.' };
+      }
+      // The door's own builder, run here purely: a spec it would refuse is never sent.
+      const factors = planned.map((p) => ({ label: p.label, link: { to_id: p.to_id, effect_direction: p.direction } }));
+      const built = buildAddFactorTransaction({ factors }, { nodes: g.nodes as never, edges: g.edges as never });
+      if (!built.matched) {
+        return { ok: false, mutated: false, refusal: 'not_prepared', reason: built.reason,
+          detail: built.reason === 'new_factor_unreachable'
+            ? 'Nothing was prepared: what the new factor drives does not lead to the goal, so it could not change the comparison. Ask the user what it affects.'
+            : 'Those factors could not be prepared as one change, so nothing was sent or changed. Tell the user plainly.' };
+      }
+      const ids = built.proposal.factors.map((f) => f.id);
+      const res = await opts.holdAddFactor({
+        scenario_id: ctx.scenario_id,
+        turn_id: randomUUID(),
+        base_graph_hash: g.graph_hash,
+        factors: planned.map((p, i) => ({ id: ids[i]!, label: p.label, link: { to_id: p.to_id, effect_direction: p.direction }, observed_state: p.observed_state,
+          basis: p.basis, quote: p.quote })),
+      });
+      if (res.status === 'stale') {
+        return { ok: false, mutated: false, refusal: 'model_changed',
+          detail: 'The model changed while this was being prepared, so nothing was held. Read it again and propose afresh.' };
+      }
+      const ref = gmHeldProposalRef(ctx.scenario_id, `node:${ids[0]!}`);
+      let heldOk = res.status === 'held' && res.proposal_id === ref && JSON.stringify(res.factor_ids) === JSON.stringify(ids);
+      if (heldOk && opts.readPendingActions !== undefined) {
+        try {
+          const hold = await liveHeldHold(ctx.scenario_id, ref);
+          const ops = hold !== undefined ? heldOpsOf(hold) : [];
+          // JSONB reorders keys: the figures are compared key-order-insensitively, never by bytes.
+          const sorted = (x: unknown): unknown => (Array.isArray(x) ? x.map(sorted) : x !== null && typeof x === 'object'
+            ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, sorted((x as Record<string, unknown>)[k])])) : x);
+          const member = hold !== undefined ? readUserTodayMember((hold.action as { inline_patch?: Record<string, unknown> }).inline_patch?.[GM_HELD_USER_TODAY_KEY]) : undefined;
+          heldOk = built.proposal.factors.every((f) => ops.some((o) => o.op === 'add_node' && o.path === f.id)
+            && ops.some((o) => o.op === 'add_edge' && o.path === `${f.id}::${f.to}`))
+            && member !== undefined && member.length === planned.length
+            && planned.every((p, i) => JSON.stringify(sorted(member.find((m) => m.factor_id === ids[i])?.observed_state)) === JSON.stringify(sorted(p.observed_state)))
+            // The record of WHY each figure is theirs is on the hold, exactly as prepared.
+            && planned.every((p, i) => { const m = member.find((x) => x.factor_id === ids[i]); return m?.basis === p.basis && m?.quote === p.quote; });
+        } catch {
+          heldOk = false;
+        }
+      }
+      if (!heldOk || res.status !== 'held') {
+        return { ok: false, mutated: false, refusal: 'not_prepared', ...(res.status === 'refused' ? { reason: res.reason } : {}),
+          detail: res.status === 'refused' && res.reason === 'target_not_allowed'
+            ? 'Olumi did not prepare that change, so nothing was added. A new factor drives an outcome or a non-lever factor (one no option sets). Tell the user plainly.'
+            : 'Olumi could not prepare that as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };
+      }
+      const labelOfId = (id: string): string => String(g.nodes.find((n) => n.id === id)?.label ?? id);
+      return {
+        ok: true, mutated: false,
+        proposal_id: ref,
+        public_label: res.public_label.trim() !== '' ? res.public_label : 'Add these factors',
+        held_message: res.held_message,
+        ...(res.detail !== undefined && res.detail.trim() !== '' ? { held_detail: res.detail } : {}),
+        base_revision: g.graph_hash,
+        factors: planned.map((p) => ({
+          label: p.label,
+          // `user_to_confirm`: the figure is in their words, and the PAIRING is Olumi's until they approve it (the card
+          // shows `quote`). `user`: one figure for one factor, written about it.
+          current_value: { value: p.value, unit: p.unit, stated_by: p.basis === 'confirmed_by_approval' ? 'user_to_confirm' : 'user', quote: p.quote },
+          affects: `${labelOfId(p.to_id)} (${p.direction === 'positive' ? 'raises it' : 'lowers it'})`,
+          how_strongly: FACTOR_PLACEHOLDER_STRENGTH,
+        })),
+        note: confirmPairing
+          ? 'Nothing has changed yet. Show the user each factor with its figure and their own words quoted, say that Olumi paired '
+            + 'each figure with its factor and they approve only if every pairing is right, say what each affects and that how '
+            + 'strongly is a placeholder — never the id — and call authorise_change with this proposal_id once they agree.'
+          : 'Nothing has changed yet. Tell the user it will add each factor with the figure they gave, what it affects, and that '
+            + 'how strongly is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.',
       };
     },
 
