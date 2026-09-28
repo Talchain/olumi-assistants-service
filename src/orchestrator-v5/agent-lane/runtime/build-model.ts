@@ -35,7 +35,7 @@
 
 import { createHash } from 'node:crypto';
 import { FRESH_READ } from '../turn-read-cache.js';
-import { admitCandidateModel, canonicalLabel, carryWithheldOptions, findMechanismPath, productIdentityOpenQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
+import { admitCandidateModel, canonicalLabel, carryWithheldOptions, findMechanismPath, productIdentityOpenQuestions, sumIdentityOpenQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -1347,6 +1347,10 @@ export async function buildModelFromBrief(
     ...optionSetLimitAsks({ nodes: statedGoal.nodes, goal_constraints: admitted.goal_constraints }),
   ];
   openQuestions.unshift(...levelAsks.map((a) => a.question));
+  // ⭐ R3-2 (AIQ #72 5867700610): a limited spend tally held as the SUM of its levers is said ONCE, as Olumi's reading,
+  // and §3's precondition failing (a lever reaches the goal only through a user-limited cost roll-up) ASKS Olumi's
+  // assumption instead of dropping the edge (AIQ 5867283878). Behind the C46 product questions, ahead of the level asks.
+  openQuestions.unshift(...(admitted.pure_limit_asks ?? []).map((a) => a.question), ...sumIdentityOpenQuestions(admitted));
   // ⛔ C46: a declared product whose sign this model cannot prove is ASKED where the user always sees it,
   // not only said in `not_represented` (which only the Agent's model reads). After the scope and deadline
   // questions, ahead of the drafter's own; nothing for a stable product or a linear model.
@@ -1556,8 +1560,12 @@ export async function buildModelFromBrief(
     // leader permission is stamped by `run_analysis` from the node's persisted declaration
     // (`nonlinearIdentityLeaderWithhold`), re-judged on the graph each Run analyses.
     ...(admitted.nonlinear_identities !== undefined ? { nonlinear_identities: admitted.nonlinear_identities } : {}),
-    // A limited £ roll-up whose drafted edge into a non-£ goal was not drawn (`findPureLimits`), beside its `pure_limit` line below.
+    // A user-limited cost roll-up whose Olumi-signed edge into the goal was not drawn (`findPureLimits`), beside its
+    // `pure_limit` line below; where a lever reaches the goal only through it, the kept edge asked (`open_questions`).
     ...(admitted.pure_limits !== undefined ? { pure_limits: admitted.pure_limits } : {}),
+    ...(admitted.pure_limit_asks !== undefined ? { pure_limit_asks: admitted.pure_limit_asks } : {}),
+    // R3-2: limited spend tallies held as the sum of their levers, beside the sentence in `open_questions`.
+    ...(admitted.sum_identities !== undefined ? { sum_identities: admitted.sum_identities } : {}),
     not_represented: [
       // ⛔ C46: the goal's unstated scope, as Olumi's assumption (the `goal_scope` entry's `after`), FIRST.
       // Said here and never written on the goal node: `get_canonical_state` shows a node's description as
@@ -1604,7 +1612,7 @@ export async function buildModelFromBrief(
         // `breakLoops`) — which link was left out, or that the user's own loop was kept.
         // `magnitude_unconvertible`: a stated size that could not be read on the two ends' frames, so the standard
         // placeholder stands in (magnitude contract, D2/D6) — never dropped unseen.
-        // `pure_limit`: a limited £ roll-up's drafted edge into a non-£ goal that was not drawn (`findPureLimits`).
+        // `pure_limit`: a user-limited cost roll-up's Olumi-signed edge into the goal that was not drawn (`findPureLimits`).
         .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|loop_withheld|loop_kept|magnitude_unconvertible|pure_limit)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),

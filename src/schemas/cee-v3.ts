@@ -519,10 +519,16 @@ export const NodeV3 = z.object({
    *
    * NOT VALUE-BEARING: it names which nodes multiply, never a magnitude. Not mirrored in
    * `openapi.yaml`; a consumer on a stale pin simply drops it.
+   *
+   * `operation: 'sum'` (R3-2, AIQ #72 5867700610): a limited spend tally that IS the sum of its
+   * levers (`admit-model.ts` `findSumTallies`), always `stated_in_brief: false`. Every C46 reader
+   * above reads `product` only (`readCarrier`), so a sum never withholds a leader.
    */
   nonlinear_identity: z
     .object({
-      operation: z.literal('product'),
+      // `sum` (R3-2, AIQ #72 5867700610): a limited spend tally held as the sum of its levers (`findSumTallies`),
+      // always Olumi's reading. PLoT (`readNonlinearIdentity`) and ISL (`NonlinearIdentityV2`) accept both.
+      operation: z.enum(['product', 'sum']),
       factor_ids: z.array(z.string().min(1)).min(2),
       stated_in_brief: z.boolean(),
     })
