@@ -49,7 +49,7 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { LIMIT_OPERATOR_WORDS } from '../admit-constraint.js';
 import { holdStatedGoalAttributes, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
-import { limitedLevelAsks } from '../limited-level-ask.js';
+import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
 
@@ -1325,7 +1325,12 @@ export async function buildModelFromBrief(
   // of theirs, is ASKED — typed (`level_asks`) and said here: behind the scope, deadline, withheld-option and C46
   // product questions (C46's required row keeps its reply slot), ahead of the magnitude and drafter's own — on journey C
   // the second question the reply shows. Non-blocking: nothing in readiness reads it (`limited-level-ask.ts`).
-  const levelAsks = limitedLevelAsks({ nodes: statedGoal.nodes, goal_constraints: admitted.goal_constraints });
+  // DL ruling 5865003207 §1: a limit on a quantity the options SET at Olumi's figures is asked too — one per quantity,
+  // naming Olumi's figures and, when it is Olumi's, today's level. Same seam, same slot rules.
+  const levelAsks = [
+    ...limitedLevelAsks({ nodes: statedGoal.nodes, goal_constraints: admitted.goal_constraints }),
+    ...optionSetLimitAsks({ nodes: statedGoal.nodes, goal_constraints: admitted.goal_constraints }),
+  ];
   openQuestions.unshift(...levelAsks.map((a) => a.question));
   // ⛔ C46: a declared product whose sign this model cannot prove is ASKED where the user always sees it,
   // not only said in `not_represented` (which only the Agent's model reads). After the scope and deadline
