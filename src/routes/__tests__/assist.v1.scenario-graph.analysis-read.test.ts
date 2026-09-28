@@ -208,8 +208,12 @@ const BASE_CAPTURE_PATH = join(
  * reach a client only on a turn response, so a reload had none and every first
  * edit was refused; it is derived beside `graph_identity_hash` from the same
  * bytes, and is NOT that hash — different projection, different question.
+ *
+ * `analysis_identity_run_use` (2026-09-28, CEE #2248, R3-9) is what the last successful Run did with each declared
+ * identity — the link writer's own input (`identityRunUseFromFacts`), carried so the Agent's door cannot disagree with
+ * the writer. It rides every answered read, `null` when no Run succeeded, so the base fixture's no-fact read shows it.
  */
-const NEW_KEYS = ["analysis_state", "analysis_result", "graph_hash", "analysis_admission"] as const;
+const NEW_KEYS = ["analysis_state", "analysis_result", "graph_hash", "analysis_admission", "analysis_identity_run_use"] as const;
 
 /**
  * Additions made INSIDE a pre-existing key since the base capture — declared
@@ -666,5 +670,39 @@ describe("the reload carries the selected run's evaluated identities (`analysis_
     expect(body.analysis_result).toBeNull();
     expect(body).not.toHaveProperty("analysis_constraint_verdict_state");
     expect(body).not.toHaveProperty("analysis_identity_evaluated_node_ids");
+  });
+});
+
+// ─── R3-9 (#2248): the last successful Run's use of each identity — the link writer's own input, NOT freshness-gated ────
+
+describe("the reload carries the last Run's identity use (`analysis_identity_run_use`), exactly as the link writer reads it", () => {
+  const withEvaluations = (graphHash: string, evaluations: unknown[]) => {
+    const fact = runAnalysisFact({ graphHash, mayName: false }) as { result: { enrichment: Record<string, unknown> } };
+    fact.result.enrichment = { ...fact.result.enrichment, identity_evaluations: evaluations };
+    return fact;
+  };
+
+  it("STALE — the graph was edited after the Run: the block and its evaluated list are withheld, the identity use is NOT", async () => {
+    readFactsFor.mockResolvedValue([withEvaluations(PRE_EDIT_GRAPH_HASH, [{ node_id: "mrr", evaluated: true }])]);
+    const app = await buildApp();
+    const body = (await read(app)).json() as Record<string, unknown>;
+    expect(body.analysis_result, "control: the read is stale").toBeNull();
+    expect(body).not.toHaveProperty("analysis_identity_evaluated_node_ids");
+    // What that Run did stands: it kept MRR's identity, so price → MRR is still a definition.
+    expect(body.analysis_identity_run_use).toEqual({ withdrawn_node_ids: [] });
+  });
+
+  it("WITHDRAWN — a carrier the last Run did not evaluate is listed, whatever the freshness", async () => {
+    readFactsFor.mockResolvedValue([withEvaluations(PRE_EDIT_GRAPH_HASH, [{ node_id: "mrr", evaluated: false, withheld_reason: "identity_zero_level" }])]);
+    const app = await buildApp();
+    const body = (await read(app)).json() as Record<string, unknown>;
+    expect(body.analysis_identity_run_use).toEqual({ withdrawn_node_ids: ["mrr"] });
+  });
+
+  it("NO RUN — null: every declared identity is in use", async () => {
+    readFactsFor.mockResolvedValue([]);
+    const app = await buildApp();
+    const body = (await read(app)).json() as Record<string, unknown>;
+    expect(body.analysis_identity_run_use).toBeNull();
   });
 });

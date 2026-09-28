@@ -1,0 +1,142 @@
+/**
+ * ⛔ R3-9 ON THE AGENT'S DOOR (DL #72 5866746362; Canonical #2229, the ONE predicate; AIQ's amendments 5867435409).
+ *
+ * AIQ's served R3 result (5866734772): a user's edit to a DEFINITIONAL link (price → MRR, where MRR = price ×
+ * subscribers is a declared identity) was stored, then silently ignored, because an evaluated identity never reads the
+ * strengths of the edges into it. Canonical refuses it on the canvas and in `adjust_edge_strength`, and the Agent's
+ * `propose_link_strength` prepared the same change for approval.
+ *
+ * The rule, from the same module (`definitionalLinkInUse` + `definitionalLinkRefusalText`):
+ *   - refused while the identity is IN USE, i.e. no Run yet, or the last Run evaluated the carrier;
+ *   - the words say whose reading it is: an inferred identity is "Olumi reads …", and it promises no move nobody can make;
+ *   - the last Run is the WRITER'S OWN input (DL CHANGES_REQUIRED on #2248): the read's `analysis_identity_run_use`,
+ *     Canonical's `identityRunUseFromFacts` over the run facts, never freshness-gated. So every row below also asks the
+ *     writer's own decision on the same facts (`definitionalLinkInUse(graph, …, identityRunUseFromFacts(facts))`, what
+ *     `edge_strength_edit` decides on approval), and the Agent must agree with it: never a change prepared that the
+ *     writer then refuses, and never a lever the last Run used blocked.
+ *
+ * The graph is served journey C's (651a7fd), where MRR declares Pro plan price × Pro paying subscribers, as Olumi's
+ * reading (`stated_in_brief: false`).
+ */
+import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dispatchTool } from '../runtime/agent-tools.js';
+import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { ProposalStore } from '../proposal.js';
+import { definitionalLinkInUse, identityRunUseFromFacts } from '../../compose/definitional-links.js';
+import { identityRunUseWire } from '../../../routes/scenario-graph-analysis-read.js';
+
+const C05 = (JSON.parse(readFileSync(new URL('./fixtures/served-journey-c-c05-budget-651a7fd.json', import.meta.url), 'utf8')) as { graph: Record<string, unknown> }).graph;
+
+/** A run history as the store holds it, and what the read shows beside it (its own gated view, which must not decide). */
+type LastRun = { facts: unknown[]; run: string; evaluated?: string[] };
+let clock = 0;
+const runFact = (enrichment: unknown, status?: string) => ({
+  fact_type: 'run_analysis', noop: false,
+  result: { enrichment: status === undefined ? enrichment : { ...(enrichment as object), analysis_status: status },
+    computed_at: new Date(Date.UTC(2026, 8, 28, 9, 0, clock++)).toISOString() },
+});
+const EVALUATED_MRR = { identity_evaluations: [{ node_id: 'mrr', evaluated: true }] };
+const NO_RUN: LastRun = { facts: [], run: 'never_run' };
+const EVALUATED: LastRun = { facts: [runFact(EVALUATED_MRR)], run: 'complete_current', evaluated: ['mrr'] };
+
+async function propose(args: Record<string, unknown>, message: string, last: LastRun, graph = C05, readSays = true): Promise<{ r: Record<string, unknown>; puts: unknown[] }> {
+  const d: InternalDispatch = async (path) => (path.endsWith('/graph')
+    ? { status: 200, json: {
+      graph: JSON.parse(JSON.stringify(graph)), graph_hash: 'h0', graph_identity_hash: { value: 'id-h0' },
+      analysis_state: { run_state: { kind: last.run } },
+      ...(last.evaluated !== undefined ? { analysis_identity_evaluated_node_ids: last.evaluated } : {}),
+      // The read route's own projection of the writer's input (`scenario-graph-analysis-read.ts`).
+      ...(readSays ? { analysis_identity_run_use: identityRunUseWire(last.facts) } : {}),
+    } }
+    : { status: 500, json: {} });
+  const store = new ProposalStore();
+  const puts: unknown[] = [];
+  const put = store.put.bind(store);
+  store.put = (p) => { puts.push(p); return put(p); };
+  const caps = createAgentCapabilities(d, store);
+  const ctx = { scenario_id: '550e8400-e29b-41d4-a716-4466554400c3', authenticated_user_id: null, request_id: 'r', user_text: message, user_turn_text: message };
+  return { r: (await dispatchTool('propose_link_strength', JSON.stringify(args), ctx as never, caps)) as Record<string, unknown>, puts };
+}
+const STRONG = 'Make the link from Pro plan price to MRR very strong.';
+const STRONG_ARGS = { from_label: 'Pro plan price', to_label: 'MRR', strength: 'very strong', rationale: STRONG };
+const OLUMI_READS = 'Olumi reads MRR as Pro plan price × Pro paying subscribers, so this link\'s strength isn\'t used while that holds';
+/** What the product's link writer decides on approval, from the same facts. */
+const writerRefuses = (last: LastRun, from = 'pro_plan_price'): boolean =>
+  definitionalLinkInUse(C05, from, 'mrr', identityRunUseFromFacts(last.facts)) !== null;
+
+describe('⛔ R3-9: the Agent never prepares a change to a link an identity defines while it is in use', () => {
+  for (const [name, last] of [['no Run yet', NO_RUN], ['the last Run evaluated MRR', EVALUATED]] as const) {
+    it(`RED (${name}): "Pro plan price → MRR very strong" is refused in the predicate’s words, as Olumi’s reading, and nothing is prepared`, async () => {
+      const { r, puts } = await propose(STRONG_ARGS, STRONG, last);
+      expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'definitional_link' }));
+      expect(String(r.detail)).toContain(OLUMI_READS);
+      expect(String(r.detail)).toContain('That reading is Olumi\'s, not yours; if MRR isn\'t that, say so.');
+      // AIQ 5868909577: no promise of a move nobody can make (there is no identity-withdrawal writer).
+      expect(String(r.detail)).not.toMatch(/I'll|I will|stop reading/);
+      expect(r).not.toHaveProperty('proposal_id');
+      expect(puts, 'nothing is prepared').toEqual([]);
+    });
+  }
+
+  it('RED (the other operand, and a reversal): refused the same way', async () => {
+    const msg = 'More Pro paying subscribers actually push MRR down, so it is a strong negative link.';
+    const { r } = await propose({ from_label: 'Pro paying subscribers', to_label: 'MRR', strength: 'strong', direction: 'negative',
+      direction_from_words: 'actually push MRR down', rationale: msg }, msg, EVALUATED);
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, refusal: 'definitional_link' }));
+    expect(String(r.detail)).toContain(OLUMI_READS);
+  });
+
+  it('a stated identity is said as the brief’s definition', async () => {
+    const stated = JSON.parse(JSON.stringify(C05)) as { nodes: Array<Record<string, unknown>> };
+    (stated.nodes.find((n) => n.id === 'mrr')!.nonlinear_identity as Record<string, unknown>).stated_in_brief = true;
+    const { r } = await propose(STRONG_ARGS, STRONG, EVALUATED, stated as never);
+    expect(String(r.detail)).toContain('This link is defined by MRR = Pro plan price × Pro paying subscribers');
+  });
+
+  // DL #2248 D1–D4: the shapes where the Agent's old second rule prepared what the writer refuses.
+  for (const [name, last] of [
+    ['D1: the graph was edited after a Run that evaluated MRR (the read is stale, its evaluated list withheld)',
+      { facts: [runFact(EVALUATED_MRR)], run: 'complete_stale' }],
+    ['D2: a fresh Run whose enrichment carries no identity_evaluations and withdrew nothing',
+      { facts: [runFact({})], run: 'complete_current' }],
+    ['D4: a newer Run failed; the last SUCCESSFUL one evaluated MRR',
+      { facts: [runFact(EVALUATED_MRR), runFact({}, 'failed')], run: 'complete_current' }],
+  ] as [string, LastRun][]) {
+    it(`RED (${name}): refused, as the writer refuses it on approval`, async () => {
+      expect(writerRefuses(last), 'the writer refuses this shape').toBe(true);
+      const { r, puts } = await propose(STRONG_ARGS, STRONG, last);
+      expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'definitional_link' }));
+      expect(puts, 'nothing is prepared').toEqual([]);
+    });
+  }
+
+  it('fail closed: a read that did not say (no `analysis_identity_run_use`) refuses, as the writer does with no Run', async () => {
+    const { r, puts } = await propose(STRONG_ARGS, STRONG, EVALUATED, C05, false);
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, refusal: 'definitional_link' }));
+    expect(puts).toEqual([]);
+  });
+
+  for (const [name, last] of [
+    ['P3: the last Run withdrew MRR (`identities_not_forwarded`)',
+      { facts: [runFact({ _meta: { identities_not_forwarded: [{ node_id: 'mrr', reason: 'inferred_identity_inconsistent', frameless_node_ids: [] }] } })], run: 'complete_current', evaluated: [] }],
+    ['P3b: the last Run did not evaluate MRR (`evaluated: false`)',
+      { facts: [runFact({ identity_evaluations: [{ node_id: 'mrr', evaluated: false, withheld_reason: 'identity_zero_level' }] })], run: 'complete_current', evaluated: [] }],
+  ] as [string, LastRun][]) {
+    it(`CONTROL (${name}): the link was a belief that Run used, so the change is prepared — and the writer allows it`, async () => {
+      expect(writerRefuses(last), 'the writer allows this shape').toBe(false);
+      const { r, puts } = await propose(STRONG_ARGS, STRONG, last);
+      expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+      expect(puts).toHaveLength(1);
+    });
+  }
+
+  it('CONTRAST: a link into MRR that the identity does not define (Cost overrun risk → MRR) is prepared, whatever the Run', async () => {
+    const msg = 'The link from Cost overrun risk to MRR is very strong.';
+    for (const last of [NO_RUN, EVALUATED]) {
+      const { r, puts } = await propose({ from_label: 'Cost overrun risk', to_label: 'MRR', strength: 'very strong', rationale: msg }, msg, last);
+      expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+      expect(puts).toHaveLength(1);
+    }
+  });
+});

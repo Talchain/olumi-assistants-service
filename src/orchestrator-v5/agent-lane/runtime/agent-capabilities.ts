@@ -30,6 +30,7 @@ import {
 import { GM_HELD_HANDLER_ID, GM_HELD_OPERATIONS_MAX_JSON_CHARS, gmHeldProposalRef } from '../../handlers/edit-graph-referee-gate.js';
 import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../../graph-management/types.js';
 import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
+import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../../compose/definitional-links.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
 
 /**
@@ -798,6 +799,12 @@ interface GraphRead {
   readonly not_modelled?: NotModelledManifest;
   /** C46 × R3-4: the read's `analysis_identity_evaluated_node_ids` (same fact and gates as its result); absent = not attested. */
   readonly identity_evaluated?: ReadonlySet<string>;
+  /**
+   * R3-9: the read's `analysis_identity_run_use` — Canonical's `identityRunUseFromFacts` over the facts the link writer
+   * reads on approval, never freshness-gated. `null` = no successful Run, or the read did not say (fail closed: a
+   * definitional link is then refused, as the writer refuses it with no Run).
+   */
+  readonly identity_run_use?: IdentityRunUse | null;
   /** The selected run's per-limit rows (`analysis_limit_verdicts`), read off the SAME graph read (`limit-checks.ts`). */
   readonly limit_verdicts?: StoredLimitVerdicts;
 }
@@ -1379,7 +1386,11 @@ export function createAgentCapabilities(
     const notModelled = notModelledOfRead(r.json.not_modelled);
     const identityEvaluated = readEvaluatedIdentityNodeIds(r.json.analysis_identity_evaluated_node_ids);
     const limitVerdicts = readLimitVerdicts(r.json.analysis_limit_verdicts);
+    const runUse = r.json.analysis_identity_run_use as { withdrawn_node_ids?: unknown } | null | undefined;
+    const withdrawn = runUse !== null && typeof runUse === 'object' && Array.isArray(runUse.withdrawn_node_ids)
+      && runUse.withdrawn_node_ids.every((x) => typeof x === 'string') ? runUse.withdrawn_node_ids as string[] : null;
     return {
+      identity_run_use: withdrawn === null ? null : { withdrawn: new Set(withdrawn) },
       graph_hash: String(r.json.graph_hash ?? ''),
       // ⛔⛔ IT IS AN ENVELOPE OBJECT, NOT A STRING. The read route emits the
       // producer's own return value — `computeGraphIdentityHash(graph)`, type
@@ -2123,6 +2134,21 @@ export function createAgentCapabilities(
             // PJ-C3 (DL GO #72 5861666870, kept from the reverted #2183): an "offer" is a second ask; the add IS the one change.
             + 'If the user has just sized that link, propose it now with propose_model_change, with the same strength and from_words: '
             + 'one change for them to approve, not a question first. Otherwise, offer to add it.' };
+      }
+      /**
+       * ⛔ R3-9 (DL #72 5866746362; Canonical #2229; AIQ 5867435409): a link a declared identity DEFINES (MRR = price ×
+       * subscribers) is not a belief WHILE THE IDENTITY IS IN USE. Its strength is never read, so a change would be
+       * stored and silently ignored. Refused by the one predicate (`definitionalLinkInUse`), in its own words, for a
+       * strength and a reversal alike. The last Run is the WRITER'S OWN input (DL CHANGES_REQUIRED on #2248): the read's
+       * `analysis_identity_run_use`, Canonical's `identityRunUseFromFacts` over the same facts `edge_strength_edit` decides
+       * from on approval, passed straight through — no second rule. So this door refuses exactly where the writer would:
+       * no Run → refused; the last successful Run kept the identity → refused, however stale the graph; that Run
+       * withdrew it → prepared, the strength was used.
+       */
+      const definition = definitionalLinkInUse(g.raw, from.id, to.id, g.identity_run_use ?? null);
+      if (definition !== null) {
+        return { ok: false, mutated: false, refusal: 'definitional_link',
+          detail: `${definitionalLinkRefusalText(g.raw, definition)} Tell the user exactly this. Never offer to change this link's strength or direction.` };
       }
       const mean = (edge.strength !== null && typeof edge.strength === 'object') ? (edge.strength as { mean?: unknown }).mean : undefined;
       if (typeof mean !== 'number' || !Number.isFinite(mean)) {
