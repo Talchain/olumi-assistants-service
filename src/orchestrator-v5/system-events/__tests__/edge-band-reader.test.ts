@@ -229,12 +229,15 @@ describe('(e) confirm_current with a band: the mean stays, the std becomes the b
       ...(band !== undefined ? { band } : {}),
     });
 
-  it('⭐ RED: mean unchanged, std = the band std, flag cleared, analysis hash MOVES', async () => {
+  // R11 (AIQ #72 5872082179): a confirm is review, so the flag is KEPT and the band recorded in `reviewed_by_user`
+  // (before R11 this row pinned the flag CLEARED on a band confirm).
+  it('⭐ RED: mean unchanged, std = the band std, flag KEPT (R11), band recorded, analysis hash MOVES', async () => {
     const base = figureSet();
     const result = await apply(base, confirm('strong'));
     const edge = persistedEdge(result);
     expect(edge.strength).toStrictEqual({ mean: 0.55, std: STRONG_BAND_STD });
-    expect(edge).not.toHaveProperty('std_defaulted');
+    expect(edge.std_defaulted).toBe(true);
+    expect((edge.provenance as Record<string, unknown>).reviewed_by_user).toMatchObject({ intent: 'confirm', band: 'strong' });
     if (result.kind !== 'mutated') return;
     expect(result.statedBand).toBe('strong');
     expect(computeAnalysisAffectingGraphHash(result.graph)).not.toBe(

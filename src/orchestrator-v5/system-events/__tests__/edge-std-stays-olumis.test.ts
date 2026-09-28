@@ -188,7 +188,10 @@ describe('(b) CONTRAST: a band the user named keeps the band’s spread and is N
     expect(edge).not.toHaveProperty('std_defaulted');
   });
 
-  it('the Agent’s band CONFIRM (mean kept): band std, flag cleared, admitted by the confirm guard', async () => {
+  // R11 (AIQ #72 5872082179): a confirm is REVIEW, not authorship, so it keeps every authorship flag exactly — the
+  // band's spread is stored (A6f/A6e) and the band recorded in `reviewed_by_user`. Before R11 this row pinned the flag
+  // CLEARED on a band confirm.
+  it('the Agent’s band CONFIRM (mean kept): band std, flag KEPT (R11), band recorded, admitted by the confirm guard', async () => {
     const inBand = paulGraph({ strength: { mean: USER_FIGURE, std: 0.425 }, std_defaulted: true });
     const result = await applyStated(
       inBand,
@@ -198,7 +201,8 @@ describe('(b) CONTRAST: a band the user named keeps the band’s spread and is N
     expect(result.kind === 'refused' ? result.reason : result.kind).toBe('mutated');
     const edge = persistedEdge(result);
     expect(edge.strength).toStrictEqual({ mean: USER_FIGURE, std: edgeBandStd('very strong') });
-    expect(edge).not.toHaveProperty('std_defaulted');
+    expect(edge.std_defaulted).toBe(true);
+    expect(edge.provenance?.reviewed_by_user).toMatchObject({ intent: 'confirm', band: 'very strong' });
   });
 });
 
@@ -265,12 +269,13 @@ describe('(e) the analysis hash: the std change is IN it, `std_defaulted` is NOT
     expect(computeAnalysisAffectingGraphHash(reparsed)).toBe(computeAnalysisAffectingGraphHash(GraphV3.parse(unflagged)));
   });
 
-  it('a figure CONFIRM keeps the std exactly, so the analysis stays fresh (flag only)', async () => {
+  // R11: the flag is KEPT exactly on a confirm (before R11 a figure confirm added `std_defaulted: true`).
+  it('a figure CONFIRM keeps the std exactly, so the analysis stays fresh (review only, R11)', async () => {
     const base = paulGraph({ strength: { mean: USER_FIGURE, std: 0.00375 } });
     const result = await apply(base, eventFor({ intent: 'confirm_current', expected: { mean: USER_FIGURE, effect_direction: 'positive' } }));
     if (result.kind !== 'mutated') throw new Error(result.reason);
     expect(persistedEdge(result).strength).toStrictEqual({ mean: USER_FIGURE, std: 0.00375 });
-    expect(persistedEdge(result).std_defaulted).toBe(true);
+    expect(persistedEdge(result)).not.toHaveProperty('std_defaulted');
     expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(computeAnalysisAffectingGraphHash(GraphV3.parse(base)));
   });
 });
@@ -281,32 +286,42 @@ describe('(e) the analysis hash: the std change is IN it, `std_defaulted` is NOT
 describe('(f) isProvenanceOnlyEdgeConfirmation admits exactly the std-provenance change and nothing else', () => {
   const before = () => paulGraph({ strength: { mean: USER_FIGURE, std: 0.00375 } });
 
-  /** The writer's projection for a confirm of `b` (#2096 stamp + this row's flag). */
-  function stamped(b: RawGraph, opts: { bandStd?: number; stdDefaulted?: boolean | null } = {}): RawGraph {
+  /**
+   * The writer's projection for a confirm of `b` — R11 (AIQ #72 5872082179): every authorship byte KEPT, the review
+   * recorded (with the band, for a band confirm), and this row's std / flag. `stdDefaulted` omitted = the flag kept as
+   * it was. (Before R11 this modelled the #2096 stamp: `user_specified`, `user_set`, `defaulted` → `exists_defaulted`,
+   * Olumi's sizing dropped, and the A6f flag set.)
+   */
+  function stamped(b: RawGraph, opts: { bandStd?: number; band?: InfluenceBand; stdDefaulted?: boolean | null } = {}): RawGraph {
     const after = structuredClone(b);
     const e = after.edges[0]!;
-    const { natural_effect: _n, magnitude: _m, reasoning: _r, ...rest } = e.provenance ?? {};
-    e.provenance = { ...rest, source: 'user_specified' };
-    e.provenance_display = 'user_set';
-    if (e.defaulted === true) e.exists_defaulted = true;
-    delete e.defaulted;
+    e.provenance = {
+      ...e.provenance,
+      reviewed_by_user: { intent: 'confirm', at: '2026-09-28T15:00:00.000Z', ...(opts.band ? { band: opts.band } : {}) },
+    };
     if (opts.bandStd !== undefined) e.strength = { ...e.strength, std: opts.bandStd };
     if (opts.stdDefaulted === null) delete e.std_defaulted;
-    else e.std_defaulted = opts.stdDefaulted ?? true;
+    else if (opts.stdDefaulted !== undefined) e.std_defaulted = opts.stdDefaulted;
     return after;
   }
   const guard = (b: RawGraph, a: RawGraph, statedBand?: InfluenceBand) =>
     isProvenanceOnlyEdgeConfirmation({ before: b, after: a, from: FROM, to: TO, ...(statedBand ? { statedBand } : {}) });
 
-  it('⭐ a figure confirm: std kept exactly, `std_defaulted` absent → true: admitted', () => {
+  // R11: a confirm keeps `std_defaulted` EXACTLY. Before R11 a figure confirm had to flip it absent → true, and a
+  // confirm that left it absent was refused as "the N1 defect as a write".
+  it('⭐ R11: a figure confirm: std kept exactly, `std_defaulted` kept (absent → absent): admitted', () => {
     const b = before();
     expect(guard(b, stamped(b))).toBe(true);
+    const flagged = paulGraph({ strength: { mean: USER_FIGURE, std: 0.00375 }, std_defaulted: true });
+    expect(guard(flagged, stamped(flagged))).toBe(true);
   });
 
-  it('⭐ RED: a figure confirm that does NOT flag the std (the N1 defect as a write) → refused', () => {
+  it('⭐ R11: a figure confirm that ADDS or REMOVES the flag → refused (a confirm restates no authorship)', () => {
     const b = before();
-    expect(guard(b, stamped(b, { stdDefaulted: null }))).toBe(false);
+    expect(guard(b, stamped(b, { stdDefaulted: true }))).toBe(false);
     expect(guard(b, stamped(b, { stdDefaulted: false }))).toBe(false);
+    const flagged = paulGraph({ strength: { mean: USER_FIGURE, std: 0.00375 }, std_defaulted: true });
+    expect(guard(flagged, stamped(flagged, { stdDefaulted: null }))).toBe(false);
   });
 
   it('⭐ a figure confirm that changes the std ANY way → refused (rescaled, default, or band’s)', () => {
@@ -316,18 +331,20 @@ describe('(f) isProvenanceOnlyEdgeConfirmation admits exactly the std-provenance
     expect(guard(b, stamped(b, { bandStd: edgeBandStd('very strong') }))).toBe(false);
   });
 
-  it('a band confirm: band std, flag absent → absent, or present → absent: admitted', () => {
+  // R11: a band confirm stores the band's spread and records the band, but keeps the flag exactly. Before R11 it had
+  // to CLEAR the flag (present → absent admitted, kept refused).
+  it('R11: a band confirm: band std, band recorded, flag KEPT (absent → absent, present → present): admitted', () => {
     const b = before();
-    expect(guard(b, stamped(b, { bandStd: edgeBandStd('very strong'), stdDefaulted: null }), 'very strong')).toBe(true);
+    expect(guard(b, stamped(b, { bandStd: edgeBandStd('very strong'), band: 'very strong' }), 'very strong')).toBe(true);
     const flagged = paulGraph({ strength: { mean: USER_FIGURE, std: 0.425 }, std_defaulted: true });
-    expect(guard(flagged, stamped(flagged, { bandStd: edgeBandStd('very strong'), stdDefaulted: null }), 'very strong')).toBe(true);
+    expect(guard(flagged, stamped(flagged, { bandStd: edgeBandStd('very strong'), band: 'very strong' }), 'very strong')).toBe(true);
   });
 
-  it('⭐ TAMPER: a band confirm that sets or keeps `std_defaulted` → refused (the band states the spread)', () => {
+  it('⭐ TAMPER (R11): a band confirm that sets or clears `std_defaulted` → refused', () => {
     const b = before();
-    expect(guard(b, stamped(b, { bandStd: edgeBandStd('very strong'), stdDefaulted: true }), 'very strong')).toBe(false);
+    expect(guard(b, stamped(b, { bandStd: edgeBandStd('very strong'), band: 'very strong', stdDefaulted: true }), 'very strong')).toBe(false);
     const flagged = paulGraph({ strength: { mean: USER_FIGURE, std: 0.425 }, std_defaulted: true });
-    expect(guard(flagged, stamped(flagged, { bandStd: edgeBandStd('very strong'), stdDefaulted: true }), 'very strong')).toBe(false);
+    expect(guard(flagged, stamped(flagged, { bandStd: edgeBandStd('very strong'), band: 'very strong', stdDefaulted: null }), 'very strong')).toBe(false);
   });
 
   it('TAMPER: `std_defaulted` added to ANOTHER edge → refused', () => {
@@ -361,11 +378,14 @@ describe('(g) every exact-figure path rescales Olumi’s spread and flags it', (
     expect(edge.std_defaulted).toBe(true);
   });
 
-  it('⭐ UI `edge_strength_edit` confirm_current, no band ("Confirm this estimate"): std exactly kept, flagged', async () => {
+  // R11: a confirm is review — the std and every flag kept exactly (before R11: std kept, flagged `std_defaulted`).
+  it('⭐ UI `edge_strength_edit` confirm_current, no band ("Confirm this estimate"): std exactly kept, flags kept (R11)', async () => {
     const base = paulGraph();
     const edge = persistedEdge(await apply(base, eventFor({ intent: 'confirm_current', magnitude: 0.0075 })));
     expect(edge.strength).toStrictEqual(CAPTURED_EDGE_17D1CD3A.strength);
-    expect(edge.std_defaulted).toBe(true);
+    expect(edge).not.toHaveProperty('std_defaulted');
+    expect(edge.defaulted).toBe(true);
+    expect(edge.provenance).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_placeholder', reviewed_by_user: { intent: 'confirm' } });
   });
 
   it('⭐ Agent approval whose band is NOT this write’s (restored proposal / another link): a figure', async () => {

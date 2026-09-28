@@ -166,8 +166,8 @@ import { computeAnalysisAffectingGraphHashSha256 } from '../context/graph-hash.j
 import type { CanonicalReadinessIssue } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { pickGoalThresholdTrio } from '../../utils/goal-threshold-trio.js';
 import {
-  classifyValueSource,
   earnsAuthorshipCredit,
+  edgeStrengthProvenance,
   structureProvenance,
   type ObligationClass,
   type StructureProvenance,
@@ -854,7 +854,7 @@ function goalTargetStated(graph: unknown): boolean {
  * Consults `obligation-provenance.ts` and derives no authorship rule of its own:
  *   · baseline nodes → {@link structureProvenance} (observed_state.source, then
  *     .extractionType, then a repair-authored incoming edge);
- *   · causal edges   → {@link classifyValueSource} over `provenance.source`.
+ *   · causal edges   → {@link edgeStrengthProvenance} (`provenance.source`; a defaulted strength earns no credit).
  *
  * ⚠ Edges INCIDENT TO an option/decision/constraint node are excluded from BOTH
  * populations — see {@link strippedByPlot}.
@@ -966,7 +966,8 @@ export function censusConfidenceParameters(graph: unknown): SemanticQualitySigna
     const to = typeof edge.to === 'string' ? edge.to : undefined;
     if (strippedByPlot(from === undefined ? undefined : kindById.get(from))) continue;
     if (strippedByPlot(to === undefined ? undefined : kindById.get(to))) continue;
-    const provenance = classifyValueSource(asRecord(edge.provenance)?.source);
+    // R11: the link's STRENGTH authorship — its source, except that a defaulted strength never earns credit.
+    const provenance = edgeStrengthProvenance(edge);
     tally(provenance);
     if (
       from !== undefined &&

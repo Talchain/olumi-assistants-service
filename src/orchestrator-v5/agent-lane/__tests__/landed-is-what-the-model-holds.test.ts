@@ -46,7 +46,7 @@ const said = (r: Record<string, unknown>): string => {
   return withWriteOutcome(n.text, n.status);
 };
 
-type Edge = { from: string; to: string; strength: { mean: number; std: number }; exists_probability: number; effect_direction: 'positive' | 'negative'; provenance?: { source: string } };
+type Edge = { from: string; to: string; strength: { mean: number; std: number }; exists_probability: number; effect_direction: 'positive' | 'negative'; provenance?: { source: string; reviewed_by_user?: { intent: string; at: string } } };
 type G = { nodes: { id: string; kind: string; label: string }[]; edges: Edge[] };
 
 /**
@@ -80,11 +80,17 @@ const NODES = [
 const linkAt = (mean: number, source = 'cee_hypothesis'): G => ({ nodes: NODES,
   edges: [{ from: 'price', to: 'mrr', strength: { mean, std: 0.1 }, exists_probability: 1, effect_direction: 'positive', provenance: { source } }] });
 
-/** The product's link-strength writer: sets ±magnitude (or keeps it, on confirm) and stamps it the user's. */
+/**
+ * The product's link-strength writer: sets ±magnitude and stamps it the user's — or, on confirm, keeps it and records
+ * the user's REVIEW (R11, AIQ #72 5872082179: a confirm is review, not authorship; before R11 it stamped both).
+ */
 const linkWriter = (opts: { refuse?: boolean; draft?: boolean } = {}) => (g: G, ev: Record<string, unknown>) => {
   if (opts.refuse === true) return { g, committed: false, moved: false };
+  const provenanceAfter = (e: Edge): Edge['provenance'] => (ev['intent'] === 'confirm_current'
+    ? (e.provenance === undefined ? undefined : { ...e.provenance, reviewed_by_user: { intent: 'confirm', at: '2026-09-28T15:00:00.000Z' } })
+    : { source: 'user_specified' });
   const next: G = { ...g, edges: g.edges.map((e) => (e.from === ev['from'] && e.to === ev['to']
-    ? { ...e, strength: { ...e.strength, mean: Number(ev['magnitude']) }, provenance: { source: 'user_specified' } } : e)) };
+    ? { ...e, strength: { ...e.strength, mean: Number(ev['magnitude']) }, provenance: provenanceAfter(e) } : e)) };
   // A provenance-only confirm leaves the ANALYSIS hash where it was (provenance is outside its projection).
   const moved = ev['intent'] !== 'confirm_current';
   return { g: next, committed: true, moved, ...(opts.draft === true ? { json: { draft_graph: next } } : {}) };
