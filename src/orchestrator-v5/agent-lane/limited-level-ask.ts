@@ -50,9 +50,13 @@ interface GraphNode {
   readonly observed_state?: unknown;
 }
 
-/** A prefix symbol by itself or by its code, from the one currency vocabulary: "GBP" and "£" both say "£". */
+/**
+ * A prefix symbol by itself or by its code, DERIVED from the one currency vocabulary (never a list of our own: the
+ * `currency-vocabulary.union` guard): its single-character, non-letter keys, as that guard reads them. "GBP" and the
+ * pound sign both say the pound sign; "CHF", "kr" and the dollar variants stay after the figure.
+ */
 const PREFIX_SYMBOL: ReadonlyMap<string, string> = new Map(Object.entries(CURRENCY_SYMBOL_TO_CODE)
-  .filter(([symbol]) => /^[£$€¥₹]$/u.test(symbol))
+  .filter(([symbol]) => [...symbol].length === 1 && !/[a-z]/i.test(symbol))
   .flatMap(([symbol, code]) => [[symbol, symbol], [code, symbol]] as const));
 
 /**
