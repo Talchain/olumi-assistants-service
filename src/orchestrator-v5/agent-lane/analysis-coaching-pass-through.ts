@@ -62,6 +62,11 @@ export interface RunTurnCoachingFinal {
    * `constraint_results`, so the predicate cannot run here. Absent → the leader-limit-risk leg is inert.
    */
   leaderLimitRisks?: unknown;
+  /**
+   * B5 (#2146): the selected run's per-limit verdicts from the SAME graph read (`readBackState` `limitVerdicts`,
+   * `analysis_limit_verdicts`). Absent → the limit leg reads the aggregate only, as before.
+   */
+  limitVerdicts?: unknown;
 }
 
 export interface RunTurnCoachingResult {
@@ -369,6 +374,7 @@ export function runTurnNextMove(
     constraintVerdictState: final.constraintVerdictState,
     leaderLimitRisks: final.leaderLimitRisks,
     boundGraph,
+    limitVerdicts: final.limitVerdicts,
   });
   const scienceBrief = scienceBriefOf(selection.move, selection.caveats, final.analysisState);
   if (selection.move === null) {

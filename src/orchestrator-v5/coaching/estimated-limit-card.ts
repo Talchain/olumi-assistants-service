@@ -61,7 +61,7 @@ import { CoachingBlockSchema, type CoachingBlock } from '@talchain/schemas/bound
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 import { collectInterventionControlledFactorIds } from '../context/intervention-controlled-drivers.js';
 import { deterministicBlockId } from '../compose/block-id.js';
-import { readRatifiedConstraints } from '../../orchestrator/context/constraint-feasibility.js';
+import { readRatifiedConstraints, type StoredLimitVerdicts } from '../../orchestrator/context/constraint-feasibility.js';
 import { sayLevel } from './bound-graph.js';
 import {
   ELICITATION_CLOSE,
@@ -135,7 +135,19 @@ export function estimatedLimitIn(graph: Record<string, unknown> | null): Estimat
   if (graph === null || !Array.isArray(graph.nodes)) return null;
   const ratified = readRatifiedConstraints(graph);
   if (ratified.length !== 1) return null;
-  const nodeId = ratified[0]!.node_id;
+  return estimatedLimitForConstraint(graph, ratified[0]!);
+}
+
+/**
+ * One ratified limit joined by identity to its node, when that node's level is not the user's own figure; null when
+ * the node is missing, duplicated, unlabelled, carries no usable level, or the limit's unit is not the node's own.
+ */
+function estimatedLimitForConstraint(
+  graph: Record<string, unknown>,
+  ratified: { readonly constraint_id: string; readonly node_id?: string | null; readonly unit?: unknown },
+): EstimatedLimit | null {
+  if (!Array.isArray(graph.nodes)) return null;
+  const nodeId = ratified.node_id;
   if (nodeId === null || nodeId === undefined || nodeId.length === 0) return null;
   const matches = graph.nodes.filter((n) => readRecord(n)?.id === nodeId);
   if (matches.length !== 1) return null;
@@ -144,15 +156,59 @@ export function estimatedLimitIn(graph: Record<string, unknown> | null): Estimat
   // checked in the unit it states. A RELABELLED limit is exempt: the relabel is what framed it (MG #70 5856264807 —
   // 17d1's "%" reached ISL as 0.04), so "checked against …" is true there (AI Quality 5856373468).
   const row = (Array.isArray(graph.goal_constraints) ? graph.goal_constraints : [])
-    .map(readRecord).find((r) => r?.constraint_id === ratified[0]!.constraint_id);
+    .map(readRecord).find((r) => r?.constraint_id === ratified.constraint_id);
   const nodeUnit = readRecord(node.observed_state)?.unit;
-  const limitUnit = ratified[0]!.unit;
+  const limitUnit = ratified.unit;
   if (row?.provenance_unit_relabelled === undefined && typeof limitUnit === 'string' && typeof nodeUnit === 'string'
     && limitUnit.trim() !== nodeUnit.trim()) return null;
   const level = levelOf(readRecord(node.observed_state));
   const label = typeof node.label === 'string' ? node.label.trim() : '';
   const kind = typeof node.kind === 'string' && TARGETABLE_NODE_KINDS.includes(node.kind) ? node.kind : null;
   return level !== null && label.length > 0 ? { nodeId, kind, label, ...level } : null;
+}
+
+/** The per-limit verdict reason (#2146) each `whose` must agree with: two facts, one answer, or no card. */
+const WHOSE_BY_REASON: Readonly<Record<string, EstimatedLimit['whose']>> = {
+  level_olumi_estimate: 'olumi',
+  level_user_assumption: 'ratified',
+};
+
+/**
+ * B5 (#2146): the limit the run CHECKED only against a figure that is not the user's, from the per-limit verdicts'
+ * OWN rows (`state: 'estimate_only'`), never from the aggregate. Joined by `constraint_id` to the bound graph's
+ * ratified limit and its node; the row's reason and the node's value source must name the same owner; a factor an
+ * option sets is not this card (its level is the option's, not today's). When several qualify, the one on the factor
+ * the result depends on most (PLoT's `importance_rank`) — one card, the consequential one. Pure; null otherwise.
+ */
+export function estimatedLimitFromVerdicts(
+  graph: Record<string, unknown> | null,
+  perLimit: StoredLimitVerdicts,
+  runOptions: unknown,
+  analysisResult: unknown,
+): EstimatedLimit | null {
+  if (graph === null) return null;
+  const ratified = readRatifiedConstraints(graph);
+  const controlled = new Set([
+    ...collectInterventionControlledFactorIds(graph),
+    ...collectInterventionControlledFactorIds({ options: runOptions }),
+  ]);
+  const rankOf = new Map<string, number>();
+  const rows = readRecord(readRecord(analysisResult)?.enrichment)?.factor_sensitivity;
+  for (const r of Array.isArray(rows) ? rows.map(readRecord) : []) {
+    if (typeof r?.factor_id === 'string' && typeof r.importance_rank === 'number') rankOf.set(r.factor_id, r.importance_rank);
+  }
+  const candidates: EstimatedLimit[] = [];
+  for (const verdict of perLimit.per_limit) {
+    if (verdict.state !== 'estimate_only') continue;
+    const whose = verdict.reason !== undefined ? WHOSE_BY_REASON[verdict.reason] : undefined;
+    const limitRow = ratified.find((c) => c.constraint_id === verdict.constraint_id);
+    if (whose === undefined || limitRow === undefined) continue;
+    const limit = estimatedLimitForConstraint(graph, limitRow);
+    if (limit === null || limit.whose !== whose || controlled.has(limit.nodeId)) continue;
+    candidates.push(limit);
+  }
+  const rank = (l: EstimatedLimit): number => rankOf.get(l.nodeId) ?? Number.POSITIVE_INFINITY;
+  return [...candidates].sort((a, b) => rank(a) - rank(b))[0] ?? null;
 }
 
 /**
@@ -227,13 +283,20 @@ export function buildEstimatedLimitCard(
   boundGraph: Record<string, unknown> | null,
   /** The bound run's `analysis_ready.options` (their interventions); unknown shape → no ids. */
   runOptions: unknown,
+  /**
+   * B5 (#2146): the SAME read's per-limit verdicts (`readLimitVerdicts`). When attested they are the authority —
+   * each limit's own row, not the aggregate — and several limits are fine; absent → the aggregate path, unchanged.
+   */
+  perLimit: StoredLimitVerdicts | null = null,
 ): EstimatedLimitCardDecision {
   const result = readRecord(input.analysisResult);
   if (result === null || result.type !== 'analysis_result' || result.computed_against_hash !== input.graphHash) {
     return { block: null, reason: 'identity_mismatch' };
   }
-  if (verdictState !== EVALUATED_FEASIBLE) return { block: null, reason: 'not_checked_against_an_estimate' };
-  const limit = estimatedLimitIn(boundGraph);
+  if (perLimit === null && verdictState !== EVALUATED_FEASIBLE) return { block: null, reason: 'not_checked_against_an_estimate' };
+  const limit = perLimit !== null
+    ? estimatedLimitFromVerdicts(boundGraph, perLimit, runOptions, result)
+    : estimatedLimitIn(boundGraph);
   if (limit === null) return { block: null, reason: 'not_checked_against_an_estimate' };
   // An option that sets this factor was checked at its own level, never today's (see above).
   if (
