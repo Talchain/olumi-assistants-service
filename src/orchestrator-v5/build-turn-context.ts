@@ -1693,22 +1693,48 @@ export async function loadMostRecentPendingActionsIntegrityStrict(
 }
 
 /**
+ * ROADMAP 2.717 — the answer of a continuation-guard read. THREE states,
+ * deliberately, because the guard's two failure directions are not
+ * symmetric:
+ *
+ *   - `'yes'` / `'no'` — the store answered.
+ *   - `'unknown'` — the store was asked and FAILED. The route treats this as
+ *     a continuation (the NON-DESTRUCTIVE branch), so its persisted-model
+ *     check runs and only a positively-read "no model, no draft in flight"
+ *     can lift the guard.
+ *
+ * Why not a boolean. `false` on a failure (the old shape) let one transient
+ * read error classify a live decision as FRESH, and a brief-shaped message
+ * then drafted OVER the stored model — the draft commit carries no expected
+ * hash (writer audit 27 Sep, finding 6). `true` on a failure would strand a
+ * genuine new decision. Neither boolean is honest; `'unknown'` is.
+ */
+export type ContinuationRead = 'yes' | 'no' | 'unknown';
+
+/**
  * V5 Signature Loop — bounded "does this scenario already have committed turns?"
- * read for the route-level refresh-continuation guard. Degrades to `false` on
- * a missing store, an unimplemented method (legacy mocks), or a read failure —
- * an uncertain read must NOT suppress the draft / frame-no-brief shortcut (a
- * false negative just keeps today's behaviour; a false positive would strand a
- * genuine new decision). Resolves the store inline via `tryGetSessionStore` to
- * keep the SessionStore import surface bounded to this module.
+ * read for the route-level refresh-continuation guard.
+ *
+ * ROADMAP 2.717 — a READ FAILURE answers `'unknown'`, never `'no'`: the route
+ * then keeps the continuation guard and runs its persisted-model check, so a
+ * model it could not rule out is never drafted over. A genuine new decision is
+ * not stranded: the persisted-model check lifts the guard when it positively
+ * reads "no model", and an explicit Generate Draft bypasses the guard.
+ *
+ * A missing store or an unimplemented method (legacy mocks) still answers
+ * `'no'`, as before: with no session store there is no persisted model to
+ * read and no draft commit can land, so that answer cannot enable an
+ * overwrite. Resolves the store inline via `tryGetSessionStore` to keep the
+ * SessionStore import surface bounded to this module.
  */
 export async function loadHasPriorTurns(
   scenarioId: string,
   requestId: string,
-): Promise<boolean> {
+): Promise<ContinuationRead> {
   const store = tryGetSessionStore(requestId, scenarioId);
-  if (!store?.hasPriorTurns) return false;
+  if (!store?.hasPriorTurns) return 'no';
   try {
-    return await store.hasPriorTurns(scenarioId);
+    return (await store.hasPriorTurns(scenarioId)) ? 'yes' : 'no';
   } catch (e) {
     log.warn(
       {
@@ -1716,9 +1742,9 @@ export async function loadHasPriorTurns(
         scenario_id: scenarioId,
         err: (e as Error)?.message ?? String(e),
       },
-      'V5 build-turn-context — hasPriorTurns failed; degrading to false (do not suppress draft/frame)',
+      "V5 build-turn-context — hasPriorTurns failed; answering 'unknown' (continuation guard kept — never draft over a model that may exist)",
     );
-    return false;
+    return 'unknown';
   }
 }
 
@@ -1731,21 +1757,20 @@ export async function loadHasPriorTurns(
  * in flight (the fresh-journey P0's S2). Failure-marked rows are excluded by
  * the store read so the post-loss state classifies fresh.
  *
- * Degrades to `false` on a missing store, an unimplemented method (legacy
- * mocks), or a read failure — identical posture to {@link loadHasPriorTurns}:
- * an uncertain read keeps today's behaviour rather than suppressing a
- * genuine new decision. (The fail-open direction of BOTH loaders is rowed
- * separately as 2.717; this loader deliberately matches the incumbent.)
+ * ROADMAP 2.717 — same three-state posture as {@link loadHasPriorTurns}: a
+ * READ FAILURE answers `'unknown'` (the route keeps the guard, and never lifts
+ * it on a draft that may be in flight); a missing store or an unimplemented
+ * method (legacy mocks) answers `'no'`, as before.
  */
 export async function loadHasOtherAdmittedLiveTurn(
   scenarioId: string,
   excludeTurnId: string,
   requestId: string,
-): Promise<boolean> {
+): Promise<ContinuationRead> {
   const store = tryGetSessionStore(requestId, scenarioId);
-  if (!store?.hasOtherAdmittedLiveTurn) return false;
+  if (!store?.hasOtherAdmittedLiveTurn) return 'no';
   try {
-    return await store.hasOtherAdmittedLiveTurn(scenarioId, excludeTurnId);
+    return (await store.hasOtherAdmittedLiveTurn(scenarioId, excludeTurnId)) ? 'yes' : 'no';
   } catch (e) {
     log.warn(
       {
@@ -1753,9 +1778,9 @@ export async function loadHasOtherAdmittedLiveTurn(
         scenario_id: scenarioId,
         err: (e as Error)?.message ?? String(e),
       },
-      'V5 build-turn-context — hasOtherAdmittedLiveTurn failed; degrading to false (do not suppress draft/frame)',
+      "V5 build-turn-context — hasOtherAdmittedLiveTurn failed; answering 'unknown' (continuation guard kept — a draft may be in flight)",
     );
-    return false;
+    return 'unknown';
   }
 }
 
@@ -1766,6 +1791,11 @@ export async function loadHasOtherAdmittedLiveTurn(
  * draft-shortcut unstranding term. Degrades to `false` (no notice, no
  * unstrand) on a missing store / method / read failure — the notice is a
  * disclosure and must never fail a turn.
+ *
+ * ROADMAP 2.717 — deliberately NOT three-state. Unlike its two neighbours,
+ * `false` here is already the CONSERVATIVE answer: it withholds a lift of the
+ * continuation guard, never grants one. Pinned by
+ * `route-v2-continuation-read-unknown.test.ts` row (e).
  */
 export async function loadDraftLossStands(
   scenarioId: string,

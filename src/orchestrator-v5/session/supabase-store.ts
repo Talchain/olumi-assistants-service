@@ -1038,7 +1038,7 @@ export class SupabaseSessionStore implements SessionStore {
    * `uncommitted` is deliberately NOT part of this predicate, and that is a
    * measured choice rather than an omission: the sole consumer
    * (`route-v2.ts` `isContinuationScenario`) ORs this read with
-   * `loadHasPriorTurns`, which is TRUE for exactly the committed case — so
+   * `loadHasPriorTurns`, which answers `'yes'` for exactly the committed case — so
    * adding a committed-row anti-join here would cost a second round trip on
    * the hot path and could not change any answer.
    */
