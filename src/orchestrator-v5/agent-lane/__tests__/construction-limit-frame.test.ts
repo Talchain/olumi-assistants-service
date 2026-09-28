@@ -93,12 +93,24 @@ describe('every limit the drafter writes carries the frame the user stated', () 
     expect(items.required).toContain('frame');
   });
 
-  it('the drafter is told how to read the frame, and to give a limited cost its current spend (not an invented level)', async () => {
+  it('the drafter is told how to read the frame, to give a limited cost its current spend, and any other limited quantity Olumi\'s labelled estimate', async () => {
     const { reqs } = await run(candidate('level'));
     expect(reqs[0]!.instructions).toMatch(/State the `frame` of each limit: "level" when the user limits the value itself/);
     expect(reqs[0]!.instructions).toMatch(/"delta" only when they limit a CHANGE from today/);
     expect(reqs[0]!.instructions).toMatch(/When the limit is on a cost, budget or spend, give that factor a `baseline_value` at what is spent on it today/);
-    expect(reqs[0]!.instructions).toMatch(/Never set a current level that the brief does not support just because the user named a limit on it/);
+    // DL ruling #72 5863840239 (ii): the prompt and the coverage retry say the same thing — never "never set a level".
+    expect(reqs[0]!.instructions).toMatch(/When the user limits a quantity whose current level the brief does not state, still give it a `baseline_value`: your provisional estimate, with baseline_known:false and provenance ai_proposed, never the user\u2019s/);
+    expect(reqs[0]!.instructions).not.toMatch(/Never set a current level/);
+  });
+
+  // ⭐ Served journey E (DL pj-x3 final 5864154474, PJ-E-A2 STABLE FAIL): "annual salary spend under £400k" was TYPED "<="
+  // in 3 of 3 runs, so no `operator_as_stated` — the prompt itself said a spend cap is an upper bound ("<="). The TYPED
+  // operator still decides (limit-operator-as-stated.test.ts R2); the prompt now asks for the user's own comparator.
+  it('⭐ RED: the drafter is told to TYPE the comparator the user wrote — "<" for under, "<=" for at most — never "<=" for every cap', async () => {
+    const { reqs } = await run(candidate('level'));
+    const said = reqs[0]!.instructions;
+    expect(said).toContain('Type the comparator the user wrote: "<" for "under", "below" or "less than"; "<=" for "at most", "no more than" or "up to"; ">" for "over", "above" or "more than"; ">=" for "at least" or "no less than".');
+    expect(said).not.toMatch(/cap is an upper bound \("<="\)/);
   });
 
   it.each(['level', 'delta'] as const)('WIRE: a limit framed "%s" reaches /graph/register with that value_frame', async (frame) => {

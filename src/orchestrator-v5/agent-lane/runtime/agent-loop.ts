@@ -18,7 +18,7 @@
  */
 
 import { toolsFor, dispatchTool, type AgentCapabilities, type AgentToolContext, type AgentLaneMode, type ToolResult } from './agent-tools.js';
-import { isProposingTool, proposalsAwaitingApproval, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL } from '../approval-chips.js';
+import { isProposingTool, proposalsAwaitingApproval, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL, WITHDRAW_PROPOSAL, NOT_PROPOSED_THIS_TURN } from '../approval-chips.js';
 import { config } from '../../../config/index.js';
 import { log } from '../../../utils/telemetry.js';
 import {
@@ -55,6 +55,16 @@ export function answerIsIncomplete(resp: ModelCallResponse): boolean {
 }
 
 export type CallModel = (req: ModelCallRequest) => Promise<ModelCallResponse>;
+
+/** A call's `proposal_id` argument, or undefined when its arguments do not parse or carry none. Never throws. */
+const proposalIdArg = (raw: unknown): string | undefined => {
+  try {
+    const id = (JSON.parse(String(raw ?? '{}')) as { proposal_id?: unknown } | null)?.proposal_id;
+    return typeof id === 'string' ? id : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 export interface AgentTurnInput {
   readonly ctx: AgentToolContext;
@@ -93,6 +103,12 @@ export interface AgentTurnInput {
    * any capability is reached. Can only REMOVE: absent means the mode's set.
    */
   readonly withheldTools?: readonly string[];
+  /**
+   * ⭐ PJ-C1 LATENCY (#70 5859918872; words AIC 5859933281): given the turn's ONLY tool call and its result, the reply
+   * composed from that result (`composeProposalReply`), or `null` to keep the narrating call. Asked only when a hop made
+   * exactly one call and it is the turn's first; a composed reply ends the turn with no further model call.
+   */
+  readonly composeReply?: (tool: string, args: unknown, result: ToolResult) => string | null;
   /** Injected for deterministic tests; defaults to the wall clock. */
   readonly now?: () => number;
 }
@@ -143,6 +159,10 @@ export interface AgentTurnResult {
   readonly tool_calls: readonly {
     name: string; ok: boolean; mutated: boolean;
     proposal_id?: string; outcome?: string; refusal?: string;
+    /** A refused call's conflict fields — which parts of what the model sent fired (names only, never the figure). */
+    conflict_fields?: readonly string[];
+    /** A refused switch level's entries AS SENT — option, factor, value, unit, estimate; bounded (`rejectedLevelsOf`). */
+    rejected_levels?: readonly RejectedLevel[];
     /** Why a construction ended without an answer (`max_output_tokens`, `construction_timeout`) — for exports. */
     incomplete_reason?: string;
   }[];
@@ -171,6 +191,50 @@ const textOf = (items: readonly Record<string, unknown>[]): string => {
 
 /** The refusal a withheld tool returns. It consumed nothing and moved nothing. */
 export const WITHHELD_ON_CHIP_TURN = 'withheld_on_chip_turn';
+
+/** One refused switch-level entry as the model sent it: labels and the level's own scalars, each bounded. */
+export interface RejectedLevel {
+  readonly option: string;
+  readonly factor: string;
+  readonly value: unknown;
+  readonly unit?: unknown;
+  readonly estimate?: unknown;
+}
+
+/** A scalar as sent, bounded: numbers, booleans and null kept; a string cut to 40 characters; anything else its type. */
+const scalarAsSent = (v: unknown): unknown =>
+  typeof v === 'string' ? v.slice(0, 40) : typeof v === 'number' || typeof v === 'boolean' || v === null ? v : typeof v;
+
+/**
+ * ⭐ WHAT A REFUSED SWITCH LEVEL WAS, NOT ONLY WHICH FIELD FIRED (DL #72 5862693164). The `switch_level_not_on` loop grew
+ * run to run (1 → 2 → 7 → 10 refusals, `conflict_fields: ["unit","estimate"]`) while the served record kept no arguments,
+ * so every fix was built on inference. The refused entries — option and factor labels, and the level's value, unit and
+ * estimate — are kept: at most 4 entries, labels cut to 80 characters, scalars bounded (`scalarAsSent`). Never the basis
+ * or any other text the model wrote.
+ */
+const rejectedLevelsOf = (result: ToolResult): { rejected_levels?: readonly RejectedLevel[] } => {
+  const conflicts = (result as { switch_level_conflicts?: unknown }).switch_level_conflicts;
+  if (result.ok !== false || result.refusal !== 'switch_level_not_on' || !Array.isArray(conflicts)) return {};
+  const levels = conflicts
+    .filter((c): c is Record<string, unknown> => typeof c === 'object' && c !== null && !Array.isArray(c))
+    .slice(0, 4)
+    .map((c) => ({
+      option: String(c.option ?? '').slice(0, 80),
+      factor: String(c.factor ?? '').slice(0, 80),
+      value: scalarAsSent(c.value),
+      ...('unit' in c ? { unit: scalarAsSent(c.unit) } : {}),
+      ...('estimate' in c ? { estimate: scalarAsSent(c.estimate) } : {}),
+    }));
+  return levels.length > 0 ? { rejected_levels: levels } : {};
+};
+
+/** A refused result's `conflict_fields` (short field names), or nothing: never the tool's payload. */
+const conflictFieldsOf = (result: ToolResult): { conflict_fields?: readonly string[] } => {
+  const f = (result as { conflict_fields?: unknown }).conflict_fields;
+  if (result.ok !== false || !Array.isArray(f)) return {};
+  const names = f.filter((x): x is string => typeof x === 'string' && /^[a-z_]{1,32}$/.test(x)).slice(0, 8);
+  return names.length > 0 ? { conflict_fields: names } : {};
+};
 
 /**
  * Opens the state item a fresh packet puts into a turn's input (and marks it, so history never keeps one).
@@ -221,7 +285,7 @@ export async function runAgentTurn(
   ];
   /** What this turn hands on as history: everything but the state it was given. */
   const handedOn = (): unknown[] => (stateItem === undefined ? items : items.filter((i) => i !== stateItem));
-  const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; incomplete_reason?: string }[] = [];
+  const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; conflict_fields?: readonly string[]; rejected_levels?: readonly RejectedLevel[]; incomplete_reason?: string }[] = [];
   const toolResults: ToolResult[] = [];
   let mutated = false;
   const now = input.now ?? (() => Date.now());
@@ -360,7 +424,15 @@ export async function runAgentTurn(
         // refused before it is stored, so the turn always ends with its one control (`ONE_CHANGE_PER_APPROVAL`).
         : isProposingTool(String(call.name)) && proposalsAwaitingApproval(toolCalls).size > 0
           ? { ok: false, mutated: false, refusal: ONE_CHANGE_PER_APPROVAL, detail: ONE_CHANGE_PER_APPROVAL_DETAIL }
-          : await dispatchTool(String(call.name), String(call.arguments ?? '{}'), input.ctx, caps, mode);
+          // ⛔ Only a change THIS turn proposed and still offers can be withdrawn: one an earlier turn showed the user
+          // stays theirs to approve or decline (`WITHDRAW_PROPOSAL`).
+          : String(call.name) === WITHDRAW_PROPOSAL && !proposalsAwaitingApproval(toolCalls).has(proposalIdArg(call.arguments) ?? '')
+            ? {
+                ok: false, mutated: false, refusal: NOT_PROPOSED_THIS_TURN,
+                detail: 'Only a change you proposed in this turn, and have not had approved, can be withdrawn. Nothing was withdrawn: '
+                  + 'a change the user has already seen stays theirs to approve or decline.',
+              }
+            : await dispatchTool(String(call.name), String(call.arguments ?? '{}'), input.ctx, caps, mode);
       // ⛔ A TOOL'S OWN PROVIDER CALL IS NOT OVERHEAD.
       //
       // `build_model_from_brief` is dispatched as a tool and makes its own
@@ -400,6 +472,10 @@ export async function runAgentTurn(
         ...(typeof result.proposal_id === 'string' ? { proposal_id: result.proposal_id } : {}),
         ...(typeof result.outcome === 'string' ? { outcome: result.outcome } : {}),
         ...(typeof result.refusal === 'string' ? { refusal: result.refusal } : {}),
+        // ⭐ What a REFUSED call sent, by field name (OpenAI Runtime #70 5859406197 item 3: the served artefacts keep no
+        // tool arguments, so which part of a refused level fired could not be told). Names only, bounded.
+        ...conflictFieldsOf(result),
+        ...rejectedLevelsOf(result),
         ...(typeof result.incomplete_reason === 'string' ? { incomplete_reason: result.incomplete_reason } : {}),
       });
       toolResults.push(result);
@@ -408,6 +484,25 @@ export async function runAgentTurn(
         call_id: call.call_id,
         output: JSON.stringify(result),
       });
+    }
+    // ⭐ ONE CALL, NOT TWO: the turn's only call, answered from its own result (`composeReply`) — no narrating call.
+    if (input.composeReply !== undefined && calls.length === 1 && toolCalls.length === 1) {
+      let args: unknown;
+      try { args = JSON.parse(String(calls[0]!.arguments ?? '{}')); } catch { args = undefined; }
+      const text = input.composeReply(String(calls[0]!.name), args, toolResults[0]!);
+      if (text !== null && text.trim() !== '') {
+        items.push({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
+        return {
+          assistant_text: text,
+          items: handedOn(),
+          tool_calls: toolCalls,
+          tool_results: toolResults,
+          mutated,
+          hops: hop + 1,
+          stopped_reason: 'answered',
+          timing: ((t) => { emitTiming(t); return t; })(timingAt(hop + 1)),
+        };
+      }
     }
   }
 

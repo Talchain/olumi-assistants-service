@@ -28,6 +28,7 @@ import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js
 import { labelMatchesBaseline } from '../../../cee/transforms/analysis-ready.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { subtractMagnitudeDelta } from './magnitude-delta.js';
+import { asServedBeforeOneForm } from './fixtures/one-form-levels.js';
 
 // ── the served corpus ────────────────────────────────────────────────────────
 type Level = { value: number; source?: string };
@@ -114,6 +115,7 @@ function candidateFromServed(g: SGraph, opts: { olumi?: 'ai_proposed' | 'inferre
     ],
     identities: [],
     unknowns: opts.unknowns ?? [],
+    decision_question: null,
   } as unknown as CandidateModel & { unknowns: string[] };
 }
 
@@ -271,7 +273,8 @@ describe.each([
 
   it('FIDELITY: the reconstruction registers the served graph exactly, apart from the Olumi-added test option', async () => {
     const { graph: sizedGraph } = await build(draft());
-    const graph = unsized(withoutG1(sizedGraph, G1_WITH_HORIZON));
+    // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
+    const graph = unsized(withoutG1(asServedBeforeOneForm(sizedGraph, run.brief.draft_graph), G1_WITH_HORIZON));
     const served = run.brief.draft_graph;
     expect(withoutOption(graph, TEST_ID).nodes).toEqual(withoutOption(served, TEST_ID).nodes);
     expect(withoutOption(graph, TEST_ID).edges).toEqual(withoutOption(served, TEST_ID).edges);
@@ -282,7 +285,7 @@ describe.each([
     const { graph } = await build(draft());
     const base = baseGraph(key);
     expect(optionIds(base)).toContain(TEST_ID);
-    expect(JSON.stringify(unsized(withoutG1(graph, G1_WITH_HORIZON)))).toBe(JSON.stringify(framedBase(withoutOption(base, TEST_ID))));
+    expect(JSON.stringify(unsized(withoutG1(asServedBeforeOneForm(graph, base), G1_WITH_HORIZON)))).toBe(JSON.stringify(framedBase(withoutOption(base, TEST_ID))));
   });
 
   it('RED: the Olumi-added test option is not registered — no node, no edge', async () => {
@@ -353,9 +356,10 @@ describe('controls — what the rule must never touch', () => {
     expect(run.brief.may_run).toBe(true);
     const { graph, out } = await build(candidateFromServed(run.brief.draft_graph, { olumi: 'ai_proposed', horizon: null }));
     expect(optionIds(graph)).toContain(olumiId);
-    expect(withoutG1(graph, G1_NO_HORIZON).nodes).toEqual(olumisKnownLevels(run.brief.draft_graph.nodes));
+    // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
+    expect(withoutG1(asServedBeforeOneForm(graph, run.brief.draft_graph), G1_NO_HORIZON).nodes).toEqual(olumisKnownLevels(run.brief.draft_graph.nodes));
     expect(unsized(graph).edges).toEqual(run.brief.draft_graph.edges);
-    expect(JSON.stringify(unsized(withoutG1(graph, G1_NO_HORIZON)))).toBe(JSON.stringify(framedBase(baseGraph(key))));
+    expect(JSON.stringify(unsized(withoutG1(asServedBeforeOneForm(graph, baseGraph(key)), G1_NO_HORIZON)))).toBe(JSON.stringify(framedBase(baseGraph(key))));
     expect(out).not.toHaveProperty('options_withheld');
     expect(questions(out).filter((q) => q.startsWith('I left out ') || q.startsWith('What makes '))).toEqual([]);
   });
@@ -397,7 +401,7 @@ describe('controls — what the rule must never touch', () => {
     })) } as typeof base;
     const { graph, out } = await build(draft);
     expect(optionIds(graph)).toEqual(['keep_pro_price_at_49', 'raise_pro_price_to_59', '49_until_next_quarter']);
-    expect(graph.nodes.find((n) => n.id === '49_until_next_quarter')?.interventions).toEqual({ pro_plan_price: { value: 0.245, source: 'cee_hypothesis' } });
+    expect(asServedBeforeOneForm(graph, SHAPE_2.brief.draft_graph).nodes.find((n) => n.id === '49_until_next_quarter')?.interventions).toEqual({ pro_plan_price: { value: 0.245, source: 'cee_hypothesis' } });
     expect(out).not.toHaveProperty('options_withheld');
     // The run, on the served approved model: that option set to today's price alone PROCEEDS. Since #1963 the held
     // status quo also counts, so the model without it proceeds too; the control's point is that (b) KEEPS it.
@@ -463,7 +467,10 @@ describe('fix round — an open cell can equal at most one level; the status quo
     label, provenance, changes, is_status_quo: null,
     interventions: level === undefined ? [] : [{ factor_label: level.factor, value: level.value, value_kind: 'absolute', unit: '£ per month', provenance: 'ai_proposed' }],
   });
-  const levelOf = (g: SGraph, id: string) => g.nodes.find((n) => n.id === id)?.interventions ?? null;
+  // Read back in the served short form (P2 A5, `one-form-levels.ts`), on the frames of the served shape each row was
+  // drafted from: these rows pin WHICH level, not its members.
+  const levelOf = (g: SGraph, id: string, served: SGraph) =>
+    asServedBeforeOneForm(g, served).nodes.find((n) => n.id === id)?.interventions ?? null;
   const registeredLabels = (g: SGraph) => g.nodes.filter((n) => n.kind === 'option').map((n) => n.description ?? n.label);
   const withheldOf = (out: Record<string, unknown>) => (out.options_withheld ?? []) as { option: string; like: string; reason: string }[];
   /** Served shape 1 with Olumi's "£54 with AI release" drafted AFTER the level-less test option. */
@@ -477,7 +484,7 @@ describe('fix round — an open cell can equal at most one level; the status quo
     expect(draft.options.map((o) => o.label)).toEqual(['Keep current pricing', '£59 with AI release', 'Test £59 with AI release', '£54 with AI release']);
     const { graph, out } = await build(draft);
     expect(optionIds(graph)).toEqual(['keep_current_pricing', '59_with_ai_release', '54_with_ai_release']);
-    expect(levelOf(graph, '54_with_ai_release')).toEqual({ pro_plan_price: { value: 0.27, source: 'cee_hypothesis' } });
+    expect(levelOf(graph, '54_with_ai_release', SHAPE_1.brief.draft_graph)).toEqual({ pro_plan_price: { value: 0.27, source: 'cee_hypothesis' } });
     expect(withheldOf(out)).toEqual([{ option: 'Test £59 with AI release', like: '£59 with AI release', reason: 'option_indistinct' }]);
     expect(questions(out).filter((q) => q.startsWith('I left out '))).toEqual([STEP_1]);
   });
@@ -505,7 +512,7 @@ describe('fix round — an open cell can equal at most one level; the status quo
     const draft = { ...base, options: [...base.options, OPT('Raise Pro Price to £54', 'inferred', ['AI Feature Value'], { factor: 'Pro Plan Price', value: 54 })] } as typeof base;
     const { graph, out } = await build(draft);
     expect(optionIds(graph)).toEqual(['keep_pro_price_at_49', 'raise_pro_price_to_59', 'raise_pro_price_to_54']);
-    expect(levelOf(graph, 'raise_pro_price_to_54')).toEqual({ pro_plan_price: { value: 0.27, source: 'cee_hypothesis' } });
+    expect(levelOf(graph, 'raise_pro_price_to_54', SHAPE_2.brief.draft_graph)).toEqual({ pro_plan_price: { value: 0.27, source: 'cee_hypothesis' } });
     expect(withheldOf(out)).toEqual([{ option: 'Test £59 With AI Release', like: 'Raise Pro Price to £59', reason: 'option_indistinct' }]);
     expect(questions(out).filter((q) => q.startsWith('I left out '))).toEqual([STEP_2]);
   });
@@ -519,7 +526,7 @@ describe('fix round — an open cell can equal at most one level; the status quo
     ] } as typeof base;
     const { graph, out } = await build(draft);
     expect(optionIds(graph)).toEqual(['keep_current_pricing', 'raise_the_pro_price_with_the_ai_release', '54_with_ai_release', '64_with_ai_release']);
-    expect([levelOf(graph, '54_with_ai_release'), levelOf(graph, '64_with_ai_release')]).toEqual([
+    expect([levelOf(graph, '54_with_ai_release', SHAPE_1.brief.draft_graph), levelOf(graph, '64_with_ai_release', SHAPE_1.brief.draft_graph)]).toEqual([
       { pro_plan_price: { value: 0.27, source: 'cee_hypothesis' } }, { pro_plan_price: { value: 0.32, source: 'cee_hypothesis' } }]);
     expect(out).not.toHaveProperty('options_withheld');
     expect(questions(out).filter((q) => q.startsWith('I left out ') || q.startsWith('What makes '))).toEqual([]);
@@ -550,7 +557,7 @@ describe('fix round — an open cell can equal at most one level; the status quo
     ]);
     const { graph, out } = await build(draft);
     expect(optionIds(graph)).toEqual(['current_setup', '59_with_ai_release', '49_with_ai_release']);
-    expect(levelOf(graph, '49_with_ai_release')).toEqual(AT_49.brief.draft_graph.nodes.find((n) => n.id === '49_with_ai_release')!.interventions);
+    expect(levelOf(graph, '49_with_ai_release', AT_49.brief.draft_graph)).toEqual(AT_49.brief.draft_graph.nodes.find((n) => n.id === '49_with_ai_release')!.interventions);
     expect(out).not.toHaveProperty('options_withheld');
   });
 
@@ -593,6 +600,11 @@ describe('a second real draft, another domain — the banked LIVE hiring candida
  * rows keep their assertions unchanged. Olumi's "Test £59 with AI release" is left AS SERVED (no level): it is the
  * option admission withholds, so its pairs must never count as gaps. `servedGaps: true` keeps the served draft's
  * gaps, for the combined rows below.
+ *
+ * ⚠ RE-PINNED FOR DL ruling #72 5863840239 (ii): the served draft limits "Monthly churn" (at most 10% per month) and gives
+ * it NO level — the journey-C defect class — which is now a limit baseline gap for the same one retry. These rows ask
+ * about OPTION gaps, so in both modes churn carries Olumi's provisional level (4, not known), as 14 of 17 served drafts
+ * give it; the limit gap itself is `construction-limited-quantity-level.test.ts`'s.
  */
 const padded = (n: number, withTest: boolean, { servedGaps = false }: { servedGaps?: boolean } = {}) => {
   const base = candidateFromServed(SHAPE_1.brief.draft_graph, { olumi: 'ai_proposed', unknowns: [] });
@@ -607,7 +619,9 @@ const padded = (n: number, withTest: boolean, { servedGaps = false }: { servedGa
     ...base,
     options: (withTest ? base.options : base.options.filter((o) => o.label !== 'Test £59 with AI release')).map(gapFree),
     factors: [
-      ...base.factors.map((f) => (servedGaps || f.label !== 'AI feature availability' ? f : { ...f, baseline_known: false, baseline_value: 0 })),
+      ...base.factors
+        .map((f) => (f.label !== 'Monthly churn' ? f : { ...f, baseline_known: false, baseline_value: 4 }))
+        .map((f) => (servedGaps || f.label !== 'AI feature availability' ? f : { ...f, baseline_known: false, baseline_value: 0 })),
       ...extra.map((label) => ({ label, role: 'observable' as const, baseline_known: false, baseline_value: null, unit: null, provenance: 'ai_proposed', plausible_max: 100 })),
     ],
     links: [...base.links, ...extra.map((from) => ({ from, to: 'MRR', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null }))],
@@ -763,7 +777,18 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
   const ONLY_TEST_WITHHELD = [{ option: 'Test £59 with AI release', like: '£59 with AI release', reason: 'option_indistinct' }];
   /** Readiness on the registered graph. A kept £54 whose AI availability stays open is one honest value question, never a withheld option. */
   const blocking = (g: SGraph) => assessCanonicalAnalysisReadiness(g).blockingIssues.map((i) => [i.code, i.message]);
-  const ASK_54_AI = [['MISSING_OPTION_VALUE', 'Factor "AI feature availability" needs a numeric value for option "£54 with AI release"']];
+  // Olumi takes AI availability as off today (its 0 on the 0..1 frame is kept since DL #72 5864452374), and says so as
+  // Olumi's, never as the user's current state.
+  const ASK_54_AI = [['MISSING_OPTION_VALUE', 'Factor "AI feature availability" is currently off (Olumi\'s estimate). What should option "£54 with AI release" set it to?']];
+  /**
+   * placeholder-zero (48f2e12f): a row whose registered AI availability is levelled at 0.5 (not a 0/1 switch) needs a
+   * status-quo level for it, or readiness also asks what it is today — a question that row is not about. `padded`'s
+   * baseline (0, not known) registered nothing on a frame of 1 until DL #72 5864452374, so these rows' drafts state it KNOWN: 0 today,
+   * the AI release not yet shipped. With a level held, an open £54 is asked against it ("is currently 0").
+   */
+  const knownAi = <D extends CandidateModel>(d: D): D =>
+    ({ ...d, factors: d.factors.map((f) => (f.label === 'AI feature availability' ? { ...f, baseline_known: true, baseline_value: 0 } : f)) }) as D;
+  const ASK_54_AI_AT_0 = [['MISSING_OPTION_VALUE', 'Factor "AI feature availability" is currently 0 (Olumi\'s estimate). What should option "£54 with AI release" set it to?']];
 
   it('PRECONDITION (row 2e): within the limit, "£54 with AI release" is registered and distinct, and the one gap asked is £54\'s', async () => {
     for (const withTest of [true, false]) {
@@ -788,7 +813,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
   });
 
   it('CONTROL (row 2e, compliant): a retry that levels £54 -> AI feature availability is adopted — no duplicate in either draft', async () => {
-    const { out, graph, reqs } = await construct(with54(false), with54(false, LEVELLED_54));
+    const { out, graph, reqs } = await construct(knownAi(with54(false)), knownAi(with54(false, LEVELLED_54)));
     expect(reqs).toHaveLength(2);
     expect(issues(reqs[1]!.input)).toEqual([GAP_54]);
     expect([out.ok, out.size_retried]).toEqual([true, false]);
@@ -801,7 +826,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
   it('CONTROL (row 2f, the other side): the FIRST draft already withheld the duplicate — the compliant retry that copies it as drafted is adopted', async () => {
     // The duplicate is withheld by both admissions. The first draft never registered it, so the retry side still leaves
     // its pairs out: 0 < 1. Counted, 2 < 1 fails and £54 never gets the level the retry gave it.
-    const { out, graph, reqs } = await construct(with54(true), with54(true, LEVELLED_54));
+    const { out, graph, reqs } = await construct(knownAi(with54(true)), knownAi(with54(true, LEVELLED_54)));
     expect(reqs).toHaveLength(2);
     expect(issues(reqs[1]!.input)).toEqual([GAP_54]);
     expect([out.ok, out.size_retried]).toEqual([true, false]);
@@ -853,7 +878,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
     return { ...base, options: [...base.options, opt] } as typeof base;
   };
   const GAP_64 = GAP_54.replace('£54 with AI release', '£64 with AI release');
-  const ASK_54_64_AI = [...ASK_54_AI, ['MISSING_OPTION_VALUE', 'Factor "AI feature availability" needs a numeric value for option "£64 with AI release"']];
+  const ASK_54_64_AI = [...ASK_54_AI, ['MISSING_OPTION_VALUE', 'Factor "AI feature availability" is currently off (Olumi\'s estimate). What should option "£64 with AI release" set it to?']];
   const FOUR = ['keep_current_pricing', '59_with_ai_release', '54_with_ai_release', '64_with_ai_release'];
   /** A draft's level gaps on the options the first draft registers ("Test £59 with AI release" is withheld by every draft here). */
   const gapsOnRegistered = (d: CandidateModel) => prepareProvisionalCandidate(d).level_gaps.filter((g) => g.option !== 'Test £59 with AI release');
@@ -871,12 +896,12 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
   });
 
   it('CONTROL (row 2h, partial progress — the verifier\'s P2-ctrl): a retry that levels £64 and leaves £54 as drafted is adopted — all four registered, £54 still asked', async () => {
-    const { out, graph } = await construct(with54And64(), with54And64({}, LEVELLED(64, 0.5)));
+    const { out, graph } = await construct(knownAi(with54And64()), knownAi(with54And64({}, LEVELLED(64, 0.5))));
     expect([out.ok, out.size_retried]).toEqual([true, false]);
     expect(optionIds(graph!)).toEqual(FOUR);
     expect(levelsById(graph!)['54_with_ai_release']).toEqual({ pro_plan_price: 0.27 });
     expect(levelsById(graph!)['64_with_ai_release']).toEqual({ pro_plan_price: 0.32, ai_feature_availability: 0.5 });
-    expect(blocking(graph!)).toEqual(ASK_54_AI);
+    expect(blocking(graph!)).toEqual(ASK_54_AI_AT_0);
     expect(withheldOptions(out)).toEqual(ONLY_TEST_WITHHELD);
     expect(out.left_out_to_stay_compact).toBeUndefined();
   });
@@ -1000,9 +1025,9 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
   it('CONTROL (row 2j, a duplicate only the RETRY adds): the first draft withholds nothing; a retry that levels £54 and adds the duplicate is adopted', async () => {
     // The rule is about options the first draft REGISTERED: a new duplicate is the retry's own to withhold and say, and its
     // pairs are no gap (0 < 1). Counted, 2 < 1 fails; refused for withholding anything, £54 never gets its level.
-    expect(withheldBy(with54(false))).toEqual([]);
-    expect(withheldBy(with54(true, LEVELLED_54))).toEqual(['Test £59 with AI release']);
-    const { out, graph, reqs } = await construct(with54(false), with54(true, LEVELLED_54));
+    expect(withheldBy(knownAi(with54(false)))).toEqual([]);
+    expect(withheldBy(knownAi(with54(true, LEVELLED_54)))).toEqual(['Test £59 with AI release']);
+    const { out, graph, reqs } = await construct(knownAi(with54(false)), knownAi(with54(true, LEVELLED_54)));
     expect(reqs).toHaveLength(2);
     expect(issues(reqs[1]!.input)).toEqual([GAP_54]);
     expect([out.ok, out.size_retried]).toEqual([true, false]);
@@ -1077,7 +1102,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
   });
 
   it('CONTROL (row 3c): the same levelled retry, declaring nothing new, is adopted — "Keep current pricing" held and stamped', async () => {
-    const { out, graph } = await construct(with54(true), with54(true, LEVELLED_54));
+    const { out, graph } = await construct(knownAi(with54(true)), knownAi(with54(true, LEVELLED_54)));
     expect([out.ok, out.size_retried]).toEqual([true, false]);
     expect(levelsById(graph!)['54_with_ai_release']).toEqual({ pro_plan_price: 0.27, ai_feature_availability: 0.5 });
     expect(held(graph!)).toEqual(['keep_current_pricing']);

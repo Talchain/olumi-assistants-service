@@ -132,13 +132,21 @@ describe('enrichDraftGraph — M2 degrade paths (all return the untouched M1 gra
 describe('enrichDraftGraph — merge paths (real merge + guards)', () => {
   beforeEach(() => vi.clearAllMocks());
 
+  // A risk proposal carries its companion edge (`delta.edge`). Node-only, the risk lands unwired, an ORPHAN_NODE, which
+  // G12(ii) now reads as a new blocker (the row after this one). It passed before only because `baseGraph` is already
+  // `blocked`, so a status compare could not see it (Canonical #72 5861770361).
+  const wiredRisk = (id: string, label: string) => ({
+    node: { id, kind: 'risk', label },
+    edge: { from: id, to: 'goal_revenue', strength: { mean: -0.2, std: 0.1 }, exists_probability: 0.6, effect_direction: 'negative' },
+  });
+
   it('valid risk proposal → enriched=true, reason=applied, merged graph returned, input untouched', async () => {
     mockM2({
       kind: 'ok',
       proposals: [
         {
           type: 'added_risk',
-          delta: { node: { id: 'risk_regulatory', kind: 'risk', label: 'Regulatory delay' } },
+          delta: wiredRisk('risk_regulatory', 'Regulatory delay'),
           evidence_pointer: 'brief: approval timeline',
         },
       ],
@@ -152,6 +160,25 @@ describe('enrichDraftGraph — merge paths (real merge + guards)', () => {
     expect(res.reason).toBe('applied');
     expect(res.graph.nodes.some((n) => n.id === 'risk_regulatory')).toBe(true);
     expect(input.graph).toEqual(snapshot);
+  });
+
+  it('G12(ii): an UNWIRED risk (node only) lands as an orphan, a new blocker → degrade readiness_downgrade, M1 kept', async () => {
+    mockM2({
+      kind: 'ok',
+      proposals: [
+        {
+          type: 'added_risk',
+          delta: { node: { id: 'risk_regulatory', kind: 'risk', label: 'Regulatory delay' } },
+          evidence_pointer: 'brief: approval timeline',
+        },
+      ],
+      latencyMs: 5000,
+      model: 'test-model',
+    });
+    const res = await enrichDraftGraph(makeInput());
+    expect(res.enriched).toBe(false);
+    expect(res.reason).toBe('readiness_downgrade');
+    expect(res.graph.nodes.some((n) => n.id === 'risk_regulatory')).toBe(false);
   });
 
   it('emits a merge_report telemetry event with the accounting', async () => {
@@ -230,7 +257,7 @@ describe('enrichDraftGraph — merge paths (real merge + guards)', () => {
       proposals: [
         {
           type: 'added_risk',
-          delta: { node: { id: 'risk_new', kind: 'risk', label: 'New risk' } },
+          delta: wiredRisk('risk_new', 'New risk'),
           evidence_pointer: 'e',
         },
       ],

@@ -25,7 +25,7 @@
  */
 import { z } from 'zod';
 import type { CandidateMutationEnvelope } from './types.js';
-import { InterventionV3 } from '../../schemas/cee-v3.js';
+import { EdgeV3, InterventionV3 } from '../../schemas/cee-v3.js';
 import {
   aiEditableFieldRoots,
   aiEditableObservedSubkeys,
@@ -171,7 +171,8 @@ const PIPELINE_OWNED_MARKERS: readonly string[] = [
  *    clear it would relabel whose existence claim it is;
  *  - `std_defaulted` — the same per-field half for the link's SPREAD: an exact
  *    figure the user writes leaves `strength.std` Olumi's (edges; A6f, AIQ N1 on
- *    #2096, minted only by `adjust-edge-strength.ts`). A producer that could set
+ *    #2096, minted only by `adjust-edge-strength.ts` and, on a drawn causal link,
+ *    `structural-add-edge.ts`). A producer that could set
  *    or clear it would relabel whose uncertainty claim it is;
  *  - `origin` — creation-source stamp (edges).
  */
@@ -242,6 +243,24 @@ export const PIPELINE_OWNED_ROOTS: ReadonlySet<string> = new Set([
 /** The CEE-local half of the union, exported so the direction rule (this set is
  *  a SUBSET of the union, always) is assertable rather than assumed. */
 export const CEE_ANALYSIS_OWNED_ROOTS_FOR_TEST: readonly string[] = CEE_ANALYSIS_OWNED_ROOTS;
+
+/**
+ * ⭐ THE CEE-OWNED EDGE FIELDS — DERIVED from the owned union above, never listed a second time.
+ *
+ * Every key `EdgeV3` DECLARES whose name `PIPELINE_OWNED_ROOTS` holds: today `provenance`, `provenance_display`,
+ * `origin`, `validation`, `defaulted`, `exists_defaulted`, `std_defaulted`. Restricted to declared keys because an
+ * undeclared key does not survive a `GraphV3` re-parse, so no reader could rely on it (and the union also holds
+ * node-only names such as `source`, `raw_value` and `starterid`, which are not edge fields).
+ *
+ * Its reader is the whole-graph register (`withStoredEdgeFactsWhenUnstated`, `assist.v1.scenario-graph-register.ts`):
+ * a re-register that OMITS one of these on an unchanged edge keeps the stored value rather than erasing it (served
+ * `dd456fe`, scratch `01500753`: provenance and Olumi's flags were silently dropped). A new owned edge field joins
+ * this set by joining the union, so the screen above and that carry cannot disagree about what CEE owns on an edge.
+ * The exact membership is pinned in `assist.v1.scenario-graph-register.keeps-stored-edge-facts.test.ts`.
+ */
+export const CEE_OWNED_EDGE_FIELDS: readonly string[] = Object.keys(EdgeV3.shape).filter((key) =>
+  PIPELINE_OWNED_ROOTS.has(key.toLowerCase()),
+);
 
 
 /** Conservative engine-claim patterns applied to every candidate string leaf (G14). */
@@ -518,6 +537,13 @@ function screenPayload(value: unknown, ctx: PayloadContext): FieldSafetyResult {
 // is refused outright — and stripping the model's self-asserted `source` is
 // CORRECT regardless, because authorship is precisely what a producer must not
 // self-certify. Granting adds a sanctioned authorship stamp is separate work.
+// ⭐ A6b (DL #70 5855437928; DL CR on #2131, option (a)) granted the NODE half,
+// for a node the USER SUPPLIED only: an add whose hold records it as the user's
+// (a typed authorship signal CEE writes when it mints the hold) is stamped
+// `provenance: 'user_set'` by CEE at the confirm seam, AFTER this strip
+// (`stampUserStatedAddProvenance`, gm-held-execute.ts). An add the user only
+// APPROVED keeps the provenance it was proposed with. The VALUE half —
+// `observed_state.source` on an added node — is still not stamped.
 //
 // WHY STRIPPING IS THE RIGHT ANSWER AND NOT A WEAKENING. These keys were never
 // the producer's to set: `PIPELINE_OWNED_ROOTS` is precisely the set CEE

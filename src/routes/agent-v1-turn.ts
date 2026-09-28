@@ -30,6 +30,7 @@ import { config } from '../config/index.js';
 import { OPENAI_ONLY, assertProviderAllowed, providerLedgerTruncated, recordProviderUsage, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { RESEARCH_CHIP_PREFIX, approvedQueryOf, readResearchResponse, researchChipFor, researchReplyText, researchRequestBody, type ResearchOutcome } from '../orchestrator-v5/agent-lane/runtime/public-research.js';
 import { agentPromptIdentity, conversationPromptAlias } from '../orchestrator-v5/agent-lane/runtime/prompt-identity.js';
+import { composeProposalReply } from '../orchestrator-v5/agent-lane/proposal-reply.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
@@ -42,7 +43,7 @@ import { contextBindingSecret, issueContextPacket } from '../orchestrator-v5/age
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
 import { log } from '../utils/telemetry.js';
-import { asVerdictState } from '../orchestrator/context/constraint-feasibility.js';
+import { asVerdictState, readLimitVerdicts, type StoredLimitVerdicts } from '../orchestrator/context/constraint-feasibility.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { answerIsIncomplete, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
@@ -64,7 +65,7 @@ import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-b
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
-import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, typedApprovalOf } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
 import { CarriedProposals, carrierForAnswerRow, offeredApproveChipOnRow, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compose/derive-pending-actions.js';
@@ -79,6 +80,7 @@ import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lan
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runDeltaBoundToReadback, runTurnNextMove, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
 import { breakEvenFor, goalNotCheckedLine, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
+import { readEvaluatedIdentityNodeIds } from '../orchestrator-v5/agent-lane/admit-model.js';
 import {
   leaderStandingOf,
   provisionalViewOfTurn,
@@ -618,9 +620,10 @@ export function offersApproval(body: { suggested_actions?: unknown }): boolean {
 export function leavesProposalAwaitingApproval(
   calls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string }[],
 ): boolean {
-  return calls.some((c, j) => c.name !== 'authorise_change' && typeof c.proposal_id === 'string'
+  // A withdrawal keeps its id too: hiding it would make the change it withdrew look offered.
+  return calls.some((c, j) => c.name !== 'authorise_change' && c.name !== WITHDRAW_PROPOSAL && typeof c.proposal_id === 'string'
     && approvalChipsFor(calls.map((d, i) => {
-      if (i === j || d.name === 'authorise_change') return d;
+      if (i === j || d.name === 'authorise_change' || d.name === WITHDRAW_PROPOSAL) return d;
       const { proposal_id: _hidden, ...rest } = d;
       return rest;
     })).length > 0);
@@ -799,7 +802,7 @@ export function timedDispatch(inner: InternalDispatch, ledger: DispatchTiming[],
   };
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest }> {
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string> }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -829,6 +832,13 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   let leaderLimitRisks: readonly unknown[] | null | undefined;
   /** A7: the read's own `not_modelled`, as read — derived by the read route over this same graph, never here. */
   let notModelled: NotModelledManifest | undefined;
+  /** B5: the selected run's per-limit rows (`analysis_limit_verdicts`), same fact and gates as `analysisResult`. */
+  let limitVerdicts: StoredLimitVerdicts | undefined;
+  /**
+   * C46 × R3-4 (Canonical criterion 1): the carriers the selected run's engine evaluated
+   * (`analysis_identity_evaluated_node_ids`), same fact and gates as `analysisResult`. `undefined` = not attested.
+   */
+  let identityEvaluated: ReadonlySet<string> | undefined;
   /**
    * ⛔ THE CANVAS RENDERS FROM `draft_graph`, NOT FROM `graph_hash`.
    *
@@ -868,6 +878,10 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
       const llr = after.json.analysis_leader_limit_risks;
       if (llr === null || Array.isArray(llr)) leaderLimitRisks = llr;
       notModelled = notModelledOfRead(after.json.not_modelled);
+      // Only a pair the 0.60 contract accepts, with at least one row, is carried: absent = not attested.
+      limitVerdicts = readLimitVerdicts(after.json.analysis_limit_verdicts) ?? undefined;
+      // A product the run's engine evaluated is not one it "adds up": the Agent's view reads it from the SAME read.
+      identityEvaluated = readEvaluatedIdentityNodeIds(after.json.analysis_identity_evaluated_node_ids);
       /**
        * ⭐ READINESS FROM THE MOMENT THE MODEL EXISTS, not from the moment
        * someone runs an analysis.
@@ -994,7 +1008,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled };
+  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1113,6 +1127,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...((req as { tool_choice?: unknown }).tool_choice === 'none' ? { tool_choice: 'none' } : {}),
         // C5b: on a withheld run that one call answers in a typed shape (`RUN_INTERPRETATION_FORMAT`).
         ...((req as { text?: unknown }).text !== undefined ? { text: (req as { text?: unknown }).text } : {}),
+        // PJ-C1 (batch 5): the conversation budget's own effort, as construction already sends its budget's (L~1222).
+        ...(budget.reasoning_effort !== undefined ? { reasoning: { effort: budget.reasoning_effort } } : {}),
         max_output_tokens: req.max_output_tokens,
       }),
     });
@@ -1493,6 +1509,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const dispatch = timedDispatch(dispatchFor(
       typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
     ), dispatchLedger, scenarioId);
+    /**
+     * ⭐ PJ-C1 LATENCY (#72 5861769155): the turn's read cache is made HERE, and its first graph read starts at once,
+     * so that ~1 s read runs beside the pending/committed-turn reads and the turn claim below instead of after them
+     * (served 84440ff A13: ~560 ms of those, then a 1,011 ms read). The claim row writes no graph
+     * (`writesGraph: false`), so the read returns what a read started after it would. See `turnReadCache`.
+     */
+    const readCache = turnReadCache(dispatch, `/assist/v1/scenarios/${scenarioId}/graph`);
+    readCache.prefetch();
 
     const approvedProposal = typedApprovalOf(body);
     const requestHash = agentTurnRequestHash(scenarioId, userId, message, approvedProposal !== undefined ? `approve:${approvedProposal}` : undefined);
@@ -1679,7 +1703,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * kept read carries the epoch it STARTED in. So a read after a write always sees it. Served: 22 reads at ~1.1 s in one
      * journey; an approve made 4.
      */
-    const readCache = turnReadCache(dispatch, `/assist/v1/scenarios/${scenarioId}/graph`);
     const readingDispatch: typeof dispatch = readCache.dispatch;
     const countingDispatch: typeof dispatch = async (path, body) => {
       if (path.endsWith('/graph/register') || path === '/orchestrate/v2/turn') writesDispatched += 1;
@@ -2084,6 +2107,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           mode,
           withheldTools: withheldToolsOf(body),
           ...(canonicalContext !== undefined ? { canonicalContext } : {}),
+          // PJ-C1 latency: a lone proposal is answered from its own result, with no narrating call (proposal-reply.ts).
+          composeReply: (tool, args, toolResult) => composeProposalReply(tool, args, toolResult, message),
         },
         capabilities,
         callModel,
@@ -2186,7 +2211,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * BEFORE the reply is composed, because the Run offer below keys on the
      * readiness this same response carries.
      */
-    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled } = await readBackState(readingDispatch, scenarioId);
+    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated } = await readBackState(readingDispatch, scenarioId);
 
     // ⛔ This turn's approval results go with it ONLY on the approve chip's fast path: it puts no authorise_change in
     // the history (only its words and Olumi's status), so they are the only record of which proposal it applied
@@ -2310,7 +2335,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * so it is not carried to be offered as a dead button; the turn count runs down once per answer row; the
          * wall clock bounds it. Same function, same order, as every route-v2 commit (`commit.ts`).
          */
-        liveHolds = computeSurvivingPriorPendingsDetailed(held, [], [], graphHash, Date.now()).survivors;
+        /*
+         * ⛔ A HOLD THE AGENT WITHDREW THIS TURN IS NOT CARRIED (`WITHDRAW_PROPOSAL`): this row is the latest, so
+         * leaving it off retires the hold, and the next turn finds nothing to confirm.
+         */
+        const withdrawn = withdrawnThisTurn(result.tool_calls);
+        liveHolds = computeSurvivingPriorPendingsDetailed(held, [], [], graphHash, Date.now()).survivors
+          .filter((pa) => typeof pa.chip_id !== 'string' || !withdrawn.has(pa.chip_id));
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: live held proposals could not be read — this answer row carries none');
       }
@@ -2336,7 +2367,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * blocks stay under `bindRunBlocksToReadback`'s rule above.
      */
     // C4: the same blocks and eligibility as `runTurnCoaching`, plus the typed move, its caveats and the science brief.
-    const runCoaching = runTurnNextMove(lastRun, { scenarioId, graphHash, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks });
+    const runCoaching = runTurnNextMove(lastRun, { scenarioId, graphHash, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, limitVerdicts });
     const coachingBound = [...runBound, ...runCoaching.blocks.filter((b) => !lastRunBlocks.includes(b))];
     // What changed since the last run: the run turn's own block and refusal reason, only beside that same run.
     const runDelta = runDeltaBoundToReadback(lastRun, { scenarioId, graphHash, analysisState, analysisResult });
@@ -2358,7 +2389,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⭐ F3 (DL #70 5851710093): on the build turn, the user's goal is named even when it could not be scored — unless the
     // arithmetic below already states the target. Pure reads of this turn's readback; the same inputs AX1 uses.
     const targetStatedByArithmetic = (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
-      && breakEvenFor(readbackGraph)?.target !== undefined;
+      && breakEvenFor(readbackGraph, identityEvaluated)?.target !== undefined;
     const goalLine = fa?.ran === true && fastPath !== 'run' && !targetStatedByArithmetic ? goalNotCheckedLine(readbackGraph, analysisResult) : null;
     const narrated = fastPath === 'run' || fastPath === 'research'
       ? { text, status: null as string | null, stripped: [] as string[] }
@@ -2452,6 +2483,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // Nor was a research answer (served `5668902`: a public source's ranking was dropped, and the closing about the
         // user's model followed a reply about public evidence).
         sayWhyWithheld: fastPath !== 'research' && !(fa !== undefined && fastPath !== 'run' && !result.tool_calls.some((c) => c.name === 'run_analysis')),
+        // The run's per-limit rows from the SAME readback: an estimate-only limit is said to have been checked.
+        ...(limitVerdicts !== undefined ? { limitVerdicts } : {}),
       });
       if (enforced.changed) {
         leaderClaimEnforced = true;
@@ -2468,12 +2501,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * this is conditional arithmetic on the model's own figures, never a ranking, and the gate drops any sentence that
      * compares options. Only on a turn that RAN an analysis (the Run, the Agent's own run, the first pass — never every
      * later turn whose readback still carries the result) and whose readback withholds the leader, and only when C46's
-     * own product finding holds (`breakEvenFor` returns null otherwise).
+     * own product finding holds (`breakEvenFor` returns null otherwise) — and never for a product this readback's run
+     * EVALUATED (`identityEvaluated`, C46 × R3-4, Canonical criterion 1): the engine computed it, so nothing is "added up".
      */
     const ranAnalysisThisTurn = fastPath === 'run' || fa !== undefined || result.tool_calls.some((c) => c.name === 'run_analysis');
     const breakEven = ranAnalysisThisTurn
       && (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
-      ? breakEvenFor(readbackGraph) : null;
+      ? breakEvenFor(readbackGraph, identityEvaluated) : null;
     if (breakEven !== null && typeof wireBody.assistant_text === 'string') {
       wireBody = { ...wireBody, assistant_text: withBreakEvenAnswer(wireBody.assistant_text, breakEven) };
     }
@@ -2491,7 +2525,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // The Agent's own words pass the user-facing scrub first (`sanitiseProvisionalView`); a code left refuses the view.
     const givenView = rawView === null ? null : sanitiseProvisionalView(rawView, parsedGraphOrNull(readbackGraph));
     if (rawView !== null && givenView === null) log.warn({ scenario_id: scenarioId }, 'agent-lane: a provisional view carried an internal code after the scrub — it is not shown');
-    const standing = givenView === null ? null : leaderStandingOf({ analysisState, analysisReady, analysisResult });
+    const standing = givenView === null ? null : leaderStandingOf({ analysisState, analysisReady, analysisResult, limitVerdicts });
     // Typed only (never appended to `assistant_text`): see `provisionalViewSidecar`.
     const provisionalView = givenView !== null && standing !== null && standing.analysis_on_record && standing.withheld
       ? provisionalViewSidecar(givenView, standing.because)
@@ -2592,6 +2626,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * (DGAI `src/v5/responseParser.ts`) moves an undeclared root key into `__additive__` — no schemas release.
        */
       ...(notModelledCarrier !== undefined ? { _not_modelled: notModelledCarrier } : {}),
+      /**
+       * ⭐ B5 (DL 5859845823): the run's per-limit verdicts, `{per_limit, joint}`, as a SIDECAR root key, the A7 pattern
+       * above: spread after the finalised body, undeclared in 0.60, moved into `__additive__` by the UI parser (DGAI
+       * #2212 reads `__additive__.limit_verdicts`). Bound to the run it describes: the graph read takes it off the SAME
+       * fact, under the SAME gates, as the `analysis_result` this turn carries. Absent = not attested.
+       */
+      ...(limitVerdicts !== undefined ? { limit_verdicts: limitVerdicts } : {}),
       /**
        * ⭐ SAY WHICH PATH SERVED THIS TURN.
        *

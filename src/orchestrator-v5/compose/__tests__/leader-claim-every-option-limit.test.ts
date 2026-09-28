@@ -187,3 +187,50 @@ describe('F-LIMIT — the claim: the two codes, their precedence, and their read
     expect(likely).not.toMatch(/meets|within/);
   });
 });
+
+/**
+ * ⛔ BF9 (DL #72 5863859943; Canonical owner read 5863888216) — THE TIER REFUSES THE CLAIM, NOT ONLY NAMES IT.
+ *
+ * Served `bee1a422` (CEE a94fcb9, 28 Sep 05:06Z): the user's churn was 12% against their "under 10%" limit, and every
+ * option was more likely than not to break it (leader 0.1699 · 0.0616 · 0 · 0), yet the typed claim NAMED the leader:
+ * the persisted leader verdict is `evaluated_feasible` because rule 4's infeasibility floor is P ≤ 0.05, and the
+ * F-LIMIT tier only chose the REASON once entitlement was already refused. Every row above composes with
+ * `mayNameLeadingOption: false`, so none of them could see an ENTITLED leader under a tier.
+ */
+const BF9_SERVED = served({ raise_price_with_release: 0.1699, phased_54_release: 0.0616, keep_current_plan: 0, '8555417c': 0 });
+
+function composeEntitled(freshness: 'fresh' | 'stale', limit?: 'none_meets' | 'likely_breaks') {
+  return composeAnalysisStateV1({
+    canonical: canonicalFor(freshness),
+    mayNameLeadingOption: true,
+    withheldBecauseUnrequested: false,
+    withheldBecauseNonlinearIdentity: false,
+    ...(limit !== undefined ? { everyOptionLimit: limit } : {}),
+    rawRobustness: { near_tie_is_tie: false } as never,
+  } as never)!;
+}
+
+describe('F-LIMIT × BF9 — an ENTITLED leader under a tier is withheld', () => {
+  it('PREMISE: the served BF9 fact (leader verdict evaluated_feasible) is tier 2', () => {
+    expect(deriveEveryOptionLimitVerdict(resultOf(BF9_SERVED, 'evaluated_feasible'), RATIFIED)).toEqual({ kind: 'likely_breaks', constraintId: LIMIT });
+  });
+
+  it('RED (BF9): entitled + separated + every option likely breaks the limit → withheld, every_option_likely_breaks_limit', () => {
+    expect(composeEntitled('fresh', 'likely_breaks').leader_claim).toMatchObject({ permitted: false, withheld_reason: WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT });
+  });
+
+  it('RED (tier 1): entitled + separated + no option meets the limit → withheld, no_option_meets_limit', () => {
+    expect(composeEntitled('fresh', 'none_meets').leader_claim).toMatchObject({ permitted: false, withheld_reason: WITHHELD_NO_OPTION_MEETS_LIMIT });
+  });
+
+  it('CONTROL: entitled + separated with NO tier (one option ≥ 0.5, or a coin-flip) → the leader is named, as today', () => {
+    expect(deriveEveryOptionLimitVerdict(resultOf(COIN_FLIP_RUN_A, 'evaluated_feasible'), RATIFIED)).toBeNull();
+    expect(composeEntitled('fresh').leader_claim).toMatchObject({ permitted: true, separation: 'separated' });
+  });
+
+  it('an OUT-OF-DATE run never carries the tier (a claim about the analysed revision, not the model now)', () => {
+    const claim = composeEntitled('stale', 'likely_breaks').leader_claim;
+    expect(claim.withheld_reason).not.toBe(WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT);
+    expect(claim).toEqual(composeEntitled('stale').leader_claim);
+  });
+});

@@ -96,6 +96,7 @@ function pricing(identities: Identity[] | undefined): Record<string, unknown> {
     ],
     ...(identities === undefined ? {} : { identities }),
     unknowns: [],
+    decision_question: null,
   };
 }
 
@@ -143,6 +144,7 @@ function sameSign(): Record<string, unknown> {
     ],
     identities: [{ outcome: 'Pro MRR', operation: 'product', factors: ['Revenue per Pro user', 'Pro subscribers'], provenance: 'inferred' }],
     unknowns: [],
+    decision_question: null,
   };
 }
 
@@ -195,6 +197,7 @@ function small(s: {
     links: s.links.map(([from, to, direction]) => ({ from, to, direction, provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null })),
     identities: s.identities,
     unknowns: [],
+    decision_question: null,
   };
 }
 
@@ -768,6 +771,7 @@ function served({ without }: { without?: [string, string] } = {}): Record<string
     ].filter((l) => without === undefined || l.from !== without[0] || l.to !== without[1]),
     identities: [PRO_MRR_IDENTITY],
     unknowns: [],
+    decision_question: null,
   };
 }
 

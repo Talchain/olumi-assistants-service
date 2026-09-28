@@ -14,6 +14,9 @@
  *   1 `missing_level`         — an option the run could not test for want of a level → give its level.
  *   2 `no_option_meets_limit` — a SCORED limit no option meets (F-LIMIT tiers) → change or add an option.
  *     `real_figure`           — a limit checked only against Olumi's estimate / an assumed figure → give the real one.
+ *     `missing_value`         — a top-3 driver (PLoT's structural order) the model holds NO value for, and no option
+ *                               sets → give its value (PJ-B3; `unvalued-driver-card.ts`): never presented as an
+ *                               analysed driver. After the limit moves (DL #2154 CHANGES_REQUIRED item 1).
  *   3 (reserved) value of information — NOT in this selector: AI Quality 5855170731 ruled factor EVPPI structurally
  *                               zero in today's additive engine (a root factor adds the same β·X to every option), so
  *                               it cannot truthfully select anything until B2's identity kinds land. Added then, with AIQ.
@@ -52,11 +55,14 @@ import { everyLimitProvedUnanchored, limitNodeLabels } from './bound-graph.js';
 import { buildNearTieCard } from './near-tie-card.js';
 import { buildEstimatedLimitCard } from './estimated-limit-card.js';
 import { buildLeaderLimitRiskCard } from './leader-limit-risk-card.js';
+import { buildUnvaluedDriverCard } from './unvalued-driver-card.js';
 import { COACHING_BLOCK_BODY_MAX } from './fragile-edge-offer-text.js';
+import { readLimitVerdicts } from '../../orchestrator/context/constraint-feasibility.js';
 
 export type NextMoveKind =
   | 'limit_risk_leader'
   | 'missing_level'
+  | 'missing_value'
   | 'no_option_meets_limit'
   | 'real_figure'
   | 'link_view'
@@ -66,6 +72,7 @@ export type NextMoveKind =
 export const NEXT_MOVE_CAPABILITY: Readonly<Record<NextMoveKind, string>> = Object.freeze({
   limit_risk_leader: 'ask_only',
   missing_level: 'propose_option_interventions',
+  missing_value: 'propose_assumptions',
   no_option_meets_limit: 'propose_new_option',
   real_figure: 'propose_starting_point',
   link_view: 'propose_link_strength',
@@ -100,6 +107,8 @@ export interface NextMoveInputs {
   readonly leaderLimitRisks: unknown;
   /** The graph proven to be the run's own (`bound-graph.ts` `graphBoundToHash`), else null. */
   readonly boundGraph: Record<string, unknown> | null;
+  /** B5 (#2146): the READBACK's per-limit verdicts (`final.limitVerdicts`, the same read); absent → aggregate only. */
+  readonly limitVerdicts?: unknown;
 }
 
 export interface NextMoveSelection {
@@ -199,7 +208,12 @@ export function selectNextMove(args: NextMoveInputs): NextMoveSelection {
   const caveats: NextMoveCaveat[] = [];
   let noOptionMeets: CoachingBlock | null = null;
   const everyOption = everyOptionBreaksALimit(analysisState);
-  if (everyOption !== null || leaderWithheldForALimit(analysisState)) {
+  // B5 (#2146; wire C01 on 08fbba5, DL GO 5861158484): "could not check" is true ONLY for an `unscored` limit (MG
+  // 5861148718). When the typed per-limit rows attest that EVERY limit was checked — some only against Olumi's
+  // estimate — a withheld leader is not a limit the user cannot check, and saying so would be false.
+  const perLimit = readLimitVerdicts(args.limitVerdicts);
+  const everyLimitChecked = perLimit !== null && perLimit.per_limit.every((r) => r.state !== 'unscored');
+  if (everyOption !== null || (leaderWithheldForALimit(analysisState) && !everyLimitChecked)) {
     const limitLabels = boundGraph !== null ? limitNodeLabels(boundGraph) ?? undefined : undefined;
     const provedUnanchored = everyOption === null && boundGraph !== null && everyLimitProvedUnanchored(boundGraph, runOptions);
     const limit = buildLimitUncheckedCard(input, limitLabels, provedUnanchored, constraintVerdictState, everyOption);
@@ -227,9 +241,14 @@ export function selectNextMove(args: NextMoveInputs): NextMoveSelection {
   // "Checked against Olumi's estimate" presupposes the limit WAS checked: never beside a "could not be checked" caveat,
   // whatever a disagreeing verdict field says (the readback's typed claim wins, as before C4).
   const estimate = caveats.length === 0
-    ? buildEstimatedLimitCard(input, constraintVerdictState, boundGraph, runOptions)
+    ? buildEstimatedLimitCard(input, constraintVerdictState, boundGraph, runOptions, perLimit)
     : { block: null };
   if (estimate.block !== null) return { move: moveOf('real_figure', estimate.block), reason: null, caveats };
+
+  // 2c — a factor the result depends on most (PLoT's top 3) that the model holds no value for (PJ-B3, DL 5860325629):
+  // never said as an analysed driver — said as the ask it is. AFTER the limit moves (DL #2154 CHANGES_REQUIRED item 1).
+  const unvalued = buildUnvaluedDriverCard(input, boundGraph);
+  if (unvalued !== null) return { move: withCaveatSentence(moveOf('missing_value', unvalued), caveats), reason: null, caveats };
 
   // 4 — the user's view of the link the result rests on.
   const built = buildFragileLinkChallenge({

@@ -720,13 +720,18 @@ export async function buildTurnContext(
   // second query or independently drifting source. Concurrent ⇒ these reads
   // cost the batch's max latency, not their sum.
   const [
-    priorTurnsRead,
+    { priorTurnsRead, priorFactsRead },
     priorTurnsTotal,
     durableMutationFactRead,
     durableScenarioAnalysisFactRead,
     analysisInvalidatedAtRead,
+    persistedScenarioStateRead,
+    mostRecentPendingActionsRead,
+    priorCoachingStateRead,
   ] = await Promise.all([
-    fetchPriorTurns(payload.scenario_id, requestId, store),
+    // C1: the facts for the prior turns are chained onto the turns read, so they load while the rest of
+    // this batch is still in flight (`readTurnsThenFacts`), not after its slowest read.
+    readTurnsThenFacts(payload.scenario_id, requestId, store),
     fetchPriorTurnsTotal(payload.scenario_id, requestId, store),
     fetchRecentAppliedMutationFacts(payload.scenario_id, requestId, store),
     fetchScenarioAnalysisFacts(payload.scenario_id, requestId, store),
@@ -777,6 +782,14 @@ export async function buildTurnContext(
         return null;
       },
     ),
+    // ⭐ PJ-C1 (DL #70 5860578805, batch 5 A): the graph + brief, the pending actions and the prior coaching state
+    // depend on nothing read above — only the scenario, the request and the store — and each resolves its own
+    // failure to its fallback (`fetchPersistedScenarioState` → a degraded read, the other two → [] / null; each
+    // catches a synchronous throw too), so none can reject this batch. They were three serial round trips after
+    // it (~150–220 ms each on served approvals); here they cost the batch's max. Used below exactly as before.
+    fetchPersistedScenarioState(payload.scenario_id, requestId, store),
+    fetchMostRecentPendingActions(payload.scenario_id, requestId, store),
+    fetchMostRecentCoachingState(payload.scenario_id, requestId, store),
   ]);
   const priorTurns = priorTurnsRead.turns;
   // V5 Conversation Context Reliability: continuity-gap guard. A 'chip'/'chip_click'
@@ -816,12 +829,7 @@ export async function buildTurnContext(
     facts: priorFacts,
     factsWithTurn: priorFactsWithTurn,
     readOk: factsReadOk,
-  } = await fetchPriorFacts(
-    priorTurns,
-    requestId,
-    payload.scenario_id,
-    store,
-  );
+  } = priorFactsRead;
   /**
    * DID THE READ THAT PRODUCED `priorFacts` SUCCEED — ALL OF IT?
    *
@@ -910,11 +918,8 @@ export async function buildTurnContext(
   // read scenarios.* is non-fatal (graceful degradation); the field
   // collapses to null and decision_review skips with `no_brief` exactly
   // as before.
-  const scenarioState = await fetchPersistedScenarioState(
-    payload.scenario_id,
-    requestId,
-    store,
-  );
+  // Read in the parallel batch above (batch 5 A).
+  const scenarioState = persistedScenarioStateRead;
 
   // ── ARE WE ENTITLED TO SAY THIS USER HAS NO MODEL? ─────────────────────
   // `fetchPersistedScenarioState` answers "did the read succeed?"; this
@@ -954,21 +959,15 @@ export async function buildTurnContext(
   // V5 Wave 2: read pending actions from the most recent prior turn.
   // Read failures are non-fatal — empty array on degradation, mirrors
   // the prior_turns degradation path.
-  const mostRecentPendingActions = await fetchMostRecentPendingActions(
-    payload.scenario_id,
-    requestId,
-    store,
-  );
+  // Read in the parallel batch above (batch 5 A).
+  const mostRecentPendingActions = mostRecentPendingActionsRead;
 
   // V5 Coaching State Spine — Stage 2B-1b: read the most recent PRIOR pre-dispatch
   // coaching-state snapshot (non-null, bounded LIMIT 1). Internal-only; attached as
   // prior_coaching_state for future (Stage 2B-2) lifecycle consumers. Read failures
   // degrade to null — never fail the turn. No lifecycle is derived here.
-  const priorCoachingState = await fetchMostRecentCoachingState(
-    payload.scenario_id,
-    requestId,
-    store,
-  );
+  // Read in the parallel batch above (batch 5 A).
+  const priorCoachingState = priorCoachingStateRead;
 
   // V5 Coaching State Spine — Stage 1: derive the DecisionContext projection
   // deterministically from canonical state (brief_text + graph). Pure + total
@@ -1691,22 +1690,48 @@ export async function loadMostRecentPendingActionsIntegrityStrict(
 }
 
 /**
+ * ROADMAP 2.717 — the answer of a continuation-guard read. THREE states,
+ * deliberately, because the guard's two failure directions are not
+ * symmetric:
+ *
+ *   - `'yes'` / `'no'` — the store answered.
+ *   - `'unknown'` — the store was asked and FAILED. The route treats this as
+ *     a continuation (the NON-DESTRUCTIVE branch), so its persisted-model
+ *     check runs and only a positively-read "no model, no draft in flight"
+ *     can lift the guard.
+ *
+ * Why not a boolean. `false` on a failure (the old shape) let one transient
+ * read error classify a live decision as FRESH, and a brief-shaped message
+ * then drafted OVER the stored model — the draft commit carries no expected
+ * hash (writer audit 27 Sep, finding 6). `true` on a failure would strand a
+ * genuine new decision. Neither boolean is honest; `'unknown'` is.
+ */
+export type ContinuationRead = 'yes' | 'no' | 'unknown';
+
+/**
  * V5 Signature Loop — bounded "does this scenario already have committed turns?"
- * read for the route-level refresh-continuation guard. Degrades to `false` on
- * a missing store, an unimplemented method (legacy mocks), or a read failure —
- * an uncertain read must NOT suppress the draft / frame-no-brief shortcut (a
- * false negative just keeps today's behaviour; a false positive would strand a
- * genuine new decision). Resolves the store inline via `tryGetSessionStore` to
- * keep the SessionStore import surface bounded to this module.
+ * read for the route-level refresh-continuation guard.
+ *
+ * ROADMAP 2.717 — a READ FAILURE answers `'unknown'`, never `'no'`: the route
+ * then keeps the continuation guard and runs its persisted-model check, so a
+ * model it could not rule out is never drafted over. A genuine new decision is
+ * not stranded: the persisted-model check lifts the guard when it positively
+ * reads "no model", and an explicit Generate Draft bypasses the guard.
+ *
+ * A missing store or an unimplemented method (legacy mocks) still answers
+ * `'no'`, as before: with no session store there is no persisted model to
+ * read and no draft commit can land, so that answer cannot enable an
+ * overwrite. Resolves the store inline via `tryGetSessionStore` to keep the
+ * SessionStore import surface bounded to this module.
  */
 export async function loadHasPriorTurns(
   scenarioId: string,
   requestId: string,
-): Promise<boolean> {
+): Promise<ContinuationRead> {
   const store = tryGetSessionStore(requestId, scenarioId);
-  if (!store?.hasPriorTurns) return false;
+  if (!store?.hasPriorTurns) return 'no';
   try {
-    return await store.hasPriorTurns(scenarioId);
+    return (await store.hasPriorTurns(scenarioId)) ? 'yes' : 'no';
   } catch (e) {
     log.warn(
       {
@@ -1714,9 +1739,9 @@ export async function loadHasPriorTurns(
         scenario_id: scenarioId,
         err: (e as Error)?.message ?? String(e),
       },
-      'V5 build-turn-context — hasPriorTurns failed; degrading to false (do not suppress draft/frame)',
+      "V5 build-turn-context — hasPriorTurns failed; answering 'unknown' (continuation guard kept — never draft over a model that may exist)",
     );
-    return false;
+    return 'unknown';
   }
 }
 
@@ -1729,21 +1754,20 @@ export async function loadHasPriorTurns(
  * in flight (the fresh-journey P0's S2). Failure-marked rows are excluded by
  * the store read so the post-loss state classifies fresh.
  *
- * Degrades to `false` on a missing store, an unimplemented method (legacy
- * mocks), or a read failure — identical posture to {@link loadHasPriorTurns}:
- * an uncertain read keeps today's behaviour rather than suppressing a
- * genuine new decision. (The fail-open direction of BOTH loaders is rowed
- * separately as 2.717; this loader deliberately matches the incumbent.)
+ * ROADMAP 2.717 — same three-state posture as {@link loadHasPriorTurns}: a
+ * READ FAILURE answers `'unknown'` (the route keeps the guard, and never lifts
+ * it on a draft that may be in flight); a missing store or an unimplemented
+ * method (legacy mocks) answers `'no'`, as before.
  */
 export async function loadHasOtherAdmittedLiveTurn(
   scenarioId: string,
   excludeTurnId: string,
   requestId: string,
-): Promise<boolean> {
+): Promise<ContinuationRead> {
   const store = tryGetSessionStore(requestId, scenarioId);
-  if (!store?.hasOtherAdmittedLiveTurn) return false;
+  if (!store?.hasOtherAdmittedLiveTurn) return 'no';
   try {
-    return await store.hasOtherAdmittedLiveTurn(scenarioId, excludeTurnId);
+    return (await store.hasOtherAdmittedLiveTurn(scenarioId, excludeTurnId)) ? 'yes' : 'no';
   } catch (e) {
     log.warn(
       {
@@ -1751,9 +1775,9 @@ export async function loadHasOtherAdmittedLiveTurn(
         scenario_id: scenarioId,
         err: (e as Error)?.message ?? String(e),
       },
-      'V5 build-turn-context — hasOtherAdmittedLiveTurn failed; degrading to false (do not suppress draft/frame)',
+      "V5 build-turn-context — hasOtherAdmittedLiveTurn failed; answering 'unknown' (continuation guard kept — a draft may be in flight)",
     );
-    return false;
+    return 'unknown';
   }
 }
 
@@ -1764,6 +1788,11 @@ export async function loadHasOtherAdmittedLiveTurn(
  * draft-shortcut unstranding term. Degrades to `false` (no notice, no
  * unstrand) on a missing store / method / read failure — the notice is a
  * disclosure and must never fail a turn.
+ *
+ * ROADMAP 2.717 — deliberately NOT three-state. Unlike its two neighbours,
+ * `false` here is already the CONSERVATIVE answer: it withholds a lift of the
+ * continuation guard, never grants one. Pinned by
+ * `route-v2-continuation-read-unknown.test.ts` row (e).
  */
 export async function loadDraftLossStands(
   scenarioId: string,
@@ -2173,6 +2202,29 @@ async function enrichRecentMutationLabelTransitions(
       'V5 qualitative edit context unavailable; preserving existing receipt history');
     return history;
   }
+}
+
+/**
+ * C1 (DL #72 5862738581, Canonical 5862863093) — THE TURNS, THEN THEIR FACTS, AS ONE MEMBER OF A BATCH.
+ *
+ * The hot-window facts are read for exactly the prior turns' row ids, so they depend on the turns read
+ * and on nothing else in either batch. Awaited AFTER the batch, their round trip (~0.31 s on staging)
+ * sat behind the batch's slowest read on every graph read and every turn context. Chained here, it runs
+ * while that read is still in flight. The queries, their arguments and their results are unchanged, and
+ * so is the failure contract: neither helper throws (each degrades to `readOk: false`), so this member
+ * can never reject the shared `Promise.all`.
+ */
+async function readTurnsThenFacts(
+  scenarioId: string,
+  requestId: string,
+  store: SessionStore | undefined,
+): Promise<{
+  readonly priorTurnsRead: Awaited<ReturnType<typeof fetchPriorTurns>>;
+  readonly priorFactsRead: Awaited<ReturnType<typeof fetchPriorFacts>>;
+}> {
+  const priorTurnsRead = await fetchPriorTurns(scenarioId, requestId, store);
+  const priorFactsRead = await fetchPriorFacts(priorTurnsRead.turns, requestId, scenarioId, store);
+  return { priorTurnsRead, priorFactsRead };
 }
 
 async function fetchPriorFacts(
@@ -2732,16 +2784,13 @@ export async function loadScenarioAnalysisFactsForRead(
       factSet: reconcileScenarioAnalysisFacts({ scenarioId, hotWindowFacts: [] }),
     };
   }
-  const [priorTurnsRead, durableRead] = await Promise.all([
-    fetchPriorTurns(scenarioId, requestId, store),
+  // C1: the hot-window facts depend ONLY on the turns, so they are read as soon as the turns land, inside
+  // the batch — not after its slowest read (see `readTurnsThenFacts`). Same queries, same result.
+  const [{ priorTurnsRead, priorFactsRead }, durableRead] = await Promise.all([
+    readTurnsThenFacts(scenarioId, requestId, store),
     fetchScenarioAnalysisFacts(scenarioId, requestId, store),
   ]);
-  const { facts, factsWithTurn, readOk } = await fetchPriorFacts(
-    priorTurnsRead.turns,
-    requestId,
-    scenarioId,
-    store,
-  );
+  const { facts, factsWithTurn, readOk } = priorFactsRead;
   const hotReadOk = readOk && priorTurnsRead.readOk;
   return {
     hotWindow: hotReadOk ? { status: 'ok', facts } : { status: 'degraded', facts: [] },

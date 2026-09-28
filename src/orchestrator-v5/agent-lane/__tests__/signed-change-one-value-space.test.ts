@@ -156,6 +156,27 @@ const oneSpace = (g: Graph, factor: string): void => {
   }
 };
 
+/**
+ * ⭐ ONE SCALE ON THE WIRE (AIQ Q2, CEE #2139 5859746452). Every level these drafts build is the one form, including
+ * the ESTIMATED capless sibling ("Sales headcount", framed only by `scale_frame`), so the request reaches PLoT in ONE
+ * scale: each option's RAW figures, which PLoT reads against each factor's cap, or its `scale_frame` for a capless one
+ * (PLoT #373 rung 1.6). Before Q2 the capless level shipped its unit value (`no_cap`), which stranded the request and
+ * demoted every other level to unit scale, and PLoT then read 0.4 FTE as 0.4 of a head on a frame of 20.
+ */
+const oneWireScale = (g: Graph, wire: Record<string, Record<string, number>>): void => {
+  let seen = 0;
+  for (const [optionId, levels] of Object.entries(wire)) {
+    for (const [factorId, v] of Object.entries(levels)) {
+      const cell = byId(g, optionId).interventions?.[factorId] as { raw_value?: number } | undefined;
+      if (cell === undefined) continue; // a held status quo is wired at today's level, not a stored cell of its own
+      expect(v, `${optionId} -> ${factorId} reaches PLoT as its raw figure`).toBe(cell.raw_value);
+      seen += 1;
+    }
+  }
+  expect(seen, 'the wire carried stored levels').toBeGreaterThan(0);
+};
+const capOf = (g: Graph, factor: string): number => (byId(g, factor).observed_state as { cap: number }).cap;
+
 const CUT = 'cut_list_price_15';
 const RAISE = 'raise_list_price_10';
 const HOLD = 'keep_current_pricing';
@@ -185,12 +206,15 @@ describe('a signed change keeps its sign, and one factor carries one value space
     // The link's direction is unchanged: a higher price level still lowers share.
     const { wire, refusal } = await runAnalysis(graph);
     expect(refusal, 'the comparison must run').toBeNull();
-    expect(wire![CUT]![PRICE]).toBeCloseTo(0.425, 10);
-    expect(wire![RAISE]![PRICE]).toBeCloseTo(0.55, 10);
-    for (const v of Object.values(wire!).flatMap((o) => Object.values(o))) {
-      expect(v).toBeGreaterThanOrEqual(0);
-      expect(v).toBeLessThanOrEqual(1);
-    }
+    // The raw figures (85 and 110 of today's 100), read by PLoT against the price's cap of 200: 0.425 and 0.55.
+    expect(wire![CUT]![PRICE]).toBe(85);
+    expect(wire![RAISE]![PRICE]).toBe(110);
+    expect(wire![CUT]![PRICE]! / today.cap).toBeCloseTo(0.425, 10);
+    expect(wire![RAISE]![PRICE]! / today.cap).toBeCloseTo(0.55, 10);
+    // The capless estimated sibling reaches PLoT as its raw figure too (8 and 6 FTE on a frame of 20), never 0.4 / 0.3.
+    expect(wire![CUT]!.sales_headcount).toBe(8);
+    expect(wire![RAISE]!.sales_headcount).toBe(6);
+    oneWireScale(graph, wire!);
     // Said once, in words, naming the factor.
     expect(said(out, /List price change/)).toHaveLength(1);
     expect(said(out, /List price change/)[0]).toMatch(/today/);
@@ -210,7 +234,8 @@ describe('a signed change keeps its sign, and one factor carries one value space
     expect(level(graph, CUT, PRICE)!).toBeLessThan((byId(graph, PRICE).observed_state as { value: number }).value);
     const { wire, refusal } = await runAnalysis(graph);
     expect(refusal).toBeNull();
-    expect(wire![CUT]![PRICE]).toBeCloseTo(0.425, 10);
+    expect(wire![CUT]![PRICE]! / capOf(graph, PRICE)).toBeCloseTo(0.425, 10);
+    oneWireScale(graph, wire!);
     // The held status quo sets no level of its own on the factor and is wired to it, so it is
     // compared at today's level (0.5) — the cut sits below it.
     expect(level(graph, HOLD, PRICE)).toBeUndefined();
@@ -224,7 +249,10 @@ describe('a signed change keeps its sign, and one factor carries one value space
     expect(said(out, /List price change/), JSON.stringify(out.not_represented)).toHaveLength(0);
     const { wire, refusal } = await runAnalysis(graph);
     expect(refusal).toBeNull();
-    expect(wire![RAISE]![PRICE]).toBeCloseTo(0.1, 10);
+    // Raw 10 on the stated 0..100 frame: 0.1 as PLoT reads it against the cap.
+    expect(wire![RAISE]![PRICE]).toBe(10);
+    expect(wire![RAISE]![PRICE]! / capOf(graph, PRICE)).toBeCloseTo(0.1, 10);
+    oneWireScale(graph, wire!);
   });
 
   it('RED: a signed change that cannot be restated as a level is WITHHELD at build, never registered raw', async () => {

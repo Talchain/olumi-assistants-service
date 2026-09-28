@@ -1,6 +1,7 @@
 /**
- * Constraint admission — the strict-bound widening must be recorded, and the
- * user's own number must never be adjusted to compensate for it.
+ * Constraint admission — a strict bound is held as stated beside the engine's
+ * non-strict operator (A2, `operator_as_stated`), and the user's own number is
+ * never adjusted to compensate for it.
  *
  * The constraint under test is the captured one from the live 22 Sep builder
  * run: `monthly churn < 4 %`, provenance explicit.
@@ -34,15 +35,10 @@ describe('admitCandidateConstraints', () => {
     expect(r.constraints[0].value).toBe(4);
   });
 
-  it('records the strict-to-non-strict widening, naming the admitted boundary', () => {
+  it('A2: holds the strict bound AS STATED beside the engine\'s "<=" — and records no widening loss (DL #72 5861407189)', () => {
     const r = admitCandidateConstraints(captured, nodeIdFor);
-    const entry = r.loss.find((l) => l.field_path.endsWith('.operator'));
-    expect(entry, 'a widening must be recorded').toBeDefined();
-    expect(entry!.before).toBe('<');
-    expect(entry!.after).toBe('<=');
-    expect(entry!.severity).toBe('warn');
-    expect(entry!.reason).toMatch(/exactly 4%/);
-    expect(entry!.reason).toMatch(/no epsilon was invented/);
+    expect(r.constraints[0]).toMatchObject({ operator: '<=', operator_as_stated: '<', value: 4 });
+    expect(r.loss.filter((l) => l.field_path.endsWith('.operator')), 'strictness is held, not lost').toHaveLength(0);
   });
 
   it('CONTRAST CONTROL: a non-strict bound is admitted with NO widening recorded', () => {
@@ -51,6 +47,7 @@ describe('admitCandidateConstraints', () => {
     ];
     const r = admitCandidateConstraints(nonStrict, nodeIdFor);
     expect(r.constraints[0].operator).toBe('<=');
+    expect(r.constraints[0]).not.toHaveProperty('operator_as_stated');
     expect(r.loss.filter((l) => l.field_path.endsWith('.operator'))).toHaveLength(0);
     expect(isStrictnessLost('<=')).toBe(false);
     expect(isStrictnessLost('<')).toBe(true);

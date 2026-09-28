@@ -24,12 +24,20 @@
  * Every miss fails toward UNDER-claiming (the figure is left unset or recorded as Olumi's, and said): word-form
  * money and percentages ("four percent"; a plain COUNT in words IS read by `figureTheUserWroteFor`), a figure the Agent derived ("down a point" → 4), and a magnitude written with a suffix
  * the Agent dropped (£54k vs 54).
+ *
+ * SCALE: a MONEY unit's own magnitude letter is the scale its figure is in, so 100 in "£k/month" is the "£100k" the
+ * user wrote (DL #72 5862282849: journey A's goal lost its brief source on every turn). Read by
+ * `readCurrencyUnitWithQualifiers`, the reading `isAmountStatedInBrief` gives the same unit; a unit with no letter, or
+ * one that is not money, is ×1 as before. So a scaled unit never reads the UNSCALED figure: 49 in £k is never "£49".
  */
-import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
+import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_CONTINUATION, parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { TODAY_LEVEL, TODAY_UNIT } from './admit-model.js';
+import { attestHorizon, type HorizonAttestation } from './horizon-attestation.js';
 import { unitPhraseFamily } from './unit-conflict.js';
+import { unitFamilyOf } from '../routing/value-unit-resolution.js';
+import { countedNoun } from './counted-nouns.js';
 
 const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
 
@@ -37,12 +45,56 @@ const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.m
 export function figureTheUserWrote(value: number, unit: unknown, userText: string | null | undefined): boolean {
   if (typeof value !== 'number' || !Number.isFinite(value)) return false;
   const family = unitPhraseFamily(unit);
-  return findStatedAmounts(userText).some((a) => {
-    if (a.kind === 'currency') return (family === null || family === 'currency') && same(a.magnitude, value);
-    // "40%" is 40 on a percentage, or 0.4 on a share kept as 0–1: the Agent passes the factor's own units.
-    if (a.kind === 'percent') return (family === null || family === 'percent') && (same(a.magnitude, value) || same(a.magnitude / 100, value));
-    return same(a.magnitude, value);
-  });
+  return findStatedAmounts(userText).some((a) => amountIs(a, value, unit, family, userText ?? undefined));
+}
+
+/**
+ * Whether ONE written amount is `value` in `unit`: the unit rules `figureTheUserWrote` and `figureTheUserWroteFor` share.
+ * A money unit's own letter scales the figure (SCALE, above). Under a scaled money unit a PLAIN amount grounds it only
+ * when written with its own letter ("75k" is 75 £k): a bare "300" is £300 or 300 £k, so neither (DL #72 5862394804:
+ * "300 subscribers" read as 0.3 £k/month).
+ */
+function amountIs(
+  a: { readonly magnitude: number; readonly kind: string; readonly matchedText: string; readonly index?: number },
+  value: number,
+  unit: unknown,
+  family: ReturnType<typeof unitPhraseFamily>,
+  text?: string,
+): boolean {
+  const scale = moneyUnitScale(unit);
+  const written = value * scale;
+  if (a.kind === 'currency') return (family === null || family === 'currency') && same(a.magnitude, written);
+  // "40%" is 40 on a percentage, or 0.4 on a share kept as 0–1: the Agent passes the factor's own units.
+  if (a.kind === 'percent') return (family === null || family === 'percent') && (same(a.magnitude, value) || same(a.magnitude / 100, value));
+  // A count in words grounds a PLAIN figure only: "two" is never £2 or 2%, which need their written unit.
+  if (a.kind === 'words') return family !== 'currency' && family !== 'percent' && same(a.magnitude, value);
+  if (scale !== 1 && !writtenWithALetter(a)) return false;
+  // ⛔ A PLAIN number's unit is the word written after it ("300 subscribers", "12 months"): of another family than the
+  // held unit's, it is not this figure (figure-written-as-another-kind.test.ts). A word that reads as no unit keeps today's.
+  const writtenAs = text === undefined ? null : unitWordAfter(text, a);
+  if (family !== null && writtenAs !== null && writtenAs !== family) return false;
+  return same(a.magnitude, written);
+}
+
+/** The unit family of the word written right after an amount (`unitFamilyOf`, else a counted noun), or null. */
+function unitWordAfter(text: string, a: { readonly matchedText: string; readonly index?: number }): ReturnType<typeof unitFamilyOf> {
+  if (typeof a.index !== 'number') return null;
+  const word = /^\s*([A-Za-z][A-Za-z-]*)/.exec(text.slice(a.index + a.matchedText.length))?.[1];
+  if (word === undefined) return null;
+  return unitFamilyOf(word) ?? (countedNoun(word) ? 'count' : null);
+}
+
+/** Whether an amount was written with a magnitude letter: its magnitude is not the number its digits spell ("75k"). */
+function writtenWithALetter(a: { readonly magnitude: number; readonly matchedText: string }): boolean {
+  const digits = Number(a.matchedText.replace(/[^0-9.]/g, ''));
+  return Number.isFinite(digits) && !same(digits, a.magnitude);
+}
+
+/** A money unit's own magnitude letter ("£k/month" → 1000, "£m" → 1e6); 1 for a unit with none, or one not money. */
+function moneyUnitScale(unit: unknown): number {
+  if (typeof unit !== 'string') return 1;
+  const reading = readCurrencyUnitWithQualifiers(unit);
+  return reading.kind === 'currency' && Number.isFinite(reading.multiplier) && reading.multiplier > 0 ? reading.multiplier : 1;
 }
 
 /** A number the text writes in words ("three engineers"), read by the repo's one cardinal grammar; a fraction refuses. */
@@ -96,16 +148,6 @@ export interface HeldGoalAttributes {
 }
 
 /**
- * Whether the brief writes the deadline `months` as a literal "N months" / "N month" / "N-month". ONLY the literal:
- * no helper here reads a duration (`figureTheUserWrote(12, 'months', …)` grounds "12 subscribers", measured), so
- * a figure beside another noun never grounds a deadline. Every miss under-claims: "eighteen months", "a year" and
- * "by Q3" are left unheld, and the deadline stays a question.
- */
-function horizonTheBriefStates(months: number, brief: string): boolean {
-  return new RegExp(`(?<![\\d.,])${months}(?:\\s+|\\s*-\\s*)months?\\b`, 'i').test(brief);
-}
-
-/**
  * ⭐ THE GOAL'S STATED TARGET SOURCE, DIRECTION AND DEADLINE ARE HELD ON THE GOAL NODE — ONLY WHEN THE BRIEF STATES
  * THEM (G1; PJ-A2 rows 6–13, 28, 29). Before this, admission recorded the direction and deadline only as ledger
  * "losses" (GraphV3 had no home for them) and never stamped whose target it was, so a cold read had none of the three.
@@ -117,18 +159,21 @@ function horizonTheBriefStates(months: number, brief: string): boolean {
  *    comparator OF that stated target, the same reading admission already acts on (`admitStatedGoalLevel`) and
  *    `goal_constraints` store. It is not read from words: `comparatorTheUserWrote` is turn-scoped and reads neither
  *    PJ-A2 brief (null on both, measured — "churn under 4%" sits beside "reaching £100k").
- *  · horizon → `goal_horizon_months`: a positive whole number of months the brief writes literally
- *    (`horizonTheBriefStates`).
+ *  · horizon → `goal_horizon_months`: the drafter's month count, held only when MG's `attestHorizon` finds the brief
+ *    writing that deadline ("within 12 months", "over the next year"; never "12 subscribers"). Its verdict is returned
+ *    as `horizon` whatever it is, so an unresolved deadline's own words ("by Q3") reach the caller, not the node.
  * Not grounded ⇒ absent, exactly as before; nothing is defaulted. Only the one goal node is touched.
  */
 export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   nodes: readonly N[],
   goal: { readonly operator?: unknown; readonly horizon_months?: unknown; readonly provenance?: unknown; readonly unit?: unknown } | null | undefined,
   brief: string,
-): { nodes: N[]; held: HeldGoalAttributes } {
+): { nodes: N[]; held: HeldGoalAttributes; horizon: HorizonAttestation } {
   const none: HeldGoalAttributes = { target: false, direction: false, horizon: false };
   const goals = nodes.filter((n) => n.kind === 'goal');
-  if (goal === null || goal === undefined || goals.length !== 1) return { nodes: [...nodes], held: none };
+  // The deadline's attestation, whatever it finds: held below only when `attested`; otherwise returned, never stored.
+  const attestation = attestHorizon(brief, goal);
+  if (goal === null || goal === undefined || goals.length !== 1) return { nodes: [...nodes], held: none, horizon: attestation };
   const node = goals[0] as N & { readonly goal_threshold_raw?: unknown; readonly goal_threshold_unit?: unknown };
   const raw = node.goal_threshold_raw;
   const target = typeof raw === 'number' && Number.isFinite(raw) && goal.provenance === 'explicit'
@@ -136,16 +181,16 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   // The stored comparator's own schema reads it (one list, `NodeV3`): anything else is undefined, i.e. not held.
   const operator = target ? NodeV3.shape.goal_direction.parse(goal.operator) : undefined;
   const direction = operator !== undefined;
-  const months = goal.horizon_months;
-  const horizon = typeof months === 'number' && Number.isInteger(months) && months > 0 && horizonTheBriefStates(months, brief);
-  if (!target && !horizon) return { nodes: [...nodes], held: none };
+  const months = attestation.status === 'attested' ? attestation.months : null;
+  const horizon = months !== null;
+  if (!target && !horizon) return { nodes: [...nodes], held: none, horizon: attestation };
   const stamped = {
     ...node,
     ...(target ? { threshold_source: 'brief_extraction' } : {}),
     ...(operator !== undefined ? { goal_direction: operator } : {}),
-    ...(horizon ? { goal_horizon_months: months as number } : {}),
+    ...(months !== null ? { goal_horizon_months: months } : {}),
   };
-  return { nodes: nodes.map((n) => (n === node ? stamped : n)), held: { target, direction, horizon } };
+  return { nodes: nodes.map((n) => (n === node ? stamped : n)), held: { target, direction, horizon }, horizon: attestation };
 }
 
 /**
@@ -235,15 +280,7 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
     return t && !o ? 'target' : o && !t ? 'other' : null;
   };
   return [...findStatedAmounts(userText), ...countsInWords(userText)].some((a) => {
-    const matches = a.kind === 'currency'
-      ? (family === null || family === 'currency') && same(a.magnitude, value)
-      : a.kind === 'percent'
-        ? (family === null || family === 'percent') && (same(a.magnitude, value) || same(a.magnitude / 100, value))
-        : a.kind === 'words'
-          // A count in words grounds a PLAIN figure only: "two" is never £2 or 2%, which need their written unit.
-          ? family !== 'currency' && family !== 'percent' && same(a.magnitude, value)
-          : same(a.magnitude, value);
-    if (!matches) return false;
+    if (!amountIs(a, value, unit, family, userText)) return false;
     const amountEnd = a.index + a.matchedText.length;
     const before = userText.slice(0, a.index);
     const after = userText.slice(amountEnd);
@@ -265,7 +302,14 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
     // no declared unit read "month" as "Monthly churn rate". A "per X", "/X", "a X", "each X" or "every X" written right
     // after the figure is its denominator, so it is passed over whatever unit the factor declares.
     const rate = /^\s*(?:(?:per|an?|each|every)\s+|\/\s*)[\p{L}\p{N}]+/iu.exec(after);
-    const afterRate = right.slice(rate === null ? 0 : [...rate[0].matchAll(/[\p{L}\p{N}]+/gu)].length);
+    // ⭐ The figure's PURPOSE names no entity either (DL #2195 CR 5863720934; Paul's C export: "we have £30,000 to
+    // spend"): "to <verb>" right after it that ends the clause, or meets a preposition ("to spend on ads"), is what the
+    // money is FOR, never whose it is. "to Advertising spend" (a noun follows) is not a purpose and is read as before.
+    const purpose = rate === null
+      ? /^\s*to\s+\p{L}+(?=\s*$|\s+(?:on|in|for|across|over|with|into|at|by)(?![\p{L}\p{N}]))/iu.exec(userText.slice(amountEnd, clauseEnd))
+      : null;
+    const skipped = rate ?? purpose;
+    const afterRate = right.slice(skipped === null ? 0 : [...skipped[0].matchAll(/[\p{L}\p{N}]+/gu)].length);
     if (a.kind === 'words') {
       // ⭐ A count in WORDS is an idiom far more often than a digit is ("That's one option we could try", "One more
       // thing"; AIQ #70 5859477600). It is the user's only when a label word of THIS entity sits within two words of it:
@@ -398,6 +442,30 @@ export function wordsTheUserWrote(words: unknown, turnText: string | null | unde
     if (readingAt(turnText, m.index).said === 'affirmed') return true;
   }
   return false;
+}
+
+/**
+ * ⛔ WHICH WAY A PHRASE SAYS A LINK RUNS (DL #2203 verdict, named residual). `wordsTheUserWrote` proves the user wrote
+ * a phrase; it does not prove the phrase is about DIRECTION. On served A16, "update it to very strong" is written and
+ * said, yet says nothing about which way. So a reversal's quoted words must also say a direction:
+ * - a movement: "raises / increases / boosts / pushes … up" → positive; "lowers / reduces / decreases / pushes … down"
+ *   → negative. VERBS only, so "the churn increase" or "a lower price" says nothing;
+ * - or that the link runs the other way ("the other way", "opposite", "backwards", "reversed") → reverse.
+ * Denied words ("does not raise", "never lowers") and a phrase naming BOTH movements say nothing: null, never a guess.
+ * A closed list cannot bound open language (#1971); here a miss only makes the Agent ask, and a hit still shows the
+ * user their words under a plain "REVERSE its direction" preview before any approval.
+ */
+const REVERSE_WORDS = /\b(?:(?:the\s+)?other\s+(?:way|direction)|opposite|backwards?|reversed?|wrong\s+way)\b/i;
+const UP_WORDS = /\b(?:raises|raised|raising|increases|increased|increasing|boosts|boosted|lifts|lifted|push(?:es|ed|ing)?\s+(?:\S+\s+){0,2}up|goes\s+up)\b/i;
+const DOWN_WORDS = /\b(?:lowers|lowered|lowering|reduces|reduced|reducing|decreases|decreased|decreasing|push(?:es|ed|ing)?\s+(?:\S+\s+){0,2}down|goes\s+down)\b/i;
+export function directionTheWordsSay(words: unknown): 'positive' | 'negative' | 'reverse' | null {
+  if (typeof words !== 'string' || NEGATOR.test(words)) return null;
+  const up = UP_WORDS.test(words);
+  const down = DOWN_WORDS.test(words);
+  if (up && down) return null;
+  if (up) return 'positive';
+  if (down) return 'negative';
+  return REVERSE_WORDS.test(words) ? 'reverse' : null;
 }
 
 /**

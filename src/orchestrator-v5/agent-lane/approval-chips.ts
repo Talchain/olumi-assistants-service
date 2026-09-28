@@ -64,6 +64,20 @@ export const ONE_CHANGE_PER_APPROVAL_DETAIL =
 /** Whether a tool leaves a proposal awaiting the user's yes — the approve chip's own list. */
 export const isProposingTool = (name: string): boolean => APPROVE[name] !== undefined;
 
+/**
+ * ⛔ A CHANGE THE AGENT DISOWNS IS NEVER LEFT OFFERED (P2 of the A16 defect, DL #72 5863691992): served `137d3a5` A16
+ * prepared a link change, then replied "do not approve that proposal" with its approve button still offered. A reply
+ * cannot take a button away, so the Agent withdraws the change by this tool, before it replies. Only a change THIS
+ * turn proposed and still offers can be withdrawn (`agent-loop.ts`); what an earlier turn showed the user stays theirs.
+ */
+export const WITHDRAW_PROPOSAL = 'withdraw_proposal';
+export const NOT_PROPOSED_THIS_TURN = 'not_proposed_this_turn';
+
+/** The ids this turn's own `withdraw_proposal` calls withdrew. A refused call withdrew nothing. */
+export function withdrawnThisTurn(toolCalls: readonly { name: string; ok: boolean; proposal_id?: string }[]): ReadonlySet<string> {
+  return new Set(toolCalls.filter((c) => c.name === WITHDRAW_PROPOSAL && c.ok && typeof c.proposal_id === 'string').map((c) => c.proposal_id as string));
+}
+
 export const AMEND_CHIP: SuggestedAction = {
   id: 'agent-amend-proposal',
   label: 'Change something first',
@@ -92,6 +106,8 @@ export function proposalsAwaitingApproval(
   const authorisations = toolCalls.filter((c) => c.name === 'authorise_change');
   if (authorisations.some((c) => typeof c.proposal_id !== 'string')) return new Map();
   const consumed = new Set(authorisations.map((c) => c.proposal_id as string));
+  // A change the Agent withdrew this turn is neither offered nor carried (`WITHDRAW_PROPOSAL`).
+  for (const id of withdrawnThisTurn(toolCalls)) consumed.add(id);
   const lastChange = toolCalls.map((c) => c.mutated).lastIndexOf(true);
   const offered = new Map<string, string>();
   toolCalls.forEach((c, i) => {

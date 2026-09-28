@@ -195,7 +195,10 @@ describe('admission absorbs an ABSENCE, never a value it cannot read', () => {
     version: '1',
     nodes: [
       ...baseNodes(),
-      { id: 'fac_budget', kind: 'factor', label: 'Budget', category: 'controllable' },
+      // placeholder-zero (48f2e12f): today's budget level is held (still CAPLESS —
+      // no cap, no scale_frame), so the emptied twin is not refused on an
+      // unvalued goal root.
+      { id: 'fac_budget', kind: 'factor', label: 'Budget', category: 'controllable', observed_state: { value: 0.5 } },
       option('opt_c0', 'Configured 0', { fac_velocity: 0.4 }),
       option('opt_c1', 'Configured 1', { fac_velocity: 0.8 }),
       {

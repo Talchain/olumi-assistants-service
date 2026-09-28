@@ -42,6 +42,7 @@ import {
   readExistingIntervention,
 } from '../../routing/native-quantity-operation.js';
 import { decideOptionCostAsk } from '../../coaching/decide-option-cost-ask.js';
+import { collectLeaderEstimatedTargetIds } from '../../../orchestrator/context/constraint-feasibility.js';
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
 
@@ -206,5 +207,68 @@ describe('native-quantity write — the ACTUAL apply chain', () => {
     const g = uncalibratedGraph();
     const op = buildNativeQuantityOperation(WRITE, readExistingIntervention(g, OPTION_ID, FACTOR_ID), undefined);
     expect(op).toBeNull();
+  });
+});
+
+/**
+ * ⭐ AIQ Q1 FOLLOW-THROUGH (CEE #2139, 5859746452) — AN OLUMI ESTIMATE THE USER ANSWERS BECOMES THE USER'S FIGURE.
+ *
+ * Q1 makes the cost ask fire on Olumi's own estimate (`cee_hypothesis`) even when it already carries a native figure,
+ * because rule (d) withholds the leader's verdict over any level that is not the user's. The ask is only a repair if its
+ * ANSWER is then the user's. MEASURED before this: the answer went through this exact chain and persisted
+ * `source: 'cee_hypothesis'` beside the user's 150000 (the write spreads the old cell, and the encoder preserves that
+ * one non-user source). So the ask re-selected the cell the user had just answered, and rule (d) still withheld.
+ */
+describe('an answered Olumi estimate is the user’s figure (AIQ Q1): the ask ends and rule (d) credits the user', () => {
+  const ESTIMATE_CELL = {
+    value: 0.7, raw_value: 175000, unit: 'GBP', source: 'cee_hypothesis', value_confidence: 'medium',
+    reasoning: 'Olumi estimate from the sector benchmark', target_match: { node_id: FACTOR_ID, match_type: 'exact_id', confidence: 'high' },
+  };
+  const RATIFIED = [{ constraint_id: 'c_budget', node_id: FACTOR_ID, unit: 'GBP', label: 'Budget limit' }];
+  function estimatedGraph() {
+    const g = calibratedGraph();
+    const option = g.nodes.find((n) => n.id === OPTION_ID)!;
+    option.interventions = { ...(option.interventions as Record<string, unknown>), [FACTOR_ID]: { ...ESTIMATE_CELL } };
+    return g;
+  }
+  const answered = () => {
+    const g = estimatedGraph();
+    return encodeOptionInterventionsForEdit(applyPatchOperations(GraphV3.parse(g) as GraphV3T, canonicalise(g)), new Set([OPTION_ID])).graph;
+  };
+  const askOn = (g: unknown) => {
+    const nodes = (g as { nodes: Array<Record<string, unknown>> }).nodes;
+    const optionNode = nodes.find((n) => n.id === OPTION_ID)!;
+    return decideOptionCostAsk({
+      notDecisionGrade: true,
+      ratified: RATIFIED,
+      nodes: nodes as never,
+      options: [{ id: OPTION_ID, label: WITNESS.ids.option_label, interventions: optionNode.interventions }],
+    });
+  };
+
+  it('RED BASELINE: before the answer, the ask names the estimated cell and rule (d) withholds on it', () => {
+    const g = estimatedGraph();
+    expect(askOn(g)).toMatchObject({ option_id: OPTION_ID, factor_id: FACTOR_ID, unit: 'GBP' });
+    expect([...collectLeaderEstimatedTargetIds(g, RATIFIED as never, OPTION_ID)]).toEqual(['c_budget']);
+  });
+
+  it('⭐ the applier persists the answer as the USER’s: user_specified, and the estimate’s confidence and reasoning go', () => {
+    const cell = readExistingIntervention(answered(), OPTION_ID, FACTOR_ID)!;
+    expect(cell.raw_value).toBe(150000);
+    expect(cell.unit).toBe('GBP');
+    expect(cell.value).toBeCloseTo(0.6);
+    expect(cell.source).toBe('user_specified');
+    expect(cell).not.toHaveProperty('value_confidence');
+    expect(cell).not.toHaveProperty('reasoning');
+    // The neighbour (the brief's own figure) is untouched.
+    expect(readExistingIntervention(answered(), OPTION_ID, NEIGHBOUR_ID)).toEqual(NEIGHBOUR_CELL);
+  });
+
+  it('⭐ the ask does not re-select the cell the user has just answered', () => {
+    expect(askOn(answered())).toBeNull();
+  });
+
+  it('⭐ rule (d) credits the user: the limit is no longer withheld over an estimate', () => {
+    expect([...collectLeaderEstimatedTargetIds(answered(), RATIFIED as never, OPTION_ID)]).toEqual([]);
   });
 });

@@ -577,7 +577,7 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
     expect(statusQuoBlocker).toBeDefined();
     expect(statusQuoBlocker).toMatchObject({
       blocker_type: "missing_value",
-      message: `Factor "${COST}" is currently 25,000. What should option "${STATUS_QUO_LABEL}" set it to?`,
+      message: `Factor "${COST}" is currently 25,000 (Olumi's estimate). What should option "${STATUS_QUO_LABEL}" set it to?`,
       suggested_action: "add_value",
     });
 

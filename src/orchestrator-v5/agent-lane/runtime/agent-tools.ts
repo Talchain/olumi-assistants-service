@@ -36,6 +36,37 @@ export const SLIGHT_IS_WEAK =
   + 'whether slight means weak. When you ask the user for a band, use the canvas\u2019s words: slight, moderate, strong or very strong.';
 
 /**
+ * \u26d4 PJ-C3: A FACTOR'S SIZE IS THE LINK OUT OF IT (R&C root #70 5860219371, words verbatim; DL route 5860238223). Asked
+ * "price sensitivity is very high", the Agent recorded the link INTO the node (Pro plan price \u2192 Price sensitivity) in 4
+ * of 5 served journey-A runs; the one PASS recorded the link OUT of it (Price sensitivity \u2192 Monthly churn, 0.0075).
+ * A node's "size" is how strongly it moves what it affects. The tool took a from/to and had no rule for a statement
+ * about a node, so the model picked the edge that feeds it.
+ */
+export const NODE_SIZE_MEANS_LINK_FROM =
+  'When the user says how big a factor or risk IS (\'price sensitivity is very high\'), they mean how strongly it moves '
+  + 'what it affects: the link FROM it, to the outcome they name or imply. If it has several and they named none, ask which.';
+
+/**
+ * ⛔ PJ-C3 — THE USER'S BAND MUST REACH THE OUTCOME THEY NAME (DL #72 5864154474; Runtime re-land of the reverted #2183,
+ * with no domain example). Served, the Agent sized the link INTO a node: into the node named for what they sized
+ * (price → "Price-sensitive customer loss", `pj-20260928T052306Z`) or into a node between cause and outcome (price →
+ * "Price-driven churn", `…053022Z`). Either way, the node's own link on to churn stayed Olumi's estimate, so their
+ * "very high" never reached churn.
+ */
+export const THE_BAND_MUST_REACH_THE_OUTCOME =
+  'Their band must reach the outcome they name, and a link INTO a node never does: that node\u2019s own link on stays '
+  + 'Olumi\u2019s estimate. If a node is named for what they sized (a qualifier such as "risk" or "loss" still counts), record '
+  + 'the link FROM it to that outcome. If none is, record the link from its cause straight to that outcome, proposing it with '
+  + 'propose_model_change at their band if the model lacks it.';
+
+/**
+ * ⛔ THE CARVE-OUT (DL CHANGES_REQUIRED on #2153, words verbatim): "how big a factor IS" also matches a FIGURE for the
+ * factor itself ("churn is 6%"). That is the factor's value (`propose_assumptions`), never a link strength.
+ */
+export const A_FIGURE_IS_THE_FACTORS_VALUE =
+  'A figure for the factor itself (e.g. \'churn is 6%\') is its value, not a link.';
+
+/**
  * ⛔ A LEVEL'S LINK IS NOT A STRENGTH TO ASK ABOUT (AI Conversation #70 5849437163 U2b, served c35801a): the user gave
  * "it lowers Monthly churn to 6%" for an option not yet linked to churn; the model left that level out and asked "how
  * strong is that effect" — the band question that belongs to a CAUSAL link between factors. A level on an unlinked
@@ -83,6 +114,17 @@ const obj = (props: Record<string, unknown>, required: string[]): Record<string,
 });
 
 
+/**
+ * PJ-C1 latency (#70 5859918872): the model's own typed word that this ONE call is everything the user asked for in
+ * this message. Only then may the reply be composed from the call's result with no narrating call (proposal-reply.ts);
+ * absent or false keeps today's second call, so a message asking for two things never loses the second.
+ */
+const WHOLE_REQUEST = {
+  type: 'boolean',
+  // Words: AI Conversation #70 5860022029.
+  description: 'true ONLY when this one call does everything the user asked for in their latest message: no other change to make, no question to answer, nothing else to explain. If there is anything more, or you are unsure, false.',
+} as const;
+
 /** The factors ONE option would change — shared by the single and the several-option forms of propose_new_option. */
 const ACTS_ON = {
   type: 'array',
@@ -93,12 +135,17 @@ const ACTS_ON = {
       type: 'string', enum: ['positive', 'negative'],
       description: 'Whether this option pushes the factor up or down. State it; never guess it for the user.',
     },
-    level: obj({
-      value: { type: 'number', description: 'The figure the user stated FOR THIS FACTOR, in the factor\u2019s own units (e.g. 54 for \u00a354 on a price). A figure given for something else (a price, when this factor is a churn rate) is never this factor\u2019s level: leave level out. With no figure from the user, leave level out \u2014 never 0 or any placeholder to mean \u201cnot set\u201d \u2014 unless it is your OWN suggested figure for an option you suggested: then set estimate.' },
-      unit: { type: 'string', description: 'The unit the user stated, if any.' },
-      estimate: { type: 'boolean', description: 'true ONLY when this figure is your own suggestion, not the user\u2019s (an option you proposed, at the figure you proposed). It is recorded and shown as Olumi\u2019s estimate, never as the user\u2019s. Needs basis.' },
-      basis: { type: 'string', description: 'With estimate: why this figure, in plain words the user can check.' },
-    }, ['value']),
+    level: {
+      ...obj({
+        value: { type: 'number', description: 'The figure the user stated FOR THIS FACTOR, in the factor\u2019s own units (e.g. 54 for \u00a354 on a price). A figure given for something else (a price, when this factor is a churn rate) is never this factor\u2019s level: leave level out. With no figure from the user, leave level out \u2014 never 0 or any placeholder to mean \u201cnot set\u201d \u2014 unless it is your OWN suggested figure for an option you suggested: then set estimate.' },
+        unit: { type: 'string', description: 'The unit the user stated, if any.' },
+        estimate: { type: 'boolean', description: 'true ONLY when this figure is your own suggestion, not the user\u2019s (an option you proposed, at the figure you proposed). It is recorded and shown as Olumi\u2019s estimate, never as the user\u2019s. Needs basis.' },
+        basis: { type: 'string', description: 'With estimate: why this figure, in plain words the user can check.' },
+      }, ['value']),
+      // ⛔ Where the model writes a level (OpenAI Runtime #70 5859406197): the switch rule sat only on new_factors.kind.
+      description: 'The level this option sets the factor to. Never give a level for a factor you add in new_factors with '
+        + 'kind \'switch\': a switch has no level of its own \u2014 the option turns it on.',
+    },
   }, ['factor_label', 'direction']),
 };
 
@@ -141,6 +188,14 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'Apply a previously returned proposal. Call this ONLY after the user has explicitly ' +
       'approved that specific proposal in their own words. The stored proposal is applied — ' +
       'nothing is regenerated. Report exactly what the result says, including a refusal.',
+    parameters: obj({ proposal_id: { type: 'string' } }, ['proposal_id']),
+  },
+  {
+    type: 'function',
+    name: 'withdraw_proposal',
+    description:
+      'Withdraw a change you proposed earlier in THIS turn that you now think is wrong, before you reply. It is never applied '
+      + 'and no approve button is shown. Never ask the user not to approve a change you leave offered.',
     parameters: obj({ proposal_id: { type: 'string' } }, ['proposal_id']),
   },
   {
@@ -242,11 +297,23 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
             description: '"switch" when the option simply turns this ON \u2014 something not in place today that the option puts in place '
               + '(grandfathering existing customers, launching a feature). It is then added as off today, Olumi\u2019s reading for the user '
               + 'to correct, and on under every option that acts on it: give it no level. Leave kind out for an amount or a rate '
-              + '(a price, a share of customers): its current value and the option\u2019s level are asked for.',
+              + '(a price, a share of customers): its current value is `today` when the user stated it, otherwise asked for, '
+              + 'and the option\u2019s level is asked for.',
+          },
+          // ⭐ PJ-A1 £49 (DL #70 5860365834): the status quo of a factor the Agent adds is its level today — the user's, or none.
+          today: {
+            ...obj({
+              value: { type: 'number', description: 'The figure the user stated for this factor TODAY, in their own units (e.g. 49 for \u201cfrom \u00a349 to \u00a359\u201d on a price).' },
+              unit: { type: 'string', description: 'The unit the user stated it in.' },
+            }, ['value']),
+            description: 'For a factor you add, give today\u2019s level ONLY if the user stated it in their own words (e.g. a price '
+              + 'they said moves "from \u00a349" is \u00a349 today). Never your own estimate, never a placeholder or 0: with no figure '
+              + 'from the user, leave today out and ask for it. Never for a switch.',
           },
         }, ['label', 'affects']),
       },
       rationale: { type: 'string', description: 'Why this option is worth comparing, in the user\u2019s terms.' },
+      whole_request: WHOLE_REQUEST,
     }, ['rationale']),
   },
   {
@@ -256,6 +323,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'Record how strong an EXISTING link is, as the user\u2019s own estimate, when the user has just said it (for example '
       + '"that effect is strong", or "it actually pushes the other way"). This does NOT change anything: it prepares ONE change '
       + 'and returns its id, which you keep for authorise_change: show the user what it records, never the id, before they approve. '
+      + NODE_SIZE_MEANS_LINK_FROM + ' ' + A_FIGURE_IS_THE_FACTORS_VALUE + ' ' + THE_BAND_MUST_REACH_THE_OUTCOME + ' '
       + 'The user\u2019s word is one of Olumi\u2019s strength bands. If the link already sits in that band, its strength is kept and only '
       + 'recorded as theirs; otherwise it is set to the middle of that band, and the result says the figure so you can tell them. '
       + 'Give `direction` ONLY when the user said the link pushes the other way. When they described the strength in their own words '
@@ -267,8 +335,10 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
       strength: { type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'], description: 'The strength the user stated, or your reading of their own words, given with `from_words`.' },
       from_words: FROM_WORDS,
-      direction: { type: 'string', enum: ['positive', 'negative'], description: 'ONLY when the user said the link pushes the other way.' },
+      direction: { type: 'string', enum: ['positive', 'negative'], description: 'ONLY when the user said the link pushes the other way, with their words in `direction_from_words`. Leave it out otherwise: the link keeps its direction.' },
+      direction_from_words: { type: 'string', description: 'With `direction`: the user\u2019s exact words in THIS message saying the link runs the other way. A reversal without them is refused.' },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
+      whole_request: WHOLE_REQUEST,
     }, ['from_label', 'to_label', 'strength', 'rationale']),
   },
   {
@@ -317,6 +387,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         }, ['factor_label', 'direction']),
       },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
+      whole_request: WHOLE_REQUEST,
     }, ['label', 'affects', 'rationale']),
   },
   {
@@ -333,8 +404,11 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       limit_label: { type: 'string', description: 'The limit\u2019s `on` label exactly as the CURRENT MODEL STATE lists it under limits.' },
       operator: { type: 'string', enum: ['<=', '>='], description: 'The limit\u2019s operator exactly as the state lists it.' },
       new_value: { type: 'number', description: 'The new figure the user stated, in the limit\u2019s own unit.' },
+      stated_operator: { type: 'string', enum: ['<', '<=', '>', '>='], description: 'Only when the user states the comparator in this message: '
+        + '< for less than or under, <= for at most, > for more than, >= for at least. Omit it for a new figure alone: the limit keeps its own.' },
       unit: { type: 'string', description: 'The unit the user wrote the figure in, if any.' },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
+      whole_request: WHOLE_REQUEST,
     }, ['limit_label', 'operator', 'new_value', 'rationale']),
   },
   {
@@ -367,6 +441,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           },
         }, ['option_label', 'factor_label', 'value', 'basis']),
       },
+      whole_request: WHOLE_REQUEST,
     }, ['interventions']),
   },
   {
@@ -433,6 +508,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         type: 'boolean',
         description: 'true ONLY when the USER gave this figure as the goal’s current level. Never set it for a figure you estimated.',
       },
+      whole_request: WHOLE_REQUEST,
     }, ['goal_label', 'value', 'unit', 'goal_is', 'user_stated']),
   },
   {
@@ -492,7 +568,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_new_risk', 'propose_link_strength', 'propose_goal_target', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'authorise_change'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_new_risk', 'propose_link_strength', 'propose_goal_target', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'authorise_change', 'withdraw_proposal'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -540,12 +616,16 @@ export interface AgentCapabilities {
     from_words?: string;
   }): Promise<ToolResult>;
   authoriseChange(ctx: AgentToolContext, args: { proposal_id: string }): Promise<ToolResult>;
+  /** Optional: a change THIS turn proposed, withdrawn before the reply (`approval-chips.ts` WITHDRAW_PROPOSAL). */
+  withdrawProposal?(ctx: AgentToolContext, args: { proposal_id: string }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */
   proposeLinkStrength?(ctx: AgentToolContext, args: {
     from_label: string; to_label: string; strength: 'weak' | 'moderate' | 'strong' | 'very strong';
     direction?: 'positive' | 'negative'; rationale: string;
     /** The user's own phrase THIS turn when `strength` is Olumi's reading of it (slice C3). */
     from_words?: string;
+    /** With a `direction` that reverses the link: the user's own words THIS turn saying it runs the other way. */
+    direction_from_words?: string;
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */
   proposeGoalTarget?(ctx: AgentToolContext, args: {
@@ -560,6 +640,8 @@ export interface AgentCapabilities {
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). SLICE C2. */
   proposeLimitChange?(ctx: AgentToolContext, args: {
     limit_label: string; operator: '<=' | '>='; new_value: number; unit?: string; rationale: string;
+    /** A2 follow-up: the comparator the user stated in this message, typed; absent for a new figure alone. */
+    stated_operator?: '<' | '<=' | '>' | '>=';
   }): Promise<ToolResult>;
   runAnalysis(ctx: AgentToolContext, args: { reason: string }): Promise<ToolResult>;
   buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;
@@ -572,7 +654,11 @@ export interface AgentCapabilities {
     /** Several options as ONE change (F4): each `{label, acts_on}`, up to 4. */
     options?: { label: string; acts_on: NewOptionActsOn[] }[];
     /** Factors the model lacks, added in the SAME change (`planNewFactors`): each named in an option's acts_on. */
-    new_factors?: readonly { label: string; affects: readonly { label: string; direction?: 'positive' | 'negative' }[] }[];
+    new_factors?: readonly {
+      label: string; affects: readonly { label: string; direction?: 'positive' | 'negative' }[];
+      /** Today's level, ONLY as the user stated it (PJ-A1 £49); taken only when their own words write it. */
+      today?: { value: number; unit?: string };
+    }[];
   }): Promise<ToolResult>;
   proposeOptionInterventions(ctx: AgentToolContext, args: {
     interventions: readonly { option_label: string; factor_label: string; value: number; basis: string; unit?: string; user_stated?: boolean }[];
@@ -623,6 +709,10 @@ export async function dispatchTool(
       return caps.proposeModelChange(ctx, args as never);
     case 'authorise_change':
       return caps.authoriseChange(ctx, args as never);
+    case 'withdraw_proposal':
+      return caps.withdrawProposal !== undefined
+        ? caps.withdrawProposal(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A change cannot be withdrawn here. Nothing was withdrawn.' };
     case 'run_analysis':
       return caps.runAnalysis(ctx, args as never);
     case 'build_model_from_brief':

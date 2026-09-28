@@ -728,6 +728,16 @@ export function buildAddOptionsTransaction(
 export const GM_HELD_SWITCH_FACTORS_KEY = 'switch_factors';
 
 /**
+ * ⭐ A6b (DL CR on #2131, option (a)) — the key the HOLD records the nodes the USER SUPPLIED under
+ * (`inline_patch.user_stated_node_ids`): today, the options whose label the user's own typed words named
+ * (`add-option-authorship-context.ts`). Written only by CEE when it mints the hold, never from a payload; read only by
+ * the confirm, which stamps exactly those adds `user_set` (`stampUserStatedAddProvenance`). Never a new factor Olumi
+ * minted, and absent on every hold with no such signal — whose adds keep their own provenance and whose bytes are
+ * unchanged. It records AUTHORSHIP, not approval: an approval alone is never recorded as the user's.
+ */
+export const GM_HELD_USER_STATED_NODES_KEY = 'user_stated_node_ids';
+
+/**
  * Today's state of a new switch: OFF, and Olumi's reading of the option's framing (AIQ 5854838919: "it CAN be wrong,
  * e.g. partly in place already"), so it is counted in "I supplied N values", shown as Olumi's estimate and correctable.
  * The value writer's own members, spelled as the builders spell an inferred value (`admit-model.ts`
@@ -779,6 +789,135 @@ export function stampNewSwitchFactors<T extends PatchOperation>(
       ...out[at[0]!]!,
       value: { ...node, observed_state: { ...NEW_SWITCH_TODAY.observed_state }, provenance: NEW_SWITCH_TODAY.provenance },
     };
+  }
+  return { ok: true, operations: out };
+}
+
+// ---------------------------------------------------------------------------
+// ⭐ PJ-A1 £49 — A NEW GRADED FACTOR'S TODAY LEVEL, WHEN THE USER STATED IT, IN THE SAME APPLY AS THE OPTION
+// (DL #70 5860365834; AIQ 5860384275 / 5860839793)
+// ---------------------------------------------------------------------------
+
+/**
+ * The key the HOLD records a batch's stated today levels under (`inline_patch.graded_today`): `[{ factor_id,
+ * observed_state }]`, one per NEW graded factor whose today level the user's own typed words state. Written only by the
+ * typed add-option dispatch, from the Agent's in-process context (`statedTodayLevelsFor`) — never from `parameters` —
+ * and read only by the confirm. Absent on every other hold, so their bytes are unchanged.
+ *
+ * WHY. Journey A's "£59 for new Pro customers" minted the NEW graded factor "New Pro customer price" with no today level.
+ * It reached ISL as a root with no observed value, ISL defaulted it to 0 (`GOAL_ANCESTOR_DATA_GAP` named it), and the
+ * status quo was measured from £0 — wrong by about £49 × new subscribers. The user's brief states £49 ("from £49 to
+ * £59"), so that is its level today, the user's (`brief_extraction`); a figure the user never wrote is never stamped, and
+ * with none the factor stays valueless and asked — never 0.
+ */
+export const GM_HELD_GRADED_TODAY_KEY = 'graded_today';
+
+export interface GradedTodayLevel {
+  readonly factor_id: string;
+  readonly observed_state: Readonly<Record<string, unknown>>;
+}
+
+const STATED_TODAY_KEYS = new Set(['value', 'raw_value', 'cap', 'declared_scale', 'unit', 'source']);
+const finiteNum = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
+
+/**
+ * Whether `os` is exactly what `framedObservedState` (`admit-model.ts`) writes for a baseline the user stated: source
+ * `brief_extraction`; framed `{ value: raw / cap, raw_value, cap, declared_scale: 'unit_interval' }` on a cap above 1
+ * with 0 ≤ raw ≤ cap; or, with no usable range, a bare value already within [0, 1] (a bare amount above 1 would be
+ * unanalysable, `baseline_scale_unresolved`). An optional unit. Nothing else — no extra member rides it into the model.
+ */
+export function isStatedTodayObservedState(os: unknown): boolean {
+  if (os === null || typeof os !== 'object' || Array.isArray(os)) return false;
+  const o = os as Record<string, unknown>;
+  if (!Object.keys(o).every((k) => STATED_TODAY_KEYS.has(k))) return false;
+  if (o.source !== 'brief_extraction' || !finiteNum(o.value)) return false;
+  if (o.unit !== undefined && (typeof o.unit !== 'string' || o.unit.trim() === '')) return false;
+  if (o.cap === undefined) {
+    return o.raw_value === undefined && o.declared_scale === undefined && o.value >= 0 && o.value <= 1;
+  }
+  if (!finiteNum(o.cap) || o.cap <= 1 || !finiteNum(o.raw_value) || o.declared_scale !== 'unit_interval') return false;
+  if (o.raw_value < 0 || o.raw_value > o.cap) return false;
+  return Math.abs(o.value - o.raw_value / o.cap) <= 1e-9;
+}
+
+/**
+ * The hold's `graded_today` member, read. A malformed member is NO signal (`undefined`): the batch is whole without it,
+ * and a factor with no today level is asked for — under-claiming, never a guessed value.
+ */
+export function readGradedTodayMember(raw: unknown): readonly GradedTodayLevel[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const out: GradedTodayLevel[] = [];
+  for (const x of raw) {
+    if (x === null || typeof x !== 'object' || Array.isArray(x)) return undefined;
+    const { factor_id: id, observed_state: os } = x as { factor_id?: unknown; observed_state?: unknown };
+    if (typeof id !== 'string' || id.length === 0 || !isStatedTodayObservedState(os)) return undefined;
+    out.push({ factor_id: id, observed_state: { ...(os as Record<string, unknown>) } });
+  }
+  return new Set(out.map((l) => l.factor_id)).size === out.length ? out : undefined;
+}
+
+/**
+ * ⭐ A1 £59 (DL 5861782245; served CEE 0db4f43, DL run pj-20260928T013016Z A05) — ONE FRAME FOR TODAY AND THE OPTION.
+ * The Agent writes an option's own level on a new graded factor into the option's `add_node` in the SAME hold as that
+ * factor's stated today level, framed on the frame today's level carries. Every VALUED level an option this batch adds
+ * sets on `l.factor_id` must be on exactly that frame: with a cap, `{ value: raw / cap, raw_value: raw }` with
+ * 0 ≤ raw ≤ cap; with none (a bare today level within [0, 1]), a bare value within [0, 1]. A link with no level (no bundle
+ * entry) is not a level. Anything else means two scales for one factor, and the whole batch is refused.
+ */
+function optionLevelsOnFrame(operations: readonly PatchOperation[], l: GradedTodayLevel): boolean {
+  const cap = l.observed_state['cap'];
+  for (const o of operations) {
+    if (o.op !== 'add_node' || o.value === null || typeof o.value !== 'object') continue;
+    const v = o.value as { kind?: unknown; interventions?: unknown };
+    if (v.kind !== 'option' || v.interventions === null || typeof v.interventions !== 'object') continue;
+    if (!Object.prototype.hasOwnProperty.call(v.interventions, l.factor_id)) continue;
+    const entry = (v.interventions as Record<string, unknown>)[l.factor_id];
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return false;
+    const { value, raw_value: raw } = entry as { value?: unknown; raw_value?: unknown };
+    if (!finiteNum(value) || value < 0 || value > 1) return false;
+    if (cap === undefined) {
+      if (raw !== undefined) return false;
+      continue;
+    }
+    if (!finiteNum(cap) || !finiteNum(raw) || raw < 0 || raw > cap || Math.abs(value - raw / cap) > 1e-9) return false;
+  }
+  return true;
+}
+
+/**
+ * Write each named new graded factor's stated today level INTO its `add_node` op — run by the confirm AFTER the
+ * re-referee (whose R4 screen keeps values off a producer's `add_node`) and AFTER the switch stamp, BEFORE the apply,
+ * exactly as `stampNewSwitchFactors` does. The one commit carries the factor, its today level, the option and the links.
+ *
+ * FAIL-CLOSED, and by identity: each id must name exactly ONE `add_node` of a FACTOR in this batch that carries no value
+ * yet (so never a switch, whose today-0 is already stamped), that an option this batch adds links to; its level must be
+ * exactly a stated framed level (`isStatedTodayObservedState`); and every level an option this batch adds sets on it must be
+ * on that same frame (`optionLevelsOnFrame`, A1 £59). Anything else is `{ ok: false }` and the caller refuses
+ * the whole batch. Pure and total; never mutates its inputs; with no levels, the operations come back unchanged.
+ */
+export function stampNewGradedTodayLevels<T extends PatchOperation>(
+  operations: readonly T[],
+  levels: readonly GradedTodayLevel[],
+): { readonly ok: true; readonly operations: T[] } | { readonly ok: false } {
+  if (levels.length === 0) return { ok: true, operations: [...operations] };
+  if (new Set(levels.map((l) => l.factor_id)).size !== levels.length) return { ok: false };
+  const out = [...operations];
+  const addedOptionIds = new Set(out.filter((o) => o.op === 'add_node' && o.value !== null && typeof o.value === 'object'
+    && (o.value as { kind?: unknown }).kind === 'option').map((o) => o.path));
+  for (const l of levels) {
+    if (!isStatedTodayObservedState(l.observed_state)) return { ok: false };
+    const at = out.flatMap((o, i) => (o.op === 'add_node' && o.path === l.factor_id ? [i] : []));
+    if (at.length !== 1) return { ok: false };
+    const value = out[at[0]!]!.value;
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return { ok: false };
+    const node = value as Record<string, unknown>;
+    if (node.kind !== 'factor' || node.id !== l.factor_id || 'observed_state' in node || 'data' in node) return { ok: false };
+    const actedOn = out.some((o) => o.op === 'add_edge' && o.path.endsWith(`::${l.factor_id}`)
+      && addedOptionIds.has(o.path.slice(0, o.path.length - `::${l.factor_id}`.length)));
+    if (!actedOn) return { ok: false };
+    // ⭐ A1 £59 (DL 5861782245): an option this batch adds that sets a level on the factor sets it on today's frame.
+    if (!optionLevelsOnFrame(out, l)) return { ok: false };
+    out[at[0]!] = { ...out[at[0]!]!, value: { ...node, observed_state: { ...l.observed_state } } };
   }
   return { ok: true, operations: out };
 }

@@ -176,20 +176,22 @@ describe('⭐ it lands through the REAL seams', () => {
     expect(assess(taken, takenHash).valid).toBe(false);
   });
 
-  it('⭐ after approval, with the add-on level UNSET: the run is admitted and the readiness NAMES the missing value', () => {
+  it('⭐ after approval, with the add-on level UNSET: the run is refused on the add-on\'s status-quo level and the readiness NAMES both missing values', () => {
     const committed = projectGraphForPersistence(applyPatchOperations(structuredClone(STORED) as never, opsOf(built()) as never) as never);
-    expect(resolveRunAdmission(committed).willProceed).toBe(true);
+    // placeholder-zero (48f2e12f): an unvalued goal root now blocks the Run — the new add-on factor has no level today.
+    expect(resolveRunAdmission(committed).willProceed).toBe(false);
     const v = assessRouteAdmission(committed);
-    expect(v.may_run).toBe(true);
+    expect(v.may_run).toBe(false);
     const named = v.readiness_issues.filter((i) => i.factor_id === 'fac_paid_ai_add_on');
-    expect(named.map((i) => i.code)).toEqual(['MISSING_OPTION_VALUE']);
+    expect(named.map((i) => i.code)).toEqual(['MISSING_OPTION_VALUE', 'MISSING_FACTOR_LEVEL']);
   });
 
-  it('CONTRAST — with a level set, nothing names the add-on', () => {
+  it('CONTRAST — with a level set, the option-value ask for the add-on is gone (its status-quo level is still asked)', () => {
     const spec = structuredClone(F4) as Json;
     spec.interventions[1].value = 0.2;
     const committed = projectGraphForPersistence(applyPatchOperations(structuredClone(STORED) as never, opsOf(buildAddOptionsTransaction(spec, STORED as never)) as never) as never);
-    expect(assessRouteAdmission(committed).readiness_issues.some((i) => i.factor_id === 'fac_paid_ai_add_on')).toBe(false);
+    // placeholder-zero (48f2e12f): an unvalued goal root now blocks the Run — only the add-on's status-quo level is left.
+    expect(assessRouteAdmission(committed).readiness_issues.filter((i) => i.factor_id === 'fac_paid_ai_add_on').map((i) => i.code)).toEqual(['MISSING_FACTOR_LEVEL']);
   });
 });
 

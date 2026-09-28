@@ -151,9 +151,9 @@ const QUESTIONS_AS_EMITTED_2026_08_20: readonly string[] = [
  * one truthfulness defect for three.
  */
 const QUESTIONS_NOW: readonly string[] = [
-  'Factor "Subcontractor cost as share of affected-route revenue" is currently Moderate (0.5). What should option "subcontracting inner-city deliveries to a green courier" set it to?',
-  'Factor "Annual clean-air charge burden" is currently Moderate (0.5). What should option "paying the daily charges and passing costs to customers" set it to?',
-  'Factor "Net EV capex after grants and resale of displaced diesels" is currently Moderate (0.5). What should option "replacing a third of the diesel fleet with electric vans now" set it to?',
+  'Factor "Subcontractor cost as share of affected-route revenue" is currently Moderate (0.5) (Olumi\'s estimate). What should option "subcontracting inner-city deliveries to a green courier" set it to?',
+  'Factor "Annual clean-air charge burden" is currently Moderate (0.5) (Olumi\'s estimate). What should option "paying the daily charges and passing costs to customers" set it to?',
+  'Factor "Net EV capex after grants and resale of displaced diesels" is currently Moderate (0.5) (Olumi\'s estimate). What should option "replacing a third of the diesel fleet with electric vans now" set it to?',
   "Choose which factor \"Electrify one-third of fleet (EV capex route)\" changes and by how much. Olumi has already linked it to 3 factors to keep the model connected, but that link is Olumi's own inference rather than a mapping you stated, and it carries no effect value.",
   "Choose which factor \"Subcontract inner-city runs to green courier\" changes and by how much. Olumi has already linked it to 3 factors to keep the model connected, but that link is Olumi's own inference rather than a mapping you stated, and it carries no effect value.",
   "Choose which factor \"Pay daily clean-air charges and pass through to customers\" changes and by how much. Olumi has already linked it to 3 factors to keep the model connected, but that link is Olumi's own inference rather than a mapping you stated, and it carries no effect value.",
@@ -365,6 +365,8 @@ describe('the questions are the producer\'s, derived not authored', () => {
     for (const row of changed.slice(0, 3)) {
       expect(row.was).toContain('Choose the missing effect value for');
       expect(row.now).toContain('is currently');
+      // The level is the drafter's (`cee_inference` in the capture), so it is said to be Olumi's (CEE #2213).
+      expect(row.now).toContain("(Olumi's estimate)");
       expect(row.now).toContain('set it to?');
       expect(row.now.startsWith(row.was)).toBe(false);
     }

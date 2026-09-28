@@ -34,6 +34,7 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js'
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
 import type { SessionStore } from '../../session/store.js';
+import { asServedBeforeOneForm } from './fixtures/one-form-levels.js';
 
 type Edge = { from: string; to: string; provenance?: { source?: string } };
 type Node = { id: string; kind: string; label: string; provenance?: string; interventions?: Record<string, { value: number; source: string }> };
@@ -198,6 +199,20 @@ async function runAnalysis(graph: Graph): Promise<{ plotCalls: { options: { opti
   return { plotCalls, error };
 }
 
+/** The fields G1 (#2140) stamps on the ONE goal node (`stated-by-user.ts`), named so a re-pin can never hide another move. */
+const G1_GOAL_FIELDS = ['threshold_source', 'goal_direction', 'goal_horizon_months'] as const;
+function withoutG1<T extends { kind?: string }>(n: T): T {
+  if (n.kind !== 'goal') return n;
+  const copy = { ...(n as Record<string, unknown>) };
+  for (const k of G1_GOAL_FIELDS) delete copy[k];
+  return copy as T;
+}
+function addedGoalKeys(built: ReadonlyArray<{ kind?: string }>, served: ReadonlyArray<{ kind?: string }>): string[] {
+  const b = (built.find((n) => n.kind === 'goal') ?? {}) as Record<string, unknown>;
+  const v = (served.find((n) => n.kind === 'goal') ?? {}) as Record<string, unknown>;
+  return Object.keys(b).filter((k) => !(k in v)).sort();
+}
+
 describe('the fixture IS the served model (fidelity, not a self-authored stand-in)', () => {
   it('served: the option pointed at itself, the self-link was the only loop, and Run was refused on it', async () => {
     expect(SERVED.analysis_ready).toMatchObject({ status: 'blocked', blocked_reason: 'CYCLE_DETECTED', may_run: false });
@@ -223,7 +238,14 @@ describe('the fixture IS the served model (fidelity, not a self-authored stand-i
       const { [ADVERTISING]: _self, ...rest } = n.interventions!;
       return { ...n, interventions: rest };
     });
-    expect(body.nodes.map(canon)).toEqual(servedNodes.map(canon));
+    // G1 (#2140, landed after this capture) stamps the goal's held attributes. They are NAMED here and subtracted, never
+    // hidden: the rest of every node must still equal the served model byte for byte.
+    const added = addedGoalKeys(body.nodes, servedNodes);
+    expect(added.length).toBeGreaterThan(0); // G1 did stamp this brief's goal (a vacuous subtraction is a failure)
+    expect(added.every((k) => (G1_GOAL_FIELDS as readonly string[]).includes(k)), added.join(',')).toBe(true);
+    // P2 A5 (#2139), landed after this capture too: option levels are read back in the served short form, on the SERVED
+    // factors' own frames and units (`one-form-levels.ts`); anything else they carry still fails this compare.
+    expect(asServedBeforeOneForm(body, SERVED.draft_graph).nodes.map((n) => canon(withoutG1(n)))).toEqual(servedNodes.map(canon));
     expect(body.edges.map(canon)).toEqual(SERVED.draft_graph.edges.filter((e) => !withheld.has(`${e.from}->${e.to}`)).map(canon));
     expect(canon(body.goal_constraints)).toEqual(canon(SERVED.draft_graph.goal_constraints));
   });
@@ -304,7 +326,12 @@ describe('CONTRAST — nothing else moves, and nothing of the user’s is droppe
     expect(loopWithheld(out)).toEqual([]);
     expect(loopLines(out)).toEqual([]);
     expect(calls).toBe(1);
-    expect(createHash('sha256').update(canon(body)).digest('hex')).toBe(ACYCLIC_BODY_SHA256_AT_BASE);
+    // The digest recorded at cd489f1 (before G1) still pins every byte except G1's named goal fields (#2140) and the
+    // members P2 A5 (#2139) adds to an option level, read back to the served short form. This draft has no served graph
+    // of its own, so the frames are read off the body; that is sound HERE because the factor nodes carrying those frames
+    // are inside the same digest, so a wrong frame, figure or unit still moves it.
+    const readBack = asServedBeforeOneForm(body, body);
+    expect(createHash('sha256').update(canon({ ...readBack, nodes: readBack.nodes.map(withoutG1) })).digest('hex')).toBe(ACYCLIC_BODY_SHA256_AT_BASE);
   });
 
   it('a self-link the USER stated is never dropped: kept, and said as theirs', async () => {
@@ -319,7 +346,10 @@ describe('CONTRAST — nothing else moves, and nothing of the user’s is droppe
     const { out, graph } = await build(servedCandidate({ advertisingLevel: { ...ADVERTISING_LEVEL, provenance: 'explicit' } }));
     expect(loopWithheld(out)).toEqual([]);
     expect(has(graph, ADVERTISING, ADVERTISING)).toBe(true);
-    expect(advertising(graph).interventions?.[ADVERTISING]).toEqual({ value: 0.2, source: 'brief_extraction' });
+    // P2 A5 (#2139): the level also names the key it is stored under (`target_match`), as every constructed level does.
+    expect(advertising(graph).interventions?.[ADVERTISING]).toEqual({
+      value: 0.2, source: 'brief_extraction', target_match: { node_id: ADVERTISING, match_type: 'exact_id', confidence: 'high' },
+    });
     expect(loopLines(out).some((s) => s.includes("Olumi's reading"))).toBe(false);
   });
 });

@@ -67,6 +67,7 @@ import { deriveStatedConstraintFrame } from '../../../cee/compound-goal/index.js
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
 import { sameUnit } from '../../../utils/currency-alphabet.js';
+import { statedOperatorOf } from '../../agent-lane/admit-constraint.js';
 import {
   buildCanonicalAnalysisReadyFromGraph,
   mergeInterventionSourceObjects,
@@ -860,9 +861,26 @@ export function createAddConstraintHandler(): HandlerFn {
           ? frameCarrier.value_frame
           : undefined;
 
+      // ⭐ A2 follow-up (DL verdict on #2180): THE COMPARATOR AS THE USER STATED IT TRAVELS WITH THE ROW. The update
+      // replaces the row wholesale (`list.map(... => constraintParse.data)`), so a strict limit ("under 4%", held `<=`
+      // with `operator_as_stated: "<"`) became "at most" on its next figure edit. This tool's vocabulary (`at_least |
+      // at_most`, and the canvas control's) cannot state strictness, so it never restates it: OMISSION MEANS UNCHANGED,
+      // the unit's doctrine above, and the prior state of the thing being changed is the same row the frame reads
+      // (`frameCarrier`: `existing`, or the moved `sourceRow`). Unlike the frame it does not describe the NUMBER, so a new
+      // figure keeps it ("under 5%"). Only a TYPED comparator the caller relays (`statedConstraintOperator`, the Agent's
+      // limit door) restates it: strict sets it, non-strict clears it. Read through `statedOperatorOf`, and written only
+      // as the strict twin of THIS row's operator, so a contradicting stamp is never carried or minted.
+      const statedOperator = invocation.statedConstraintOperator
+        ?? (frameCarrier === undefined ? undefined : statedOperatorOf(frameCarrier));
+      const operatorAsStated =
+        statedOperator === '<' && operator === '<=' ? ('<' as const)
+          : statedOperator === '>' && operator === '>=' ? ('>' as const)
+            : undefined;
+
       const newConstraintBase: Omit<GoalConstraintT, 'constraint_id'> = {
         node_id: targetId,
         operator,
+        ...(operatorAsStated !== undefined ? { operator_as_stated: operatorAsStated } : {}),
         value: params.value, // user units, no normalisation
         label: constraintLabel,
         provenance: 'explicit',
@@ -1008,6 +1026,8 @@ export function createAddConstraintHandler(): HandlerFn {
         existing !== undefined &&
         existing.value === newConstraint.value &&
         existing.unit === newConstraint.unit &&
+        // A2 follow-up: "at most 4%" over "under 4%" changes the limit, whatever the figure.
+        statedOperatorOf(existing) === statedOperatorOf(newConstraint) &&
         !userStampDisagrees;
       const nodeChannelUnchanged =
         ownsGoalThresholdChannel &&
@@ -1491,6 +1511,7 @@ export function createAddConstraintHandler(): HandlerFn {
       const formatInput = {
         targetLabel: constraintLabel,
         operator,
+        ...(operatorAsStated !== undefined ? { operatorAsStated } : {}),
         value: params.value,
         ...(newConstraint.unit !== undefined ? { unit: newConstraint.unit } : {}),
       };

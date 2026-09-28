@@ -28,6 +28,9 @@ const SERVED_REPLY = 'No option can be put forward on MRR yet: the model treats 
 describe('AX1: a Run whose leader is withheld for the product still answers with the arithmetic', () => {
   let app: FastifyInstance;
   let permitted = false;
+  /** The graph read's `analysis_identity_evaluated_node_ids` and the leader's withheld reason (C46 × R3-4 row). */
+  let evaluatedIds: unknown;
+  let withheldReason = 'nonlinear_identity_sign_unproven';
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: SERVED_REPLY }] }] }), { status: 200 })));
     vi.resetModules();
@@ -40,14 +43,15 @@ describe('AX1: a Run whose leader is withheld for the product still answers with
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
       graph: served, graph_hash: HASH,
       analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-09-26T20:20:00.000Z' },
-        leader_claim: permitted ? { permitted: true, separation: 'separated' } : { permitted: false, withheld_reason: 'nonlinear_identity_sign_unproven', separation: 'separated' } },
+        leader_claim: permitted ? { permitted: true, separation: 'separated' } : { permitted: false, withheld_reason: withheldReason, separation: 'separated' } },
       analysis_result: { type: 'analysis_result', computed_against_hash: HASH, leading_option_id: null },
+      ...(evaluatedIds !== undefined ? { analysis_identity_evaluated_node_ids: evaluatedIds } : {}),
     }));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { permitted = false; });
+  beforeEach(() => { permitted = false; evaluatedIds = undefined; withheldReason = 'nonlinear_identity_sign_unproven'; });
 
   const pressRun = async () => (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     kind: 'message', scenario_id: SCENARIO, message: 'Run analysis.', source: 'chip_click', chip: { action_type: 'run_analysis' },
@@ -65,13 +69,31 @@ describe('AX1: a Run whose leader is withheld for the product still answers with
     const b = await pressRun();
     expect(b._agent?.break_even).toMatchObject({
       goal: 'MRR', unit: 'GBP/month', baseline_price: 49, baseline_volume: 300, baseline_volume_by: 'approved', baseline_goal: 14_700,
+      // A5 (DL #70 5855437928): the graph ids ride beside the labels on the wire.
+      goal_id: 'mrr', price_factor_id: 'pro_plan_price', volume_factor_id: 'pro_paying_subscribers',
       options: [
-        { option: 'Raise Pro to £59', price: 59, price_by: 'user', keep_at_least: 250 },
-        { option: 'Hold £49 with AI release', price: 49, price_by: 'user' },
-        { option: 'Raise Pro to £54', price: 54, price_by: 'olumi', keep_at_least: 273 },
+        { option: 'Raise Pro to £59', option_id: 'raise_pro_to_59', price: 59, price_by: 'user', keep_at_least: 250 },
+        { option: 'Hold £49 with AI release', option_id: 'hold_49_with_ai_release', price: 49, price_by: 'user' },
+        { option: 'Raise Pro to £54', option_id: 'raise_pro_to_54', price: 54, price_by: 'olumi', keep_at_least: 273 },
       ],
       target: { value: 20_000, needs: [{ price: 59, volume: 339 }, { price: 54, volume: 371 }, { price: 49, volume: 409 }] },
     });
+  });
+
+  it('ROW (C46 × R3-4, Canonical criterion 1): the run\'s engine EVALUATED the product, the leader withheld for a LIMIT → no arithmetic appended', async () => {
+    withheldReason = 'constraint_verdict_withheld';
+    // CONTRAST first, on the same readback without the list: today's arithmetic is appended.
+    const today = await pressRun();
+    expect(today._diagnostic_trace?.fast_path).toBe('run');
+    expect(today.assistant_text).toContain('At £59/month, MRR stays at least that while 250 or more of the 300 stay (a loss of at most 50).');
+    expect(today._agent?.break_even).toBeDefined();
+    evaluatedIds = ['mrr'];
+    const b = await pressRun();
+    expect(b._diagnostic_trace?.fast_path).toBe('run');
+    expect(b.assistant_text).not.toContain('The arithmetic still answers');
+    expect(b.assistant_text).not.toContain('MRR stays at least that');
+    expect(b._agent, JSON.stringify(b)).toBeDefined();
+    expect(Object.hasOwn(b._agent!, 'break_even')).toBe(false);
   });
 
   it('CONTRAST: a readback that permits the leader adds nothing (the analysis answers)', async () => {

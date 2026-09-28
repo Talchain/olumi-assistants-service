@@ -69,6 +69,7 @@ function c22() {
     // C46 (#1972) made identities and the goal's scope required in the strict schema; c22 declared neither.
     identities: [],
     unknowns: [] as string[],
+    decision_question: null,
   };
 }
 
@@ -304,8 +305,13 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     retry.options[0] = { ...retry.options[0]!, interventions: [...levels, est('Hiring cost', 140000, 'GBP')] };
     return retry;
   };
+  // Since P2 A5 the registered level is in the one form: the user's 52 itself, on the factor's own frame and unit
+  // (known baseline 40, cap 100, "story points"), and the factor it is keyed by.
   const userLevelKept = (graph: Graph) =>
-    expect(node(graph, 'hire_two_developers').interventions?.engineering_delivery_capacity).toStrictEqual({ value: 0.52, source: 'brief_extraction' });
+    expect(node(graph, 'hire_two_developers').interventions?.engineering_delivery_capacity).toStrictEqual({
+      value: 0.52, source: 'brief_extraction', raw_value: 52, unit: 'story points',
+      target_match: { node_id: 'engineering_delivery_capacity', match_type: 'exact_id', confidence: 'high' },
+    });
 
   it('RED (pre-review 5829120255 #1): the same number re-stamped ai_proposed is not adopted — authorship is part of the user\'s number', async () => {
     const { graph } = await construct(first52(), retry52([{ ...explicit52, provenance: 'ai_proposed' }]));
@@ -484,7 +490,7 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     expect(said.filter((s) => s.startsWith(`"Hire Two Developers" puts "${CUT}" at -60000 GBP`))).toHaveLength(1);
     expect(said.filter((s) => s.includes('treated your') && s.includes(CUT))).toEqual([]);
     // Readiness asks for exactly that one pair's value, and nothing else.
-    expect(missingValues(graph)).toEqual([`Factor "${CUT}" is currently £0. What should option "Hire Two Developers" set it to?`]);
+    expect(missingValues(graph)).toEqual([`Factor "${CUT}" is currently £0 (Olumi's estimate). What should option "Hire Two Developers" set it to?`]);
   });
 
   it('CONTROL (#1930 test): the same pair with NO level is a gap, and the retry IS spent on it', async () => {

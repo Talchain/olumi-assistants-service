@@ -19,6 +19,7 @@ import { STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 
 import { percentLevelFrame } from '../../orchestrator-v5/agent-lane/admit-constraint.js';
 import { sizeLink, type MagnitudeNode } from './link-effect.js';
+import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -113,7 +114,8 @@ export function frameDefaultedLinks<G>(graph: G, factorId: string): FramedLinks<
     const provenance = isRec(edge.provenance) ? edge.provenance : {};
     if (sizing.outcome === 'placeholder') {
       const sameSize = strength.mean === sizing.mean && strength.std === sizing.std && provenance.magnitude === 'olumi_placeholder'
-        && JSON.stringify(provenance.natural_effect) === JSON.stringify(sizing.natural_effect);
+        // Key-order-insensitive: a graph read back from jsonb holds `natural_effect`'s keys shortest-first, never as written.
+        && stableStringify(provenance.natural_effect) === stableStringify(sizing.natural_effect);
       if (sameSize) return edge;
       sized.push(`${String(edge.from)}::${String(edge.to)}`);
       const { natural_effect: _dropped, ...rest } = provenance;
