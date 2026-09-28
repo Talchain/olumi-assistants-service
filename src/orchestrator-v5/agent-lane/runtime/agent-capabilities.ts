@@ -131,6 +131,8 @@ import { runWithStatedLinkBand } from '../stated-link-band-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
 import { classifyUnitScaleClass } from '../../../cee/draft/records/unit-scale-class.js';
+import { unitFamilyOf } from '../../routing/value-unit-resolution.js';
+import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, factorTheUserNamed, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
@@ -366,11 +368,45 @@ function newSwitchLevelConflict(level: unknown): { value: unknown; unit?: unknow
   return { value, ...(hasUnit ? { unit } : {}), ...(hasEstimate ? { estimate } : {}), fields };
 }
 
-/** A switch figure that says ON: a bare 1 or `true` with no unit, or exactly 100 in a percent-class unit. */
+/**
+ * ⭐ A 1 IN A UNIT THAT IS NO QUANTITY IS ON (MG, switch-loop step 2; #2194's `rejected_levels`, served `a8cffcf`, OpenAI):
+ * the grandfather switch was refused at `{1, unit: "enabled", estimate: true}` (MG pj-20260928T040509Z A05) and at
+ * `{1, unit: "binary"}` (DL pj-20260928T040536Z A07) — two runs, two different ON words, so no word list: the test is
+ * inverted (DL #72 5863189058). A unit is a QUANTITY — and a 1 in it an amount the switch cannot keep, refused as before
+ * (1%, £1, 1 hire, 1 per month: VERIFIER-S1) — when anything in it reads as one: a percent-class unit
+ * (`classifyUnitScaleClass`), a digit or a currency/percent sign, or any token the estate's unit classifier knows
+ * (`unitFamilyOf`: currency, percent, time, metric, count) or names as a currency (`isCurrencyUnit`). Anything else
+ * ("enabled", "binary", "on", "boolean") names the switch's STATE, not an amount: its 1 is on, its 0 is off.
+ */
+function unitReadsAsQuantity(unit: string): boolean {
+  if (classifyUnitScaleClass(unit) !== 'unknown') return true;
+  if (/[\d%£$€¥₹]/u.test(unit)) return true;
+  return unit.split(/[\s/,;:()[\]{}"'-]+/u).some((t) => t !== '' && (unitFamilyOf(t) !== null || isCurrencyUnit(t) || countedNoun(t)));
+}
+
+/**
+ * The things a count is OF that `unitFamilyOf` does not list ("1 unit", "1 customer"): a miss here only refuses, as
+ * before, so the set may stay small — it only closes the inverted test's open side (`unitReadsAsQuantity`).
+ */
+const COUNTED_NOUNS: ReadonlySet<string> = new Set([
+  'unit', 'item', 'piece', 'count', 'number', 'amount', 'quantity', 'customer', 'subscriber', 'account', 'client',
+  'member', 'order', 'sale', 'licence', 'license', 'store', 'location', 'product', 'feature',
+]);
+function countedNoun(token: string): boolean {
+  const t = token.toLowerCase();
+  return COUNTED_NOUNS.has(t) || (t.length > 1 && t.endsWith('s') && COUNTED_NOUNS.has(t.slice(0, -1)));
+}
+
+/**
+ * A switch figure that says ON: a bare 1 or `true` with no unit; a 1 or `true` in a unit that reads as no quantity
+ * (`unitReadsAsQuantity`); or exactly 100 in a percent-class unit.
+ */
 function switchFigureMeansOn(value: unknown, unit: unknown): boolean {
   const hasUnit = unit !== undefined && unit !== null && !(typeof unit === 'string' && unit.trim() === '');
   if (!hasUnit) return value === 1 || value === true;
-  return value === 100 && typeof unit === 'string' && classifyUnitScaleClass(unit) === 'percent';
+  if (typeof unit !== 'string') return false;
+  if ((value === 1 || value === true) && !unitReadsAsQuantity(unit)) return true;
+  return value === 100 && classifyUnitScaleClass(unit) === 'percent';
 }
 
 /**
@@ -391,7 +427,8 @@ function switchLevelMeansOff(level: unknown): boolean {
   if (value !== 0) return false;
   if (estimate !== undefined && estimate !== null && typeof estimate !== 'boolean') return false;
   const hasUnit = unit !== undefined && unit !== null && !(typeof unit === 'string' && unit.trim() === '');
-  return !hasUnit || (typeof unit === 'string' && classifyUnitScaleClass(unit) === 'percent');
+  // A 0 in a unit that names the switch's state ("binary", "enabled") is off, as its 1 is on (`unitReadsAsQuantity`).
+  return !hasUnit || (typeof unit === 'string' && (classifyUnitScaleClass(unit) === 'percent' || !unitReadsAsQuantity(unit)));
 }
 
 /**

@@ -88,6 +88,9 @@ describe('R1/R2 — a new switch at exactly 0 under an option, turned on by anot
     ["{ value: 0, unit: '%' }", { value: 0, unit: '%' }],
     ["{ value: 0, unit: '% of at-risk accounts' }", { value: 0, unit: '% of at-risk accounts' }],
     ['{ value: 0, estimate: true } (Olumi’s reading that it leaves it off)', { value: 0, estimate: true, basis: 'conversion work does not touch retention' }],
+    // Switch-loop step 2: a 0 in a unit that names the switch's STATE is off, as its 1 is on (served shapes used "binary").
+    ["{ value: 0, unit: 'binary' }", { value: 0, unit: 'binary' }],
+    ["{ value: 0, unit: 'enabled' }", { value: 0, unit: 'enabled' }],
   ])('RED: %s → ok, held; retention turns the switch on at 1; conversion sends NO intervention on it; the drop is said', async (_name, offLevel) => {
     const { caps, sent } = setup();
     const r = await caps.proposeNewOption(ctx as never, a03(offLevel) as never) as Result;
