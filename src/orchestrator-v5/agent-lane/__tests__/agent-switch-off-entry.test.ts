@@ -172,9 +172,11 @@ describe('R3 — no option in the change turns the switch on → refused, and th
 
   // Served 137d3a5 (MG pj-20260928T042134Z A07/A08): in a ONE-option change "list it under the option that turns it on"
   // named the option it was already under; the model re-sent `{0}` four times. The next call is named exactly instead.
-  it('RED (one-option change): the only option lists it at 0 → the detail names that entry with NO "level" key, not 0', async () => {
+  // Switch-loop step 5 (Runtime 5865857191): a PLACEHOLDER 0 (nothing but 0) here is now read as on
+  // (`agent-switch-placeholder-zero.test.ts`), so these rows bind a 0 that says more, which keeps this refusal.
+  it('RED (one-option change): the only option lists it at { 0, "binary" } → the detail names that entry with NO "level" key, not 0', async () => {
     const { caps, sent } = setup();
-    const r = await caps.proposeNewOption(ctx as never, { options: [conversion([{ level: { value: 0 } }])], new_factors: NEW_SWITCH, rationale: 'x' } as never) as Result;
+    const r = await caps.proposeNewOption(ctx as never, { options: [conversion([{ level: { value: 0, unit: 'binary' } }])], new_factors: NEW_SWITCH, rationale: 'x' } as never) as Result;
     expect(r.refusal, JSON.stringify(r)).toBe('switch_level_not_on');
     expect(sent).toEqual([]);
     expect(r.detail).toContain(`NEXT CALL: call propose_new_option again with exactly the same arguments, except send the acts_on entry for "${SWITCH}" in "${CONV}" with NO "level" key at all`);
@@ -184,8 +186,8 @@ describe('R3 — no option in the change turns the switch on → refused, and th
 
   it('the single-option refusal keeps its conflict_fields (names only)', async () => {
     const { caps } = setup();
-    const r = await caps.proposeNewOption(ctx as never, { options: [conversion([{ level: { value: 0 } }])], new_factors: NEW_SWITCH, rationale: 'x' } as never) as Result;
-    expect(r.conflict_fields).toEqual(['not_one']);
+    const r = await caps.proposeNewOption(ctx as never, { options: [conversion([{ level: { value: 0, unit: 'binary' } }])], new_factors: NEW_SWITCH, rationale: 'x' } as never) as Result;
+    expect(r.conflict_fields).toEqual(['unit', 'not_one']);
   });
 
   it('ONE HOP: following that detail (the switch bare under retention, left out of conversion) is held — no second refusal', async () => {
