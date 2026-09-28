@@ -171,6 +171,18 @@ function scopeIn(g: { readonly nodes: readonly { readonly label?: unknown; reado
 }
 
 /**
+ * The LIMIT door's scope (DL #2195 CHANGES_REQUIRED 5863720934, served journey-C budget limits): the user calls a limit
+ * a "limit" ("change the budget limit to £30,000"), so that word is the limit's own; and a RISK is no quantity a limit's
+ * figure measures, so its label ("Budget overrun risk") makes no claim on the figure. Every other quantity still does:
+ * "300 Pro paying subscribers" is never a £300 limit on the price.
+ */
+export function limitScopeIn(g: { readonly nodes: readonly { readonly label?: unknown; readonly kind?: unknown }[] }, limitLabel: string): EntityScope {
+  const risks = new Set(g.nodes.filter((n) => n.kind === 'risk').map((n) => (typeof n.label === 'string' ? n.label : '')));
+  const { target, others } = scopeIn(g, limitLabel);
+  return { target: [...target, 'limit'], others: others.filter((l) => !risks.has(l)) };
+}
+
+/**
  * ⛔ C46 (d) — THE AGENT IS TOLD WHEN THE LEADER RESTS ON A PRODUCT THE ANALYSIS ONLY ADDS UP.
  *
  * `claim_permissions` is the Agent's only view of the leader permission. A C46 reason the wire carries
@@ -2006,12 +2018,11 @@ export function createAgentCapabilities(
           detail: 'A target needs the figure, its unit, and whether the goal must be at least or at most that figure. Nothing was prepared; ask the user for whichever is missing.' };
       }
       const figure = targetFigure(value, unit);
+      const targetNotStated: ToolResult = { ok: false, mutated: false, refusal: 'target_not_stated',
+        detail: `${figure} is not a figure the user wrote, so nothing was prepared: it would be recorded as their target. `
+          + 'Ask them what figure the goal must reach, in their own words, and never offer a figure of your own as theirs.' };
       // ⛔ The figure is recorded as the user's target, so it must be one the user wrote.
-      if (!figureTheUserWrote(value, unit, ctx.user_text)) {
-        return { ok: false, mutated: false, refusal: 'target_not_stated',
-          detail: `${figure} is not a figure the user wrote, so nothing was prepared: it would be recorded as their target. `
-            + 'Ask them what figure the goal must reach, in their own words, and never offer a figure of your own as theirs.' };
-      }
+      if (!figureTheUserWrote(value, unit, ctx.user_text)) return targetNotStated;
       // ⛔ And so is which way it binds: said, affirmed, in this turn's own typed words.
       const said = comparatorTheUserWrote(ctx.user_turn_text);
       if (said !== type) {
@@ -2046,6 +2057,8 @@ export function createAgentCapabilities(
           detail: `The goal "${goal.label}" is measured in ${String(goalUnit)}, and ${figure} is a different kind of figure, so nothing was prepared. `
             + 'Ask the user for the target in the goal’s own units, and never record a figure given for something else as this goal’s target.' };
       }
+      // ⛔ …and written ABOUT this goal (DL #72 5862394804): "300 Pro paying subscribers" is never a £300 MRR target.
+      if (!figureTheUserWroteFor(value, unit, ctx.user_text, scopeIn(g, goal.label))) return targetNotStated;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -4517,6 +4530,8 @@ export function createAgentCapabilities(
             reason: `${shown} is not a level "${f.label}" can hold today, so its value today is not set. Ask the user what it is today.` });
           continue;
         }
+        // Not bound to the factor (unlike the goal target and limit doors): journey A's accepted A1 row grounds the NEW price
+        // factor's today with the brief's "£49", written about the existing "Pro plan price" (#2132; DL #72 5862394804).
         if (!figureTheUserWrote(t.value, unit, ctx.user_text)) {
           todayNotSet.push({ factor: f.label, value: t.value,
             reason: `The user's own words do not state ${shown}, so today's value for "${f.label}" is not set: it is never taken from Olumi's words or a guess. Ask the user what it is today.` });
@@ -5198,8 +5213,9 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'limit_unit_mismatch',
           detail: `The limit on "${node.label}" is in ${String(unit)}, and the figure given is a different kind of figure, so nothing was prepared. Ask the user for the limit in its own units.` };
       }
-      // ⛔ Recorded as the user's own figure, so it must be one the user wrote.
-      if (!figureTheUserWrote(value, unit, ctx.user_text)) {
+      // ⛔ Recorded as the user's own figure, so it must be one the user wrote, ABOUT this limit's quantity (DL #72
+      // 5862394804): "300 Pro paying subscribers" is never a £300 limit on the price.
+      if (!figureTheUserWrote(value, unit, ctx.user_text) || !figureTheUserWroteFor(value, unit, ctx.user_text, limitScopeIn(g, node.label))) {
         return { ok: false, mutated: false, refusal: 'figure_not_stated',
           detail: `${figureOf(value)} is not a figure the user wrote, so nothing was prepared: it would be recorded as their limit. `
             + 'Ask them what the new limit is, in their own words, and never offer a figure of your own as theirs.' };

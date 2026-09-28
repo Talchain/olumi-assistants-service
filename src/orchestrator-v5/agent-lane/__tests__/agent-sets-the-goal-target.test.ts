@@ -137,6 +137,77 @@ describe('the Agent sets the goal\'s success target the user stated, through the
     expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ goal_node_id: 'churn', constraint_type: 'at_most', raw_value: 5, unit: '%' }));
   });
 
+  // DL #72 5862394804: a bare count grounded any unit. With subscribers in the model, "300 Pro paying subscribers" is
+  // written about THEM, so it is never MRR's £300 target, nor a £300 limit on the price (`figureTheUserWroteFor`).
+  const withSubscribers = (extra: Partial<Graph> = {}): Graph => {
+    const g = graphWith(undefined, extra);
+    g.nodes.push({ id: 'subs', kind: 'factor', label: 'Pro paying subscribers', observed_state: { value: 0.15, raw_value: 300, unit: 'subscribers', cap: 2000 } });
+    return g;
+  };
+  const SUBS_SAID = 'We have 300 Pro paying subscribers, and MRR must be at least that.';
+
+  it('⭐ RED: "300 Pro paying subscribers" is never a £300 MRR target → refused target_not_stated, nothing prepared', async () => {
+    const w = world(withSubscribers());
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(SUBS_SAID), { constraint_type: 'at_least', value: 300, unit: '£', rationale: 'x' });
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'target_not_stated' }));
+    expect(store.outstanding(SCENARIO, null)).toEqual([]);
+    expect(w.sent).toEqual([]);
+  });
+
+  it('CONTROL: the same model, "MRR must be at least £20k" → prepared (the figure is written about MRR)', async () => {
+    const w = world(withSubscribers());
+    const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeGoalTarget!(ctxOf('MRR must be at least £20k.'), { constraint_type: 'at_least', value: 20000, unit: '£', rationale: 'x' });
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true }));
+  });
+
+  const PRICE_LIMIT = { constraint_id: 'gc-price', node_id: 'price', operator: '<=', value: 100, unit: '£', value_frame: 'level', label: 'Pro plan price', provenance: 'explicit' };
+  it('⭐ RED: "300 Pro paying subscribers" is never a £300 limit on the Pro plan price → refused figure_not_stated', async () => {
+    const w = world(withSubscribers({ goal_constraints: [PRICE_LIMIT] }));
+    const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeLimitChange!(ctxOf('We have 300 Pro paying subscribers.'),
+      { limit_label: 'Pro plan price', operator: '<=', new_value: 300, unit: '£', rationale: 'x' });
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'figure_not_stated' }));
+  });
+
+  // DL #2195 CHANGES_REQUIRED 5863720934 (journey C): the served budget-limit shape — the limit's node, sibling spends,
+  // and a budget RISK. Paul's own words and the composed "budget limit" words are the limit's figure THROUGH THE DOOR.
+  const withBudget = (): Graph => {
+    const g = graphWith(undefined, { goal_constraints: [{ constraint_id: 'gc-rel', node_id: 'rel', operator: '<=', value: 20000, unit: 'GBP', value_frame: 'level', label: 'Release investment', provenance: 'explicit' }] });
+    g.nodes.push(
+      { id: 'rel', kind: 'factor', label: 'Release investment', observed_state: { value: 0.5, raw_value: 20000, unit: 'GBP', cap: 40000 } },
+      { id: 'ads', kind: 'factor', label: 'Advertising spend', observed_state: { value: 0.25, raw_value: 10000, unit: 'GBP', cap: 40000 } },
+      { id: 'dev', kind: 'factor', label: 'Feature development spend', observed_state: { value: 0.25, raw_value: 10000, unit: 'GBP', cap: 40000 } },
+      { id: 'overrun', kind: 'risk', label: 'Budget overrun risk' },
+    );
+    return g;
+  };
+  it.each([
+    ["Paul verbatim: \"…we have £30,000 to spend.\"", "I've just found out that we've had a budget increase, and we have £30,000 to spend."],
+    ['composed: "change the budget limit to £30,000"', 'Please change the budget limit to £30,000.'],
+    // Each half of \`limitScopeIn\` alone: no "limit" word (only the risk exclusion lets "budget" name nothing) …
+    ['risk-only: "The budget is now £30,000."', 'The budget is now £30,000.'],
+    // … and a word the sibling SPENDS share (only the user's "limit" names the limit).
+    ['limit-word-only: "change the spend limit to £30,000"', 'Please change the spend limit to £30,000.'],
+  ])('⭐ RED (door): %s → the Release investment limit change is prepared', async (_n, said) => {
+    const w = world(withBudget());
+    const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeLimitChange!(ctxOf(said),
+      { limit_label: 'Release investment', operator: '<=', new_value: 30000, unit: 'GBP', rationale: 'x' });
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true }));
+  });
+  it('CONTRAST (door): "£30,000 of Advertising spend" is never the Release investment limit → figure_not_stated', async () => {
+    const w = world(withBudget());
+    const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeLimitChange!(ctxOf('We put £30,000 of Advertising spend into it.'),
+      { limit_label: 'Release investment', operator: '<=', new_value: 30000, unit: 'GBP', rationale: 'x' });
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: false, refusal: 'figure_not_stated' }));
+  });
+
+  it('CONTROL: "cap the Pro plan price at £120" → the limit change is prepared', async () => {
+    const w = world(withSubscribers({ goal_constraints: [PRICE_LIMIT] }));
+    const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeLimitChange!(ctxOf('Cap the Pro plan price at £120.'),
+      { limit_label: 'Pro plan price', operator: '<=', new_value: 120, unit: '£', rationale: 'x' });
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true }));
+  });
+
   it('RED: a figure the user did not write → refused, NOTHING prepared, nothing sent, and the Agent is told to ask for the figure', async () => {
     for (const [c, value] of [[ctx, 65000], [ctx, 60], [ctxOf('Yes.'), 60000]] as const) {
       const w = world(graphWith());
