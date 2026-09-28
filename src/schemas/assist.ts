@@ -405,6 +405,22 @@ export const GoalConstraintSchema = z.object({
   node_id: z.string().min(1),
   /** Comparison operator - ASCII only (>= or <=) */
   operator: z.enum([">=", "<="]),
+  /**
+   * A2 (DL #72 5861407189): the comparator AS THE USER STATED IT, when that was STRICT. "Keeping monthly churn under
+   * 4%" is held as `operator: "<="` (the only upper bound the engine takes) with `operator_as_stated: "<"` beside it,
+   * so every surface that states the limit says "less than 4%", never "at most 4%". Written only from the drafter's
+   * TYPED operator (`admit-constraint.ts`), never from words, and only when it is strict: `"<"` beside `"<="`, `">"`
+   * beside `">="`. Absent means the operator is as stated.
+   *
+   * ⛔ NOT A WIDER `operator` ENUM: `GraphV3.safeParse` fails the WHOLE graph on an unknown operator (Canonical
+   * 5860723311), and PLoT's preflight refuses anything but `>=`/`<=`. The engine still gets `operator` only; the
+   * PLoT wire copy withholds this field (`run-analysis.ts`, `withholdStatedOperator`).
+   *
+   * ⚠ DECLARED, NOT LEFT TO PASSTHROUGH: this is a plain `z.object`, so an undeclared stamp is deleted at the first
+   * `GraphV3` parse hop — every later D1 edit (`apply-graph-mutation.ts`) writes the parsed rows. An older reader
+   * without this declaration strips it and the graph stays valid.
+   */
+  operator_as_stated: z.enum(["<", ">"]).optional(),
   /** Threshold value in user units - PLoT normalises */
   value: z.number(),
   /** Human-readable constraint label */
