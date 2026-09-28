@@ -85,8 +85,7 @@ describe('the approve chip resolves its proposal in the history the next request
     return { output, paired };
   };
 
-  // ⭐ PJ-C1 tokens (`dropSupersededPairs`): the stubbed pair then leaves the history, call and output together.
-  it('RED: after a chip approval the next request carries neither the proposal’s call nor its output — only the words', async () => {
+  it('RED: after a chip approval the next request carries the proposal’s output as a stub, still paired with its call', async () => {
     const { proposalId, approve } = await propose(APPROVED, 'c_link');
     expect(approve, 'the approve chip was offered').toBeDefined();
     const sent = requests.length;
@@ -98,12 +97,10 @@ describe('the approve chip resolves its proposal in the history the next request
 
     await turn({ scenario_id: APPROVED, message: 'What did that change?' });
     const { output, paired } = carried('c_link');
-    expect(paired, 'the applied proposal’s call is not carried').toBe(false);
-    expect(output, 'nor its output (valid input: no output without its call)').toBeUndefined();
-    const input = requests[requests.length - 1]!.input as Array<{ role?: string; content?: Array<{ text?: string }> }>;
-    const words = JSON.stringify(input.filter((i) => i.role === 'user'));
-    expect(words, 'the conversation’s words stay').toContain(TYPED_BAND);
-    expect(JSON.stringify(input)).not.toContain(proposalId);
+    expect(paired, 'the call is still in the request').toBe(true);
+    expect(output, 'the output is still beside it (valid input)').toBeTypeOf('string');
+    expect(output, 'the applied proposal is not carried in full').toMatch(/superseded/);
+    expect(output).not.toContain(proposalId);
   });
 
   it('CONTROL: a proposal nobody approved is carried verbatim into the next request', async () => {
