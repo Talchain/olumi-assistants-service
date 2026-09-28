@@ -833,8 +833,19 @@ export function limitLevelOwnerReason(stamp: unknown): EstimateOnlyReason | null
 export function collectLimitLevelOwners(
   graph: unknown,
   ratified: readonly RatifiedConstraint[],
-): { userBaselineIds: Set<string>; userAssumptionIds: Set<string> } {
-  const out = { userBaselineIds: new Set<string>(), userAssumptionIds: new Set<string>() };
+): { userBaselineIds: Set<string>; userAssumptionIds: Set<string>; relativeChangeIds: Set<string> } {
+  const out = { userBaselineIds: new Set<string>(), userAssumptionIds: new Set<string>(), relativeChangeIds: new Set<string>() };
+  // R1 S4-core: the limits STORED as a relative change from today (`value_frame: 'change_rel'`), read off the same
+  // persisted rows the ratified list came from. ISL's `frame_verdict` must be present for these (0.61.0: absent fails
+  // closed), so {@link derivePerLimitVerdicts} needs to know which they are.
+  const rows = (graph as { goal_constraints?: unknown } | null | undefined)?.goal_constraints;
+  if (Array.isArray(rows)) {
+    for (const c of ratified) {
+      if (rows.some((r) => readRecord(r)?.constraint_id === c.constraint_id && readRecord(r)?.value_frame === 'change_rel')) {
+        out.relativeChangeIds.add(c.constraint_id);
+      }
+    }
+  }
   const rawNodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
   if (!Array.isArray(rawNodes)) return out;
   for (const c of ratified) {
@@ -1438,7 +1449,12 @@ export function deriveConstraintVerdict(
    * B5. {@link collectLimitLevelOwners} over the analysed graph. OPTIONAL, and omitted is the SAFE value: no rows are
    * attested (never a defaulted `scored`). Both sets are required when it is given, so no caller can omit the owner.
    */
-  perLimitInput?: { readonly userBaselineIds: ReadonlySet<string>; readonly userAssumptionIds: ReadonlySet<string> },
+  perLimitInput?: {
+    readonly userBaselineIds: ReadonlySet<string>;
+    readonly userAssumptionIds: ReadonlySet<string>;
+    /** R1 S4-core: limits stored `change_rel` ({@link collectLimitLevelOwners}). Omitted = none known (as before). */
+    readonly relativeChangeIds?: ReadonlySet<string>;
+  },
   /**
    * ⭐ A2 follow-up (DL verdict on #2180): option id → the STRICT limits that option sets at EXACTLY their threshold
    * (`strictLimitsPinnedAtThreshold`, `level-limit-baseline.ts`). That option's result for that limit is WITHHELD, here,
@@ -1474,6 +1490,12 @@ export function deriveConstraintVerdict(
 export const STRICT_THRESHOLD_PIN_REASON = 'level_set_at_strict_threshold';
 
 /**
+ * R1 S4-core: ISL's `frame_verdict` says the base a limit was compared on is NOT the user's, while CEE reads that same
+ * level as the user's own. The hops disagree about whose figure it is, so the row is `unscored` (CEE's own code).
+ */
+export const BASE_OWNER_UNESTABLISHED_REASON = 'base_owner_unestablished';
+
+/**
  * The per-limit `reason` codes, ranked by the precondition they report (AI Quality 5855511541: "reason names the FIRST
  * failed precondition"). Lower is earlier; ties keep the first reason found. A code is a `string` on the contract so a
  * consumer on an older pin never fails to parse a new one (hazard 1).
@@ -1505,6 +1527,7 @@ export const PER_LIMIT_REASON_RANK: ReadonlyMap<string, number> = new Map([
   ['constraint_block_withheld', 9],
   ['no_score_returned', 10],
   ['not_decision_grade', 11],
+  [BASE_OWNER_UNESTABLISHED_REASON, 11],
   [STRICT_THRESHOLD_PIN_REASON, 12],
 ]);
 /** A producer removal reason CEE does not map, passed verbatim: after the named preconditions, before CEE's own codes. */
@@ -1588,7 +1611,7 @@ const JOINT_WITHHELD_REASON = 'limit_unscored';
 function derivePerLimitVerdicts(
   envelope: Record<string, unknown>,
   ratified: readonly RatifiedConstraint[],
-  levels: { readonly userBaselineIds: ReadonlySet<string>; readonly userAssumptionIds: ReadonlySet<string> },
+  levels: { readonly userBaselineIds: ReadonlySet<string>; readonly userAssumptionIds: ReadonlySet<string>; readonly relativeChangeIds?: ReadonlySet<string> },
   leaderEstimatedTargetIds: ReadonlySet<string> | undefined,
   /** A2 follow-up: the strict limits some option sets at exactly their threshold ({@link STRICT_THRESHOLD_PIN_REASON}). */
   strictThresholdPinnedIds: ReadonlySet<string>,
@@ -1645,6 +1668,13 @@ function derivePerLimitVerdicts(
     if (jointWithheldIds.has(c.constraint_id)) reasons.push(JOINT_WITHHELD_REASON);
     const rows = results.map(readRecord).filter((r) => r !== null && readString(r.constraint_id) === c.constraint_id);
     if (rows.length === 0) reasons.push('not_decision_grade');
+    // ⛔ R1 S4-core (0.61.0, meaning AIQ 5871459631; Codex DL blocker 5880319881): ISL's verdict on the FRAME. A limit
+    // stored as a RELATIVE change is compared on today's level, so its P is the user's finding only when ISL says
+    // `scored`; ABSENT (a pre-R1 ISL, or a hop that dropped it) fails closed, exactly as an absent `scale_provenance`.
+    if (levels.relativeChangeIds?.has(c.constraint_id) === true
+      && !rows.some((r) => r?.frame_verdict === 'scored' || r?.frame_verdict === 'estimate_only')) {
+      reasons.push('not_decision_grade');
+    }
     for (const row of rows) {
       const marker = EnrichmentScaleProvenanceSchema.safeParse(row?.scale_provenance);
       if (!marker.success) {
@@ -1691,9 +1721,14 @@ function derivePerLimitVerdicts(
     }
     // Pushed after `certified` is read: it is CEE's reading of the words, never producer evidence about the block.
     if (strictThresholdPinnedIds.has(c.constraint_id)) reasons.push(STRICT_THRESHOLD_PIN_REASON);
-    if (reasons.length > 0) return { constraint_id: c.constraint_id, state: 'unscored', reason: firstFailed(reasons) };
+    // ISL's `estimate_only`: the base it compared on is NOT the user's (Olumi's estimate, or an owner it could not
+    // establish). It only ever LOWERS a row. When CEE reads that same level as the user's own, the two hops disagree
+    // about whose figure it is, so neither "scored" nor "only Olumi's estimates" would be true: the row fails closed.
+    const islEstimateOnly = results.some((r) => readRecord(r)?.constraint_id === c.constraint_id && readRecord(r)?.frame_verdict === 'estimate_only');
     const usersOwnLevel =
       userBaselineIds.has(c.constraint_id) && leaderEstimatedTargetIds?.has(c.constraint_id) !== true;
+    if (islEstimateOnly && usersOwnLevel) reasons.push(BASE_OWNER_UNESTABLISHED_REASON);
+    if (reasons.length > 0) return { constraint_id: c.constraint_id, state: 'unscored', reason: firstFailed(reasons) };
     if (usersOwnLevel) return { constraint_id: c.constraint_id, state: 'scored' };
     // (a) WHOSE figure. A level that is not the user's names its own owner. When the level IS the user's, only rule (d)
     // leaves the row here: the leader SETS the target, at an intervention's level whose vocabulary (brief_extraction |
