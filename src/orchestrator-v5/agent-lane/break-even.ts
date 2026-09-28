@@ -89,8 +89,13 @@ function exactRaw(stored: { value?: unknown; raw_value?: unknown } | null | unde
   return Math.abs(raw - cents) <= 1e-9 ? cents : null;
 }
 
-export function breakEvenFor(graph: unknown): BreakEven | null {
-  const finding = nonlinearIdentityForAgent(graph, true);
+/**
+ * `evaluated` (C46 × R3-4, Canonical criterion 1): the carriers the selected run's engine evaluated, as the graph read
+ * carries them (`analysis_identity_evaluated_node_ids`). A product the engine computed is not one it "adds up", so no
+ * arithmetic stands in for it. Omitted ⇒ today's reading, byte for byte.
+ */
+export function breakEvenFor(graph: unknown, evaluated?: ReadonlySet<string>): BreakEven | null {
+  const finding = nonlinearIdentityForAgent(graph, true, evaluated);
   if (finding === null || finding.outcome_id !== finding.goal_id || finding.factor_ids.length !== 2) return null;
   // MG B2 (#2051 5850436075): "stays at least that" and "needs N" are a floor's words; a goal to REDUCE reads them
   // backwards (for a cap, N at £p is the most allowed). The estate's one direction authority decides; no answer otherwise.

@@ -626,3 +626,45 @@ describe("the reload carries the selected run's per-limit verdicts (B5, `analysi
     expect(body).not.toHaveProperty("analysis_limit_verdicts");
   });
 });
+
+// ─── C46 × R3-4: the carriers the run's engine evaluated ride with the same block (Canonical criterion 1) ────────────
+
+describe("the reload carries the selected run's evaluated identities (`analysis_identity_evaluated_node_ids`)", () => {
+  /** ISL #187's list as PLoT #379 forwards it; the run fact stores the /v2/run body whole as its `enrichment`. */
+  const IDENTITY_EVALUATIONS = [
+    { node_id: "mrr", operation: "product", factor_ids: ["pro_plan_price", "pro_subscribers"], evaluated: true, level_source: "identity_inputs" },
+    { node_id: "team_mrr", operation: "product", factor_ids: ["team_price", "team_seats"], evaluated: false, withheld_reason: "identity_frame_missing" },
+  ];
+  const withList = (graphHash: string) => {
+    // The leader withheld for ANOTHER reason (the constraint verdict): the lift must still reach the Agent's view.
+    const fact = runAnalysisFact({ graphHash, mayName: false }) as { result: { enrichment: Record<string, unknown> } };
+    fact.result.enrichment = { ...fact.result.enrichment, identity_evaluations: IDENTITY_EVALUATIONS };
+    return fact;
+  };
+
+  it("ROW A (FRESH) — exactly the carriers the fact's engine marked `evaluated: true`, beside its block", async () => {
+    readFactsFor.mockResolvedValue([withList(GRAPH_HASH)]);
+    const app = await buildApp();
+    const body = (await read(app)).json() as Record<string, unknown>;
+    expect(body.analysis_result).not.toBeNull();
+    expect(body.analysis_constraint_verdict_state, "control: the same fact is read").toBe("unevaluated");
+    expect(body.analysis_identity_evaluated_node_ids).toEqual(["mrr"]);
+  });
+
+  it("CONTRAST — a fresh fact whose enrichment carries no list (every run before batch 7) carries no key", async () => {
+    readFactsFor.mockResolvedValue([runAnalysisFact({ graphHash: GRAPH_HASH, mayName: false })]);
+    const app = await buildApp();
+    const body = (await read(app)).json() as Record<string, unknown>;
+    expect(body.analysis_constraint_verdict_state, "control: the same fact is read").toBe("unevaluated");
+    expect(body).not.toHaveProperty("analysis_identity_evaluated_node_ids");
+  });
+
+  it("ROW A (STALE) — no block, and no evaluated identities: both describe a different graph", async () => {
+    readFactsFor.mockResolvedValue([withList(PRE_EDIT_GRAPH_HASH)]);
+    const app = await buildApp();
+    const body = (await read(app)).json() as Record<string, unknown>;
+    expect(body.analysis_result).toBeNull();
+    expect(body).not.toHaveProperty("analysis_constraint_verdict_state");
+    expect(body).not.toHaveProperty("analysis_identity_evaluated_node_ids");
+  });
+});
