@@ -25,6 +25,8 @@
  *     sha is what tells them apart.
  */
 import { createHash } from 'node:crypto';
+import { GIT_COMMIT_SHA } from '../../../version.js';
+import { getRuntimeEnvResolution } from '../../../config/env-resolver.js';
 
 /** The served Agent lane's prompt aliases (map Part 3, stages 1–4). One list, so tests and the map share it. */
 export const AGENT_PROMPT_ALIASES = ['agent.converse', 'agent.interpret', 'agent.research', 'agent.construct', 'agent.read_brief'] as const;
@@ -57,4 +59,38 @@ export function agentPromptIdentity(alias: AgentPromptAlias, instructions: unkno
  */
 export function conversationPromptAlias(toolChoice: unknown): AgentPromptAlias {
   return toolChoice === 'none' ? 'agent.interpret' : 'agent.converse';
+}
+
+/**
+ * ⭐ THE WHOLE REQUEST IDENTITY OF ONE AGENT CALL (PTL row 4, #72 5871228357; DL ASSIGN 5871346171), read from the BODY
+ * the call then JSON-encodes and sends — never from what the caller meant to send:
+ *   · the alias and the instructions sha, as {@link agentPromptIdentity};
+ *   · `tools_sha256` / `schema_sha256`: sha256 of the sent `tools` / `text.format.schema`, JSON-encoded, as MG's Baseline
+ *     v1 manifest defines them (schema = sha256(JSON.stringify(buildCandidateSchema()))). Absent when not sent;
+ *   · the sent `reasoning.effort` and `max_output_tokens`;
+ *   · `cee_build` (the full commit) and the environment with its source (`getRuntimeEnvResolution`).
+ * NEVER THROWS: it sits on the path to the provider.
+ */
+export function agentRequestIdentity(alias: AgentPromptAlias, body: Readonly<Record<string, unknown>>): Readonly<Record<string, string | number>> {
+  const out: Record<string, string | number> = { ...agentPromptIdentity(alias, body['instructions']) };
+  try {
+    const text = body['text'] as { format?: { schema?: unknown } } | undefined;
+    const reasoning = body['reasoning'] as { effort?: unknown } | undefined;
+    if (body['tools'] !== undefined) out['tools_sha256'] = jsonSha256(body['tools']);
+    if (text?.format?.schema !== undefined) out['schema_sha256'] = jsonSha256(text.format.schema);
+    if (typeof reasoning?.effort === 'string') out['reasoning_effort'] = reasoning.effort;
+    if (typeof body['max_output_tokens'] === 'number') out['max_output_tokens'] = body['max_output_tokens'];
+    out['cee_build'] = GIT_COMMIT_SHA;
+    const env = getRuntimeEnvResolution();
+    out['environment'] = env.env;
+    out['environment_source'] = env.source;
+  } catch { /* measuring a call never fails it */ }
+  return out;
+}
+
+/** sha256 of a value as JSON-encoding sends it; an unserialisable value hashes `''`. */
+function jsonSha256(value: unknown): string {
+  let text = '';
+  try { text = JSON.stringify(value) ?? ''; } catch { text = ''; }
+  return createHash('sha256').update(text, 'utf8').digest('hex');
 }

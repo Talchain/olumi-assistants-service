@@ -29,7 +29,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
 import { OPENAI_ONLY, assertProviderAllowed, providerLedgerTruncated, recordProviderUsage, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { RESEARCH_CHIP_PREFIX, approvedQueryOf, readResearchResponse, researchChipFor, researchReplyText, researchRequestBody, type ResearchOutcome } from '../orchestrator-v5/agent-lane/runtime/public-research.js';
-import { agentPromptIdentity, conversationPromptAlias } from '../orchestrator-v5/agent-lane/runtime/prompt-identity.js';
+import { agentRequestIdentity, conversationPromptAlias } from '../orchestrator-v5/agent-lane/runtime/prompt-identity.js';
 import { composeProposalReply } from '../orchestrator-v5/agent-lane/proposal-reply.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
@@ -1114,10 +1114,24 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * `agent.converse`. The sha is of `req.instructions` — the SAME string the body below sends, so C5b's view line or
      * the interpret-only constraint changes it.
      */
+    // Built ONCE: the ledger's identity (PTL row 4) is read from the very object that is sent.
+    const sentBody: Record<string, unknown> = {
+      model: budget.model,
+      instructions: req.instructions,
+      input: req.input,
+      tools: req.tools,
+      // Fast path 3 answers over a run Olumi already made: it may interpret, never act.
+      ...((req as { tool_choice?: unknown }).tool_choice === 'none' ? { tool_choice: 'none' } : {}),
+      // C5b: on a withheld run that one call answers in a typed shape (`RUN_INTERPRETATION_FORMAT`).
+      ...((req as { text?: unknown }).text !== undefined ? { text: (req as { text?: unknown }).text } : {}),
+      // PJ-C1 (batch 5): the conversation budget's own effort, as construction already sends its budget's (L~1222).
+      ...(budget.reasoning_effort !== undefined ? { reasoning: { effort: budget.reasoning_effort } } : {}),
+      max_output_tokens: req.max_output_tokens,
+    };
     const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callModel', {
       model: budget.model,
       purpose: 'conversation',
-      ...agentPromptIdentity(conversationPromptAlias((req as { tool_choice?: unknown }).tool_choice), req.instructions),
+      ...agentRequestIdentity(conversationPromptAlias((req as { tool_choice?: unknown }).tool_choice), sentBody),
     });
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
@@ -1125,19 +1139,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`,
         'content-type': 'application/json',
       },
-      body: JSON.stringify({
-        model: budget.model,
-        instructions: req.instructions,
-        input: req.input,
-        tools: req.tools,
-        // Fast path 3 answers over a run Olumi already made: it may interpret, never act.
-        ...((req as { tool_choice?: unknown }).tool_choice === 'none' ? { tool_choice: 'none' } : {}),
-        // C5b: on a withheld run that one call answers in a typed shape (`RUN_INTERPRETATION_FORMAT`).
-        ...((req as { text?: unknown }).text !== undefined ? { text: (req as { text?: unknown }).text } : {}),
-        // PJ-C1 (batch 5): the conversation budget's own effort, as construction already sends its budget's (L~1222).
-        ...(budget.reasoning_effort !== undefined ? { reasoning: { effort: budget.reasoning_effort } } : {}),
-        max_output_tokens: req.max_output_tokens,
-      }),
+      body: JSON.stringify(sentBody),
     });
     if (!r.ok) {
       const text = await r.text();
@@ -1166,7 +1168,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Built once, so the ledger's sha is of the instructions this exact body sends (`RESEARCH_INSTRUCTIONS` today).
     const researchBody = researchRequestBody(query, model);
     const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callResearch', {
-      model, purpose: 'public_research', ...agentPromptIdentity('agent.research', researchBody['instructions']),
+      model, purpose: 'public_research', ...agentRequestIdentity('agent.research', researchBody),
     });
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
@@ -1220,8 +1222,26 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * write was missing. Nothing new is fetched or computed here.
      */
     // `agent.construct` covers BUILD_INSTRUCTIONS and its retry/size/compaction suffixes; the sha tells them apart.
+    // Built ONCE: the ledger's identity (PTL row 4) is read from the very object that is sent.
+    const sentBody: Record<string, unknown> = {
+      model: reqBody.model,
+      instructions: reqBody.instructions,
+      input: reqBody.input,
+      max_output_tokens: reqBody.max_output_tokens,
+      ...(reqBody.reasoning_effort !== undefined
+        ? { reasoning: { effort: reqBody.reasoning_effort } }
+        : {}),
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'whole_candidate',
+          strict: true,
+          schema: reqBody.schema,
+        },
+      },
+    };
     const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callStructured', {
-      model: reqBody.model, purpose: 'construction', ...agentPromptIdentity('agent.construct', reqBody.instructions),
+      model: reqBody.model, purpose: 'construction', ...agentRequestIdentity('agent.construct', sentBody),
     });
     let j: {
       output?: { type?: string; content?: { type?: string; text?: string }[] }[];
@@ -1236,23 +1256,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`,
           'content-type': 'application/json',
         },
-        body: JSON.stringify({
-          model: reqBody.model,
-          instructions: reqBody.instructions,
-          input: reqBody.input,
-          max_output_tokens: reqBody.max_output_tokens,
-          ...(reqBody.reasoning_effort !== undefined
-            ? { reasoning: { effort: reqBody.reasoning_effort } }
-            : {}),
-          text: {
-            format: {
-              type: 'json_schema',
-              name: 'whole_candidate',
-              strict: true,
-              schema: reqBody.schema,
-            },
-          },
-        }),
+        body: JSON.stringify(sentBody),
         // The call's OWN bound (see `constructionDeadline`), below the global 110 s undici one.
         signal: AbortSignal.timeout(budgetMs),
       });
@@ -1293,20 +1297,21 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
    * No retry. It is optional display work, so a failure only means nothing is shown.
    */
   const callBriefReading: CallBriefReading = async (reqBody) => {
+    const sentBody: Record<string, unknown> = {
+      model: reqBody.model,
+      instructions: reqBody.instructions,
+      input: reqBody.input,
+      temperature: 0,
+      max_output_tokens: 600,
+      text: { format: { type: 'json_schema', name: 'brief_spans', strict: true, schema: reqBody.schema } },
+    };
     const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callBriefReading', {
-      model: reqBody.model, purpose: 'brief_reading', ...agentPromptIdentity('agent.read_brief', reqBody.instructions),
+      model: reqBody.model, purpose: 'brief_reading', ...agentRequestIdentity('agent.read_brief', sentBody),
     });
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: { authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: reqBody.model,
-        instructions: reqBody.instructions,
-        input: reqBody.input,
-        temperature: 0,
-        max_output_tokens: 600,
-        text: { format: { type: 'json_schema', name: 'brief_spans', strict: true, schema: reqBody.schema } },
-      }),
+      body: JSON.stringify(sentBody),
       signal: AbortSignal.timeout(BRIEF_READING_TIMEOUT_MS),
     });
     if (!r.ok) throw new Error(`openai_${r.status}`);

@@ -92,7 +92,28 @@ export interface GenerativeCall {
    * suffix appended under the same alias reads as a different prompt. Computed by the caller, carried verbatim.
    */
   readonly prompt_sha256?: string;
+  /**
+   * ⭐ THE REST OF THE REQUEST'S IDENTITY (PTL row 4, #72 5871228357), each read from the body AS SENT and carried
+   * verbatim, so a served row resolves to Baseline v1 (MG-BASELINE-V1-MANIFEST.md) with no offline recompute:
+   * `tools_sha256` / `schema_sha256` = sha256 of the sent `tools` / `text.format.schema` as JSON-encoded; the sent
+   * `reasoning.effort` and `max_output_tokens`; the service build and the environment it resolved (with its source,
+   * since only `olumi_env` / `render_service_name` tell staging from production). Same additive rule as above.
+   */
+  readonly tools_sha256?: string;
+  readonly schema_sha256?: string;
+  readonly reasoning_effort?: string;
+  readonly max_output_tokens?: number;
+  readonly cee_build?: string;
+  readonly environment?: string;
+  readonly environment_source?: string;
 }
+
+/** What a caller may say about its call; every field is optional and recorded only when given. */
+export type ProviderCallDetail = Readonly<Partial<Pick<GenerativeCall,
+  'model' | 'purpose' | 'prompt_alias' | 'prompt_sha256' | 'tools_sha256' | 'schema_sha256' | 'reasoning_effort'
+  | 'max_output_tokens' | 'cee_build' | 'environment' | 'environment_source'>>>;
+/** The identity fields, in the order a row carries them. */
+const IDENTITY_FIELDS = ['prompt_alias', 'prompt_sha256', 'tools_sha256', 'schema_sha256', 'reasoning_effort', 'max_output_tokens', 'cee_build', 'environment', 'environment_source'] as const;
 
 /**
  * ⭐ WHAT A CALL COST, SO CACHING CAN BE MEASURED RATHER THAN ASSUMED.
@@ -259,7 +280,7 @@ export function currentProviderPolicy(): ProviderPolicy | undefined {
 export function assertProviderAllowed(
   provider: LlmProvider,
   site?: string,
-  detail?: { readonly model?: string; readonly purpose?: string; readonly prompt_alias?: string; readonly prompt_sha256?: string },
+  detail?: ProviderCallDetail,
 ): ProviderCallHandle {
   const policy = store.getStore();
   if (policy === undefined) return undefined;
@@ -274,9 +295,8 @@ export function assertProviderAllowed(
       model: detail?.model ?? 'unknown',
       purpose: detail?.purpose ?? site ?? 'unspecified',
       outcome: allowed ? 'allowed' : 'refused_before_network',
-      // Additive: a caller that passes no prompt identity gets a row with NEITHER key, byte for byte as before.
-      ...(detail?.prompt_alias !== undefined ? { prompt_alias: detail.prompt_alias } : {}),
-      ...(detail?.prompt_sha256 !== undefined ? { prompt_sha256: detail.prompt_sha256 } : {}),
+      // Additive: a caller that passes no identity gets a row with NONE of these keys, byte for byte as before.
+      ...Object.fromEntries(IDENTITY_FIELDS.filter((k) => detail?.[k] !== undefined).map((k) => [k, detail![k]])),
     });
   } else {
     policy.truncated = true;

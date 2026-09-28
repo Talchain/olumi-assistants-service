@@ -105,8 +105,11 @@ describe('the Agent route is OpenAI-only, all the way down', () => {
     // 5858315483 item 3), so they are added to the exact key set and pinned by value
     // here — never tolerated by a looser matcher. The sha's binding to the instructions
     // actually sent is proved in `provider-ledger-prompt-identity.test.ts`.
+    // ⭐ PTL row 4 (#72 5871228357): the rest of the request identity is INTENDED too, added to the exact key set the
+    // same way; each field's binding to the body actually sent is proved in `provider-ledger-request-identity.test.ts`.
+    const REQUEST_IDENTITY = ['tools_sha256', 'reasoning_effort', 'max_output_tokens', 'cee_build', 'environment', 'environment_source'];
     for (const c of calls) {
-      expect(Object.keys(c).sort()).toEqual([...PURITY, 'duration_ms', 'prompt_alias', 'prompt_sha256'].sort());
+      expect(Object.keys(c).sort()).toEqual([...PURITY, 'duration_ms', 'prompt_alias', 'prompt_sha256', ...REQUEST_IDENTITY].sort());
       expect((c as { prompt_alias?: string }).prompt_alias).toBe('agent.converse');
       expect((c as { prompt_sha256?: string }).prompt_sha256).toMatch(/^[0-9a-f]{64}$/);
     }
