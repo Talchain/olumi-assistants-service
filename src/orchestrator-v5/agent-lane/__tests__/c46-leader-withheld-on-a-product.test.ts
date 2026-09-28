@@ -264,8 +264,9 @@ const PAUL_SENTENCE =
   'No option can be put forward on "MRR" yet: Olumi reads "MRR" as depending on "Pro plan price" times "Pro subscribers", ' +
   'and this model adds those effects up rather than multiplying them, so it cannot say which option does better.';
 const PAUL_QUESTION =
-  'Which option does better on "MRR"? This model cannot answer that yet: Olumi reads "MRR" as depending on "Pro plan price" ' +
-  'times "Pro subscribers", and the model adds those effects up rather than multiplying them.';
+  'Which option does better on "MRR"? Olumi reads "MRR" as depending on "Pro plan price" times "Pro subscribers". ' +
+  'Olumi\'s analysis multiplies them when every part has a figure and together they match "MRR" (within 5%); otherwise it adds those ' +
+  'effects up and cannot say which option does better on "MRR".';
 
 const nodeById = (g: Graph, id: string) => g.nodes.find((n) => n.id === id);
 
@@ -732,5 +733,29 @@ describe('(d) the Agent\'s view carries the product cause, remove-only', () => {
     const permissions = (r.first_analysis as { claim_permissions: Record<string, unknown> }).claim_permissions;
     expect(permissions.withheld_reason).toBe(WITHHELD_UNREQUESTED_ANALYSIS);
     expect(permissions.nonlinear_identity).toMatchObject({ reason: WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN, say: PAUL_SENTENCE });
+  });
+});
+
+// ⛔ R3-4b (AIQ #72 5866734772; DL 5866746362): since PLoT #383/#386 the engine MULTIPLIES a declared product whose parts
+// all have levels consistent with it — served journey A names its leader by evaluating it — yet the build told the user,
+// in `open_questions` (the UI's disclosure lists all of them), that "the model adds those effects up rather than multiplying
+// them" (served c2222 A01 ×3, c2220 C01 ×2 on `63e060e`). Before any Run, nothing the build returns may claim the analysis
+// cannot multiply: it says when it does, and what happens otherwise. The Run-time sentence (PAUL_SENTENCE) is unchanged —
+// it is keyed on the run's typed evaluated set and fires only when the product was NOT evaluated.
+describe('R3-4b — before any Run, nothing the build says claims the analysis cannot multiply', () => {
+  const NEVER = /cannot yet multiply|cannot answer that yet|rather than multiplying/;
+  it('RED: journey A\'s build (the product the Run evaluates) — no sentence anywhere in the result claims it', async () => {
+    const { out } = await build(paul());
+    const all = JSON.stringify(out);
+    expect(all.match(NEVER)?.[0] ?? null, 'a pre-Run sentence still claims the analysis cannot multiply').toBeNull();
+  });
+  it('the question stays, as a question the Run answers, saying when the analysis multiplies (PAUL_QUESTION, by identity)', async () => {
+    const { out } = await build(paul());
+    expect(out.open_questions).toContain(PAUL_QUESTION);
+    expect(PAUL_QUESTION).toContain('Olumi\'s analysis multiplies them when every part has a figure and together they match "MRR" (within 5%)');
+  });
+  it('CONTRAST: a model with no declared product says nothing about multiplying', async () => {
+    const { out } = await build(paul({ identities: [] }));
+    expect(JSON.stringify(out)).not.toMatch(/multipl/);
   });
 });
