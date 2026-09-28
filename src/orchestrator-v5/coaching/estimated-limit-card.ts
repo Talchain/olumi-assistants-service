@@ -181,15 +181,15 @@ const WHOSE_BY_REASON: Readonly<Record<string, EstimatedLimit['whose']>> = {
  * the result depends on most (PLoT's `importance_rank`) — one card, the consequential one. Pure; null otherwise.
  */
 export function estimatedLimitFromVerdicts(
-  graph: Record<string, unknown> | null,
+  boundGraph: Record<string, unknown> | null,
   perLimit: StoredLimitVerdicts,
   runOptions: unknown,
   analysisResult: unknown,
 ): EstimatedLimit | null {
-  if (graph === null) return null;
-  const ratified = readRatifiedConstraints(graph);
+  if (boundGraph === null) return null;
+  const ratified = readRatifiedConstraints(boundGraph);
   const controlled = new Set([
-    ...collectInterventionControlledFactorIds(graph),
+    ...collectInterventionControlledFactorIds(boundGraph),
     ...collectInterventionControlledFactorIds({ options: runOptions }),
   ]);
   const rankOf = new Map<string, number>();
@@ -203,7 +203,7 @@ export function estimatedLimitFromVerdicts(
     const whose = verdict.reason !== undefined ? WHOSE_BY_REASON[verdict.reason] : undefined;
     const limitRow = ratified.find((c) => c.constraint_id === verdict.constraint_id);
     if (whose === undefined || limitRow === undefined) continue;
-    const limit = estimatedLimitForConstraint(graph, limitRow);
+    const limit = estimatedLimitForConstraint(boundGraph, limitRow);
     if (limit === null || limit.whose !== whose || controlled.has(limit.nodeId)) continue;
     candidates.push(limit);
   }
