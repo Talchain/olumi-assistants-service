@@ -685,7 +685,13 @@ export interface LevelGap { readonly option: string; readonly factor: string }
  * churn ranked #2 unvalued in 3 of 17 drafts), so it is a gap like an acted-on baseline: the retry gives Olumi's
  * labelled estimate (baseline_known:false), never the user's, and the user is asked for theirs.
  */
-export interface BaselineGap { readonly factor: string; readonly because?: 'limit' }
+/**
+ * `because: 'identity'` (MG #72 5865315803): a quantity a declared PRODUCT multiplies, with no level of its own. ISL
+ * evaluates a product from its parts' levels, so one part with none leaves the product unevaluable and the Run refused
+ * (served journey C run 2, CEE 651a7fd: "MRR = Pro price × Pro subscribers" with no subscriber level — every Run said
+ * "the current number of Pro paying subscribers is missing"). The same retry, the same labelled estimate, never the user's.
+ */
+export interface BaselineGap { readonly factor: string; readonly because?: 'limit' | 'identity' }
 export function findCoverageGaps(
   model: CandidateModel,
   additionsWithoutTotal: readonly AdditionWithoutTotal[],
@@ -719,6 +725,13 @@ export function findCoverageGaps(
   const limited = new Set((model.constraints ?? []).filter((c) => c.frame !== 'delta').map((c) => c.metric));
   for (const f of model.factors) {
     if (limited.has(f.label) && !actedOn.has(f.label) && !userOwnedBaseline.has(f.label) && noBaseline(f)) baseline_gaps.push({ factor: f.label, because: 'limit' });
+  }
+  // A quantity a declared product multiplies (and no earlier rule already names).
+  const multiplied = new Set((model.identities ?? []).filter((i) => i.operation === 'product').flatMap((i) => i.factors ?? []));
+  for (const f of model.factors) {
+    if (multiplied.has(f.label) && !baseline_gaps.some((g) => g.factor === f.label) && !userOwnedBaseline.has(f.label) && noBaseline(f)) {
+      baseline_gaps.push({ factor: f.label, because: 'identity' });
+    }
   }
   return { level_gaps, baseline_gaps };
 }
@@ -807,7 +820,9 @@ function sayCoverageGaps(p: { level_gaps: readonly LevelGap[]; baseline_gaps: re
     ...p.level_gaps.map((g) => `${g.option} -> ${g.factor}: give the level this option sets in interventions (the user's number if stated, otherwise an ai_proposed estimate in the factor's unit and plausible_max frame); keep it only in changes if no defensible level exists`),
     ...p.baseline_gaps.map((g) => (g.because === 'limit'
       ? `${g.factor}: give a baseline_value (a provisional estimate with baseline_known:false, provenance ai_proposed \u2014 never the user's) \u2014 the user limits it, and the limit cannot be checked without today's level`
-      : `${g.factor}: give a baseline_value (a provisional estimate with baseline_known:false) \u2014 an option acts on it`)),
+      : g.because === 'identity'
+        ? `${g.factor}: give a baseline_value (a provisional estimate with baseline_known:false, provenance ai_proposed \u2014 never the user's) \u2014 a product in identities multiplies it, and the product cannot be computed without today's level of every part; when the product's own level is stated, give the level that makes the product hold`
+        : `${g.factor}: give a baseline_value (a provisional estimate with baseline_known:false) \u2014 an option acts on it`)),
   ];
 }
 
