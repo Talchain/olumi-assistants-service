@@ -133,6 +133,7 @@ import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
 import { classifyUnitScaleClass } from '../../../cee/draft/records/unit-scale-class.js';
 import { unitFamilyOf } from '../../routing/value-unit-resolution.js';
 import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
+import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, factorTheUserNamed, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
@@ -384,18 +385,6 @@ function unitReadsAsQuantity(unit: string): boolean {
   return unit.split(/[\s/,;:()[\]{}"'-]+/u).some((t) => t !== '' && (unitFamilyOf(t) !== null || isCurrencyUnit(t) || countedNoun(t)));
 }
 
-/**
- * The things a count is OF that `unitFamilyOf` does not list ("1 unit", "1 customer"): a miss here only refuses, as
- * before, so the set may stay small — it only closes the inverted test's open side (`unitReadsAsQuantity`).
- */
-const COUNTED_NOUNS: ReadonlySet<string> = new Set([
-  'unit', 'item', 'piece', 'count', 'number', 'amount', 'quantity', 'customer', 'subscriber', 'account', 'client',
-  'member', 'order', 'sale', 'licence', 'license', 'store', 'location', 'product', 'feature',
-]);
-function countedNoun(token: string): boolean {
-  const t = token.toLowerCase();
-  return COUNTED_NOUNS.has(t) || (t.length > 1 && t.endsWith('s') && COUNTED_NOUNS.has(t.slice(0, -1)));
-}
 
 /**
  * A switch figure that says ON: a bare 1 or `true` with no unit; a 1 or `true` in a unit that reads as no quantity

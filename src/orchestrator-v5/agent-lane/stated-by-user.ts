@@ -36,6 +36,8 @@ import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_CONTINUATION, parseCardinalAm
 import { TODAY_LEVEL, TODAY_UNIT } from './admit-model.js';
 import { attestHorizon, type HorizonAttestation } from './horizon-attestation.js';
 import { unitPhraseFamily } from './unit-conflict.js';
+import { unitFamilyOf } from '../routing/value-unit-resolution.js';
+import { countedNoun } from './counted-nouns.js';
 
 const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
 
@@ -43,7 +45,7 @@ const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.m
 export function figureTheUserWrote(value: number, unit: unknown, userText: string | null | undefined): boolean {
   if (typeof value !== 'number' || !Number.isFinite(value)) return false;
   const family = unitPhraseFamily(unit);
-  return findStatedAmounts(userText).some((a) => amountIs(a, value, unit, family));
+  return findStatedAmounts(userText).some((a) => amountIs(a, value, unit, family, userText ?? undefined));
 }
 
 /**
@@ -53,10 +55,11 @@ export function figureTheUserWrote(value: number, unit: unknown, userText: strin
  * "300 subscribers" read as 0.3 £k/month).
  */
 function amountIs(
-  a: { readonly magnitude: number; readonly kind: string; readonly matchedText: string },
+  a: { readonly magnitude: number; readonly kind: string; readonly matchedText: string; readonly index?: number },
   value: number,
   unit: unknown,
   family: ReturnType<typeof unitPhraseFamily>,
+  text?: string,
 ): boolean {
   const scale = moneyUnitScale(unit);
   const written = value * scale;
@@ -66,7 +69,19 @@ function amountIs(
   // A count in words grounds a PLAIN figure only: "two" is never £2 or 2%, which need their written unit.
   if (a.kind === 'words') return family !== 'currency' && family !== 'percent' && same(a.magnitude, value);
   if (scale !== 1 && !writtenWithALetter(a)) return false;
+  // ⛔ A PLAIN number's unit is the word written after it ("300 subscribers", "12 months"): of another family than the
+  // held unit's, it is not this figure (figure-written-as-another-kind.test.ts). A word that reads as no unit keeps today's.
+  const writtenAs = text === undefined ? null : unitWordAfter(text, a);
+  if (family !== null && writtenAs !== null && writtenAs !== family) return false;
   return same(a.magnitude, written);
+}
+
+/** The unit family of the word written right after an amount (`unitFamilyOf`, else a counted noun), or null. */
+function unitWordAfter(text: string, a: { readonly matchedText: string; readonly index?: number }): ReturnType<typeof unitFamilyOf> {
+  if (typeof a.index !== 'number') return null;
+  const word = /^\s*([A-Za-z][A-Za-z-]*)/.exec(text.slice(a.index + a.matchedText.length))?.[1];
+  if (word === undefined) return null;
+  return unitFamilyOf(word) ?? (countedNoun(word) ? 'count' : null);
 }
 
 /** Whether an amount was written with a magnitude letter: its magnitude is not the number its digits spell ("75k"). */
@@ -265,7 +280,7 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
     return t && !o ? 'target' : o && !t ? 'other' : null;
   };
   return [...findStatedAmounts(userText), ...countsInWords(userText)].some((a) => {
-    if (!amountIs(a, value, unit, family)) return false;
+    if (!amountIs(a, value, unit, family, userText)) return false;
     const amountEnd = a.index + a.matchedText.length;
     const before = userText.slice(0, a.index);
     const after = userText.slice(amountEnd);
