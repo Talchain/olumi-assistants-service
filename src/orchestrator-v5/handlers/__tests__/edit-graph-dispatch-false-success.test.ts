@@ -93,6 +93,18 @@ const INGRESS_GRAPH: GraphStateIngress = {
   edges: [{ from: 'fac_price', to: 'goal_revenue' }],
 };
 
+/**
+ * The same graph with a GraphV3-valid edge, for the rows that pin APPLIED-edit
+ * persistence: a structurally-invalid base (INGRESS_GRAPH's bare edge) never
+ * persists an edit — see edit-graph-dispatch-fallback-keeps-untouched.test.ts.
+ */
+const STRICT_INGRESS_GRAPH: GraphStateIngress = {
+  nodes: INGRESS_GRAPH.nodes,
+  edges: [
+    { from: 'fac_price', to: 'goal_revenue', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+  ],
+};
+
 function makeNoOpFalseSuccessResult(assistantText: string): EditGraphResult {
   return {
     blocks: [],
@@ -297,7 +309,7 @@ describe('dispatchEditGraph — V5 H5 false-success invariant', () => {
       payload: makePayload(),
       requestId: 'req-happy-path',
       request: STUB_REQUEST,
-      graphState: INGRESS_GRAPH,
+      graphState: STRICT_INGRESS_GRAPH,
       analysisState: null,
     });
 
@@ -370,7 +382,7 @@ describe('dispatchEditGraph — V5 H5 graph-persistence backstop', () => {
       payload: makePayload(),
       requestId: 'req-graph-persist-yes',
       request: STUB_REQUEST,
-      graphState: INGRESS_GRAPH,
+      graphState: STRICT_INGRESS_GRAPH,
       analysisState: null,
     });
 
@@ -580,7 +592,7 @@ describe('dispatchEditGraph — V5 H5 unified mutation predicate (Codex round-2 
       payload: makePayload(),
       requestId: 'req-true-success-returned-graph',
       request: STUB_REQUEST,
-      graphState: INGRESS_GRAPH,
+      graphState: STRICT_INGRESS_GRAPH,
       analysisState: null,
     });
 
@@ -801,7 +813,7 @@ describe('dispatchEditGraph — V5 structural-invariant backstop (ops + !applied
       payload: makePayload(),
       requestId: 'req-happy-no-backstop',
       request: STUB_REQUEST,
-      graphState: INGRESS_GRAPH,
+      graphState: STRICT_INGRESS_GRAPH,
       analysisState: null,
     });
 

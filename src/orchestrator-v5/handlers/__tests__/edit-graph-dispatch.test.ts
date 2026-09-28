@@ -30,6 +30,9 @@
  *     still invoked with a structural fallback graph (no throw, no skipped
  *     dispatch). This proves the adapter at graphStateToGraphV3 keeps the
  *     edit pipeline reachable even when the UI sends weakly-typed graph state.
+ *     The turn still commits, but WITHOUT a graph: an edit applied to the
+ *     structural fallback is never persisted (`BASE_GRAPH_INVALID`; the rows
+ *     live in edit-graph-dispatch-fallback-keeps-untouched.test.ts).
  */
 
 import { describe, it, expect, vi, beforeEach, type MockedFunction } from 'vitest';
@@ -112,6 +115,18 @@ const INGRESS_GRAPH: GraphStateIngress = {
     { id: 'goal_revenue', kind: 'goal', label: 'Revenue' },
   ],
   edges: [{ from: 'dec_launch', to: 'goal_revenue' }],
+};
+
+/**
+ * The same graph with a GraphV3-valid edge. The applied-edit PERSISTENCE rows
+ * run on this: a structurally-invalid base (INGRESS_GRAPH's bare edge) never
+ * persists an edit — see edit-graph-dispatch-fallback-keeps-untouched.test.ts.
+ */
+const STRICT_INGRESS_GRAPH: GraphStateIngress = {
+  nodes: INGRESS_GRAPH.nodes,
+  edges: [
+    { from: 'dec_launch', to: 'goal_revenue', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+  ],
 };
 
 const POST_EDIT_GRAPH = {
@@ -221,7 +236,7 @@ describe('dispatchEditGraph', () => {
         payload: makePayload(),
         requestId: 'req-edit-applied',
         request: STUB_REQUEST,
-        graphState: INGRESS_GRAPH,
+        graphState: STRICT_INGRESS_GRAPH,
         analysisState: null,
       });
 
@@ -840,7 +855,7 @@ describe('dispatchEditGraph', () => {
         payload: makePayload(),
         requestId: 'req-applied-blocks-empty',
         request: STUB_REQUEST,
-        graphState: INGRESS_GRAPH,
+        graphState: STRICT_INGRESS_GRAPH,
         analysisState: null,
       });
 
@@ -882,6 +897,11 @@ describe('dispatchEditGraph', () => {
       const [context] = (handleEditGraph as MockedFunction<typeof handleEditGraph>).mock.calls[0]!;
       expect(context.graph?.nodes).toHaveLength(2);
       expect(context.graph?.edges).toHaveLength(1);
+      // The turn commits, but the edit it applied to the structural fallback
+      // is NOT persisted: committing it would overwrite every stored field the
+      // fallback dropped (BASE_GRAPH_INVALID).
+      const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0]!;
+      expect(metadata.graph).toBeUndefined();
     });
 
     it('passes analysisState to context when provided', async () => {
