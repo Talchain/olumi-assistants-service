@@ -179,6 +179,14 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   },
   {
     type: 'function',
+    name: 'withdraw_proposal',
+    description:
+      'Withdraw a change you proposed earlier in THIS turn that you now think is wrong, before you reply. It is never applied '
+      + 'and no approve button is shown. Never ask the user not to approve a change you leave offered.',
+    parameters: obj({ proposal_id: { type: 'string' } }, ['proposal_id']),
+  },
+  {
+    type: 'function',
     name: 'run_analysis',
     description:
       'Run the decision analysis over the persisted model. It may refuse and explain what is ' +
@@ -543,7 +551,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_new_risk', 'propose_link_strength', 'propose_goal_target', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'authorise_change'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_new_risk', 'propose_link_strength', 'propose_goal_target', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'authorise_change', 'withdraw_proposal'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -591,6 +599,8 @@ export interface AgentCapabilities {
     from_words?: string;
   }): Promise<ToolResult>;
   authoriseChange(ctx: AgentToolContext, args: { proposal_id: string }): Promise<ToolResult>;
+  /** Optional: a change THIS turn proposed, withdrawn before the reply (`approval-chips.ts` WITHDRAW_PROPOSAL). */
+  withdrawProposal?(ctx: AgentToolContext, args: { proposal_id: string }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */
   proposeLinkStrength?(ctx: AgentToolContext, args: {
     from_label: string; to_label: string; strength: 'weak' | 'moderate' | 'strong' | 'very strong';
@@ -682,6 +692,10 @@ export async function dispatchTool(
       return caps.proposeModelChange(ctx, args as never);
     case 'authorise_change':
       return caps.authoriseChange(ctx, args as never);
+    case 'withdraw_proposal':
+      return caps.withdrawProposal !== undefined
+        ? caps.withdrawProposal(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A change cannot be withdrawn here. Nothing was withdrawn.' };
     case 'run_analysis':
       return caps.runAnalysis(ctx, args as never);
     case 'build_model_from_brief':

@@ -1283,6 +1283,8 @@ export function createAgentCapabilities(
     return Array.isArray(ops) ? ops.filter((o): o is { op: string; path: string; value?: unknown } =>
       o !== null && typeof o === 'object' && typeof (o as { op?: unknown }).op === 'string' && typeof (o as { path?: unknown }).path === 'string') : [];
   };
+  /** The held (`gmh_`) changes this turn withdrew (`withdrawProposal`): never listed as awaiting, never confirmed. */
+  const withdrawnHolds = new Set<string>();
   /** Every live held add-option, as the approval it awaits. A failed read lists none — never a guess. */
   const liveHeldAwaiting = async (scenarioId: string): Promise<{ proposal_id: string; public_label: string }[]> => {
     if (opts.readPendingActions === undefined) return [];
@@ -1292,7 +1294,7 @@ export function createAgentCapabilities(
       .filter((p) => typeof p.chip_id === 'string' && /^gmh_[0-9a-f]{12}$/.test(p.chip_id)
         && p.action.kind === 'apply_proposed_change'
         && (p.action as { inline_patch?: { handler_id?: unknown } }).inline_patch?.handler_id === GM_HELD_HANDLER_ID
-        && !isPendingActionExpired(p, Date.now()))
+        && !isPendingActionExpired(p, Date.now()) && !withdrawnHolds.has(p.chip_id))
       .map((p) => ({ proposal_id: p.chip_id as string, public_label: resolveProposalRenderCopy(p.action as { kind: string; public_label?: string }).label }));
   };
   /** A level is set when the option's intervention for that factor carries a number (either stored shape). */
@@ -2819,10 +2821,37 @@ export function createAgentCapabilities(
       };
     },
 
+    /**
+     * ⛔ A CHANGE THE AGENT DISOWNS IS NEVER LEFT OFFERED (`approval-chips.ts` WITHDRAW_PROPOSAL). The loop admits only
+     * a change THIS turn proposed and still offers. A stored proposal is removed, so it is neither listed as awaiting
+     * approval nor carried; a held one (`gmh_`) lives on the product's row, and the route leaves it off this turn's
+     * answer row by the same tool call, so the next turn finds nothing to confirm.
+     */
+    async withdrawProposal(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const id = typeof args?.proposal_id === 'string' ? args.proposal_id : '';
+      const notFound = { ok: false, mutated: false, refusal: 'not_proposed_this_turn', detail: 'No change with that id is awaiting approval. Nothing was withdrawn.' };
+      if (/^gmh_[0-9a-f]{12}$/.test(id)) {
+        withdrawnHolds.add(id);
+      } else {
+        const p = proposals.get(id);
+        if (p === undefined || p.scenario_id !== ctx.scenario_id || p.user_id !== ctx.authenticated_user_id) return notFound;
+        proposals.discard(id);
+      }
+      return {
+        ok: true, mutated: false, proposal_id: id, withdrawn: true,
+        detail: 'Withdrawn: it will not be applied, and the user is offered no button for it. Tell them plainly what you '
+          + 'withdrew and why; propose the corrected change only if their words support it.',
+      };
+    },
+
     async authoriseChange(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       // A held add-option (C52) is confirmed on the product's own seam, never through the proposal store.
-      if (typeof args?.proposal_id === 'string' && /^gmh_[0-9a-f]{12}$/.test(args.proposal_id)) return confirmHeld(ctx, args.proposal_id);
+      if (typeof args?.proposal_id === 'string' && /^gmh_[0-9a-f]{12}$/.test(args.proposal_id)) {
+        if (withdrawnHolds.has(args.proposal_id)) return { ok: false, mutated: false, refusal: 'withdrawn', detail: 'That change was withdrawn this turn. Nothing was changed.' };
+        return confirmHeld(ctx, args.proposal_id);
+      }
       const before = await readGraph(ctx.scenario_id);
       if (before === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const decision = proposals.authorise({
