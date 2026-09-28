@@ -577,7 +577,8 @@ describe("H1a′: every CEE writer a saved model passes through keeps the C46 ca
       expected: { mean: (e.strength as { mean: number }).mean, effect_direction: e.effect_direction }, intent: 'set' };
     const r = await applyEdgeStrengthEdit({ payload: payloadFor(event), event: event as never, requestId: 'req-c46-r39', persistedGraph: graph });
     expect(r.kind === 'refused' && r.reason).toBe('definitional_link');
-    expect(r.response.assistant_text).toContain('MRR =');
+    // The constructed carrier is Olumi's reading (stated_in_brief false): said as such (AIQ 5867435409 (2)).
+    expect(r.response.assistant_text).toMatch(/^Olumi reads MRR as /);
     expect(JSON.stringify(graph)).toBe(before);
   });
 

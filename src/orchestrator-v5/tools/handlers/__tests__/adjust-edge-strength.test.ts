@@ -605,3 +605,28 @@ describe('R3-9 — a definitional link is refused, never stored and ignored (AIQ
     expect(outcome).toBeTruthy();
   });
 });
+
+describe('R3-9 × AIQ 5867435409 (1): the handler refuses only while the last Run kept the identity in use', () => {
+  const withProduct = (): GraphV3T => {
+    const graph = buildD1Fixture();
+    const goal = graph.nodes.find((n) => n.id === 'g-revenue')!;
+    (goal as Record<string, unknown>).nonlinear_identity = { operation: 'product', factor_ids: ['f-budget', 'f-quality'], stated_in_brief: true };
+    return graph;
+  };
+  const proposal = () => makeProposal({ entityId: 'f-budget→g-revenue', strength: 0.8, operator: 'set' });
+
+  it('⭐ RED: its own prior_facts carry a Run that withdrew the carrier → the edit adjusts', async () => {
+    const inv = buildInvocation(withProduct(), proposal());
+    const withFacts = { ...inv, context: { ...inv.context, prior_facts: [
+      { fact_type: 'run_analysis', result: { enrichment: { _meta: { identities_not_forwarded: [{ node_id: 'g-revenue' }] } } } },
+    ] } } as unknown as HandlerInvocation;
+    await expect(createAdjustEdgeStrengthHandler()(withFacts)).resolves.toBeTruthy();
+  });
+
+  it('the trusted side band wins over prior_facts (the adapter\'s durable reading)', async () => {
+    const inv = { ...buildInvocation(withProduct(), proposal()), identityRunUseAuthority: { withdrawn: new Set(['g-revenue']) } };
+    await expect(createAdjustEdgeStrengthHandler()(inv)).resolves.toBeTruthy();
+    const kept = { ...buildInvocation(withProduct(), proposal()), identityRunUseAuthority: null };
+    await expect(createAdjustEdgeStrengthHandler()(kept)).rejects.toMatchObject({ cause_kind: 'precondition_unmet_at_execute' });
+  });
+});

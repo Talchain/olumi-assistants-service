@@ -8,7 +8,9 @@
  * parsed graph would call a real definition an ordinary belief. Each edge writer refuses there, in the user's words.
  */
 import { describe, it, expect } from 'vitest';
-import { definitionalLinkOf, definitionalLinks, definitionalLinkRefusalText } from '../definitional-links.js';
+import {
+  definitionalLinkInUse, definitionalLinkOf, definitionalLinks, definitionalLinkRefusalText, identityRunUseFromFacts,
+} from '../definitional-links.js';
 import { composeEdgeIdentity } from '../edge-address.js';
 
 const graph = {
@@ -66,5 +68,67 @@ describe('R3-9 — the ONE definitional-link predicate', () => {
     expect(product).toMatch(/change Pro plan price or Pro paying subscribers instead/i);
     const sum = definitionalLinkRefusalText(graph, definitionalLinkOf(graph, 'tools', 'spend')!);
     expect(sum).toContain('Total spend = Advertising + Feature investment + Tooling');
+  });
+});
+
+describe('AIQ 5867435409 (1): refused only while the identity is IN USE — the last Run decides', () => {
+  const runFact = (enrichment: unknown) => ({ fact_type: 'run_analysis', result: { enrichment } });
+
+  it('no Run yet → the link is in use (refused; the next Run decides)', () => {
+    expect(identityRunUseFromFacts([])).toBeNull();
+    expect(definitionalLinkInUse(graph, 'price', 'mrr', null)?.carrier_id).toBe('mrr');
+  });
+
+  it('the last Run EVALUATED the carrier → in use (refused)', () => {
+    const use = identityRunUseFromFacts([runFact({ identity_evaluations: [{ node_id: 'mrr', evaluated: true }] })]);
+    expect(definitionalLinkInUse(graph, 'price', 'mrr', use)?.carrier_id).toBe('mrr');
+  });
+
+  it('⭐ RED: the last Run WITHDREW it (_meta.identities_not_forwarded) → an ordinary belief: NOT refused', () => {
+    const use = identityRunUseFromFacts([runFact({ _meta: { identities_not_forwarded: [{ node_id: 'mrr', reason: 'inferred_identity_inconsistent', frameless_node_ids: [] }] } })]);
+    expect(definitionalLinkInUse(graph, 'price', 'mrr', use)).toBeNull();
+  });
+
+  it('⭐ RED: the last Run did not evaluate it (evaluated: false) → NOT refused', () => {
+    const use = identityRunUseFromFacts([runFact({ identity_evaluations: [{ node_id: 'mrr', evaluated: false, withheld_reason: 'identity_zero_level' }] })]);
+    expect(definitionalLinkInUse(graph, 'price', 'mrr', use)).toBeNull();
+  });
+
+  it('only the NEWEST run decides (facts newest-first), and other facts are skipped', () => {
+    const use = identityRunUseFromFacts([
+      { fact_type: 'edit_graph', result: {} },
+      runFact({ identity_evaluations: [{ node_id: 'mrr', evaluated: true }] }),
+      runFact({ _meta: { identities_not_forwarded: [{ node_id: 'mrr' }] } }),
+    ]);
+    expect(definitionalLinkInUse(graph, 'price', 'mrr', use)?.carrier_id).toBe('mrr');
+  });
+
+  it('a withdrawal of ANOTHER carrier leaves this one in use', () => {
+    const use = identityRunUseFromFacts([runFact({ _meta: { identities_not_forwarded: [{ node_id: 'spend' }] } })]);
+    expect(definitionalLinkInUse(graph, 'price', 'mrr', use)?.carrier_id).toBe('mrr');
+    expect(definitionalLinkInUse(graph, 'ads', 'spend', use)).toBeNull();
+  });
+});
+
+describe('AIQ 5867435409 (2): whose reading — an inferred identity is Olumi\'s reading, never stated as fact', () => {
+  const inferred = {
+    ...graph,
+    nodes: graph.nodes.map((n) => (n.id === 'mrr' ? { ...n, nonlinear_identity: { operation: 'product', factor_ids: ['price', 'subs'], stated_in_brief: false } } : n)),
+  };
+
+  it('⭐ RED: stated_in_brief false → "Olumi reads MRR as …", with the way out; never "is defined by"', () => {
+    const text = definitionalLinkRefusalText(inferred, definitionalLinkOf(inferred, 'price', 'mrr')!);
+    expect(text).toMatch(/^Olumi reads MRR as Pro plan price × Pro paying subscribers/);
+    expect(text).toMatch(/tell me if MRR isn't that/i);
+    expect(text).not.toContain('is defined by');
+  });
+
+  it('a declaration with no stated_in_brief is Olumi\'s reading too (never promoted to fact)', () => {
+    const unknown = { ...graph, nodes: graph.nodes.map((n) => (n.id === 'mrr' ? { ...n, nonlinear_identity: { operation: 'product', factor_ids: ['price', 'subs'] } } : n)) };
+    expect(definitionalLinkRefusalText(unknown, definitionalLinkOf(unknown, 'price', 'mrr')!)).toMatch(/^Olumi reads/);
+  });
+
+  it('CONTROL: stated_in_brief true → stated as the brief\'s definition', () => {
+    expect(definitionalLinkRefusalText(graph, definitionalLinkOf(graph, 'price', 'mrr')!)).toMatch(/^This link is defined by MRR =/);
   });
 });

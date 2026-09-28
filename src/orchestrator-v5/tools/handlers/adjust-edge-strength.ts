@@ -27,7 +27,7 @@ import type { AdjustEdgeStrengthHandlerFact } from '@talchain/schemas/orchestrat
 
 import { DEFAULT_STRENGTH_STD } from '../../../cee/constants.js';
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
-import { definitionalLinkOf, definitionalLinkRefusalText } from '../../compose/definitional-links.js';
+import { definitionalLinkInUse, definitionalLinkRefusalText, identityRunUseFromFacts } from '../../compose/definitional-links.js';
 import { parseEdgeAddress } from '../../compose/edge-address.js';
 import { edgeBandFromMagnitude, edgeBandStd } from '../../format/edge-strength-bands.js';
 import { sanitiseUserFacingText } from '../../../orchestrator/shared/output-safety.js';
@@ -257,7 +257,11 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
       // R3-9 (AIQ #72 5866734772, DL 5866746362): a link a declared identity DEFINES is not a belief the analysis
       // reads; storing an edit to it would be silently ignored. Refused for every caller of this handler (the canvas
       // adapter refuses first, in the same words). Read off the RAW graph, which keeps an identity `NodeV3` drops.
-      const definition = definitionalLinkOf(rawGraph, parsed.from, parsed.to);
+      // Only while the identity is IN USE (AIQ 5867435409 (1)): a Run that withdrew it used this strength.
+      const runUse = invocation.identityRunUseAuthority !== undefined
+        ? invocation.identityRunUseAuthority
+        : identityRunUseFromFacts(invocation.context.prior_facts ?? []);
+      const definition = definitionalLinkInUse(rawGraph, parsed.from, parsed.to, runUse);
       if (definition !== null) {
         throw new D1HandlerError(
           'PRECONDITION_UNMET',

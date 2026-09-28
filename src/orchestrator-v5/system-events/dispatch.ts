@@ -66,6 +66,7 @@ import {
   isSuccessfulRunAnalysisFact,
   type FreshnessDerivation,
 } from '../context/freshness.js';
+import { identityRunUseFromFacts } from '../compose/definitional-links.js';
 import { isScenarioAnalysisReasoningAuthority } from '../context/reconcile-scenario-analysis-facts.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import {
@@ -1442,6 +1443,11 @@ async function dispatchEdgeStrengthEdit(
       event,
       requestId,
       persistedGraph,
+      // R3-9 (AIQ 5867435409 (1)): the last Run's use of each declared identity, from the SAME facts this reply's
+      // freshness reads (durable record when it is reasoning authority, else the hot window).
+      lastRunIdentityUse: identityRunUseFromFacts(
+        isScenarioAnalysisReasoningAuthority(factsRead.factSet) ? factsRead.factSet.facts : factsRead.hotWindow.facts,
+      ),
     });
   } catch (err) {
     log.error(

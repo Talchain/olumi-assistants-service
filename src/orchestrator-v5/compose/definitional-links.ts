@@ -23,6 +23,17 @@ export interface DefinitionalLink {
   readonly operand_ids: readonly string[];
   /** The identity's `addends` (absent → empty). */
   readonly addend_ids: readonly string[];
+  /** True only when the declaration says the brief states it; anything else is Olumi's reading (AIQ 5867435409 (2)). */
+  readonly stated_in_brief: boolean;
+}
+
+/**
+ * What the LAST Run did with the declared identities (AIQ 5867435409 (1)): the carriers it WITHDREW — PLoT's
+ * `_meta.identities_not_forwarded` (frameless or inconsistent, variants (b) and (c)) and any `identity_evaluations` row
+ * with `evaluated: false`. A withdrawn identity leaves its node linear, so that Run DID use the link's strength.
+ */
+export interface IdentityRunUse {
+  readonly withdrawn: ReadonlySet<string>;
 }
 
 function rec(value: unknown): Record<string, unknown> | null {
@@ -51,6 +62,7 @@ function declaredIdentities(graph: unknown): DefinitionalLink[] {
       operation: identity.operation === 'sum' ? 'sum' : 'product',
       operand_ids: operands,
       addend_ids: addends,
+      stated_in_brief: identity.stated_in_brief === true,
     });
   }
   return out;
@@ -63,6 +75,39 @@ export function definitionalLinkOf(graph: unknown, from: string, to: string): De
   ) ?? null;
 }
 
+/**
+ * The newest `run_analysis` fact decides (facts arrive newest-first, `SessionStore.readFactsFor`). No Run → null: the
+ * link is refused, and the next Run decides. Pure; never throws on a malformed fact.
+ */
+export function identityRunUseFromFacts(facts: readonly unknown[]): IdentityRunUse | null {
+  const run = facts.map(rec).find((f) => f?.fact_type === 'run_analysis');
+  if (run === undefined || run === null) return null;
+  const enrichment = rec(rec(run.result)?.enrichment);
+  const withdrawn = new Set<string>();
+  const notForwarded = rec(enrichment?._meta)?.identities_not_forwarded;
+  for (const row of Array.isArray(notForwarded) ? notForwarded : []) {
+    const id = rec(row)?.node_id;
+    if (typeof id === 'string' && id.length > 0) withdrawn.add(id);
+  }
+  const evaluations = enrichment?.identity_evaluations;
+  for (const row of Array.isArray(evaluations) ? evaluations : []) {
+    const r = rec(row);
+    if (r?.evaluated === false && typeof r.node_id === 'string' && r.node_id.length > 0) withdrawn.add(r.node_id);
+  }
+  return { withdrawn };
+}
+
+/**
+ * The link a declared identity defines AND the last Run kept in use; null when it is an ordinary belief, or when the
+ * last Run withdrew the identity (the strength was then used, additively: refusing would block the one lever that
+ * moves the numbers, and "not something the analysis uses" would be false).
+ */
+export function definitionalLinkInUse(graph: unknown, from: string, to: string, lastRun: IdentityRunUse | null): DefinitionalLink | null {
+  const link = definitionalLinkOf(graph, from, to);
+  if (link === null) return null;
+  return lastRun !== null && lastRun.withdrawn.has(link.carrier_id) ? null : link;
+}
+
 /** Every definitional edge, keyed by the card's own edge identity (`composeEdgeIdentity`). No graph → empty. */
 export function definitionalLinks(graph: unknown): ReadonlySet<string> {
   const out = new Set<string>();
@@ -73,8 +118,9 @@ export function definitionalLinks(graph: unknown): ReadonlySet<string> {
 }
 
 /**
- * The refusal, in the user's labels: "This link is defined by MRR = Pro plan price × Pro paying subscribers, so its
- * strength is not something the analysis uses. Change Pro plan price or Pro paying subscribers instead."
+ * The refusal, in the user's labels. A STATED identity: "This link is defined by MRR = Pro plan price × Pro paying
+ * subscribers, so its strength is not something the analysis uses … Change Pro plan price or Pro paying subscribers
+ * instead." An INFERRED one is Olumi's reading: "Olumi reads MRR as … — or tell me if MRR isn't that".
  */
 export function definitionalLinkRefusalText(graph: unknown, link: DefinitionalLink): string {
   const nodes = rec(graph)?.nodes;
@@ -86,6 +132,13 @@ export function definitionalLinkRefusalText(graph: unknown, link: DefinitionalLi
   const formula = [term, ...link.addend_ids.map(labelOf)].join(' + ');
   const parts = [...link.operand_ids, ...link.addend_ids].map(labelOf);
   const change = parts.length <= 2 ? parts.join(' or ') : `${parts.slice(0, -1).join(', ')} or ${parts[parts.length - 1]}`;
-  return `This link is defined by ${labelOf(link.carrier_id)} = ${formula}, so its strength is not something the analysis uses, `
+  const carrier = labelOf(link.carrier_id);
+  // AIQ 5867435409 (2), CEE's N-c rule (`admit-model.ts`): a declaration the brief states is said as fact; any other is
+  // Olumi's reading, said as such, with the way out.
+  if (!link.stated_in_brief) {
+    return `Olumi reads ${carrier} as ${formula}, so this link's strength isn't used while that holds, and I haven't changed it. `
+      + `Change ${change} instead — or tell me if ${carrier} isn't that, and I'll stop reading it that way.`;
+  }
+  return `This link is defined by ${carrier} = ${formula}, so its strength is not something the analysis uses, `
     + `and I haven't changed it. Change ${change} instead.`;
 }
