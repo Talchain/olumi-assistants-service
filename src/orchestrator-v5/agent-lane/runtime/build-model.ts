@@ -49,6 +49,7 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { LIMIT_OPERATOR_WORDS } from '../admit-constraint.js';
 import { holdStatedGoalAttributes, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
+import { limitedLevelAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
 
@@ -1320,6 +1321,12 @@ export async function buildModelFromBrief(
   // the target's range is ASKED where the user always sees it — ahead of the drafter's own questions, and behind
   // every question placed below. Admission writes each as a `.magnitude_question` ledger entry (`admit-candidate.ts`).
   openQuestions.unshift(...admitted.loss.filter((l) => /\.magnitude_question$/.test(l.field_path)).map((l) => l.reason));
+  // ⭐ DL ruling #72 5863840239 (ii), condition 2: today's level of a quantity the user limits, when the model holds none
+  // of theirs, is ASKED — typed (`level_asks`) and said here: behind the scope, deadline, withheld-option and C46
+  // product questions (C46's required row keeps its reply slot), ahead of the magnitude and drafter's own — on journey C
+  // the second question the reply shows. Non-blocking: nothing in readiness reads it (`limited-level-ask.ts`).
+  const levelAsks = limitedLevelAsks({ nodes: statedGoal.nodes, goal_constraints: admitted.goal_constraints });
+  openQuestions.unshift(...levelAsks.map((a) => a.question));
   // ⛔ C46: a declared product whose sign this model cannot prove is ASKED where the user always sees it,
   // not only said in `not_represented` (which only the Agent's model reads). After the scope and deadline
   // questions, ahead of the drafter's own; nothing for a stable product or a linear model.
@@ -1511,6 +1518,8 @@ export async function buildModelFromBrief(
     // strategic additions in `unknowns`, and on the common path (a first pass already
     // within budget — 3 of 3 live benchmark runs) nothing else ever showed them.
     ...(openQuestions.length > 0 ? { open_questions: openQuestions } : {}),
+    // Condition 2's typed twin of its sentence in `open_questions`, above.
+    ...(levelAsks.length > 0 ? { level_asks: levelAsks } : {}),
     // B1/B2 (review 5822711266), machine-readable beside the sentences below.
     ...(preparation.additions_without_total.length > 0 ? { additions_without_total: preparation.additions_without_total } : {}),
     ...(preparation.provenance_demoted.length > 0 ? { provenance_demoted: preparation.provenance_demoted } : {}),

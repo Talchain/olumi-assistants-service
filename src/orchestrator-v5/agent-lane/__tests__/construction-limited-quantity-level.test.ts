@@ -9,7 +9,10 @@
  * Ruling (ii): a LEVEL limit's own quantity with no level is a baseline gap for the ONE repair retry (`findCoverageGaps`,
  * `because: 'limit'`), which gives Olumi's provisional estimate — baseline_known:false, ai_proposed — stamped
  * `cee_inference`, never `user_specified` or `brief_extraction`. A DELTA limit needs no level of its own; a level the
- * brief states stays the user's. (The typed non-blocking ask for the user's own level is the ruling's condition 2.)
+ * brief states stays the user's.
+ *
+ * Condition 2: the user is ASKED for today's level — typed (`level_asks`, `limited-level-ask.ts`) and said where they
+ * always see it (`open_questions`), non-blocking: the build registers and nothing in readiness changes.
  */
 import { describe, it, expect } from 'vitest';
 import { Ajv } from 'ajv';
@@ -69,7 +72,7 @@ async function construct(brief: string, ...drafts: ReturnType<typeof journeyC>[]
     return { text: JSON.stringify(drafts[Math.min(inputs.length - 1, drafts.length - 1)]) };
   }) as Record<string, unknown>;
   expect(result.ok, JSON.stringify(result)).toBe(true);
-  return { graph: GraphV3.parse(graph) as unknown as Graph, inputs };
+  return { graph: GraphV3.parse(graph) as unknown as Graph, inputs, result };
 }
 const churn = (g: Graph) => g.nodes.find((n) => n.label === 'Monthly churn rate')!;
 
@@ -107,5 +110,63 @@ describe('a LEVEL limit\'s quantity with no level is a baseline gap the repair r
     const stated = BRIEF.replace('while keeping monthly churn under 4%', 'while keeping monthly churn (3% today) under 4%');
     const { graph } = await construct(stated, journeyC(3, 'level', true));
     expect(churn(graph).observed_state).toMatchObject({ source: 'brief_extraction', raw_value: 3 });
+  });
+});
+
+type Ask = { kind: string; node_id: string; quantity: string; constraint_ids: string[]; estimate: { value: number; unit: string } | null; question: string };
+const asksOf = (r: Record<string, unknown>) => (r.level_asks ?? []) as Ask[];
+const questionsOf = (r: Record<string, unknown>) => (r.open_questions ?? []) as string[];
+
+describe('condition 2 — the user is asked, typed and non-blocking, for today\'s level of the quantity they limit', () => {
+  it('⭐ RED: Olumi\'s estimate → ONE typed ask on the churn node, naming the limit and the estimate it can only be checked against', async () => {
+    const { graph, result } = await construct(BRIEF, journeyC(null), journeyC(3));
+    const churnId = churn(graph).id;
+    const limitIds = ((graph as unknown as { goal_constraints?: { constraint_id: string; node_id: string }[] }).goal_constraints ?? [])
+      .filter((c) => c.node_id === churnId).map((c) => c.constraint_id);
+    expect(limitIds).toHaveLength(1);
+    expect(asksOf(result)).toEqual([{
+      kind: 'limited_quantity_level', node_id: churnId, quantity: 'Monthly churn rate', constraint_ids: limitIds,
+      estimate: { value: 3, unit: '%' },
+      question: 'What is "Monthly churn rate" today? Your limit (less than 4%) can only be checked against Olumi\'s estimate of 3%, not a figure you gave, until you give yours.',
+    }]);
+  });
+
+  it('⭐ RED: the ask is said where the user always sees it — in the first two open questions, the two the reply shows', async () => {
+    // The drafter parks two questions of its own: the ask still goes ahead of them, behind only the deadline.
+    const parked = { ...journeyC(3), unknowns: ['Will competitors match a £59 Pro price?', 'How price-sensitive are Pro customers?'] };
+    const { result } = await construct(BRIEF, journeyC(null), parked);
+    expect(questionsOf(result).length).toBeGreaterThanOrEqual(4);
+    expect(questionsOf(result).slice(0, 2)).toContain(asksOf(result)[0]!.question);
+  });
+
+  it('⭐ RED: the retry leaves churn with NO level → still asked, saying the limit cannot be checked (never silent)', async () => {
+    const { result } = await construct(BRIEF, journeyC(null), journeyC(null));
+    expect(asksOf(result).map((a) => [a.quantity, a.estimate])).toEqual([['Monthly churn rate', null]]);
+    expect(questionsOf(result)).toContain('What is "Monthly churn rate" today? Your limit (less than 4%) cannot be checked until the model has its current level.');
+  });
+
+  it('NON-BLOCKING: the build still registers the model with the churn limit on it', async () => {
+    const { graph, result } = await construct(BRIEF, journeyC(null), journeyC(3));
+    expect(result).toMatchObject({ ok: true, mutated: true, goal_constraints_carried: 1 });
+    expect((graph as unknown as { goal_constraints?: { node_id: string }[] }).goal_constraints?.map((c) => c.node_id)).toEqual([churn(graph).id]);
+  });
+
+  it('CONTRAST: a level the BRIEF states is the user\'s — no ask', async () => {
+    const stated = BRIEF.replace('while keeping monthly churn under 4%', 'while keeping monthly churn (3% today) under 4%');
+    const { result } = await construct(stated, journeyC(3, 'level', true));
+    expect(asksOf(result)).toEqual([]);
+    expect(questionsOf(result).join(' ')).not.toContain('today? Your limit');
+  });
+
+  it('CONTRAST: a DELTA limit needs no level of its own — no ask', async () => {
+    const { result } = await construct(BRIEF, journeyC(null, 'delta'));
+    expect(asksOf(result)).toEqual([]);
+  });
+
+  it('CONTRAST: a limit on a factor an option SETS is checked at the option\'s level — no ask', async () => {
+    const d = journeyC(3);
+    const capped = { ...d, constraints: [...d.constraints, { metric: 'Advertising spend', operator: '<=', value: 20000, unit: 'GBP', provenance: 'explicit', frame: 'level' as const }] };
+    const { result } = await construct(BRIEF.replace('?', ', with no more than £20,000 on advertising?'), capped as unknown as ReturnType<typeof journeyC>);
+    expect(asksOf(result).map((a) => a.quantity)).toEqual(['Monthly churn rate']);
   });
 });

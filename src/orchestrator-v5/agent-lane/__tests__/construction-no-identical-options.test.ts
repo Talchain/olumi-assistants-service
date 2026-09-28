@@ -600,6 +600,11 @@ describe('a second real draft, another domain — the banked LIVE hiring candida
  * rows keep their assertions unchanged. Olumi's "Test £59 with AI release" is left AS SERVED (no level): it is the
  * option admission withholds, so its pairs must never count as gaps. `servedGaps: true` keeps the served draft's
  * gaps, for the combined rows below.
+ *
+ * ⚠ RE-PINNED FOR DL ruling #72 5863840239 (ii): the served draft limits "Monthly churn" (at most 10% per month) and gives
+ * it NO level — the journey-C defect class — which is now a limit baseline gap for the same one retry. These rows ask
+ * about OPTION gaps, so in both modes churn carries Olumi's provisional level (4, not known), as 14 of 17 served drafts
+ * give it; the limit gap itself is `construction-limited-quantity-level.test.ts`'s.
  */
 const padded = (n: number, withTest: boolean, { servedGaps = false }: { servedGaps?: boolean } = {}) => {
   const base = candidateFromServed(SHAPE_1.brief.draft_graph, { olumi: 'ai_proposed', unknowns: [] });
@@ -614,7 +619,9 @@ const padded = (n: number, withTest: boolean, { servedGaps = false }: { servedGa
     ...base,
     options: (withTest ? base.options : base.options.filter((o) => o.label !== 'Test £59 with AI release')).map(gapFree),
     factors: [
-      ...base.factors.map((f) => (servedGaps || f.label !== 'AI feature availability' ? f : { ...f, baseline_known: false, baseline_value: 0 })),
+      ...base.factors
+        .map((f) => (f.label !== 'Monthly churn' ? f : { ...f, baseline_known: false, baseline_value: 4 }))
+        .map((f) => (servedGaps || f.label !== 'AI feature availability' ? f : { ...f, baseline_known: false, baseline_value: 0 })),
       ...extra.map((label) => ({ label, role: 'observable' as const, baseline_known: false, baseline_value: null, unit: null, provenance: 'ai_proposed', plausible_max: 100 })),
     ],
     links: [...base.links, ...extra.map((from) => ({ from, to: 'MRR', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null }))],
