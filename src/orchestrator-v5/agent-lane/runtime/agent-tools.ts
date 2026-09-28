@@ -54,6 +54,17 @@ export const A_FIGURE_IS_THE_FACTORS_VALUE =
   'A figure for the factor itself (e.g. \'churn is 6%\') is its value, not a link.';
 
 /**
+ * ⛔ PJ-C3 WITH NO NODE TO SIZE (DL GO #72 5861666870; Runtime 5861684872). With no node named for what the user sized,
+ * 3 of 9 served runs sized price → an intermediate node the BRIEF had drafted ("Price-driven churn risk" on 84440ff),
+ * whose link on to churn stayed Olumi's 0.0075: the user's "very high" was multiplied by a placeholder. None of those
+ * graphs had a direct price → churn link, so the move is to ADD it at their band (`propose_model_change`, one approval).
+ */
+export const NO_NAMED_NODE_SIZES_THE_CAUSE_LINK =
+  'If no factor or risk is named for what they sized, they mean how strongly its cause moves that outcome '
+  + '(price sensitivity: Pro plan price → churn): record THAT link, proposing it with propose_model_change at their band '
+  + 'if the model lacks it — never a link INTO a node between the two, whose own link on would stay Olumi’s placeholder.';
+
+/**
  * ⛔ A LEVEL'S LINK IS NOT A STRENGTH TO ASK ABOUT (AI Conversation #70 5849437163 U2b, served c35801a): the user gave
  * "it lowers Monthly churn to 6%" for an option not yet linked to churn; the model left that level out and asked "how
  * strong is that effect" — the band question that belongs to a CAUSAL link between factors. A level on an unlinked
@@ -302,7 +313,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'Record how strong an EXISTING link is, as the user\u2019s own estimate, when the user has just said it (for example '
       + '"that effect is strong", or "it actually pushes the other way"). This does NOT change anything: it prepares ONE change '
       + 'and returns its id, which you keep for authorise_change: show the user what it records, never the id, before they approve. '
-      + NODE_SIZE_MEANS_LINK_FROM + ' ' + A_FIGURE_IS_THE_FACTORS_VALUE + ' '
+      + NODE_SIZE_MEANS_LINK_FROM + ' ' + A_FIGURE_IS_THE_FACTORS_VALUE + ' ' + NO_NAMED_NODE_SIZES_THE_CAUSE_LINK + ' '
       + 'The user\u2019s word is one of Olumi\u2019s strength bands. If the link already sits in that band, its strength is kept and only '
       + 'recorded as theirs; otherwise it is set to the middle of that band, and the result says the figure so you can tell them. '
       + 'Give `direction` ONLY when the user said the link pushes the other way. When they described the strength in their own words '
