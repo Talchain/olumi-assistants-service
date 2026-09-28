@@ -193,7 +193,10 @@ describe('A1 — propose_new_option sends a new SWITCH switched on, in the same 
       const { caps, sent } = setup();
       const r = await caps.proposeNewOption(ctx, call({ value, unit: '%' }) as never) as { refusal?: string; detail?: string };
       expect(r.refusal, String(value)).toBe('switch_level_not_on');
-      expect(r.detail).toContain('remove "level" from the acts_on entry for "AI add-on offered"');
+      // ⛔ A 0 is never fixed by removing its level (a bare switch entry means ON; served A03, agent-switch-off-entry.test.ts):
+      // with no option turning the switch on, the detail says to list it under the option that turns it on.
+      if (value === 0) expect(r.detail).toContain('No option in this change turns "AI add-on offered" on; list it under the option that turns it on');
+      else expect(r.detail).toContain('remove "level" from the acts_on entry for "AI add-on offered"');
       if (value !== 0) expect(r.detail, String(value)).toContain('declare "AI add-on offered" as a graded factor instead');
       expect(sent).toEqual([]);
     }

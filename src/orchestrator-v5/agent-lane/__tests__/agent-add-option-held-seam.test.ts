@@ -1470,4 +1470,79 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     // The switch is untouched by the dropped figure.
     expect(g.nodes.find((x) => x.id === GF_FAC)!.observed_state).toEqual({ value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' });
   }, 120_000);
+
+  // ─── A03 (MG; served DL run pj-20260928T011147Z on CEE 84440ff, journey A step A03) ──────────────────────────────────
+  // "Please add two options to compare: "Improve trial-to-Pro conversion" and "Retention intervention for at-risk
+  // accounts"." FIVE `propose_new_option` calls, each refused `switch_level_not_on` with `not_one` (~23 s), then a 13 s
+  // clarification turn. Inferred from the served reply (the arguments are not kept — UNVERIFIED): ONE change carried both
+  // options and ONE new switch, and the Agent listed the switch at 0 under the conversion option ("this option leaves it
+  // off"). SPEC: a new switch listed at exactly 0 under an option, when ANOTHER option in the change turns it on, means
+  // that option does not act on it — the entry is dropped (no intervention, no link), the switch keeps Olumi's today-0.
+  // FIXTURE: Paul's graph (a295e4a1) with the two options A03 asked for removed — the model as A03 found it.
+  const CONV = 'Improve trial-to-Pro conversion';
+  const RET = 'Retention intervention for at-risk accounts';
+  const RET_SWITCH = 'Retention intervention in place';
+  const A03_MESSAGE = `Please add two options to compare: "${CONV}" and "${RET}".`;
+  const BEFORE_A03 = (() => {
+    const g = structuredClone(PAUL) as { nodes: { id: string; label?: string }[]; edges: { from: string; to: string }[] };
+    const gone = new Set(g.nodes.filter((x) => x.label === CONV || x.label === RET).map((x) => x.id));
+    if (gone.size !== 2) throw new Error('the fixture must hold both A03 options, removed here');
+    return { ...g, nodes: g.nodes.filter((x) => !gone.has(x.id)), edges: g.edges.filter((e) => !gone.has(e.from) && !gone.has(e.to)) };
+  })();
+  let a03ToolOutput = '';
+  const proposeA03 = (offLevel: unknown) => {
+    script = [
+      () => fnCall('propose_new_option', {
+        options: [
+          { label: CONV, acts_on: [
+            { factor_label: 'Monthly new Pro subscribers', direction: 'positive', level: { value: 90, unit: 'subscribers per month', estimate: true, basis: 'a modest conversion uplift' } },
+            { factor_label: RET_SWITCH, direction: 'positive', level: offLevel }] },
+          { label: RET, acts_on: [{ factor_label: RET_SWITCH, direction: 'positive' }] },
+        ],
+        new_factors: [{ label: RET_SWITCH, kind: 'switch', affects: [{ label: 'Monthly churn', direction: 'negative' }] }],
+        rationale: 'The user asked to compare both.',
+      }),
+      (body) => { a03ToolOutput = JSON.stringify(body['input'] ?? []); return say('I would add both. Shall I?'); },
+    ];
+    return turn({ message: A03_MESSAGE });
+  };
+
+  it.each([
+    ['{ value: 0 } (A03)', { value: 0 }],
+    ["{ value: 0, unit: '%' }", { value: 0, unit: '%' }],
+  ])('[A03] R1/R2/R6 RED: the switch at %s under the conversion option, turned on by the retention option → ONE propose_new_option call, held → one click → retention on (1), conversion NOT linked to it, today-0 Olumi\'s', async (_name, offLevel) => {
+    graphOf.set(SCENARIO, structuredClone(BEFORE_A03));
+    const t1 = await proposeA03(offLevel);
+    const calls = t1._agent.tool_calls;
+    // R6: ONE call, not refused — the served turn made five, every one refused.
+    expect(calls.filter((c) => c.name === 'propose_new_option'), JSON.stringify(calls)).toEqual([expect.objectContaining({ ok: true })]);
+    expect(calls.filter((c) => c.refusal !== undefined), JSON.stringify(calls)).toEqual([]);
+    const approve = approveChipOf(t1);
+    expect(approve?.id, JSON.stringify(calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    // The Agent is told which entry was dropped, by option and factor.
+    expect(a03ToolOutput).toContain('switch_off_entries_dropped');
+    expect(a03ToolOutput).toContain(JSON.stringify(JSON.stringify({ option: CONV, factor: RET_SWITCH })).slice(1, -1));
+
+    const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const g = graphNow() as unknown as { nodes: Record<string, any>[]; edges: { from: string; to: string }[] };
+    const sw = g.nodes.filter((x) => x.kind === 'factor' && x.label === RET_SWITCH);
+    expect(sw, 'the switch is added once').toHaveLength(1);
+    const swId = String(sw[0]!.id);
+    const conv = g.nodes.find((x) => x.kind === 'option' && x.label === CONV)!;
+    const ret = g.nodes.find((x) => x.kind === 'option' && x.label === RET)!;
+    expect(conv, 'the conversion option is added').toBeDefined();
+    expect(ret, 'the retention option is added').toBeDefined();
+    // The retention option turns the switch on: the structural 1.
+    expect(ret.interventions[swId]).toEqual(ON_LEVEL(swId));
+    expect(g.edges.some((e) => e.from === ret.id && e.to === swId), 'retention → switch').toBe(true);
+    // The conversion option does not act on it: no intervention, no link.
+    expect(Object.prototype.hasOwnProperty.call(conv.interventions ?? {}, swId), JSON.stringify(conv.interventions)).toBe(false);
+    expect(g.edges.some((e) => e.from === conv.id && e.to === swId), 'NO conversion → switch link').toBe(false);
+    // CONTRAST: the conversion option IS linked to what it does act on.
+    expect(g.edges.some((e) => e.from === conv.id && e.to === 'monthly_new_pro_subscribers'), 'conversion → Monthly new Pro subscribers').toBe(true);
+    // The switch's today is Olumi's off.
+    expect(sw[0]!.observed_state).toEqual({ value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' });
+    expect(routerCalls).toEqual([]);
+  }, 120_000);
 });
