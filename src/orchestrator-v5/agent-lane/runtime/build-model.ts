@@ -1371,7 +1371,15 @@ export async function buildModelFromBrief(
    * (`write-outcome.ts` `openQuestionsLine`), so the deadline goes FIRST there, ahead of the five-question cap.
    */
   const horizon = candidate.goal?.horizon_months;
-  if (typeof horizon === 'number' && Number.isFinite(horizon) && horizon > 0) {
+  // ⛔ T2 (journey E, PJ-E-A2; served pj-20260928T074951Z E01): a deadline the brief writes but no month count can hold
+  // ("by Q3" needs a year and a fiscal calendar) is asked in the brief's OWN words, in this same first slot. Before, the
+  // wording `attestHorizon` kept was read by nothing: the served reply never said "Q3" (the drafter's own question sat
+  // 8th of 10, two shown), and a month count the drafter typed for it was asked as the deadline. Olumi's count is never
+  // asked as the user's. The wording is still held on no field: that is Canonical's shape (PJ-A2 row 27, second half).
+  if (statedGoal.horizon.status === 'unresolved') {
+    const goalName = typeof candidate.goal?.metric === 'string' && candidate.goal.metric.trim() !== '' ? ` for "${candidate.goal.metric}"` : '';
+    openQuestions.unshift(`Which date does "${statedGoal.horizon.wording}" mean? It is the deadline your brief sets${goalName}, but the model does not hold it yet, so no result answers whether it is met by then.`);
+  } else if (typeof horizon === 'number' && Number.isFinite(horizon) && horizon > 0) {
     // Held (G1): the model keeps the deadline, but the analysis compares levels, so still no result answers it.
     openQuestions.unshift(statedGoal.held.horizon
       ? `Does "${candidate.goal.metric}" get there within ${horizon} months? The model holds the deadline; no result answers that yet.`
