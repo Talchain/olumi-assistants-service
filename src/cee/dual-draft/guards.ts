@@ -253,29 +253,78 @@ const READINESS_RANK: Record<string, number> = {
 const RANK_UNKNOWN_STATUS = 5;
 const RANK_UNDERIVABLE = 6;
 
-function readinessRank(graph: GraphV3T): { rank: number; status: string | null } {
+interface Readiness {
+  readonly rank: number;
+  readonly status: string | null;
+  /** Blocking readiness issues, counted per identity — see `blockingIssueCounts`. */
+  readonly blocking: ReadonlyMap<string, number>;
+}
+
+function readinessOf(graph: GraphV3T): Readiness {
   const payload = buildCanonicalAnalysisReadyFromGraph(graph);
-  if (!payload) return { rank: RANK_UNDERIVABLE, status: null };
+  if (!payload) return { rank: RANK_UNDERIVABLE, status: null, blocking: new Map() };
   const status = String(payload.status);
-  return { rank: READINESS_RANK[status] ?? RANK_UNKNOWN_STATUS, status };
+  return { rank: READINESS_RANK[status] ?? RANK_UNKNOWN_STATUS, status, blocking: blockingIssueCounts(payload.readiness_issues) };
+}
+
+/**
+ * A graph's blocking readiness issues, counted per identity `code|option_id|factor_id` — never by `issue_id` or wording,
+ * which differ from graph to graph. Counted, so a second id-less structural issue (another orphan) is new too.
+ * Left out: a carrier re-encoding (`safe_canonicalisation`, never a blocker) and an issue waived by excluding its option.
+ */
+function blockingIssueCounts(
+  issues: ReadonlyArray<{
+    readonly code: string;
+    readonly repairability?: string;
+    readonly waived_by_exclusion?: boolean;
+    readonly option_id?: string;
+    readonly factor_id?: string;
+  }> | undefined,
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const issue of issues ?? []) {
+    if (issue.repairability === 'safe_canonicalisation' || issue.waived_by_exclusion === true) continue;
+    const key = `${issue.code}|${issue.option_id ?? ''}|${issue.factor_id ?? ''}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
 }
 
 export interface ReadinessNoDowngradeResult {
   readonly ok: boolean;
   readonly before_status: string | null;
   readonly after_status: string | null;
+  /** Blocking issues the merge added (`code|option_id|factor_id`), MISSING_FACTOR_LEVEL excluded. */
+  readonly added_blockers: readonly string[];
 }
+
+const LEVEL_GAP = 'MISSING_FACTOR_LEVEL|';
 
 /**
  * G12(ii): structural readiness of the merged graph must not be worse than
  * the M1 graph's. Necessary-but-not-sufficient by ruling — the activation
  * gate is real merged-graph run_analysis success, not this check.
+ *
+ * ⛔ COMPARED AS BLOCKING-ISSUE SETS, MISSING_FACTOR_LEVEL EXCLUDED ON BOTH SIDES (Canonical #72 5861770361; DL
+ * 5861785834). The status alone went blind after #2164: a real first draft whose goal roots have no levels is already
+ * `needs_user_input`, so a merge that added a value-less option kept the same status and passed.
+ *  · Any blocking issue the M1 graph does not have is a downgrade — except a level gap. G10 keeps every value channel
+ *    closed to M2, so each root factor a merge adds arrives level-less and the user is asked for it; that is an honest
+ *    ask, not harm (and on a real first draft the gap is on both sides).
+ *  · A worse STATUS is still a downgrade unless a new level gap is what explains it. So a goal that disappears
+ *    (underivable) or a structural break still fails.
  */
 export function checkReadinessNoDowngrade(
   before: GraphV3T,
   after: GraphV3T,
 ): ReadinessNoDowngradeResult {
-  const b = readinessRank(before);
-  const a = readinessRank(after);
-  return { ok: a.rank <= b.rank, before_status: b.status, after_status: a.status };
+  const b = readinessOf(before);
+  const a = readinessOf(after);
+  const addedAll = [...a.blocking]
+    .filter(([key, count]) => count > (b.blocking.get(key) ?? 0))
+    .map(([key]) => key)
+    .sort();
+  const added = addedAll.filter((key) => !key.startsWith(LEVEL_GAP));
+  const statusExplained = a.rank <= b.rank || addedAll.some((key) => key.startsWith(LEVEL_GAP));
+  return { ok: added.length === 0 && statusExplained, before_status: b.status, after_status: a.status, added_blockers: added };
 }
