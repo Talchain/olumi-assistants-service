@@ -19,6 +19,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { ProposalStore } from '../proposal.js';
 import { figuresWrittenIn, quoteOfFigure } from '../stated-by-user.js';
 import { gmHeldProposalRef } from '../../handlers/edit-graph-referee-gate.js';
+import type { HoldAddFactorInput, HoldAddFactorResult } from '../../system-events/dispatch.js';
 
 type G = { nodes: { id: string; kind: string; label: string }[]; edges: unknown[] };
 type Case = { id: string; msg: string; calls: { name: string; factors: { label: string; value: number }[] }[] };
@@ -34,7 +35,7 @@ const doorFor = () => {
     ? { status: 200, json: { graph: { nodes: E07.nodes, edges: E07.edges }, graph_hash: 'h1' } }
     : { status: 404, json: {} });
   const caps = createAgentCapabilities(d, new ProposalStore(), undefined, 'full', undefined, {
-    holdAddFactor: async (input) => {
+    holdAddFactor: async (input: HoldAddFactorInput): Promise<HoldAddFactorResult> => {
       held = input.factors.map((f) => ({ label: f.label, basis: f.basis, quote: f.quote, raw: (f.observed_state as { raw_value?: unknown }).raw_value }));
       const ids = input.factors.map((f) => f.id!);
       return { status: 'held', proposal_id: gmHeldProposalRef(SID, `node:${ids[0]!}`), factor_ids: ids, public_label: 'Add these factors', held_message: 'Yes, add them.' };
