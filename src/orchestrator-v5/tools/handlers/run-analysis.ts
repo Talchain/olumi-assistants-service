@@ -74,6 +74,7 @@ import { buildIntakeOptionDisclosure } from '../../coaching/intake-option-disclo
 // ⛔ C46 stage 1 (b): a leader on a product the analysis only adds up (MRR = price × subscribers).
 import {
   applyNonlinearIdentityToLeaderPermission,
+  evaluatedIdentityNodeIds,
   nonlinearIdentityLeaderWithhold,
 } from '../../agent-lane/admit-model.js';
 // D-ask-1 extended to CEE-inferred FACTOR values: the analysis says whose
@@ -2046,11 +2047,15 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // HERE, in the same response, and the persisted permission is folded at the one stamp below. Gating
     // only the stamp would ship "{X} currently leads" beside a fact that says no leader may be named —
     // the G-CEE-1 contradiction. `headline !== null` stays the leader permission for every tail below.
+    //
+    // ⭐ R3-4 (ISL #187): a carrier THIS response's `identity_evaluations` marks `evaluated: true` was
+    // computed as a product by the engine, so the sign test does not judge it (`evaluatedIdentityNodeIds`).
     const nonlinearIdentityWithhold = leadingOptionId === null
       ? null
       : nonlinearIdentityLeaderWithhold(snapshot.graph, leadingOptionId, {
         comparedOptionIds: [...analysedOptionIds],
         goalId: snapshot.goal_node_id,
+        evaluatedIdentityNodeIds: evaluatedIdentityNodeIds(response),
       });
     if (nonlinearIdentityWithhold !== null) {
       // Ids and counts only — no labels, no figures.

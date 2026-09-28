@@ -1357,6 +1357,27 @@ function levelObject(v: unknown): ConstructedLevel | undefined {
 }
 
 /**
+ * ⭐ C46 × R3-4 (ISL #187) — THE CARRIERS THE ENGINE EVALUATED ON THIS RUN.
+ *
+ * Only `evaluated: true` licenses a numerical claim; a carrier the engine evaluated on THIS run is not
+ * withheld by the structural sign test. Absent/false/malformed → today's withhold (fail closed).
+ * Reads `identity_evaluations` (PLoT #379 forwards ISL's list at the TOP LEVEL of the /v2/run response,
+ * which CEE stores whole as the fact's `enrichment`): the string `node_id` of each plain-object entry
+ * whose `evaluated === true`. Pure and total: anything else is the empty set, never a throw.
+ */
+export function evaluatedIdentityNodeIds(enrichmentOrResponse: unknown): ReadonlySet<string> {
+  const list = enrichmentOrResponse !== null && typeof enrichmentOrResponse === 'object'
+    ? (enrichmentOrResponse as { identity_evaluations?: unknown }).identity_evaluations
+    : undefined;
+  if (!Array.isArray(list)) return new Set();
+  return new Set(list
+    .filter((e): e is { node_id: string } => e !== null && typeof e === 'object' && !Array.isArray(e)
+      && (e as { evaluated?: unknown }).evaluated === true
+      && typeof (e as { node_id?: unknown }).node_id === 'string' && (e as { node_id: string }).node_id !== '')
+    .map((e) => e.node_id));
+}
+
+/**
  * ⛔ C46 STAGE 1 (b) — MAY THIS RUN NAME ITS LEADER, GIVEN A PRODUCT IT CAN ONLY ADD UP?
  *
  * Reads the carrier (`cee-v3.ts` NodeV3 `nonlinear_identity`) on the graph the analysis ran on,
@@ -1377,18 +1398,24 @@ function levelObject(v: unknown): ConstructedLevel | undefined {
  * `leaderId: null` asks the Agent-view question (the leader is withheld from every readback): is
  * EVERY compared option unprovable as a leader? Only then is the sentence true of whichever led.
  *
+ * `opts.evaluatedIdentityNodeIds` (the helper above, read from THIS run's response or fact): a
+ * carrier on one of those nodes is not judged here — the engine computed the product, so "adds those
+ * effects up" is false of it. Omitted or empty ⇒ every carrier is judged, exactly as before.
+ *
  * Pure and total: a malformed graph or carrier is `null`, never a throw on a Run.
  */
 export function nonlinearIdentityLeaderWithhold(
   graph: unknown,
   leaderId: string | null,
-  opts: { readonly comparedOptionIds?: readonly string[]; readonly goalId?: string } = {},
+  opts: { readonly comparedOptionIds?: readonly string[]; readonly goalId?: string; readonly evaluatedIdentityNodeIds?: ReadonlySet<string> } = {},
 ): NonlinearIdentityLeaderWithhold | null {
   const rawNodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
   const rawEdges = (graph as { edges?: unknown } | null | undefined)?.edges;
   if (!Array.isArray(rawNodes) || !Array.isArray(rawEdges)) return null;
   const nodes = rawNodes.filter((n): n is GraphNodeLike => n !== null && typeof n === 'object' && typeof (n as GraphNodeLike).id === 'string' && typeof (n as GraphNodeLike).kind === 'string');
-  const carried = nodes.map((n) => ({ id: n.id as string, carrier: readCarrier(n) })).filter((c): c is { id: string; carrier: NonlinearIdentityCarrier } => c.carrier !== null);
+  const carried = nodes.map((n) => ({ id: n.id as string, carrier: readCarrier(n) }))
+    .filter((c): c is { id: string; carrier: NonlinearIdentityCarrier } => c.carrier !== null)
+    .filter((c) => opts.evaluatedIdentityNodeIds?.has(c.id) !== true);
   if (carried.length === 0) return null;
   const goals = nodes.filter((n) => n.kind === 'goal').map((n) => n.id as string);
   const goalId = opts.goalId ?? (goals.length === 1 ? goals[0] : undefined);
@@ -1477,16 +1504,19 @@ export function nonlinearIdentityLeaderWithhold(
  * which name no option) OR every option the graph compares is unprovable as a leader, so the sentence
  * is true of whichever led. Otherwise `null`: a finding about some other pair is not said as the
  * reason this leader was withheld.
+ *
+ * `evaluated`: the carriers the latest run's engine evaluated (`evaluatedIdentityNodeIds`), when the
+ * caller holds that run's response; omitted ⇒ today's reading.
  */
-export function nonlinearIdentityForAgent(graph: unknown, reasonNamesIt: boolean): NonlinearIdentityLeaderWithhold | null {
-  const every = nonlinearIdentityLeaderWithhold(graph, null);
+export function nonlinearIdentityForAgent(graph: unknown, reasonNamesIt: boolean, evaluated?: ReadonlySet<string>): NonlinearIdentityLeaderWithhold | null {
+  const every = nonlinearIdentityLeaderWithhold(graph, null, { evaluatedIdentityNodeIds: evaluated });
   if (every !== null || !reasonNamesIt) return every;
   const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
   const options = Array.isArray(nodes)
     ? nodes.filter((n) => (n as GraphNodeLike | null)?.kind === 'option' && typeof (n as GraphNodeLike).id === 'string').map((n) => (n as GraphNodeLike).id as string)
     : [];
   for (const id of options) {
-    const f = nonlinearIdentityLeaderWithhold(graph, id);
+    const f = nonlinearIdentityLeaderWithhold(graph, id, { evaluatedIdentityNodeIds: evaluated });
     if (f !== null) return f;
   }
   return null;
@@ -1572,7 +1602,10 @@ export function nonlinearIdentityLeaderClaimCause(input: {
   const leader = result?.leading_option_id;
   if (typeof leader !== 'string' || leader === '') return none;
   const compared = comparedOptionIdsOf(result?.enrichment);
-  const finding = nonlinearIdentityLeaderWithhold(input.graph, leader, compared !== undefined ? { comparedOptionIds: compared } : {});
+  const finding = nonlinearIdentityLeaderWithhold(input.graph, leader, {
+    ...(compared !== undefined ? { comparedOptionIds: compared } : {}),
+    evaluatedIdentityNodeIds: evaluatedIdentityNodeIds(result?.enrichment),
+  });
   if (finding === null) return none;
   return input.requested
     ? { withheldBecauseUnrequested: false, withheldBecauseNonlinearIdentity: true }
