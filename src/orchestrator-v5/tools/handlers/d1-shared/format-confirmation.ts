@@ -15,6 +15,7 @@ import {
 import { edgeBandFromMagnitude } from '../../../format/edge-strength-bands.js';
 import type { PendingAction } from '../../../session/pending-action.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../../../agent-lane/limit-operator-words.js';
+import { sayLimitInFrame } from '../../../agent-lane/limit-frame.js';
 import { sayFigureAsWritten } from '../../../agent-lane/say-figure.js';
 import {
   durationNotEvaluatedSentence,
@@ -105,26 +106,30 @@ export interface ConstraintAddedInput {
   readonly operatorAsStated?: '<' | '>';
   readonly value: number;
   readonly unit?: string;
+  /**
+   * R1 S4-core: `GoalConstraintSchema.value_frame`. A change from today (`change_rel`: a fraction; `change_abs`) is said as
+   * the change ("no more than 10% above today"); a level, or none, exactly as before (`sayLimitInFrame`).
+   */
+  readonly valueFrame?: string;
 }
 
 /**
- * The limit's comparator in words, from the ONE vocabulary (`LIMIT_OPERATOR_WORDS`): "less than" / "more than" for a
- * strict row (A2 follow-up, DL verdict on #2180), else "at most" / "at least" exactly as before. `statedOperatorOf`
- * says a stamp only when it is the strict twin of the held operator.
+ * The limit's bound in words — comparator and figure together, frame-aware (`sayLimitInFrame`). Byte-identical for a
+ * level (`LIMIT_OPERATOR_WORDS` of the stated comparator, then `formatValueWithUnit`), as before.
  */
-const limitPhrase = (input: ConstraintAddedInput): string =>
-  LIMIT_OPERATOR_WORDS[statedOperatorOf({ operator: input.operator, operator_as_stated: input.operatorAsStated }) ?? input.operator];
+const limitBound = (input: ConstraintAddedInput): string =>
+  sayLimitInFrame({
+    operator: statedOperatorOf({ operator: input.operator, operator_as_stated: input.operatorAsStated }) ?? input.operator,
+    value: input.value, unit: input.unit, frame: input.valueFrame,
+    words: LIMIT_OPERATOR_WORDS, figure: (v, u) => formatValueWithUnit(v, u),
+  });
 
 export function formatConstraintAdded(input: ConstraintAddedInput): string {
-  const phrase = limitPhrase(input);
-  const value = formatValueWithUnit(input.value, input.unit);
-  return `Added constraint: ${input.targetLabel} must be ${phrase} ${value}.`;
+  return `Added constraint: ${input.targetLabel} must be ${limitBound(input)}.`;
 }
 
 export function formatConstraintUpdated(input: ConstraintAddedInput): string {
-  const phrase = limitPhrase(input);
-  const value = formatValueWithUnit(input.value, input.unit);
-  return `Updated constraint: ${input.targetLabel} must be ${phrase} ${value}.`;
+  return `Updated constraint: ${input.targetLabel} must be ${limitBound(input)}.`;
 }
 
 /**
@@ -139,9 +144,7 @@ export function formatConstraintUpdated(input: ConstraintAddedInput): string {
  * Deliberately avoids a sentence-leading commit verb ("Updated"/"Set").
  */
 export function formatConstraintUnchanged(input: ConstraintAddedInput): string {
-  const phrase = limitPhrase(input);
-  const value = formatValueWithUnit(input.value, input.unit);
-  return `${input.targetLabel} is already constrained to be ${phrase} ${value}.`;
+  return `${input.targetLabel} is already constrained to be ${limitBound(input)}.`;
 }
 
 /**
@@ -155,9 +158,7 @@ export function formatConstraintUnchanged(input: ConstraintAddedInput): string {
  * be named on its own terms.
  */
 export function formatConstraintLabelUpdated(input: ConstraintAddedInput): string {
-  const phrase = limitPhrase(input);
-  const value = formatValueWithUnit(input.value, input.unit);
-  return `Updated the label to ${input.targetLabel} — the constraint (must be ${phrase} ${value}) is unchanged.`;
+  return `Updated the label to ${input.targetLabel} — the constraint (must be ${limitBound(input)}) is unchanged.`;
 }
 
 /**

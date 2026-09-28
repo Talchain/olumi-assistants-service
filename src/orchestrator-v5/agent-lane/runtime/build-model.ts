@@ -46,8 +46,8 @@ import {
   type ConstructionSizeVerdict,
 } from '../construction-size-gate.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
-import { LIMIT_OPERATOR_WORDS } from '../admit-constraint.js';
-import { isChangeFrame, limitNeedsTodaysLevel } from '../limit-frame.js';
+import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js';
+import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
 import { figureTheUserWrote, holdStatedGoalAttributes, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
@@ -507,7 +507,12 @@ function unattachedLimitLines(model: CandidateModel, loss: readonly { readonly f
     // Words, never symbols: this sentence reaches the user (RC 5828938080 §3, Runtime's copy point).
     const bound = OPERATOR_WORDS[c.operator] ?? c.operator;
     const unit = c.unit === undefined || c.unit === '' ? '' : c.unit.startsWith('%') ? c.unit : ` ${c.unit}`;
-    const limit = `${c.metric} of ${bound} ${c.value}${unit}`;
+    // R1 S4-core: a limit on a CHANGE from today is said as that change ("Cost, no more than 10% above today"), in the
+    // frame admission would have written (`writtenLimitFrame`); a level exactly as before.
+    const written = writtenLimitFrame(c);
+    const limit = isChangeFrame(written.frame) && (c.operator === '<=' || c.operator === '>=' || c.operator === '<' || c.operator === '>')
+      ? `${c.metric}, ${sayLimitInFrame({ operator: c.operator, value: written.value, unit: written.unit, frame: written.frame, words: LIMIT_OPERATOR_WORDS, figure: (v, u) => `${v}${u === undefined || u === '' ? '' : u.startsWith('%') ? u : ` ${u}`}` })}`
+      : `${c.metric} of ${bound} ${c.value}${unit}`;
     // The same rule as `admit-constraint.ts` `isUserAuthored`: only a bound the user stated is called theirs.
     const users = c.provenance === 'explicit';
     const key = `${users ? 'user' : 'olumi'}\u0000${limit}`;

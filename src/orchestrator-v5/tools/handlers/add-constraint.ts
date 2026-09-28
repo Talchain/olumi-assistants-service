@@ -1514,6 +1514,8 @@ export function createAddConstraintHandler(): HandlerFn {
         ...(operatorAsStated !== undefined ? { operatorAsStated } : {}),
         value: params.value,
         ...(newConstraint.unit !== undefined ? { unit: newConstraint.unit } : {}),
+        // R1 S4-core: a limit written in a change frame is said as the change (`sayLimitInFrame`).
+        ...(typeof newConstraint.value_frame === 'string' ? { valueFrame: newConstraint.value_frame } : {}),
       };
       // Goal-target sets get the honest target-naming receipt (the
       // threshold IS stamped in the committed write above); everything
