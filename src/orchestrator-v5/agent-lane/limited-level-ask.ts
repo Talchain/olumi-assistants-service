@@ -67,9 +67,10 @@ function sayFigure(value: number, unit: string): string {
   const n = value.toLocaleString('en-GB', { maximumFractionDigits: 2 });
   if (unit === '') return n;
   if (unit.startsWith('%')) return `${n}${unit}`;
-  const [head = '', ...rest] = unit.split(/\s+/u);
+  // The leading token, up to a space or a "/" (served journey E: "GBP/year"); the rest keeps its own separator.
+  const [, head = '', rest = ''] = /^([^\s/]+)(.*)$/u.exec(unit) ?? [];
   const symbol = PREFIX_SYMBOL.get(head.toUpperCase()) ?? PREFIX_SYMBOL.get(head);
-  if (symbol !== undefined) return `${symbol}${n}${rest.length > 0 ? ` ${rest.join(' ')}` : ''}`;
+  if (symbol !== undefined) return `${symbol}${n}${rest}`;
   return `${n} ${unit}`;
 }
 

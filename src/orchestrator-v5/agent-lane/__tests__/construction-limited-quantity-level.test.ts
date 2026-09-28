@@ -218,6 +218,8 @@ describe('the ask says a money figure the way the user writes it (DL copy nit on
     ['£', '£', 'at most £20,000', '£30,000'],
     ['GBP per month', 'GBP per month', 'at most £20,000 per month', '£30,000 per month'],
     ['USD', 'USD', 'at most $20,000', '$30,000'],
+    // Served journey E (pj-20260928T051530Z): "GBP/year" — the code, then the period with no space.
+    ['GBP/year', 'GBP/year', 'at most £20,000/year', '£30,000/year'],
     ['%', '%', 'at most 20,000%', '30,000%'],
     ['subscribers', 'subscribers', 'at most 20,000 subscribers', '30,000 subscribers'],
   ])('unit %s', (unit, limitUnit, limit, level) => {
