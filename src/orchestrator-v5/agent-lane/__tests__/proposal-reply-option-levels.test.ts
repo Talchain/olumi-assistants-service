@@ -13,7 +13,7 @@
  * The fixture is the capability's REAL output on a served graph (live replay, pj-20260928T030304Z A06), plus the typed
  * `stated_by` this change adds.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { composeProposalReply } from '../proposal-reply.js';
 import { runAgentTurn } from '../runtime/agent-loop.js';
 import { AGENT_TOOLS, type AgentCapabilities } from '../runtime/agent-tools.js';
@@ -69,6 +69,42 @@ describe('⭐ PJ-C1: an option-levels proposal is answered from its own result',
     ]) expect(composeProposalReply('propose_option_interventions', WHOLE, { ...A06, ...extra }, MSG), JSON.stringify(extra)).toBeNull();
     expect(composeProposalReply('propose_option_interventions', { ...WHOLE, whole_request: false }, A06, MSG)).toBeNull();
     expect(composeProposalReply('propose_option_interventions', WHOLE, A06, 'Add those — what would they do?')).toBeNull();
+  });
+
+  it('⛔ Codex CR #2 on #2263 (the REAL price proposal): a price level carrying £54 answers in ONE call; add "churn rose 54%" and it narrates (2 calls)', async () => {
+    const COHORT = 'Test £54 versus £59 by customer cohort before rollout';
+    const RAISE = 'Raise to £59';
+    const nodes = [
+      { id: 'goal_mrr', kind: 'goal', label: 'MRR' },
+      { id: 'fac_price', kind: 'factor', label: 'Pro plan monthly price', observed_state: { value: 0.245, raw_value: 49, cap: 200, unit: 'GBP per month' } },
+      { id: 'opt_cohort', kind: 'option', label: COHORT },
+      { id: 'opt_raise', kind: 'option', label: RAISE },
+    ];
+    const e = (from: string, to: string) => ({ from, to, strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' });
+    const d: InternalDispatch = async () => ({ status: 200, json: { graph: { nodes, edges: [e('opt_cohort', 'fac_price'), e('opt_raise', 'fac_price'), e('fac_price', 'goal_mrr')] }, graph_hash: 'h0' } });
+    const args = { whole_request: true, interventions: [
+      { option_label: COHORT, factor_label: 'Pro plan monthly price', value: 54, unit: '£ per month', basis: 'the user: £54 per month', user_stated: true },
+    ] };
+    const turn = async (message: string) => {
+      const caps = createAgentCapabilities(d, new ProposalStore());
+      const call = { type: 'function_call', call_id: 'c1', name: 'propose_option_interventions', arguments: JSON.stringify(args) };
+      const callModel = vi.fn()
+        .mockResolvedValueOnce({ output: [call] })
+        .mockResolvedValueOnce({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'Narrated.' }] }] });
+      const r = await runAgentTurn({
+        ctx: { scenario_id: 's1', authenticated_user_id: null, request_id: 'r', user_text: message, user_turn_text: message },
+        history: [], message, instructions: 'i', maxOutputTokens: 500,
+        composeReply: (t: string, a: unknown, res: unknown) => composeProposalReply(t, a, res, message),
+      } as never, caps, callModel as never);
+      return { r, calls: callModel.mock.calls.length };
+    };
+    const plain = await turn(`For "${COHORT}": use £54 per month as its Pro plan monthly price.`);
+    expect(plain.r.tool_calls, JSON.stringify(plain.r.tool_calls)).toEqual([expect.objectContaining({ name: 'propose_option_interventions', ok: true })]);
+    expect(plain.calls, 'the real £54 proposal answers in one call').toBe(1);
+    const colliding = await turn(`For "${COHORT}": use £54 per month as its Pro plan monthly price. Last time we raised it, churn rose 54%.`);
+    expect(colliding.r.tool_calls).toEqual([expect.objectContaining({ name: 'propose_option_interventions', ok: true })]);
+    expect(colliding.calls, 'the 54% churn evidence is not carried by a £54 level: the narrating call runs').toBe(2);
+    expect(colliding.r.assistant_text).toBe('Narrated.');
   });
 
   it('RED (the PRODUCER): the real capability types whose each level is — the user’s £54 is `user`, Olumi’s £59 is `olumi_estimate` — and only Olumi’s gets a line', async () => {

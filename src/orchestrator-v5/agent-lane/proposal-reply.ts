@@ -270,6 +270,9 @@ function carriedBy(value: unknown, key: string, into: { nums: Carried[]; strs: s
 
 const PERCENT_UNIT = /%|percent|pct|fraction|ratio|proportion/i;
 const MONEY_UNIT = /£|\$|€|\bGBP\b|\bUSD\b|\bEUR\b|pound|dollar|euro/i;
+/** The currency a carried unit names (null when it names none): compared with the written amount's `currencyCode`. */
+const currencyOf = (unit: string | null): string | null => unit === null ? null
+  : /£|\bGBP\b|pound/i.test(unit) ? 'GBP' : /\$|\bUSD\b|dollar/i.test(unit) ? 'USD' : /€|\bEUR\b|euro/i.test(unit) ? 'EUR' : null;
 const sameNumber = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
 
 /**
@@ -277,7 +280,7 @@ const sameNumber = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * 
  * #2263: `{ value: 4, unit: 'GBP' }` must not carry both "£4" and "4%"). `unit` = the carried unit says the same kind;
  * `bare` = no unit beside it, so it may stand for the amount but only once; null = not this amount.
  */
-function evidences(c: Carried, a: { readonly magnitude: number; readonly kind?: unknown }): 'unit' | 'bare' | null {
+function evidences(c: Carried, a: { readonly magnitude: number; readonly kind?: unknown; readonly currencyCode?: string }): 'unit' | 'bare' | null {
   const money = c.unit !== null && MONEY_UNIT.test(c.unit);
   const percent = c.unit !== null && PERCENT_UNIT.test(c.unit);
   if (a.kind === 'percent') {
@@ -286,7 +289,8 @@ function evidences(c: Carried, a: { readonly magnitude: number; readonly kind?: 
   }
   if (!sameNumber(c.value, a.magnitude)) return null;
   if (c.unit === null) return 'bare';
-  if (a.kind === 'currency') return money && !percent ? 'unit' : null;
+  // Codex CR #2 on #2263: USD 4 never carries the user's £4 — the written amount's currency identity, not "some money".
+  if (a.kind === 'currency') return money && !percent && (a.currencyCode === undefined || currencyOf(c.unit) === a.currencyCode) ? 'unit' : null;
   return money || percent ? null : 'unit';
 }
 
@@ -304,13 +308,22 @@ export function userFiguresTheCallLeaves(args: unknown, userMessage: string): st
   const c: { nums: Carried[]; strs: string[] } = { nums: [], strs: [] };
   carriedBy(args, '', c, null);
   const used = new Set<number>();
+  // Codex CR #2 on #2263: text evidence is one-to-one too — each written occurrence consumes one occurrence of its text
+  // (whole figures only: "£4" is not inside "£45"), so one "£4" in a label never carries two written "£4"s.
+  const textUsed = new Map<string, number>();
+  const occurrences = (s: string, text: string): number => {
+    const esc = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return (s.match(new RegExp(`(?<![\\d.,])${esc}(?![\\d]|[.,]\\d)`, 'g')) ?? []).length;
+  };
   const left: string[] = [];
   for (const a of findStatedAmounts(userMessage)) {
     const text = a.matchedText.trim();
-    const pick = (want: 'unit' | 'bare'): number => c.nums.findIndex((n, i) => !used.has(i) && evidences(n, a as { magnitude: number; kind?: unknown }) === want);
+    const amount = a as { magnitude: number; kind?: unknown; currencyCode?: string };
+    const pick = (want: 'unit' | 'bare'): number => c.nums.findIndex((n, i) => !used.has(i) && evidences(n, amount) === want);
     const i = pick('unit') >= 0 ? pick('unit') : pick('bare');
     if (i >= 0) { used.add(i); continue; }
-    if (c.strs.some((s) => s.includes(text))) continue;
+    const s = c.strs.findIndex((str, k) => occurrences(str, text) > (textUsed.get(`${k}|${text}`) ?? 0));
+    if (s >= 0) { textUsed.set(`${s}|${text}`, (textUsed.get(`${s}|${text}`) ?? 0) + 1); continue; }
     left.push(text);
   }
   return left;
