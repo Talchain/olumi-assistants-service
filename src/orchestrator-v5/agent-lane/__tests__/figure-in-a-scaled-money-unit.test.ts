@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { figureTheUserWrote } from '../stated-by-user.js';
+import { figureTheUserWrote, figureTheUserWroteFor } from '../stated-by-user.js';
 
 const BRIEF = 'Given our goal of reaching £100k MRR within 12 months [Currently 75k] while keeping monthly churn under 4%, '
   + 'should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?';
@@ -33,5 +33,31 @@ describe('figureTheUserWrote reads a scaled money unit at its own scale', () => 
     ['CONTROL (unchanged): a percentage: 4 % is "under 4%"', 4, '%', BRIEF, true],
   ])('%s', (_label, value, unit, text, expected) => {
     expect(figureTheUserWrote(value, unit, text)).toBe(expected);
+  });
+});
+
+// DL #72 5862394804 (#2188 review): the SCALE opened a path. A bare "300" in "300 subscribers" read as 0.3 £k/month.
+// Under a scaled money unit a PLAIN amount now grounds only when it carries its own letter ("75k"); and
+// `figureTheUserWroteFor` shares the same unit rules (`amountIs`), so it scales too.
+describe('a bare number never grounds a figure held at a money scale; the entity-bound matcher scales too', () => {
+  it.each([
+    ['⭐ RED: "300 subscribers" is never 0.3 £k/month', 0.3, '£k/month', 'we have 300 subscribers', false],
+    ['PINNED (closed by #2188 already): a bare "300" is never 300 £k/month (£300k or £300? neither)', 300, '£k/month', 'we have 300 subscribers', false],
+    ['KEPT: a plain amount with its own letter, "75k", is 75 £k/month', 75, '£k/month', BRIEF, true],
+    ['KEPT: a written £300 IS 0.3 £k/month (money, at the unit\'s scale)', 0.3, '£k/month', 'it costs £300 a month', true],
+    ['CONTROL (unscaled, unchanged): a bare "300" still grounds 300 subscribers', 300, 'subscribers', 'we have 300 subscribers', true],
+  ])('%s', (_label, value, unit, text, expected) => {
+    expect(figureTheUserWrote(value, unit, text)).toBe(expected);
+  });
+
+  const MRR = { target: ['MRR'], others: ['Pro plan price', 'Pro paying subscribers'] };
+  it('⭐ RED: figureTheUserWroteFor reads 100 £k/month for MRR as the "£100k MRR" written about it', () => {
+    expect(figureTheUserWroteFor(100, '£k/month', BRIEF, MRR)).toBe(true);
+  });
+  it('CONTRAST: figureTheUserWroteFor still binds the entity: £100k MRR is not the Pro plan price', () => {
+    expect(figureTheUserWroteFor(100, '£k/month', BRIEF, { target: ['Pro plan price'], others: ['MRR', 'Pro paying subscribers'] })).toBe(false);
+  });
+  it('CONTROL (unscaled, unchanged): figureTheUserWroteFor reads £59 for the Pro plan price', () => {
+    expect(figureTheUserWroteFor(59, 'GBP/month', BRIEF, { target: ['Pro plan price'], others: ['MRR', 'Pro paying subscribers'] })).toBe(true);
   });
 });

@@ -43,14 +43,36 @@ const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.m
 export function figureTheUserWrote(value: number, unit: unknown, userText: string | null | undefined): boolean {
   if (typeof value !== 'number' || !Number.isFinite(value)) return false;
   const family = unitPhraseFamily(unit);
-  // The figure as the user would write it: 100 in "£k/month" is £100k (SCALE, above); ×1 for every other unit.
-  const written = value * moneyUnitScale(unit);
-  return findStatedAmounts(userText).some((a) => {
-    if (a.kind === 'currency') return (family === null || family === 'currency') && same(a.magnitude, written);
-    // "40%" is 40 on a percentage, or 0.4 on a share kept as 0–1: the Agent passes the factor's own units.
-    if (a.kind === 'percent') return (family === null || family === 'percent') && (same(a.magnitude, value) || same(a.magnitude / 100, value));
-    return same(a.magnitude, written);
-  });
+  return findStatedAmounts(userText).some((a) => amountIs(a, value, unit, family));
+}
+
+/**
+ * Whether ONE written amount is `value` in `unit`: the unit rules `figureTheUserWrote` and `figureTheUserWroteFor` share.
+ * A money unit's own letter scales the figure (SCALE, above). Under a scaled money unit a PLAIN amount grounds it only
+ * when written with its own letter ("75k" is 75 £k): a bare "300" is £300 or 300 £k, so neither (DL #72 5862394804:
+ * "300 subscribers" read as 0.3 £k/month).
+ */
+function amountIs(
+  a: { readonly magnitude: number; readonly kind: string; readonly matchedText: string },
+  value: number,
+  unit: unknown,
+  family: ReturnType<typeof unitPhraseFamily>,
+): boolean {
+  const scale = moneyUnitScale(unit);
+  const written = value * scale;
+  if (a.kind === 'currency') return (family === null || family === 'currency') && same(a.magnitude, written);
+  // "40%" is 40 on a percentage, or 0.4 on a share kept as 0–1: the Agent passes the factor's own units.
+  if (a.kind === 'percent') return (family === null || family === 'percent') && (same(a.magnitude, value) || same(a.magnitude / 100, value));
+  // A count in words grounds a PLAIN figure only: "two" is never £2 or 2%, which need their written unit.
+  if (a.kind === 'words') return family !== 'currency' && family !== 'percent' && same(a.magnitude, value);
+  if (scale !== 1 && !writtenWithALetter(a)) return false;
+  return same(a.magnitude, written);
+}
+
+/** Whether an amount was written with a magnitude letter: its magnitude is not the number its digits spell ("75k"). */
+function writtenWithALetter(a: { readonly magnitude: number; readonly matchedText: string }): boolean {
+  const digits = Number(a.matchedText.replace(/[^0-9.]/g, ''));
+  return Number.isFinite(digits) && !same(digits, a.magnitude);
 }
 
 /** A money unit's own magnitude letter ("£k/month" → 1000, "£m" → 1e6); 1 for a unit with none, or one not money. */
@@ -243,15 +265,7 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
     return t && !o ? 'target' : o && !t ? 'other' : null;
   };
   return [...findStatedAmounts(userText), ...countsInWords(userText)].some((a) => {
-    const matches = a.kind === 'currency'
-      ? (family === null || family === 'currency') && same(a.magnitude, value)
-      : a.kind === 'percent'
-        ? (family === null || family === 'percent') && (same(a.magnitude, value) || same(a.magnitude / 100, value))
-        : a.kind === 'words'
-          // A count in words grounds a PLAIN figure only: "two" is never £2 or 2%, which need their written unit.
-          ? family !== 'currency' && family !== 'percent' && same(a.magnitude, value)
-          : same(a.magnitude, value);
-    if (!matches) return false;
+    if (!amountIs(a, value, unit, family)) return false;
     const amountEnd = a.index + a.matchedText.length;
     const before = userText.slice(0, a.index);
     const after = userText.slice(amountEnd);
