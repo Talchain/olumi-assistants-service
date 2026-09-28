@@ -26,6 +26,20 @@ export interface UserNamedOptions {
   readonly turnId: string;
   /** The option ids (the chip's `option_id`s) whose label THIS turn's typed words name. */
   readonly optionIds: readonly string[];
+  /**
+   * ⭐ PJ-A1 £49 (DL #70 5860365834; AIQ 5860384275 / 5860839793) — a NEW graded factor's TODAY level that the user's
+   * own typed words state (`figureTheUserWrote`), already framed as admission frames a stated baseline
+   * (`framedObservedState`, source `brief_extraction`). By the factor's LABEL as this batch adds it. Same rule as the
+   * option ids: the claim is about the user's words, so it rides this store and never the chip's wire parameters (the
+   * `new_factors` wire is strict — a `today` there is refused, not read). Absent: no factor gets a today level here.
+   */
+  readonly statedToday?: readonly StatedTodayLevel[];
+}
+
+/** One new graded factor's today level, as the user stated it and admission frames it. */
+export interface StatedTodayLevel {
+  readonly label: string;
+  readonly observed_state: Readonly<Record<string, unknown>>;
 }
 
 const store = new AsyncLocalStorage<UserNamedOptions>();
@@ -43,4 +57,14 @@ export function userNamedOptionIdsFor(scenarioId: string, turnId: string): reado
   const s = store.getStore();
   if (s === undefined || s.scenarioId !== scenarioId || s.turnId !== turnId) return [];
   return s.optionIds;
+}
+
+/**
+ * The new graded factors' stated today levels for THIS add-option turn if — and only if — the context names this
+ * scenario and this turn. Otherwise `[]`: no factor gets a today level (under-claiming, never over).
+ */
+export function statedTodayLevelsFor(scenarioId: string, turnId: string): readonly StatedTodayLevel[] {
+  const s = store.getStore();
+  if (s === undefined || s.scenarioId !== scenarioId || s.turnId !== turnId) return [];
+  return s.statedToday ?? [];
 }

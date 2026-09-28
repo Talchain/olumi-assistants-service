@@ -24,8 +24,13 @@
  * Every miss fails toward UNDER-claiming (the figure is left unset or recorded as Olumi's, and said): word-form
  * money and percentages ("four percent"; a plain COUNT in words IS read by `figureTheUserWroteFor`), a figure the Agent derived ("down a point" → 4), and a magnitude written with a suffix
  * the Agent dropped (£54k vs 54).
+ *
+ * SCALE: a MONEY unit's own magnitude letter is the scale its figure is in, so 100 in "£k/month" is the "£100k" the
+ * user wrote (DL #72 5862282849: journey A's goal lost its brief source on every turn). Read by
+ * `readCurrencyUnitWithQualifiers`, the reading `isAmountStatedInBrief` gives the same unit; a unit with no letter, or
+ * one that is not money, is ×1 as before. So a scaled unit never reads the UNSCALED figure: 49 in £k is never "£49".
  */
-import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
+import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_CONTINUATION, parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { TODAY_LEVEL, TODAY_UNIT } from './admit-model.js';
@@ -38,12 +43,43 @@ const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.m
 export function figureTheUserWrote(value: number, unit: unknown, userText: string | null | undefined): boolean {
   if (typeof value !== 'number' || !Number.isFinite(value)) return false;
   const family = unitPhraseFamily(unit);
-  return findStatedAmounts(userText).some((a) => {
-    if (a.kind === 'currency') return (family === null || family === 'currency') && same(a.magnitude, value);
-    // "40%" is 40 on a percentage, or 0.4 on a share kept as 0–1: the Agent passes the factor's own units.
-    if (a.kind === 'percent') return (family === null || family === 'percent') && (same(a.magnitude, value) || same(a.magnitude / 100, value));
-    return same(a.magnitude, value);
-  });
+  return findStatedAmounts(userText).some((a) => amountIs(a, value, unit, family));
+}
+
+/**
+ * Whether ONE written amount is `value` in `unit`: the unit rules `figureTheUserWrote` and `figureTheUserWroteFor` share.
+ * A money unit's own letter scales the figure (SCALE, above). Under a scaled money unit a PLAIN amount grounds it only
+ * when written with its own letter ("75k" is 75 £k): a bare "300" is £300 or 300 £k, so neither (DL #72 5862394804:
+ * "300 subscribers" read as 0.3 £k/month).
+ */
+function amountIs(
+  a: { readonly magnitude: number; readonly kind: string; readonly matchedText: string },
+  value: number,
+  unit: unknown,
+  family: ReturnType<typeof unitPhraseFamily>,
+): boolean {
+  const scale = moneyUnitScale(unit);
+  const written = value * scale;
+  if (a.kind === 'currency') return (family === null || family === 'currency') && same(a.magnitude, written);
+  // "40%" is 40 on a percentage, or 0.4 on a share kept as 0–1: the Agent passes the factor's own units.
+  if (a.kind === 'percent') return (family === null || family === 'percent') && (same(a.magnitude, value) || same(a.magnitude / 100, value));
+  // A count in words grounds a PLAIN figure only: "two" is never £2 or 2%, which need their written unit.
+  if (a.kind === 'words') return family !== 'currency' && family !== 'percent' && same(a.magnitude, value);
+  if (scale !== 1 && !writtenWithALetter(a)) return false;
+  return same(a.magnitude, written);
+}
+
+/** Whether an amount was written with a magnitude letter: its magnitude is not the number its digits spell ("75k"). */
+function writtenWithALetter(a: { readonly magnitude: number; readonly matchedText: string }): boolean {
+  const digits = Number(a.matchedText.replace(/[^0-9.]/g, ''));
+  return Number.isFinite(digits) && !same(digits, a.magnitude);
+}
+
+/** A money unit's own magnitude letter ("£k/month" → 1000, "£m" → 1e6); 1 for a unit with none, or one not money. */
+function moneyUnitScale(unit: unknown): number {
+  if (typeof unit !== 'string') return 1;
+  const reading = readCurrencyUnitWithQualifiers(unit);
+  return reading.kind === 'currency' && Number.isFinite(reading.multiplier) && reading.multiplier > 0 ? reading.multiplier : 1;
 }
 
 /** A number the text writes in words ("three engineers"), read by the repo's one cardinal grammar; a fraction refuses. */
@@ -229,15 +265,7 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
     return t && !o ? 'target' : o && !t ? 'other' : null;
   };
   return [...findStatedAmounts(userText), ...countsInWords(userText)].some((a) => {
-    const matches = a.kind === 'currency'
-      ? (family === null || family === 'currency') && same(a.magnitude, value)
-      : a.kind === 'percent'
-        ? (family === null || family === 'percent') && (same(a.magnitude, value) || same(a.magnitude / 100, value))
-        : a.kind === 'words'
-          // A count in words grounds a PLAIN figure only: "two" is never £2 or 2%, which need their written unit.
-          ? family !== 'currency' && family !== 'percent' && same(a.magnitude, value)
-          : same(a.magnitude, value);
-    if (!matches) return false;
+    if (!amountIs(a, value, unit, family)) return false;
     const amountEnd = a.index + a.matchedText.length;
     const before = userText.slice(0, a.index);
     const after = userText.slice(amountEnd);

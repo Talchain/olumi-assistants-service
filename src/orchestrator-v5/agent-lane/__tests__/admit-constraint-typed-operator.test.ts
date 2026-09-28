@@ -3,9 +3,10 @@
  *
  * The drafter emits the operator TYPED (`buildCandidateSchema`: `>= <= > <`); admission never reads a word for it. It
  * keeps the typed operator wherever the canonical store can hold it (`admittedOperator`, whose list is
- * `GoalConstraintSchema`'s own). Today the store holds only `>=` / `<=`, so "under 4%" is still held as "at most 4%":
- * the widening is recorded AND now said to the user, per limit. Row 14 itself stays RED until the store and PLoT
- * (whose preflight refuses any other operator) take `<` — pinned below so that move cannot happen unseen.
+ * `GoalConstraintSchema`'s own). Today the store's `operator` holds only `>=` / `<=`, so "under 4%" is held as
+ * `operator: "<="` with `operator_as_stated: "<"` beside it (A2, DL #72 5861407189): nothing is lost, and nothing is
+ * said as a widening. The `operator` enum itself moves only WITH PLoT (whose preflight refuses any other operator) —
+ * pinned below so that move cannot happen unseen. A2's own rows: `limit-operator-as-stated.test.ts`.
  */
 import { describe, expect, it, vi } from 'vitest';
 
@@ -79,8 +80,6 @@ async function build(brief: string, operator: CandidateConstraint['operator']): 
   return { limits: (cold.goal_constraints ?? []) as unknown as Rec[], said: ((result.not_represented ?? []) as string[]).join(' · ') };
 }
 
-const WIDENED = 'Your limit "Monthly churn less than 4%" is held as "at most 4%": the model cannot hold a strict limit yet, '
-  + 'so exactly 4% counts as meeting it.';
 
 describe('the builder types the limit\'s operator; admission keeps it where the store can hold it', () => {
   it('the strict contract offers the strict operators, typed (the drafter says "<", no word is parsed)', () => {
@@ -102,23 +101,25 @@ describe('the builder types the limit\'s operator; admission keeps it where the 
     expect(admittedOperator('>')).toBe('>=');
   });
 
-  it('⭐ RED: "under 4%" typed "<" — held as "at most 4%" today, and the widening is SAID to the user', async () => {
+  it('⭐ A2: "under 4%" typed "<" — held as "<=" WITH operator_as_stated "<", and no widening is said', async () => {
     const { limits, said } = await build(STRICT_BRIEF, '<');
     expect(limits).toHaveLength(1);
     expect(limits[0]!.operator).toBe('<=');
+    expect(limits[0]!.operator_as_stated).toBe('<');
     expect(limits[0]!.value, 'the user\'s number is never moved to compensate').toBe(4);
-    expect(said).toContain(WIDENED);
+    expect(said).not.toMatch(/strict limit/);
   });
 
   it('⭐ CONTRAST: "at most 4%" typed "<=" -> "<=", and nothing is said about strictness', async () => {
     const { limits, said } = await build(AT_MOST_BRIEF, '<=');
     expect(limits[0]!.operator).toBe('<=');
+    expect(limits[0]).not.toHaveProperty('operator_as_stated');
     expect(said).not.toMatch(/strict limit/);
   });
 
   it('⭐ THE TYPED OPERATOR DECIDES, NOT THE WORDS: typed "<=" beside "under" is not strict; typed "<" beside "at most" is', async () => {
-    expect((await build(STRICT_BRIEF, '<=')).said).not.toMatch(/strict limit/);
-    expect((await build(AT_MOST_BRIEF, '<')).said).toContain(WIDENED);
+    expect((await build(STRICT_BRIEF, '<=')).limits[0]).not.toHaveProperty('operator_as_stated');
+    expect((await build(AT_MOST_BRIEF, '<')).limits[0]!.operator_as_stated).toBe('<');
   });
 
   it('a limit Olumi proposed is never called the user\'s', () => {

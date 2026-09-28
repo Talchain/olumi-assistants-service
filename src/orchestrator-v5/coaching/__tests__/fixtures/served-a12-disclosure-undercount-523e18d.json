@@ -1,0 +1,558 @@
+{
+  "_capture": {
+    "what": "draft_graph of the served run turn that said \"I supplied 6 of the values behind this\"",
+    "run": "DL pj-20260927T181846Z A12-run2-final (journey A, run 2)",
+    "scenario_id": "1ceb77d8-4352-4485-aadf-6e30ad429062",
+    "at": "2026-09-27T18:22:27.888Z",
+    "graph_hash": "a8ef47fe52bebbaa",
+    "cee": "523e18d",
+    "scrubbed": "ids, kinds, value/source stamps and edge numbers only; labels, reasoning, natural_effect, warning prose and brief text removed. response.inference_warnings keeps code/field/severity of the engine warnings on this run, verbatim."
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "decision_mrr",
+        "kind": "decision"
+      },
+      {
+        "id": "mrr",
+        "kind": "goal",
+        "observed_state": {
+          "cap": 125000,
+          "unit": "GBP/month",
+          "value": 0.6,
+          "source": "brief_extraction",
+          "raw_value": 75000
+        }
+      },
+      {
+        "id": "keep_pro_at_49",
+        "kind": "option",
+        "is_baseline": true
+      },
+      {
+        "id": "raise_pro_to_59_at_release",
+        "kind": "option",
+        "interventions": {
+          "pro_plan_price": {
+            "value": 0.295,
+            "source": "brief_extraction"
+          }
+        }
+      },
+      {
+        "id": "raise_pro_to_54_at_release",
+        "kind": "option",
+        "interventions": {
+          "pro_plan_price": {
+            "value": 0.27,
+            "source": "cee_hypothesis"
+          }
+        }
+      },
+      {
+        "id": "pro_plan_price",
+        "kind": "factor",
+        "observed_state": {
+          "cap": 200,
+          "unit": "GBP/month",
+          "value": 0.245,
+          "source": "brief_extraction",
+          "raw_value": 49
+        }
+      },
+      {
+        "id": "pro_paying_subscribers_at_month_12",
+        "kind": "factor",
+        "observed_state": {
+          "unit": "subscribers",
+          "value": 0.272,
+          "source": "cee_inference",
+          "raw_value": 1360,
+          "extractionType": "inferred"
+        }
+      },
+      {
+        "id": "monthly_churn_rate",
+        "kind": "factor",
+        "observed_state": {
+          "unit": "%",
+          "value": 0.03,
+          "source": "cee_inference",
+          "raw_value": 3,
+          "extractionType": "inferred"
+        }
+      },
+      {
+        "id": "other_plan_mrr_at_month_12",
+        "kind": "factor",
+        "observed_state": {
+          "unit": "GBP/month",
+          "value": 0.13,
+          "source": "cee_inference",
+          "raw_value": 26000,
+          "extractionType": "inferred"
+        }
+      },
+      {
+        "id": "price_sensitivity",
+        "kind": "risk"
+      },
+      {
+        "id": "pro_mrr_at_month_12",
+        "kind": "outcome"
+      },
+      {
+        "id": "4cbb5475",
+        "kind": "option",
+        "interventions": {
+          "fac_trial_to_pro_conversion_improvement": {
+            "value": 1,
+            "source": "cee_hypothesis"
+          }
+        }
+      },
+      {
+        "id": "fac_trial_to_pro_conversion_improvement",
+        "kind": "factor",
+        "observed_state": {
+          "value": 0,
+          "source": "cee_inference",
+          "raw_value": 0,
+          "extractionType": "inferred"
+        }
+      },
+      {
+        "id": "fac_at_risk_account_retention_intervention",
+        "kind": "factor",
+        "observed_state": {
+          "value": 0,
+          "source": "cee_inference",
+          "raw_value": 0,
+          "extractionType": "inferred"
+        }
+      },
+      {
+        "id": "a9643e27",
+        "kind": "option",
+        "interventions": {
+          "fac_at_risk_account_retention_intervention": {
+            "value": 1,
+            "source": "cee_hypothesis"
+          }
+        }
+      },
+      {
+        "id": "bb667b99",
+        "kind": "option",
+        "interventions": {
+          "pro_plan_price": {
+            "unit": "GBP/month",
+            "value": 0.295,
+            "source": "user_specified",
+            "raw_value": 59
+          },
+          "fac_existing_customer_grandfathering": {
+            "value": 1,
+            "source": "cee_hypothesis"
+          }
+        }
+      },
+      {
+        "id": "fac_existing_customer_grandfathering",
+        "kind": "factor",
+        "observed_state": {
+          "value": 0,
+          "source": "cee_inference",
+          "raw_value": 0,
+          "extractionType": "inferred"
+        }
+      },
+      {
+        "id": "risk_competitor_price_or_ai_feature_response",
+        "kind": "risk"
+      }
+    ],
+    "edges": [
+      {
+        "from": "decision_mrr",
+        "to": "keep_pro_at_49",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis"
+        }
+      },
+      {
+        "from": "decision_mrr",
+        "to": "raise_pro_to_59_at_release",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis"
+        }
+      },
+      {
+        "from": "decision_mrr",
+        "to": "raise_pro_to_54_at_release",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis"
+        }
+      },
+      {
+        "from": "raise_pro_to_59_at_release",
+        "to": "pro_plan_price",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis"
+        }
+      },
+      {
+        "from": "raise_pro_to_54_at_release",
+        "to": "pro_plan_price",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis"
+        }
+      },
+      {
+        "from": "keep_pro_at_49",
+        "to": "pro_plan_price",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "exists_probability": 1,
+        "origin": "repair",
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis"
+        }
+      },
+      {
+        "from": "pro_plan_price",
+        "to": "pro_mrr_at_month_12",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "exists_probability": 0.8,
+        "defaulted": true,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis"
+        }
+      },
+      {
+        "from": "pro_paying_subscribers_at_month_12",
+        "to": "pro_mrr_at_month_12",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "exists_probability": 0.8,
+        "defaulted": true,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis"
+        }
+      },
+      {
+        "from": "monthly_churn_rate",
+        "to": "pro_paying_subscribers_at_month_12",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "exists_probability": 0.8,
+        "defaulted": true,
+        "effect_direction": "negative",
+        "provenance": {
+          "source": "cee_hypothesis"
+        }
+      },
+      {
+        "from": "pro_plan_price",
+        "to": "monthly_churn_rate",
+        "strength": {
+          "std": 0.049999999999999996,
+          "mean": 0.09999999999999999
+        },
+        "exists_probability": 0.8,
+        "defaulted": true,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_estimate"
+        }
+      },
+      {
+        "from": "pro_plan_price",
+        "to": "price_sensitivity",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "exists_probability": 0.8,
+        "defaulted": true,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis"
+        }
+      },
+      {
+        "from": "price_sensitivity",
+        "to": "monthly_churn_rate",
+        "strength": {
+          "std": 0.08660254037844388,
+          "mean": 0.85
+        },
+        "exists_probability": 0.8,
+        "exists_defaulted": true,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "user_specified"
+        }
+      },
+      {
+        "from": "pro_mrr_at_month_12",
+        "to": "mrr",
+        "strength": {
+          "std": 0.075,
+          "mean": 0.15
+        },
+        "exists_probability": 0.8,
+        "defaulted": true,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder"
+        }
+      },
+      {
+        "from": "other_plan_mrr_at_month_12",
+        "to": "mrr",
+        "strength": {
+          "std": 0.075,
+          "mean": 0.15
+        },
+        "exists_probability": 0.8,
+        "defaulted": true,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder"
+        }
+      },
+      {
+        "from": "decision_mrr",
+        "to": "4cbb5475",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "user_specified"
+        }
+      },
+      {
+        "from": "fac_trial_to_pro_conversion_improvement",
+        "to": "pro_paying_subscribers_at_month_12",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "exists_probability": 0.8,
+        "defaulted": true,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis"
+        }
+      },
+      {
+        "from": "fac_at_risk_account_retention_intervention",
+        "to": "monthly_churn_rate",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "exists_probability": 0.8,
+        "defaulted": true,
+        "effect_direction": "negative",
+        "provenance": {
+          "source": "cee_hypothesis"
+        }
+      },
+      {
+        "from": "4cbb5475",
+        "to": "fac_trial_to_pro_conversion_improvement",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis"
+        }
+      },
+      {
+        "from": "decision_mrr",
+        "to": "a9643e27",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "user_specified"
+        }
+      },
+      {
+        "from": "a9643e27",
+        "to": "fac_at_risk_account_retention_intervention",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis"
+        }
+      },
+      {
+        "from": "decision_mrr",
+        "to": "bb667b99",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "user_specified"
+        }
+      },
+      {
+        "from": "fac_existing_customer_grandfathering",
+        "to": "mrr",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "exists_probability": 0.8,
+        "defaulted": true,
+        "effect_direction": "negative",
+        "provenance": {
+          "source": "cee_hypothesis"
+        }
+      },
+      {
+        "from": "fac_existing_customer_grandfathering",
+        "to": "monthly_churn_rate",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "exists_probability": 0.8,
+        "defaulted": true,
+        "effect_direction": "negative",
+        "provenance": {
+          "source": "cee_hypothesis"
+        }
+      },
+      {
+        "from": "bb667b99",
+        "to": "pro_plan_price",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "user_specified"
+        }
+      },
+      {
+        "from": "bb667b99",
+        "to": "fac_existing_customer_grandfathering",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis"
+        }
+      },
+      {
+        "from": "risk_competitor_price_or_ai_feature_response",
+        "to": "mrr",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "exists_probability": 0.8,
+        "defaulted": true,
+        "effect_direction": "negative",
+        "provenance": {
+          "source": "cee_hypothesis"
+        }
+      }
+    ]
+  },
+  "response": {
+    "inference_warnings": [
+      {
+        "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+        "severity": "info"
+      },
+      {
+        "code": "ROOT_NODE_DEFAULT_VALUE",
+        "field": "nodes[risk_competitor_price_or_ai_feature_response].observed_state.value",
+        "severity": "info"
+      },
+      {
+        "code": "GOAL_DIRECTION_UNATTESTED",
+        "field": "goal_direction",
+        "severity": "warning"
+      },
+      {
+        "code": "GOAL_ANCESTOR_DATA_GAP",
+        "field": "nodes[mrr]",
+        "severity": "info"
+      }
+    ]
+  },
+  "served_summary": "Ran analysis on your current scenario. 'Keep Pro at \u00a349' was analysed as no change \u2014 the factors it compares against were held at the values your model records today. I supplied 6 of the values behind this, because your brief did not state them. They are mine rather than yours. Changing any of them changes what this model implies."
+}

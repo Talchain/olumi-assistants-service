@@ -93,7 +93,10 @@ const INGRESS_GRAPH: GraphStateIngress = {
     { id: 'goal_revenue', kind: 'goal', label: 'Revenue' },
     { id: 'fac_price', kind: 'factor', label: 'Price' },
   ],
-  edges: [{ from: 'fac_price', to: 'goal_revenue' }],
+  // A strictly-canonical base (GraphV3-valid edge). A structurally-invalid base
+  // never persists an edit (`BASE_GRAPH_INVALID`, edit-graph-dispatch-fallback-
+  // keeps-untouched.test.ts), and this suite pins applied-edit persistence.
+  edges: [{ from: 'fac_price', to: 'goal_revenue', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' }],
 };
 
 const POST_EDIT_GRAPH = {

@@ -80,6 +80,7 @@ import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lan
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runDeltaBoundToReadback, runTurnNextMove, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
 import { breakEvenFor, goalNotCheckedLine, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
+import { readEvaluatedIdentityNodeIds } from '../orchestrator-v5/agent-lane/admit-model.js';
 import {
   leaderStandingOf,
   provisionalViewOfTurn,
@@ -800,7 +801,7 @@ export function timedDispatch(inner: InternalDispatch, ledger: DispatchTiming[],
   };
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts }> {
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string> }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -832,6 +833,11 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   let notModelled: NotModelledManifest | undefined;
   /** B5: the selected run's per-limit rows (`analysis_limit_verdicts`), same fact and gates as `analysisResult`. */
   let limitVerdicts: StoredLimitVerdicts | undefined;
+  /**
+   * C46 × R3-4 (Canonical criterion 1): the carriers the selected run's engine evaluated
+   * (`analysis_identity_evaluated_node_ids`), same fact and gates as `analysisResult`. `undefined` = not attested.
+   */
+  let identityEvaluated: ReadonlySet<string> | undefined;
   /**
    * ⛔ THE CANVAS RENDERS FROM `draft_graph`, NOT FROM `graph_hash`.
    *
@@ -873,6 +879,8 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
       notModelled = notModelledOfRead(after.json.not_modelled);
       // Only a pair the 0.60 contract accepts, with at least one row, is carried: absent = not attested.
       limitVerdicts = readLimitVerdicts(after.json.analysis_limit_verdicts) ?? undefined;
+      // A product the run's engine evaluated is not one it "adds up": the Agent's view reads it from the SAME read.
+      identityEvaluated = readEvaluatedIdentityNodeIds(after.json.analysis_identity_evaluated_node_ids);
       /**
        * ⭐ READINESS FROM THE MOMENT THE MODEL EXISTS, not from the moment
        * someone runs an analysis.
@@ -999,7 +1007,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts };
+  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1118,6 +1126,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...((req as { tool_choice?: unknown }).tool_choice === 'none' ? { tool_choice: 'none' } : {}),
         // C5b: on a withheld run that one call answers in a typed shape (`RUN_INTERPRETATION_FORMAT`).
         ...((req as { text?: unknown }).text !== undefined ? { text: (req as { text?: unknown }).text } : {}),
+        // PJ-C1 (batch 5): the conversation budget's own effort, as construction already sends its budget's (L~1222).
+        ...(budget.reasoning_effort !== undefined ? { reasoning: { effort: budget.reasoning_effort } } : {}),
         max_output_tokens: req.max_output_tokens,
       }),
     });
@@ -1498,6 +1508,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const dispatch = timedDispatch(dispatchFor(
       typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
     ), dispatchLedger, scenarioId);
+    /**
+     * ⭐ PJ-C1 LATENCY (#72 5861769155): the turn's read cache is made HERE, and its first graph read starts at once,
+     * so that ~1 s read runs beside the pending/committed-turn reads and the turn claim below instead of after them
+     * (served 84440ff A13: ~560 ms of those, then a 1,011 ms read). The claim row writes no graph
+     * (`writesGraph: false`), so the read returns what a read started after it would. See `turnReadCache`.
+     */
+    const readCache = turnReadCache(dispatch, `/assist/v1/scenarios/${scenarioId}/graph`);
+    readCache.prefetch();
 
     const approvedProposal = typedApprovalOf(body);
     const requestHash = agentTurnRequestHash(scenarioId, userId, message, approvedProposal !== undefined ? `approve:${approvedProposal}` : undefined);
@@ -1684,7 +1702,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * kept read carries the epoch it STARTED in. So a read after a write always sees it. Served: 22 reads at ~1.1 s in one
      * journey; an approve made 4.
      */
-    const readCache = turnReadCache(dispatch, `/assist/v1/scenarios/${scenarioId}/graph`);
     const readingDispatch: typeof dispatch = readCache.dispatch;
     const countingDispatch: typeof dispatch = async (path, body) => {
       if (path.endsWith('/graph/register') || path === '/orchestrate/v2/turn') writesDispatched += 1;
@@ -2193,7 +2210,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * BEFORE the reply is composed, because the Run offer below keys on the
      * readiness this same response carries.
      */
-    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts } = await readBackState(readingDispatch, scenarioId);
+    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated } = await readBackState(readingDispatch, scenarioId);
 
     // ⛔ This turn's approval results go with it ONLY on the approve chip's fast path: it puts no authorise_change in
     // the history (only its words and Olumi's status), so they are the only record of which proposal it applied
@@ -2365,7 +2382,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⭐ F3 (DL #70 5851710093): on the build turn, the user's goal is named even when it could not be scored — unless the
     // arithmetic below already states the target. Pure reads of this turn's readback; the same inputs AX1 uses.
     const targetStatedByArithmetic = (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
-      && breakEvenFor(readbackGraph)?.target !== undefined;
+      && breakEvenFor(readbackGraph, identityEvaluated)?.target !== undefined;
     const goalLine = fa?.ran === true && fastPath !== 'run' && !targetStatedByArithmetic ? goalNotCheckedLine(readbackGraph, analysisResult) : null;
     const narrated = fastPath === 'run' || fastPath === 'research'
       ? { text, status: null as string | null, stripped: [] as string[] }
@@ -2475,12 +2492,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * this is conditional arithmetic on the model's own figures, never a ranking, and the gate drops any sentence that
      * compares options. Only on a turn that RAN an analysis (the Run, the Agent's own run, the first pass — never every
      * later turn whose readback still carries the result) and whose readback withholds the leader, and only when C46's
-     * own product finding holds (`breakEvenFor` returns null otherwise).
+     * own product finding holds (`breakEvenFor` returns null otherwise) — and never for a product this readback's run
+     * EVALUATED (`identityEvaluated`, C46 × R3-4, Canonical criterion 1): the engine computed it, so nothing is "added up".
      */
     const ranAnalysisThisTurn = fastPath === 'run' || fa !== undefined || result.tool_calls.some((c) => c.name === 'run_analysis');
     const breakEven = ranAnalysisThisTurn
       && (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
-      ? breakEvenFor(readbackGraph) : null;
+      ? breakEvenFor(readbackGraph, identityEvaluated) : null;
     if (breakEven !== null && typeof wireBody.assistant_text === 'string') {
       wireBody = { ...wireBody, assistant_text: withBreakEvenAnswer(wireBody.assistant_text, breakEven) };
     }

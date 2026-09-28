@@ -17,6 +17,7 @@ import { readFileSync } from 'node:fs';
 import { Ajv } from 'ajv';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
+import { asServedBeforeOneForm } from './fixtures/one-form-levels.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
@@ -29,8 +30,13 @@ const served = (name: string): Graph =>
   (JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8')) as { draft_graph: Graph }).draft_graph;
 const SERVED_OUTCOME = served('served-paul-churn-outcome-20260926T032916Z.json');
 const SERVED_FACTOR = served('served-paul-churn-factor-20260926T032913Z.json');
-/** The served limit row was captured before #1919, which stamps the drafter's stated frame; nothing else differs. */
-const SERVED_FACTOR_GC_FRAMED = (SERVED_FACTOR.goal_constraints as Record<string, unknown>[]).map((c) => ({ ...c, value_frame: 'level' }));
+/**
+ * The served limit row was captured before #1919, which stamps the drafter's stated frame, and before A2 (DL #72
+ * 5861407189), which keeps the drafter's typed strict "<" ("under 10 percent per month") as `operator_as_stated`
+ * beside the held "<="; nothing else differs.
+ */
+const SERVED_FACTOR_GC_FRAMED = (SERVED_FACTOR.goal_constraints as Record<string, unknown>[])
+  .map((c) => ({ ...c, value_frame: 'level', ...(c.constraint_id === 'agent-lane:monthly_churn:<=' ? { operator_as_stated: '<' } : {}) }));
 /**
  * G1 (27 Sep): this brief states the £20k target and "12 months", so construction now HOLDS the goal's direction,
  * deadline and target source on the goal node (`holdStatedGoalAttributes`). The served drafts predate that, so a served
@@ -159,8 +165,10 @@ describe('a limit the user states on a level is admitted on a factor that can ho
   it('FIDELITY: the rebuilt served outcome draft reproduces the served graph on every other node and every edge', async () => {
     const { graph } = await register(outcomeDraft());
     expect(edgeKeys(graph)).toEqual(edgeKeys(SERVED_OUTCOME));
+    // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
+    const asServed = asServedBeforeOneForm(graph, SERVED_OUTCOME);
     for (const s of SERVED_OUTCOME.nodes.filter((n) => n.id !== 'monthly_churn')) {
-      expect(byId(graph, s.id), s.id).toStrictEqual(asServedNow(s));
+      expect(byId(asServed, s.id), s.id).toStrictEqual(asServedNow(s));
     }
   });
 
@@ -183,7 +191,7 @@ describe('a limit the user states on a level is admitted on a factor that can ho
     const { graph } = await register(outcomeDraft());
     expect(graph.goal_constraints).toStrictEqual(SERVED_FACTOR_GC_FRAMED);
     expect(graph.goal_constraints).toStrictEqual([{
-      constraint_id: 'agent-lane:monthly_churn:<=', node_id: 'monthly_churn', operator: '<=', value: 10, label: 'Monthly churn', unit: '%',
+      constraint_id: 'agent-lane:monthly_churn:<=', node_id: 'monthly_churn', operator: '<=', operator_as_stated: '<', value: 10, label: 'Monthly churn', unit: '%',
       provenance: 'explicit',
       provenance_unit_relabelled: { rule: 'agent_lane_limit_unit_v1', pre_normalisation_value: 10, pre_normalisation_unit: 'percent per month' },
       value_frame: 'level',
@@ -230,7 +238,8 @@ describe('a limit the user states on a level is admitted on a factor that can ho
 describe('CONTROLS — what the rule must leave alone', () => {
   it('the served FACTOR-kind draft registers byte-identical to what was served', async () => {
     const { graph } = await register(factorDraft());
-    expect(graph.nodes).toStrictEqual(SERVED_FACTOR.nodes.map(asServedNow));
+    // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
+    expect(asServedBeforeOneForm(graph, SERVED_FACTOR).nodes).toStrictEqual(SERVED_FACTOR.nodes.map(asServedNow));
     expect(edgeKeys(graph)).toEqual(edgeKeys(SERVED_FACTOR));
     expect(graph.goal_constraints).toStrictEqual(SERVED_FACTOR_GC_FRAMED);
   });

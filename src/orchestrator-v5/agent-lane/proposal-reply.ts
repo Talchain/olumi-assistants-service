@@ -26,6 +26,9 @@ const nonEmpty = (x: unknown): x is string => typeof x === 'string' && x.trim() 
 const NEW_OPTION_KEYS: ReadonlySet<string> = new Set([
   'ok', 'mutated', 'proposal_id', 'public_label', 'held_message', 'held_detail', 'base_revision',
   'option', 'options', 'levels', 'levels_not_set', 'new_factors', 'new_factors_note', 'note',
+  // A new switch listed at 0 under an option that leaves it off (served A03): the held change is exactly the one without
+  // that entry, so the user is told nothing more than that change's own reply.
+  'switch_off_entries_dropped', 'switch_off_entries_note',
 ]);
 /** Every key `proposeLinkStrength` returns on success: its reading is already in its consent label. */
 const LINK_KEYS: ReadonlySet<string> = new Set(['ok', 'mutated', 'proposal_id', 'public_label', 'base_revision', 'link', 'interpretation', 'note']);

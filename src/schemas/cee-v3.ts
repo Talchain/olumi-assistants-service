@@ -640,8 +640,9 @@ export const EdgeV3 = z.object({
    * absolute value (`adjust-edge-strength.ts` `olumiSpreadForMean`) — while the edge is stamped `user_specified`.
    * Without this flag that std read as the user's.
    *
-   * CEE-MINTED, ONE WRITER: `adjust-edge-strength.ts` sets it to `true` on every user write whose std the user did
-   * not state, and REMOVES it when the write states the spread itself (a named band, or an explicit `std`). The
+   * CEE-MINTED, TWO WRITERS: `adjust-edge-strength.ts` sets it to `true` on every user write whose std the user did
+   * not state, and REMOVES it when the write states the spread itself (a named band, or an explicit `std`);
+   * `structural-add-edge.ts` sets it on a causal link the user draws, whose `DEFAULT_STD` is Olumi's. The
    * confirmation guard (`isProvenanceOnlyEdgeConfirmation`) admits absent → `true` on a figure confirm and present →
    * absent on a band confirm, and nothing else. A producer cannot write it: the root is in `field-safety.ts`
    * `CEE_ANALYSIS_OWNED_ROOTS` (update refused PIPELINE_OWNED_FIELD at any depth; an `add_node` value is stripped).

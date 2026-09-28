@@ -91,7 +91,11 @@ const READY_GRAPH: GraphStateIngress = {
   nodes: [
     { id: 'goal_1', kind: 'goal', label: 'Profit' },
     { id: 'dec_1', kind: 'decision', label: 'Choose an option' },
-    { id: 'fac_licence', kind: 'factor', label: 'Annual CRM Licence Cost' },
+    // A status-quo level (inside the options' 0.3–0.7 scale, as #2177 gave this factor in the admission-verdict spec). Since
+    // #2164 an unvalued goal root is a factor-scoped `MISSING_FACTOR_LEVEL` that refuses the Run, so without it this
+    // graph is not structurally `ready` and the FENCE/CONTROL/TWIN rows lose their premise. NOT_READY_GRAPH below
+    // carries the same level, so the interventions stay the ONLY difference between the two.
+    { id: 'fac_licence', kind: 'factor', label: 'Annual CRM Licence Cost', observed_state: { value: 0.5 } },
     { id: 'opt_a', kind: 'option', label: 'A', interventions: { fac_licence: 0.7 } },
     { id: 'opt_b', kind: 'option', label: 'B', interventions: { fac_licence: 0.3 } },
   ],
@@ -511,7 +515,8 @@ describe('the P0 — a refused analyse turn must not erase a model the same turn
     nodes: [
       { id: 'goal_1', kind: 'goal', label: 'Profit' },
       { id: 'dec_1', kind: 'decision', label: 'Choose an option' },
-      { id: 'fac_licence', kind: 'factor', label: 'Annual CRM Licence Cost' },
+      // The same status-quo level as READY_GRAPH, so the ONLY difference stays the interventions (see its note).
+      { id: 'fac_licence', kind: 'factor', label: 'Annual CRM Licence Cost', observed_state: { value: 0.5 } },
       { id: 'opt_a', kind: 'option', label: 'A' },
       { id: 'opt_b', kind: 'option', label: 'B' },
     ],

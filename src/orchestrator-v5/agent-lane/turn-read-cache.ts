@@ -19,6 +19,8 @@ export interface TurnReadCache {
   readonly dispatch: InternalDispatch;
   /** Runs an in-process writer (or anything that may write); the epoch advances when it finishes. */
   around<T>(fn: () => Promise<T>): Promise<T>;
+  /** Starts the turn's first graph read now; the first reader of the same epoch joins it (see the implementation). */
+  prefetch(): void;
 }
 
 type Read = Awaited<ReturnType<InternalDispatch>>;
@@ -35,6 +37,8 @@ const copy = (r: Read): Read => ({ ...r, json: structuredClone(r.json) });
 export function turnReadCache(inner: InternalDispatch, graphReadPath: string): TurnReadCache {
   let epoch = 0;
   let kept: { read: Read; epoch: number } | undefined;
+  /** The read `prefetch` started and has not finished yet, with the epoch it started in. */
+  let inflight: { promise: Promise<Read>; epoch: number } | undefined;
 
   const around = async <T>(fn: () => Promise<T>): Promise<T> => {
     try {
@@ -52,11 +56,39 @@ export function turnReadCache(inner: InternalDispatch, graphReadPath: string): T
     // blind that way under C1c and would stay blind under the epoch rule. The marker never reaches the route.
     const fresh = isFreshRead(body);
     if (!fresh && kept !== undefined && kept.epoch === epoch) return copy(kept.read);
+    // The prefetched read of THIS epoch, still in flight: join it rather than read again. A failed one is never the
+    // answer — the reader falls through and reads for itself.
+    if (!fresh && inflight !== undefined && inflight.epoch === epoch) {
+      const joined = await inflight.promise.catch(() => undefined);
+      if (joined !== undefined && joined.status === 200) return copy(joined);
+    }
     const startedAt = epoch;
     const read = await inner(path, fresh ? withoutFresh(body) : body);
     kept = read.status === 200 ? { read: copy(read), epoch: startedAt } : undefined;
     return read;
   };
 
-  return { dispatch, around };
+  /**
+   * ⭐ PJ-C1 LATENCY (#72 5861769155): start the turn's first graph read NOW, beside the route's own store reads and
+   * turn claim, instead of after them (served 84440ff A13: ~560 ms of those, then a 1,011 ms read). It is tagged with
+   * the epoch it starts in, so the epoch rule is unchanged: once anything else has been dispatched or written, no
+   * reader is given it. Never throws; a second call while a read is kept or in flight does nothing.
+   */
+  const prefetch = (): void => {
+    if (kept !== undefined || inflight !== undefined) return;
+    const startedAt = epoch;
+    const promise = inner(graphReadPath, {});
+    const entry = { promise, epoch: startedAt };
+    inflight = entry;
+    promise.then(
+      (read) => {
+        if (read.status === 200 && kept === undefined) kept = { read: copy(read), epoch: startedAt };
+      },
+      () => undefined,
+    ).finally(() => {
+      if (inflight === entry) inflight = undefined;
+    });
+  };
+
+  return { dispatch, around, prefetch };
 }

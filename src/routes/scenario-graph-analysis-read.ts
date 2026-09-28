@@ -111,7 +111,7 @@ import {
   wasAnalysisRequestedByUser,
 } from '../orchestrator-v5/compose/unrequested-analysis-confinement.js';
 // C46 stage 1: WHY a persisted fact's leader was withheld, when the reason is a product the analysis adds up.
-import { nodesUnderANonlinearIdentity, nonlinearIdentityLeaderClaimCause } from '../orchestrator-v5/agent-lane/admit-model.js';
+import { evaluatedIdentityNodeIds, nodesUnderANonlinearIdentity, nonlinearIdentityLeaderClaimCause } from '../orchestrator-v5/agent-lane/admit-model.js';
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import {
@@ -169,6 +169,15 @@ export interface ScenarioAnalysisRead {
    * attested, never defaulted. The Agent turn carries it as its `limit_verdicts` sidecar.
    */
   readonly analysis_limit_verdicts?: StoredLimitVerdicts;
+  /**
+   * C46 × R3-4 (Canonical criterion 1): the carriers the SELECTED fact's engine evaluated (`identity_evaluations`,
+   * `evaluated: true`, read by `evaluatedIdentityNodeIds` off the fact's own `enrichment`) under the SAME gates as
+   * `analysis_limit_verdicts`, so the Agent's view of "adds those effects up" reads exactly the run `analysis_result`
+   * came from. The transport block's enrichment keep-list does not carry the list (it stays in lock-step with
+   * @talchain/schemas), so this is the only way the Agent sees it. `[]` = the engine reported a list and evaluated none;
+   * ABSENT when the fact records no list (every run before batch 7) or no fact passes the gates: absent = not attested.
+   */
+  readonly analysis_identity_evaluated_node_ids?: string[];
 }
 
 const NOT_ANSWERED: ScenarioAnalysisRead = Object.freeze({
@@ -412,6 +421,9 @@ export async function readScenarioAnalysis(
               const limitVerdicts = readLimitVerdictsFromResult(fact.result);
               return limitVerdicts === null ? {} : { analysis_limit_verdicts: limitVerdicts };
             })(),
+            ...(Array.isArray((fact.result.enrichment as { identity_evaluations?: unknown } | undefined)?.identity_evaluations)
+              ? { analysis_identity_evaluated_node_ids: [...evaluatedIdentityNodeIds(fact.result.enrichment)] }
+              : {}),
           }
         : {}),
     };

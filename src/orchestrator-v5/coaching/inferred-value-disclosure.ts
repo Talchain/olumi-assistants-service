@@ -42,7 +42,38 @@
  * ⛔ IT COUNTS, IT DOES NOT NAME. Naming every inferred factor would bury the
  * result, and the count is what the user needs to decide whether to look. The
  * labels are already on the canvas, where they can be changed.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ⛔ IT COUNTED ONLY FACTOR BASELINES, AND SO UNDERSTATED HOW MUCH WAS OURS
+ * (A6 `olumi-authored-disclosure-undercounts`, P2 re-measure on CEE 523e18d).
+ *
+ * Served, journey A run 2 (scenario `1ceb77d8`, graph `a8ef47fe52bebbaa`): the
+ * run said *"I supplied 6 of the values behind this"*. The graph it ran on also
+ * carried 4 option levels Olumi proposed (`cee_hypothesis`) and 12 link
+ * strengths Olumi drafted. The sentence counted 6 of 22.
+ *
+ * So the count is now every Olumi value the model carries into the analysis —
+ * {@link deriveOlumiAuthoredValues}. Authorship is read by the estate's ONE
+ * classifier (`classifyValueSource`, `obligation-provenance.ts`), never a list
+ * kept here, and a value the user stated OR confirmed is never counted as ours.
+ * The sentence is unchanged; only its number is.
+ *
+ * ⚠ NOT COUNTED HERE, DELIBERATELY: the ENGINE's 0.0 for a root node nobody gave
+ * a starting value (`ROOT_NODE_DEFAULT_VALUE`). It is not in the graph; PLoT
+ * names its node by id only in `inference_warnings`, a ratified Tier-3 deny key that a
+ * user-facing string producer may not read without claim-safety review
+ * (`tests/contract/tier3-leak-guard.static.guard.test.ts`). It has its own
+ * disclosure family (`pick-defaulted-assumptions.ts`, which reads
+ * `decision_brief.defaulted_assumptions`); counting it in THIS sentence is a
+ * claim-safety-review change, not this one.
  */
+
+import {
+  classifyValueSource,
+  type StructureProvenance,
+} from '../../cee/graph-readiness/obligation-provenance.js';
+import { readEdgeParams } from '../../cee/unified-pipeline/utils/edge-format.js';
+import { isLegalStructuralEdge } from '../../cee/utils/structural-edge-classifier.js';
 
 /**
  * The longest suffix this module can emit, for the caller's length budget.
@@ -71,6 +102,17 @@ export const INFERRED_VALUE_DISCLOSURE_RE_SRC =
 export interface InferredValueRecord {
   readonly factor_id: string;
 }
+
+/**
+ * One value the analysis computes on that is Olumi's, by what it is. The
+ * disclosure spends only the COUNT; the kind and ids exist so a test can bind
+ * the count to the exact values it covers, never to a number another set could
+ * also produce.
+ */
+export type OlumiAuthoredValue =
+  | { readonly kind: 'factor_baseline'; readonly factor_id: string }
+  | { readonly kind: 'option_level'; readonly option_id: string; readonly factor_id: string }
+  | { readonly kind: 'link_strength'; readonly from: string; readonly to: string };
 
 /**
  * ⛔⛔ PARKED, NOT FORGOTTEN: "AND DOES OUR NUMBER ACTUALLY MATTER?"
@@ -115,7 +157,7 @@ export interface InferredValueRecord {
  * because there is nothing of ours in the result to distinguish.
  */
 export function buildInferredValueDisclosure(
-  inferred: readonly InferredValueRecord[],
+  inferred: readonly (InferredValueRecord | OlumiAuthoredValue)[],
 ): string {
   const n = inferred.length;
   if (n === 0) return '';
@@ -167,4 +209,101 @@ export function deriveInferredValues(graph: unknown): InferredValueRecord[] {
     out.push({ factor_id: typeof raw.id === 'string' ? raw.id : '' });
   }
   return out;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EVERY OLUMI-AUTHORED VALUE THE ANALYSIS COMPUTES ON
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Whose value a classified stamp is, for THIS sentence ("They are mine rather than yours").
+ *
+ * ⛔ `user_ratified` IS THE USER'S HERE. A confirmed estimate is one a person acted on, and describing it back as
+ * Olumi's own invention is the lie `reflectsAHumanAct` (`obligation-provenance.ts`) exists to prevent. `unattributed`
+ * is nobody we can name, so it is never claimed as ours: wrongly calling a user's value our invention is the worse
+ * error (`not-modelled-manifest.ts`). A `Record` so a sixth class must be ruled here, not absorbed by an `else`.
+ */
+const OLUMI_AUTHORED: Readonly<Record<StructureProvenance, boolean>> = {
+  user_stated: false,
+  user_ratified: false,
+  ai_drafted: true,
+  system_repaired: true,
+  unattributed: false,
+};
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function recordsOf(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.map(asRecord).filter((r): r is Record<string, unknown> => r !== null) : [];
+}
+
+/**
+ * The option levels Olumi set: each option×factor `interventions` entry that carries a number and whose `source`
+ * classifies as Olumi's (`cee_hypothesis` → `ai_drafted`). A level the user stated (`brief_extraction`,
+ * `user_specified`) or confirmed is not counted, and a bare-number legacy entry carries no author and is not claimed.
+ */
+export function deriveOlumiOptionLevels(graph: unknown): OlumiAuthoredValue[] {
+  const out: OlumiAuthoredValue[] = [];
+  for (const node of recordsOf(asRecord(graph)?.nodes)) {
+    if (node.kind !== 'option' || typeof node.id !== 'string') continue;
+    const interventions = asRecord(node.interventions) ?? asRecord(asRecord(node.data)?.interventions);
+    if (interventions === null) continue;
+    for (const [factorId, raw] of Object.entries(interventions)) {
+      const entry = asRecord(raw);
+      if (entry === null) continue;
+      if (typeof entry.value !== 'number' && typeof entry.raw_value !== 'number') continue;
+      if (!OLUMI_AUTHORED[classifyValueSource(entry.source)]) continue;
+      out.push({ kind: 'option_level', option_id: node.id, factor_id: factorId });
+    }
+  }
+  return out;
+}
+
+/**
+ * The link strengths Olumi supplied: every causal link carrying a strength whose `provenance.source` classifies as
+ * Olumi's, or which nobody stamped but CEE marked `defaulted` (its own flag that a default strength was applied).
+ *
+ * ⛔ A link the user set or confirmed is the USER's strength (`adjust-edge-strength.ts` stamps `user_specified` and
+ * ends `defaulted`), and it stays theirs even beside a stale `defaulted`. Its `exists_defaulted` / `std_defaulted`
+ * say the existence and the spread are still Olumi's, but this sentence counts values the user would recognise, and
+ * the link's strength is not one of Olumi's. Structural wiring (decision→option, option→factor) carries a fixed
+ * 1 / 0.01, not an estimate, so it is not a strength anyone supplied.
+ */
+export function deriveOlumiLinkStrengths(graph: unknown): OlumiAuthoredValue[] {
+  const g = asRecord(graph);
+  const kindById = new Map<string, string>();
+  for (const node of recordsOf(g?.nodes)) {
+    if (typeof node.id === 'string' && typeof node.kind === 'string') kindById.set(node.id, node.kind);
+  }
+  const out: OlumiAuthoredValue[] = [];
+  for (const edge of recordsOf(g?.edges)) {
+    if (typeof edge.from !== 'string' || typeof edge.to !== 'string') continue;
+    const fromKind = kindById.get(edge.from);
+    const toKind = kindById.get(edge.to);
+    // A link to nothing in the model is nothing the analysis runs on.
+    if (fromKind === undefined || toKind === undefined) continue;
+    if (isLegalStructuralEdge(fromKind, toKind)) continue;
+    if (readEdgeParams(edge).mean === undefined) continue;
+    const author = classifyValueSource(asRecord(edge.provenance)?.source);
+    const ours = OLUMI_AUTHORED[author] || (author === 'unattributed' && edge.defaulted === true);
+    if (!ours) continue;
+    out.push({ kind: 'link_strength', from: edge.from, to: edge.to });
+  }
+  return out;
+}
+
+/**
+ * ⭐ WHAT THE DISCLOSURE COUNTS: every Olumi-authored value the model carries into the analysis — factor baselines
+ * ({@link deriveInferredValues}, unchanged), option levels and link strengths.
+ */
+export function deriveOlumiAuthoredValues(graph: unknown): OlumiAuthoredValue[] {
+  return [
+    ...deriveInferredValues(graph).map((r): OlumiAuthoredValue => ({ kind: 'factor_baseline', factor_id: r.factor_id })),
+    ...deriveOlumiOptionLevels(graph),
+    ...deriveOlumiLinkStrengths(graph),
+  ];
 }

@@ -78,6 +78,21 @@ function withProvenance(provenance: string, value?: number): CandidateModel {
   };
 }
 
+/**
+ * P2 A5: every constructed level also names the factor it is keyed by (`target_match`). "Developers hired" is framed
+ * only by its node's `scale_frame` (no baseline), and since AIQ Q2 (CEE #2139 5859746452) such a level is the SAME one
+ * form: the drafter's figure as `raw_value` (= value × scale_frame) and the factor's unit, "hires" — see
+ * `one-intervention-form.test.ts` (h).
+ */
+function expectCell(admitted: AdmittedModel, value: number, raw: number, source: string): void {
+  const { factorId } = idsFor(admitted);
+  const frame = admitted.nodes.find((n) => n.id === factorId)!.scale_frame;
+  expect(cell(admitted)).toEqual({
+    value, raw_value: raw, unit: 'hires', source, target_match: { node_id: factorId, match_type: 'exact_id', confidence: 'high' },
+  });
+  expect(value * frame!, 'raw_value is the level read on the node’s own scale_frame').toBeCloseTo(raw, 9);
+}
+
 function cell(admitted: AdmittedModel): unknown {
   const { optionId, factorId } = idsFor(admitted);
   return admitted.nodes.find((n) => n.id === optionId)!.interventions?.[factorId];
@@ -124,18 +139,18 @@ describe('a constructed option level states where it came from', () => {
 
   it('a brief-stated level (in range) is stamped brief_extraction', () => {
     // 2 of a stated range of 20 → 0.1 on the model scale.
-    expect(cell(admitCandidateModel(banked(), {}))).toEqual({ value: 0.1, source: 'brief_extraction' });
+    expectCell(admitCandidateModel(banked(), {}), 0.1, 2, 'brief_extraction');
   });
 
   it.each(['inferred', 'ai_proposed'])('a %s level (in range) is stamped cee_hypothesis', (provenance) => {
-    expect(cell(admitCandidateModel(withProvenance(provenance), {}))).toEqual({ value: 0.1, source: 'cee_hypothesis' });
+    expectCell(admitCandidateModel(withProvenance(provenance), {}), 0.1, 2, 'cee_hypothesis');
   });
 
   it('an above-range level carries the same claim (the range widens; the level is never kept raw)', () => {
     // 25 hires against a stated range of 20: the range widens to 0..100 (said), so the level is
     // 0.25 in the factor's one value space — never a raw 25 beside normalised siblings (#69 5835137365).
-    expect(cell(admitCandidateModel(withProvenance('explicit', 25), {}))).toEqual({ value: 0.25, source: 'brief_extraction' });
-    expect(cell(admitCandidateModel(withProvenance('inferred', 25), {}))).toEqual({ value: 0.25, source: 'cee_hypothesis' });
+    expectCell(admitCandidateModel(withProvenance('explicit', 25), {}), 0.25, 25, 'brief_extraction');
+    expectCell(admitCandidateModel(withProvenance('inferred', 25), {}), 0.25, 25, 'cee_hypothesis');
   });
 
   it('⛔ NO constructed level ever claims user authority, and every one is in the writer’s enum', () => {

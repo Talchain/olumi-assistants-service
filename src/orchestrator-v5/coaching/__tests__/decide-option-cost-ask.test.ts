@@ -84,7 +84,7 @@ describe('decideOptionCostAsk — the captured defect', () => {
   it('moves to the NEXT cell once the first records a native value', () => {
     const options = CAPTURED_OPTIONS.map((o) =>
       o.id === 'opt_status_quo'
-        ? { ...o, interventions: { '85dd1a1d': { value: 0, raw_value: 0, unit: 'GBP' }, '943110e8': { value: 0 } } }
+        ? { ...o, interventions: { '85dd1a1d': { value: 0, raw_value: 0, unit: 'GBP', source: 'user_specified' }, '943110e8': { value: 0 } } }
         : o,
     );
     expect(ask({ options })?.option_id).toBe('opt_two_devs');
@@ -102,14 +102,15 @@ describe('decideOptionCostAsk — the ask must not survive its own answer', () =
       const next = ask({ options });
       if (next === null) break;
       asked.push(next.option_id);
-      // Answer it the way the writer does — on the CELL.
+      // Answer it the way the writer does — on the CELL, as the user's figure (`native-quantity-operation.ts` stamps
+      // `user_specified`; AIQ Q1, CEE #2139: a native only answers the ask when the user gave it).
       options = options.map((o) =>
         o.id === next.option_id
           ? {
               ...o,
               interventions: {
                 ...(o.interventions as Record<string, unknown>),
-                [next.factor_id]: { value: 0.7, raw_value: 95000, unit: 'GBP' },
+                [next.factor_id]: { value: 0.7, raw_value: 95000, unit: 'GBP', source: 'user_specified' },
               },
             }
           : o,
@@ -122,10 +123,10 @@ describe('decideOptionCostAsk — the ask must not survive its own answer', () =
   it('a native in a DIFFERENT unit does not count as answered', () => {
     // A figure in USD does not answer a question asked in GBP. Treating it as
     // an answer would leave the limit uncheckable while the product believed
-    // it had what it needed.
+    // it had what it needed. The figure is the user's, so the UNIT is the only reason it does not answer.
     const options = CAPTURED_OPTIONS.map((o) => ({
       ...o,
-      interventions: { ...(o.interventions as Record<string, unknown>), '85dd1a1d': { value: 0.7, raw_value: 95000, unit: 'USD' } },
+      interventions: { ...(o.interventions as Record<string, unknown>), '85dd1a1d': { value: 0.7, raw_value: 95000, unit: 'USD', source: 'user_specified' } },
     }));
     expect(ask({ options })?.option_id).toBe('opt_status_quo');
   });
@@ -170,7 +171,7 @@ describe('decideOptionCostAsk — every refusal is a decision not to guess', () 
   it('asks NOTHING when every participating option already records a native value', () => {
     const options = CAPTURED_OPTIONS.map((o) => ({
       ...o,
-      interventions: { ...(o.interventions as Record<string, unknown>), '85dd1a1d': { value: 0.7, raw_value: 1, unit: 'GBP' } },
+      interventions: { ...(o.interventions as Record<string, unknown>), '85dd1a1d': { value: 0.7, raw_value: 1, unit: 'GBP', source: 'user_specified' } },
     }));
     expect(ask({ options })).toBeNull();
   });

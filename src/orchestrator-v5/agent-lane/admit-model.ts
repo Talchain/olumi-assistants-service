@@ -288,10 +288,79 @@ export interface WidenerAdditions {
  * only the writer, on a user's approved change, mints that stamp.
  */
 export type ConstructedLevelSource = Exclude<InterventionV3T['source'], 'user_specified'>;
-export interface ConstructedLevel { value: number; source: ConstructedLevelSource }
+export interface ConstructedLevel {
+  value: number;
+  source: ConstructedLevelSource;
+  /** The factor this level is keyed by — `InterventionV3.target_match`, which the contract requires. */
+  target_match?: { node_id: string; match_type: 'exact_id'; confidence: 'high' };
+  /**
+   * The drafter's own figure, present exactly when `value` is that figure read on the factor's OWN frame: its
+   * `observed_state.cap`, or (a factor with no cap) its node `scale_frame`.
+   */
+  raw_value?: number;
+  /** The factor's own unit, beside `raw_value`: its `observed_state.unit`, else the unit the construction declared for it. */
+  unit?: string;
+}
 
 const levelSourceFor = (provenance: string): ConstructedLevelSource =>
   provenance === 'explicit' ? 'brief_extraction' : 'cee_hypothesis';
+
+/**
+ * ⭐ ONE FORM FOR AN OPTION'S LEVEL, WHICHEVER WRITER WROTE IT (P2 A5; DL #70 order 5858777018 item 3).
+ *
+ * MEASURED on served CEE 523e18d (journey A, `build_model_from_brief` at A01): this writer stored "Raise Pro to £59"
+ * as `{ value: 0.295, source }`. The brief's 59, the factor's unit and the factor match were all in hand here and all
+ * dropped, while the add-option writer stores the same level on the same factor as
+ * `{ value, raw_value: 59, unit, source, target_match }` (A06). Every `{source, value}` level on the five fresh journeys
+ * (18 of them) came from the one line that calls this.
+ *
+ * EVERY MEMBER COMES FROM THIS CONSTRUCTION — nothing is guessed, and nothing is filled later at projection (which runs
+ * on every write, and would rewrite cells nobody touched):
+ *  · `target_match` names the key the level is stored under, exactly as the encoder synthesises it for an entry that
+ *    lacks one (`encode-option-interventions.ts` `buildInterventionV3`) and the add-option writer writes it;
+ *  · `raw_value` is the drafter's figure itself, and `unit` is the FACTOR's own `observed_state.unit` (the contract:
+ *    "should match target factor's observed_state.unit"), never the option's spelling of it. Both are written ONLY when
+ *    the level was divided by the factor's OWN frame, so `raw_value / frame === value` is re-checkable from the stored
+ *    bytes:
+ *      – the cap its `observed_state` stores; or
+ *      – ⭐ its node `scale_frame`, for a factor with no cap (AIQ Q2, CEE #2139 5859746452). PLoT #373 rung 1.6 scales
+ *        every intervened cap-less factor on [0, scale_frame], so it expects the RAW figure, and the egress ships a bare
+ *        `{value}` there unchanged (`plot-intervention-scale.ts`, rule `no_cap`). EXECUTED on served PLoT a6da42b
+ *        (`monthly_new_pro_subscribers`, scale_frame 1000): raw 90 gave +£18.08, the unframed 0.09 gave −£90.27, a sign
+ *        flip. With the pair the egress takes `raw_value_used` and ships 90, as it already does for every add-option
+ *        and encoder cell on such a factor (AIQ census 5859754585: 24 of 24). Such a node may store no observed state,
+ *        and so no unit; its unit is then the one the construction declared for it, the same `f.unit` an observed
+ *        state is written with.
+ *
+ * ⚠ AND ONLY THEN, DELIBERATELY: an UNFRAMED level (no range; the level is its own figure) keeps
+ * `{ value, source, target_match }` — `InterventionV3`: "value = raw_value (or raw_value omitted)".
+ */
+function constructedLevel(
+  factorId: string,
+  figure: number,
+  cap: number | undefined,
+  source: ConstructedLevelSource,
+  factor: Pick<AdmittedNode, 'observed_state' | 'scale_frame'> | undefined,
+  declaredUnit: string | undefined,
+): ConstructedLevel {
+  const level: ConstructedLevel = {
+    value: cap !== undefined ? figure / cap : figure,
+    source,
+    target_match: { node_id: factorId, match_type: 'exact_id', confidence: 'high' },
+  };
+  const os = factor?.observed_state;
+  const usable = (u: unknown): u is string => typeof u === 'string' && u.trim() !== '';
+  if (cap !== undefined && os?.cap === cap) {
+    level.raw_value = figure;
+    if (usable(os.unit)) level.unit = os.unit;
+  } else if (cap !== undefined && typeof os?.cap !== 'number' && factor?.scale_frame === cap) {
+    level.raw_value = figure;
+    const stored = os?.unit;
+    const unit = usable(stored) ? stored : declaredUnit;
+    if (usable(unit)) level.unit = unit;
+  }
+  return level;
+}
 
 export interface AdmittedNode {
   /** The full text, when the label had to be shortened to stay editable. */
@@ -554,8 +623,12 @@ const inferenceClassFor = (provenance: string): InferenceClass => {
  * the engine compares across factors. The range is the model's proposal and is
  * recorded in the ledger as such — it is not a forecast, and it never replaces
  * what the user said.
+ *
+ * ⭐ EXPORTED FOR ONE OTHER WRITER (PJ-A1 £49, DL #70 5860365834): the today level the user stated for a NEW graded factor
+ * the Agent adds (`propose_new_option` `new_factors[].today`) is framed by THIS function, so it is stored exactly as a
+ * baseline the brief states — never a second framer.
  */
-function framedObservedState(f: {
+export function framedObservedState(f: {
   baseline_value: number | null; unit: string | null; provenance: string; plausible_max?: number | null;
 }): Record<string, unknown> {
   const raw = f.baseline_value as number;
@@ -1284,6 +1357,40 @@ function levelObject(v: unknown): ConstructedLevel | undefined {
 }
 
 /**
+ * ⭐ C46 × R3-4 (ISL #187) — THE CARRIERS THE ENGINE EVALUATED ON THIS RUN.
+ *
+ * Only `evaluated: true` licenses a numerical claim; a carrier the engine evaluated on THIS run is not
+ * withheld by the structural sign test. Absent/false/malformed → today's withhold (fail closed).
+ * Reads `identity_evaluations` (PLoT #379 forwards ISL's list at the TOP LEVEL of the /v2/run response,
+ * which CEE stores whole as the fact's `enrichment`): the string `node_id` of each plain-object entry
+ * whose `evaluated === true`. Pure and total: anything else is the empty set, never a throw.
+ */
+export function evaluatedIdentityNodeIds(enrichmentOrResponse: unknown): ReadonlySet<string> {
+  const list = enrichmentOrResponse !== null && typeof enrichmentOrResponse === 'object'
+    ? (enrichmentOrResponse as { identity_evaluations?: unknown }).identity_evaluations
+    : undefined;
+  if (!Array.isArray(list)) return new Set();
+  return new Set(list
+    .filter((e): e is { node_id: string } => e !== null && typeof e === 'object' && !Array.isArray(e)
+      && (e as { evaluated?: unknown }).evaluated === true
+      && typeof (e as { node_id?: unknown }).node_id === 'string' && (e as { node_id: string }).node_id !== '')
+    .map((e) => e.node_id));
+}
+
+/**
+ * ⭐ C46 × R3-4 ON THE AGENT'S VIEW — the graph read's `analysis_identity_evaluated_node_ids`, as the Agent reads it.
+ *
+ * The Agent's readers (`breakEvenFor`, `withNonlinearIdentity`) see the graph and the transport block, whose enrichment
+ * keep-list does not carry `identity_evaluations`; the graph read projects the SELECTED fact's evaluated carriers beside
+ * `analysis_result` (same fact, same gates). An array of non-empty strings → that set; anything else (absent, `null`,
+ * any malformed member) → `undefined`, i.e. today's reading (fail closed: every carrier is judged).
+ */
+export function readEvaluatedIdentityNodeIds(wire: unknown): ReadonlySet<string> | undefined {
+  if (!Array.isArray(wire) || !wire.every((id) => typeof id === 'string' && id !== '')) return undefined;
+  return new Set(wire as string[]);
+}
+
+/**
  * ⛔ C46 STAGE 1 (b) — MAY THIS RUN NAME ITS LEADER, GIVEN A PRODUCT IT CAN ONLY ADD UP?
  *
  * Reads the carrier (`cee-v3.ts` NodeV3 `nonlinear_identity`) on the graph the analysis ran on,
@@ -1304,18 +1411,24 @@ function levelObject(v: unknown): ConstructedLevel | undefined {
  * `leaderId: null` asks the Agent-view question (the leader is withheld from every readback): is
  * EVERY compared option unprovable as a leader? Only then is the sentence true of whichever led.
  *
+ * `opts.evaluatedIdentityNodeIds` (the helper above, read from THIS run's response or fact): a
+ * carrier on one of those nodes is not judged here — the engine computed the product, so "adds those
+ * effects up" is false of it. Omitted or empty ⇒ every carrier is judged, exactly as before.
+ *
  * Pure and total: a malformed graph or carrier is `null`, never a throw on a Run.
  */
 export function nonlinearIdentityLeaderWithhold(
   graph: unknown,
   leaderId: string | null,
-  opts: { readonly comparedOptionIds?: readonly string[]; readonly goalId?: string } = {},
+  opts: { readonly comparedOptionIds?: readonly string[]; readonly goalId?: string; readonly evaluatedIdentityNodeIds?: ReadonlySet<string> } = {},
 ): NonlinearIdentityLeaderWithhold | null {
   const rawNodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
   const rawEdges = (graph as { edges?: unknown } | null | undefined)?.edges;
   if (!Array.isArray(rawNodes) || !Array.isArray(rawEdges)) return null;
   const nodes = rawNodes.filter((n): n is GraphNodeLike => n !== null && typeof n === 'object' && typeof (n as GraphNodeLike).id === 'string' && typeof (n as GraphNodeLike).kind === 'string');
-  const carried = nodes.map((n) => ({ id: n.id as string, carrier: readCarrier(n) })).filter((c): c is { id: string; carrier: NonlinearIdentityCarrier } => c.carrier !== null);
+  const carried = nodes.map((n) => ({ id: n.id as string, carrier: readCarrier(n) }))
+    .filter((c): c is { id: string; carrier: NonlinearIdentityCarrier } => c.carrier !== null)
+    .filter((c) => opts.evaluatedIdentityNodeIds?.has(c.id) !== true);
   if (carried.length === 0) return null;
   const goals = nodes.filter((n) => n.kind === 'goal').map((n) => n.id as string);
   const goalId = opts.goalId ?? (goals.length === 1 ? goals[0] : undefined);
@@ -1404,16 +1517,19 @@ export function nonlinearIdentityLeaderWithhold(
  * which name no option) OR every option the graph compares is unprovable as a leader, so the sentence
  * is true of whichever led. Otherwise `null`: a finding about some other pair is not said as the
  * reason this leader was withheld.
+ *
+ * `evaluated`: the carriers the latest run's engine evaluated (`evaluatedIdentityNodeIds`), when the
+ * caller holds that run's response; omitted ⇒ today's reading.
  */
-export function nonlinearIdentityForAgent(graph: unknown, reasonNamesIt: boolean): NonlinearIdentityLeaderWithhold | null {
-  const every = nonlinearIdentityLeaderWithhold(graph, null);
+export function nonlinearIdentityForAgent(graph: unknown, reasonNamesIt: boolean, evaluated?: ReadonlySet<string>): NonlinearIdentityLeaderWithhold | null {
+  const every = nonlinearIdentityLeaderWithhold(graph, null, { evaluatedIdentityNodeIds: evaluated });
   if (every !== null || !reasonNamesIt) return every;
   const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
   const options = Array.isArray(nodes)
     ? nodes.filter((n) => (n as GraphNodeLike | null)?.kind === 'option' && typeof (n as GraphNodeLike).id === 'string').map((n) => (n as GraphNodeLike).id as string)
     : [];
   for (const id of options) {
-    const f = nonlinearIdentityLeaderWithhold(graph, id);
+    const f = nonlinearIdentityLeaderWithhold(graph, id, { evaluatedIdentityNodeIds: evaluated });
     if (f !== null) return f;
   }
   return null;
@@ -1499,7 +1615,10 @@ export function nonlinearIdentityLeaderClaimCause(input: {
   const leader = result?.leading_option_id;
   if (typeof leader !== 'string' || leader === '') return none;
   const compared = comparedOptionIdsOf(result?.enrichment);
-  const finding = nonlinearIdentityLeaderWithhold(input.graph, leader, compared !== undefined ? { comparedOptionIds: compared } : {});
+  const finding = nonlinearIdentityLeaderWithhold(input.graph, leader, {
+    ...(compared !== undefined ? { comparedOptionIds: compared } : {}),
+    evaluatedIdentityNodeIds: evaluatedIdentityNodeIds(result?.enrichment),
+  });
   if (finding === null) return none;
   return input.requested
     ? { withheldBecauseUnrequested: false, withheldBecauseNonlinearIdentity: true }
@@ -2528,6 +2647,16 @@ function admitOnce(
     const c = capByLabel.get(f.label);
     if (fid !== undefined && c !== undefined) capByFactorId.set(fid, c);
   }
+  /**
+   * Each factor's unit as the construction declares it: the same `f.unit` its observed state is written with. Read by
+   * the level writer (a factor framed only by `scale_frame` may store no observed state, so no unit, at all) and by
+   * the link sizing below.
+   */
+  const unitById = new Map<string, string>();
+  for (const f of model.factors) {
+    const id = ids.get(f.label);
+    if (id !== undefined && typeof f.unit === 'string') unitById.set(id, f.unit);
+  }
   for (const d of defaultedFrames) {
     // "Your own figures" only when a figure the user stated fed the frame; when
     // every figure is Olumi's, saying so is the honest record.
@@ -2638,7 +2767,7 @@ function admitOnce(
         continue;
       }
       const cap = capByFactorId.get(factorId);
-      bundle[factorId] = { value: cap !== undefined ? iv.value / cap : iv.value, source: levelSourceFor(iv.provenance) };
+      bundle[factorId] = constructedLevel(factorId, iv.value, cap, levelSourceFor(iv.provenance), nodes.find((n) => n.id === factorId), unitById.get(factorId));
     }
     if (Object.keys(bundle).length > 0) interventionsByOption.set(optionId, bundle);
   }
@@ -2685,11 +2814,6 @@ function admitOnce(
    * Only a link whose direction is stated and whose mean nobody supplied directly is sized. A link with no usable
    * size and nothing to check it against keeps today's projection exactly.
    */
-  const unitById = new Map<string, string>();
-  for (const f of model.factors) {
-    const id = ids.get(f.label);
-    if (id !== undefined && typeof f.unit === 'string') unitById.set(id, f.unit);
-  }
   const optionLevelsById = new Map<string, number[]>();
   for (const bundle of interventionsByOption.values()) {
     for (const [factorId, level] of Object.entries(bundle)) optionLevelsById.set(factorId, [...(optionLevelsById.get(factorId) ?? []), level.value]);

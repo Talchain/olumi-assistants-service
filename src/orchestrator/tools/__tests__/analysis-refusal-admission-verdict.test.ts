@@ -82,7 +82,11 @@ import type { AnalysisReadyPayload } from '../analysis-ready-helper.js';
 
 const DECISION = { id: 'dec_crm', kind: 'decision', label: 'CRM decision' };
 const GOAL = { id: 'goal_revenue', kind: 'goal', label: 'Revenue', goal_threshold: 0.8 };
-const FACTOR = { id: 'fac_licence', kind: 'factor', label: 'Annual CRM Licence Cost' };
+// A status-quo level (inside the options' 0.3–0.7 scale, as #2168 gave this same factor). Since #2164 an unvalued goal
+// root is a factor-scoped `MISSING_FACTOR_LEVEL` that no waiver answers, so without it EVERY class below is refused on
+// the level and the table's A (may_run TRUE) and B (`ready`) cannot exist. Class C keeps its meaning: with the level
+// set it is refused on its three unvalued options alone (`MISSING_OPTION_VALUE` ×3), which is the defect it pins.
+const FACTOR = { id: 'fac_licence', kind: 'factor', label: 'Annual CRM Licence Cost', observed_state: { value: 0.5 } };
 
 const edge = (from: string, to: string, mean: number, exists = 0.9) => ({
   from,

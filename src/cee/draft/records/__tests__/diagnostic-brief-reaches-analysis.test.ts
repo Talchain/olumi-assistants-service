@@ -118,14 +118,24 @@ function explanationsFiledAsOptions(): DraftRecordSet {
  * so "the value that factor would take if this option were chosen" is a defined
  * question. It was never defined for the explanations, which is exactly why
  * forcing it onto them would have been worse than blocking.
+ *
+ * ⚠ SINCE #2164 THE THREE CAUSES CARRY A CURRENT LEVEL (`value` 0.6,
+ * `value_scale: "unit_interval"`, no unit — the instruction's own form for a
+ * factor scored 0 to 1). They are goal roots, and a goal root with no status-quo
+ * level is now a factor-scoped `MISSING_FACTOR_LEVEL` that refuses the Run
+ * (ISL would otherwise sample it at 0.0). The brief states none of these levels:
+ * they are OLUMI'S estimates, projected as `extractionType: "inferred"`, never a
+ * user fact. Whether a real draw emits them is model compliance, which this file
+ * already says it does not measure. What the user gets when the draw OMITS them
+ * is pinned by name in the (c′) row below: one ask per cause.
  */
 function causesAsFactorsActionsAsRefinements(): DraftRecordSet {
   return {
     stated_items: [{ kind: "goal", source_quote: "revenue growth" }],
     claims: [
-      { claim_kind: "factor", label: "Competitive Product Position", basis: [0] },
-      { claim_kind: "factor", label: "Onboarding Conversion", basis: [0] },
-      { claim_kind: "factor", label: "Customer Segment Fit", basis: [0] },
+      { claim_kind: "factor", label: "Competitive Product Position", basis: [0], value: 0.6, value_scale: "unit_interval" },
+      { claim_kind: "factor", label: "Onboarding Conversion", basis: [0], value: 0.6, value_scale: "unit_interval" },
+      { claim_kind: "factor", label: "Customer Segment Fit", basis: [0], value: 0.6, value_scale: "unit_interval" },
       { claim_kind: "outcome", label: "Quarterly Revenue Growth", basis: [0] },
       { claim_kind: "option_refinement", label: "Commission a structured win/loss review", basis: [0] },
       { claim_kind: "option_refinement", label: "Run rapid customer interviews across churned accounts", basis: [0] },
@@ -202,6 +212,39 @@ describe("a diagnostic brief, filed the way v12 asks, reaches a completed analys
       "Commission a structured win/loss review",
       "Run rapid customer interviews across churned accounts",
     ]);
+  });
+
+  /**
+   * ⭐ (c′) THE SAME v12 SHAPE WITH NO CURRENT LEVEL ON THE CAUSES — the case the
+   * instruction produces whenever it follows "leave `value` out where the current
+   * level … is unknown", which is this brief. Since #2164 that is not a completed
+   * analysis on placeholder zeros: the Run is refused and the user is asked for
+   * each cause's level, BY NAME, and for nothing else. This row is also what makes
+   * the three levels above load-bearing rather than decoration.
+   */
+  it("AFTER — (c′) without a current level on the three causes, the Run asks for each one by name", () => {
+    const unlevelled = causesAsFactorsActionsAsRefinements() as unknown as {
+      claims: { claim_kind: string; value?: number; value_scale?: string }[];
+    };
+    for (const claim of unlevelled.claims) {
+      if (claim.claim_kind === "factor") {
+        delete claim.value;
+        delete claim.value_scale;
+      }
+    }
+    const after = drive(unlevelled as unknown as DraftRecordSet, A1);
+    const asks = assessCanonicalAnalysisReadiness(after.graph as never).blockingIssues.map((issue) => ({
+      code: issue.code,
+      factor_label: issue.factor_label,
+    }));
+
+    expect(asks.sort((a, b) => String(a.factor_label).localeCompare(String(b.factor_label)))).toEqual([
+      { code: "MISSING_FACTOR_LEVEL", factor_label: "Competitive Product Position" },
+      { code: "MISSING_FACTOR_LEVEL", factor_label: "Customer Segment Fit" },
+      { code: "MISSING_FACTOR_LEVEL", factor_label: "Onboarding Conversion" },
+    ]);
+    expect(after.safeToAnalyse).toBe(false);
+    expect(after.status).not.toBe("ready");
   });
 
   it("AFTER — it buys the analysis WITHOUT erasing attribution or inventing user facts", () => {

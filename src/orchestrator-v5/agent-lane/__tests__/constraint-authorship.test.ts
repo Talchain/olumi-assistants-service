@@ -21,17 +21,14 @@ const userBound = { metric: 'monthly churn', operator: '<' as const, value: 4, u
 const modelBound = { ...userBound, provenance: 'ai_proposed' };
 
 describe('constraint authorship', () => {
-  it('a model-proposed bound is NOT reported as the user’s', () => {
-    const r = admitCandidateConstraints([modelBound], resolve);
-    const reason = r.loss.find((l) => l.field_path.endsWith('.operator'))?.reason ?? '';
-    expect(reason, 'must not claim the user stated it').not.toMatch(/user stated/i);
-    expect(reason).toMatch(/this system proposed/i);
-  });
-
-  it('a user-stated bound IS reported as the user’s', () => {
-    const r = admitCandidateConstraints([userBound], resolve);
-    const reason = r.loss.find((l) => l.field_path.endsWith('.operator'))?.reason ?? '';
-    expect(reason).toMatch(/you stated/i);
+  // A2 (DL #72 5861407189): a strict bound is no longer a widening LOSS — it is held as stated
+  // (`operator_as_stated`) — so its authorship lives on the admitted row alone (next row), never in a receipt.
+  it('A2: a strict bound, the user\'s or the model\'s, leaves no widening receipt to misattribute', () => {
+    for (const bound of [userBound, modelBound]) {
+      const r = admitCandidateConstraints([bound], resolve);
+      expect(r.loss.filter((l) => l.field_path.endsWith('.operator')), bound.provenance).toEqual([]);
+      expect(r.constraints[0]).toMatchObject({ operator: '<=', operator_as_stated: '<' });
+    }
   });
 
   it('the admitted constraint carries its canonical authorship', () => {

@@ -80,7 +80,7 @@ import {
 } from './edge-strength-edit.js';
 import { applyFactorValueEdit } from './factor-value-edit.js';
 import { applyGoalTargetEdit, type GoalTargetEditResult } from './goal-target-edit.js';
-import { applyLimitEdit } from './limit-edit.js';
+import { applyLimitEdit, type LimitEditRequest } from './limit-edit.js';
 import { dispatchAddRiskTransaction } from '../handlers/add-risk-dispatch.js';
 import { buildHeldSupersessionNotice } from '../handlers/edit-graph-referee-gate.js';
 import { applyStructuralDelete } from './structural-delete.js';
@@ -3305,6 +3305,8 @@ export type CommitLimitEditInput = {
   readonly operator: '<=' | '>=';
   /** The user's figure, in the row's own unit. */
   readonly raw_value: number;
+  /** A2 follow-up: the comparator the user STATED on this edit (typed), when they stated one (`LimitEditRequest`). */
+  readonly stated_operator?: LimitEditRequest['stated_operator'];
 };
 export type CommitLimitEditResult =
   | {
@@ -3326,7 +3328,8 @@ export type CommitLimitEditResult =
 export async function commitLimitEditInProcess(input: CommitLimitEditInput, requestId: string): Promise<CommitLimitEditResult> {
   const turn = { scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame' as const };
   const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
-    kind: 'agent_limit_edit', node_id: input.node_id, operator: input.operator, raw_value: input.raw_value, base_graph_hash: input.base_graph_hash }))
+    kind: 'agent_limit_edit', node_id: input.node_id, operator: input.operator, raw_value: input.raw_value, base_graph_hash: input.base_graph_hash,
+    ...(input.stated_operator !== undefined ? { stated_operator: input.stated_operator } : {}) }))
     .digest('hex').slice(0, 32)}`;
   const r = await dispatchAddConstraintEdit(
     {
@@ -3339,7 +3342,8 @@ export async function commitLimitEditInProcess(input: CommitLimitEditInput, requ
       dispatchPath: 'agent_lane.limit_edit',
       apply: (persistedGraph, priorFacts) => applyLimitEdit({
         payload: turn,
-        request: { node_id: input.node_id, operator: input.operator, raw_value: input.raw_value, base_graph_hash: input.base_graph_hash },
+        request: { node_id: input.node_id, operator: input.operator, raw_value: input.raw_value, base_graph_hash: input.base_graph_hash,
+          ...(input.stated_operator !== undefined ? { stated_operator: input.stated_operator } : {}) },
         requestId,
         persistedGraph,
         priorFacts,

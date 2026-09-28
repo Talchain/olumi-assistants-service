@@ -54,6 +54,17 @@ export const A_FIGURE_IS_THE_FACTORS_VALUE =
   'A figure for the factor itself (e.g. \'churn is 6%\') is its value, not a link.';
 
 /**
+ * ⛔ PJ-C3 WITH NO NODE TO SIZE (DL GO #72 5861666870; Runtime 5861684872). With no node named for what the user sized,
+ * 3 of 9 served runs sized price → an intermediate node the BRIEF had drafted ("Price-driven churn risk" on 84440ff),
+ * whose link on to churn stayed Olumi's 0.0075: the user's "very high" was multiplied by a placeholder. None of those
+ * graphs had a direct price → churn link, so the move is to ADD it at their band (`propose_model_change`, one approval).
+ */
+export const NO_NAMED_NODE_SIZES_THE_CAUSE_LINK =
+  'If no factor or risk is named for what they sized, they mean how strongly its cause moves that outcome '
+  + '(price sensitivity: Pro plan price → churn): record THAT link, proposing it with propose_model_change at their band '
+  + 'if the model lacks it — never a link INTO a node between the two, whose own link on would stay Olumi’s placeholder.';
+
+/**
  * ⛔ A LEVEL'S LINK IS NOT A STRENGTH TO ASK ABOUT (AI Conversation #70 5849437163 U2b, served c35801a): the user gave
  * "it lowers Monthly churn to 6%" for an option not yet linked to churn; the model left that level out and asked "how
  * strong is that effect" — the band question that belongs to a CAUSAL link between factors. A level on an unlinked
@@ -122,12 +133,17 @@ const ACTS_ON = {
       type: 'string', enum: ['positive', 'negative'],
       description: 'Whether this option pushes the factor up or down. State it; never guess it for the user.',
     },
-    level: obj({
-      value: { type: 'number', description: 'The figure the user stated FOR THIS FACTOR, in the factor\u2019s own units (e.g. 54 for \u00a354 on a price). A figure given for something else (a price, when this factor is a churn rate) is never this factor\u2019s level: leave level out. With no figure from the user, leave level out \u2014 never 0 or any placeholder to mean \u201cnot set\u201d \u2014 unless it is your OWN suggested figure for an option you suggested: then set estimate.' },
-      unit: { type: 'string', description: 'The unit the user stated, if any.' },
-      estimate: { type: 'boolean', description: 'true ONLY when this figure is your own suggestion, not the user\u2019s (an option you proposed, at the figure you proposed). It is recorded and shown as Olumi\u2019s estimate, never as the user\u2019s. Needs basis.' },
-      basis: { type: 'string', description: 'With estimate: why this figure, in plain words the user can check.' },
-    }, ['value']),
+    level: {
+      ...obj({
+        value: { type: 'number', description: 'The figure the user stated FOR THIS FACTOR, in the factor\u2019s own units (e.g. 54 for \u00a354 on a price). A figure given for something else (a price, when this factor is a churn rate) is never this factor\u2019s level: leave level out. With no figure from the user, leave level out \u2014 never 0 or any placeholder to mean \u201cnot set\u201d \u2014 unless it is your OWN suggested figure for an option you suggested: then set estimate.' },
+        unit: { type: 'string', description: 'The unit the user stated, if any.' },
+        estimate: { type: 'boolean', description: 'true ONLY when this figure is your own suggestion, not the user\u2019s (an option you proposed, at the figure you proposed). It is recorded and shown as Olumi\u2019s estimate, never as the user\u2019s. Needs basis.' },
+        basis: { type: 'string', description: 'With estimate: why this figure, in plain words the user can check.' },
+      }, ['value']),
+      // ⛔ Where the model writes a level (OpenAI Runtime #70 5859406197): the switch rule sat only on new_factors.kind.
+      description: 'The level this option sets the factor to. Never give a level for a factor you add in new_factors with '
+        + 'kind \'switch\': a switch has no level of its own \u2014 the option turns it on.',
+    },
   }, ['factor_label', 'direction']),
 };
 
@@ -271,7 +287,18 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
             description: '"switch" when the option simply turns this ON \u2014 something not in place today that the option puts in place '
               + '(grandfathering existing customers, launching a feature). It is then added as off today, Olumi\u2019s reading for the user '
               + 'to correct, and on under every option that acts on it: give it no level. Leave kind out for an amount or a rate '
-              + '(a price, a share of customers): its current value and the option\u2019s level are asked for.',
+              + '(a price, a share of customers): its current value is `today` when the user stated it, otherwise asked for, '
+              + 'and the option\u2019s level is asked for.',
+          },
+          // ⭐ PJ-A1 £49 (DL #70 5860365834): the status quo of a factor the Agent adds is its level today — the user's, or none.
+          today: {
+            ...obj({
+              value: { type: 'number', description: 'The figure the user stated for this factor TODAY, in their own units (e.g. 49 for \u201cfrom \u00a349 to \u00a359\u201d on a price).' },
+              unit: { type: 'string', description: 'The unit the user stated it in.' },
+            }, ['value']),
+            description: 'For a factor you add, give today\u2019s level ONLY if the user stated it in their own words (e.g. a price '
+              + 'they said moves "from \u00a349" is \u00a349 today). Never your own estimate, never a placeholder or 0: with no figure '
+              + 'from the user, leave today out and ask for it. Never for a switch.',
           },
         }, ['label', 'affects']),
       },
@@ -286,7 +313,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'Record how strong an EXISTING link is, as the user\u2019s own estimate, when the user has just said it (for example '
       + '"that effect is strong", or "it actually pushes the other way"). This does NOT change anything: it prepares ONE change '
       + 'and returns its id, which you keep for authorise_change: show the user what it records, never the id, before they approve. '
-      + NODE_SIZE_MEANS_LINK_FROM + ' ' + A_FIGURE_IS_THE_FACTORS_VALUE + ' '
+      + NODE_SIZE_MEANS_LINK_FROM + ' ' + A_FIGURE_IS_THE_FACTORS_VALUE + ' ' + NO_NAMED_NODE_SIZES_THE_CAUSE_LINK + ' '
       + 'The user\u2019s word is one of Olumi\u2019s strength bands. If the link already sits in that band, its strength is kept and only '
       + 'recorded as theirs; otherwise it is set to the middle of that band, and the result says the figure so you can tell them. '
       + 'Give `direction` ONLY when the user said the link pushes the other way. When they described the strength in their own words '
@@ -365,6 +392,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       limit_label: { type: 'string', description: 'The limit\u2019s `on` label exactly as the CURRENT MODEL STATE lists it under limits.' },
       operator: { type: 'string', enum: ['<=', '>='], description: 'The limit\u2019s operator exactly as the state lists it.' },
       new_value: { type: 'number', description: 'The new figure the user stated, in the limit\u2019s own unit.' },
+      stated_operator: { type: 'string', enum: ['<', '<=', '>', '>='], description: 'Only when the user states the comparator in this message: '
+        + '< for less than or under, <= for at most, > for more than, >= for at least. Omit it for a new figure alone: the limit keeps its own.' },
       unit: { type: 'string', description: 'The unit the user wrote the figure in, if any.' },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
     }, ['limit_label', 'operator', 'new_value', 'rationale']),
@@ -592,6 +621,8 @@ export interface AgentCapabilities {
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). SLICE C2. */
   proposeLimitChange?(ctx: AgentToolContext, args: {
     limit_label: string; operator: '<=' | '>='; new_value: number; unit?: string; rationale: string;
+    /** A2 follow-up: the comparator the user stated in this message, typed; absent for a new figure alone. */
+    stated_operator?: '<' | '<=' | '>' | '>=';
   }): Promise<ToolResult>;
   runAnalysis(ctx: AgentToolContext, args: { reason: string }): Promise<ToolResult>;
   buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;
@@ -604,7 +635,11 @@ export interface AgentCapabilities {
     /** Several options as ONE change (F4): each `{label, acts_on}`, up to 4. */
     options?: { label: string; acts_on: NewOptionActsOn[] }[];
     /** Factors the model lacks, added in the SAME change (`planNewFactors`): each named in an option's acts_on. */
-    new_factors?: readonly { label: string; affects: readonly { label: string; direction?: 'positive' | 'negative' }[] }[];
+    new_factors?: readonly {
+      label: string; affects: readonly { label: string; direction?: 'positive' | 'negative' }[];
+      /** Today's level, ONLY as the user stated it (PJ-A1 £49); taken only when their own words write it. */
+      today?: { value: number; unit?: string };
+    }[];
   }): Promise<ToolResult>;
   proposeOptionInterventions(ctx: AgentToolContext, args: {
     interventions: readonly { option_label: string; factor_label: string; value: number; basis: string; unit?: string; user_stated?: boolean }[];

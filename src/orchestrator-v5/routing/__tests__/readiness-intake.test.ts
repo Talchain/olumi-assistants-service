@@ -52,7 +52,15 @@ function readyGraph() {
       { id: 'dec_1', kind: 'decision', label: 'Choose an option' },
       optionNode('opt_1', 'Option A', READY_INTERVENTIONS),
       optionNode('opt_2', 'Option B', READY_INTERVENTIONS),
-      { id: 'f1', kind: 'factor', label: 'Market response', category: 'controllable' },
+      // A status-quo level (inside the options' unit scale, distinct from their 0.5): since #2164 an unvalued goal
+      // root is a factor-scoped `MISSING_FACTOR_LEVEL` that refuses the Run, so without it this READY graph is open.
+      {
+        id: 'f1',
+        kind: 'factor',
+        label: 'Market response',
+        category: 'controllable',
+        observed_state: { value: 0.4 },
+      },
     ],
     edges: [
       edge('dec_1', 'opt_1'),
@@ -138,6 +146,8 @@ describe('composeReadinessIntakeResponse — populated canvas (NOT the fresh pat
 
   it('unreachable controllable factor remains open even when both options are individually ready', () => {
     const graph = readyGraph();
+    // No level on f2, deliberately: the producer's unreachable-controllable ask already owns this factor, and #2164's
+    // level rule skips a factor that is already factor-blocked, so the open item stays the mapping ask.
     graph.nodes.push({
       id: 'f2',
       kind: 'factor',
