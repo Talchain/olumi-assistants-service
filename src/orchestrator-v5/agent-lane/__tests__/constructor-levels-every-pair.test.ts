@@ -490,7 +490,7 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     expect(said.filter((s) => s.startsWith(`"Hire Two Developers" puts "${CUT}" at -60000 GBP`))).toHaveLength(1);
     expect(said.filter((s) => s.includes('treated your') && s.includes(CUT))).toEqual([]);
     // Readiness asks for exactly that one pair's value, and nothing else.
-    expect(missingValues(graph)).toEqual([`Factor "${CUT}" is currently £0. What should option "Hire Two Developers" set it to?`]);
+    expect(missingValues(graph)).toEqual([`Factor "${CUT}" is currently £0 (Olumi's estimate). What should option "Hire Two Developers" set it to?`]);
   });
 
   it('CONTROL (#1930 test): the same pair with NO level is a gap, and the retry IS spent on it', async () => {

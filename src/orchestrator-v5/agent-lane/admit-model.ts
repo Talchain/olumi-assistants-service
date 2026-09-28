@@ -694,7 +694,16 @@ function estimatedObservedState(
   if (f.baseline_known) return null;
   const raw = f.baseline_value;
   if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
-  if (typeof c !== 'number' || !Number.isFinite(c) || c <= 1 || raw < 0 || raw > c) return null;
+  if (typeof c !== 'number' || !Number.isFinite(c)) return null;
+  // ⭐ ALREADY A PROPORTION IS KEPT AS IT IS — as `framedObservedState` keeps a KNOWN one (DL #72 5864452374: served
+  // journey A's switch "Pro feature release delivered", today-0 on its 0..1 frame, reached the graph with NO level and
+  // ranked #2 unvalued; the candidate's number hid the gap from the retry). Olumi's, as every estimate here.
+  if (c <= 1) {
+    return raw >= 0 && raw <= 1
+      ? { value: raw, ...(f.unit ? { unit: f.unit } : {}), source: 'cee_inference', extractionType: 'inferred' }
+      : null;
+  }
+  if (raw < 0 || raw > c) return null;
   // `extractionType: 'inferred'` is the stamp the conventional builders write for a value the
   // brief did not state; the canvas reads it to say "Olumi estimate" (served UI b017e3c2 showed
   // "no source" without it). A value a person later sets withdraws it (`set-factor-value.ts`).

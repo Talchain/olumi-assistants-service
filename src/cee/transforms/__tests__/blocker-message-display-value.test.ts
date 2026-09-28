@@ -129,10 +129,10 @@ describe("a blocker message renders the factor's current level in its own displa
 
     // THE SPEC: the factor's own display authority is what the user reads.
     expect(messageFor(payload, "fac_licence_cost")).toBe(
-      `Factor "CRM Annual Licence Cost" is currently 50,000. What should option "${OPTION_LABEL}" set it to?`,
+      `Factor "CRM Annual Licence Cost" is currently 50,000 (Olumi's estimate). What should option "${OPTION_LABEL}" set it to?`,
     );
     expect(messageFor(payload, "fac_adoption")).toBe(
-      `Factor "CRM Adoption and Usability" is currently Moderate (0.5). What should option "${OPTION_LABEL}" set it to?`,
+      `Factor "CRM Adoption and Usability" is currently Moderate (0.5) (Olumi's estimate). What should option "${OPTION_LABEL}" set it to?`,
     );
 
     // …and the internal level is unreachable from the sentence where it is not
@@ -218,5 +218,27 @@ describe("a blocker message renders the factor's current level in its own displa
     expect(messageFor(payload, "fac_novalue")).toBe(
       `Factor "Unknown factor" needs a numeric value for option "${OPTION_LABEL}"`,
     );
+  });
+});
+
+// ⛔ AN ESTIMATE IS NEVER SAID AS TODAY'S FACT (MG; DL #72 5864452374). The level's owner comes from the ONE authority
+// (`classifyValueSource`): Olumi's reads "(Olumi's estimate)"; the user's own figure, and an unattributed level, read as
+// before. The same factor at the same level — only `observed_state.source` differs.
+describe("whose level it is — Olumi's estimate is labelled, the user's figure is not", () => {
+  const licence = (source?: string) => factor("fac_licence_cost", "CRM Annual Licence Cost", {
+    observed_state: { value: 0.5, raw_value: 50000, ...(source ? { source } : {}), factor_type: "other" },
+    scale_frame: 100000,
+    display_value: "50,000",
+  });
+  it.each([
+    ["cee_inference", true],
+    ["cee_hypothesis", true],
+    ["brief_extraction", false],
+    ["user_specified", false],
+    [undefined, false],
+  ])("source %s → labelled as Olumi's estimate: %s", (source, labelled) => {
+    const message = messageFor(payloadFor([licence(source)]), "fac_licence_cost");
+    expect(message.startsWith('Factor "CRM Annual Licence Cost" is currently 50,000')).toBe(true);
+    expect(message.includes("(Olumi's estimate)")).toBe(labelled);
   });
 });

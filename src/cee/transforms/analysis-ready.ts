@@ -36,6 +36,7 @@ import {
   resolveMagnitudeScale,
 } from "../provenance/stated-amounts.js";
 import { readIsBaseline } from "../baseline-identity.js";
+import { classifyValueSource } from "../graph-readiness/obligation-provenance.js";
 import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 import { classifyEncodedInterventionAdmissibility } from "../../orchestrator/shared/encoded-intervention-admissibility.js";
 // ⭐ ROADMAP 2.1266 — ONE authority on repair-authored option→factor edges,
@@ -492,6 +493,17 @@ export interface InterventionDetail {
  * rendering through them would be borrowing with a citation. That branch keeps
  * the bare level.
  */
+/**
+ * ⛔ AN ESTIMATE IS NEVER SAID AS TODAY'S FACT (MG; DL #72 5864452374). `is currently …` described the factor's observed
+ * level whoever supplied it, so Olumi's own estimate read as the user's current state — "is currently off" for a switch
+ * Olumi takes as off today, "is currently 3%" for Olumi's churn. The level's owner is read by the ONE authority
+ * (`classifyValueSource`); Olumi's (`ai_drafted`, `system_repaired`) is labelled, every other level reads as before.
+ */
+function isOlumisLevel(factorNode: NodeV3T): boolean {
+  const owner = classifyValueSource((factorNode.observed_state as { source?: unknown } | undefined)?.source);
+  return owner === "ai_drafted" || owner === "system_repaired";
+}
+
 function renderFactorCurrentLevel(
   factorNode: NodeV3T,
   currentLevel: number,
@@ -977,7 +989,7 @@ export function buildAnalysisReadyPayload(
                 currentLevel,
                 typeof observedValue === "number",
                 switchIds.has(factorId),
-              )}. What should option "${analysisOpt.label}" set it to?`
+              )}${typeof observedValue === "number" && isOlumisLevel(factorNode) ? " (Olumi's estimate)" : ""}. What should option "${analysisOpt.label}" set it to?`
             : `Factor "${factorLabel}" needs a numeric value for option "${analysisOpt.label}"`,
         suggested_action: "add_value",
       });
