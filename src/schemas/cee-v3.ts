@@ -265,7 +265,8 @@ export const NodeV3 = z.object({
    * `goal_direction` is the comparator of the stated target (`>=` "reach £100k"; `<` "under 4%"), the candidate
    * contract's own four values (`buildCandidateSchema`, goal.operator; pinned equal by `goal-stated-attrs-held.test.ts`).
    * ⚠ NOT the `goal_direction` on the PLoT request (`run-analysis.ts`, `'minimise'`): that is the objective's SENSE,
-   * derived from the label, a top-level wire key. Same word, a different concept at a different level.
+   * a top-level wire key. Same word, a different concept at a different level — but READ by it: a held `<=` / `<`
+   * sends `'minimise'` (`resolveGoalDirection`, `goal-target/goal-direction.ts`); with none held, the label decides.
    *
    * `goal_horizon_months` is the deadline the brief states ("within 12 months"). The analysis has no time axis: it
    * compares levels, so no result answers the deadline yet.

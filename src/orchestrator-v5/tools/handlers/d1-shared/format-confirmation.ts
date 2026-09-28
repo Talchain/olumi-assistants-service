@@ -15,6 +15,7 @@ import {
 import { edgeBandFromMagnitude } from '../../../format/edge-strength-bands.js';
 import type { PendingAction } from '../../../session/pending-action.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../../../agent-lane/limit-operator-words.js';
+import { sayFigureAsWritten } from '../../../agent-lane/say-figure.js';
 import {
   durationNotEvaluatedSentence,
   UNMEASURED_TARGET_CONSEQUENCE_AT_WRITE,
@@ -22,43 +23,17 @@ import {
   unmeasuredTargetRepairAsk,
 } from '../../../coaching/constraint-gap-copy.js';
 
-const NO_SPACE_UNITS = new Set(['%']);
-const PREFIX_UNITS = new Set(['£', '$', '€', '¥']);
+/** Moved to the one figure rule (`agent-lane/say-figure.ts`); re-exported for its existing importers. */
+export { pluraliseUnit } from '../../../agent-lane/say-figure.js';
 
 /**
- * Render a number with a unit suffix or prefix. Returns the bare number
- * (toString) when no unit is supplied. Numbers ≥ 1000 get thousands
- * separators (`Intl.NumberFormat('en-GB')`) so "£50000" displays as
- * "£50,000".
+ * Render a number with its unit. Returns the bare number when no unit is supplied (numbers ≥ 1000 get thousands
+ * separators). ⛔ With a unit it is CEE's ONE figure rule, `sayFigureAsWritten` (DL #72 5870353946): "£49/month",
+ * "5%", "12 months", never "49 GBP/month". Exact, up to four decimal places.
  */
 export function formatValueWithUnit(value: number, unit?: string): string {
-  const numStr = formatNumber(value);
-  if (!unit) return numStr;
-  if (NO_SPACE_UNITS.has(unit)) return `${numStr}${unit}`;
-  if (PREFIX_UNITS.has(unit)) return `${unit}${numStr}`;
-  return `${numStr} ${pluraliseUnit(unit, value)}`;
-}
-
-/**
- * Grammatically agree a space-separated unit with its count: singular form
- * when |value| === 1 ("1 month", not "1 months"); the supplied plural form
- * otherwise ("12 months", "0 months", "2 months").
- *
- * Conservative by design — only collapses a regular trailing "-s" on an
- * alphabetic unit of 4+ characters, and never for "-ss"/"-us"/"-is" endings
- * (e.g. "status", "analysis", "bonus") or abbreviations shorter than 4 chars
- * (e.g. "bps"). Symbol / no-space / prefix units never reach here (handled by
- * the caller). Irregular plurals (e.g. "people") are intentionally left
- * untouched: rare in the decision domain and better readable-but-imperfect
- * than mangled. Only the documented "1 months" → "1 month" class is fixed.
- */
-export function pluraliseUnit(unit: string, value: number): string {
-  if (Math.abs(value) !== 1) return unit;
-  // "-ies", "-ses", "-xes", "-zes", "-ches", "-shes" are left whole: dropping the "s" would print "deliverie" or "boxe".
-  if (/[a-z]{3,}s$/i.test(unit) && !/(?:ss|us|is|ies|ses|xes|zes|ches|shes)$/i.test(unit)) {
-    return unit.replace(/s$/i, '');
-  }
-  return unit;
+  if (!unit) return formatNumber(value);
+  return sayFigureAsWritten(value, unit);
 }
 
 function formatNumber(n: number): string {

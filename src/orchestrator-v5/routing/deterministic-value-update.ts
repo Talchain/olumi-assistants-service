@@ -1871,7 +1871,9 @@ export function buildClarifyChipMessage(
   const verb = verbMatch ? verbMatch[0].toLowerCase() : 'set';
   let valueText = '';
   if (quantity.value != null) {
-    const { value, unit } = mapCqeQuantityToProposalValue(quantity);
+    // The period the user wrote rides the replay ("£49.50 per month" → "£49.50 / month"), so the click writes a rate,
+    // not a bare amount (AIQ on #2247, 5871084445: without the message the chip said "£49.50" and lost it).
+    const { value, unit } = mapCqeQuantityToProposalValue(quantity, message);
     valueText = formatValueWithUnit(value, unit);
   } else if (quantity.raw_text) {
     valueText = quantity.raw_text;
@@ -1944,8 +1946,8 @@ const RATE_PERIODS: Readonly<Record<string, string>> = {
   annum: 'year',
 };
 
-/** `/month`, ` per month`, ` a month`, ` an hour`, ` each week`. */
-const RATE_TAIL_PATTERN = /^\s*(?:\/|per\s+|a\s+|an\s+|each\s+)([A-Za-z]+)\b/;
+/** `/month`, ` / month` (CEE's own spaced notation, DL 5871074397), ` per month`, ` a month`, ` an hour`, ` each week`. */
+const RATE_TAIL_PATTERN = /^\s*(?:\/\s*|per\s+|a\s+|an\s+|each\s+)([A-Za-z]+)\b/;
 
 /**
  * ⭐⭐ THE RATE DENOMINATOR THE USER ACTUALLY WROTE.

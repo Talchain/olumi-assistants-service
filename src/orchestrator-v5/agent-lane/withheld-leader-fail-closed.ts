@@ -83,6 +83,7 @@ import {
   WITHHELD_RUN_IDENTITY_CONFLICT,
   WITHHELD_RUN_IDENTITY_UNCONFIRMED,
   WITHHELD_SEPARATION_UNAVAILABLE,
+  SEPARATION_NEAR_TIE,
 } from '../compose/analysis-state-v1.js';
 import {
   neutraliseEnforcementFalsePositiveSpans,
@@ -1028,6 +1029,12 @@ function estimateOnlyClause(limitVerdicts: StoredLimitVerdicts | undefined, limi
  */
 const NO_RESULT_RUN_KINDS: ReadonlySet<string> = new Set(['never_run', 'refused', 'blocked', 'running']);
 
+/** The run's own separation statement (`leader_claim.separation`); absent = not computed, never "near tie". */
+export function separationOf(analysisState: unknown): string | undefined {
+  const separation = (analysisState as { leader_claim?: { separation?: unknown } } | null | undefined)?.leader_claim?.separation;
+  return typeof separation === 'string' ? separation : undefined;
+}
+
 function runStateSaysNoResult(analysisState: unknown): boolean {
   const kind = (analysisState as { run_state?: { kind?: unknown } } | null | undefined)?.run_state?.kind;
   return typeof kind === 'string' && NO_RESULT_RUN_KINDS.has(kind);
@@ -1061,9 +1068,30 @@ const REASON_NOT_RECORDED =
 const sentence = (clause: string): string => `${NO_LEADER_OPENING}, ${clause}.`;
 
 /** Every sentence this module can append — the build-time probe and the idempotence check read this. */
+/**
+ * ⭐ R13 (DL #72 5871699334, Paul's production test 13:33Z): EVERY CAUSE THAT HOLDS, NEVER A FIX ANOTHER CAUSE BLOCKS.
+ * The run's separation is a fact of its own (`leader_claim.separation`), and it is kept even when the claim's single
+ * `withheld_reason` names something else: `composeLeaderClaim` writes `constraint_verdict_withheld` for any unentitled
+ * verdict. Served (export 64c5eccc), an all-Olumi admission hid a near tie (gap 0.041), and the reply promised "set one
+ * of them yourself, then run the analysis again", which that near tie blocks. So a near tie is said FIRST (the
+ * engine's finding about this run), then the other cause's why, and the one next action is the near tie's, which no
+ * co-holding cause blocks. A single cause is said exactly as before.
+ */
+const NEAR_TIE_CLAUSE = BY_WITHHELD_REASON[WITHHELD_NEAR_TIE]!;
+
+function withNearTie(clause: string): string {
+  if (clause === NEAR_TIE_CLAUSE || clause === REASON_NOT_RECORDED) return NEAR_TIE_CLAUSE;
+  const [nearTieWhy, ...nearTieAction] = NEAR_TIE_CLAUSE.split(';');
+  const otherWhy = clause.split(';')[0]!.trim().replace(/^because /, '');
+  return `${nearTieWhy!.trim()}, and ${otherWhy};${nearTieAction.join(';')}`;
+}
+
+const SINGLE_CAUSE_CLAUSES: readonly string[] = [...Object.values(BY_WITHHELD_REASON), ...Object.values(BY_CONSTRAINT_CODE),
+  ...Object.values(BY_ADMISSION_REASON), estimateOnlyClauseFor(1), estimateOnlyClauseFor(2), estimateOnlyClauseFor(1, true),
+  estimateOnlyClauseFor(2, true), REASON_NOT_RECORDED];
+
 export const AGENT_NO_LEADER_SENTENCES: readonly string[] = [
-  ...new Set([...Object.values(BY_WITHHELD_REASON), ...Object.values(BY_CONSTRAINT_CODE), ...Object.values(BY_ADMISSION_REASON),
-    estimateOnlyClauseFor(1), estimateOnlyClauseFor(2), estimateOnlyClauseFor(1, true), estimateOnlyClauseFor(2, true), REASON_NOT_RECORDED].map(sentence)),
+  ...new Set([...SINGLE_CAUSE_CLAUSES, ...SINGLE_CAUSE_CLAUSES.map(withNearTie)].map(sentence)),
 ];
 
 /**
@@ -1121,13 +1149,22 @@ function admissionClause(analysisReady: unknown): string | undefined {
  */
 export function agentNoLeaderSentence(
   withheldReason: string | undefined, analysisReady: unknown, limitCauseCodes: readonly string[] = [], limitVerdicts?: StoredLimitVerdicts,
-  limitAskIds?: ReadonlySet<string>,
+  limitAskIds?: ReadonlySet<string>, separation?: string,
 ): string {
-  return sentence(agentNoLeaderClause(withheldReason, analysisReady, limitCauseCodes, limitVerdicts, limitAskIds));
+  return sentence(agentNoLeaderClause(withheldReason, analysisReady, limitCauseCodes, limitVerdicts, limitAskIds, separation));
 }
 
 /** The clause `agentNoLeaderSentence` closes on — the why and its one next action — chosen by the SAME rule. */
 function agentNoLeaderClause(
+  withheldReason: string | undefined, analysisReady: unknown, limitCauseCodes: readonly string[] = [], limitVerdicts?: StoredLimitVerdicts,
+  limitAskIds?: ReadonlySet<string>, separation?: string,
+): string {
+  const clause = singleCauseClause(withheldReason, analysisReady, limitCauseCodes, limitVerdicts, limitAskIds);
+  return separation === SEPARATION_NEAR_TIE || withheldReason === WITHHELD_NEAR_TIE ? withNearTie(clause) : clause;
+}
+
+/** The one cause the precedence rule picks: the admission first, then the typed claim reason, then "not recorded". */
+function singleCauseClause(
   withheldReason: string | undefined, analysisReady: unknown, limitCauseCodes: readonly string[] = [], limitVerdicts?: StoredLimitVerdicts,
   limitAskIds?: ReadonlySet<string>,
 ): string {
@@ -1149,9 +1186,9 @@ function agentNoLeaderClause(
  */
 export function agentNoLeaderReason(
   withheldReason: string | undefined, analysisReady: unknown, limitCauseCodes: readonly string[] = [], limitVerdicts?: StoredLimitVerdicts,
-  limitAskIds?: ReadonlySet<string>,
+  limitAskIds?: ReadonlySet<string>, separation?: string,
 ): string {
-  return agentNoLeaderClause(withheldReason, analysisReady, limitCauseCodes, limitVerdicts, limitAskIds).split(';')[0]!.trim();
+  return agentNoLeaderClause(withheldReason, analysisReady, limitCauseCodes, limitVerdicts, limitAskIds, separation).split(';')[0]!.trim();
 }
 
 // ── the projection ─────────────────────────────────────────────────────────────────────────────
@@ -1544,7 +1581,8 @@ export function enforceAgentLaneLeaderClaimsAtWire(
         const noResult = runStateSaysNoResult((response as { analysis_state?: unknown }).analysis_state) && admissionClause(opts.analysisReady) === undefined;
         const closing = noResult
           ? sentence(REASON_NOT_RECORDED)
-          : agentNoLeaderSentence(withheldReason, opts.analysisReady, limitCauseCodesOf((response as { blocks?: unknown }).blocks), opts.limitVerdicts, opts.limitAskIds);
+          : agentNoLeaderSentence(withheldReason, opts.analysisReady, limitCauseCodesOf((response as { blocks?: unknown }).blocks), opts.limitVerdicts, opts.limitAskIds,
+            separationOf((response as { analysis_state?: unknown }).analysis_state));
         const body = projected.text.trimEnd();
         const alreadySaid = closing === PRODUCT_IDENTITY_SENTENCE && replyAlreadySaysProductReason(body, opts.graph);
         next = { ...response, assistant_text: body.length === 0 ? closing : opts.sayWhyWithheld === false || noResult || alreadySaid ? body : `${body}\n\n${closing}` } as OlumiResponse;

@@ -113,7 +113,8 @@ export function leaderStandingOf(readback: {
       analysisReady: readback.analysisReady,
     }),
     because: agentNoLeaderReason(withheldReason, readback.analysisReady,
-      limitCauseCodesOf(readback.analysisResult === undefined ? [] : [readback.analysisResult]), readback.limitVerdicts, readback.limitAskIds),
+      limitCauseCodesOf(readback.analysisResult === undefined ? [] : [readback.analysisResult]), readback.limitVerdicts, readback.limitAskIds,
+      typeof claim?.separation === 'string' ? claim.separation : undefined),
   };
 }
 

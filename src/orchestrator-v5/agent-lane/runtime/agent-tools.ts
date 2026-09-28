@@ -416,6 +416,30 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       whole_request: WHOLE_REQUEST,
     }, ['label', 'affects', 'rationale']),
   },
+  // PJ-E-FIG (DL #72 5866036457): the add-risk door's twin for new factors carrying the user's figures. Text kept minimal:
+  // every character here is sent on every turn (C1 latency).
+  {
+    type: 'function',
+    name: 'propose_new_factor',
+    description:
+      'Add 1\u20133 NEW factors whose figures the user just stated (e.g. \u201cseniors cost \u00a3120k a year each\u201d), each figure '
+      + 'recorded as theirs, as ONE change. Prepares only: show the factors and figures, never the id, then authorise_change once '
+      + 'they agree. A factor the model has already: propose_assumptions.',
+    parameters: obj({
+      factors: {
+        type: 'array', minItems: 1, maxItems: 3,
+        items: obj({
+          label: { type: 'string' },
+          unit: { type: 'string', description: 'The user\u2019s unit, e.g. "GBP/year per engineer".' },
+          today: obj({ value: { type: 'number', description: 'Whole units: 120000 for \u00a3120k.' }, unit: { type: 'string' } }, ['value']),
+          affects: { type: 'string', description: 'ONE existing outcome, or a factor no option sets, that it drives, as the CURRENT MODEL STATE labels it.' },
+          direction: { type: 'string', enum: ['positive', 'negative'] },
+        }, ['label', 'unit', 'today', 'affects', 'direction']),
+      },
+      rationale: { type: 'string' },
+      whole_request: WHOLE_REQUEST,
+    }, ['factors', 'rationale']),
+  },
   {
     type: 'function',
     name: 'propose_limit_change',
@@ -594,7 +618,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_new_risk', 'propose_link_strength', 'propose_link_strengths', 'propose_goal_target', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'authorise_change', 'withdraw_proposal'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_strengths', 'propose_goal_target', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'authorise_change', 'withdraw_proposal'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -667,6 +691,14 @@ export interface AgentCapabilities {
     label: string; rationale: string;
     affects: readonly { target_label: string; direction: 'positive' | 'negative' }[];
     caused_by?: readonly { factor_label: string; direction: 'positive' | 'negative' }[];
+  }): Promise<ToolResult>;
+  /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). PJ-E-FIG. */
+  proposeNewFactor?(ctx: AgentToolContext, args: {
+    rationale: string;
+    factors: readonly {
+      label: string; unit: string; today: { value: number; unit?: string };
+      affects: string; direction: 'positive' | 'negative';
+    }[];
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). SLICE C2. */
   proposeLimitChange?(ctx: AgentToolContext, args: {
@@ -768,6 +800,10 @@ export async function dispatchTool(
       return caps.proposeNewRisk !== undefined
         ? caps.proposeNewRisk(ctx, args as never)
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A risk cannot be added here. Nothing was changed.' };
+    case 'propose_new_factor':
+      return caps.proposeNewFactor !== undefined
+        ? caps.proposeNewFactor(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A factor cannot be added here. Nothing was changed.' };
     case 'propose_limit_change':
       return caps.proposeLimitChange !== undefined
         ? caps.proposeLimitChange(ctx, args as never)

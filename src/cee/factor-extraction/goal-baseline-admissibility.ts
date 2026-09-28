@@ -87,6 +87,13 @@ export function admitGoalBaseline(args: {
   readonly rawTarget: number;
   readonly rawBaseline: number;
   readonly cap: number;
+  /**
+   * ⭐ RULE 1, MIRRORED, for a CEILING the run scores as one (a held `<=` sent with `goal_direction: 'minimise'`,
+   * `admitStatedGoalLevel`; MG #72 5870097103). The level must sit strictly ABOVE the target: a level already AT OR
+   * BELOW it is `direction_unsupported` (the question would be upside down; equality is withheld too, the
+   * conservative reading of the ruling). Rule 2 is unchanged. Absent ⇒ the floor rule, byte for byte.
+   */
+  readonly ceiling?: boolean;
 }): GoalBaselineAdmission {
   const { rawTarget, rawBaseline, cap } = args;
 
@@ -99,7 +106,7 @@ export function admitGoalBaseline(args: {
     return { admitted: false, reason: 'baseline_off_cap_scale' };
   }
 
-  if (statedLevelExceedsTarget(rawTarget, rawBaseline)) {
+  if (args.ceiling === true ? !statedLevelExceedsTarget(rawTarget, rawBaseline) : statedLevelExceedsTarget(rawTarget, rawBaseline)) {
     return { admitted: false, reason: 'direction_unsupported' };
   }
 

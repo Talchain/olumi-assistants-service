@@ -28,6 +28,7 @@ import {
   agentNoLeaderSentence,
   enforceAgentLaneLeaderClaimsAtWire,
   sentenceRanksOptions,
+  separationOf,
 } from '../withheld-leader-fail-closed.js';
 import { leaderStandingOf } from '../provisional-view.js';
 import type { StoredLimitVerdicts } from '../../../orchestrator/context/constraint-feasibility.js';
@@ -135,7 +136,8 @@ describe('⭐ the no-leader sentence reads the limit rows', () => {
 
   it('C5: the provisional view’s "because" gives the same cause from the same rows', () => {
     const standing = leaderStandingOf({ analysisState: RUN1.analysis_state, analysisReady: RUN1.analysis_ready, limitVerdicts: RUN1.limit_verdicts ?? undefined });
-    expect(standing.because).toBe(agentNoLeaderReason('constraint_verdict_withheld', RUN1.analysis_ready, [], RUN1.limit_verdicts ?? undefined));
+    // R13 (DL 5871699334): the same producer, fed the run's own separation, so a near tie on this run is said too.
+    expect(standing.because).toBe(agentNoLeaderReason('constraint_verdict_withheld', RUN1.analysis_ready, [], RUN1.limit_verdicts ?? undefined, undefined, separationOf(RUN1.analysis_state)));
     expect(standing.because).toContain('checked only against Olumi’s estimates');
   });
 });
