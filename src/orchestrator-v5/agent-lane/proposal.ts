@@ -79,7 +79,13 @@ export interface ProposalOperation {
      * (`commitLimitEditInProcess` → `add_constraint`), which keeps the row's unit and frame and stamps the figure as the
      * user's. Never adds a limit, never the goal's own target.
      */
-    | 'set_limit';
+    | 'set_limit'
+    /**
+     * ⭐ ONE LINK OF A SET OF LINK STRENGTHS (DL #72 5871594233; seam Canonical 5871633483) — `path` is `from::to`, `value`
+     * is `{magnitude, intent, expected, band, author}`. A set is written ONLY whole: every link through the canonical link
+     * writer, in ONE commit (`commitOptionLevels` → `link_strengths`). An Olumi band is stamped as Olumi's estimate.
+     */
+    | 'set_link_strength';
   /** Node id, or `from::to` for an edge. */
   readonly path: string;
   readonly value?: unknown;

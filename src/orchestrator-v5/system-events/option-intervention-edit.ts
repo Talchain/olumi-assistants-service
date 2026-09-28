@@ -68,10 +68,14 @@ import type { FrameFreshness } from '../graph-management/types.js';
 import { normaliseAbsenceOnly, projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { interventionKeysFollowInterventions } from '../reindex-intervention-keys.js';
 import { reconcileTopLevelOptionsFromNodes } from '../reconcile-top-level-options.js';
-import { APPROVED_LEVEL_ADOPTION_SOURCE, approvedLevelSourceFor, runWithApprovedAdoption } from '../agent-lane/approved-adoption-context.js';
+import { APPROVED_LEVEL_ADOPTION_SOURCE, approvedLevelSourceFor, runWithApprovedAdoption, runWithApprovedLinkAdoptions } from '../agent-lane/approved-adoption-context.js';
+import { runWithStatedLinkBand } from '../agent-lane/stated-link-band-context.js';
+import type { IdentityRunUse } from '../compose/definitional-links.js';
+import type { InfluenceBand } from '../format/influence-bands.js';
 import { structuralEdgeValue } from '../routing/add-option-transaction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { applyFactorValueEdit, type FactorValueEditResult } from './factor-value-edit.js';
+import { applyEdgeStrengthEdit } from './edge-strength-edit.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
 
 /**
@@ -499,6 +503,118 @@ async function applyApprovedFactorValues(
   return { kind: 'applied', graph, handlerFacts, confirmations, linksResized: linksResizedByContract(before, graph, touched) };
 }
 
+/**
+ * ⭐ ONE LINK OF AN APPROVED SET OF LINK STRENGTHS (DL #72 5871594233; seam Canonical 5871633483, DL 5871661097). Paul's
+ * production test (`64c5eccc`): four permissions recorded one link of eight. A set is written by the canonical link
+ * writer (`applyEdgeStrengthEdit`, the canvas's own edit, with its expected-before tuple and its definitional-link
+ * refusal) once per link, IN MEMORY, and committed as ONE append — all of them or none.
+ */
+export interface ApprovedLinkStrength {
+  readonly from: string;
+  readonly to: string;
+  /** |mean| the link lands on: the band's midpoint (`set`), or the current |mean| kept (`confirm_current`). */
+  readonly magnitude: number;
+  readonly intent: 'set' | 'confirm_current';
+  /**
+   * The link as the approval saw it: any other mean, direction or REVIEW refuses the whole set. `reviewed_at` is the
+   * link's `provenance.reviewed_by_user.at` (a confirm) when proposed, or null: a canvas confirm since then writes only
+   * that stamp (#2257), which neither the mean nor the analysis hash can see.
+   */
+  readonly expected: { readonly mean: number; readonly effect_direction: 'positive' | 'negative'; readonly reviewed_at?: string | null };
+  readonly band: InfluenceBand;
+  /**
+   * Olumi's band, adopted by the approval: stamped as Olumi's size (`olumi_estimate`), never the user's. Otherwise the
+   * band the user named this turn, stamped as the canvas writer stamps it.
+   */
+  readonly adopted: boolean;
+}
+
+/** The members of a link the canonical link writer owns: its size, direction and whose size it is. Nothing else. */
+const LINK_WRITER_OWNED_EDGE_MEMBERS = ['strength', 'effect_direction', 'provenance', 'provenance_display', 'defaulted', 'exists_defaulted', 'std_defaulted'] as const;
+
+/**
+ * ⛔ ONLY THE DECLARED LINKS MAY CHANGE, and on each only what the link writer owns: no node, no other link, no edge
+ * added or removed or re-ordered, no top-level field.
+ */
+export function linkStrengthsPostimageIsScoped(storedBefore: unknown, after: unknown, links: readonly { from: string; to: string }[]): boolean {
+  const before = normaliseAbsenceOnly(storedBefore);
+  if (!isEditableGraph(before) || !isEditableGraph(after) || links.length === 0) return false;
+  if (new Set(links.map(l => `${l.from}::${l.to}`)).size !== links.length) return false;
+  if (after.edges.length !== before.edges.length) return false;
+  const restored = structuredClone(after);
+  for (let i = 0; i < restored.edges.length; i += 1) {
+    const now = restored.edges[i]! as Record<string, unknown> & { from: string; to: string };
+    const was = before.edges[i]! as Record<string, unknown> & { from: string; to: string };
+    if (now.from !== was.from || now.to !== was.to) return false;
+    if (!links.some(l => l.from === was.from && l.to === was.to)) continue;
+    for (const member of LINK_WRITER_OWNED_EDGE_MEMBERS) {
+      if (Object.hasOwn(was, member)) now[member] = structuredClone(was[member]);
+      else delete now[member];
+    }
+  }
+  return isDeepStrictEqual(restored, before);
+}
+
+/**
+ * The approved set, applied IN MEMORY through the canonical link writer against ONE base, in order. All or nothing:
+ * the first link refused refuses the whole set (`linkIndex` names it). No I/O: the writer reads only the graph given.
+ */
+async function applyApprovedLinkStrengths(
+  before: EditableGraph,
+  links: readonly ApprovedLinkStrength[],
+  ctx: { readonly scenarioId: string; readonly turnId: string; readonly requestId: string; readonly stage: OlumiResponse['stage_indicator'];
+    readonly lastRunIdentityUse: IdentityRunUse | null },
+): Promise<
+  | { readonly kind: 'applied'; readonly graph: EditableGraph; readonly handlerFacts: readonly unknown[]; readonly confirmations: readonly string[] }
+  | { readonly kind: 'refused'; readonly reason: string; readonly linkIndex: number }
+> {
+  const refuse = (reason: string, linkIndex: number) => ({ kind: 'refused' as const, reason, linkIndex });
+  const seen = new Set<string>();
+  let working: unknown = structuredClone(before);
+  const handlerFacts: unknown[] = [];
+  const confirmations: string[] = [];
+  for (let i = 0; i < links.length; i += 1) {
+    const l = links[i]!;
+    const key = `${l.from}::${l.to}`;
+    if (seen.has(key)) return refuse('duplicate_link', i);
+    seen.add(key);
+    if (!Number.isFinite(l.magnitude) || l.magnitude < 0 || l.magnitude > 1) return refuse('link_strength_invalid', i);
+    // ⛔ B3 (DL CR on #2255): an estimate never goes over a strength that is the user's own AT WRITE TIME. The proposal
+    // checked it, but a canvas confirm since then keeps the mean and direction (so expected-before passes) and changes
+    // only provenance (outside the analysis hash). Checked on the graph being written, so the whole set refuses.
+    const stored = (working as EditableGraph).edges.find(e => e.from === l.from && e.to === l.to) as
+      { provenance?: { source?: unknown; reviewed_by_user?: { intent?: unknown; at?: unknown } }; defaulted?: unknown } | undefined;
+    if (l.adopted && stored?.provenance?.source === 'user_specified' && stored.defaulted !== true) return refuse('link_became_users_own', i);
+    // …and a link the user REVIEWED since the proposal (a canvas confirm writes only that stamp) is their settled view.
+    const review = stored?.provenance?.reviewed_by_user;
+    const reviewedAt = review?.intent === 'confirm' && typeof review.at === 'string' ? review.at : null;
+    if (reviewedAt !== (l.expected.reviewed_at ?? null)) return refuse('link_reviewed_since', i);
+    // Direction is kept: a reversal is the user's words on one link (`propose_link_strength`), never part of a set.
+    const event = { kind: 'edge_strength_edit' as const, from: l.from, to: l.to, intent: l.intent, direction_intent: 'preserve' as const,
+      magnitude: l.magnitude, expected: { mean: l.expected.mean, effect_direction: l.expected.effect_direction } };
+    const write = () => applyEdgeStrengthEdit({
+      payload: { kind: 'system_event', turn_id: ctx.turnId, scenario_id: ctx.scenarioId, stage: ctx.stage, event } as never,
+      event: event as never, requestId: ctx.requestId, persistedGraph: working, lastRunIdentityUse: ctx.lastRunIdentityUse,
+    });
+    let res: Awaited<ReturnType<typeof applyEdgeStrengthEdit>>;
+    try {
+      res = l.adopted
+        ? await runWithApprovedLinkAdoptions([{ scenarioId: ctx.scenarioId, proposalId: ctx.turnId, from: l.from, to: l.to, magnitude: l.magnitude, band: l.band }], write)
+        : await runWithStatedLinkBand({ scenarioId: ctx.scenarioId, proposalId: ctx.turnId, from: l.from, to: l.to, band: l.band }, write);
+    } catch {
+      return refuse('canonical_graph_unavailable', i);
+    }
+    if (res.kind !== 'mutated') return refuse(`link_${res.reason}`, i);
+    working = res.mutatedGraph;
+    handlerFacts.push(...res.handlerFacts);
+    if (res.response.assistant_text) confirmations.push(res.response.assistant_text);
+  }
+  const graph = projectGraphForPersistence(working);
+  // No single link is to blame for a scope refusal, so none is named (-1 names none downstream).
+  if (!isEditableGraph(graph) || !linkStrengthsPostimageIsScoped(before, graph, links)) return refuse('link_scope_mismatch', -1);
+  return { kind: 'applied', graph, handlerFacts, confirmations };
+}
+
 export type OptionInterventionExecutionInput = Omit<OptionInterventionTransactionInput, 'persistedGraph' | 'source'> & {
   readonly stage: OlumiResponse['stage_indicator'];
   /** Existing caller request digest: informational, NOT the idempotency key. */
@@ -538,6 +654,10 @@ export type OptionInterventionBatchExecutionInput =
     readonly values?: readonly ApprovedFactorValue[];
     /** The ranges the approval attaches to factors holding a bare amount — in the SAME commit. */
     readonly frames?: readonly ApprovedFactorFrame[];
+    /** ⭐ An approved set of link strengths: ONE append, alone (never with levels, values or ranges). */
+    readonly linkStrengths?: readonly ApprovedLinkStrength[];
+    /** The last Run's use of each declared identity (`identityRunUseFromFacts`); null = no Run, a definition refuses. */
+    readonly lastRunIdentityUse?: IdentityRunUse | null;
   };
 
 /**
@@ -552,7 +672,8 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       /** Olumi's own links this commit re-sized to fit a new level (P1-a); empty when none. */
       readonly linksResized?: readonly { from: string; to: string }[] }
   | { readonly kind: 'unchanged' }
-  | { readonly kind: 'refused'; readonly reason: string; readonly index?: number; readonly valueIndex?: number; readonly frameIndex?: number }
+  | { readonly kind: 'refused'; readonly reason: string; readonly index?: number; readonly valueIndex?: number; readonly frameIndex?: number;
+      readonly linkIndex?: number }
   | { readonly kind: 'unverified'; readonly reason: string; readonly commitAttempted: boolean }
 > {
   let before: unknown;
@@ -571,7 +692,8 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     return { optionId: t.optionId, factorId: t.factorId, modelValue: t.modelValue, ...(source !== undefined ? { source } : {}),
       ...(t.figure !== undefined ? { figure: t.figure } : {}) };
   });
-  const { targets: _callerTargets, expectedLinks, values: _callerValues, frames: _callerFrames, ...common } = input;
+  const { targets: _callerTargets, expectedLinks, values: _callerValues, frames: _callerFrames, linkStrengths: _callerLinks,
+    lastRunIdentityUse: _callerRunUse, ...common } = input;
   // ⭐ THE VALUES FIRST, ON THE PERSISTED BASE, IN MEMORY — then the links and levels on the graph they produce, and ONE
   // append for all of it. The caller's base is checked against the PERSISTED model before anything is applied: the
   // levels are prepared on the post-value graph, so their own stale check can no longer see the caller's base.
@@ -579,7 +701,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   const frames = input.frames ?? [];
   let levelBase: unknown = before;
   let levelBaseHash = input.expectedGraphHash;
-  let valueFacts: readonly ValueHandlerFact[] = [];
+  let valueFacts: readonly unknown[] = [];
   let valueConfirmations: readonly string[] = [];
   let linksResized: readonly { from: string; to: string }[] = [];
   if (values.length + frames.length > 0) {
@@ -603,11 +725,36 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     valueConfirmations = applied.confirmations;
     linksResized = applied.linksResized;
   }
-  const valuesChanged = values.length + frames.length > 0 && !isDeepStrictEqual(levelBase, before);
+  /**
+   * ⭐ A SET OF LINK STRENGTHS (seam Canonical #72 5871633483): the values' own shape — applied in memory on the
+   * persisted base, through the canonical link writer, then the ONE append and read-back below. Alone, so a set is
+   * never half of a mixed approval, and checked in full before anything is sent.
+   */
+  const linkStrengths = input.linkStrengths ?? [];
+  if (linkStrengths.length > 0) {
+    if (targets.length + values.length + frames.length > 0 || (expectedLinks?.length ?? 0) > 0) {
+      return { kind: 'refused', reason: 'link_strengths_not_alone' };
+    }
+    if (!isEditableGraph(before)
+      || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
+    const applied = await applyApprovedLinkStrengths(before, linkStrengths, { scenarioId: input.scenarioId, turnId: input.turnId,
+      requestId: input.requestId, stage: input.stage, lastRunIdentityUse: input.lastRunIdentityUse ?? null });
+    if (applied.kind === 'refused') return { kind: 'refused', reason: applied.reason, linkIndex: applied.linkIndex };
+    const appliedHash = computeAnalysisAffectingGraphHash(applied.graph);
+    if (!appliedHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    levelBase = applied.graph;
+    levelBaseHash = appliedHash;
+    valueFacts = applied.handlerFacts;
+    valueConfirmations = applied.confirmations;
+  }
+  const valuesChanged = values.length + frames.length + linkStrengths.length > 0 && !isDeepStrictEqual(levelBase, before);
   // ⭐ A VALUES-ONLY APPROVAL IS ONE COMMIT TOO (Canonical #70 5850018984): Olumi's starting point is usually values
   // with no level, and wrote each value as its own commit. With no level to prepare, the values (and their ranges)
   // are the whole plan: the same writer, adoption authority, scope guard, ONE append and ONE read-back.
-  const candidate = targets.length === 0 && values.length + frames.length > 0
+  const candidate = targets.length === 0 && values.length + frames.length + linkStrengths.length > 0
     ? ({ kind: 'unchanged' } as const)
     : applyOptionInterventionBatch({ ...common, expectedGraphHash: levelBaseHash, persistedGraph: levelBase, targets });
   if (candidate.kind === 'refused') return candidate;

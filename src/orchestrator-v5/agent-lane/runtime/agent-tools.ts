@@ -343,6 +343,34 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   },
   {
     type: 'function',
+    name: 'propose_link_strengths',
+    description:
+      'Record the strengths of SEVERAL existing links as ONE change the user approves once \u2014 never one approval per link. '
+      + 'Use it when the user gives strengths for more than one link in one message, or asks Olumi to size links for them '
+      + '(they ask what you recommend, then agree to it). This does NOT change anything: it prepares ONE change and returns its id, '
+      + 'which you keep for authorise_change: show the user what each link will hold, never the id, before they approve. '
+      + 'A link is recorded as the user\u2019s own ONLY when its `from_words` are the user\u2019s exact words from THIS message naming that link '
+      + '(one of its ends) AND its band; naming the band a link already sits in keeps it as it is. '
+      + 'Every other link is recorded as OLUMI\u2019S ESTIMATE, applied with their approval \u2014 never as theirs \u2014 and you must say which are which. '
+      + 'Directions are kept: a link the user says runs the other way is propose_link_strength, one link at a time. '
+      + 'A strength the user set themselves is never replaced by an estimate. The set is written whole or not at all.' + SLIGHT_IS_WEAK,
+    parameters: obj({
+      links: {
+        type: 'array', minItems: 1, maxItems: 12,
+        description: 'Every link in the set, each once.',
+        items: obj({
+          from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
+          to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
+          strength: { type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'], description: 'The band the user named for this link, or Olumi\u2019s estimate when they did not.' },
+          from_words: { type: 'string', description: 'ONLY when the user named this link\u2019s band: their exact words from THIS message that name this link (one of its ends) and the band. Leave it out for Olumi\u2019s estimate.' },
+        }, ['from_label', 'to_label', 'strength']),
+      },
+      rationale: { type: 'string', description: 'What the user asked for, in their words.' },
+      whole_request: WHOLE_REQUEST,
+    }, ['links', 'rationale']),
+  },
+  {
+    type: 'function',
     name: 'propose_goal_target',
     description:
       'Set the goal’s success target to the figure the user has just stated (for example "we need at least £60k MRR", '
@@ -592,7 +620,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_goal_target', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'authorise_change', 'withdraw_proposal'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_strengths', 'propose_goal_target', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'authorise_change', 'withdraw_proposal'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -650,6 +678,11 @@ export interface AgentCapabilities {
     from_words?: string;
     /** With a `direction` that reverses the link: the user's own words THIS turn saying it runs the other way. */
     direction_from_words?: string;
+  }): Promise<ToolResult>;
+  /** Optional: a set of link strengths as ONE approval and ONE commit; a capability set without it refuses the tool plainly. */
+  proposeLinkStrengths?(ctx: AgentToolContext, args: {
+    links: readonly { from_label: string; to_label: string; strength: 'weak' | 'moderate' | 'strong' | 'very strong'; from_words?: string }[];
+    rationale: string;
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */
   proposeGoalTarget?(ctx: AgentToolContext, args: {
@@ -756,6 +789,10 @@ export async function dispatchTool(
     case 'propose_link_strength':
       return caps.proposeLinkStrength !== undefined
         ? caps.proposeLinkStrength(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'Link strengths cannot be recorded here. Nothing was changed.' };
+    case 'propose_link_strengths':
+      return caps.proposeLinkStrengths !== undefined
+        ? caps.proposeLinkStrengths(ctx, args as never)
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'Link strengths cannot be recorded here. Nothing was changed.' };
     case 'propose_goal_target':
       return caps.proposeGoalTarget !== undefined

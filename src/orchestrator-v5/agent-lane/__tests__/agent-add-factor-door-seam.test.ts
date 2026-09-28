@@ -278,8 +278,14 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect(await hashNow()).not.toBe(hashBefore);
     const g = graphNow();
     const node = (id: string) => g.nodes.find((x) => x.id === id)!;
-    expect(node(senior)['observed_state']).toEqual({ value: 0.12, raw_value: 120000, cap: 1000000, declared_scale: 'unit_interval', unit: UNIT, source: USER_SOURCE });
-    expect(node(junior)['observed_state']).toEqual({ value: 0.65, raw_value: 65000, cap: 100000, declared_scale: 'unit_interval', unit: UNIT, source: USER_SOURCE });
+    // R11 × #2235: two figures, so the pairing was CONFIRMED on the card — the node keeps how it became the user's.
+    const confirmedPairing = { reviewed_by_user: { intent: 'confirm_pairing', quote: FIG_MSG } };
+    expect(node(senior)['observed_state']).toEqual({ value: 0.12, raw_value: 120000, cap: 1000000, declared_scale: 'unit_interval', unit: UNIT, source: USER_SOURCE, ...confirmedPairing });
+    expect(node(junior)['observed_state']).toEqual({ value: 0.65, raw_value: 65000, cap: 100000, declared_scale: 'unit_interval', unit: UNIT, source: USER_SOURCE, ...confirmedPairing });
+    // …and it survives the save and a reload: a JSONB round trip, then the persisted-graph parse.
+    const { GraphV3 } = await import('../../../schemas/cee-v3.js');
+    const reloaded = GraphV3.parse(JSON.parse(JSON.stringify(g))) as unknown as G;
+    expect((reloaded.nodes.find((x) => x.id === senior)!['observed_state'] as Record<string, unknown>)['reviewed_by_user']).toEqual(confirmedPairing.reviewed_by_user);
     const { hypothesisEdgeValue } = await import('../../routing/add-option-transaction.js');
     for (const id of [senior, junior]) {
       expect(node(id)['provenance'], 'no node-level field beyond the value').toBeUndefined();

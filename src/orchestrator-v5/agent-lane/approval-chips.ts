@@ -34,6 +34,8 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_goal_current_level: { label: 'Record this current level', message: 'Yes, record it.' },
   // A link's strength recorded as the user's own (challenge → authorised revision): one button, carried like the rest.
   propose_link_strength: { label: 'Record this link', message: 'Yes, record that.' },
+  // A set of link strengths: ONE button records the whole set, as one commit (DL #72 5871594233).
+  propose_link_strengths: { label: 'Record these links', message: 'Yes, record those.' },
   // The goal's success target the user stated, written through the product's typed target writer.
   propose_goal_target: { label: 'Set this target', message: 'Yes, set that target.' },
   // SLICE C2: a new risk, held on the product's own seam like the add-option (`gmh_`, the product's words on the button).
@@ -59,7 +61,7 @@ export const ONE_CHANGE_PER_APPROVAL_DETAIL =
   + 'it moves the model, so a second proposal made now could never be approved after it. Nothing was stored. If both '
   + 'belong to one operation, propose them in ONE call instead (propose_new_option carries up to 4 options in `options`; '
   + 'propose_starting_point carries starting values and option levels together; propose_option_interventions adds the '
-  + 'link a level needs). Otherwise present the change '
+  + 'link a level needs; propose_link_strengths carries several links\u2019 strengths). Otherwise present the change '
   + 'already proposed, and tell the user this further change is not proposed yet \u2014 they can ask for it once they '
   + 'have answered. Never ask them to approve both.';
 
