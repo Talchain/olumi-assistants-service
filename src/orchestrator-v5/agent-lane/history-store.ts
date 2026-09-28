@@ -369,6 +369,49 @@ export function pruneSupersededToolOutputs(
   });
 }
 
+/**
+ * ⭐ A PAIR WHOSE OUTPUT IS ALREADY A STUB LEAVES THE HISTORY (PJ-C1 tokens; DL ranking #72 5865911113). Measured on the
+ * joined run 1 (CEE c35f1c7, `pj-20260928T074951Z` A09, 18,284 input tokens) with OpenAI's token counter on the route's
+ * real request: about 5.5k of it was history, and about 1.2k of that the ARGUMENTS of three proposals already approved
+ * and applied — their outputs stubbed by `pruneSupersededToolOutputs`, their calls kept. A kept reasoning item is
+ * re-billed as well (+39 tokens for a 39-token item), and the API refuses a call without it, so they leave together.
+ *
+ * After the prune: a `function_call` whose output is one of its stubs is dropped WITH that output, and a reasoning item
+ * is dropped only when EVERY call it produced is dropped (a reasoning item that also produced a kept call keeps all of
+ * them). Messages are never touched; the latest run, the latest approval and a proposal awaiting a yes are not stubs, so
+ * they stay byte for byte. PURE and idempotent; the result is valid input.
+ */
+const PRUNE_STUBS: ReadonlySet<string> = new Set([SUPERSEDED_OUTPUT, APPLIED_PROPOSAL_OUTPUT, EARLIER_APPROVAL_OUTPUT]);
+
+export function dropSupersededPairs(items: readonly unknown[]): unknown[] {
+  type It = { type?: unknown; call_id?: unknown; output?: unknown };
+  const stubbed = new Set<string>();
+  for (const i of items) {
+    const it = i as It;
+    if (it?.type === 'function_call_output' && typeof it.call_id === 'string' && PRUNE_STUBS.has(String(it.output))) stubbed.add(it.call_id);
+  }
+  if (stubbed.size === 0) return [...items];
+  const drop = new Set<number>();
+  items.forEach((i, k) => {
+    const it = i as It;
+    if (it?.type !== 'reasoning') return;
+    // What this reasoning item produced: the calls straight after it.
+    const produced: number[] = [];
+    for (let n = k + 1; n < items.length && (items[n] as It)?.type === 'function_call'; n += 1) produced.push(n);
+    if (produced.length === 0) return;
+    if (!produced.every((n) => stubbed.has(String((items[n] as It).call_id)))) {
+      for (const n of produced) stubbed.delete(String((items[n] as It).call_id));
+      return;
+    }
+    drop.add(k);
+  });
+  items.forEach((i, k) => {
+    const it = i as It;
+    if ((it?.type === 'function_call' || it?.type === 'function_call_output') && typeof it.call_id === 'string' && stubbed.has(it.call_id)) drop.add(k);
+  });
+  return items.filter((_, k) => !drop.has(k));
+}
+
 export function dropDanglingCalls(items: readonly unknown[]): unknown[] {
   const answered = new Set<string>();
   for (const i of items) {
