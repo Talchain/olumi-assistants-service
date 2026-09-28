@@ -34,6 +34,12 @@ const NEW_OPTION_KEYS: ReadonlySet<string> = new Set([
 const NEW_RISK_KEYS: ReadonlySet<string> = new Set([
   'ok', 'mutated', 'proposal_id', 'public_label', 'held_message', 'held_detail', 'base_revision', 'risk', 'note',
 ]);
+/**
+ * Every key `proposeOptionInterventions` returns on a clean success. Its disclosures (`not_the_users_figure`,
+ * `no_stated_range`, `already_set`, `levels_not_accepted`, `unresolved`, `adds_links_note`, `ambiguous_targets`) each
+ * carry a reason the user needs, so they keep the second call.
+ */
+const OPTION_LEVELS_KEYS: ReadonlySet<string> = new Set(['ok', 'mutated', 'proposal_id', 'public_label', 'base_revision', 'interventions', 'note']);
 /** The capability's one strength disclosure for a new risk; any other wording has no template here. */
 const RISK_PLACEHOLDER_STRENGTH = 'not known yet: Olumi uses a placeholder strength for each link, not an estimate';
 /** Every key `proposeLinkStrength` returns on success: its reading is already in its consent label. */
@@ -121,6 +127,24 @@ function newRiskReply(r: Rec): string | null {
   ], question(r.public_label));
 }
 
+/**
+ * ⭐ OPTION LEVELS (PJ-C1; live replay of 68 served two-call turns: 10 were these). The consent subject is the
+ * proposal's own label; each level Olumi estimated says so with its basis, in the option template's words. A level
+ * whose `stated_by` is not typed keeps the second call: whose figure it is is never guessed.
+ */
+function optionLevelsReply(r: Rec): string | null {
+  if (!nonEmpty(r.public_label) || !Array.isArray(r.interventions) || r.interventions.length === 0) return null;
+  const lines: string[] = [];
+  for (const raw of r.interventions) {
+    const iv = recordOf(raw);
+    if (iv === undefined || !nonEmpty(iv.option) || !nonEmpty(iv.factor) || typeof iv.value !== 'number' || !Number.isFinite(iv.value)) return null;
+    if (iv.stated_by === 'user') continue; // the consent subject states it
+    if (iv.stated_by !== 'olumi_estimate' || !nonEmpty(iv.basis)) return null;
+    lines.push(`${q(iv.factor)} under ${q(iv.option)} is set to ${shown(iv.value, iv.unit)}, Olumi’s estimate (${iv.basis.trim().replace(/\.$/, '')}), for you to correct.`);
+  }
+  return reply(r.public_label.trim().replace(/\.$/, ''), lines, question(undefined));
+}
+
 function linkStrengthReply(r: Rec): string | null {
   if (!nonEmpty(r.public_label)) return null;
   const label = r.public_label.trim().replace(/\.$/, '');
@@ -134,7 +158,8 @@ export function composeProposalReply(tool: string, args: unknown, result: unknow
   const r = recordOf(result);
   if (r === undefined || r.ok !== true || r.mutated !== false || !nonEmpty(r.proposal_id)) return null;
   const allowed = tool === 'propose_new_option' ? NEW_OPTION_KEYS : tool === 'propose_link_strength' ? LINK_KEYS
-    : tool === 'propose_new_risk' ? NEW_RISK_KEYS : undefined;
+    : tool === 'propose_new_risk' ? NEW_RISK_KEYS : tool === 'propose_option_interventions' ? OPTION_LEVELS_KEYS : undefined;
   if (allowed === undefined || Object.keys(r).some((k) => !allowed.has(k))) return null;
-  return tool === 'propose_new_option' ? newOptionReply(r) : tool === 'propose_new_risk' ? newRiskReply(r) : linkStrengthReply(r);
+  return tool === 'propose_new_option' ? newOptionReply(r) : tool === 'propose_new_risk' ? newRiskReply(r)
+    : tool === 'propose_option_interventions' ? optionLevelsReply(r) : linkStrengthReply(r);
 }

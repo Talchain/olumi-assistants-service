@@ -440,6 +440,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           },
         }, ['option_label', 'factor_label', 'value', 'basis']),
       },
+      whole_request: WHOLE_REQUEST,
     }, ['interventions']),
   },
   {

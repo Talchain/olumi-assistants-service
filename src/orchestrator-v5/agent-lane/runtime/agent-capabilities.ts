@@ -2806,6 +2806,8 @@ export function createAgentCapabilities(
           ...(i.derivedFrame !== null ? { range_taken_from_your_figure: i.derivedFrame } : {}),
           ...(i.needsLink ? { adds_the_link: true } : {}),
           basis: i.basis,
+          // Whose level this is, typed — the same flag the writer stamps (`authored_by` above). The one-call reply reads it.
+          stated_by: i.userStated ? 'user' : 'olumi_estimate',
         })),
         ...(unresolved.length > 0 ? { unresolved } : {}),
         ...(linkOps.length > 0 ? {

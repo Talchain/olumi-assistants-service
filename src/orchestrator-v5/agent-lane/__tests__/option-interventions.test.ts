@@ -119,9 +119,9 @@ describe('the value is read against the factor’s declared range', () => {
     expect(p.posted).toHaveLength(0);
     expect(r.interventions).toEqual([
       { option: 'Phase Pro price increase', factor: 'Pro feature value', value: 0.8, unit: 'index 0-1',
-        recorded_on_model_scale: 0.8, model_range: null, basis: 'the release lifts perceived value' },
+        recorded_on_model_scale: 0.8, model_range: null, basis: 'the release lifts perceived value', stated_by: 'olumi_estimate' },
       { option: 'Phase Pro price increase', factor: 'Pro plan price', value: 54, unit: 'GBP/month',
-        recorded_on_model_scale: 54 / 200, model_range: 200, basis: 'the user said a staged rise to £54 first' },
+        recorded_on_model_scale: 54 / 200, model_range: 200, basis: 'the user said a staged rise to £54 first', stated_by: 'olumi_estimate' },
     ]);
     // The label the user sees quotes THEIR number, never the normalised one.
     expect(String(r.public_label)).toMatch(/sets Pro plan price to 54 GBP\/month/);
@@ -144,7 +144,7 @@ describe('the value is read against the factor’s declared range', () => {
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r.interventions).toEqual([
       { option: 'Phase Pro price increase', factor: 'Pro subscribers', value: 300, unit: 'subscribers',
-        recorded_on_model_scale: 0.3, model_range: 1000, range_taken_from_your_figure: 1000, basis: 'growth' },
+        recorded_on_model_scale: 0.3, model_range: 1000, range_taken_from_your_figure: 1000, basis: 'growth', stated_by: 'olumi_estimate' },
     ]);
     expect(p.posted).toHaveLength(0);
 
