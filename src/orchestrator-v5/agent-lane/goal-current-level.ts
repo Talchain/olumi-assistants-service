@@ -46,6 +46,7 @@ import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-v
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import { createProposal, type ProposalOperation, type ProposalStore, type ReceiptSummary, type StructuredProposal } from './proposal.js';
 import { registrationTurnId } from '../graph-registration/registration-identity.js';
+import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 import type { AgentToolContext, ToolResult } from './runtime/agent-tools.js';
 
 /** The proposal op: the estate's existing node-update op, carrying the goal's new `observed_state`. */
@@ -66,7 +67,10 @@ export interface GoalCurrentLevelArgs {
 export interface GoalLevelRead {
   readonly graph_hash: string;
   readonly graph_identity_hash: string;
-  readonly nodes: readonly { id: string; kind: string; label: string; observed_state?: Record<string, unknown> }[];
+  readonly nodes: readonly {
+    id: string; kind: string; label: string; observed_state?: Record<string, unknown>;
+    scale_frame?: unknown; display_value?: unknown; nonlinear_identity?: unknown;
+  }[];
   readonly raw: Record<string, unknown>;
 }
 
@@ -121,6 +125,92 @@ function targetOf(node: Record<string, unknown>): GoalTarget {
 const sameTarget = (a: GoalTarget, b: GoalTarget): boolean =>
   a.goal_threshold_frame === b.goal_threshold_frame && a.goal_threshold_unit === b.goal_threshold_unit &&
   a.goal_threshold_raw === b.goal_threshold_raw && a.goal_threshold_cap === b.goal_threshold_cap;
+
+/**
+ * ⭐ OLUMI'S ONE ESTIMATED PART OF THE GOAL, RE-DERIVED FROM THE USER'S OWN FIGURES (MG #72 5864722128; the DL's
+ * alternative to withdrawing the identity, 5864468829).
+ *
+ * Served journey C: construction declared "MRR = Pro plan price × Pro paying subscribers" as Olumi's reading
+ * (`stated_in_brief: false`), with the brief's £49 price and Olumi's estimate of 1,000 subscribers. The user then
+ * gave their MRR, £72,000, and ISL refused the Run: the parts give £49,000, 31.9% from the figure the user stated
+ * (`IDENTITY_NOT_EVALUATED`, `identity_inconsistent`). The one figure in that product that is nobody's but Olumi's
+ * is the estimate, so in the SAME approval it becomes the level the user's own figures imply: 72,000 / 49 ≈ 1,469.4
+ * subscribers. The product then holds, ISL evaluates it, and the estimate stays Olumi's (`source` unchanged) — the
+ * approval text says so.
+ *
+ * NEVER (null, and the goal's level is recorded alone, as before):
+ *   · the product is the user's own (`stated_in_brief` true), malformed, or not a product;
+ *   · not exactly ONE part is Olumi's (`classifyValueSource`: `ai_drafted` / `system_repaired`), or any other part
+ *     is not the user's (`user_stated` / `user_ratified`) or holds no level above zero;
+ *   · the user's figure is not above zero;
+ *   · the estimate's frame is not read exactly (its `cap`, else the node's `scale_frame`, and its normalised value
+ *     must be raw / frame), or the derived level falls outside it;
+ *   · the estimate carries a `display_value`, which would go on saying the old figure;
+ *   · the estimate already holds the derived level.
+ * Pure: the same read and figure give the same answer, so apply re-runs it and requires the same result.
+ */
+export interface RederivedPart {
+  readonly node_id: string;
+  readonly label: string;
+  readonly unit?: string;
+  readonly was: number;
+  readonly now: number;
+  /** The user's own parts it is derived from, by label and level, in the product's order. */
+  readonly from: readonly { readonly label: string; readonly raw_value: number }[];
+  /** The estimate's `observed_state` as it will be written: Olumi's still, at the derived level. */
+  readonly observed_state: Record<string, unknown>;
+}
+
+const OLUMIS: ReadonlySet<string> = new Set(['ai_drafted', 'system_repaired']);
+const USERS: ReadonlySet<string> = new Set(['user_stated', 'user_ratified']);
+
+export function rederivedEstimatedPart(nodes: GoalLevelRead['nodes'], goalId: string, statedRaw: number): RederivedPart | null {
+  const goal = nodes.find((n) => n.id === goalId);
+  const identity = goal?.nonlinear_identity as { operation?: unknown; factor_ids?: unknown; stated_in_brief?: unknown } | undefined;
+  if (identity === null || typeof identity !== 'object' || identity.operation !== 'product' || identity.stated_in_brief !== false) return null;
+  if (!Array.isArray(identity.factor_ids) || !num(statedRaw) || statedRaw <= 0) return null;
+  const parts = identity.factor_ids.map((id) => {
+    const matches = nodes.filter((n) => n.id === id);
+    return matches.length === 1 && matches[0]!.kind === 'factor' ? matches[0]! : undefined;
+  });
+  if (parts.length < 2 || parts.some((p) => p === undefined)) return null;
+  const whose = (p: (typeof nodes)[number]): string => classifyValueSource(p.observed_state?.source);
+  const estimated = parts.filter((p) => OLUMIS.has(whose(p!)));
+  if (estimated.length !== 1) return null;
+  const part = estimated[0]!;
+  const given = parts.filter((p) => p !== part).map((p) => ({ label: p!.label, raw_value: p!.observed_state?.raw_value }));
+  if (parts.some((p) => p !== part && !USERS.has(whose(p!)))) return null;
+  if (!given.every((g): g is { label: string; raw_value: number } => num(g.raw_value) && g.raw_value > 0)) return null;
+
+  const os = part.observed_state!;
+  if (!num(os.raw_value) || !num(os.value) || part.display_value !== undefined) return null;
+  const frame = num(os.cap) && os.cap > 0 ? os.cap : num(part.scale_frame) && part.scale_frame > 0 ? part.scale_frame : undefined;
+  if (frame === undefined || Math.abs(os.value * frame - os.raw_value) > 1e-9 * Math.max(1, Math.abs(os.raw_value))) return null;
+  const now = statedRaw / given.reduce((product, g) => product * g.raw_value, 1);
+  if (!Number.isFinite(now) || now <= 0 || now > frame || now === os.raw_value) return null;
+  return {
+    node_id: part.id,
+    label: part.label,
+    ...(typeof os.unit === 'string' && os.unit.trim() !== '' ? { unit: os.unit.trim() } : {}),
+    was: os.raw_value,
+    now,
+    from: given,
+    observed_state: { ...os, raw_value: now, value: now / frame, ...(num(os.baseline) ? { baseline: now / frame } : {}) },
+  };
+}
+
+/** "about 1,469 subscribers" — a whole figure from 100 up, two decimals below. */
+function sayPartLevel(x: number, unit: string | undefined): string {
+  const n = x.toLocaleString('en-GB', { maximumFractionDigits: Math.abs(x) >= 100 ? 0 : 2 });
+  return unit !== undefined ? `${n} ${unit}` : n;
+}
+
+/** What the approval says about the re-derived estimate: whose it stays, what it was, and why it moves. */
+function sayRederived(goalLabel: string, part: RederivedPart): string {
+  return `Olumi's estimate of "${part.label}" becomes about ${sayPartLevel(part.now, part.unit)} (was ` +
+    `${sayPartLevel(part.was, part.unit)}), so that ${[...part.from.map((g) => `"${g.label}"`), `"${part.label}"`].join(' × ')} ` +
+    `gives your "${goalLabel}"; it stays Olumi's estimate, not your figure.`;
+}
 
 type StatedLevel =
   | { readonly ok: true; readonly raw: number; readonly normalised?: UnitNormalised }
@@ -356,17 +446,23 @@ export async function proposeGoalCurrentLevel(
   const asStated = `${value}${statedUnit !== '' ? ` ${statedUnit}` : ''}`;
   const figure = stated.normalised !== undefined ? `${asStated}, which is ${withUnit(raw)}` : asStated;
   const replaces = existingRaw !== undefined && existingRaw !== raw ? existingRaw : undefined;
+  // Carried INSIDE the goal's one op, so this stays one goal-level proposal with one write.
+  const rederived = rederivedEstimatedPart(g.nodes, goal.id, raw);
   const proposal = createProposal({
     scenario_id: ctx.scenario_id,
     user_id: ctx.authenticated_user_id,
     base_graph_identity_hash: g.graph_hash,
-    operations: [{ op: GOAL_CURRENT_LEVEL_OP, path: goal.id, value: { goal_current_level: observed, against: targetOf(node) } }],
+    operations: [{
+      op: GOAL_CURRENT_LEVEL_OP, path: goal.id,
+      value: { goal_current_level: observed, against: targetOf(node), ...(rederived !== null ? { rederived_part: rederived } : {}) },
+    }],
     provenance: { authored_by: 'user_stated', basis: 'the current level of the goal, as the user stated it' },
     validation: { admitted: true, loss_count: 0, refusals: [] },
     public_label:
       `Record the current level of "${goal.label}" as your figure: ` +
       (replaces !== undefined ? `${withUnit(replaces)} → ${figure}` : figure) +
-      ` (target ${withUnit(target)})`,
+      ` (target ${withUnit(target)})` +
+      (rederived !== null ? `. ${sayRederived(goal.label, rederived)}` : ''),
   });
   deps.proposals.put(proposal);
   return {
@@ -379,11 +475,19 @@ export async function proposeGoalCurrentLevel(
     as_stated: { value, ...(statedUnit !== '' ? { unit: statedUnit } : {}) },
     target: { value: target, ...(goalUnit !== undefined ? { unit: goalUnit } : {}) },
     ...(replaces !== undefined ? { replaces } : {}),
+    ...(rederived !== null
+      ? { rederived: { factor: rederived.label, from: rederived.was, to: rederived.now, ...(rederived.unit !== undefined ? { unit: rederived.unit } : {}), whose: "Olumi's estimate" } }
+      : {}),
     note:
       'Nothing has changed. Show the user the figure as they gave it' +
       (stated.normalised !== undefined ? ` and what it is recorded as (${asStated} is ${withUnit(raw)})` : '') +
-      ', and that it will be recorded as THEIR current level of the goal, never the id, and call authorise_change ' +
-      'with this proposal_id only once they agree.',
+      ', and that it will be recorded as THEIR current level of the goal, never the id' +
+      (rederived !== null
+        ? `, and that in the same change Olumi's estimate of "${rederived.label}" becomes about ` +
+          `${sayPartLevel(rederived.now, rederived.unit)} (was ${sayPartLevel(rederived.was, rederived.unit)}) so that ` +
+          `the product gives their figure — say it stays Olumi's estimate, never the user's`
+        : '') +
+      ', and call authorise_change with this proposal_id only once they agree.',
   };
 }
 
@@ -420,10 +524,24 @@ export async function applyGoalCurrentLevel(
     };
   }
 
+  // ⛔ THE RE-DERIVED ESTIMATE IS RE-DERIVED AT APPLY TIME, and must come out exactly as the user approved it — or,
+  // when none was approved, still none: the approval text said what would change, and nothing else is written.
+  const carried = (op.value as { rederived_part?: RederivedPart } | undefined)?.rederived_part ?? null;
+  const part = rederivedEstimatedPart(approved.nodes, goal.id, os.raw_value);
+  if (JSON.stringify(part) !== JSON.stringify(carried)) {
+    return {
+      ok: false, mutated: false, applied: false, proposal_id: proposal.proposal_id, refusal: 'superseded',
+      detail: `The figures "${goal.label}" is the product of changed after this was prepared, so nothing was written. ` +
+        'Read the model again and propose afresh.',
+    };
+  }
+
   const operationId = deps.operationId(`${proposal.proposal_id}#goal_current_level`);
   // A rescale stamp describes the figure it came with: a new figure without one never inherits the previous one's.
   const { provenance_unit_normalised: _previousStamp, ...kept } = (goal.observed_state ?? {}) as Record<string, unknown>;
-  const nodes = approved.nodes.map((n) => (n.id === op.path ? { ...n, observed_state: { ...kept, ...os } } : n));
+  const nodes = approved.nodes.map((n) => (n.id === op.path
+    ? { ...n, observed_state: { ...kept, ...os } }
+    : part !== null && n.id === part.node_id ? { ...n, observed_state: part.observed_state } : n));
   const reg = await deps.dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
     graph: { ...approved.raw, nodes },
     ...(approved.graph_hash !== '' ? { expected_graph_hash: approved.graph_hash } : {}),
@@ -449,7 +567,9 @@ export async function applyGoalCurrentLevel(
   // ⛔ CONFIRMED FROM STATE: the goal as stored now holds exactly the level this write carried.
   const after = await deps.readGraph(ctx.scenario_id);
   const held = after?.nodes.find((n) => n.id === op.path)?.observed_state;
-  const landed = held !== undefined && held.raw_value === os.raw_value && held.baseline === os.baseline && held.source === os.source;
+  const partHeld = part === null ? undefined : after?.nodes.find((n) => n.id === part.node_id)?.observed_state;
+  const landed = held !== undefined && held.raw_value === os.raw_value && held.baseline === os.baseline && held.source === os.source &&
+    (part === null || (partHeld !== undefined && partHeld.raw_value === part.now && partHeld.source === part.observed_state.source));
   if (!landed) {
     return {
       ok: false, mutated: true, applied: false, proposal_id: proposal.proposal_id, refusal: 'not_verified', receipts,
@@ -464,10 +584,18 @@ export async function applyGoalCurrentLevel(
     receipts,
     goal: goal.label,
     recorded: { value: os.raw_value, ...(os.unit !== undefined ? { unit: os.unit } : {}) },
+    ...(part !== null
+      ? { rederived: { factor: part.label, from: part.was, to: part.now, ...(part.unit !== undefined ? { unit: part.unit } : {}), whose: "Olumi's estimate" } }
+      : {}),
     revision_before: approved.graph_hash,
     revision_after: after?.graph_hash ?? approved.graph_hash,
     not_represented:
       `The current level of "${goal.label}" (${os.raw_value}${unit}) is recorded as the user’s own figure. Say so. ` +
+      (part !== null
+        ? `Olumi's estimate of "${part.label}" is now about ${sayPartLevel(part.now, part.unit)} (was ` +
+          `${sayPartLevel(part.was, part.unit)}), derived from the user's figures so that the product holds; say it is ` +
+          "still Olumi's estimate, never the user's. "
+        : '') +
       'An analysis the user asks for can now compare it with the target.',
   };
 }
