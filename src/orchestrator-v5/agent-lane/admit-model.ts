@@ -906,7 +906,6 @@ export interface PureLimitAsk {
   readonly levers_only_through: readonly string[];
   readonly question: string;
 }
-const USER_STATED_LINK_SOURCES: ReadonlySet<string> = new Set(['brief_extraction', 'user_specified']);
 type RollupNode = { id: string; kind?: string; label?: string; category?: string; goal_threshold_unit?: string; observed_state?: unknown };
 type RollupEdge = { from: string; to: string; effect_direction?: string; provenance?: { source?: string } };
 
