@@ -17,7 +17,7 @@ import type { ValidationMetadata } from "../cee/validation-pipeline/types.js";
 import { GoalConstraintSchema } from "./assist.js";
 import { CausalClaimsArraySchema } from "./causal-claims.js";
 import { GoalThresholdCapProvenanceSchema } from "../utils/goal-threshold-cap.js";
-import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES, GoalThresholdFrame, OBSERVED_STATE_SOURCE_LITERALS } from "@talchain/schemas";
+import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES, GoalThresholdFrame, QuantityFrame, OBSERVED_STATE_SOURCE_LITERALS } from "@talchain/schemas";
 import { CAUSAL_CLAIMS_WARNING_CODES } from "./causal-claims.js";
 import { CANONICAL_ID_REGEX } from "../cee/utils/id-normalizer.js";
 import { OBSERVED_STATE_STATED_ROLES } from "../cee/context-integrity/stated-role-vocabulary.js";
@@ -244,6 +244,13 @@ export const NodeV3 = z.object({
    * contract's own enum rather than restated as a local literal union.
    */
   goal_threshold_frame: GoalThresholdFrame.optional(),
+  /**
+   * ⭐ WHAT THE NODE'S VALUE MEASURES (`@talchain/schemas` 0.61.0 `NodeV3Schema.quantity_frame`, R1): `change` = the value
+   * IS a change from today (0 today by definition); absent means `level`. Declared for the same reason as
+   * `goal_threshold_frame` above: undeclared, it is SILENTLY DELETED by the run path's `GraphV3.safeParse`
+   * (contract-field-guard `stripped:cee.NodeV3:quantity_frame`). A malformed value is dropped, never a reason to refuse.
+   */
+  quantity_frame: QuantityFrame.optional().catch(undefined),
   /**
    * ⛔ WHO STATED THE GOAL TARGET, AND THE TARGET THEY STATED (goal nodes; written by the UI's register).
    *
