@@ -126,10 +126,32 @@ describe('⛔ CEE says a figure by one rule (Panel ROOT 5870330356, DL 587035394
     expect(chip('Set price to £49.50.')).toBe('Set Price to £49.50.');
   });
 
-  it('CONTRAST (CQE): a range’s hyphen is never a sign — "£100-£500" stays £100 and £500', () => {
-    expect(extractQuantities('Budget between £100-£500.').map((q) => q.value)).toEqual([100, 500]);
-    expect(extractQuantities('Price £100-£500').map((q) => q.value)).toEqual([100, 500]);
-  });
+  // DL CHANGES_REQUIRED on #2247 @03e509fc: CQE masks each figure it reads, so the hyphen after one looked like a word
+  // start. The sign is decided on the ORIGINAL text: a range's hyphen and a bullet are never a minus.
+  for (const [typed, want] of [
+    ['£100-£500', [100, 500]],
+    // The DL's reproduction: an edit verb's rule masks "£100" first, and at 03e509fc the hyphen then read as a sign.
+    ['Set the budget to £100-£500.', [100, 500]],
+    ['Increase spend by £100-£500', [100, 500]],
+    ['Set price to £100-£500', [100, 500]],
+    ['Budget between £100-£500.', [100, 500]],
+    ['Price £100-£500', [100, 500]],
+    ['between £100 -£500', [100, 500]],
+    ['Costs:\n-£500 for tools', [500]],
+    ['Costs:\n- £500 for tools', [500]],
+    ['10k -£5k', [5000]],
+    ['Costs:\n  -£500 for tools\n  -£200 for training', [500, 200]],
+  ] as const) {
+    it(`CONTRAST (CQE): a range’s hyphen or a bullet is never a sign — ${JSON.stringify(typed)}`, () => {
+      const gbp = extractQuantities(typed).filter((q) => q.unit === 'GBP');
+      expect(gbp.map((q) => q.value), typed).toEqual(want);
+    });
+  }
+  for (const [typed, want] of [['-£500', -500], ['Set the margin to -£500.', -500], ['Margin: -£500', -500], ['Set cost to (-£20k).', -20000], ['Adjust:\nSet the margin to -£500.', -500]] as const) {
+    it(`a minus that IS the sign stays negative — ${JSON.stringify(typed)}`, () => {
+      expect(extractQuantities(typed).map((q) => q.value)).toEqual([want]);
+    });
+  }
 
   it('pluraliseUnit moved with the rule and still answers its importers', () => {
     expect(pluraliseUnit('months', 1)).toBe('month');

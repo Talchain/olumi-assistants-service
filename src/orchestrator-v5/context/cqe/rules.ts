@@ -165,6 +165,11 @@ const WORD_FRACTIONS: ReadonlyArray<{ phrase: string; value: number }> = [
 
 export interface RuleContext {
   readonly wordNumberReplacements: readonly WordNumberReplacement[];
+  /**
+   * The text BEFORE any rule masked a span (same length and positions: a mask writes spaces). A rule that must read what
+   * stood beside its match reads it here, because by its turn an earlier figure is blank ("£100-£500" → "     -£500").
+   */
+  readonly unmaskedText?: string;
 }
 
 export interface CqePatternMatch {
@@ -762,8 +767,27 @@ const rule_P7_continuation: PatternRule = {
 // ---- P8 currency -----------------------------------------------------------
 
 // ⛔ A MINUS BEFORE THE SYMBOL IS THE FIGURE'S SIGN (AIQ on CEE #2247, 5871017629). "-£500" read as +500: measured on real
-// CQE, "Set the margin to -£500." gave value 500, while "£-500" gave -500. Only at a word start (start, space, "(",
-// ":" or "="), so a range's hyphen ("£100-£500") is never a sign.
+// CQE, "Set the margin to -£500." gave value 500, while "£-500" gave -500. The regex admits it only at a word start; the
+// loop below then decides it on the UNMASKED text (`minusIsSign`), so a range's hyphen or a bullet is never a sign.
+/**
+ * Is the "-" at `at` the sign of the figure after it? Decided on the UNMASKED text (DL CHANGES_REQUIRED on #2247:
+ * "£100-£500" read as (100, -500) because the first figure was already masked). Not a sign when a figure stands before
+ * it: a range ("£100-£500", "£100 -£500", "10k -£5k"). A bullet never reaches here as "-£": `preNormalise` spaces it
+ * off ("- £500") before whitespace is collapsed. Without the unmasked text it is never read as a sign: a write must not
+ * invent a negative.
+ */
+function minusIsSign(unmasked: string | undefined, at: number): boolean {
+  if (unmasked === undefined) return false;
+  const before = unmasked.slice(0, at);
+  return !(/[\d%)]\s*$/.test(before) || /\d\s*(?:k|m|bn|b|thousand|million|billion)\s*$/i.test(before));
+}
+
+/** The same match one character later: the leading "-" is not part of the figure. */
+function withoutLeadingChar(m: RegExpExecArray): RegExpExecArray {
+  const next = Object.assign([m[0].slice(1), undefined, ...m.slice(2)], { index: m.index + 1, input: m.input, groups: m.groups });
+  return next as unknown as RegExpExecArray;
+}
+
 const P8_SYMBOL_REGEX = new RegExp(
   `(?:(?<=^|[\\s(:=])(-))?(${CURRENCY_SYMBOL})\\s?(${NUM})\\s*(${SUFFIX})?`,
   'gi',
@@ -787,13 +811,17 @@ const rule_P8: PatternRule = {
   apply: (text, ctx) => {
     const out: CqePatternMatch[] = [];
 
-    for (const m of scanAllExec(text, P8_SYMBOL_REGEX)) {
+    for (const found of scanAllExec(text, P8_SYMBOL_REGEX)) {
+      // A minus that is NOT the figure's sign (a range's hyphen, a bullet) is left out of the span, so it stays
+      // readable by the range rule and the figure is read unsigned.
+      const signed = found[1] === '-' && minusIsSign(ctx.unmaskedText, found.index);
+      const m = found[1] === '-' && !signed ? withoutLeadingChar(found) : found;
       const unit = normaliseCurrencyUnit(m[2]);
       const num = parseNum(m[3]);
       const suffix = m[4];
       if (!Number.isFinite(num)) continue;
       // "-£-500" is not a double negative a person writes: the leading sign applies only to an unsigned figure.
-      const value = m[1] === '-' && num > 0 ? -applySuffix(num, suffix) : applySuffix(num, suffix);
+      const value = signed && num > 0 ? -applySuffix(num, suffix) : applySuffix(num, suffix);
       out.push(
         emit(
           m,

@@ -174,7 +174,7 @@ function runExtractionInternal(
       const ruleStart = cpuMs();
       let ruleMatches: CqePatternMatch[];
       try {
-        ruleMatches = rule.apply(maskedText, { wordNumberReplacements: replacements });
+        ruleMatches = rule.apply(maskedText, { wordNumberReplacements: replacements, unmaskedText: text });
       } catch (err) {
         log.warn(
           { pattern_id: rule.id, err: String(err) },
