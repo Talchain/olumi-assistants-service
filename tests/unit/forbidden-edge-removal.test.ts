@@ -49,12 +49,13 @@ describe("fixRemainingForbiddenEdges", () => {
     expect(fixRemainingForbiddenEdges(graph, "test").removedCount).toBe(1);
   });
 
-  it("removes outcome→outcome edge", () => {
+  // R10 (AI Quality #72 5872082179): outcome→outcome is a LEGAL link in the one table, so the sweep KEEPS it.
+  it("keeps outcome→outcome edge (R10: legal)", () => {
     const graph = createTestGraph({
       nodes: [{ id: "out_1", kind: "outcome", label: "O1" }, { id: "out_2", kind: "outcome", label: "O2" }],
       edges: [{ from: "out_1", to: "out_2", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.8, effect_direction: "positive" }],
     });
-    expect(fixRemainingForbiddenEdges(graph, "test").removedCount).toBe(1);
+    expect(fixRemainingForbiddenEdges(graph, "test").removedCount).toBe(0);
   });
 
   it("removes risk→risk edge", () => {
@@ -82,8 +83,9 @@ describe("fixRemainingForbiddenEdges", () => {
       ],
     });
     const result = fixRemainingForbiddenEdges(graph, "test");
-    expect(result.removedCount).toBe(2);
-    expect(graph.edges).toHaveLength(4);
+    // R10: out_1→out_2 (outcome→outcome) is legal and stays; only decision→outcome is removed.
+    expect(result.removedCount).toBe(1);
+    expect(graph.edges).toHaveLength(5);
   });
 
   it("logs reachability warning when removal disconnects target", async () => {

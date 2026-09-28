@@ -232,23 +232,24 @@ describe("repair order — factor→goal must reach the authority that repairs i
     });
 
     it("still deletes the patterns the sweep's own forbidden-edge list DOES own", () => {
-      // outcome→outcome is in the sweep's SIMPLE_REMOVE_PATTERNS: both authorities
-      // agree on DELETE there, so there is no disagreement to resolve and nothing to
-      // defer. Pinned so a broadened deferral cannot slip through unnoticed.
+      // risk→risk is in the sweep's SIMPLE_REMOVE_PATTERNS: both authorities agree on
+      // DELETE there, so there is no disagreement to resolve and nothing to defer.
+      // Pinned so a broadened deferral cannot slip through unnoticed. (R10: this row used
+      // outcome→outcome, which is now a LEGAL link in the one table.)
       const g = crmRecordSetGraph();
       (g.nodes as any[]).push(
-        { id: "out_a", kind: "outcome", label: "A" },
-        { id: "out_b", kind: "outcome", label: "B" },
+        { id: "risk_a", kind: "risk", label: "A" },
+        { id: "risk_b", kind: "risk", label: "B" },
       );
       (g.edges as any[]).push(
-        edge("fac_adoption_rate", "out_a", 0.5, "positive"),
-        edge("out_a", GOAL_ID, 0.5, "positive"),
-        edge("fac_adoption_rate", "out_b", 0.5, "positive"),
-        edge("out_b", GOAL_ID, 0.5, "positive"),
-        edge("out_a", "out_b", 0.5, "positive"), // outcome→outcome
+        edge("fac_adoption_rate", "risk_a", 0.5, "positive"),
+        edge("risk_a", GOAL_ID, -0.5, "negative"),
+        edge("fac_adoption_rate", "risk_b", 0.5, "positive"),
+        edge("risk_b", GOAL_ID, -0.5, "negative"),
+        edge("risk_a", "risk_b", 0.5, "positive"), // risk→risk
       );
       const repaired = simpleRepair(g, "test-req", STAGE_3_OPTS);
-      expect(hasEdge(repaired, "out_a", "out_b")).toBe(false);
+      expect(hasEdge(repaired, "risk_a", "risk_b")).toBe(false);
     });
   });
 

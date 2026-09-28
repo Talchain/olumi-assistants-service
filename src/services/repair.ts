@@ -1,23 +1,15 @@
 import type { GraphT } from "../schemas/graph.js";
 import { log } from "../utils/telemetry.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../config/graphCaps.js";
+import { ALLOWED_EDGE_KIND_PAIRS } from "../validators/graph-validator.types.js";
 
 /**
  * Allowed edge patterns (closed-world).
  * Storage includes option→risk hypotheses. The shared analysis-readiness
  * authority withholds them until their intervention mapping is resolved.
  */
-export const ALLOWED_EDGE_PATTERNS: Array<{ from: string; to: string }> = [
-  { from: "decision", to: "option" },
-  { from: "option", to: "factor" },
-  { from: "option", to: "risk" },
-  { from: "factor", to: "outcome" },
-  { from: "factor", to: "risk" },
-  { from: "factor", to: "factor" },
-  { from: "outcome", to: "goal" },
-  { from: "risk", to: "goal" },
-  { from: "risk", to: "outcome" },
-];
+// R10: derived from the ONE typed table (`validators/graph-validator.types.ts` ALLOWED_EDGES), never hand-kept.
+export const ALLOWED_EDGE_PATTERNS: ReadonlyArray<{ from: string; to: string }> = ALLOWED_EDGE_KIND_PAIRS;
 
 /**
  * Check if an edge pattern is allowed.
