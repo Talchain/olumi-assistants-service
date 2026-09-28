@@ -571,3 +571,37 @@ describe('adjust_edge_strength handler', () => {
     expect(fact.result.status).toBe('noop');
   });
 });
+
+describe('R3-9 — a definitional link is refused, never stored and ignored (AIQ 5866734772, DL 5866746362)', () => {
+  const withProduct = (): GraphV3T => {
+    const graph = buildD1Fixture();
+    const goal = graph.nodes.find((n) => n.id === 'g-revenue')!;
+    (goal as Record<string, unknown>).nonlinear_identity = { operation: 'product', factor_ids: ['f-budget', 'f-quality'], stated_in_brief: true };
+    return graph;
+  };
+
+  it('RED at base: an operand edge of a declared product is refused with the definition in the user\'s labels', async () => {
+    const handler = createAdjustEdgeStrengthHandler();
+    const graph = withProduct();
+    const before = JSON.stringify(graph);
+    await expect(
+      handler(buildInvocation(graph, makeProposal({ entityId: 'f-budget→g-revenue', strength: 0.8, operator: 'set' }))),
+    ).rejects.toMatchObject({
+      cause_kind: 'precondition_unmet_at_execute',
+      details: expect.objectContaining({ reason: 'definitional_link', carrier_id: 'g-revenue' }),
+    });
+    expect(JSON.stringify(graph), 'the graph passed in is untouched').toBe(before);
+  });
+
+  it('control: the same graph\'s ordinary belief edge (churn → revenue) still adjusts', async () => {
+    const handler = createAdjustEdgeStrengthHandler();
+    const outcome = await handler(buildInvocation(withProduct(), makeProposal({ entityId: 'f-churn→g-revenue', strength: -0.3, operator: 'set' })));
+    expect(outcome).toBeTruthy();
+  });
+
+  it('control: with no declared identity, the operand-shaped edge adjusts exactly as before', async () => {
+    const handler = createAdjustEdgeStrengthHandler();
+    const outcome = await handler(buildInvocation(buildD1Fixture(), makeProposal({ entityId: 'f-budget→g-revenue', strength: 0.8, operator: 'set' })));
+    expect(outcome).toBeTruthy();
+  });
+});

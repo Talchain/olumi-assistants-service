@@ -19,6 +19,7 @@ import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { log } from '../../utils/telemetry.js';
 import { statedLinkBandFor } from '../agent-lane/stated-link-band-context.js';
 import { composeToolCallResponse } from '../compose.js';
+import { definitionalLinkOf, definitionalLinkRefusalText } from '../compose/definitional-links.js';
 import { composeRecoverableHandlerResponse } from '../compose/recoverable-handler-response.js';
 import { composeRecoverableValidationResponse } from '../compose/recoverable-validation-response.js';
 import {
@@ -457,6 +458,24 @@ export async function applyEdgeStrengthEdit(
     );
   }
   const targetEdge = matches[0]!;
+
+  // R3-9 (AIQ #72 5866734772, DL 5866746362): a link a declared identity DEFINES (MRR = price × subscribers) is not a
+  // belief the analysis reads, so an edit to it would be stored and then silently ignored. Refused before the stale
+  // check and for every intent: a definition is never editable, and never stamped as the user's judgement. Read off
+  // the RAW persisted graph, which keeps an identity `NodeV3` drops (`definitional-links.ts`).
+  const definition = definitionalLinkOf(persistedGraph, event.from, event.to);
+  if (definition !== null) {
+    log.info(
+      {
+        event: 'v5.system_event.edge_strength_edit.definitional_link',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        carrier_id: definition.carrier_id,
+      },
+      'edge_strength_edit — the link is defined by a declared identity; refusing without a graph write',
+    );
+    return refuse(payload, 'definitional_link', definitionalLinkRefusalText(persistedGraph, definition));
+  }
 
   // Optimistic expected-before guard. This is exact by contract: the event is
   // a readback assertion, not a tolerance-based scientific comparison. The

@@ -1,0 +1,91 @@
+/**
+ * R3-9 (AIQ #72 5866734772; DL 5866746362, owner Canonical) — THE ONE DEFINITIONAL-LINK PREDICATE.
+ *
+ * A node that declares a `nonlinear_identity` (MRR = price × subscribers) is computed from its operands, and an
+ * evaluated identity never reads the strengths of the edges into it (ISL `definitional_edges`, R3-9e). Those edges are
+ * DEFINITIONS, not beliefs: every operand (`factor_ids`) and every addend (`addends`), into the carrier. A user's edit to
+ * one was stored and then silently ignored. Every edge writer asks THIS predicate and refuses in the user's words; the
+ * coaching card's "never select a definition" (`next-move.ts` `definitionalLinks`) reads the same set.
+ *
+ * ⛔ READ THE RAW GRAPH, NEVER THE PARSED ONE. CEE's `NodeV3` declares only `{ operation: 'product', factor_ids }`
+ * (`.strict()`, `.catch(undefined)`), so an identity with addends or a `sum` is DROPPED by `GraphV3.safeParse`, while
+ * PLoT and ISL evaluate it. A predicate over the parsed graph would call a real definition an ordinary belief.
+ *
+ * "Declared", not "evaluated": whether ISL evaluates an identity is known only after a Run, and a link the next Run
+ * defines must not be edited as a belief now. Total and pure; never throws on a malformed graph.
+ */
+import { composeEdgeIdentity } from './edge-address.js';
+
+export interface DefinitionalLink {
+  readonly carrier_id: string;
+  readonly operation: 'product' | 'sum';
+  /** The identity's `factor_ids`, in order. */
+  readonly operand_ids: readonly string[];
+  /** The identity's `addends` (absent → empty). */
+  readonly addend_ids: readonly string[];
+}
+
+function rec(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function ids(value: unknown): string[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return null;
+  return value.every((x) => typeof x === 'string' && x.length > 0) ? (value as string[]) : null;
+}
+
+function declaredIdentities(graph: unknown): DefinitionalLink[] {
+  const nodes = rec(graph)?.nodes;
+  if (!Array.isArray(nodes)) return [];
+  const out: DefinitionalLink[] = [];
+  for (const raw of nodes) {
+    const node = rec(raw);
+    const identity = rec(node?.nonlinear_identity);
+    if (typeof node?.id !== 'string' || node.id.length === 0 || identity === null) continue;
+    const operands = ids(identity.factor_ids);
+    const addends = ids(identity.addends);
+    if (operands === null || addends === null || operands.length === 0) continue;
+    out.push({
+      carrier_id: node.id,
+      operation: identity.operation === 'sum' ? 'sum' : 'product',
+      operand_ids: operands,
+      addend_ids: addends,
+    });
+  }
+  return out;
+}
+
+/** The identity that DEFINES the edge `from → to`, or null when that edge is an ordinary belief. */
+export function definitionalLinkOf(graph: unknown, from: string, to: string): DefinitionalLink | null {
+  return declaredIdentities(graph).find(
+    (d) => d.carrier_id === to && (d.operand_ids.includes(from) || d.addend_ids.includes(from)),
+  ) ?? null;
+}
+
+/** Every definitional edge, keyed by the card's own edge identity (`composeEdgeIdentity`). No graph → empty. */
+export function definitionalLinks(graph: unknown): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const d of declaredIdentities(graph)) {
+    for (const from of [...d.operand_ids, ...d.addend_ids]) out.add(composeEdgeIdentity(from, d.carrier_id));
+  }
+  return out;
+}
+
+/**
+ * The refusal, in the user's labels: "This link is defined by MRR = Pro plan price × Pro paying subscribers, so its
+ * strength is not something the analysis uses. Change Pro plan price or Pro paying subscribers instead."
+ */
+export function definitionalLinkRefusalText(graph: unknown, link: DefinitionalLink): string {
+  const nodes = rec(graph)?.nodes;
+  const labelOf = (id: string): string => {
+    const node = Array.isArray(nodes) ? nodes.map(rec).find((n) => n?.id === id) : undefined;
+    return typeof node?.label === 'string' && node.label.trim() !== '' ? node.label.trim() : id;
+  };
+  const term = link.operand_ids.map(labelOf).join(link.operation === 'sum' ? ' + ' : ' × ');
+  const formula = [term, ...link.addend_ids.map(labelOf)].join(' + ');
+  const parts = [...link.operand_ids, ...link.addend_ids].map(labelOf);
+  const change = parts.length <= 2 ? parts.join(' or ') : `${parts.slice(0, -1).join(', ')} or ${parts[parts.length - 1]}`;
+  return `This link is defined by ${labelOf(link.carrier_id)} = ${formula}, so its strength is not something the analysis uses, `
+    + `and I haven't changed it. Change ${change} instead.`;
+}

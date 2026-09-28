@@ -27,6 +27,7 @@ import type { AdjustEdgeStrengthHandlerFact } from '@talchain/schemas/orchestrat
 
 import { DEFAULT_STRENGTH_STD } from '../../../cee/constants.js';
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
+import { definitionalLinkOf, definitionalLinkRefusalText } from '../../compose/definitional-links.js';
 import { parseEdgeAddress } from '../../compose/edge-address.js';
 import { edgeBandFromMagnitude, edgeBandStd } from '../../format/edge-strength-bands.js';
 import { sanitiseUserFacingText } from '../../../orchestrator/shared/output-safety.js';
@@ -249,6 +250,27 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
               to: parsed.to,
             },
             userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
+          },
+        );
+      }
+
+      // R3-9 (AIQ #72 5866734772, DL 5866746362): a link a declared identity DEFINES is not a belief the analysis
+      // reads; storing an edit to it would be silently ignored. Refused for every caller of this handler (the canvas
+      // adapter refuses first, in the same words). Read off the RAW graph, which keeps an identity `NodeV3` drops.
+      const definition = definitionalLinkOf(rawGraph, parsed.from, parsed.to);
+      if (definition !== null) {
+        throw new D1HandlerError(
+          'PRECONDITION_UNMET',
+          `adjust_edge_strength: ${parsed.from}→${parsed.to} is defined by the identity on "${definition.carrier_id}".`,
+          {
+            details: {
+              handler_id: 'adjust_edge_strength',
+              reason: 'definitional_link',
+              carrier_id: definition.carrier_id,
+              from: parsed.from,
+              to: parsed.to,
+            },
+            userGuidance: definitionalLinkRefusalText(rawGraph, definition),
           },
         );
       }
