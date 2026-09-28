@@ -618,7 +618,7 @@ describe('R3-9 × AIQ 5867435409 (1): the handler refuses only while the last Ru
   it('⭐ RED: its own prior_facts carry a Run that withdrew the carrier → the edit adjusts', async () => {
     const inv = buildInvocation(withProduct(), proposal());
     const withFacts = { ...inv, context: { ...inv.context, prior_facts: [
-      { fact_type: 'run_analysis', result: { enrichment: { _meta: { identities_not_forwarded: [{ node_id: 'g-revenue' }] } } } },
+      { fact_type: 'run_analysis', noop: false, result: { computed_at: '2026-09-28T09:00:00.000Z', enrichment: { _meta: { identities_not_forwarded: [{ node_id: 'g-revenue' }] } } } },
     ] } } as unknown as HandlerInvocation;
     await expect(createAdjustEdgeStrengthHandler()(withFacts)).resolves.toBeTruthy();
   });

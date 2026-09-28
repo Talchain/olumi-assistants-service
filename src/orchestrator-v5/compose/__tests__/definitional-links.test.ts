@@ -72,7 +72,12 @@ describe('R3-9 — the ONE definitional-link predicate', () => {
 });
 
 describe('AIQ 5867435409 (1): refused only while the identity is IN USE — the last Run decides', () => {
-  const runFact = (enrichment: unknown) => ({ fact_type: 'run_analysis', result: { enrichment } });
+  let clock = 0;
+  const runFact = (enrichment: unknown, status?: string) => ({
+    fact_type: 'run_analysis', noop: false,
+    result: { enrichment: status === undefined ? enrichment : { ...(enrichment as object), analysis_status: status },
+      computed_at: new Date(Date.UTC(2026, 8, 28, 9, 0, clock++)).toISOString() },
+  });
 
   it('no Run yet → the link is in use (refused; the next Run decides)', () => {
     expect(identityRunUseFromFacts([])).toBeNull();
@@ -94,13 +99,19 @@ describe('AIQ 5867435409 (1): refused only while the identity is IN USE — the 
     expect(definitionalLinkInUse(graph, 'price', 'mrr', use)).toBeNull();
   });
 
-  it('only the NEWEST run decides (facts newest-first), and other facts are skipped', () => {
-    const use = identityRunUseFromFacts([
-      { fact_type: 'edit_graph', result: {} },
-      runFact({ identity_evaluations: [{ node_id: 'mrr', evaluated: true }] }),
-      runFact({ _meta: { identities_not_forwarded: [{ node_id: 'mrr' }] } }),
-    ]);
+  it('only the NEWEST run BY TIME decides (the one ordering core), and other facts are skipped', () => {
+    const older = runFact({ _meta: { identities_not_forwarded: [{ node_id: 'mrr' }] } });
+    const newer = runFact({ identity_evaluations: [{ node_id: 'mrr', evaluated: true }] });
+    // Array position must not decide: the older withdrawing Run first, the newer evaluating one after.
+    const use = identityRunUseFromFacts([{ fact_type: 'edit_graph', result: {} }, older, newer]);
     expect(definitionalLinkInUse(graph, 'price', 'mrr', use)?.carrier_id).toBe('mrr');
+  });
+
+  it('⭐ RED (DL verdict): a newer FAILED Run after a withdrawing one does not re-refuse — only successful Runs decide', () => {
+    const withdrawing = runFact({ _meta: { identities_not_forwarded: [{ node_id: 'mrr' }] } });
+    const failed = runFact({}, 'failed');
+    const use = identityRunUseFromFacts([failed, withdrawing]);
+    expect(definitionalLinkInUse(graph, 'price', 'mrr', use)).toBeNull();
   });
 
   it('a withdrawal of ANOTHER carrier leaves this one in use', () => {
@@ -119,8 +130,10 @@ describe('AIQ 5867435409 (2): whose reading — an inferred identity is Olumi\'s
   it('⭐ RED: stated_in_brief false → "Olumi reads MRR as …", with the way out; never "is defined by"', () => {
     const text = definitionalLinkRefusalText(inferred, definitionalLinkOf(inferred, 'price', 'mrr')!);
     expect(text).toMatch(/^Olumi reads MRR as Pro plan price × Pro paying subscribers/);
-    expect(text).toMatch(/tell me if MRR isn't that/i);
+    expect(text).toMatch(/That reading is Olumi's, not yours; if MRR isn't that, say so\./);
     expect(text).not.toContain('is defined by');
+    // AIQ 5868909577: no promise of an action nobody can take.
+    expect(text).not.toMatch(/I'll|I will|stop reading/i);
   });
 
   it('a declaration with no stated_in_brief is Olumi\'s reading too (never promoted to fact)', () => {

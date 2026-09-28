@@ -14,6 +14,8 @@
  * "Declared", not "evaluated": whether ISL evaluates an identity is known only after a Run, and a link the next Run
  * defines must not be edited as a belief now. Total and pure; never throws on a malformed graph.
  */
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import { selectRunAnalysisFact } from '../context/freshness.js';
 import { composeEdgeIdentity } from './edge-address.js';
 
 export interface DefinitionalLink {
@@ -76,13 +78,17 @@ export function definitionalLinkOf(graph: unknown, from: string, to: string): De
 }
 
 /**
- * The newest `run_analysis` fact decides (facts arrive newest-first, `SessionStore.readFactsFor`). No Run → null: the
- * link is refused, and the next Run decides. Pure; never throws on a malformed fact.
+ * The newest SUCCESSFUL `run_analysis` fact decides (`selectRunAnalysisFact`). No Run → null: the link is refused, and
+ * the next Run decides. Pure; never throws on a malformed fact.
  */
 export function identityRunUseFromFacts(facts: readonly unknown[]): IdentityRunUse | null {
-  const run = facts.map(rec).find((f) => f?.fact_type === 'run_analysis');
-  if (run === undefined || run === null) return null;
-  const enrichment = rec(rec(run.result)?.enrichment);
+  // THE ONE ORDERING CORE (`context/freshness.ts` `selectRunAnalysisFact`; DL verdict + AIQ 5867961154): the newest
+  // SUCCESSFUL run by time, never the first by position. A refused or failed Run after a withdrawing one carries no
+  // identity decisions, and must not re-refuse the edit.
+  const selected = selectRunAnalysisFact(facts as readonly HandlerFact[]);
+  if (selected === null) return null;
+  const run = rec(selected.fact);
+  const enrichment = rec(rec(run?.result)?.enrichment);
   const withdrawn = new Set<string>();
   const notForwarded = rec(enrichment?._meta)?.identities_not_forwarded;
   for (const row of Array.isArray(notForwarded) ? notForwarded : []) {
@@ -120,7 +126,8 @@ export function definitionalLinks(graph: unknown): ReadonlySet<string> {
 /**
  * The refusal, in the user's labels. A STATED identity: "This link is defined by MRR = Pro plan price × Pro paying
  * subscribers, so its strength is not something the analysis uses … Change Pro plan price or Pro paying subscribers
- * instead." An INFERRED one is Olumi's reading: "Olumi reads MRR as … — or tell me if MRR isn't that".
+ * instead." An INFERRED one is Olumi's reading: "Olumi reads MRR as … That reading is Olumi's, not yours; if MRR isn't that, say so."
+ * (No promise to stop reading it: nothing can withdraw an inferred identity yet, AIQ 5868909577.)
  */
 export function definitionalLinkRefusalText(graph: unknown, link: DefinitionalLink): string {
   const nodes = rec(graph)?.nodes;
@@ -136,8 +143,9 @@ export function definitionalLinkRefusalText(graph: unknown, link: DefinitionalLi
   // AIQ 5867435409 (2), CEE's N-c rule (`admit-model.ts`): a declaration the brief states is said as fact; any other is
   // Olumi's reading, said as such, with the way out.
   if (!link.stated_in_brief) {
+    // AIQ 5868909577: no promise of an action nobody can take (there is no writer that withdraws an inferred identity).
     return `Olumi reads ${carrier} as ${formula}, so this link's strength isn't used while that holds, and I haven't changed it. `
-      + `Change ${change} instead — or tell me if ${carrier} isn't that, and I'll stop reading it that way.`;
+      + `Change ${change} instead. That reading is Olumi's, not yours; if ${carrier} isn't that, say so.`;
   }
   return `This link is defined by ${carrier} = ${formula}, so its strength is not something the analysis uses, `
     + `and I haven't changed it. Change ${change} instead.`;
