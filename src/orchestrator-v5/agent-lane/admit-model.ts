@@ -596,6 +596,27 @@ const inferenceClassFor = (provenance: string): InferenceClass => {
   return 'builder_inferred';
 };
 
+/**
+ * The frame an OUTCOME this limit names is admitted on as an observable FACTOR (see "A LIMIT THE USER STATED ON A LEVEL
+ * NAMES A QUANTITY THAT CAN HOLD ONE" in `admitCandidateModel`): a limit the user stated, in a percentage. Undefined
+ * when the limit re-kinds nothing. ONE rule, read by admission and by `findCoverageGaps` (`build-model.ts`), which must
+ * see that quantity as the level-less factor admission registers.
+ */
+export function limitedOutcomeFrame(c: Pick<CandidateConstraint, 'provenance' | 'value' | 'unit' | 'frame'>): number | undefined {
+  return inferenceClassFor(c.provenance) === 'brief_stated' ? percentLevelFrame(c.value, c.unit, c.frame) : undefined;
+}
+
+/**
+ * Whether a limit's `metric` names the entity labelled `label`, as admission attaches a limit to its node
+ * (`nodeIdForMetric`): the exact label, else the same text ignoring case and surrounding space — never a fuzzy guess
+ * (inner spacing is not collapsed). ONE rule, read by admission and by `findCoverageGaps` (`build-model.ts`), so a limit
+ * that re-kinds an outcome here is the limit gap there (verifier FIX_FIRST (4) on f773a217: "Monthly Churn" vs
+ * "Monthly churn" was re-kinded by admission and matched by nothing in the gap count).
+ */
+export function metricNamesLabel(metric: string, label: string): boolean {
+  return metric === label || metric.trim().toLowerCase() === label.trim().toLowerCase();
+}
+
 
 /**
  * ⭐ A BARE AMOUNT IS UNANALYSABLE, AND THAT IS THE PRODUCT'S OWN RULE.
@@ -2602,8 +2623,7 @@ function admitOnce(
   const nodeIdForMetric = (metric: string): string | undefined => {
     const exact = ids.get(metric);
     if (exact !== undefined) return exact;
-    const wanted = metric.trim().toLowerCase();
-    for (const [label, id] of ids) if (label.trim().toLowerCase() === wanted) return id;
+    for (const [label, id] of ids) if (metricNamesLabel(metric, label)) return id;
     return undefined;
   };
 
@@ -2628,8 +2648,7 @@ function admitOnce(
    */
   const limitedLevelFrames = new Map<string, number>();
   for (const c of model.constraints) {
-    if (inferenceClassFor(c.provenance) !== 'brief_stated') continue;
-    const frame = percentLevelFrame(c.value, c.unit, c.frame);
+    const frame = limitedOutcomeFrame(c);
     if (frame === undefined) continue;
     const id = nodeIdForMetric(c.metric);
     if (id !== undefined) limitedLevelFrames.set(id, frame);
