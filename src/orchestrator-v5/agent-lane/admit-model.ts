@@ -732,7 +732,15 @@ function estimatedObservedState(
 export function defaultFrameFor(largestMagnitude: number): number {
   const magnitude = Math.abs(largestMagnitude);
   if (!Number.isFinite(magnitude) || magnitude <= 1) return 1;
-  return 10 ** Math.ceil(Math.log10(magnitude) + Number.EPSILON);
+  // ⭐ HEADROOM (AIQ #72 5868446435): the frame sits STRICTLY above the figure, so an exact
+  // power of ten takes the next step up — £100,000 → 0–1,000,000 (0.1), never 1.0 of its frame
+  // (ISL clips a value at the edge one-sided; PLoT refuses a limit outside the frame). The old
+  // `ceil(log10 + EPSILON)` only managed that for 10: above it the EPSILON was lost.
+  let frame = 10 ** (Math.floor(Math.log10(magnitude)) + 1);
+  // `Math.log10` can round across a power of ten; correct by one step either way.
+  if (frame <= magnitude) frame *= 10;
+  else if (frame / 10 > magnitude) frame /= 10;
+  return frame;
 }
 
 /**
