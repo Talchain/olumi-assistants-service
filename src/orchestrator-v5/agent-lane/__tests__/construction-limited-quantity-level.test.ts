@@ -20,6 +20,10 @@ import type { CandidateModel } from '../admit-model.js';
 import { buildCandidateSchema, buildModelFromBrief, prepareProvisionalCandidate } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { readFileSync } from 'node:fs';
+import {
+  collectLeaderEstimatedTargetIds, collectLimitLevelOwners, deriveConstraintVerdict, readRatifiedConstraints,
+} from '../../../orchestrator/context/constraint-feasibility.js';
 
 const BRIEF = 'We need to reach £100k MRR within 6 months, while keeping monthly churn under 4%. '
   + 'Should we increase our Pro plan price from £49 to £59 per month, or invest in additional advertising?';
@@ -168,5 +172,37 @@ describe('condition 2 — the user is asked, typed and non-blocking, for today\'
     const capped = { ...d, constraints: [...d.constraints, { metric: 'Advertising spend', operator: '<=', value: 20000, unit: 'GBP', provenance: 'explicit', frame: 'level' as const }] };
     const { result } = await construct(BRIEF.replace('?', ', with no more than £20,000 on advertising?'), capped as unknown as ReturnType<typeof journeyC>);
     expect(asksOf(result).map((a) => a.quantity)).toEqual(['Monthly churn rate']);
+  });
+});
+
+describe('condition 1 — the limit verdict on Olumi\'s level is estimate_only, never scored (the verdict\'s own producer)', () => {
+  /**
+   * The served 17d1 PLoT envelope (`tests/fixtures/cross-service/b5-per-limit/`, churn ≤ 4 % computed, P = 1, decision
+   * grade) — DERIVED here: its limit id is re-keyed to the id this construction registers, nothing else changes. The
+   * verdict is derived exactly as `run_analysis` derives it (`constraint-verdict-per-limit.test.ts` `verdictFor`).
+   */
+  const ENV = JSON.parse(readFileSync('tests/fixtures/cross-service/b5-per-limit/17d1cd3a.plot-response.json', 'utf8')) as Record<string, unknown>;
+  const verdictOn = (graph: Graph) => {
+    const g = graph as unknown as Record<string, unknown>;
+    const ratified = readRatifiedConstraints(g);
+    expect(ratified).toHaveLength(1);
+    const id = ratified[0]!.constraint_id;
+    const env = JSON.parse(JSON.stringify(ENV).split('agent-lane:monthly_churn:<=').join(id)) as Record<string, unknown>;
+    const leader = (env.option_comparison as { option_id: string; win_probability: number }[])
+      .slice().sort((a, b) => b.win_probability - a.win_probability)[0]!.option_id;
+    return { id, v: deriveConstraintVerdict(env, ratified, leader, undefined, collectLeaderEstimatedTargetIds(g, ratified, leader), collectLimitLevelOwners(g, ratified)) };
+  };
+
+  it('⭐ the retry\'s level (Olumi\'s 3%) → per_limit estimate_only / level_olumi_estimate', async () => {
+    const { graph } = await construct(BRIEF, journeyC(null), journeyC(3));
+    const { id, v } = verdictOn(graph);
+    expect(v.perLimit).toEqual([{ constraint_id: id, state: 'estimate_only', reason: 'level_olumi_estimate' }]);
+  });
+
+  it('CONTRAST: the same limit on a level the BRIEF states is scored — the user\'s figure', async () => {
+    const stated = BRIEF.replace('while keeping monthly churn under 4%', 'while keeping monthly churn (3% today) under 4%');
+    const { graph } = await construct(stated, journeyC(3, 'level', true));
+    const { id, v } = verdictOn(graph);
+    expect(v.perLimit).toEqual([{ constraint_id: id, state: 'scored' }]);
   });
 });
