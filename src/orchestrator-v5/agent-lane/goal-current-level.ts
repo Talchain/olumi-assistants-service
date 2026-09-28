@@ -166,7 +166,7 @@ const USERS: ReadonlySet<string> = new Set(['user_stated', 'user_ratified']);
 
 export function rederivedEstimatedPart(nodes: GoalLevelRead['nodes'], goalId: string, statedRaw: number): RederivedPart | null {
   const goal = nodes.find((n) => n.id === goalId);
-  const identity = goal?.nonlinear_identity as { operation?: unknown; factor_ids?: unknown; stated_in_brief?: unknown } | undefined;
+  const identity = goal?.nonlinear_identity as { operation?: unknown; factor_ids?: unknown; stated_in_brief?: unknown; addends?: unknown } | undefined;
   if (identity === null || typeof identity !== 'object' || identity.operation !== 'product' || identity.stated_in_brief !== false) return null;
   if (!Array.isArray(identity.factor_ids) || !num(statedRaw) || statedRaw <= 0) return null;
   const parts = identity.factor_ids.map((id) => {
@@ -181,12 +181,25 @@ export function rederivedEstimatedPart(nodes: GoalLevelRead['nodes'], goalId: st
   const given = parts.filter((p) => p !== part).map((p) => ({ label: p!.label, raw_value: p!.observed_state?.raw_value }));
   if (parts.some((p) => p !== part && !USERS.has(whose(p!)))) return null;
   if (!given.every((g): g is { label: string; raw_value: number } => num(g.raw_value) && g.raw_value > 0)) return null;
+  /**
+   * ⛔ ADDENDS (AIQ meaning call #72 5867317386, amendment 2): with declared addends the goal is the product PLUS them,
+   * so the estimate is (stated − Σ addends) / Π(the user's parts). Every addend must be the user's own figure: an
+   * addend that is Olumi's (or unlevelled, or not one node) would make TWO Olumi figures — null, and #385's withdrawal
+   * applies. Latent today (CEE's carrier holds no addends), so this is a guard.
+   */
+  const addendIds = Array.isArray(identity.addends) ? identity.addends : [];
+  const addends = addendIds.map((id) => {
+    const matches = nodes.filter((n) => n.id === id);
+    return matches.length === 1 ? matches[0]! : undefined;
+  });
+  if (addends.some((a) => a === undefined || !USERS.has(whose(a)) || !num(a.observed_state?.raw_value))) return null;
+  const addendSum = addends.reduce((sum, a) => sum + (a!.observed_state!.raw_value as number), 0);
 
   const os = part.observed_state!;
   if (!num(os.raw_value) || !num(os.value) || part.display_value !== undefined) return null;
   const frame = num(os.cap) && os.cap > 0 ? os.cap : num(part.scale_frame) && part.scale_frame > 0 ? part.scale_frame : undefined;
   if (frame === undefined || Math.abs(os.value * frame - os.raw_value) > 1e-9 * Math.max(1, Math.abs(os.raw_value))) return null;
-  const now = statedRaw / given.reduce((product, g) => product * g.raw_value, 1);
+  const now = (statedRaw - addendSum) / given.reduce((product, g) => product * g.raw_value, 1);
   if (!Number.isFinite(now) || now <= 0 || now > frame || now === os.raw_value) return null;
   return {
     node_id: part.id,
@@ -207,9 +220,11 @@ function sayPartLevel(x: number, unit: string | undefined): string {
 
 /** What the approval says about the re-derived estimate: whose it stays, what it was, and why it moves. */
 function sayRederived(goalLabel: string, part: RederivedPart): string {
+  const product = [...part.from.map((g) => `"${g.label}"`), `"${part.label}"`].join(' × ');
+  // AIQ meaning call #72 5867317386, amendment 1: the derivation holds only if ALL of the goal is that product — say so.
   return `Olumi's estimate of "${part.label}" becomes about ${sayPartLevel(part.now, part.unit)} (was ` +
-    `${sayPartLevel(part.was, part.unit)}), so that ${[...part.from.map((g) => `"${g.label}"`), `"${part.label}"`].join(' × ')} ` +
-    `gives your "${goalLabel}"; it stays Olumi's estimate, not your figure.`;
+    `${sayPartLevel(part.was, part.unit)}), so that ${product} gives your "${goalLabel}"; it stays Olumi's estimate, ` +
+    `not your figure — this assumes all of your "${goalLabel}" comes from ${product}; tell me if some comes from elsewhere.`;
 }
 
 type StatedLevel =
