@@ -936,7 +936,18 @@ export function separationWithholdFromRobustness(
 }
 
 function composeLeaderClaim(input: AnalysisStateComposeInput, runState: AnalysisRunState): AnalysisLeaderClaim {
-  const entitled = input.mayNameLeadingOption === true;
+  /**
+   * ⛔ F-LIMIT × BF9 (DL #72 5863859943; owner Canonical 5863888216) — AN F-LIMIT TIER REFUSES THE CLAIM, not only names
+   * the reason. The persisted leader verdict entitles any leader above rule 4's infeasibility floor (P ≤ 0.05), so on
+   * served `bee1a422` a leader 83% likely to break the user's own limit was named while every option sat under 0.5
+   * (`likely_breaks`). "The leading option" is not something to name when EVERY option is more likely than not to break
+   * the limit; the reply already said so. Only on the analysed revision (never an out-of-date run), exactly where the
+   * reason chain below names the tier. Every consumer reads this claim (the Agent's `claim_permissions`, the cards, the
+   * egress guard), so this is the one place it changes.
+   */
+  const everyOptionBreaksLimit = (input.everyOptionLimit === 'none_meets' || input.everyOptionLimit === 'likely_breaks')
+    && runState.kind !== 'complete_stale';
+  const entitled = input.mayNameLeadingOption === true && !everyOptionBreaksLimit;
   const raw: RawRobustnessSignals | null = input.rawRobustness;
   const separationKnown = raw !== null;
   const separates = separationEstablishedFromRobustness(raw);
