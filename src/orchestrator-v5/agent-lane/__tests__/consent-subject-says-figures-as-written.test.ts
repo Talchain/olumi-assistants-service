@@ -58,7 +58,8 @@ describe('⭐ a consent subject says a figure as the user writes it', () => {
     expect(sayFigureExactly(72000, '£ MRR')).toBe('£72,000 MRR');
     expect(sayFigureExactly(20000, 'GBP over 6 months')).toBe('£20,000 over 6 months');
     expect(sayFigureExactly(20000, '£ over 6 months')).toBe('£20,000 over 6 months');
-    expect(sayFigureExactly(30000, 'GBP/year')).toBe('£30,000/year');
+    // Spaced " / ": the one money notation across both sides (DL 5871074397).
+    expect(sayFigureExactly(30000, 'GBP/year')).toBe('£30,000 / year');
     expect(sayFigureExactly(3.5, '%')).toBe('3.5%');
     expect(sayFigureExactly(1300, 'subscribers')).toBe('1,300 subscribers');
     // Money with pence says both digits, still exactly (DL 5870353946, Panel ROOT 5870330356: one rule per side).
