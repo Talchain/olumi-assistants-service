@@ -33,6 +33,7 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.
 import { createNoopSessionStore } from '../../../session/__tests__/fixtures.js';
 import { createRunAnalysisHandler, type ScenarioReader } from '../run-analysis.js';
 import { carryLevelLimitBaselines, levelLimitBaselineNodeIds } from '../level-limit-baseline.js';
+import { limitChecksForAgent } from '../../../agent-lane/limit-checks.js';
 import type { HandlerInvocation } from '../../registry.js';
 import type { PLoTClient } from '../../../../orchestrator/plot-client.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
@@ -285,5 +286,148 @@ describe('GUARD — a total an option moves only through its parts carries no ba
     const goalId = (g.nodes as Json[]).find((n) => n.kind === 'goal')!.id as string;
     expect(levelLimitBaselineNodeIds(g, g.goal_constraints, goalId)).toEqual(new Set([idOf(g, CHURN_LABEL)]));
     expect(levelLimitBaselineNodeIds(g, g.goal_constraints, goalId, optionsOf(g))).toEqual(new Set([idOf(g, CHURN_LABEL), idOf(g, BUDGET_LABEL)]));
+  });
+});
+
+/**
+ * ⭐ AI QUALITY'S TWO REQUIRED ROWS FOR #2244 (#72 5869646768).
+ *
+ * ROW 1 — AT THE LIMIT. "50/50 Features, Price Rise and Advertising" sets the total to £30,000 against "≤ £30,000":
+ * spending exactly the budget meets it. What CEE owns, and what these rows pin at 0 LLM, is the wire ISL reads it from:
+ * the total goes out with its own level as the baseline, and every option that moves the budget SETS the total itself,
+ * at its own figure, divided by the one cap the threshold is divided by. ISL compares an option that sets a limit's
+ * target at exactly the level it sets (`GoalThresholdPlan.pinned_levels`), never through baseline + (option − this
+ * draw's status quo), so the two £0 levers' spread cannot reach it.
+ *
+ * MEASURED, not asserted here (MG T4 rows, 28 Sep): CEE 99b165a9 real loader+handler egress → PLoT ccd602c (real
+ * `/v2/run`, ISL call captured) → ISL a1fa8ae6 real `/api/v1/robustness/analyze/v2` in process (n 10,000, PLoT's own
+ * seed): P(total ≤ £30,000) = 1.000 for £30,000, £18,000, £12,000, £0 and price-only, each at sd £0. The same draws
+ * through the un-pinned conversion read 0.8734 for the £30,000 option (a floating-point tie at the limit), so the probe
+ * sees a non-1 answer where one exists. The PLoT body that ISL response produced is the row-2 fixture.
+ *
+ * ROW 2 — WHOSE BASELINE (B5). The same captured PLoT bodies (`tests/fixtures/cross-service/b5-per-limit/`
+ * `journey-c-082121Z.*`) through the REAL handler: C01's total is Olumi's £0 (`cee_inference`) → `estimate_only`,
+ * told "checked … only against Olumi's estimates"; C15's is the user's £0 (`user_override`) → `scored`.
+ */
+const B5_DIR = 'tests/fixtures/cross-service/b5-per-limit';
+const CAPTURED: Record<'c01' | 'c15', Json> = {
+  c01: JSON.parse(readFileSync(`${B5_DIR}/journey-c-082121Z.c01.plot-response.json`, 'utf8')),
+  c15: JSON.parse(readFileSync(`${B5_DIR}/journey-c-082121Z.c15.plot-response.json`, 'utf8')),
+};
+const AT_LIMIT_OPTION = '50/50 Features, Price Rise and Advertising';
+const wireOptionByLabel = (body: Json, label: string): Json => {
+  const hits = (body.options as Json[]).filter((o) => o.label === label);
+  expect(hits, `exactly one wire option labelled "${label}"`).toHaveLength(1);
+  return hits[0];
+};
+
+/** The run result the REAL handler stores for a persisted graph, PLoT answering with a captured `/v2/run` body. */
+async function storedRunOf(graph: Json, plotBody: Json): Promise<Json> {
+  const run = vi.fn(async () => structuredClone(plotBody));
+  const store = createNoopSessionStore({ loadGraphResult: structuredClone(graph) });
+  const scenarioReader: ScenarioReader = (id) => loadScenarioSnapshotForRunAnalysis(id, 'req-budget-limit', store);
+  const invocation = {
+    context: {
+      stage: 'analyse', entity_registry: { option_ids: [], goal_id: null }, capabilities: {},
+      messages: [{ role: 'user', content: 'run analysis' }], session_id: SCENARIO_ID, request_id: 'req-budget-limit',
+      budgets: { turn_ms: 180_000, llm_narrate_ms: 60_000 }, prior_turns: [], prior_facts: [], scenarioBriefText: null, persistedGraph: null,
+    },
+    payload: makeMessagePayload({ turn_id: 't1', scenario_id: SCENARIO_ID, message: 'run analysis', turn_class: 'decide', stage: 'analyse' }),
+    requestId: 'req-budget-limit', signal: new AbortController().signal, orientationText: '',
+  } as unknown as HandlerInvocation;
+  const outcome = await createRunAnalysisHandler({ plotClient: { run, validatePatch: vi.fn().mockResolvedValue({}) } as unknown as PLoTClient, scenarioReader })(invocation);
+  expect(run).toHaveBeenCalledTimes(1);
+  const fact = outcome.handler_facts[0]!;
+  if (fact.fact_type !== 'run_analysis') throw new Error(`wrong fact_type ${fact.fact_type}`);
+  return fact.result as unknown as Json;
+}
+const budgetRowOf = (result: Json): Json => {
+  const rows = (result.constraint_verdict?.per_limit ?? []) as Json[];
+  const hits = rows.filter((r) => r.constraint_id === BUDGET_LIMIT);
+  expect(hits, `exactly one per-limit row for ${BUDGET_LIMIT}`).toHaveLength(1);
+  return hits[0];
+};
+const budgetSayOf = (graph: Json, result: Json): string => {
+  const checks = limitChecksForAgent(graph, { per_limit: result.constraint_verdict.per_limit, joint: result.constraint_verdict.joint }) ?? [];
+  const hits = checks.filter((c) => c.constraint_id === BUDGET_LIMIT);
+  expect(hits, 'exactly one limit check for the budget').toHaveLength(1);
+  return hits[0]!.say;
+};
+
+describe('AIQ REQUIRED row 1 (#72 5869646768) — C15 at the limit: the £30,000 option sets the total at exactly the limit, on the cap the limit is read on', () => {
+  it('the wire: the total\'s own level as baseline; every option that moves the budget sets the total itself; "50/50 …" at exactly £30,000', async () => {
+    const body = await wireOf(SERVED.c15);
+    const budgetId = idOf(body.graph, BUDGET_LABEL);
+    const wire = nodeOf(body.graph, BUDGET_LABEL);
+    expect(wire.observed_state.baseline, 'the baseline is the total\'s own level').toBe(wire.observed_state.value);
+    expect(wire.observed_state.source).toBe('user_override');
+    // One cap for the threshold and for the level an option sets on this node.
+    expect(wire.goal_threshold_cap).toBe(100000);
+    expect(wire.scale_frame).toBe(wire.goal_threshold_cap);
+    const limit = (body.goal_constraints as Json[]).find((c) => c.constraint_id === BUDGET_LIMIT);
+    expect(limit).toMatchObject({ node_id: budgetId, operator: '<=', value: 30000, value_frame: 'level', unit: 'GBP over 6 months' });
+
+    // Each option that moves the total or a part of it SETS the total (ISL then reads it at that level: pinned_levels).
+    const parts = ['advertising_spend', 'feature_development_spend'];
+    const setsTotal: Record<string, unknown> = {};
+    for (const o of body.options as Json[]) {
+      const iv = (o.interventions ?? {}) as Json;
+      if (!(budgetId in iv) && !parts.some((p) => p in iv)) continue;
+      expect(Object.keys(iv), `${o.label} moves the budget, so it sets the total itself`).toContain(budgetId);
+      setsTotal[o.label as string] = iv[budgetId];
+    }
+    expect(setsTotal).toEqual({
+      'Features and Price Rise': 12000,
+      'Additional Advertising': 18000,
+      'Carry On as Now': 0,
+      [AT_LIMIT_OPTION]: 30000,
+    });
+    // AT the limit: the option's figure IS the limit's figure, in the limit's unit (no rounding, no second frame).
+    expect(wireOptionByLabel(body, AT_LIMIT_OPTION).interventions[budgetId]).toBe(limit!.value);
+    for (const [label, level] of Object.entries(setsTotal)) expect(level as number, label).toBeLessThanOrEqual(limit!.value as number);
+  });
+
+  it('CAPTURED premise (ISL a1fa8ae6 via PLoT ccd602c, not computed here): the budget limit is certified and scored on every option, P 1 at £30,000', () => {
+    const body = CAPTURED.c15;
+    expect(body.constraints_status).toBe('computed');
+    const rows = (body.constraint_results as Json[]).filter((r) => r.constraint_id === BUDGET_LIMIT);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) expect(r.scale_provenance).toMatchObject({ range_unified: true, decision_grade: true });
+    const p = Object.fromEntries((body.option_comparison as Json[]).map((o) => [o.option_label ?? o.label, o.constraint_probabilities?.[BUDGET_LIMIT]]));
+    expect(p).toEqual({
+      'Features and Price Rise': 1, 'Additional Advertising': 1, 'Carry On as Now': 1, 'Price Rise Only': 1, [AT_LIMIT_OPTION]: 1,
+    });
+  });
+});
+
+describe('AIQ REQUIRED row 2 (#72 5869646768, B5) — WHOSE baseline: Olumi\'s £0 is estimate_only, the user\'s £0 is scored', () => {
+  it('C01 (spend £0 = cee_inference): the budget limit is estimate_only / level_olumi_estimate, "checked … only against Olumi\'s estimates"', async () => {
+    const graph = SERVED.c01;
+    expect(nodeOf(graph, BUDGET_LABEL).observed_state.source).toBe('cee_inference');
+    const result = await storedRunOf(graph, CAPTURED.c01);
+    expect(budgetRowOf(result)).toEqual({ constraint_id: BUDGET_LIMIT, state: 'estimate_only', reason: 'level_olumi_estimate' });
+    expect(budgetSayOf(graph, result)).toBe('‘Total initiative spend’ was checked, but only against Olumi’s estimates, not figures you gave.');
+  });
+
+  it('C15 (spend £0 = user_override): the budget limit is scored, "checked against the figures in your model"', async () => {
+    const graph = SERVED.c15;
+    expect(nodeOf(graph, BUDGET_LABEL).observed_state.source).toBe('user_override');
+    const result = await storedRunOf(graph, CAPTURED.c15);
+    expect(budgetRowOf(result)).toEqual({ constraint_id: BUDGET_LIMIT, state: 'scored' });
+    expect(budgetSayOf(graph, result)).toBe('‘Total initiative spend’ was checked against the figures in your model.');
+  });
+
+  it('CONTROL (DERIVED: C01 with ONLY the total\'s source made the user\'s) — the same captured run is scored, so whose level it is decides', async () => {
+    const graph = structuredClone(SERVED.c01);
+    nodeOf(graph, BUDGET_LABEL).observed_state.source = 'user_override';
+    const result = await storedRunOf(graph, CAPTURED.c01);
+    expect(budgetRowOf(result)).toEqual({ constraint_id: BUDGET_LIMIT, state: 'scored' });
+  });
+
+  it('SCOPE: on both runs the churn limit (Olumi\'s 3 %) stays estimate_only — row 2 is bound to the budget limit by id', async () => {
+    for (const k of ['c01', 'c15'] as const) {
+      const rows = (await storedRunOf(SERVED[k], CAPTURED[k])).constraint_verdict.per_limit as Json[];
+      expect(rows.find((r) => r.constraint_id === 'agent-lane:monthly_churn:<='), k).toEqual({ constraint_id: 'agent-lane:monthly_churn:<=', state: 'estimate_only', reason: 'level_olumi_estimate' });
+    }
   });
 });

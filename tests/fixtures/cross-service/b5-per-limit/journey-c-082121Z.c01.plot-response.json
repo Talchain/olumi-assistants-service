@@ -1,0 +1,3099 @@
+{
+ "request_schema_version": "v3",
+ "endpoint_version": "v2/run",
+ "preflight_version": "2025-12-26",
+ "request_id": "req-budget-limit",
+ "analysis_status": "computed",
+ "approximate": false,
+ "option_comparison_status": "computed",
+ "robustness_status": "computed",
+ "drivers_status": "computed",
+ "constraints_status": "computed",
+ "constraint_results": [
+  {
+   "constraint_id": "agent-lane:total_initiative_spend:<=",
+   "node_id": "total_initiative_spend",
+   "operator": "<=",
+   "value": 20000,
+   "probability": 1,
+   "option_id": "features_and_price_rise",
+   "scale_provenance": {
+    "source": "scale_frame",
+    "range_unified": true,
+    "decision_grade": true
+   }
+  },
+  {
+   "constraint_id": "agent-lane:monthly_churn:<=",
+   "node_id": "monthly_churn",
+   "operator": "<=",
+   "value": 4,
+   "probability": 0.9998,
+   "option_id": "features_and_price_rise",
+   "scale_provenance": {
+    "source": "unit_percent",
+    "range_unified": true,
+    "decision_grade": true
+   }
+  }
+ ],
+ "constraint_diagnostics": [
+  {
+   "constraint_id": "agent-lane:total_initiative_spend:<=",
+   "binding": false
+  },
+  {
+   "constraint_id": "agent-lane:monthly_churn:<=",
+   "failure_margin_median": 0.0411466038809323,
+   "near_miss_fraction": 1,
+   "binding": false
+  }
+ ],
+ "conditional_probabilities": [],
+ "auto_noise_applied": false,
+ "auto_noise_provenance": {
+  "applied": false,
+  "effect": "widens_outcome_and_risk_uncertainty",
+  "formula_version": "plot_auto_v1",
+  "multiplier": 1,
+  "noise_distribution": "normal_zero_mean_outcome_std",
+  "filter_scope": "outcome_and_risk_nodes",
+  "is_provisional": true,
+  "calibration_status": "provisional_pending_pilot_calibration"
+ },
+ "isl_analysis_status": "computed",
+ "critiques": [
+  {
+   "id": "2b946a0d-a6c9-4050-a044-2015a72fb11a",
+   "code": "SCALE_MISMATCH_WARNING",
+   "severity": "warning",
+   "message": "Intervention values span wide range (max is ~408\u00d7 min). Large magnitudes may dominate outcomes.",
+   "suggestion": "Express large quantities as 0\u20131 proportions with explicit cap in factor label.",
+   "source": "validation",
+   "blocks_analysis": false,
+   "user_message": "Intervention values span a wide range. Large magnitudes may dominate outcomes. Consider normalising values to similar scales."
+  },
+  {
+   "id": "8da9c799-1a7a-476a-aa78-c22bd1756ba5",
+   "code": "MIXED_RANGE_DERIVATION",
+   "severity": "info",
+   "message": "Factors use 5 different range derivation tiers. Normalisation quality may vary.",
+   "source": "validation",
+   "affected_node_ids": [
+    "advertising_spend",
+    "feature_development_spend",
+    "monthly_churn",
+    "monthly_customer_acquisition",
+    "mrr",
+    "pro_plan_price",
+    "product_value_score",
+    "total_initiative_spend"
+   ],
+   "blocks_analysis": false,
+   "user_message": "Factors use different methods to determine their value ranges. Normalisation quality may vary."
+  },
+  {
+   "id": "7c66db5e-daa9-4ac9-b389-37f353560942",
+   "code": "CONSTRAINT_MISSING_RANGE",
+   "severity": "info",
+   "message": "Constraint \"agent-lane:total_initiative_spend:<=\" target node \"total_initiative_spend\" has no derivable range. Constraint value will be compared as-is by ISL.",
+   "source": "validation",
+   "affected_node_ids": [
+    "total_initiative_spend"
+   ],
+   "blocks_analysis": false,
+   "user_message": "The constraint on Total initiative spend cannot be range-checked. The constraint value will be used as-is."
+  },
+  {
+   "id": "a4784b6e-3030-4578-b373-364752beabc8",
+   "code": "CONSTRAINT_MISSING_RANGE",
+   "severity": "info",
+   "message": "Constraint \"agent-lane:monthly_churn:<=\" target node \"monthly_churn\" has no derivable range. Constraint value will be compared as-is by ISL.",
+   "source": "validation",
+   "affected_node_ids": [
+    "monthly_churn"
+   ],
+   "blocks_analysis": false,
+   "user_message": "The constraint on Monthly churn cannot be range-checked. The constraint value will be used as-is."
+  },
+  {
+   "id": "303d69b3-caa1-46e4-908a-28f8ba4b5823",
+   "code": "NORMALIZATION_WARNING",
+   "severity": "info",
+   "message": "Node 'features_and_price_rise' has kind='option'. Option nodes are filtered before analysis.",
+   "source": "validation",
+   "blocks_analysis": false,
+   "user_message": "An option was excluded from factor analysis. This is expected."
+  },
+  {
+   "id": "c425c356-40e3-4bd9-a860-bb80a70f864e",
+   "code": "NORMALIZATION_WARNING",
+   "severity": "info",
+   "message": "Node 'additional_advertising' has kind='option'. Option nodes are filtered before analysis.",
+   "source": "validation",
+   "blocks_analysis": false,
+   "user_message": "An option was excluded from factor analysis. This is expected."
+  },
+  {
+   "id": "7b434068-5ffc-406b-a3e0-38773c05ee9f",
+   "code": "NORMALIZATION_WARNING",
+   "severity": "info",
+   "message": "Node 'carry_on_as_now' has kind='option'. Option nodes are filtered before analysis.",
+   "source": "validation",
+   "blocks_analysis": false,
+   "user_message": "An option was excluded from factor analysis. This is expected."
+  },
+  {
+   "id": "9bb6ada9-be56-4c9c-85df-bf10905c014d",
+   "code": "NORMALIZATION_WARNING",
+   "severity": "info",
+   "message": "Node 'price_rise_only' has kind='option'. Option nodes are filtered before analysis.",
+   "source": "validation",
+   "blocks_analysis": false,
+   "user_message": "An option was excluded from factor analysis. This is expected."
+  },
+  {
+   "id": "critique_90b45569ab92",
+   "code": "MARGINAL_SWITCH_TRUNCATED",
+   "severity": "warning",
+   "message": "Marginal switch probability was computed for the 10 most elastic fragile edge(s) of 15; the remaining 5 carry marginal_switch_probability=null. Each edge's sweep costs 100 isolated re-evaluations per option, so the set is bounded to keep the analysis inside its compute-admission budget. Retained values are unaffected \u2014 each is computed independently of the others",
+   "suggestion": "The omitted edges are the least elastic of the fragile set; if a specific edge's marginal contribution matters, re-run with a graph scoped to it",
+   "source": "isl",
+   "affected_node_ids": [
+    "monthly_churn",
+    "monthly_customer_acquisition",
+    "mrr",
+    "total_initiative_spend"
+   ],
+   "blocks_analysis": false,
+   "user_message": "Tipping-point detail was computed for the most sensitive fragile connections only; the least sensitive were skipped to keep the analysis fast. All values shown are unaffected."
+  }
+ ],
+ "option_comparison": [
+  {
+   "option_id": "features_and_price_rise",
+   "option_label": "Features and Price Rise",
+   "id": "features_and_price_rise",
+   "label": "Features and Price Rise",
+   "outcome": {
+    "mean": 0.06257053361512359,
+    "std": 0.31065021755195055,
+    "p10": -0.32998447801380815,
+    "p50": 0.08064863560788893,
+    "p90": 0.4235829179806133,
+    "n_samples": 10000,
+    "n_valid_samples": 10000,
+    "validity_ratio": 1,
+    "percentiles_source": "samples"
+   },
+   "status": "computed",
+   "win_probability": 0.1272083333333333,
+   "downside": {
+    "cvar_10": -0.5285444159816395,
+    "p05": -0.47501717969110546,
+    "expected_regret": 0.0906318703672939
+   },
+   "probability_of_joint_goal": 0.9998,
+   "constraint_probabilities": {
+    "agent-lane:total_initiative_spend:<=": 1,
+    "agent-lane:monthly_churn:<=": 0.9998
+   },
+   "constraints_decision_grade": true,
+   "constraint_margins": [
+    {
+     "constraint_id": "agent-lane:total_initiative_spend:<="
+    },
+    {
+     "constraint_id": "agent-lane:monthly_churn:<=",
+     "failure_margin_median": 0.0411466038809323,
+     "near_miss_fraction": 1,
+     "level_out_of_domain_fraction": 0
+    }
+   ]
+  },
+  {
+   "option_id": "additional_advertising",
+   "option_label": "Additional Advertising",
+   "id": "additional_advertising",
+   "label": "Additional Advertising",
+   "outcome": {
+    "mean": 0.06073440702839111,
+    "std": 0.3029121562463929,
+    "p10": -0.32167951788887755,
+    "p50": 0.08090873138870514,
+    "p90": 0.41230309370686347,
+    "n_samples": 10000,
+    "n_valid_samples": 10000,
+    "validity_ratio": 1,
+    "percentiles_source": "samples"
+   },
+   "status": "computed",
+   "win_probability": 0.167975,
+   "downside": {
+    "cvar_10": -0.5229826417260391,
+    "p05": -0.47013193509727136,
+    "expected_regret": 0.09246799695402638
+   },
+   "probability_of_joint_goal": 1,
+   "constraint_probabilities": {
+    "agent-lane:total_initiative_spend:<=": 1,
+    "agent-lane:monthly_churn:<=": 1
+   },
+   "constraints_decision_grade": true,
+   "constraint_margins": [
+    {
+     "constraint_id": "agent-lane:total_initiative_spend:<="
+    },
+    {
+     "constraint_id": "agent-lane:monthly_churn:<=",
+     "level_out_of_domain_fraction": 0
+    }
+   ]
+  },
+  {
+   "option_id": "carry_on_as_now",
+   "option_label": "Carry On as Now",
+   "id": "carry_on_as_now",
+   "label": "Carry On as Now",
+   "outcome": {
+    "mean": 0.12097978110648426,
+    "std": 0.2973359328302483,
+    "p10": -0.24012802521218957,
+    "p50": 0.11752363635163932,
+    "p90": 0.4870764170598743,
+    "n_samples": 10000,
+    "n_valid_samples": 10000,
+    "validity_ratio": 1,
+    "percentiles_source": "samples"
+   },
+   "status": "computed",
+   "win_probability": 0.18690833333333332,
+   "downside": {
+    "cvar_10": -0.42415999719746594,
+    "p05": -0.37702178590096275,
+    "expected_regret": 0.032222622875933235
+   },
+   "probability_of_joint_goal": 1,
+   "constraint_probabilities": {
+    "agent-lane:total_initiative_spend:<=": 1,
+    "agent-lane:monthly_churn:<=": 1
+   },
+   "constraints_decision_grade": true,
+   "constraint_margins": [
+    {
+     "constraint_id": "agent-lane:total_initiative_spend:<="
+    },
+    {
+     "constraint_id": "agent-lane:monthly_churn:<=",
+     "level_out_of_domain_fraction": 0
+    }
+   ]
+  },
+  {
+   "option_id": "price_rise_only",
+   "option_label": "Price Rise Only",
+   "id": "price_rise_only",
+   "label": "Price Rise Only",
+   "outcome": {
+    "mean": 0.12956204878898148,
+    "std": 0.3002023514593057,
+    "p10": -0.2346181686076945,
+    "p50": 0.12932240470713977,
+    "p90": 0.49636418827021633,
+    "n_samples": 10000,
+    "n_valid_samples": 10000,
+    "validity_ratio": 1,
+    "percentiles_source": "samples"
+   },
+   "status": "computed",
+   "win_probability": 0.5179083333333333,
+   "downside": {
+    "cvar_10": -0.4204509393481216,
+    "p05": -0.3725456843807167,
+    "expected_regret": 0.023640355193436016
+   },
+   "probability_of_joint_goal": 1,
+   "constraint_probabilities": {
+    "agent-lane:total_initiative_spend:<=": 1,
+    "agent-lane:monthly_churn:<=": 1
+   },
+   "constraints_decision_grade": true,
+   "constraint_margins": [
+    {
+     "constraint_id": "agent-lane:total_initiative_spend:<="
+    },
+    {
+     "constraint_id": "agent-lane:monthly_churn:<=",
+     "level_out_of_domain_fraction": 0
+    }
+   ]
+  }
+ ],
+ "edge_sensitivity": [
+  {
+   "edge_id": "pro_plan_price::mrr",
+   "from": "pro_plan_price",
+   "to": "mrr",
+   "from_label": "Pro plan price",
+   "to_label": "MRR",
+   "sensitivity_type": "existence",
+   "elasticity": 2.5465838652047426,
+   "importance_rank": 1,
+   "interpretation": "Decision is highly sensitive to pro_plan_price->mrr existence - consider validating this relationship"
+  },
+  {
+   "edge_id": "total_initiative_spend::mrr",
+   "from": "total_initiative_spend",
+   "to": "mrr",
+   "from_label": "Total initiative spend",
+   "to_label": "MRR",
+   "sensitivity_type": "existence",
+   "elasticity": -1.886385218775622,
+   "importance_rank": 2,
+   "interpretation": "Decision is highly sensitive to total_initiative_spend->mrr existence - consider validating this relationship"
+  },
+  {
+   "edge_id": "pro_plan_price::monthly_customer_acquisition",
+   "from": "pro_plan_price",
+   "to": "monthly_customer_acquisition",
+   "from_label": "Pro plan price",
+   "to_label": "Monthly customer acquisition",
+   "sensitivity_type": "existence",
+   "elasticity": -0.8733670813825379,
+   "importance_rank": 3,
+   "interpretation": "Decision is highly sensitive to pro_plan_price->monthly_customer_acquisition existence - consider validating this relationship"
+  },
+  {
+   "edge_id": "monthly_customer_acquisition::mrr",
+   "from": "monthly_customer_acquisition",
+   "to": "mrr",
+   "from_label": "Monthly customer acquisition",
+   "to_label": "MRR",
+   "sensitivity_type": "existence",
+   "elasticity": -0.8562547028142525,
+   "importance_rank": 4,
+   "interpretation": "Decision is highly sensitive to monthly_customer_acquisition->mrr existence - consider validating this relationship"
+  },
+  {
+   "edge_id": "price_sensitivity::monthly_customer_acquisition",
+   "from": "price_sensitivity",
+   "to": "monthly_customer_acquisition",
+   "from_label": "Price sensitivity",
+   "to_label": "Monthly customer acquisition",
+   "sensitivity_type": "existence",
+   "elasticity": -0.6985743419836028,
+   "importance_rank": 5,
+   "interpretation": "Decision is highly sensitive to price_sensitivity->monthly_customer_acquisition existence - consider validating this relationship"
+  },
+  {
+   "edge_id": "feature_development_spend::product_value_score",
+   "from": "feature_development_spend",
+   "to": "product_value_score",
+   "from_label": "Feature development spend",
+   "to_label": "Product value score",
+   "sensitivity_type": "existence",
+   "elasticity": 0.5727531634436713,
+   "importance_rank": 6,
+   "interpretation": "Decision is highly sensitive to feature_development_spend->product_value_score existence - consider validating this relationship"
+  },
+  {
+   "edge_id": "total_initiative_spend::mrr",
+   "from": "total_initiative_spend",
+   "to": "mrr",
+   "from_label": "Total initiative spend",
+   "to_label": "MRR",
+   "sensitivity_type": "magnitude",
+   "elasticity": 0.46855155886149724,
+   "importance_rank": 7,
+   "interpretation": "Decision is highly sensitive to total_initiative_spend->mrr effect size - consider narrowing uncertainty"
+  },
+  {
+   "edge_id": "advertising_efficiency_risk::monthly_customer_acquisition",
+   "from": "advertising_efficiency_risk",
+   "to": "monthly_customer_acquisition",
+   "from_label": "Advertising efficiency risk",
+   "to_label": "Monthly customer acquisition",
+   "sensitivity_type": "existence",
+   "elasticity": 0.46135131948894775,
+   "importance_rank": 8,
+   "interpretation": "Decision is highly sensitive to advertising_efficiency_risk->monthly_customer_acquisition existence - consider validating this relationship"
+  },
+  {
+   "edge_id": "pro_plan_price::mrr",
+   "from": "pro_plan_price",
+   "to": "mrr",
+   "from_label": "Pro plan price",
+   "to_label": "MRR",
+   "sensitivity_type": "magnitude",
+   "elasticity": 0.4501058348428266,
+   "importance_rank": 9,
+   "interpretation": "Decision is highly sensitive to pro_plan_price->mrr effect size - consider narrowing uncertainty"
+  },
+  {
+   "edge_id": "product_value_score::monthly_customer_acquisition",
+   "from": "product_value_score",
+   "to": "monthly_customer_acquisition",
+   "from_label": "Product value score",
+   "to_label": "Monthly customer acquisition",
+   "sensitivity_type": "magnitude",
+   "elasticity": 0.4218179573426208,
+   "importance_rank": 10,
+   "interpretation": "Decision is highly sensitive to product_value_score->monthly_customer_acquisition effect size - consider narrowing uncertainty"
+  },
+  {
+   "edge_id": "product_value_score::monthly_customer_acquisition",
+   "from": "product_value_score",
+   "to": "monthly_customer_acquisition",
+   "from_label": "Product value score",
+   "to_label": "Monthly customer acquisition",
+   "sensitivity_type": "existence",
+   "elasticity": 0.39405600054756806,
+   "importance_rank": 11,
+   "interpretation": "Decision is highly sensitive to product_value_score->monthly_customer_acquisition existence - consider validating this relationship"
+  },
+  {
+   "edge_id": "advertising_spend::advertising_efficiency_risk",
+   "from": "advertising_spend",
+   "to": "advertising_efficiency_risk",
+   "from_label": "Advertising spend",
+   "to_label": "Advertising efficiency risk",
+   "sensitivity_type": "existence",
+   "elasticity": 0.38890925412336386,
+   "importance_rank": 12,
+   "interpretation": "Decision is highly sensitive to advertising_spend->advertising_efficiency_risk existence - consider validating this relationship"
+  },
+  {
+   "edge_id": "pro_plan_price::price_sensitivity",
+   "from": "pro_plan_price",
+   "to": "price_sensitivity",
+   "from_label": "Pro plan price",
+   "to_label": "Price sensitivity",
+   "sensitivity_type": "existence",
+   "elasticity": -0.3842292657041214,
+   "importance_rank": 13,
+   "interpretation": "Decision is highly sensitive to pro_plan_price->price_sensitivity existence - consider validating this relationship"
+  },
+  {
+   "edge_id": "monthly_churn::mrr",
+   "from": "monthly_churn",
+   "to": "mrr",
+   "from_label": "Monthly churn",
+   "to_label": "MRR",
+   "sensitivity_type": "existence",
+   "elasticity": 0.312286895656339,
+   "importance_rank": 14,
+   "interpretation": "Decision is highly sensitive to monthly_churn->mrr existence - consider validating this relationship"
+  },
+  {
+   "edge_id": "advertising_spend::total_initiative_spend",
+   "from": "advertising_spend",
+   "to": "total_initiative_spend",
+   "from_label": "Advertising spend",
+   "to_label": "Total initiative spend",
+   "sensitivity_type": "existence",
+   "elasticity": -0.2670520662910021,
+   "importance_rank": 15,
+   "interpretation": "Decision is highly sensitive to advertising_spend->total_initiative_spend existence - consider validating this relationship"
+  },
+  {
+   "edge_id": "monthly_customer_acquisition::mrr",
+   "from": "monthly_customer_acquisition",
+   "to": "mrr",
+   "from_label": "Monthly customer acquisition",
+   "to_label": "MRR",
+   "sensitivity_type": "magnitude",
+   "elasticity": -0.2640427846361881,
+   "importance_rank": 16,
+   "interpretation": "Decision is highly sensitive to monthly_customer_acquisition->mrr effect size - consider narrowing uncertainty"
+  },
+  {
+   "edge_id": "advertising_spend::monthly_customer_acquisition",
+   "from": "advertising_spend",
+   "to": "monthly_customer_acquisition",
+   "from_label": "Advertising spend",
+   "to_label": "Monthly customer acquisition",
+   "sensitivity_type": "existence",
+   "elasticity": 0.2390813096863179,
+   "importance_rank": 17,
+   "interpretation": "Decision is highly sensitive to advertising_spend->monthly_customer_acquisition existence - consider validating this relationship"
+  },
+  {
+   "edge_id": "pro_plan_price::monthly_customer_acquisition",
+   "from": "pro_plan_price",
+   "to": "monthly_customer_acquisition",
+   "from_label": "Pro plan price",
+   "to_label": "Monthly customer acquisition",
+   "sensitivity_type": "magnitude",
+   "elasticity": 0.22343472080944585,
+   "importance_rank": 18,
+   "interpretation": "Decision is highly sensitive to pro_plan_price->monthly_customer_acquisition effect size - consider narrowing uncertainty"
+  },
+  {
+   "edge_id": "price_sensitivity::monthly_customer_acquisition",
+   "from": "price_sensitivity",
+   "to": "monthly_customer_acquisition",
+   "from_label": "Price sensitivity",
+   "to_label": "Monthly customer acquisition",
+   "sensitivity_type": "magnitude",
+   "elasticity": 0.21577318089781156,
+   "importance_rank": 19,
+   "interpretation": "Decision is highly sensitive to price_sensitivity->monthly_customer_acquisition effect size - consider narrowing uncertainty"
+  },
+  {
+   "edge_id": "price_sensitivity::monthly_churn",
+   "from": "price_sensitivity",
+   "to": "monthly_churn",
+   "from_label": "Price sensitivity",
+   "to_label": "Monthly churn",
+   "sensitivity_type": "existence",
+   "elasticity": -0.1600286452218641,
+   "importance_rank": 20,
+   "interpretation": "Decision is moderately sensitive to price_sensitivity->monthly_churn existence"
+  },
+  {
+   "edge_id": "price_sensitivity::monthly_churn",
+   "from": "price_sensitivity",
+   "to": "monthly_churn",
+   "from_label": "Price sensitivity",
+   "to_label": "Monthly churn",
+   "sensitivity_type": "magnitude",
+   "elasticity": 0.12929538541694735,
+   "importance_rank": 21,
+   "interpretation": "Decision is moderately sensitive to price_sensitivity->monthly_churn effect size"
+  },
+  {
+   "edge_id": "product_value_score::monthly_churn",
+   "from": "product_value_score",
+   "to": "monthly_churn",
+   "from_label": "Product value score",
+   "to_label": "Monthly churn",
+   "sensitivity_type": "magnitude",
+   "elasticity": -0.126513196799961,
+   "importance_rank": 22,
+   "interpretation": "Decision is moderately sensitive to product_value_score->monthly_churn effect size"
+  },
+  {
+   "edge_id": "product_value_score::monthly_churn",
+   "from": "product_value_score",
+   "to": "monthly_churn",
+   "from_label": "Product value score",
+   "to_label": "Monthly churn",
+   "sensitivity_type": "existence",
+   "elasticity": -0.10585109287090284,
+   "importance_rank": 23,
+   "interpretation": "Decision is moderately sensitive to product_value_score->monthly_churn existence"
+  },
+  {
+   "edge_id": "advertising_spend::advertising_efficiency_risk",
+   "from": "advertising_spend",
+   "to": "advertising_efficiency_risk",
+   "from_label": "Advertising spend",
+   "to_label": "Advertising efficiency risk",
+   "sensitivity_type": "magnitude",
+   "elasticity": 0.09452342300223748,
+   "importance_rank": 24,
+   "interpretation": "Decision is moderately sensitive to advertising_spend->advertising_efficiency_risk effect size"
+  },
+  {
+   "edge_id": "monthly_churn::mrr",
+   "from": "monthly_churn",
+   "to": "mrr",
+   "from_label": "Monthly churn",
+   "to_label": "MRR",
+   "sensitivity_type": "magnitude",
+   "elasticity": -0.08060333065092445,
+   "importance_rank": 25,
+   "interpretation": "Decision is moderately sensitive to monthly_churn->mrr effect size"
+  },
+  {
+   "edge_id": "advertising_efficiency_risk::monthly_customer_acquisition",
+   "from": "advertising_efficiency_risk",
+   "to": "monthly_customer_acquisition",
+   "from_label": "Advertising efficiency risk",
+   "to_label": "Monthly customer acquisition",
+   "sensitivity_type": "magnitude",
+   "elasticity": -0.07865927938980175,
+   "importance_rank": 26,
+   "interpretation": "Decision is moderately sensitive to advertising_efficiency_risk->monthly_customer_acquisition effect size"
+  },
+  {
+   "edge_id": "feature_development_spend::product_value_score",
+   "from": "feature_development_spend",
+   "to": "product_value_score",
+   "from_label": "Feature development spend",
+   "to_label": "Product value score",
+   "sensitivity_type": "magnitude",
+   "elasticity": 0.06995595119145209,
+   "importance_rank": 27,
+   "interpretation": "Decision is moderately sensitive to feature_development_spend->product_value_score effect size"
+  },
+  {
+   "edge_id": "feature_development_spend::total_initiative_spend",
+   "from": "feature_development_spend",
+   "to": "total_initiative_spend",
+   "from_label": "Feature development spend",
+   "to_label": "Total initiative spend",
+   "sensitivity_type": "magnitude",
+   "elasticity": 0.06965755727376605,
+   "importance_rank": 28,
+   "interpretation": "Decision is moderately sensitive to feature_development_spend->total_initiative_spend effect size"
+  },
+  {
+   "edge_id": "advertising_spend::monthly_customer_acquisition",
+   "from": "advertising_spend",
+   "to": "monthly_customer_acquisition",
+   "from_label": "Advertising spend",
+   "to_label": "Monthly customer acquisition",
+   "sensitivity_type": "magnitude",
+   "elasticity": -0.047332886086826745,
+   "importance_rank": 29,
+   "interpretation": "Decision is robust to effect size variation in advertising_spend->monthly_customer_acquisition"
+  },
+  {
+   "edge_id": "advertising_spend::total_initiative_spend",
+   "from": "advertising_spend",
+   "to": "total_initiative_spend",
+   "from_label": "Advertising spend",
+   "to_label": "Total initiative spend",
+   "sensitivity_type": "magnitude",
+   "elasticity": -0.03459129847385291,
+   "importance_rank": 30,
+   "interpretation": "Decision is robust to effect size variation in advertising_spend->total_initiative_spend"
+  },
+  {
+   "edge_id": "feature_development_spend::total_initiative_spend",
+   "from": "feature_development_spend",
+   "to": "total_initiative_spend",
+   "from_label": "Feature development spend",
+   "to_label": "Total initiative spend",
+   "sensitivity_type": "existence",
+   "elasticity": -0.015153103482232378,
+   "importance_rank": 31,
+   "interpretation": "Decision is robust to whether feature_development_spend->total_initiative_spend exists"
+  },
+  {
+   "edge_id": "pro_plan_price::price_sensitivity",
+   "from": "pro_plan_price",
+   "to": "price_sensitivity",
+   "from_label": "Pro plan price",
+   "to_label": "Price sensitivity",
+   "sensitivity_type": "magnitude",
+   "elasticity": -5.898416483840746e-06,
+   "importance_rank": 32,
+   "interpretation": "Decision is robust to effect size variation in pro_plan_price->price_sensitivity"
+  }
+ ],
+ "sensitivity_reference_option_id": "features_and_price_rise",
+ "decision_evpi": 0.023640355193436016,
+ "factor_evppi": [
+  {
+   "factor_id": "product_value_score",
+   "evppi": 0,
+   "evppi_raw": 0,
+   "baseline_max_expected_utility": 0.129562,
+   "conditional_max_expected_utility": 0.129562,
+   "units": "outcome",
+   "method": "regression_evppi_v1",
+   "regression_degree": 4,
+   "n_samples": 10000,
+   "clamped_low": false,
+   "clamped_high": false,
+   "noise_floor": 4e-06,
+   "status": "below_resolution",
+   "correlation_active": false
+  },
+  {
+   "factor_id": "monthly_customer_acquisition",
+   "evppi": 0,
+   "evppi_raw": 0,
+   "baseline_max_expected_utility": 0.129562,
+   "conditional_max_expected_utility": 0.129562,
+   "units": "outcome",
+   "method": "regression_evppi_v1",
+   "regression_degree": 4,
+   "n_samples": 10000,
+   "clamped_low": false,
+   "clamped_high": false,
+   "noise_floor": 1e-06,
+   "status": "below_resolution",
+   "correlation_active": false
+  },
+  {
+   "factor_id": "monthly_churn",
+   "evppi": 0,
+   "evppi_raw": 0,
+   "baseline_max_expected_utility": 0.129562,
+   "conditional_max_expected_utility": 0.129562,
+   "units": "outcome",
+   "method": "regression_evppi_v1",
+   "regression_degree": 4,
+   "n_samples": 10000,
+   "clamped_low": false,
+   "clamped_high": false,
+   "noise_floor": 3e-06,
+   "status": "below_resolution",
+   "correlation_active": false
+  }
+ ],
+ "p_win_sensitivity": [
+  {
+   "factor_id": "pro_plan_price",
+   "p_win_delta": 0,
+   "p_win_delta_percentage_points": 0,
+   "current_metric": 1,
+   "perfect_metric": 1,
+   "metric_type": "p_joint_goal",
+   "method": "p_win_delta_at_mean_v1",
+   "n_samples": 2000,
+   "status": "below_resolution",
+   "clamped": false,
+   "noise_floor": 0.03099,
+   "noise_floor_method": "z95_worst_case_bernoulli_diff",
+   "labelling_doctrine": "provisional_doctrine_v0"
+  },
+  {
+   "factor_id": "feature_development_spend",
+   "p_win_delta": 0,
+   "p_win_delta_percentage_points": 0,
+   "current_metric": 1,
+   "perfect_metric": 1,
+   "metric_type": "p_joint_goal",
+   "method": "p_win_delta_at_mean_v1",
+   "n_samples": 2000,
+   "status": "below_resolution",
+   "clamped": false,
+   "noise_floor": 0.03099,
+   "noise_floor_method": "z95_worst_case_bernoulli_diff",
+   "labelling_doctrine": "provisional_doctrine_v0"
+  },
+  {
+   "factor_id": "advertising_spend",
+   "p_win_delta": 0,
+   "p_win_delta_percentage_points": 0,
+   "current_metric": 1,
+   "perfect_metric": 1,
+   "metric_type": "p_joint_goal",
+   "method": "p_win_delta_at_mean_v1",
+   "n_samples": 2000,
+   "status": "below_resolution",
+   "clamped": false,
+   "noise_floor": 0.03099,
+   "noise_floor_method": "z95_worst_case_bernoulli_diff",
+   "labelling_doctrine": "provisional_doctrine_v0"
+  },
+  {
+   "factor_id": "total_initiative_spend",
+   "p_win_delta": 0,
+   "p_win_delta_percentage_points": 0,
+   "current_metric": 1,
+   "perfect_metric": 1,
+   "metric_type": "p_joint_goal",
+   "method": "p_win_delta_at_mean_v1",
+   "n_samples": 2000,
+   "status": "below_resolution",
+   "clamped": false,
+   "noise_floor": 0.03099,
+   "noise_floor_method": "z95_worst_case_bernoulli_diff",
+   "labelling_doctrine": "provisional_doctrine_v0"
+  },
+  {
+   "factor_id": "product_value_score",
+   "p_win_delta": 0,
+   "p_win_delta_percentage_points": 0,
+   "current_metric": 1,
+   "perfect_metric": 1,
+   "metric_type": "p_joint_goal",
+   "method": "p_win_delta_at_mean_v1",
+   "n_samples": 2000,
+   "status": "below_resolution",
+   "clamped": false,
+   "noise_floor": 0.03099,
+   "noise_floor_method": "z95_worst_case_bernoulli_diff",
+   "labelling_doctrine": "provisional_doctrine_v0"
+  },
+  {
+   "factor_id": "monthly_customer_acquisition",
+   "p_win_delta": 0,
+   "p_win_delta_percentage_points": 0,
+   "current_metric": 1,
+   "perfect_metric": 1,
+   "metric_type": "p_joint_goal",
+   "method": "p_win_delta_at_mean_v1",
+   "n_samples": 2000,
+   "status": "below_resolution",
+   "clamped": false,
+   "noise_floor": 0.03099,
+   "noise_floor_method": "z95_worst_case_bernoulli_diff",
+   "labelling_doctrine": "provisional_doctrine_v0"
+  },
+  {
+   "factor_id": "monthly_churn",
+   "p_win_delta": 0,
+   "p_win_delta_percentage_points": 0,
+   "current_metric": 1,
+   "perfect_metric": 1,
+   "metric_type": "p_joint_goal",
+   "method": "p_win_delta_at_mean_v1",
+   "n_samples": 2000,
+   "status": "below_resolution",
+   "clamped": false,
+   "noise_floor": 0.03099,
+   "noise_floor_method": "z95_worst_case_bernoulli_diff",
+   "labelling_doctrine": "provisional_doctrine_v0"
+  }
+ ],
+ "edge_e_values": [
+  {
+   "edge_id": "pro_plan_price::mrr",
+   "from_id": "pro_plan_price",
+   "to_id": "mrr",
+   "from_label": "Pro plan price",
+   "to_label": "MRR",
+   "e_value": 1,
+   "flip_direction": "decrease",
+   "current_mean": 0.5,
+   "flip_mean": 0.281199,
+   "stability": {
+    "n_seeds": 10,
+    "n_seeds_flipped": 9,
+    "band_min": -1e-06,
+    "band_median": 0.193154,
+    "band_max": 0.6033,
+    "band_width": 0.603301,
+    "seed_flip_means": [
+     0.182555,
+     0.6033,
+     0.193154,
+     0.533995,
+     0.061261,
+     null,
+     0.398954,
+     -1e-06,
+     0.186719,
+     0.372082
+    ]
+   }
+  },
+  {
+   "edge_id": "monthly_customer_acquisition::mrr",
+   "from_id": "monthly_customer_acquisition",
+   "to_id": "mrr",
+   "from_label": "Monthly customer acquisition",
+   "to_label": "MRR",
+   "e_value": 1.7814,
+   "flip_direction": "increase",
+   "current_mean": 0.5,
+   "flip_mean": 0.890715,
+   "stability": {
+    "n_seeds": 10,
+    "n_seeds_flipped": 8,
+    "band_min": -0.354289,
+    "band_median": 0.402446,
+    "band_max": 0.799016,
+    "band_width": 1.153305,
+    "seed_flip_means": [
+     -0.354289,
+     0.614689,
+     -0.002407,
+     0.464965,
+     -1e-06,
+     0.339927,
+     0.799016,
+     null,
+     null,
+     0.717702
+    ]
+   }
+  },
+  {
+   "edge_id": "total_initiative_spend::mrr",
+   "from_id": "total_initiative_spend",
+   "to_id": "mrr",
+   "from_label": "Total initiative spend",
+   "to_label": "MRR",
+   "e_value": 1,
+   "flip_direction": "increase",
+   "current_mean": -0.5,
+   "flip_mean": -0.081199,
+   "stability": {
+    "n_seeds": 10,
+    "n_seeds_flipped": 10,
+    "band_min": -0.202937,
+    "band_median": -0.105732,
+    "band_max": 1e-06,
+    "band_width": 0.202938,
+    "seed_flip_means": [
+     1e-06,
+     -0.145927,
+     -0.202937,
+     -0.198452,
+     -0.09896,
+     -0.112504,
+     -0.170186,
+     1e-06,
+     1e-06,
+     -0.09111
+    ]
+   }
+  }
+ ],
+ "conditional_winners": [],
+ "factor_sensitivity": [
+  {
+   "factor_id": "monthly_customer_acquisition",
+   "factor_label": "Monthly customer acquisition",
+   "influence_score": 1,
+   "influence_rank": 2,
+   "sensitivity_score": 0.5,
+   "elasticity": 1,
+   "direction": "positive",
+   "importance_rank": 1,
+   "value_of_information": 0.019999999999999997,
+   "confidence": 0.605,
+   "confidence_source": "plot_unified_from_isl_bootstrap",
+   "confidence_provenance": {
+    "computation_source": "plot_unified_from_isl_bootstrap",
+    "formula_version": "plot_unified_v3",
+    "is_provisional": true,
+    "calibration_status": "provisional_pending_pilot_calibration",
+    "input_quality": "standard"
+   },
+   "confidence_components": {
+    "structural_certainty": 0.8,
+    "sampling_stability": 0.25
+   },
+   "source": "graph",
+   "flip_risk_category": "correlated",
+   "attribution_stability": "low",
+   "rank_flip_rate": 0.2,
+   "value_source": "cee_inference",
+   "value_extraction_type": "inferred",
+   "importance_basis": "graph_structural",
+   "driver_label": "biggest",
+   "evpi_percentage_points": 0.7,
+   "evpi_method": "heuristic",
+   "evidence_hint": false,
+   "range_derivation_source": "inferred_value"
+  },
+  {
+   "factor_id": "monthly_churn",
+   "factor_label": "Monthly churn",
+   "influence_score": 1,
+   "influence_rank": 3,
+   "sensitivity_score": -0.5,
+   "elasticity": 1,
+   "direction": "negative",
+   "importance_rank": 2,
+   "value_of_information": 0,
+   "confidence": 0.59955,
+   "confidence_source": "plot_unified_from_isl_bootstrap",
+   "confidence_provenance": {
+    "computation_source": "plot_unified_from_isl_bootstrap",
+    "formula_version": "plot_unified_v3",
+    "is_provisional": true,
+    "calibration_status": "provisional_pending_pilot_calibration",
+    "input_quality": "standard"
+   },
+   "confidence_components": {
+    "structural_certainty": 0.8,
+    "sampling_stability": 0.25
+   },
+   "source": "graph",
+   "flip_risk_category": "correlated",
+   "attribution_stability": "low",
+   "rank_flip_rate": 0.2,
+   "value_source": "cee_inference",
+   "value_extraction_type": "inferred",
+   "importance_basis": "graph_structural",
+   "driver_label": "strong",
+   "evpi_percentage_points": 0,
+   "evpi_method": "heuristic",
+   "evidence_hint": false,
+   "range_derivation_source": "inferred_baseline"
+  },
+  {
+   "factor_id": "product_value_score",
+   "factor_label": "Product value score",
+   "influence_score": 0.5075,
+   "influence_rank": 4,
+   "sensitivity_score": 0.25375,
+   "elasticity": 0.5075,
+   "direction": "positive",
+   "importance_rank": 3,
+   "value_of_information": 0,
+   "confidence": 0.5874,
+   "confidence_source": "plot_unified_from_isl_bootstrap",
+   "confidence_provenance": {
+    "computation_source": "plot_unified_from_isl_bootstrap",
+    "formula_version": "plot_unified_v3",
+    "is_provisional": true,
+    "calibration_status": "provisional_pending_pilot_calibration",
+    "input_quality": "standard"
+   },
+   "confidence_components": {
+    "structural_certainty": 0.8,
+    "sampling_stability": 0.25
+   },
+   "source": "graph",
+   "flip_risk_category": "correlated",
+   "attribution_stability": "low",
+   "rank_flip_rate": 0.25,
+   "value_source": "cee_inference",
+   "value_extraction_type": "inferred",
+   "importance_basis": "graph_structural",
+   "driver_label": "strong",
+   "evpi_percentage_points": 0,
+   "evpi_method": "heuristic",
+   "evidence_hint": false,
+   "range_derivation_source": "inferred_value"
+  },
+  {
+   "factor_id": "total_initiative_spend",
+   "factor_label": "Total initiative spend",
+   "influence_score": 1,
+   "influence_rank": 1,
+   "sensitivity_score": 0,
+   "elasticity": 0,
+   "direction": "negative",
+   "importance_rank": 4,
+   "value_of_information": 0,
+   "confidence": 0.5955,
+   "confidence_source": "plot_unified_from_isl_bootstrap",
+   "confidence_provenance": {
+    "computation_source": "plot_unified_from_isl_bootstrap",
+    "formula_version": "plot_unified_v3",
+    "is_provisional": true,
+    "calibration_status": "provisional_pending_pilot_calibration",
+    "input_quality": "standard"
+   },
+   "confidence_components": {
+    "structural_certainty": 0.8,
+    "sampling_stability": 0.25
+   },
+   "zero_reason": "intervention_override",
+   "source": "graph",
+   "flip_risk_category": "isolated",
+   "attribution_stability": "low",
+   "rank_flip_rate": 0.45,
+   "value_source": "cee_inference",
+   "value_extraction_type": "inferred",
+   "importance_basis": "graph_structural",
+   "driver_label": "strong",
+   "range_derivation_source": "scale_frame"
+  },
+  {
+   "factor_id": "advertising_spend",
+   "factor_label": "Advertising spend",
+   "influence_score": 0.25,
+   "influence_rank": 5,
+   "sensitivity_score": 0,
+   "elasticity": 0,
+   "direction": "negative",
+   "importance_rank": 5,
+   "value_of_information": 0,
+   "confidence": 0.39235,
+   "confidence_source": "plot_unified_from_isl_bootstrap",
+   "confidence_provenance": {
+    "computation_source": "plot_unified_from_isl_bootstrap",
+    "formula_version": "plot_unified_v3",
+    "is_provisional": true,
+    "calibration_status": "provisional_pending_pilot_calibration",
+    "input_quality": "standard"
+   },
+   "confidence_components": {
+    "structural_certainty": 0.5,
+    "sampling_stability": 0.25
+   },
+   "zero_reason": "intervention_override",
+   "source": "graph",
+   "flip_risk_category": "correlated",
+   "attribution_stability": "low",
+   "rank_flip_rate": 0.4,
+   "value_source": "cee_inference",
+   "value_extraction_type": "inferred",
+   "importance_basis": "graph_structural",
+   "driver_label": "moderate",
+   "range_derivation_source": "scale_frame"
+  },
+  {
+   "factor_id": "pro_plan_price",
+   "factor_label": "Pro plan price",
+   "influence_score": 0.24625000000000002,
+   "influence_rank": 6,
+   "sensitivity_score": 0,
+   "elasticity": 0,
+   "direction": "positive",
+   "importance_rank": 6,
+   "value_of_information": 0,
+   "confidence": 0.3,
+   "confidence_source": "plot_unified_from_isl_bootstrap",
+   "confidence_provenance": {
+    "computation_source": "plot_unified_from_isl_bootstrap",
+    "formula_version": "plot_unified_v3",
+    "is_provisional": true,
+    "calibration_status": "provisional_pending_pilot_calibration",
+    "input_quality": "standard"
+   },
+   "confidence_components": {
+    "structural_certainty": 0.5,
+    "sampling_stability": 0
+   },
+   "zero_reason": "intervention_override",
+   "source": "graph",
+   "flip_risk_category": "isolated",
+   "attribution_stability": "negligible",
+   "rank_flip_rate": 0.4,
+   "value_source": "brief_extraction",
+   "importance_basis": "graph_structural",
+   "driver_label": "moderate",
+   "range_derivation_source": "explicit_cap"
+  },
+  {
+   "factor_id": "feature_development_spend",
+   "factor_label": "Feature development spend",
+   "influence_score": 0.24625000000000002,
+   "influence_rank": 7,
+   "sensitivity_score": 0,
+   "elasticity": 0,
+   "direction": "negative",
+   "importance_rank": 7,
+   "value_of_information": 0,
+   "confidence": 0.4303,
+   "confidence_source": "plot_unified_from_isl_bootstrap",
+   "confidence_provenance": {
+    "computation_source": "plot_unified_from_isl_bootstrap",
+    "formula_version": "plot_unified_v3",
+    "is_provisional": true,
+    "calibration_status": "provisional_pending_pilot_calibration",
+    "input_quality": "standard"
+   },
+   "confidence_components": {
+    "structural_certainty": 0.5,
+    "sampling_stability": 0.25
+   },
+   "zero_reason": "intervention_override",
+   "source": "graph",
+   "flip_risk_category": "correlated",
+   "attribution_stability": "low",
+   "rank_flip_rate": 0.35,
+   "value_source": "cee_inference",
+   "value_extraction_type": "inferred",
+   "importance_basis": "graph_structural",
+   "driver_label": "moderate",
+   "range_derivation_source": "scale_frame"
+  }
+ ],
+ "driver_order": {
+  "version": 1,
+  "basis": "graph_structural",
+  "ranked_factor_ids": [
+   "monthly_customer_acquisition",
+   "monthly_churn",
+   "product_value_score",
+   "total_initiative_spend",
+   "advertising_spend",
+   "pro_plan_price",
+   "feature_development_spend"
+  ],
+  "species": "single",
+  "lever_policy": "du_union",
+  "lever_ids": [
+   "total_initiative_spend",
+   "advertising_spend",
+   "pro_plan_price",
+   "feature_development_spend"
+  ],
+  "separability": {
+   "top_pair_separable": false,
+   "method": "basis_value_exact_tie"
+  },
+  "rank_stability": {
+   "max_rank_flip_rate": 0.45,
+   "min_attribution_stability": "negligible"
+  }
+ },
+ "factor_stability": [
+  {
+   "factor_id": "product_value_score",
+   "factor_label": "Product value score",
+   "elasticity_std": 1.06450296,
+   "attribution_stability": "low",
+   "rank_flip_rate": 0.25,
+   "stability_method": "bootstrap_20"
+  },
+  {
+   "factor_id": "monthly_churn",
+   "factor_label": "Monthly churn",
+   "elasticity_std": 0.11245427,
+   "attribution_stability": "low",
+   "rank_flip_rate": 0.2,
+   "stability_method": "bootstrap_20"
+  },
+  {
+   "factor_id": "monthly_customer_acquisition",
+   "factor_label": "Monthly customer acquisition",
+   "elasticity_std": 0.0639593,
+   "attribution_stability": "low",
+   "rank_flip_rate": 0.2,
+   "stability_method": "bootstrap_20"
+  },
+  {
+   "factor_id": "total_initiative_spend",
+   "factor_label": "Total initiative spend",
+   "elasticity_std": 0,
+   "attribution_stability": "low",
+   "rank_flip_rate": 0.45,
+   "stability_method": "bootstrap_20"
+  },
+  {
+   "factor_id": "feature_development_spend",
+   "factor_label": "Feature development spend",
+   "elasticity_std": 0,
+   "attribution_stability": "low",
+   "rank_flip_rate": 0.35,
+   "stability_method": "bootstrap_20"
+  },
+  {
+   "factor_id": "advertising_spend",
+   "factor_label": "Advertising spend",
+   "elasticity_std": 0,
+   "attribution_stability": "low",
+   "rank_flip_rate": 0.4,
+   "stability_method": "bootstrap_20"
+  },
+  {
+   "factor_id": "pro_plan_price",
+   "factor_label": "Pro plan price",
+   "elasticity_std": 0,
+   "attribution_stability": "negligible",
+   "rank_flip_rate": 0.4,
+   "stability_method": "bootstrap_20"
+  }
+ ],
+ "stability_thresholds": {
+  "high_moderate_boundary": 0.1,
+  "moderate_low_boundary": 0.3,
+  "version": "v1.0-operational-defaults",
+  "provisional": true
+ },
+ "inference_warnings": [
+  {
+   "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+   "message": "13 edge E-value entries were omitted from edge_e_values: 13 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+   "severity": "info"
+  },
+  {
+   "code": "GOAL_DIRECTION_UNATTESTED",
+   "message": "No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team's stated aim: if the goal is a quantity to reduce, or the aim is to land near a target rather than as high as possible, this ranking answers a different question. Send goal_direction to rank against the stated objective.",
+   "severity": "warning",
+   "field": "goal_direction"
+  },
+  {
+   "code": "GOAL_THRESHOLD_NOT_CONVERTIBLE",
+   "message": "A 'level' frame requires goal node 'mrr' to carry observed_state.baseline to convert the level into the samples' frame, but it carries no observed_state at all.",
+   "severity": "warning",
+   "field": "nodes[mrr].observed_state.baseline"
+  }
+ ],
+ "m1_coaching": {
+  "story_headlines": {
+   "price_rise_only": "Price Rise Only leads, but Product value score \u2192 Monthly customer acquisition could swing the outcome to Carry On as Now",
+   "carry_on_as_now": "Runner-up with 19% win probability",
+   "additional_advertising": "Runner-up with 17% win probability",
+   "features_and_price_rise": "Runner-up with 13% win probability"
+  },
+  "evidence_gaps": [
+   {
+    "factor_id": "monthly_churn",
+    "factor_label": "Monthly churn",
+    "voi_score": 0.40045,
+    "confidence": 0.59955,
+    "confidence_display": "60%",
+    "confidence_defaulted": false,
+    "influence": 1,
+    "influence_display": "100%",
+    "suggestion": "Gather data on \"Monthly churn\" to reduce uncertainty",
+    "notes": [],
+    "value": 0.03,
+    "raw_value": 3,
+    "unit": "percent",
+    "evpi_percentage_points": 13.3,
+    "evpi_method": "heuristic"
+   },
+   {
+    "factor_id": "monthly_customer_acquisition",
+    "factor_label": "Monthly customer acquisition",
+    "voi_score": 0.395,
+    "confidence": 0.605,
+    "confidence_display": "61%",
+    "confidence_defaulted": false,
+    "influence": 1,
+    "influence_display": "100%",
+    "suggestion": "Gather data on \"Monthly customer acquisition\" to reduce uncertainty",
+    "notes": [],
+    "value": 0.02,
+    "raw_value": 20,
+    "unit": "new Pro customers/month",
+    "evpi_percentage_points": 13.1,
+    "evpi_method": "heuristic"
+   },
+   {
+    "factor_id": "product_value_score",
+    "factor_label": "Product value score",
+    "voi_score": 0.20939449999999996,
+    "confidence": 0.5874,
+    "confidence_display": "59%",
+    "confidence_defaulted": false,
+    "influence": 0.5075,
+    "influence_display": "51%",
+    "suggestion": "Gather data on \"Product value score\" to reduce uncertainty",
+    "notes": [],
+    "value": 0.5,
+    "raw_value": 50,
+    "unit": "score out of 100",
+    "evpi_percentage_points": 6.9,
+    "evpi_method": "heuristic"
+   }
+  ],
+  "model_critiques": [
+   {
+    "type": "ANCHORING_RISK",
+    "severity": "warn",
+    "challenge_question": "High-influence factors have 0.5 baseline values \u2014 a common 'I don't know' default. Are these estimates or evidence?",
+    "suggested_action": "Validate assumptions for: Product value score",
+    "targets": [
+     "product_value_score"
+    ]
+   }
+  ],
+  "next_actions": [
+   {
+    "priority": 2,
+    "action": "Gather evidence on Monthly churn",
+    "rationale": "This factor has high impact (100%) but low confidence (60%)",
+    "target_type": "factor",
+    "target_id": "monthly_churn",
+    "target_label": "Monthly churn"
+   },
+   {
+    "priority": 3,
+    "action": "Validate the Product value score \u2192 Monthly customer acquisition assumption",
+    "rationale": "21% chance this flips the decision to Carry On as Now",
+    "target_type": "edge",
+    "target_id": "product_value_score->monthly_customer_acquisition",
+    "target_label": "Product value score \u2192 Monthly customer acquisition"
+   }
+  ],
+  "readiness": "needs_evidence",
+  "headline_type": "high_uncertainty",
+  "top_fragile_edge": {
+   "edge_id": "product_value_score->monthly_customer_acquisition",
+   "label": "Product value score \u2192 Monthly customer acquisition",
+   "alternative_winner": "Carry On as Now",
+   "switch_probability": 0.2064
+  },
+  "assumptions_ledger": {
+   "assumptions": [
+    {
+     "dedup_key": "plot_normaliser:removed:global:unknown:goal_constraints[constraint_id=agent-lane:total_initiative_spend:<=]",
+     "source_service": "plot_normaliser",
+     "action": "removed",
+     "entity_type": "global",
+     "entity_id": "unknown",
+     "field": "goal_constraints[constraint_id=agent-lane:total_initiative_spend:<=]",
+     "from_value": "{\"unit\":\"GBP over 6 months\"}",
+     "to_value": "null",
+     "reason": "Non-canonical fields stripped before ISL: unit",
+     "impact": "low",
+     "impact_reason_code": "STRUCTURAL_ONLY"
+    },
+    {
+     "dedup_key": "plot_normaliser:removed:global:unknown:goal_constraints[constraint_id=agent-lane:monthly_churn:<=]",
+     "source_service": "plot_normaliser",
+     "action": "removed",
+     "entity_type": "global",
+     "entity_id": "unknown",
+     "field": "goal_constraints[constraint_id=agent-lane:monthly_churn:<=]",
+     "from_value": "{\"unit\":\"%\"}",
+     "to_value": "null",
+     "reason": "Non-canonical fields stripped before ISL: unit",
+     "impact": "low",
+     "impact_reason_code": "STRUCTURAL_ONLY"
+    },
+    {
+     "dedup_key": "plot_normaliser:normalised:global:unknown:intervention.value.pro_plan_price",
+     "source_service": "plot_normaliser",
+     "action": "normalised",
+     "entity_type": "global",
+     "entity_id": "unknown",
+     "field": "intervention.value.pro_plan_price",
+     "from_value": 59,
+     "to_value": 0.295,
+     "reason": "normalised range=[0,200] source=explicit_cap",
+     "impact": "low",
+     "impact_reason_code": "STRUCTURAL_ONLY"
+    },
+    {
+     "dedup_key": "plot_normaliser:normalised:global:unknown:intervention.value.total_initiative_spend",
+     "source_service": "plot_normaliser",
+     "action": "normalised",
+     "entity_type": "global",
+     "entity_id": "unknown",
+     "field": "intervention.value.total_initiative_spend",
+     "from_value": 20000,
+     "to_value": 0.2,
+     "reason": "normalised range=[0,100000] source=scale_frame",
+     "impact": "low",
+     "impact_reason_code": "STRUCTURAL_ONLY"
+    },
+    {
+     "dedup_key": "plot_normaliser:normalised:global:unknown:intervention.value.feature_development_spend",
+     "source_service": "plot_normaliser",
+     "action": "normalised",
+     "entity_type": "global",
+     "entity_id": "unknown",
+     "field": "intervention.value.feature_development_spend",
+     "from_value": 20000,
+     "to_value": 0.2,
+     "reason": "normalised range=[0,100000] source=scale_frame",
+     "impact": "low",
+     "impact_reason_code": "STRUCTURAL_ONLY"
+    },
+    {
+     "dedup_key": "plot_normaliser:normalised:global:unknown:intervention.value.advertising_spend",
+     "source_service": "plot_normaliser",
+     "action": "normalised",
+     "entity_type": "global",
+     "entity_id": "unknown",
+     "field": "intervention.value.advertising_spend",
+     "from_value": 20000,
+     "to_value": 0.2,
+     "reason": "normalised range=[0,100000] source=scale_frame",
+     "impact": "low",
+     "impact_reason_code": "STRUCTURAL_ONLY"
+    },
+    {
+     "dedup_key": "plot_normaliser:normalised:global:unknown:constraint.value.agent-lane:total_initiative_spend:<=",
+     "source_service": "plot_normaliser",
+     "action": "normalised",
+     "entity_type": "global",
+     "entity_id": "unknown",
+     "field": "constraint.value.agent-lane:total_initiative_spend:<=",
+     "from_value": 20000,
+     "to_value": 0.2,
+     "reason": "normalised range=[0,100000] source=scale_frame",
+     "impact": "low",
+     "impact_reason_code": "STRUCTURAL_ONLY"
+    },
+    {
+     "dedup_key": "plot_normaliser:normalised:global:unknown:constraint.value.agent-lane:monthly_churn:<=",
+     "source_service": "plot_normaliser",
+     "action": "normalised",
+     "entity_type": "global",
+     "entity_id": "unknown",
+     "field": "constraint.value.agent-lane:monthly_churn:<=",
+     "from_value": 4,
+     "to_value": 0.04,
+     "reason": "normalised range=[0,100] source=unit_percent",
+     "impact": "low",
+     "impact_reason_code": "STRUCTURAL_ONLY"
+    },
+    {
+     "dedup_key": "isl_engine:flagged:edge:pro_plan_price->mrr:switch_probability",
+     "source_service": "isl_engine",
+     "action": "flagged",
+     "entity_type": "edge",
+     "entity_id": "pro_plan_price->mrr",
+     "field": "switch_probability",
+     "from_value": null,
+     "to_value": 0.584,
+     "reason": "Edge Pro plan price \u2192 MRR has 58% chance of flipping decision",
+     "impact": "high",
+     "impact_reason_code": "FRAGILE_EDGE"
+    },
+    {
+     "dedup_key": "isl_engine:flagged:edge:pro_plan_price->monthly_customer_acquisition:switch_probability",
+     "source_service": "isl_engine",
+     "action": "flagged",
+     "entity_type": "edge",
+     "entity_id": "pro_plan_price->monthly_customer_acquisition",
+     "field": "switch_probability",
+     "from_value": null,
+     "to_value": 0.2468,
+     "reason": "Edge Pro plan price \u2192 Monthly customer acquisition has 25% chance of flipping decision",
+     "impact": "medium",
+     "impact_reason_code": "FRAGILE_EDGE"
+    },
+    {
+     "dedup_key": "isl_engine:flagged:edge:total_initiative_spend->mrr:switch_probability",
+     "source_service": "isl_engine",
+     "action": "flagged",
+     "entity_type": "edge",
+     "entity_id": "total_initiative_spend->mrr",
+     "field": "switch_probability",
+     "from_value": null,
+     "to_value": 0.2352,
+     "reason": "Edge Total initiative spend \u2192 MRR has 24% chance of flipping decision",
+     "impact": "medium",
+     "impact_reason_code": "FRAGILE_EDGE"
+    },
+    {
+     "dedup_key": "isl_engine:flagged:edge:advertising_spend->monthly_customer_acquisition:switch_probability",
+     "source_service": "isl_engine",
+     "action": "flagged",
+     "entity_type": "edge",
+     "entity_id": "advertising_spend->monthly_customer_acquisition",
+     "field": "switch_probability",
+     "from_value": null,
+     "to_value": 0.2296,
+     "reason": "Edge Advertising spend \u2192 Monthly customer acquisition has 23% chance of flipping decision",
+     "impact": "medium",
+     "impact_reason_code": "FRAGILE_EDGE"
+    },
+    {
+     "dedup_key": "isl_engine:flagged:edge:feature_development_spend->product_value_score:switch_probability",
+     "source_service": "isl_engine",
+     "action": "flagged",
+     "entity_type": "edge",
+     "entity_id": "feature_development_spend->product_value_score",
+     "field": "switch_probability",
+     "from_value": null,
+     "to_value": 0.2164,
+     "reason": "Edge Feature development spend \u2192 Product value score has 22% chance of flipping decision",
+     "impact": "medium",
+     "impact_reason_code": "FRAGILE_EDGE"
+    },
+    {
+     "dedup_key": "isl_engine:flagged:edge:advertising_spend->advertising_efficiency_risk:switch_probability",
+     "source_service": "isl_engine",
+     "action": "flagged",
+     "entity_type": "edge",
+     "entity_id": "advertising_spend->advertising_efficiency_risk",
+     "field": "switch_probability",
+     "from_value": null,
+     "to_value": 0.216,
+     "reason": "Edge Advertising spend \u2192 Advertising efficiency risk has 22% chance of flipping decision",
+     "impact": "medium",
+     "impact_reason_code": "FRAGILE_EDGE"
+    },
+    {
+     "dedup_key": "isl_engine:flagged:edge:product_value_score->monthly_customer_acquisition:switch_probability",
+     "source_service": "isl_engine",
+     "action": "flagged",
+     "entity_type": "edge",
+     "entity_id": "product_value_score->monthly_customer_acquisition",
+     "field": "switch_probability",
+     "from_value": null,
+     "to_value": 0.2064,
+     "reason": "Edge Product value score \u2192 Monthly customer acquisition has 21% chance of flipping decision",
+     "impact": "medium",
+     "impact_reason_code": "FRAGILE_EDGE"
+    },
+    {
+     "dedup_key": "isl_engine:flagged:edge:price_sensitivity->monthly_customer_acquisition:switch_probability",
+     "source_service": "isl_engine",
+     "action": "flagged",
+     "entity_type": "edge",
+     "entity_id": "price_sensitivity->monthly_customer_acquisition",
+     "field": "switch_probability",
+     "from_value": null,
+     "to_value": 0.2052,
+     "reason": "Edge Price sensitivity \u2192 Monthly customer acquisition has 21% chance of flipping decision",
+     "impact": "medium",
+     "impact_reason_code": "FRAGILE_EDGE"
+    },
+    {
+     "dedup_key": "isl_engine:flagged:edge:monthly_churn->mrr:switch_probability",
+     "source_service": "isl_engine",
+     "action": "flagged",
+     "entity_type": "edge",
+     "entity_id": "monthly_churn->mrr",
+     "field": "switch_probability",
+     "from_value": null,
+     "to_value": 0.1924,
+     "reason": "Edge Monthly churn \u2192 MRR has 19% chance of flipping decision",
+     "impact": "medium",
+     "impact_reason_code": "FRAGILE_EDGE"
+    },
+    {
+     "dedup_key": "isl_engine:flagged:edge:advertising_efficiency_risk->monthly_customer_acquisition:switch_probability",
+     "source_service": "isl_engine",
+     "action": "flagged",
+     "entity_type": "edge",
+     "entity_id": "advertising_efficiency_risk->monthly_customer_acquisition",
+     "field": "switch_probability",
+     "from_value": null,
+     "to_value": 0.1912,
+     "reason": "Edge Advertising efficiency risk \u2192 Monthly customer acquisition has 19% chance of flipping decision",
+     "impact": "medium",
+     "impact_reason_code": "FRAGILE_EDGE"
+    },
+    {
+     "dedup_key": "isl_engine:flagged:edge:advertising_spend->total_initiative_spend:switch_probability",
+     "source_service": "isl_engine",
+     "action": "flagged",
+     "entity_type": "edge",
+     "entity_id": "advertising_spend->total_initiative_spend",
+     "field": "switch_probability",
+     "from_value": null,
+     "to_value": 0.1888,
+     "reason": "Edge Advertising spend \u2192 Total initiative spend has 19% chance of flipping decision",
+     "impact": "medium",
+     "impact_reason_code": "FRAGILE_EDGE"
+    },
+    {
+     "dedup_key": "isl_engine:flagged:edge:product_value_score->monthly_churn:switch_probability",
+     "source_service": "isl_engine",
+     "action": "flagged",
+     "entity_type": "edge",
+     "entity_id": "product_value_score->monthly_churn",
+     "field": "switch_probability",
+     "from_value": null,
+     "to_value": 0.1832,
+     "reason": "Edge Product value score \u2192 Monthly churn has 18% chance of flipping decision",
+     "impact": "medium",
+     "impact_reason_code": "FRAGILE_EDGE"
+    },
+    {
+     "dedup_key": "isl_engine:flagged:edge:price_sensitivity->monthly_churn:switch_probability",
+     "source_service": "isl_engine",
+     "action": "flagged",
+     "entity_type": "edge",
+     "entity_id": "price_sensitivity->monthly_churn",
+     "field": "switch_probability",
+     "from_value": null,
+     "to_value": 0.1812,
+     "reason": "Edge Price sensitivity \u2192 Monthly churn has 18% chance of flipping decision",
+     "impact": "medium",
+     "impact_reason_code": "FRAGILE_EDGE"
+    },
+    {
+     "dedup_key": "isl_engine:flagged:edge:pro_plan_price->price_sensitivity:switch_probability",
+     "source_service": "isl_engine",
+     "action": "flagged",
+     "entity_type": "edge",
+     "entity_id": "pro_plan_price->price_sensitivity",
+     "field": "switch_probability",
+     "from_value": null,
+     "to_value": 0.1652,
+     "reason": "Edge Pro plan price \u2192 Price sensitivity has 17% chance of flipping decision",
+     "impact": "medium",
+     "impact_reason_code": "FRAGILE_EDGE"
+    },
+    {
+     "dedup_key": "isl_engine:flagged:node:advertising_spend:confidence",
+     "source_service": "isl_engine",
+     "action": "flagged",
+     "entity_type": "node",
+     "entity_id": "advertising_spend",
+     "field": "confidence",
+     "from_value": null,
+     "to_value": 0.39235,
+     "reason": "Factor Advertising spend has low confidence (39%)",
+     "impact": "low",
+     "impact_reason_code": "STRUCTURAL_ONLY"
+    },
+    {
+     "dedup_key": "isl_engine:flagged:node:pro_plan_price:confidence",
+     "source_service": "isl_engine",
+     "action": "flagged",
+     "entity_type": "node",
+     "entity_id": "pro_plan_price",
+     "field": "confidence",
+     "from_value": null,
+     "to_value": 0.3,
+     "reason": "Factor Pro plan price has low confidence (30%)",
+     "impact": "low",
+     "impact_reason_code": "STRUCTURAL_ONLY"
+    },
+    {
+     "dedup_key": "isl_engine:flagged:node:feature_development_spend:confidence",
+     "source_service": "isl_engine",
+     "action": "flagged",
+     "entity_type": "node",
+     "entity_id": "feature_development_spend",
+     "field": "confidence",
+     "from_value": null,
+     "to_value": 0.4303,
+     "reason": "Factor Feature development spend has low confidence (43%)",
+     "impact": "low",
+     "impact_reason_code": "STRUCTURAL_ONLY"
+    }
+   ],
+   "total_count": 25,
+   "high_impact_count": 1,
+   "medium_impact_count": 13,
+   "low_impact_count": 11
+  },
+  "thresholds_used": {
+   "headline_clear_winner_delta": 0.2,
+   "headline_clear_winner_stability": 0.7,
+   "headline_moderate_winner_delta": 0.1,
+   "headline_moderate_winner_stability": 0.5,
+   "headline_close_call_delta": 0.1,
+   "headline_high_uncertainty_voi": 0.3,
+   "headline_high_uncertainty_fragile": 0.25,
+   "headline_fragile_edge_min": 0.15,
+   "evidence_gap_min_voi": 0,
+   "evidence_gap_top_quartile": true,
+   "evidence_gap_floor": 3,
+   "evidence_gap_cap": 3,
+   "critique_dominant_factor_threshold": 0.5,
+   "critique_influential_external_quartile": 0.25,
+   "critique_narrow_framing_max_options": 2,
+   "critique_anchoring_baseline_value": 0.5,
+   "critique_overconfidence_threshold": 0.85,
+   "action_fragile_edge_threshold": 0.2,
+   "action_high_voi_threshold": 0.4,
+   "readiness_high_evidence_gap_count": 2,
+   "readiness_high_voi_threshold": 0.4,
+   "readiness_joint_prob_floor": 0.05,
+   "readiness_joint_prob_close_call": 0.3,
+   "tone_confident_stability_min": 0.75,
+   "tone_low_driver_confidence_max": 0.5
+  },
+  "readiness_signals": {
+   "overall": "needs_evidence",
+   "overall_score": 0.35,
+   "computed_score_raw": 0.76,
+   "dimensions": {
+    "evidence_quality": 0.8,
+    "model_robustness": 0.7,
+    "framing_quality": 0.8
+   },
+   "signals": [
+    {
+     "dimension": "evidence",
+     "signal": "3 evidence gaps",
+     "impact": "negative",
+     "weight": 0.2
+    },
+    {
+     "dimension": "robustness",
+     "signal": "8 fragile edges",
+     "impact": "negative",
+     "weight": 0.3
+    },
+    {
+     "dimension": "robustness",
+     "signal": "Clear 33-point margin",
+     "impact": "positive",
+     "weight": 0.15
+    },
+    {
+     "dimension": "framing",
+     "signal": "Anchoring risk detected",
+     "impact": "negative",
+     "weight": 0.2
+    },
+    {
+     "dimension": "framing",
+     "signal": "4 options considered",
+     "impact": "positive",
+     "weight": 0.1
+    }
+   ]
+  },
+  "key_drivers": [
+   {
+    "factor_id": "monthly_customer_acquisition",
+    "factor_label": "Monthly customer acquisition",
+    "influence_score": 1,
+    "normalised_impact": 1,
+    "impact_display": "Very High",
+    "direction": "positive",
+    "rank": 1
+   },
+   {
+    "factor_id": "monthly_churn",
+    "factor_label": "Monthly churn",
+    "influence_score": 1,
+    "normalised_impact": 1,
+    "impact_display": "Very High",
+    "direction": "negative",
+    "rank": 2
+   },
+   {
+    "factor_id": "product_value_score",
+    "factor_label": "Product value score",
+    "influence_score": 0.507,
+    "normalised_impact": 0.51,
+    "impact_display": "High",
+    "direction": "positive",
+    "rank": 3
+   },
+   {
+    "factor_id": "total_initiative_spend",
+    "factor_label": "Total initiative spend",
+    "influence_score": 1,
+    "normalised_impact": 1,
+    "impact_display": "Very High",
+    "direction": "negative",
+    "rank": 4
+   },
+   {
+    "factor_id": "advertising_spend",
+    "factor_label": "Advertising spend",
+    "influence_score": 0.25,
+    "normalised_impact": 0.25,
+    "impact_display": "Medium",
+    "direction": "negative",
+    "rank": 5
+   }
+  ],
+  "executive_summary": {
+   "summary": "Price Rise Only currently leads, but the outcome is highly uncertain. Key uncertainty: Monthly churn has high impact but low evidence quality. Gather evidence on Monthly churn before deciding.",
+   "decision_statement": "Price Rise Only currently leads, but the outcome is highly uncertain.",
+   "key_qualifier": "Key uncertainty: Monthly churn has high impact but low evidence quality.",
+   "action_implication": "Gather evidence on Monthly churn before deciding."
+  },
+  "readiness_tone": "caution",
+  "readiness_reasons": [
+   "NOT_ROBUST",
+   "LOW_ROBUSTNESS",
+   "LOW_STABILITY",
+   "MATERIAL_FRAGILE_EDGE",
+   "EVIDENCE_GAPS"
+  ],
+  "coaching_version": "1.2.0",
+  "computed_at": "2026-09-28T12:26:06.048Z"
+ },
+ "confidence_tier": "needs_work",
+ "flip_thresholds": [
+  {
+   "factor_id": "pro_plan_price",
+   "factor_label": "Pro plan price",
+   "current_value": 49,
+   "flip_value": 59,
+   "direction": "increase",
+   "unit": "GBP/month",
+   "alternative_winner_id": "carry_on_as_now",
+   "alternative_winner_label": "Carry On as Now",
+   "flip_reason": "found",
+   "iterations_used": 0,
+   "probes_used": 0,
+   "value_scale": "display",
+   "current_display": "49 GBP/month",
+   "flip_display": "59 GBP/month"
+  },
+  {
+   "factor_id": "feature_development_spend",
+   "factor_label": "Feature development spend",
+   "current_value": 0,
+   "flip_value": null,
+   "unit": "GBP over 6 months",
+   "alternative_winner_id": null,
+   "alternative_winner_label": null,
+   "flip_reason": "no_effect_within_bounds",
+   "iterations_used": 0,
+   "probes_used": 0,
+   "no_flip_in_range": true
+  },
+  {
+   "factor_id": "advertising_spend",
+   "factor_label": "Advertising spend",
+   "current_value": 0,
+   "flip_value": null,
+   "unit": "GBP over 6 months",
+   "alternative_winner_id": null,
+   "alternative_winner_label": null,
+   "flip_reason": "no_effect_within_bounds",
+   "iterations_used": 0,
+   "probes_used": 0,
+   "no_flip_in_range": true
+  }
+ ],
+ "flip_thresholds_status": "partial_no_effect",
+ "flip_thresholds_margin_status": "unavailable",
+ "flip_thresholds_margin_coverage": {
+  "total": 3,
+  "with_margin": 0,
+  "without_margin": 3
+ },
+ "identifiability": {
+  "status": "identifiable",
+  "method": "backdoor",
+  "pairs_checked": 4,
+  "pairs_identifiable": 4
+ },
+ "m1_review": null,
+ "review_status": "disabled",
+ "robustness": {
+  "fragile_edges": [
+   {
+    "edge_id": "pro_plan_price->mrr",
+    "from_id": "pro_plan_price",
+    "to_id": "mrr",
+    "switch_probability": 0.584,
+    "marginal_switch_probability": 0.26,
+    "alternative_winner_id": "carry_on_as_now",
+    "from_label": "Pro plan price",
+    "to_label": "MRR",
+    "severity": "error",
+    "visible": true,
+    "alternative_winner_label": "Carry On as Now"
+   },
+   {
+    "edge_id": "pro_plan_price->monthly_customer_acquisition",
+    "from_id": "pro_plan_price",
+    "to_id": "monthly_customer_acquisition",
+    "switch_probability": 0.2468,
+    "marginal_switch_probability": 0,
+    "alternative_winner_id": "carry_on_as_now",
+    "from_label": "Pro plan price",
+    "to_label": "Monthly customer acquisition",
+    "severity": "warning",
+    "visible": true,
+    "alternative_winner_label": "Carry On as Now"
+   },
+   {
+    "edge_id": "total_initiative_spend->mrr",
+    "from_id": "total_initiative_spend",
+    "to_id": "mrr",
+    "switch_probability": 0.2352,
+    "marginal_switch_probability": 0.16,
+    "alternative_winner_id": "carry_on_as_now",
+    "from_label": "Total initiative spend",
+    "to_label": "MRR",
+    "severity": "warning",
+    "visible": true,
+    "alternative_winner_label": "Carry On as Now"
+   },
+   {
+    "edge_id": "advertising_spend->monthly_customer_acquisition",
+    "from_id": "advertising_spend",
+    "to_id": "monthly_customer_acquisition",
+    "switch_probability": 0.2296,
+    "alternative_winner_id": "carry_on_as_now",
+    "from_label": "Advertising spend",
+    "to_label": "Monthly customer acquisition",
+    "severity": "warning",
+    "visible": true,
+    "alternative_winner_label": "Carry On as Now"
+   },
+   {
+    "edge_id": "feature_development_spend->product_value_score",
+    "from_id": "feature_development_spend",
+    "to_id": "product_value_score",
+    "switch_probability": 0.2164,
+    "marginal_switch_probability": 0,
+    "alternative_winner_id": "carry_on_as_now",
+    "from_label": "Feature development spend",
+    "to_label": "Product value score",
+    "severity": "warning",
+    "visible": true,
+    "alternative_winner_label": "Carry On as Now"
+   },
+   {
+    "edge_id": "advertising_spend->advertising_efficiency_risk",
+    "from_id": "advertising_spend",
+    "to_id": "advertising_efficiency_risk",
+    "switch_probability": 0.216,
+    "marginal_switch_probability": 0,
+    "alternative_winner_id": "additional_advertising",
+    "from_label": "Advertising spend",
+    "to_label": "Advertising efficiency risk",
+    "severity": "warning",
+    "visible": true,
+    "alternative_winner_label": "Additional Advertising"
+   },
+   {
+    "edge_id": "product_value_score->monthly_customer_acquisition",
+    "from_id": "product_value_score",
+    "to_id": "monthly_customer_acquisition",
+    "switch_probability": 0.2064,
+    "marginal_switch_probability": 0,
+    "alternative_winner_id": "carry_on_as_now",
+    "from_label": "Product value score",
+    "to_label": "Monthly customer acquisition",
+    "severity": "warning",
+    "visible": true,
+    "alternative_winner_label": "Carry On as Now"
+   },
+   {
+    "edge_id": "price_sensitivity->monthly_customer_acquisition",
+    "from_id": "price_sensitivity",
+    "to_id": "monthly_customer_acquisition",
+    "switch_probability": 0.2052,
+    "marginal_switch_probability": 0,
+    "alternative_winner_id": "carry_on_as_now",
+    "from_label": "Price sensitivity",
+    "to_label": "Monthly customer acquisition",
+    "severity": "warning",
+    "visible": true,
+    "alternative_winner_label": "Carry On as Now"
+   },
+   {
+    "edge_id": "monthly_churn->mrr",
+    "from_id": "monthly_churn",
+    "to_id": "mrr",
+    "switch_probability": 0.1924,
+    "alternative_winner_id": "carry_on_as_now",
+    "from_label": "Monthly churn",
+    "to_label": "MRR",
+    "severity": "warning",
+    "visible": true,
+    "alternative_winner_label": "Carry On as Now"
+   },
+   {
+    "edge_id": "advertising_efficiency_risk->monthly_customer_acquisition",
+    "from_id": "advertising_efficiency_risk",
+    "to_id": "monthly_customer_acquisition",
+    "switch_probability": 0.1912,
+    "marginal_switch_probability": 0,
+    "alternative_winner_id": "carry_on_as_now",
+    "from_label": "Advertising efficiency risk",
+    "to_label": "Monthly customer acquisition",
+    "severity": "warning",
+    "visible": true,
+    "alternative_winner_label": "Carry On as Now"
+   },
+   {
+    "edge_id": "advertising_spend->total_initiative_spend",
+    "from_id": "advertising_spend",
+    "to_id": "total_initiative_spend",
+    "switch_probability": 0.1888,
+    "alternative_winner_id": "carry_on_as_now",
+    "from_label": "Advertising spend",
+    "to_label": "Total initiative spend",
+    "severity": "warning",
+    "visible": true,
+    "alternative_winner_label": "Carry On as Now"
+   },
+   {
+    "edge_id": "product_value_score->monthly_churn",
+    "from_id": "product_value_score",
+    "to_id": "monthly_churn",
+    "switch_probability": 0.1832,
+    "alternative_winner_id": "carry_on_as_now",
+    "from_label": "Product value score",
+    "to_label": "Monthly churn",
+    "severity": "warning",
+    "visible": true,
+    "alternative_winner_label": "Carry On as Now"
+   },
+   {
+    "edge_id": "price_sensitivity->monthly_churn",
+    "from_id": "price_sensitivity",
+    "to_id": "monthly_churn",
+    "switch_probability": 0.1812,
+    "alternative_winner_id": "carry_on_as_now",
+    "from_label": "Price sensitivity",
+    "to_label": "Monthly churn",
+    "severity": "warning",
+    "visible": true,
+    "alternative_winner_label": "Carry On as Now"
+   },
+   {
+    "edge_id": "pro_plan_price->price_sensitivity",
+    "from_id": "pro_plan_price",
+    "to_id": "price_sensitivity",
+    "switch_probability": 0.1652,
+    "marginal_switch_probability": 0,
+    "alternative_winner_id": "additional_advertising",
+    "from_label": "Pro plan price",
+    "to_label": "Price sensitivity",
+    "severity": "warning",
+    "visible": true,
+    "alternative_winner_label": "Additional Advertising"
+   },
+   {
+    "edge_id": "monthly_customer_acquisition->mrr",
+    "from_id": "monthly_customer_acquisition",
+    "to_id": "mrr",
+    "switch_probability": 0.1352,
+    "marginal_switch_probability": 0.05,
+    "alternative_winner_id": "carry_on_as_now",
+    "from_label": "Monthly customer acquisition",
+    "to_label": "MRR",
+    "severity": "warning",
+    "visible": false,
+    "alternative_winner_label": "Carry On as Now"
+   }
+  ],
+  "robust_edges": [],
+  "is_robust": false,
+  "level": "low",
+  "confidence": 0.5179083333333333,
+  "confidence_basis": "recommendation_stability_uncalibrated",
+  "recommended_option_id": "price_rise_only",
+  "recommended_option_label": "Price Rise Only",
+  "recommended_option_compliance": "compliant",
+  "recommended_option_compliance_reason": "this option met every limit you set, in all the scenarios we tested",
+  "near_tie": {
+   "is_tie": false,
+   "top_option_id": "price_rise_only",
+   "second_option_id": "carry_on_as_now",
+   "tied_option_ids": [
+    "price_rise_only"
+   ],
+   "gap": 0.33099999999999996,
+   "threshold": 0.1
+  },
+  "display_verdict": "fragile",
+  "display_verdict_reason": "small changes to your assumptions could change which option is most likely to achieve your goal"
+ },
+ "robustness_synthesis": null,
+ "cee_status": "skipped",
+ "decision_quality": null,
+ "insights": null,
+ "improvement_guidance": null,
+ "rationale": null,
+ "ceeTrace": {
+  "requestId": "req-budget-limit",
+  "degraded": false,
+  "timestamp": "2026-09-28T12:26:06.044Z",
+  "source": "orchestrator",
+  "reason": "CEE feature disabled"
+ },
+ "processing_time_ms": 37.54620899999986,
+ "response_hash": "575b92cbfd4ebd4f",
+ "decision_brief": {
+  "brief_id": "d89cead1-5a76-4324-a95d-934fa10f1a53",
+  "version": "1",
+  "graph_hash": "575b92cbfd4ebd4f",
+  "seed": 1120835644,
+  "created_at": "2026-09-28T12:26:06.072Z",
+  "headline": "Price Rise Only currently leads, but the outcome is highly uncertain. Key uncertainty: Monthly churn has high impact but low evidence quality. Gather evidence on Monthly churn before deciding.",
+  "options": [
+   {
+    "option_id": "price_rise_only",
+    "label": "Price Rise Only",
+    "win_probability": 0.5179083333333333,
+    "rank": 1
+   },
+   {
+    "option_id": "carry_on_as_now",
+    "label": "Carry On as Now",
+    "win_probability": 0.18690833333333332,
+    "rank": 2
+   },
+   {
+    "option_id": "additional_advertising",
+    "label": "Additional Advertising",
+    "win_probability": 0.167975,
+    "rank": 3
+   },
+   {
+    "option_id": "features_and_price_rise",
+    "label": "Features and Price Rise",
+    "win_probability": 0.1272083333333333,
+    "rank": 4
+   }
+  ],
+  "top_drivers": [
+   {
+    "factor_label": "Monthly customer acquisition",
+    "sensitivity": 1,
+    "direction": "positive"
+   },
+   {
+    "factor_label": "Monthly churn",
+    "sensitivity": 1,
+    "direction": "negative"
+   },
+   {
+    "factor_label": "Product value score",
+    "sensitivity": 0.5075,
+    "direction": "positive"
+   }
+  ],
+  "key_assumptions": [
+   "Monthly churn",
+   "Monthly customer acquisition",
+   "Product value score"
+  ],
+  "what_would_change": [
+   "Product value score \u2192 Monthly customer acquisition",
+   "Price sensitivity \u2192 Monthly customer acquisition",
+   "Monthly churn \u2192 MRR",
+   "Advertising efficiency risk \u2192 Monthly customer acquisition",
+   "Product value score \u2192 Monthly churn",
+   "Price sensitivity \u2192 Monthly churn",
+   "Monthly customer acquisition \u2192 MRR"
+  ],
+  "robustness": "fragile",
+  "warnings": [
+   {
+    "code": "ANCHORING_RISK",
+    "message": "High-influence factors have 0.5 baseline values \u2014 a common 'I don't know' default. Are these estimates or evidence?",
+    "severity": "warning"
+   },
+   {
+    "code": "M2_UNAVAILABLE",
+    "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+    "severity": "warning"
+   },
+   {
+    "code": "MARGINAL_SWITCH_TRUNCATED",
+    "message": "Marginal switch probability was computed for the 10 most elastic fragile edge(s) of 15; the remaining 5 carry marginal_switch_probability=null. Each edge's sweep costs 100 isolated re-evaluations per option, so the set is bounded to keep the analysis inside its compute-admission budget. Retained values are unaffected \u2014 each is computed independently of the others",
+    "severity": "warning"
+   },
+   {
+    "code": "SCALE_MISMATCH_WARNING",
+    "message": "Intervention values span wide range (max is ~408\u00d7 min). Large magnitudes may dominate outcomes.",
+    "severity": "warning"
+   }
+  ],
+  "lineage": {
+   "config_version": "00e0edce70a2",
+   "response_hash": "575b92cbfd4ebd4f",
+   "n_samples": 10000
+  },
+  "headline_banded": {
+   "text": "Price Rise Only is slightly ahead.",
+   "band": "slightly_ahead",
+   "leader_option_id": "price_rise_only",
+   "leader_label": "Price Rise Only",
+   "runner_up_option_id": "carry_on_as_now",
+   "runner_up_label": "Carry On as Now",
+   "win_probability_gap": 0.33099999999999996,
+   "robustness_gated": true,
+   "doctrine": "provisional_doctrine_v0"
+  },
+  "defaulted_assumptions": [],
+  "robustness_caveat": {
+   "text": "This run was fragile under the changes we tested. Small changes to your assumptions could change which option is most likely to achieve your goal.",
+   "basis": "is_robust",
+   "flip_evidence": {
+    "status": "partial_no_effect",
+    "text": "Changing at least one tested factor on its own could change which option is most likely to achieve your goal. The other factors we could test could not."
+   },
+   "doctrine": "provisional_doctrine_v0"
+  },
+  "warning_codes": [
+   "GOAL_DIRECTION_UNATTESTED",
+   "GOAL_THRESHOLD_NOT_CONVERTIBLE"
+  ]
+ },
+ "review_cards": [
+  {
+   "card_id": "ep_monthly_churn_monthly_customer_acquisition_product_value_score",
+   "card_type": "evidence_priority",
+   "review_phase": "post_analysis",
+   "what": "Gathering better evidence on Monthly churn, Monthly customer acquisition, Product value score could change the recommendation.",
+   "why": "These factors have high sensitivity but low confidence \u2014 better data would most improve decision quality.",
+   "supporting_refs": [
+    {
+     "kind": "fact",
+     "id": "sensitivity_monthly_churn",
+     "role": "derived_from"
+    },
+    {
+     "kind": "fact",
+     "id": "sensitivity_monthly_customer_acquisition",
+     "role": "derived_from"
+    },
+    {
+     "kind": "fact",
+     "id": "sensitivity_product_value_score",
+     "role": "derived_from"
+    }
+   ],
+   "priority": 2,
+   "priority_band": "high",
+   "suggested_action": "add_evidence",
+   "provenance": {
+    "source": "isl",
+    "origin_id": "evidence_priority"
+   },
+   "items": [
+    {
+     "node_id": "monthly_churn",
+     "factor_id": "monthly_churn",
+     "factor_label": "Monthly churn",
+     "sensitivity_rank": 1,
+     "sensitivity_value": 1,
+     "confidence_normalised": 0.59955,
+     "score": 0.40045,
+     "suggested_evidence": "Gather evidence on how Monthly churn affects the goal \u2014 this factor is highly sensitive but your confidence in its strength is medium.",
+     "elasticity": 1
+    },
+    {
+     "node_id": "monthly_customer_acquisition",
+     "factor_id": "monthly_customer_acquisition",
+     "factor_label": "Monthly customer acquisition",
+     "sensitivity_rank": 2,
+     "sensitivity_value": 1,
+     "confidence_normalised": 0.605,
+     "score": 0.395,
+     "suggested_evidence": "Gather evidence on how Monthly customer acquisition affects the goal \u2014 this factor is highly sensitive but your confidence in its strength is medium.",
+     "elasticity": 1
+    },
+    {
+     "node_id": "product_value_score",
+     "factor_id": "product_value_score",
+     "factor_label": "Product value score",
+     "sensitivity_rank": 3,
+     "sensitivity_value": 0.5075,
+     "confidence_normalised": 0.5874,
+     "score": 0.20939449999999996,
+     "suggested_evidence": "Gather evidence on how Product value score affects the goal \u2014 this factor is highly sensitive but your confidence in its strength is medium.",
+     "elasticity": 0.5075
+    }
+   ]
+  }
+ ],
+ "fact_objects": [
+  {
+   "fact_id": "d6dd529037bee847",
+   "fact_key": {
+    "type": "probability",
+    "option_id": "additional_advertising"
+   },
+   "fact_type": "probability",
+   "data": {
+    "type": "probability",
+    "option_id": "additional_advertising",
+    "option_label": "Additional Advertising",
+    "p10": -0.32167951788887755,
+    "p50": 0.08090873138870514,
+    "p90": 0.41230309370686347,
+    "mean": 0.06073440702839111
+   },
+   "lineage": {
+    "graph_hash": "5be549aac08243ba",
+    "seed": 1120835644,
+    "config_version": "1",
+    "isl_request_id": "req-budget-limit",
+    "n_samples": 10000
+   },
+   "content_hash": "83f6da5e40c8fb46"
+  },
+  {
+   "fact_id": "9189e3b38d654fa6",
+   "fact_key": {
+    "type": "probability",
+    "option_id": "carry_on_as_now"
+   },
+   "fact_type": "probability",
+   "data": {
+    "type": "probability",
+    "option_id": "carry_on_as_now",
+    "option_label": "Carry On as Now",
+    "p10": -0.24012802521218957,
+    "p50": 0.11752363635163932,
+    "p90": 0.4870764170598743,
+    "mean": 0.12097978110648426
+   },
+   "lineage": {
+    "graph_hash": "5be549aac08243ba",
+    "seed": 1120835644,
+    "config_version": "1",
+    "isl_request_id": "req-budget-limit",
+    "n_samples": 10000
+   },
+   "content_hash": "bee47bdc1ec326d0"
+  },
+  {
+   "fact_id": "6a4bbae41b10225a",
+   "fact_key": {
+    "type": "probability",
+    "option_id": "features_and_price_rise"
+   },
+   "fact_type": "probability",
+   "data": {
+    "type": "probability",
+    "option_id": "features_and_price_rise",
+    "option_label": "Features and Price Rise",
+    "p10": -0.32998447801380815,
+    "p50": 0.08064863560788893,
+    "p90": 0.4235829179806133,
+    "mean": 0.06257053361512359
+   },
+   "lineage": {
+    "graph_hash": "5be549aac08243ba",
+    "seed": 1120835644,
+    "config_version": "1",
+    "isl_request_id": "req-budget-limit",
+    "n_samples": 10000
+   },
+   "content_hash": "46c8f55d91a92089"
+  },
+  {
+   "fact_id": "86f8d8b327de6953",
+   "fact_key": {
+    "type": "probability",
+    "option_id": "price_rise_only"
+   },
+   "fact_type": "probability",
+   "data": {
+    "type": "probability",
+    "option_id": "price_rise_only",
+    "option_label": "Price Rise Only",
+    "p10": -0.2346181686076945,
+    "p50": 0.12932240470713977,
+    "p90": 0.49636418827021633,
+    "mean": 0.12956204878898148
+   },
+   "lineage": {
+    "graph_hash": "5be549aac08243ba",
+    "seed": 1120835644,
+    "config_version": "1",
+    "isl_request_id": "req-budget-limit",
+    "n_samples": 10000
+   },
+   "content_hash": "45f38329fc236d3b"
+  },
+  {
+   "fact_id": "932e9a3ead6c3930",
+   "fact_key": {
+    "type": "factor_sensitivity",
+    "node_id": "advertising_spend",
+    "metric": "sensitivity_score"
+   },
+   "fact_type": "factor_sensitivity",
+   "data": {
+    "type": "factor_sensitivity",
+    "node_id": "advertising_spend",
+    "label": "Advertising spend",
+    "sensitivity_score": 0,
+    "importance_rank": 5,
+    "elasticity": 0,
+    "direction": "negative",
+    "confidence": 0.39235,
+    "attribution_stability": "low"
+   },
+   "lineage": {
+    "graph_hash": "5be549aac08243ba",
+    "seed": 1120835644,
+    "config_version": "1",
+    "isl_request_id": "req-budget-limit",
+    "n_samples": 10000
+   },
+   "content_hash": "198d3b88ca83bc50"
+  },
+  {
+   "fact_id": "46032235e49396ff",
+   "fact_key": {
+    "type": "factor_sensitivity",
+    "node_id": "monthly_churn",
+    "metric": "sensitivity_score"
+   },
+   "fact_type": "factor_sensitivity",
+   "data": {
+    "type": "factor_sensitivity",
+    "node_id": "monthly_churn",
+    "label": "Monthly churn",
+    "sensitivity_score": -0.5,
+    "importance_rank": 2,
+    "elasticity": 1,
+    "direction": "negative",
+    "confidence": 0.59955,
+    "attribution_stability": "low"
+   },
+   "lineage": {
+    "graph_hash": "5be549aac08243ba",
+    "seed": 1120835644,
+    "config_version": "1",
+    "isl_request_id": "req-budget-limit",
+    "n_samples": 10000
+   },
+   "content_hash": "9f6aed728c24d318"
+  },
+  {
+   "fact_id": "0b2b2d5be087d7b1",
+   "fact_key": {
+    "type": "factor_sensitivity",
+    "node_id": "monthly_customer_acquisition",
+    "metric": "sensitivity_score"
+   },
+   "fact_type": "factor_sensitivity",
+   "data": {
+    "type": "factor_sensitivity",
+    "node_id": "monthly_customer_acquisition",
+    "label": "Monthly customer acquisition",
+    "sensitivity_score": 0.5,
+    "importance_rank": 1,
+    "elasticity": 1,
+    "direction": "positive",
+    "confidence": 0.605,
+    "attribution_stability": "low"
+   },
+   "lineage": {
+    "graph_hash": "5be549aac08243ba",
+    "seed": 1120835644,
+    "config_version": "1",
+    "isl_request_id": "req-budget-limit",
+    "n_samples": 10000
+   },
+   "content_hash": "70ff7c30df9ce918"
+  },
+  {
+   "fact_id": "eb7454745780d40a",
+   "fact_key": {
+    "type": "factor_sensitivity",
+    "node_id": "product_value_score",
+    "metric": "sensitivity_score"
+   },
+   "fact_type": "factor_sensitivity",
+   "data": {
+    "type": "factor_sensitivity",
+    "node_id": "product_value_score",
+    "label": "Product value score",
+    "sensitivity_score": 0.25375,
+    "importance_rank": 3,
+    "elasticity": 0.5075,
+    "direction": "positive",
+    "confidence": 0.5874,
+    "attribution_stability": "low"
+   },
+   "lineage": {
+    "graph_hash": "5be549aac08243ba",
+    "seed": 1120835644,
+    "config_version": "1",
+    "isl_request_id": "req-budget-limit",
+    "n_samples": 10000
+   },
+   "content_hash": "be6ffbad6e46c788"
+  },
+  {
+   "fact_id": "ba2d4c8d48dc4ad4",
+   "fact_key": {
+    "type": "factor_sensitivity",
+    "node_id": "total_initiative_spend",
+    "metric": "sensitivity_score"
+   },
+   "fact_type": "factor_sensitivity",
+   "data": {
+    "type": "factor_sensitivity",
+    "node_id": "total_initiative_spend",
+    "label": "Total initiative spend",
+    "sensitivity_score": 0,
+    "importance_rank": 4,
+    "elasticity": 0,
+    "direction": "negative",
+    "confidence": 0.5955,
+    "attribution_stability": "low"
+   },
+   "lineage": {
+    "graph_hash": "5be549aac08243ba",
+    "seed": 1120835644,
+    "config_version": "1",
+    "isl_request_id": "req-budget-limit",
+    "n_samples": 10000
+   },
+   "content_hash": "a079de85bbf282fa"
+  },
+  {
+   "fact_id": "4663d91ab4f44b37",
+   "fact_key": {
+    "type": "critique",
+    "node_id": "2b946a0d-a6c9-4050-a044-2015a72fb11a",
+    "metric": "SCALE_MISMATCH_WARNING"
+   },
+   "fact_type": "critique",
+   "data": {
+    "type": "critique",
+    "id": "2b946a0d-a6c9-4050-a044-2015a72fb11a",
+    "code": "SCALE_MISMATCH_WARNING",
+    "severity": "warning",
+    "message": "Intervention values span wide range (max is ~408\u00d7 min). Large magnitudes may dominate outcomes.",
+    "suggestion": "Express large quantities as 0\u20131 proportions with explicit cap in factor label."
+   },
+   "lineage": {
+    "graph_hash": "5be549aac08243ba",
+    "seed": 1120835644,
+    "config_version": "1",
+    "isl_request_id": "req-budget-limit",
+    "n_samples": 10000
+   },
+   "content_hash": "fd90bf1a28e38bb8"
+  },
+  {
+   "fact_id": "81339dfdf24ad2fa",
+   "fact_key": {
+    "type": "critique",
+    "node_id": "303d69b3-caa1-46e4-908a-28f8ba4b5823",
+    "metric": "NORMALIZATION_WARNING"
+   },
+   "fact_type": "critique",
+   "data": {
+    "type": "critique",
+    "id": "303d69b3-caa1-46e4-908a-28f8ba4b5823",
+    "code": "NORMALIZATION_WARNING",
+    "severity": "info",
+    "message": "Node 'features_and_price_rise' has kind='option'. Option nodes are filtered before analysis."
+   },
+   "lineage": {
+    "graph_hash": "5be549aac08243ba",
+    "seed": 1120835644,
+    "config_version": "1",
+    "isl_request_id": "req-budget-limit",
+    "n_samples": 10000
+   },
+   "content_hash": "115a9bada2b0c057"
+  },
+  {
+   "fact_id": "96ffa479ae8f1a5f",
+   "fact_key": {
+    "type": "critique",
+    "node_id": "7b434068-5ffc-406b-a3e0-38773c05ee9f",
+    "metric": "NORMALIZATION_WARNING"
+   },
+   "fact_type": "critique",
+   "data": {
+    "type": "critique",
+    "id": "7b434068-5ffc-406b-a3e0-38773c05ee9f",
+    "code": "NORMALIZATION_WARNING",
+    "severity": "info",
+    "message": "Node 'carry_on_as_now' has kind='option'. Option nodes are filtered before analysis."
+   },
+   "lineage": {
+    "graph_hash": "5be549aac08243ba",
+    "seed": 1120835644,
+    "config_version": "1",
+    "isl_request_id": "req-budget-limit",
+    "n_samples": 10000
+   },
+   "content_hash": "e1946008dfa915ce"
+  },
+  {
+   "fact_id": "20b61219f4b8ea9b",
+   "fact_key": {
+    "type": "critique",
+    "node_id": "7c66db5e-daa9-4ac9-b389-37f353560942",
+    "metric": "CONSTRAINT_MISSING_RANGE"
+   },
+   "fact_type": "critique",
+   "data": {
+    "type": "critique",
+    "id": "7c66db5e-daa9-4ac9-b389-37f353560942",
+    "code": "CONSTRAINT_MISSING_RANGE",
+    "severity": "info",
+    "message": "Constraint \"agent-lane:total_initiative_spend:<=\" target node \"total_initiative_spend\" has no derivable range. Constraint value will be compared as-is by ISL.",
+    "affected_node_ids": [
+     "total_initiative_spend"
+    ]
+   },
+   "lineage": {
+    "graph_hash": "5be549aac08243ba",
+    "seed": 1120835644,
+    "config_version": "1",
+    "isl_request_id": "req-budget-limit",
+    "n_samples": 10000
+   },
+   "content_hash": "c48b0afe3f04a07a"
+  },
+  {
+   "fact_id": "3809b69702f4dca5",
+   "fact_key": {
+    "type": "critique",
+    "node_id": "8da9c799-1a7a-476a-aa78-c22bd1756ba5",
+    "metric": "MIXED_RANGE_DERIVATION"
+   },
+   "fact_type": "critique",
+   "data": {
+    "type": "critique",
+    "id": "8da9c799-1a7a-476a-aa78-c22bd1756ba5",
+    "code": "MIXED_RANGE_DERIVATION",
+    "severity": "info",
+    "message": "Factors use 5 different range derivation tiers. Normalisation quality may vary.",
+    "affected_node_ids": [
+     "advertising_spend",
+     "feature_development_spend",
+     "monthly_churn",
+     "monthly_customer_acquisition",
+     "mrr",
+     "pro_plan_price",
+     "product_value_score",
+     "total_initiative_spend"
+    ]
+   },
+   "lineage": {
+    "graph_hash": "5be549aac08243ba",
+    "seed": 1120835644,
+    "config_version": "1",
+    "isl_request_id": "req-budget-limit",
+    "n_samples": 10000
+   },
+   "content_hash": "47f8fcdb41776436"
+  },
+  {
+   "fact_id": "fe310b59c8347c7e",
+   "fact_key": {
+    "type": "critique",
+    "node_id": "9bb6ada9-be56-4c9c-85df-bf10905c014d",
+    "metric": "NORMALIZATION_WARNING"
+   },
+   "fact_type": "critique",
+   "data": {
+    "type": "critique",
+    "id": "9bb6ada9-be56-4c9c-85df-bf10905c014d",
+    "code": "NORMALIZATION_WARNING",
+    "severity": "info",
+    "message": "Node 'price_rise_only' has kind='option'. Option nodes are filtered before analysis."
+   },
+   "lineage": {
+    "graph_hash": "5be549aac08243ba",
+    "seed": 1120835644,
+    "config_version": "1",
+    "isl_request_id": "req-budget-limit",
+    "n_samples": 10000
+   },
+   "content_hash": "dac4c9031d12b0d8"
+  },
+  {
+   "fact_id": "ab62f6a1b7c5062a",
+   "fact_key": {
+    "type": "critique",
+    "node_id": "a4784b6e-3030-4578-b373-364752beabc8",
+    "metric": "CONSTRAINT_MISSING_RANGE"
+   },
+   "fact_type": "critique",
+   "data": {
+    "type": "critique",
+    "id": "a4784b6e-3030-4578-b373-364752beabc8",
+    "code": "CONSTRAINT_MISSING_RANGE",
+    "severity": "info",
+    "message": "Constraint \"agent-lane:monthly_churn:<=\" target node \"monthly_churn\" has no derivable range. Constraint value will be compared as-is by ISL.",
+    "affected_node_ids": [
+     "monthly_churn"
+    ]
+   },
+   "lineage": {
+    "graph_hash": "5be549aac08243ba",
+    "seed": 1120835644,
+    "config_version": "1",
+    "isl_request_id": "req-budget-limit",
+    "n_samples": 10000
+   },
+   "content_hash": "2dc9ade26329b3ac"
+  },
+  {
+   "fact_id": "089477403558d293",
+   "fact_key": {
+    "type": "critique",
+    "node_id": "c425c356-40e3-4bd9-a860-bb80a70f864e",
+    "metric": "NORMALIZATION_WARNING"
+   },
+   "fact_type": "critique",
+   "data": {
+    "type": "critique",
+    "id": "c425c356-40e3-4bd9-a860-bb80a70f864e",
+    "code": "NORMALIZATION_WARNING",
+    "severity": "info",
+    "message": "Node 'additional_advertising' has kind='option'. Option nodes are filtered before analysis."
+   },
+   "lineage": {
+    "graph_hash": "5be549aac08243ba",
+    "seed": 1120835644,
+    "config_version": "1",
+    "isl_request_id": "req-budget-limit",
+    "n_samples": 10000
+   },
+   "content_hash": "8ae21ae39356533b"
+  },
+  {
+   "fact_id": "625cef73a4799495",
+   "fact_key": {
+    "type": "critique",
+    "node_id": "critique_90b45569ab92",
+    "metric": "MARGINAL_SWITCH_TRUNCATED"
+   },
+   "fact_type": "critique",
+   "data": {
+    "type": "critique",
+    "id": "critique_90b45569ab92",
+    "code": "MARGINAL_SWITCH_TRUNCATED",
+    "severity": "warning",
+    "message": "Marginal switch probability was computed for the 10 most elastic fragile edge(s) of 15; the remaining 5 carry marginal_switch_probability=null. Each edge's sweep costs 100 isolated re-evaluations per option, so the set is bounded to keep the analysis inside its compute-admission budget. Retained values are unaffected \u2014 each is computed independently of the others",
+    "suggestion": "The omitted edges are the least elastic of the fragile set; if a specific edge's marginal contribution matters, re-run with a graph scoped to it",
+    "affected_node_ids": [
+     "monthly_churn",
+     "monthly_customer_acquisition",
+     "mrr",
+     "total_initiative_spend"
+    ]
+   },
+   "lineage": {
+    "graph_hash": "5be549aac08243ba",
+    "seed": 1120835644,
+    "config_version": "1",
+    "isl_request_id": "req-budget-limit",
+    "n_samples": 10000
+   },
+   "content_hash": "08c546c41e3e299f"
+  },
+  {
+   "fact_id": "6e21e9d688c47b42",
+   "fact_key": {
+    "type": "robustness",
+    "metric": "robustness_score"
+   },
+   "fact_type": "robustness",
+   "data": {
+    "type": "robustness",
+    "robustness_level": "moderate",
+    "robustness_score": 0.5
+   },
+   "lineage": {
+    "graph_hash": "5be549aac08243ba",
+    "seed": 1120835644,
+    "config_version": "1",
+    "isl_request_id": "req-budget-limit",
+    "n_samples": 10000
+   },
+   "content_hash": "746563481e476303"
+  }
+ ],
+ "_meta": {
+  "source_path": "isl",
+  "repairs_applied": [
+   {
+    "field": "goal_constraints[constraint_id=agent-lane:total_initiative_spend:<=]",
+    "action": "removed",
+    "from_value": "{\"unit\":\"GBP over 6 months\"}",
+    "to_value": "null",
+    "reason": "Non-canonical fields stripped before ISL: unit",
+    "code": "STRIP_RAW_CONSTRAINT_FIELDS",
+    "layer": "plot",
+    "field_path": "goal_constraints[constraint_id=agent-lane:total_initiative_spend:<=]",
+    "before": {
+     "unit": "GBP over 6 months"
+    },
+    "after": null,
+    "severity": "info"
+   },
+   {
+    "field": "goal_constraints[constraint_id=agent-lane:monthly_churn:<=]",
+    "action": "removed",
+    "from_value": "{\"unit\":\"%\"}",
+    "to_value": "null",
+    "reason": "Non-canonical fields stripped before ISL: unit",
+    "code": "STRIP_RAW_CONSTRAINT_FIELDS",
+    "layer": "plot",
+    "field_path": "goal_constraints[constraint_id=agent-lane:monthly_churn:<=]",
+    "before": {
+     "unit": "%"
+    },
+    "after": null,
+    "severity": "info"
+   },
+   {
+    "field": "intervention.value.pro_plan_price",
+    "action": "normalised",
+    "from_value": 59,
+    "to_value": 0.295,
+    "reason": "normalised range=[0,200] source=explicit_cap",
+    "code": "LEGACY_REPAIR",
+    "layer": "plot",
+    "field_path": "intervention.value.pro_plan_price",
+    "before": 59,
+    "after": 0.295,
+    "severity": "info"
+   },
+   {
+    "field": "intervention.value.total_initiative_spend",
+    "action": "normalised",
+    "from_value": 20000,
+    "to_value": 0.2,
+    "reason": "normalised range=[0,100000] source=scale_frame",
+    "code": "LEGACY_REPAIR",
+    "layer": "plot",
+    "field_path": "intervention.value.total_initiative_spend",
+    "before": 20000,
+    "after": 0.2,
+    "severity": "info"
+   },
+   {
+    "field": "intervention.value.feature_development_spend",
+    "action": "normalised",
+    "from_value": 20000,
+    "to_value": 0.2,
+    "reason": "normalised range=[0,100000] source=scale_frame",
+    "code": "LEGACY_REPAIR",
+    "layer": "plot",
+    "field_path": "intervention.value.feature_development_spend",
+    "before": 20000,
+    "after": 0.2,
+    "severity": "info"
+   },
+   {
+    "field": "intervention.value.advertising_spend",
+    "action": "normalised",
+    "from_value": 20000,
+    "to_value": 0.2,
+    "reason": "normalised range=[0,100000] source=scale_frame",
+    "code": "LEGACY_REPAIR",
+    "layer": "plot",
+    "field_path": "intervention.value.advertising_spend",
+    "before": 20000,
+    "after": 0.2,
+    "severity": "info"
+   },
+   {
+    "field": "constraint.value.agent-lane:total_initiative_spend:<=",
+    "action": "normalised",
+    "from_value": 20000,
+    "to_value": 0.2,
+    "reason": "normalised range=[0,100000] source=scale_frame",
+    "code": "LEGACY_REPAIR",
+    "layer": "plot",
+    "field_path": "constraint.value.agent-lane:total_initiative_spend:<=",
+    "before": 20000,
+    "after": 0.2,
+    "severity": "info"
+   },
+   {
+    "field": "constraint.value.agent-lane:monthly_churn:<=",
+    "action": "normalised",
+    "from_value": 4,
+    "to_value": 0.04,
+    "reason": "normalised range=[0,100] source=unit_percent",
+    "code": "LEGACY_REPAIR",
+    "layer": "plot",
+    "field_path": "constraint.value.agent-lane:monthly_churn:<=",
+    "before": 4,
+    "after": 0.04,
+    "severity": "info"
+   }
+  ],
+  "request_id": "req-budget-limit",
+  "plot_build": "ccd602c",
+  "hash_version": 8,
+  "response_hash": "575b92cbfd4ebd4f",
+  "request_id_chain": {
+   "ui": "req-budget-limit",
+   "plot": "req-budget-limit",
+   "isl": "req-budget-limit",
+   "isl_echoed": null,
+   "cee": null,
+   "cee_echoed": null,
+   "all_match": false,
+   "chain_complete": false
+  },
+  "constraint_sources": {},
+  "range_derivation_sources": {
+   "mrr": "default",
+   "pro_plan_price": "explicit_cap",
+   "feature_development_spend": "scale_frame",
+   "advertising_spend": "scale_frame",
+   "total_initiative_spend": "scale_frame",
+   "product_value_score": "inferred_value",
+   "monthly_customer_acquisition": "inferred_value",
+   "monthly_churn": "inferred_baseline"
+  },
+  "evidence": {
+   "plot_build": "ccd602c",
+   "isl_build": "dev",
+   "isl_request_digest": null,
+   "isl_response_digest": null,
+   "isl_wire_generation_ok": true,
+   "enrichment_contract_schema_parsed": true,
+   "enrichment_contract_ok": true,
+   "enrichment_contract_withheld": []
+  },
+  "feature_flags_snapshot": {
+   "SCM_LITE_ENABLE": "0",
+   "PROD_SCM_LITE_PLACEHOLDER": "0",
+   "ADAPTIVE_K_ENABLE": "0",
+   "CONFIDENCE_CALIBRATED": "0",
+   "IDENT_TAG_ENABLE": "0",
+   "PROVENANCE_ENABLE": "0",
+   "ENABLE_DUAL_BELIEFS": "0",
+   "ENABLE_NOISY_OR": "0",
+   "ENABLE_LOGISTIC": "0",
+   "ENABLE_NOISY_AND_NOT": "0",
+   "ENABLE_MIXED_COMBINATION": "0",
+   "ENABLE_TRACE_CACHING": "0",
+   "ENABLE_STRATIFIED_SAMPLING": "0",
+   "ENABLE_IMPORTANCE_SAMPLING": "0",
+   "ENABLE_OPTION_PROBABILITIES": "0",
+   "RATE_LIMIT_ENABLED": "0",
+   "TOKEN_RL_ENABLE": "0",
+   "RL_CB_ENABLE": "0",
+   "PROMETHEUS_METRICS": "0",
+   "PROMETHEUS_ENABLE": "0",
+   "OPS_SNAPSHOT_ENABLE": "0",
+   "METRICS": "0",
+   "AUTH_ENABLED": "0",
+   "AUTH_V2_ENABLED": "0",
+   "TEST_ROUTES": "0",
+   "CORS_DEV": "0",
+   "OPENAPI_DEV": "0",
+   "COMPARE_VIEW_ENABLE": "0",
+   "INSPECTOR_DEBUG_ENABLE": "0",
+   "FEATURE_STREAM": "0",
+   "STREAM_PARITY_ENABLE": "0",
+   "WHATIF_DELTA_ENABLE": "0",
+   "CEE_ORCHESTRATOR_ENABLED": "0",
+   "DECISION_REVIEW_ENABLE": "0",
+   "ENABLE_FACTS_ASSEMBLY": "0",
+   "ENABLE_REVIEW_PASS": "0",
+   "ENABLE_VALIDATE_PATCH": "0",
+   "BRIEF_CLAIM_SAFE_SURFACES_ENABLE": "0",
+   "BRIEF_DECISION_RECORD_SUMMARY_ENABLE": "0"
+  },
+  "decision_brief_assembled": true,
+  "review_cards_count": 1,
+  "evidence_priority_card_present": true,
+  "response_content_hash": "rch_v2:2f72f78ccb757d1e"
+ },
+ "meta": {
+  "seed_used": "1120835644",
+  "seed_source": "server_generated",
+  "n_samples": 10000,
+  "detail_level": "standard",
+  "latency_ms": 37.54620899999986,
+  "normalization_ms": 13.95462499999985,
+  "validation_ms": 6.48695900000007,
+  "isl_ms": 3.876209000000017,
+  "cee_ms": 0,
+  "build": "ccd602c",
+  "computed_at": "2026-09-28T12:22:23.900059Z",
+  "request_id_chain": {
+   "ui": "req-budget-limit",
+   "plot": "req-budget-limit",
+   "isl": "req-budget-limit",
+   "isl_echoed": null,
+   "cee": null,
+   "cee_echoed": null,
+   "all_match": false,
+   "chain_complete": false
+  },
+  "feature_flags": {
+   "SCM_LITE_ENABLE": "0",
+   "PROD_SCM_LITE_PLACEHOLDER": "0",
+   "ADAPTIVE_K_ENABLE": "0",
+   "CONFIDENCE_CALIBRATED": "0",
+   "IDENT_TAG_ENABLE": "0",
+   "PROVENANCE_ENABLE": "0",
+   "ENABLE_DUAL_BELIEFS": "0",
+   "ENABLE_NOISY_OR": "0",
+   "ENABLE_LOGISTIC": "0",
+   "ENABLE_NOISY_AND_NOT": "0",
+   "ENABLE_MIXED_COMBINATION": "0",
+   "ENABLE_TRACE_CACHING": "0",
+   "ENABLE_STRATIFIED_SAMPLING": "0",
+   "ENABLE_IMPORTANCE_SAMPLING": "0",
+   "ENABLE_OPTION_PROBABILITIES": "0",
+   "RATE_LIMIT_ENABLED": "0",
+   "TOKEN_RL_ENABLE": "0",
+   "RL_CB_ENABLE": "0",
+   "PROMETHEUS_METRICS": "0",
+   "PROMETHEUS_ENABLE": "0",
+   "OPS_SNAPSHOT_ENABLE": "0",
+   "METRICS": "0",
+   "AUTH_ENABLED": "0",
+   "AUTH_V2_ENABLED": "0",
+   "TEST_ROUTES": "0",
+   "CORS_DEV": "0",
+   "OPENAPI_DEV": "0",
+   "COMPARE_VIEW_ENABLE": "0",
+   "INSPECTOR_DEBUG_ENABLE": "0",
+   "FEATURE_STREAM": "0",
+   "STREAM_PARITY_ENABLE": "0",
+   "WHATIF_DELTA_ENABLE": "0",
+   "CEE_ORCHESTRATOR_ENABLED": "0",
+   "DECISION_REVIEW_ENABLE": "0",
+   "ENABLE_FACTS_ASSEMBLY": "0",
+   "ENABLE_REVIEW_PASS": "0",
+   "ENABLE_VALIDATE_PATCH": "0",
+   "BRIEF_CLAIM_SAFE_SURFACES_ENABLE": "0",
+   "BRIEF_DECISION_RECORD_SUMMARY_ENABLE": "0",
+   "facts_assembly": true,
+   "review_pass": true
+  }
+ }
+}
