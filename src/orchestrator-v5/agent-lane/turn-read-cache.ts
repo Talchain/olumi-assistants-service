@@ -34,7 +34,14 @@ const withoutFresh = (body: unknown): Record<string, unknown> => {
 };
 const copy = (r: Read): Read => ({ ...r, json: structuredClone(r.json) });
 
-export function turnReadCache(inner: InternalDispatch, graphReadPath: string): TurnReadCache {
+/**
+ * ⭐ PJ-C1 BUILD TURN, LEVER 3 (DL GO #72 5868860230): `readOnlyPaths` are READS the caller names (the version list),
+ * so dispatching one does not end the epoch. Measured on 16 served first-pass builds: the construction receipt lookup
+ * (`/versions`, `findConstructionVersion`) ended the epoch the route's prefetch had started, so the "never build over a
+ * model" check read the graph again, 0.5–0.7 s later, with nothing written in between. A path listed here must write
+ * nothing: the version list is a read (`assist.v1.scenario-versions.ts`, LIST, refuses rather than create-on-read).
+ */
+export function turnReadCache(inner: InternalDispatch, graphReadPath: string, readOnlyPaths: readonly string[] = []): TurnReadCache {
   let epoch = 0;
   let kept: { read: Read; epoch: number } | undefined;
   /** The read `prefetch` started and has not finished yet, with the epoch it started in. */
@@ -49,6 +56,7 @@ export function turnReadCache(inner: InternalDispatch, graphReadPath: string): T
   };
 
   const dispatch: InternalDispatch = async (path, body) => {
+    if (readOnlyPaths.includes(path)) return inner(path, body);
     if (path !== graphReadPath) return around(() => inner(path, body));
     // ⛔ A read that must SEE OTHER WRITERS asks for it: `{ fresh: true }` bypasses the kept read (and refreshes it).
     // The epoch only moves for THIS turn's writes, so a model another tab created during a long construction is
