@@ -314,7 +314,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
       strength: { type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'], description: 'The strength the user stated, or your reading of their own words, given with `from_words`.' },
       from_words: FROM_WORDS,
-      direction: { type: 'string', enum: ['positive', 'negative'], description: 'ONLY when the user said the link pushes the other way.' },
+      direction: { type: 'string', enum: ['positive', 'negative'], description: 'ONLY when the user said the link pushes the other way, with their words in `direction_from_words`. Leave it out otherwise: the link keeps its direction.' },
+      direction_from_words: { type: 'string', description: 'With `direction`: the user\u2019s exact words in THIS message saying the link runs the other way. A reversal without them is refused.' },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
       whole_request: WHOLE_REQUEST,
     }, ['from_label', 'to_label', 'strength', 'rationale']),
@@ -596,6 +597,8 @@ export interface AgentCapabilities {
     direction?: 'positive' | 'negative'; rationale: string;
     /** The user's own phrase THIS turn when `strength` is Olumi's reading of it (slice C3). */
     from_words?: string;
+    /** With a `direction` that reverses the link: the user's own words THIS turn saying it runs the other way. */
+    direction_from_words?: string;
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */
   proposeGoalTarget?(ctx: AgentToolContext, args: {
