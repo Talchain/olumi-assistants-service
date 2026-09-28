@@ -155,7 +155,6 @@ describe('R1/R2 — a new switch at exactly 0 under an option, turned on by anot
 describe('R3 — no option in the change turns the switch on → refused, and the detail says where to list it', () => {
   const NOWHERE = `No option in this change turns "${SWITCH}" on; list it under the option that turns it on`;
   it.each([
-    ['the only option lists it at 0', { options: [conversion([{ level: { value: 0 } }])], new_factors: NEW_SWITCH, rationale: 'x' }],
     ['one option at 0, the other does not list it', a03({ value: 0 }, [{ factor_label: 'Monthly churn', direction: 'negative' }])],
     ['both options list it at 0', a03({ value: 0 }, [{ factor_label: SWITCH, direction: 'positive', level: { value: 0 } }])],
     ["one at { 0, '%' }, the other at 0", a03({ value: 0, unit: '%' }, [{ factor_label: SWITCH, direction: 'positive', level: { value: 0 } }])],
@@ -167,6 +166,18 @@ describe('R3 — no option in the change turns the switch on → refused, and th
     expect(r.detail).toContain(NOWHERE);
     expect(r.detail).toContain('and leave it out of the others');
     expect(r.detail).not.toContain(`remove "level" from the acts_on entry for "${SWITCH}"`);
+  });
+
+  // Served 137d3a5 (MG pj-20260928T042134Z A07/A08): in a ONE-option change "list it under the option that turns it on"
+  // named the option it was already under; the model re-sent `{0}` four times. The next call is named exactly instead.
+  it('RED (one-option change): the only option lists it at 0 → the detail names that entry with NO "level" key, not 0', async () => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx as never, { options: [conversion([{ level: { value: 0 } }])], new_factors: NEW_SWITCH, rationale: 'x' } as never) as Result;
+    expect(r.refusal, JSON.stringify(r)).toBe('switch_level_not_on');
+    expect(sent).toEqual([]);
+    expect(r.detail).toContain(`NEXT CALL: call propose_new_option again with exactly the same arguments, except send the acts_on entry for "${SWITCH}" in "${CONV}" with NO "level" key at all`);
+    expect(r.detail).toContain('not 0: 0 says off');
+    expect(r.detail).not.toContain(NOWHERE);
   });
 
   it('the single-option refusal keeps its conflict_fields (names only)', async () => {

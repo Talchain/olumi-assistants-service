@@ -485,6 +485,8 @@ function switchLevelRefusalDetail(
   conflicts: readonly { option: string; factor: string; value: unknown; unit?: unknown; estimate?: unknown }[],
   entriesNaming: (option: string, factor: string) => number,
   turnedOnInChange: (factor: string) => boolean = () => true,
+  /** How many options the change adds: the exact single-lister edit is named only for a ONE-option change. */
+  optionCount?: number,
 ): string {
   const zero = (c: { value: unknown }): boolean => c.value === 0;
   const onNowhere = (c: { factor: string; value: unknown }): boolean => zero(c) && !turnedOnInChange(c.factor);
@@ -492,12 +494,23 @@ function switchLevelRefusalDetail(
     ? `"${c.option}" lists the new switch "${c.factor}" at ${shownSwitchLevel(c)}.`
     : `"${c.factor}" was added as a switch that "${c.option}" turns on, but it was given a level: ${shownSwitchLevel(c)}.`));
   const pairs = conflicts.filter((c, i) => conflicts.findIndex((d) => d.option === c.option && d.factor === c.factor) === i);
-  const edits = pairs.filter((c) => !onNowhere(c)).map((c) => (entriesNaming(c.option, c.factor) > 1
+  /**
+   * ⭐ ONE OPTION LISTS THE SWITCH, AT 0, AND NONE TURNS IT ON (served 137d3a5, MG pj-20260928T042134Z A07/A08: `{0}` four
+   * times on the grandfather switch in the ONLY option, each reply saying it "must be recorded as on under this option").
+   * "List it under the option that turns it on" read, in a one-option change, as the option it was already under, so
+   * the same call came back. Here the next call is named exactly: that entry with NO "level" key — not 0. Only in a
+   * ONE-option change: with two, a 0 under one of them may mean the OTHER turns it on, which the text above says.
+   */
+  const singleLister = (c: { option: string; factor: string; value: unknown }): boolean =>
+    optionCount === 1 && onNowhere(c) && pairs.filter((d) => d.factor === c.factor).length === 1 && entriesNaming(c.option, c.factor) === 1;
+  const edits = pairs.filter((c) => !onNowhere(c) || singleLister(c)).map((c) => (singleLister(c)
+    ? `send the acts_on entry for "${c.factor}" in "${c.option}" with NO "level" key at all \u2014 not 0: 0 says off, and an entry with no level turns the switch on under that option (if "${c.option}" does not turn it on, remove that entry and "${c.factor}" from new_factors instead)`
+    : entriesNaming(c.option, c.factor) > 1
     ? `keep ONE acts_on entry for "${c.factor}" in "${c.option}", with no "level"`
     : zero(c)
       ? `remove the whole acts_on entry for "${c.factor}" from "${c.option}" (not only its "level": a bare entry turns the switch on)`
       : `remove "level" from the acts_on entry for "${c.factor}" in "${c.option}"`));
-  const unswitched = conflicts.filter(onNowhere).map((c) => c.factor).filter((f, i, all) => all.indexOf(f) === i);
+  const unswitched = conflicts.filter((c) => onNowhere(c) && !singleLister(c)).map((c) => c.factor).filter((f, i, all) => all.indexOf(f) === i);
   const quantities = conflicts.filter((c) => typeof c.value === 'number' && Number.isFinite(c.value) && c.value !== 0 && !switchFigureMeansOn(c.value, c.unit));
   const graded = quantities.filter((c, i) => quantities.findIndex((d) => d.factor === c.factor) === i).map((c) =>
     ` If ${shownSwitchLevel({ value: c.value, unit: c.unit })} is the figure the user meant for "${c.factor}" (a share of the customers or an amount), `
@@ -4716,7 +4729,7 @@ export function createAgentCapabilities(
         return {
           ok: false, mutated: false, refusal: 'switch_level_not_on', switch_level_conflicts: switchLevelConflicts,
           conflict_fields: switchConflictFields,
-          detail: switchLevelRefusalDetail(switchLevelConflicts, entriesNaming, turnedOnInChange),
+          detail: switchLevelRefusalDetail(switchLevelConflicts, entriesNaming, turnedOnInChange, plans.length),
         };
       }
       /**
