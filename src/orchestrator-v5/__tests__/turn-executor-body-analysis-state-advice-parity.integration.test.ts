@@ -944,11 +944,16 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
     const pack = observeSerialisedPack(prompt);
     const analysis = pack.analysis as {
       leading_option?: { label?: string };
+      leading_option_note?: string;
       top_drivers?: Array<{ label?: string }>;
       analysis_not_current_note?: string;
     } | null;
     expect(pack.graph_context).toEqual({ status: 'canonical' });
-    expect(analysis?.leading_option?.label).toBe(CANONICAL_LEADER_LABEL);
+    // Canonical ruling 28 Sep (single-projection parity, rule 3): the pack never names the leader of an OUT-OF-DATE
+    // run. This line used to pin `leading_option.label === CANONICAL_LEADER_LABEL` on this stale run. The STORED run
+    // (not the request's) is still what reaches the pack: its driver label and not-current note below bind it.
+    expect(analysis?.leading_option).toBeUndefined();
+    expect(analysis?.leading_option_note).toBeDefined();
     expect(analysis?.top_drivers?.[0]?.label).toBe(CANONICAL_DRIVER_LABEL);
     expect(analysis?.analysis_not_current_note).toBeDefined();
     expect(prompt).not.toContain(REQUEST_DRIVER_LABEL);

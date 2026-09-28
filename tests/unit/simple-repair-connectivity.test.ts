@@ -465,7 +465,8 @@ describe("simpleRepair connectivity", () => {
   });
 
   describe("invalid edge pattern removal", () => {
-    it("removes outcome→outcome edges", () => {
+    // R10 (AI Quality #72 5872082179): a LEGAL causal link in the one table, so simpleRepair KEEPS it.
+    it("keeps outcome→outcome edges (R10: legal)", () => {
       const graph = createTestGraph({
         nodes: [
           { id: "dec_1", kind: "decision", label: "Decision" },
@@ -489,10 +490,11 @@ describe("simpleRepair connectivity", () => {
         const tNode = result.nodes.find((n) => n.id === e.to);
         return fNode?.kind === "outcome" && tNode?.kind === "outcome";
       });
-      expect(invalidEdges).toHaveLength(0);
+      expect(invalidEdges).toHaveLength(1);
     });
 
-    it("removes outcome→risk edges", () => {
+    // R10 (AI Quality #72 5872082179): a LEGAL causal link in the one table, so simpleRepair KEEPS it.
+    it("keeps outcome→risk edges (R10: legal)", () => {
       const graph = createTestGraph({
         nodes: [
           { id: "dec_1", kind: "decision", label: "Decision" },
@@ -516,7 +518,7 @@ describe("simpleRepair connectivity", () => {
         const tNode = result.nodes.find((n) => n.id === e.to);
         return fNode?.kind === "outcome" && tNode?.kind === "risk";
       });
-      expect(invalidEdges).toHaveLength(0);
+      expect(invalidEdges).toHaveLength(1);
     });
   });
 

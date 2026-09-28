@@ -297,13 +297,15 @@ describe('a link that cannot be made says which one would work', () => {
     // No pre-existing edges: this loop is about the KIND rule, and the
     // fixture's decision->option edge would otherwise be refused as a
     // duplicate before the kind check ever ran.
-    const bare = edgeTool(graphOf({ edges: [] }));
+    // R10: outcome → outcome is in the table too, so a same-kind pair needs a SECOND node of that kind.
+    const bare = edgeTool(graphOf({ edges: [], nodes: [...graphOf().nodes, { id: 'out_retention', kind: 'outcome', label: 'Retention' }] }));
+    const secondOfKind: Record<string, string> = { factor: 'fac_revenue', outcome: 'out_retention' };
     let admitted = 0;
     for (const rule of ALLOWED_EDGES) {
       const from = byKind[rule.fromKind];
       const to = byKind[rule.toKind];
-      // factor -> factor needs two distinct factors; the rest are distinct by kind.
-      const toId = rule.fromKind === rule.toKind ? 'fac_revenue' : to;
+      // A same-kind rule (factor -> factor, outcome -> outcome) needs two distinct nodes of that kind.
+      const toId = rule.fromKind === rule.toKind ? secondOfKind[rule.fromKind] : to;
       if (from === undefined || toId === undefined) continue;
       const out = await bare.execute({ from_id: from, to_id: toId, ...causal });
       expect(out.type, `${rule.fromKind} -> ${rule.toKind} should be admitted`).toBe('proposed');
