@@ -38,7 +38,7 @@ import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { collectTurnReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
 import { withCurrentGraphHash } from '../orchestrator-v5/agent-lane/analysis-freshness-stamp.js';
-import { BOARD_EDIT_PREFIX, HistoryStore, historyFromDurableTurns, needsDurableSeed, pruneSupersededToolOutputs } from '../orchestrator-v5/agent-lane/history-store.js';
+import { BOARD_EDIT_PREFIX, HistoryStore, dropSupersededPairs, historyFromDurableTurns, needsDurableSeed, pruneSupersededToolOutputs } from '../orchestrator-v5/agent-lane/history-store.js';
 import { contextBindingSecret, issueContextPacket } from '../orchestrator-v5/agent-lane/runtime/request-assembly.js';
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
@@ -2230,7 +2230,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * Nothing between the turn's end and here reads the history, and `readBackState` swallows its own failures (an
      * unreadable state stores the run as unconfirmed: fail closed). No extra read: this is the read the reply needs.
      */
-    histories.set(sessionId, pruneSupersededToolOutputs(result.items, chipApprovals, { analysisState, analysisResult }));
+    // PJ-C1 tokens: a pair the prune stubbed carries nothing, so it leaves with its reasoning (`dropSupersededPairs`).
+    histories.set(sessionId, dropSupersededPairs(pruneSupersededToolOutputs(result.items, chipApprovals, { analysisState, analysisResult })));
     const fa = firstAnalysis?.outcome;
     // An analysis of THIS revision exists because this turn's construction ran it (or already had).
     const firstAnalysisExists = fa !== undefined && (fa.ran || fa.reason === 'already_ran_for_construction');
