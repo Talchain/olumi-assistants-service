@@ -130,6 +130,65 @@ describe('R3 — every other figure is refused, never rounded to on, with nothin
   });
 });
 
+// ⭐ SWITCH-LOOP STEP 2 (#2194's `rejected_levels`, served `a8cffcf`, OpenAI): the model wrote the switch's ON with a word
+// for its STATE as the unit — MG pj-20260928T040509Z A05 `{1, unit: "enabled", estimate: true}`, DL pj-20260928T040536Z
+// A07 `{1, unit: "binary"}` — and each was refused, costing a call (and, after the refusal, a contradicting `{0}`). Two
+// runs, two words: the test is inverted (DL #72 5863189058). A 1 is refused only when its unit reads as a QUANTITY.
+describe('R8 — a 1 in a unit that names the switch\'s STATE is on; a 1 in a quantity stays refused', () => {
+  it.each([
+    ["{ 1, 'enabled', estimate: true } (served MG A05)", { value: 1, unit: 'enabled', estimate: true, basis: 'the option grandfathers existing customers' }],
+    ["{ 1, 'binary' } (served DL A07)", { value: 1, unit: 'binary' }],
+    ["{ 1, 'Enabled' }", { value: 1, unit: 'Enabled' }],
+    ["{ 1, 'on/off' }", { value: 1, unit: 'on/off' }],
+    ["{ true, 'boolean' }", { value: true, unit: 'boolean' }],
+    ["{ 1, 'active' }", { value: 1, unit: 'active' }],
+  ])('R8 RED: a new switch at %s → accepted in ONE call; the option turns it on at 1 with no source', async (_name, level) => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx as never, withLevel(level) as never) as Result;
+    expect(r.refusal, JSON.stringify(r)).not.toBe('switch_level_not_on');
+    expect(sent).toHaveLength(1);
+    expect(switchLevelSent(sent), JSON.stringify(r)).toEqual([{ factor_key: SWITCH_KEY, value: 1 }]);
+  });
+
+  it.each([
+    ["{ 1, 'GBP' } (an amount)", { value: 1, unit: 'GBP' }, ['unit']],
+    ["{ 1, '£' }", { value: 1, unit: '£' }, ['unit']],
+    ["{ 1, 'GBP per month' }", { value: 1, unit: 'GBP per month' }, ['unit']],
+    ["{ 1, 'hire' } (a count)", { value: 1, unit: 'hire' }, ['unit']],
+    ["{ 1, 'enabled users' } (a state word beside a count)", { value: 1, unit: 'enabled users' }, ['unit']],
+    ["{ 1, 'customers' } (a count the unit classifier does not list)", { value: 1, unit: 'customers' }, ['unit']],
+    ["{ 1, 'per month' } (a rate)", { value: 1, unit: 'per month' }, ['unit']],
+    ["{ 1, '0/1' } (digits: fails closed)", { value: 1, unit: '0/1' }, ['unit']],
+    ["{ 2, 'binary' } (not one)", { value: 2, unit: 'binary' }, ['unit', 'not_one']],
+    ["{ 0.5, 'enabled' } (a partial state)", { value: 0.5, unit: 'enabled' }, ['unit', 'not_one']],
+  ])('R8 CONTRAST: a new switch at %s → refused as before, nothing sent', async (_name, level, fields) => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx as never, withLevel(level) as never) as Result;
+    expect(r.refusal, JSON.stringify(r)).toBe('switch_level_not_on');
+    expect(r.conflict_fields).toEqual(fields);
+    expect(sent).toEqual([]);
+  });
+});
+
+// Served 137d3a5 (MG pj-20260928T042134Z A07/A08): the grandfather switch at `{0}` in the ONLY option, four times.
+describe('R9 — a one-option change that lists its new switch at 0 is told the exact next call, and that call is held', () => {
+  it('R9 RED: { 0 } → refused; the detail names the entry with NO "level" key (not 0)', async () => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx as never, withLevel({ value: 0 }) as never) as Result;
+    expect(r.refusal, JSON.stringify(r)).toBe('switch_level_not_on');
+    expect(sent).toEqual([]);
+    expect(r.detail).toContain(`except send the acts_on entry for "${SWITCH}" in "${GRANDFATHER}" with NO "level" key at all`);
+  });
+  it('R9 ONE HOP: following it (the entry with no level) is held, the switch on at 1, in ONE call', async () => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx as never, a05([{}]) as never) as Result;
+    // The fixture answers every inner request 500: what is bound is what was SENT, and that no refusal came first.
+    expect(r.refusal, JSON.stringify(r)).not.toBe('switch_level_not_on');
+    expect(sent).toHaveLength(1);
+    expect(switchLevelSent(sent)).toEqual([{ factor_key: SWITCH_KEY, value: 1 }]);
+  });
+});
+
 describe('R4 — a refusal is fixable in ONE hop: it names the exact next call, and the graded alternative for a share or an amount', () => {
   it.each([
     ["{ 50, '%' }", { value: 50, unit: '%' }, '50%'],
@@ -165,15 +224,15 @@ describe('R4 — a refusal is fixable in ONE hop: it names the exact next call, 
     expect(r.detail).not.toContain('graded factor');
   });
 
-  // ⛔ A 0 is not fixed by removing its level — a bare switch entry means ON (served A03, pj-20260928T011147Z): with no
-  // other option turning the switch on, the detail says to list it under the option that turns it on
-  // (`agent-switch-off-entry.test.ts` R3/R5 bind the rest).
-  it('R4 CONTRAST (A03): { 0 } as the only entry for the switch → the detail never says remove "level"; it says to list it under the option that turns it on', async () => {
+  // ⛔ A 0 is not fixed by removing its level — a bare switch entry means ON (served A03, pj-20260928T011147Z). In this
+  // ONE-option change the detail names the exact next call (R9: that entry with NO "level" key, not 0); with two options
+  // it says to list it under the option that turns it on (`agent-switch-off-entry.test.ts` R3/R5 bind the rest).
+  it('R4 CONTRAST (A03): { 0 } as the only entry for the switch → the detail never says remove "level"; it names the entry with no level key', async () => {
     const { caps } = setup();
     const r = await caps.proposeNewOption(ctx as never, withLevel({ value: 0 }) as never) as Result;
     expect(r.refusal).toBe('switch_level_not_on');
     expect(r.detail).not.toContain(REMOVE_LEVEL);
-    expect(r.detail).toContain(`No option in this change turns "${SWITCH}" on; list it under the option that turns it on`);
+    expect(r.detail).toContain(`send the acts_on entry for "${SWITCH}" in "${GRANDFATHER}" with NO "level" key at all`);
     expect(r.detail).not.toContain('graded factor');
   });
 

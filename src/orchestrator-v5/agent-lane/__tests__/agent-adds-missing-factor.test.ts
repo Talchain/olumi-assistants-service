@@ -195,7 +195,8 @@ describe('A1 — propose_new_option sends a new SWITCH switched on, in the same 
       expect(r.refusal, String(value)).toBe('switch_level_not_on');
       // ⛔ A 0 is never fixed by removing its level (a bare switch entry means ON; served A03, agent-switch-off-entry.test.ts):
       // with no option turning the switch on, the detail says to list it under the option that turns it on.
-      if (value === 0) expect(r.detail).toContain('No option in this change turns "AI add-on offered" on; list it under the option that turns it on');
+      // A ONE-option change (served 137d3a5, MG pj-20260928T042134Z): the detail names the exact next call, not 0.
+      if (value === 0) expect(r.detail).toContain('send the acts_on entry for "AI add-on offered" in "Keep £49 and offer a paid AI add-on" with NO "level" key at all');
       else expect(r.detail).toContain('remove "level" from the acts_on entry for "AI add-on offered"');
       if (value !== 0) expect(r.detail, String(value)).toContain('declare "AI add-on offered" as a graded factor instead');
       expect(sent).toEqual([]);

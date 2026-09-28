@@ -41,6 +41,7 @@
 
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { applyPatchOperations } from '../../orchestrator/patch-applier.js';
+import { sizeNewFactorLinks } from './size-new-factor-links.js';
 import {
   canonicaliseValueOps,
   stampUserEditProvenance,
@@ -814,10 +815,23 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
     );
     return { status: 'apply_failed', reason: 'apply_error' };
   }
-  const opsToApply: PatchOperation[] = reconcileObservedValuePair(
+  const reconciledOps: PatchOperation[] = reconcileObservedValuePair(
     heldCanonicalisedOps,
     input.currentGraph,
   );
+
+  // ── 2b′. A new SWITCH's links, sized by the first model's own rule (R2, DL #72 5862693164) ───────────────────────
+  // `hypothesisEdgeValue` writes every link of a factor the Agent adds at a flat ±0.5; admission would size it with D6
+  // (`frameAwarePlaceholder`). A graded new factor is re-sized when its level arrives; a switch's today-0 is stamped
+  // here, so this is its one chance. Re-sized INTO the ops, so the apply and the all-landed postcondition agree.
+  const linkSizing = sizeNewFactorLinks(reconciledOps, input.currentGraph, input.switchFactorIds ?? []);
+  if (linkSizing.sized.length > 0) {
+    log.info(
+      { request_id: input.requestId, scenario_id: input.scenarioId, sized_links: linkSizing.sized },
+      'GM held-execute — sized the new factor links by the first model\'s D6 rule',
+    );
+  }
+  const opsToApply: PatchOperation[] = linkSizing.operations;
 
   // ── 2c. Cascade-redundant remove_edge elision (P0, 2026-08-16) ─────────
   // `applyRemoveNode` cascade-removes every edge incident to the node it
