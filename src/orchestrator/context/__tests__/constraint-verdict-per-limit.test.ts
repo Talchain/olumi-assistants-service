@@ -473,3 +473,64 @@ describe('the intake conjunct keeps the rows it does not own', () => {
     expect(out).toEqual({ ...persisted, may_name_leading_option: false });
   });
 });
+
+// ── R1 S4-core: ISL's frame_verdict reaches the typed per-limit rows (Codex DL blocker 5880319881; Panel 5880277253) ──
+/**
+ * The served 17d1 bytes (PLoT certified P = 1 on every option, `decision_grade: true`), with exactly three knobs:
+ *   · the limit's stored frame (`level` | `change_abs` | `change_rel`);
+ *   · whose level the target carries (`cee_inference` as served = Olumi's; `brief_extraction` = the user's own);
+ *   · ISL's `frame_verdict` on the limit's `constraint_results` row (absent | `scored` | `estimate_only`).
+ * Served shape of the verdict (R3 wire witness 5880071853, PLoT #403 @ 77be665): `constraint_results[0].frame_verdict`.
+ */
+describe('R1 S4-core — ISL frame_verdict on the per-limit rows', () => {
+  const variant = (frame: 'level' | 'change_abs' | 'change_rel', owner: 'olumi' | 'user', verdict?: 'scored' | 'estimate_only') => {
+    const { graph } = load('17d1cd3a.graph.json');
+    const env = load('17d1cd3a.plot-response.json');
+    graph.goal_constraints[0].value_frame = frame;
+    if (owner === 'user') nodeOf(graph, 'monthly_churn').observed_state.source = 'brief_extraction';
+    if (verdict !== undefined) env.constraint_results[0].frame_verdict = verdict;
+    const v = verdictFor(env, graph, leaderOf(env.option_comparison));
+    expectContractValid(v);
+    return rowOf(v, CHURN);
+  };
+
+  it('PRECONDITION: a LEVEL limit on the user\'s own level, no frame_verdict, is scored (the rows below differ only in their knob)', () => {
+    expect(variant('level', 'user')).toEqual({ constraint_id: CHURN, state: 'scored' });
+  });
+
+  it('FV-1 RED: change_rel on the user\'s level, ISL says estimate_only → the hops disagree whose base it is → unscored (never scored)', () => {
+    expect(variant('change_rel', 'user', 'estimate_only')).toEqual({ constraint_id: CHURN, state: 'unscored', reason: 'base_owner_unestablished' });
+  });
+
+  it('FV-2 RED: change_rel with NO frame_verdict (a pre-R1 ISL, or a dropped hop) fails closed → unscored / not_decision_grade', () => {
+    expect(variant('change_rel', 'user')).toEqual({ constraint_id: CHURN, state: 'unscored', reason: 'not_decision_grade' });
+  });
+
+  it('FV-3 CONTROL: change_rel on the user\'s level, ISL says scored → scored', () => {
+    expect(variant('change_rel', 'user', 'scored')).toEqual({ constraint_id: CHURN, state: 'scored' });
+  });
+
+  it('FV-4 CONTROL: change_rel on Olumi\'s level, ISL says estimate_only → estimate_only / level_olumi_estimate (the two hops agree)', () => {
+    expect(variant('change_rel', 'olumi', 'estimate_only')).toEqual({ constraint_id: CHURN, state: 'estimate_only', reason: 'level_olumi_estimate' });
+  });
+
+  it('FV-5 CONTROL: a LEVEL limit with no frame_verdict is exactly as before — absence fails closed for change_rel only', () => {
+    expect(variant('level', 'olumi')).toEqual({ constraint_id: CHURN, state: 'estimate_only', reason: 'level_olumi_estimate' });
+  });
+
+  it('FV-6 CONTROL: change_abs with no frame_verdict is as before (0.61.0 scopes the absence rule to relative changes)', () => {
+    expect(variant('change_abs', 'user')).toEqual({ constraint_id: CHURN, state: 'scored' });
+  });
+
+  it('FV-7: ISL\'s estimate_only only ever LOWERS a row — on a limit CEE already reads as Olumi\'s it changes nothing', () => {
+    expect(variant('level', 'olumi', 'estimate_only')).toEqual(variant('level', 'olumi'));
+  });
+
+  it('the stored frame is read off the persisted row by id (collectLimitLevelOwners), never guessed', () => {
+    const { graph } = load('17d1cd3a.graph.json');
+    const ratified = readRatifiedConstraints(graph);
+    expect([...collectLimitLevelOwners(graph, ratified).relativeChangeIds]).toEqual([]);
+    graph.goal_constraints[0].value_frame = 'change_rel';
+    expect([...collectLimitLevelOwners(graph, ratified).relativeChangeIds]).toEqual([CHURN]);
+  });
+});
