@@ -1322,6 +1322,17 @@ export async function buildModelFromBrief(
   // `statedGoal.horizon` whatever it is. ⚠ HAND-OFF: an `unresolved` deadline's own words ("by Q3") have no stored field
   // yet; they stay on this typed result until the joint work frame (Codex rows 2–3, 27) gives them one.
   const statedGoal = holdStatedGoalAttributes(withdrawUnstatedBaselineStamps(admitted.nodes, brief), candidate.goal, brief);
+  /**
+   * ⭐ T2 PART 2 (PJ-E-A2; Canonical #2231 `NodeV3.goal_deadline_as_stated`, G1 contract): an `unresolved` deadline's
+   * own words ("by Q3") are HELD on the goal — verbatim, never converted to a month count (that needs a year and a
+   * fiscal calendar: inventing). Construction is the field's only writer. Words over the field's 60 characters are not
+   * held (the schema would read them as absence); `attestHorizon`'s spans are far shorter today, so that is a guard.
+   */
+  const deadlineWords = statedGoal.horizon.status === 'unresolved' ? statedGoal.horizon.wording.trim() : '';
+  const deadlineHeld = deadlineWords !== '' && deadlineWords.length <= 60;
+  const goalNodes = deadlineHeld
+    ? statedGoal.nodes.map((n) => (n.kind === 'goal' ? { ...n, goal_deadline_as_stated: deadlineWords } : n))
+    : statedGoal.nodes;
   if (statedGoal.held.horizon || statedGoal.held.direction) {
     admitted = {
       ...admitted,
@@ -1378,7 +1389,9 @@ export async function buildModelFromBrief(
   // asked as the user's. The wording is still held on no field: that is Canonical's shape (PJ-A2 row 27, second half).
   if (statedGoal.horizon.status === 'unresolved') {
     const goalName = typeof candidate.goal?.metric === 'string' && candidate.goal.metric.trim() !== '' ? ` for "${candidate.goal.metric}"` : '';
-    openQuestions.unshift(`Which date does "${statedGoal.horizon.wording}" mean? It is the deadline your brief sets${goalName}, but the model does not hold it yet, so no result answers whether it is met by then.`);
+    openQuestions.unshift(deadlineHeld
+      ? `Which date does "${deadlineWords}" mean? It is the deadline your brief sets${goalName}; the model keeps your words but no date, so no result answers whether it is met by then.`
+      : `Which date does "${statedGoal.horizon.wording}" mean? It is the deadline your brief sets${goalName}, but the model does not hold it yet, so no result answers whether it is met by then.`);
   } else if (typeof horizon === 'number' && Number.isFinite(horizon) && horizon > 0) {
     // Held (G1): the model keeps the deadline, but the analysis compares levels, so still no result answers it.
     openQuestions.unshift(statedGoal.held.horizon
@@ -1394,7 +1407,7 @@ export async function buildModelFromBrief(
 
   const graph = {
     // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
-    nodes: statedGoal.nodes,
+    nodes: goalNodes,
     edges: admitted.edges,
     ...(admitted.goal_constraints.length > 0
       ? { goal_constraints: admitted.goal_constraints }
