@@ -315,20 +315,22 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     expect(JSON.stringify(persisted)).toBe(moved);
   });
 
-  it('RED (a definitional link in the set): the WHOLE set is refused, naming it, and the model is byte-identical', async () => {
-    // Hours delegated = workload × quality, declared: both links INTO it are definitions (R3-9), with no Run to withdraw it.
-    const g = persisted as { nodes: Record<string, unknown>[] };
-    g.nodes.find((n) => n.id === 'routine_work_hours_delegated')!.nonlinear_identity = { operation: 'product', factor_ids: ['delegable_routine_workload', 'delegation_quality'], stated_in_brief: false };
+  it('RED (a link becomes definitional AFTER the set was prepared): the approval is refused whole (the base moved) and the model is byte-identical', async () => {
+    // The proposer leaves out links an identity in use defines (agent-link-set-leaves-out-definitional.test.ts); the writer
+    // stays the backstop when one is declared between the proposal and the approval.
     const { caps, ctx } = agent('I\'m aligned with these. Please make these updates.');
     // The definition comes LAST, so a writer that committed per link would already have landed the others.
     const p = await caps.proposeLinkStrengths!(ctx, { links: setOf(['capacityOverhead', 'aiUseQuality', 'riskQuality', 'qualityHours']) as never, rationale: 'x' });
     expect(p.ok, JSON.stringify(p)).toBe(true);
+    // Hours delegated = workload × quality, declared now: both links INTO it are definitions (R3-9), with no Run to withdraw it.
+    const g = persisted as { nodes: Record<string, unknown>[] };
+    g.nodes.find((n) => n.id === 'routine_work_hours_delegated')!.nonlinear_identity = { operation: 'product', factor_ids: ['delegable_routine_workload', 'delegation_quality'], stated_in_brief: false };
     const before = JSON.stringify(persisted);
     const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     expect(out.ok, JSON.stringify(out)).toBe(false);
     expect(out.mutated).toBe(false);
-    expect(String(out.detail)).toContain('"Delegation quality" → "Routine-work hours delegated" is defined by a calculation');
-    expect(String(out.detail)).toContain('none of these links was recorded');
+    // Declaring the identity moved the analysis-affecting hash, so the approval's stale-base check refuses before the
+    // writer's own definitional backstop is reached — either way, nothing lands.
     expect(rows.size, 'nothing committed').toBe(0);
     expect(JSON.stringify(persisted), 'byte-identical').toBe(before);
   });

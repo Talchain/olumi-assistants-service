@@ -2347,6 +2347,7 @@ export function createAgentCapabilities(
       const ops: ProposalOperation[] = [];
       const shown: Shown[] = [];
       const already: string[] = [];
+      const definitional: string[] = [];
       const seen = new Set<string>();
       for (const l of asked) {
         const name = `"${String(l?.from_label ?? '')}" \u2192 "${String(l?.to_label ?? '')}"`;
@@ -2378,6 +2379,18 @@ export function createAgentCapabilities(
         const edge = g.edges.find((e) => e.from === from.id && e.to === to.id);
         if (edge === undefined) {
           return refuseSet('no_such_link', `The model has no link from "${from.label}" to "${to.label}". Leave it out of the set, or offer to add it.`);
+        }
+        /**
+         * ⛔ R3-9 × R12 (served 13acc577, 28 Sep: Paul's set held "Pro plan price" → "Pro MRR", an operand of the declared
+         * MRR = price × subscribers): a link a declared identity DEFINES is not a belief while the identity is in use, and
+         * the writer refuses the WHOLE set on it at approval ("Not saved: none of it was applied."). Left out HERE, by the
+         * one predicate the writer decides with (`definitionalLinkInUse` over the read's `identity_run_use`, as
+         * `proposeLinkStrength` does), and said — so the approval the user gives is one the writer can honour.
+         */
+        const definition = definitionalLinkInUse(g.raw, from.id, to.id, g.identity_run_use ?? null);
+        if (definition !== null) {
+          definitional.push(definitionalLinkRefusalText(g.raw, definition));
+          continue;
         }
         const mean = (edge.strength !== null && typeof edge.strength === 'object') ? (edge.strength as { mean?: unknown }).mean : undefined;
         if (typeof mean !== 'number' || !Number.isFinite(mean)) {
@@ -2415,6 +2428,10 @@ export function createAgentCapabilities(
         shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps: false, was: currentBand, wasStrength: Math.abs(mean) });
       }
       if (ops.length === 0) {
+        if (definitional.length > 0) {
+          return { ok: false, mutated: false, refusal: 'definitional_link', definitional, ...(already.length > 0 ? { already } : {}),
+            detail: 'Nothing was prepared: every link left is defined by a calculation the model declares. Tell the user exactly what `definitional` says. Never offer to change those links.' };
+        }
         return { ok: false, mutated: false, refusal: 'nothing_to_change', already,
           detail: 'Every link already holds what was asked, so nothing was prepared. Say so plainly.' };
       }
@@ -2441,7 +2458,9 @@ export function createAgentCapabilities(
         links: shown.map((x) => ({ from: x.from, to: x.to, was: { band: linkBandWord(x.was), strength: quotable(x.wasStrength) },
           becomes: { band: linkBandWord(x.band), strength: quotable(x.magnitude) }, whose: x.yours ? 'yours' : 'Olumi\u2019s estimate', keeps_current_strength: x.keeps })),
         ...(already.length > 0 ? { already } : {}),
+        ...(definitional.length > 0 ? { left_out_definitional: definitional } : {}),
         note: 'Nothing has changed yet. ONE approval records every link in this set, all together or none. '
+          + (definitional.length > 0 ? 'Some links were left out because a calculation the model declares defines them (`left_out_definitional`): say so in those words, and never offer to change them. ' : '')
           + (olumis > 0
             ? `${olumis === shown.length ? 'Every strength here is' : `${olumis} of these strengths are`} Olumi\u2019s estimate, not the user\u2019s: say so, and that approving applies them while they stay marked as Olumi\u2019s, never as theirs. `
             : '')
