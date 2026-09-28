@@ -49,6 +49,12 @@ const GOAL_LEVEL_KEYS: ReadonlySet<string> = new Set([
 ]);
 /** Every key `proposeLimitChange` returns on success; the new figure is the user's by construction (`figure_not_stated`). */
 const LIMIT_CHANGE_KEYS: ReadonlySet<string> = new Set(['ok', 'mutated', 'proposal_id', 'public_label', 'base_revision', 'limit', 'note']);
+/** Every key `proposeNewFactor` returns on success (PJ-E-FIG): each factor's figure, link and strength are typed in `factors`. */
+const NEW_FACTOR_KEYS: ReadonlySet<string> = new Set([
+  'ok', 'mutated', 'proposal_id', 'public_label', 'held_message', 'held_detail', 'base_revision', 'factors', 'note',
+]);
+/** The capability's one strength disclosure for a new factor's link; any other wording has no template here. */
+const FACTOR_PLACEHOLDER_STRENGTH = 'not known yet: Olumi uses a placeholder strength for the link, not an estimate';
 /** The capability's one strength disclosure for a new risk; any other wording has no template here. */
 const RISK_PLACEHOLDER_STRENGTH = 'not known yet: Olumi uses a placeholder strength for each link, not an estimate';
 /** Every key `proposeLinkStrength` returns on success: its reading is already in its consent label. */
@@ -137,6 +143,26 @@ function newRiskReply(r: Rec): string | null {
 }
 
 /**
+ * ⭐ NEW FACTORS WITH THE USER'S FIGURES (PJ-E-FIG): each figure is the user's (`stated_by: 'user'`), what it affects is the
+ * capability's own typed phrase, and how strongly is its one fixed disclosure. The figures are named here because the
+ * consent subject is minted from the ops, which never carry them. Anything else keeps the second call.
+ */
+function newFactorReply(r: Rec): string | null {
+  const subject = heldSubject(r);
+  if (subject === undefined || !Array.isArray(r.factors) || r.factors.length === 0) return null;
+  const lines: string[] = [];
+  for (const raw of r.factors) {
+    const f = recordOf(raw);
+    const cv = recordOf(f?.current_value);
+    if (f === undefined || cv === undefined || !nonEmpty(f.label) || !nonEmpty(f.affects) || cv.stated_by !== 'user'
+      || typeof cv.value !== 'number' || !Number.isFinite(cv.value) || f.how_strongly !== FACTOR_PLACEHOLDER_STRENGTH) return null;
+    lines.push(`${q(f.label)} is ${shown(cv.value, cv.unit)}, the figure you gave, and affects ${f.affects.trim()}.`);
+  }
+  lines.push('How strongly each acts is not known yet: Olumi uses a placeholder strength for the link, not an estimate, for you to correct.');
+  return reply(subject, lines, question(r.public_label));
+}
+
+/**
  * ⭐ OPTION LEVELS (PJ-C1; live replay of 68 served two-call turns: 10 were these). The consent subject is the
  * proposal's own label; each level Olumi estimated says so with its basis, in the option template's words. A level
  * whose `stated_by` is not typed keeps the second call: whose figure it is is never guessed.
@@ -200,10 +226,11 @@ export function composeProposalReply(tool: string, args: unknown, result: unknow
   const r = recordOf(result);
   if (r === undefined || r.ok !== true || r.mutated !== false || !nonEmpty(r.proposal_id)) return null;
   const allowed = tool === 'propose_new_option' ? NEW_OPTION_KEYS : tool === 'propose_link_strength' ? LINK_KEYS
-    : tool === 'propose_new_risk' ? NEW_RISK_KEYS : tool === 'propose_option_interventions' ? OPTION_LEVELS_KEYS
+    : tool === 'propose_new_risk' ? NEW_RISK_KEYS : tool === 'propose_new_factor' ? NEW_FACTOR_KEYS : tool === 'propose_option_interventions' ? OPTION_LEVELS_KEYS
       : tool === 'propose_goal_current_level' ? GOAL_LEVEL_KEYS : tool === 'propose_limit_change' ? LIMIT_CHANGE_KEYS : undefined;
   if (allowed === undefined || Object.keys(r).some((k) => !allowed.has(k))) return null;
   return tool === 'propose_new_option' ? newOptionReply(r) : tool === 'propose_new_risk' ? newRiskReply(r)
+    : tool === 'propose_new_factor' ? newFactorReply(r)
     : tool === 'propose_option_interventions' ? optionLevelsReply(r) : tool === 'propose_goal_current_level' ? goalLevelReply(r)
       : tool === 'propose_limit_change' ? limitChangeReply(r) : linkStrengthReply(r);
 }

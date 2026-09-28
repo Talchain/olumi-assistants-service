@@ -82,6 +82,7 @@ import { applyFactorValueEdit } from './factor-value-edit.js';
 import { applyGoalTargetEdit, type GoalTargetEditResult } from './goal-target-edit.js';
 import { applyLimitEdit, type LimitEditRequest } from './limit-edit.js';
 import { dispatchAddRiskTransaction } from '../handlers/add-risk-dispatch.js';
+import { dispatchAddFactorTransaction } from '../handlers/add-factor-dispatch.js';
 import { buildHeldSupersessionNotice } from '../handlers/edit-graph-referee-gate.js';
 import { applyStructuralDelete } from './structural-delete.js';
 import { applyStructuralAdd, findFabricatedLevel } from './structural-add.js';
@@ -3282,6 +3283,125 @@ export async function holdAddRiskInProcess(input: HoldAddRiskInput, requestId: s
     status: 'held',
     proposal_id: outcome.chip.id,
     risk_id: outcome.riskId,
+    public_label: outcome.chip.label,
+    held_message: outcome.chip.message,
+    ...(outcome.chip.detail !== undefined ? { detail: outcome.chip.detail } : {}),
+  };
+}
+
+/**
+ * PJ-E-FIG — the Agent's ADD-FACTOR door (Delivery Lead #72 5866036457, on Canonical 5866021645): the add-risk door's
+ * twin, IN-PROCESS, same steps — a strict read of the stored graph and the latest row's live holds; the base must BE the
+ * stored model's analysis hash (else `stale`, nothing written); `dispatchAddFactorTransaction` builds the batch (target
+ * kinds refused THERE), referees it into ONE held pending pinned to that hash and records each factor's figure on it; that
+ * ONE hold is committed with the turn row (`commitDirectAnswer`, no graph), prior live holds carried. The confirm is the
+ * product's own held resume, ONE `commitTurn` under CAS. Every outcome but `held` leaves the graph and the row untouched.
+ */
+export type HoldAddFactorInput = {
+  readonly scenario_id: string;
+  /** The hold's own turn row (a v4 uuid), fresh per offer — see `HoldAddRiskInput.turn_id`. */
+  readonly turn_id: string;
+  /** The analysis-space hash of the model the proposal was built against. */
+  readonly base_graph_hash: string;
+  /** 1..3 new factors, each with its ONE link and the user's figure, framed (`isUserTodayObservedState`). */
+  readonly factors: readonly {
+    readonly id?: string;
+    readonly label: string;
+    readonly link: { readonly to_id: string; readonly effect_direction: 'positive' | 'negative' };
+    readonly observed_state: Readonly<Record<string, unknown>>;
+  }[];
+};
+export type HoldAddFactorResult =
+  | {
+      readonly status: 'held';
+      /** The hold's `gmh_` handle — `gmHeldProposalRef(scenario, 'node:<first factor id>')`. */
+      readonly proposal_id: string;
+      readonly factor_ids: readonly string[];
+      readonly public_label: string;
+      readonly held_message: string;
+      readonly detail?: string;
+    }
+  | { readonly status: 'stale' }
+  | { readonly status: 'refused'; readonly reason: string };
+
+export async function holdAddFactorInProcess(input: HoldAddFactorInput, requestId: string): Promise<HoldAddFactorResult> {
+  const startedAt = Date.now();
+  const logBase = { request_id: requestId, scenario_id: input.scenario_id, event: 'v5.agent.add_factor_hold' };
+  let persistedGraph: unknown;
+  let priorPendings: readonly PendingAction[];
+  try {
+    [persistedGraph, priorPendings] = await Promise.all([
+      loadPersistedGraphStrict(input.scenario_id),
+      loadMostRecentPendingActionsIntegrityStrict(input.scenario_id, requestId),
+    ]);
+  } catch (err) {
+    log.error({ ...logBase, err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) } },
+      'add-factor hold — authoritative graph/pending read failed; nothing held');
+    return { status: 'refused', reason: 'read_failed' };
+  }
+  if (persistedGraph === null || persistedGraph === undefined) return { status: 'refused', reason: 'no_persisted_graph' };
+  let currentHash: string | null;
+  try {
+    currentHash = computeAnalysisAffectingGraphHash(persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0]);
+  } catch {
+    currentHash = null;
+  }
+  if (currentHash === null) return { status: 'refused', reason: 'no_graph_hash' };
+  if (currentHash !== input.base_graph_hash) return { status: 'stale' };
+
+  let freshness: FrameFreshness = 'unknown';
+  try {
+    freshness = preWriteRefereeFreshness(await loadPriorFactsWithReadState(input.scenario_id, requestId), currentHash);
+  } catch {
+    freshness = 'unknown';
+  }
+
+  const factors = input.factors.map((f) => ({ ...(f.id !== undefined ? { id: f.id } : {}), label: f.label, link: f.link }));
+  const outcome = dispatchAddFactorTransaction({
+    params: { factors },
+    userToday: input.factors.map((f) => f.observed_state),
+    currentGraph: persistedGraph,
+    currentGraphHash: currentHash,
+    freshness,
+    mode: config.features.graphManagementMode,
+    scenarioId: input.scenario_id,
+    turnId: input.turn_id,
+    requestId,
+    stage: 'frame',
+  });
+  if (outcome.kind === 'refused') {
+    log.info({ ...logBase, reason: outcome.reason, governing: outcome.governing }, 'add-factor hold — refused; nothing held');
+    return { status: 'refused', reason: outcome.reason };
+  }
+  const notice = buildHeldSupersessionNotice(outcome.pendingActions[0]!, priorPendings, Date.now());
+  const response: OlumiResponse = notice === null
+    ? outcome.response
+    : { ...outcome.response, assistant_text: appendLapseNotice(outcome.response.assistant_text, notice) };
+  const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
+    kind: 'agent_add_factor', factors: input.factors, base_graph_hash: input.base_graph_hash })).digest('hex').slice(0, 32)}`;
+  try {
+    await commitDirectAnswer(response, {
+      scenario_id: input.scenario_id,
+      turn_id: input.turn_id,
+      turn_class: 'direct_answer',
+      handler_id: null,
+      request_hash: requestHash,
+      llm_calls_used: 0,
+      duration_ms: Date.now() - startedAt,
+      handler_facts: [],
+      pending_actions: [...outcome.pendingActions],
+      priorPendingActions: priorPendings,
+      coaching_state: null,
+    });
+  } catch (err) {
+    log.warn({ ...logBase, err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) } },
+      'add-factor hold — commit failed; nothing offered');
+    return { status: 'refused', reason: 'commit_failed' };
+  }
+  return {
+    status: 'held',
+    proposal_id: outcome.chip.id,
+    factor_ids: [...outcome.factorIds],
     public_label: outcome.chip.label,
     held_message: outcome.chip.message,
     ...(outcome.chip.detail !== undefined ? { detail: outcome.chip.detail } : {}),

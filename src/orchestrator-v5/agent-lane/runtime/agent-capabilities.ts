@@ -118,8 +118,10 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
 import { planNewFactors, planNewOption, type NewFactorRequest } from '../propose-new-option.js';
 import { createProposal, ProposalStore, type ProposalInterpretation, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
-import type { CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
+import type { CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
 import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
+import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isNewFactorTarget, MAX_FACTORS_PER_ADD, readUserTodayMember, USER_TODAY_SOURCE } from '../../routing/add-factor-transaction.js';
+import { readCurrencyUnitWithQualifiers } from '../../../cee/provenance/stated-amounts.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
 import { readinessViewOf, withoutCantRunOpening } from '../readiness-view.js';
@@ -668,6 +670,8 @@ interface GraphRead {
     /** The drafter's status-quo declaration, read only through `readIsBaseline` (`statusQuoOptionId`). */
     is_baseline?: unknown;
     data?: unknown;
+    /** Read by the add-factor door's target rule (`isNewFactorTarget`): a lever the options set is never a target. */
+    category?: unknown;
   }[];
   /** `origin` is read only to recognise a repair-authored edge (`isRepairAuthoredOptionFactorEdge`). */
   readonly edges: {
@@ -1065,6 +1069,9 @@ function riskUnreachableWhy(g: Pick<GraphRead, 'nodes'>, risk: string, links: re
     + `A link from ${hurt || 'that outcome'} to ${goalName} is added on the canvas, not here — never offer to add it.`;
 }
 
+/** How strongly a new factor's one link acts, as the add-factor door says it: Olumi's placeholder, never an estimate. */
+const FACTOR_PLACEHOLDER_STRENGTH = 'not known yet: Olumi uses a placeholder strength for the link, not an estimate';
+
 /** A goal target's direction, in words (the product's own receipt says "at least" / "at most"). */
 const DIRECTION_WORDS = { at_least: 'at least', at_most: 'at most' } as const;
 /** A goal target's figure in the user's units: the approve chip's own formatter, else the target writer's receipt formatter. */
@@ -1175,6 +1182,12 @@ export function createAgentCapabilities(
      * ONE `gmh_` hold pinned to the base hash, confirmed by the product's own held resume. Absent ⇒ unavailable.
      */
     readonly holdAddRisk?: (input: HoldAddRiskInput) => Promise<HoldAddRiskResult>;
+    /**
+     * ⭐ PJ-E-FIG (DL #72 5866036457): the product's add-factor door, reached in-process (`holdAddFactorInProcess`): ONE
+     * `gmh_` hold carrying the user's figures, pinned to the base hash, confirmed by the product's own held resume.
+     * Absent ⇒ unavailable.
+     */
+    readonly holdAddFactor?: (input: HoldAddFactorInput) => Promise<HoldAddFactorResult>;
     /**
      * ⭐ SLICE C2: the product's limit door (`commitLimitEditInProcess`): a new figure for an EXISTING limit row, its unit
      * and frame kept, stamped as the user's, ONE CAS commit with the base-hash gate. Absent ⇒ unavailable.
@@ -1421,6 +1434,11 @@ export function createAgentCapabilities(
         + (into.length > 0 ? ` and driven by ${into.map((e) => labelOf(e.from)).join(', ')}` : '')
         + `; ${howStronglyWords([...out, ...into])}`);
     }
+    // ⭐ PJ-E-FIG: the factors the add-factor door added, each with the user's figure (`GM_HELD_USER_TODAY_KEY`).
+    const userTodayIds = new Set((readUserTodayMember((hold.action as { inline_patch?: Record<string, unknown> }).inline_patch?.[GM_HELD_USER_TODAY_KEY]) ?? [])
+      .map((l) => l.factor_id));
+    /** The range Olumi chose for each such figure, said ONCE — here, on the turn that writes it (`ranges_added_for_analysis`). */
+    const rangesAdded: { factor: string; value: number; range: number }[] = [];
     const factorParts: AddedFactorPart[] = [];
     for (const fid of addedFactorIds) {
       const f = after!.nodes.find((x) => x.id === fid);
@@ -1440,6 +1458,16 @@ export function createAgentCapabilities(
       }
       // ⭐ PJ-A1 £49: a new graded factor committed WITH the today level the user stated is said as that, never asked again.
       const statedRaw = (os as { raw_value?: unknown } | undefined)?.raw_value ?? os?.value;
+      // ⭐ PJ-E-FIG: a factor the add-factor door committed WITH the user's figure — said as theirs, never asked again; its
+      // range (Olumi's) is disclosed once below, never re-framed later (`levelFrameOf` reads the stored cap).
+      if (userTodayIds.has(fid) && os?.source === USER_TODAY_SOURCE && typeof statedRaw === 'number') {
+        const u = (os as { unit?: unknown }).unit;
+        const cap = (os as { cap?: unknown }).cap;
+        sentences.push(`Added "${String(f.label ?? fid)}" as a factor, affecting ${changes.join(', ')}; ${howStronglyWords(outgoing)} `
+          + `Its value today is ${statedRaw}${typeof u === 'string' && u !== '' ? ` ${u}` : ''}, as you said.`);
+        if (typeof cap === 'number' && Number.isFinite(cap) && cap > 1) rangesAdded.push({ factor: String(f.label ?? fid), value: statedRaw, range: cap });
+        continue;
+      }
       if (todayIds.has(fid) && os?.source === 'brief_extraction' && typeof statedRaw === 'number') {
         const u = (os as { unit?: unknown }).unit;
         sentences.push(`Also added the factor "${String(f.label ?? fid)}", which changes ${changes.join(', ')}; ${howStronglyWords(outgoing)} `
@@ -1455,6 +1483,7 @@ export function createAgentCapabilities(
       receipts: summary !== null ? [summary] : [],
       ...(unreadable ? { receipt_unreadable: true } : {}),
       follow_up: sentences.join(' '),
+      ...(rangesAdded.length > 0 ? { ranges_added_for_analysis: rangesAdded } : {}),
     };
   };
 
@@ -5206,6 +5235,179 @@ export function createAgentCapabilities(
         },
         note: 'Nothing has changed yet. Tell the user it will add the risk, what it threatens and what drives it, and that how strongly '
           + 'is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.',
+      };
+    },
+
+    /**
+     * ⭐ PJ-E-FIG — NEW FACTORS CARRYING THE FIGURES THE USER STATED, HELD ON THE PRODUCT'S OWN SEAM (Delivery Lead #72
+     * 5866036457, on Canonical 5866021645). Journey E: "Senior engineers cost £120k a year each and juniors £65k a year
+     * each." — the Agent had no path to hold those figures. The add-risk door's twin: labels resolve by `resolveNamed`; the
+     * batch is built purely first (`buildAddFactorTransaction`); then the product's add-factor door holds it as ONE `gmh_`
+     * pending pinned to the model this read saw. ALL OR NOTHING: 1..3 factors, each with the user's figure, in one hold.
+     *
+     * THE FIGURE is taken ONLY when the user's own words write it (`figureTheUserWrote`, the lane's one matcher, as
+     * `new_factors[].today` uses it); otherwise the whole call is refused and said (`today_not_set`), nothing held. It is
+     * framed by the ONE rule (`framedObservedState` on `defaultFrameFor`, the statedToday block in `proposeNewOption`), then
+     * stamped as the user's (`USER_TODAY_SOURCE`). The range is Olumi's: said ONCE, by the confirm that writes it.
+     */
+    async proposeNewFactor(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      if (opts.holdAddFactor === undefined) {
+        return { ok: false, mutated: false, refusal: 'unavailable', detail: 'A factor cannot be added here. Nothing was changed. Tell the user plainly.' };
+      }
+      const requested = Array.isArray(args?.factors) ? args.factors as readonly unknown[] : [];
+      if (requested.length === 0 || requested.length > MAX_FACTORS_PER_ADD) {
+        return { ok: false, mutated: false, refusal: 'no_factors',
+          detail: `Nothing was prepared: one change adds 1 to ${MAX_FACTORS_PER_ADD} new factors. Tell the user plainly.` };
+      }
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const planned: { label: string; unit: string; value: number; to_id: string; direction: 'positive' | 'negative'; observed_state: Record<string, unknown> }[] = [];
+      const todayNotSet: { factor: string; value: unknown; reason: string }[] = [];
+      const ambiguous: AmbiguousTarget[] = [];
+      const recordOf = (x: unknown): Record<string, unknown> => (x !== null && typeof x === 'object' && !Array.isArray(x) ? x as Record<string, unknown> : {});
+      for (const raw of requested) {
+        const f = recordOf(raw);
+        const label = typeof f.label === 'string' ? f.label.trim() : '';
+        if (label === '') {
+          return { ok: false, mutated: false, refusal: 'unreadable_factor', detail: 'A new factor needs a name, in the user’s words. Nothing was prepared.' };
+        }
+        if (g.nodes.some((n) => norm(n.label) === norm(label))) {
+          return { ok: false, mutated: false, refusal: 'factor_exists',
+            detail: `The model already has something called "${label}", so nothing was prepared. A value for a factor the model `
+              + 'already has is set with propose_assumptions (revise: true when it already holds one), not added again.' };
+        }
+        if (planned.some((p) => norm(p.label) === norm(label)) || todayNotSet.some((t) => norm(t.factor) === norm(label))) {
+          return { ok: false, mutated: false, refusal: 'duplicate_factor', detail: `"${label}" is named twice in one change, so nothing was prepared.` };
+        }
+        const unit = typeof f.unit === 'string' && f.unit.trim() !== '' ? f.unit.trim() : '';
+        if (unit === '') {
+          return { ok: false, mutated: false, refusal: 'unit_not_stated',
+            detail: `Nothing was prepared: give the unit of "${label}" as the user gave it (for example GBP/year per engineer).` };
+        }
+        const asked = String(f.affects ?? '');
+        const res = resolveNamed(g, asked, (n) => isNewFactorTarget({ kind: n.kind, ...(typeof n.category === 'string' ? { category: n.category } : {}) }));
+        if (res.kind === 'ambiguous') { ambiguous.push(describeAmbiguity(g, asked, res.candidates)); continue; }
+        if (res.kind === 'other' && res.node.kind === 'factor') {
+          return { ok: false, mutated: false, refusal: 'target_is_a_lever',
+            detail: `Nothing was prepared: "${res.node.label}" is set by the options, so nothing else may drive it. Link "${label}" to `
+              + 'the outcome or the goal it affects instead, from the user’s words; if it is unclear, ask.' };
+        }
+        if (res.kind !== 'one') {
+          return { ok: false, mutated: false, refusal: res.kind === 'none' ? 'target_not_found' : 'target_not_allowed',
+            detail: res.kind === 'none'
+              ? `The model has nothing called "${asked}", so nothing was prepared. A new factor drives an existing factor, outcome or goal.`
+              : `"${asked}" is ${res.node.kind === 'option' ? 'an option' : `a ${res.node.kind}`}, so nothing was prepared. A new factor drives an existing factor, outcome or goal — never an option or a decision.` };
+        }
+        const direction = f.direction === 'positive' || f.direction === 'negative' ? f.direction : null;
+        if (direction === null) {
+          return { ok: false, mutated: false, refusal: 'direction_not_stated',
+            detail: `Nothing was prepared: say whether more "${label}" raises or lowers "${res.node.label}", from the user’s words; if it is unclear, ask.` };
+        }
+        const t = recordOf(f.today);
+        const todayUnit = typeof t.unit === 'string' && t.unit.trim() !== '' ? t.unit.trim() : unit;
+        const shown = `${typeof t.value === 'number' ? t.value : JSON.stringify(t.value ?? null)} ${todayUnit}`;
+        if (typeof t.value !== 'number' || !Number.isFinite(t.value) || t.value < 0) {
+          todayNotSet.push({ factor: label, value: t.value ?? null,
+            reason: `${shown} is not a level "${label}" can hold, so it was not taken. Ask the user what it is.` });
+          continue;
+        }
+        // ⛔ A figure in another kind of unit is never this factor's value (`unit-conflict.ts`): £120k is not a level for a
+        // factor measured in engineers. Refused whole and said (review finding 3), never the declared unit silently dropped.
+        if (unitsConflict(todayUnit, unit) !== null) {
+          todayNotSet.push({ factor: label, value: t.value,
+            reason: `${shown} is not the kind of figure "${label}" holds (it is measured in ${unit}), so it was not taken. Ask the user which they meant.` });
+          continue;
+        }
+        const scaled = readCurrencyUnitWithQualifiers(todayUnit);
+        if (scaled.kind === 'currency' && Number.isFinite(scaled.multiplier) && scaled.multiplier > 1) {
+          todayNotSet.push({ factor: label, value: t.value,
+            reason: `${shown} is in a scaled unit; give the figure in whole units (120000 for £120k) in the user's own unit.` });
+          continue;
+        }
+        // The lane's one matcher, over THIS message's words (Canonical, on the door's review F4): over the whole
+        // conversation a figure typed about anything — the £400k LIMIT, a rent — could be committed as this new factor's
+        // value, as the user's. A factor the user is adding now is one they state now.
+        if (!figureTheUserWrote(t.value, todayUnit, ctx.user_turn_text ?? '')) {
+          todayNotSet.push({ factor: label, value: t.value,
+            reason: `The user's own words in this message do not state ${shown}, so "${label}" was not prepared: a new factor's value is never taken from Olumi's words, a guess, or a figure said earlier about something else. Ask the user what it is.` });
+          continue;
+        }
+        // THE ONE FRAMING RULE (ruling point 3; `proposeNewOption` statedToday): Olumi's default range over the largest
+        // figure this change carries for the factor — its own — then stamped as the user's.
+        const v = t.value;
+        const observed = { ...framedObservedState({ baseline_value: v, unit: todayUnit, provenance: 'explicit',
+          plausible_max: v > 1 ? defaultFrameFor(Math.abs(v)) : null }), source: USER_TODAY_SOURCE };
+        planned.push({ label, unit: todayUnit, value: v, to_id: res.node.id, direction, observed_state: observed });
+      }
+      if (ambiguous.length > 0) {
+        return { ok: false, mutated: false, refusal: 'ambiguous_target', ambiguous_targets: ambiguous, detail: AMBIGUOUS_NOTE };
+      }
+      if (todayNotSet.length > 0) {
+        return { ok: false, mutated: false, refusal: 'today_not_set', today_not_set: todayNotSet,
+          detail: 'Nothing was prepared or held: every new factor in one change carries the value the user stated, or none is '
+            + 'added. Tell the user plainly which figure is missing and ask for it; never supply one.' };
+      }
+      // The door's own builder, run here purely: a spec it would refuse is never sent.
+      const factors = planned.map((p) => ({ label: p.label, link: { to_id: p.to_id, effect_direction: p.direction } }));
+      const built = buildAddFactorTransaction({ factors }, { nodes: g.nodes as never, edges: g.edges as never });
+      if (!built.matched) {
+        return { ok: false, mutated: false, refusal: 'not_prepared', reason: built.reason,
+          detail: built.reason === 'new_factor_unreachable'
+            ? 'Nothing was prepared: what the new factor drives does not lead to the goal, so it could not change the comparison. Ask the user what it affects.'
+            : 'Those factors could not be prepared as one change, so nothing was sent or changed. Tell the user plainly.' };
+      }
+      const ids = built.proposal.factors.map((f) => f.id);
+      const res = await opts.holdAddFactor({
+        scenario_id: ctx.scenario_id,
+        turn_id: randomUUID(),
+        base_graph_hash: g.graph_hash,
+        factors: planned.map((p, i) => ({ id: ids[i]!, label: p.label, link: { to_id: p.to_id, effect_direction: p.direction }, observed_state: p.observed_state })),
+      });
+      if (res.status === 'stale') {
+        return { ok: false, mutated: false, refusal: 'model_changed',
+          detail: 'The model changed while this was being prepared, so nothing was held. Read it again and propose afresh.' };
+      }
+      const ref = gmHeldProposalRef(ctx.scenario_id, `node:${ids[0]!}`);
+      let heldOk = res.status === 'held' && res.proposal_id === ref && JSON.stringify(res.factor_ids) === JSON.stringify(ids);
+      if (heldOk && opts.readPendingActions !== undefined) {
+        try {
+          const hold = await liveHeldHold(ctx.scenario_id, ref);
+          const ops = hold !== undefined ? heldOpsOf(hold) : [];
+          // JSONB reorders keys: the figures are compared key-order-insensitively, never by bytes.
+          const sorted = (x: unknown): unknown => (Array.isArray(x) ? x.map(sorted) : x !== null && typeof x === 'object'
+            ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, sorted((x as Record<string, unknown>)[k])])) : x);
+          const member = hold !== undefined ? readUserTodayMember((hold.action as { inline_patch?: Record<string, unknown> }).inline_patch?.[GM_HELD_USER_TODAY_KEY]) : undefined;
+          heldOk = built.proposal.factors.every((f) => ops.some((o) => o.op === 'add_node' && o.path === f.id)
+            && ops.some((o) => o.op === 'add_edge' && o.path === `${f.id}::${f.to}`))
+            && member !== undefined && member.length === planned.length
+            && planned.every((p, i) => JSON.stringify(sorted(member.find((m) => m.factor_id === ids[i])?.observed_state)) === JSON.stringify(sorted(p.observed_state)));
+        } catch {
+          heldOk = false;
+        }
+      }
+      if (!heldOk || res.status !== 'held') {
+        return { ok: false, mutated: false, refusal: 'not_prepared', ...(res.status === 'refused' ? { reason: res.reason } : {}),
+          detail: res.status === 'refused' && res.reason === 'target_not_allowed'
+            ? 'Olumi did not prepare that change, so nothing was added. A new factor drives an existing factor, outcome or goal. Tell the user plainly.'
+            : 'Olumi could not prepare that as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };
+      }
+      const labelOfId = (id: string): string => String(g.nodes.find((n) => n.id === id)?.label ?? id);
+      return {
+        ok: true, mutated: false,
+        proposal_id: ref,
+        public_label: res.public_label.trim() !== '' ? res.public_label : 'Add these factors',
+        held_message: res.held_message,
+        ...(res.detail !== undefined && res.detail.trim() !== '' ? { held_detail: res.detail } : {}),
+        base_revision: g.graph_hash,
+        factors: planned.map((p) => ({
+          label: p.label,
+          current_value: { value: p.value, unit: p.unit, stated_by: 'user' },
+          affects: `${labelOfId(p.to_id)} (${p.direction === 'positive' ? 'raises it' : 'lowers it'})`,
+          how_strongly: FACTOR_PLACEHOLDER_STRENGTH,
+        })),
+        note: 'Nothing has changed yet. Tell the user it will add each factor with the figure they gave, what it affects, and that '
+          + 'how strongly is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.',
       };
     },
 
