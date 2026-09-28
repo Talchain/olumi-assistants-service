@@ -730,10 +730,13 @@ export function findCoverageGaps(
     .filter((f) => actedOn.has(f.label) && !userOwnedBaseline.has(f.label))
     .filter(noBaseline)
     .map((f) => ({ factor: f.label }));
-  // A LEVEL limit's own quantity (a DELTA limit is a change from today: it needs no level of its own).
-  const limited = new Set((model.constraints ?? []).filter((c) => c.frame !== 'delta').map((c) => c.metric));
+  // A LEVEL limit's own quantity (a DELTA limit is a change from today: it needs no level of its own), named as
+  // admission names a limit's node (`metricNamesLabel`), so "Monthly Churn" is the factor "Monthly churn" (verifier LOW).
+  const limited = (model.constraints ?? []).filter((c) => c.frame !== 'delta').map((c) => c.metric);
   for (const f of model.factors) {
-    if (limited.has(f.label) && !actedOn.has(f.label) && !userOwnedBaseline.has(f.label) && noBaseline(f)) baseline_gaps.push({ factor: f.label, because: 'limit' });
+    if (limited.some((m) => metricNamesLabel(m, f.label)) && !actedOn.has(f.label) && !userOwnedBaseline.has(f.label) && noBaseline(f)) {
+      baseline_gaps.push({ factor: f.label, because: 'limit' });
+    }
   }
   // The same quantity drafted as an OUTCOME: admission registers it as a factor with no level (`limitedOutcomeFrame`),
   // naming it as admission names a limit's node (`metricNamesLabel`: case and surrounding space ignored). Only when the
@@ -856,7 +859,10 @@ function neverTheLimitAsTodaysLevel(retryRaw: CandidateModel, firstRaw: Candidat
   const limitFigures = (label: string): number[] => [...(firstRaw.constraints ?? []), ...(retryRaw.constraints ?? [])]
     .filter((c) => canonicalLabel(c.metric) === label && typeof c.value === 'number' && Number.isFinite(c.value))
     .map((c) => c.value);
-  const sameFigure = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+  const eq = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+  // The limit's figure, or that figure as a share ("under 4%" given back as 0.04): admission's own figureTheUserWrote
+  // reads "4%" as 0.04 on a share (stated-by-user.ts), so either spelling would register the limit as the user's level.
+  const sameFigure = (v: number, limit: number): boolean => eq(v, limit) || eq(v, limit / 100);
   return {
     ...retryRaw,
     factors: retryRaw.factors.map((f) => {

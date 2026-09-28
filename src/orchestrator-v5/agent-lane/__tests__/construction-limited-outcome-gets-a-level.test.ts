@@ -231,7 +231,17 @@ describe('(1) the limit\'s own figure is never the user\'s level; (2) a level th
     expect(asks(result).map((a) => [a.node_id, a.estimate])).toEqual([['monthly_churn', { value: 4, unit: '%' }]]);
   });
 
-  it('INVARIANT (holds at base too; measured on 7 units at f773a217): the limit figure as a proportion (0.04 on a 0–1 frame) is never adopted as the user\'s', async () => {
+  it('⭐ RED (1, verifier FIX_FIRST): the limit\'s 4% given back as a SHARE (0.04, known, explicit) on a 0–100 percent frame is not the user\'s either', async () => {
+    for (const unit of ['%', '% per month', 'percent per month', '% of subscribers per month']) {
+      const { graph, result } = await construct(firstPass(), churnAsFactor('explicit', 0.04, { baseline_known: true, plausible_max: 100 }, unit));
+      const os = node(graph, 'monthly_churn')!.observed_state;
+      expect(os?.source, unit).not.toBe('brief_extraction');
+      expect(os, unit).toMatchObject({ source: 'cee_inference', extractionType: 'inferred' });
+      expect(asks(result).map((a) => a.node_id), unit).toEqual(['monthly_churn']);
+    }
+  });
+
+  it('INVARIANT (measured on 7 units at f773a217, where the gap exists): the limit figure as a proportion (0.04 on a 0–1 frame) is never adopted as the user\'s', async () => {
     for (const unit of ['proportion', 'share', 'rate', 'fraction', 'ratio', '%', 'decimal']) {
       const { graph, trace } = await construct(firstPass(), churnAsFactor('explicit', 0.04, { baseline_known: true, plausible_max: 1 }, unit));
       expect(trace, unit).toMatchObject({ outcome: 'kept_first' });
@@ -288,6 +298,17 @@ describe('(3) one gap per quantity; (4) the quantity a limit names is read as ad
     expect(gapsOf(d)).toEqual([{ factor: CHURN, because: 'limit', outcome: true }]);
     const { graph } = await construct(d);
     expect(node(graph, 'monthly_churn')!.kind).toBe('factor');
+  });
+
+  it('⭐ RED (4, verifier LOW): a limit on "Monthly Churn" names a level-less FACTOR "Monthly churn" too — a gap, as admission attaches it', () => {
+    const d = withChurnLimit(churnAsFactor('explicit', null), { metric: 'Monthly Churn' });
+    expect(gapsOf(d)).toEqual([{ factor: CHURN, because: 'limit' }]);
+  });
+
+  it('⭐ RED (4, verifier P6): a level-less factor "monthly churn" + the outcome "Monthly churn" + a limit on "Monthly churn" — one gap', () => {
+    const d = firstPass();
+    d.factors.push({ label: 'monthly churn', role: 'observable', baseline_known: false, baseline_value: null, unit: 'percent', provenance: 'explicit', plausible_max: 100 });
+    expect(gapsOf(d)).toEqual([{ factor: 'monthly churn', because: 'limit' }]);
   });
 
   it('CONTRAST (4): a metric admission does NOT resolve ("Monthly  churn", two spaces) re-kinds nothing and is no gap', async () => {
