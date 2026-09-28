@@ -27,12 +27,30 @@ import { readBackState } from '../agent-v1-turn.js';
  * verdict as the original: `status: needs_user_input`, `may_run: true` — i.e.
  * the admissible-but-not-ready shape this whole fix is about.
  */
-const GRAPH = JSON.parse(
+const PERSISTED = JSON.parse(
   readFileSync(
     new URL('../../orchestrator-v5/handlers/__tests__/fixtures/admissible-not-ready.graph.json', import.meta.url),
     'utf8',
   ),
-) as unknown;
+) as { nodes: Record<string, unknown>[] };
+
+/**
+ * ⚠ OVERLAY, not the persisted bytes (the JSON is shared with other suites and stays as recorded). Since #2164 its
+ * three goal roots with no status-quo level — Factor 1, 2 and 3 — are each a factor-scoped `MISSING_FACTOR_LEVEL`
+ * that no waiver answers, so the model as stored is now REFUSED (`may_run: false`) and is no longer the
+ * admissible-but-not-ready case. A level on each (0.5, inside the unit scale its options' 0.1 levels use) restores
+ * that premise; it stays not ready on Option 3's unset level (`MISSING_OPTION_VALUE`), which does not refuse the Run.
+ */
+const STATUS_QUO_LEVELS: Record<string, number> = { fac_6: 0.5, fac_7: 0.5, fac_8: 0.5 };
+for (const id of Object.keys(STATUS_QUO_LEVELS)) {
+  if (!PERSISTED.nodes.some((n) => n.id === id)) throw new Error(`overlay target ${id} is not in the fixture`);
+}
+const GRAPH = {
+  ...PERSISTED,
+  nodes: PERSISTED.nodes.map((n) => (typeof n.id === 'string' && n.id in STATUS_QUO_LEVELS
+    ? { ...n, observed_state: { ...(n.observed_state as object | undefined), value: STATUS_QUO_LEVELS[n.id] } }
+    : n)),
+} as unknown;
 
 /** Mirrors the real route: 200, a graph, and NO `analysis_ready`. */
 const dispatch = async () => ({ status: 200, json: { graph_hash: 'h1', graph: GRAPH } }) as never;
