@@ -207,12 +207,12 @@ describe('(a) the served witness, replayed: a UI-shaped re-register keeps the st
     expect(contrast).toEqual(SERVED_CONTRAST_AFTER_EDIT);
   });
 
-  it('a failed read of the stored graph degrades to today: the register proceeds, nothing is carried', async () => {
+  it('a failed read of the stored graph refuses the register (503): the stored edge facts are never erased blind', async () => {
     const w = world(CAPTURE.read_after_edit.graph);
     (storeRef.value as { loadGraph: ReturnType<typeof vi.fn> }).loadGraph.mockRejectedValue(new Error('read failed'));
     const res = await post(CAPTURE.ui_reregister_request);
-    expect(res.statusCode, res.body).toBe(200);
-    expect(edgeOf(w.stored(), TARGET)).toEqual(edgeOf(CAPTURE.ui_reregister_request.graph, TARGET));
+    expect(res.statusCode, res.body).toBe(503);
+    expect(edgeOf(w.stored(), TARGET)).toEqual(edgeOf(CAPTURE.read_after_edit.graph, TARGET));
   });
 });
 
