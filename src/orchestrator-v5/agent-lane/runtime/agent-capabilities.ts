@@ -131,7 +131,7 @@ import { CANVAS_BAND_WORD, edgeBandFromMagnitude, EDGE_STRENGTH_MIDPOINTS } from
 import { runWithApprovedAdoption } from '../approved-adoption-context.js';
 import { runWithStatedLinkBand } from '../stated-link-band-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
-import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
+import { factorUnitOf, unitPhraseFamily, unitsConflict } from '../unit-conflict.js';
 import { classifyUnitScaleClass } from '../../../cee/draft/records/unit-scale-class.js';
 import { unitFamilyOf } from '../../routing/value-unit-resolution.js';
 import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
@@ -173,6 +173,33 @@ function scopeIn(g: { readonly nodes: readonly { readonly label?: unknown; reado
     .map((n) => (typeof n.label === 'string' ? n.label : ''))
     .filter((l) => l !== '' && !target.includes(l));
   return { target, others };
+}
+
+/**
+ * ⛔ THE ADD-FACTOR DOOR'S SCOPE (PJ-E-FIG, DL CHANGES_REQUIRED on #2235): whose figure a NEW factor's value is. Target: the
+ * new factor's own label. Others: every quantity in the model (`scopeIn`) PLUS the other new factors in this call — so on
+ * "Senior engineers cost £120k a year each and juniors £65k a year each" a swap (senior 65000) or the £400k limit is never
+ * this factor's. RIVALS (`EntityScope.rivals`): the others that could HOLD this figure. A factor measured in another kind
+ * of unit ("New senior engineers hired", engineers, for a £ figure) and a risk (a likelihood, for any figure not a
+ * percentage) cannot, so the words they share with the target ("senior") stay the target's; every word of their own
+ * still marks a figure as not the target's.
+ */
+function newFactorScopeIn(
+  g: { readonly raw?: unknown; readonly nodes: readonly { readonly id?: unknown; readonly label?: unknown; readonly kind?: unknown; readonly observed_state?: unknown }[] },
+  target: string,
+  figureUnit: string,
+  inCall: readonly { readonly label: string; readonly unit: string }[],
+): EntityScope {
+  const percentOrUnknown = ((f) => f === null || f === 'percent')(unitPhraseFamily(figureUnit));
+  const quantities = g.nodes.filter((n) => n.kind !== 'option' && n.kind !== 'decision' && typeof n.label === 'string' && n.label !== '' && n.label !== target);
+  const siblings = inCall.filter((s) => s.label !== '' && s.label !== target);
+  const couldHold = (n: (typeof quantities)[number]): boolean => (n.kind === 'risk' ? percentOrUnknown
+    : n.kind !== 'factor' || unitsConflict(figureUnit, factorUnitOf(g.raw, n as { id?: unknown; observed_state?: unknown })) === null);
+  return {
+    target: [target],
+    others: [...quantities.map((n) => n.label as string), ...siblings.map((s) => s.label)],
+    rivals: [...quantities.filter(couldHold).map((n) => n.label as string), ...siblings.filter((s) => unitsConflict(figureUnit, s.unit) === null).map((s) => s.label)],
+  };
 }
 
 /**
@@ -5245,8 +5272,9 @@ export function createAgentCapabilities(
      * batch is built purely first (`buildAddFactorTransaction`); then the product's add-factor door holds it as ONE `gmh_`
      * pending pinned to the model this read saw. ALL OR NOTHING: 1..3 factors, each with the user's figure, in one hold.
      *
-     * THE FIGURE is taken ONLY when the user's own words write it (`figureTheUserWrote`, the lane's one matcher, as
-     * `new_factors[].today` uses it); otherwise the whole call is refused and said (`today_not_set`), nothing held. It is
+     * THE FIGURE is taken ONLY when the user's own words in THIS message write it about THIS factor (`figureTheUserWroteFor`
+     * on `newFactorScopeIn`: never the other factor's figure, never the limit's); otherwise the whole call is refused and
+     * said (`today_not_set`), nothing held. It is
      * framed by the ONE rule (`framedObservedState` on `defaultFrameFor`, the statedToday block in `proposeNewOption`), then
      * stamped as the user's (`USER_TODAY_SOURCE`). The range is Olumi's: said ONCE, by the confirm that writes it.
      */
@@ -5266,6 +5294,11 @@ export function createAgentCapabilities(
       const todayNotSet: { factor: string; value: unknown; reason: string }[] = [];
       const ambiguous: AmbiguousTarget[] = [];
       const recordOf = (x: unknown): Record<string, unknown> => (x !== null && typeof x === 'object' && !Array.isArray(x) ? x as Record<string, unknown> : {});
+      // Every new factor named in THIS call, with its declared unit: each one's figure is never another's (`newFactorScopeIn`).
+      const inCall = requested.map((x) => recordOf(x)).map((x) => ({
+        label: typeof x.label === 'string' ? x.label.trim() : '',
+        unit: typeof x.unit === 'string' ? x.unit.trim() : '',
+      }));
       for (const raw of requested) {
         const f = recordOf(raw);
         const label = typeof f.label === 'string' ? f.label.trim() : '';
@@ -5291,13 +5324,13 @@ export function createAgentCapabilities(
         if (res.kind === 'other' && res.node.kind === 'factor') {
           return { ok: false, mutated: false, refusal: 'target_is_a_lever',
             detail: `Nothing was prepared: "${res.node.label}" is set by the options, so nothing else may drive it. Link "${label}" to `
-              + 'the outcome or the goal it affects instead, from the user’s words; if it is unclear, ask.' };
+              + 'the outcome or the non-lever factor (one no option sets) it affects instead, from the user’s words; if it is unclear, ask.' };
         }
         if (res.kind !== 'one') {
           return { ok: false, mutated: false, refusal: res.kind === 'none' ? 'target_not_found' : 'target_not_allowed',
             detail: res.kind === 'none'
-              ? `The model has nothing called "${asked}", so nothing was prepared. A new factor drives an existing factor, outcome or goal.`
-              : `"${asked}" is ${res.node.kind === 'option' ? 'an option' : `a ${res.node.kind}`}, so nothing was prepared. A new factor drives an existing factor, outcome or goal — never an option or a decision.` };
+              ? `The model has nothing called "${asked}", so nothing was prepared. A new factor drives an outcome or a non-lever factor (one no option sets).`
+              : `"${asked}" is ${res.node.kind === 'option' ? 'an option' : `a ${res.node.kind}`}, so nothing was prepared. A new factor drives an outcome or a non-lever factor (one no option sets) — never the goal, a risk, an option or a decision.` };
         }
         const direction = f.direction === 'positive' || f.direction === 'negative' ? f.direction : null;
         if (direction === null) {
@@ -5325,12 +5358,13 @@ export function createAgentCapabilities(
             reason: `${shown} is in a scaled unit; give the figure in whole units (120000 for £120k) in the user's own unit.` });
           continue;
         }
-        // The lane's one matcher, over THIS message's words (Canonical, on the door's review F4): over the whole
-        // conversation a figure typed about anything — the £400k LIMIT, a rent — could be committed as this new factor's
-        // value, as the user's. A factor the user is adding now is one they state now.
-        if (!figureTheUserWrote(t.value, todayUnit, ctx.user_turn_text ?? '')) {
+        // The lane's SCOPED matcher, over THIS message's words (Canonical, on the door's review F4; DL CHANGES_REQUIRED on
+        // #2235): the figure must be written ABOUT this factor. Over the whole conversation, or anywhere in the message, a
+        // figure typed about anything else — the £400k LIMIT, the other factor's figure (a swap) — could be committed as
+        // this new factor's value, as the user's. A factor the user is adding now is one they state now, beside its name.
+        if (!figureTheUserWroteFor(t.value, todayUnit, ctx.user_turn_text ?? '', newFactorScopeIn(g, label, todayUnit, inCall))) {
           todayNotSet.push({ factor: label, value: t.value,
-            reason: `The user's own words in this message do not state ${shown}, so "${label}" was not prepared: a new factor's value is never taken from Olumi's words, a guess, or a figure said earlier about something else. Ask the user what it is.` });
+            reason: `The user's own words in this message do not state ${shown} for "${label}", so it was not prepared: a new factor's value is never taken from Olumi's words, a guess, or a figure said about something else (another factor, a limit, an earlier message). Ask the user what it is.` });
           continue;
         }
         // THE ONE FRAMING RULE (ruling point 3; `proposeNewOption` statedToday): Olumi's default range over the largest
@@ -5389,7 +5423,7 @@ export function createAgentCapabilities(
       if (!heldOk || res.status !== 'held') {
         return { ok: false, mutated: false, refusal: 'not_prepared', ...(res.status === 'refused' ? { reason: res.reason } : {}),
           detail: res.status === 'refused' && res.reason === 'target_not_allowed'
-            ? 'Olumi did not prepare that change, so nothing was added. A new factor drives an existing factor, outcome or goal. Tell the user plainly.'
+            ? 'Olumi did not prepare that change, so nothing was added. A new factor drives an outcome or a non-lever factor (one no option sets). Tell the user plainly.'
             : 'Olumi could not prepare that as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };
       }
       const labelOfId = (id: string): string => String(g.nodes.find((n) => n.id === id)?.label ?? id);

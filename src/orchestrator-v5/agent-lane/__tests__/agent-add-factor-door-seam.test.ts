@@ -17,6 +17,8 @@
  *   (e) a link into an option → refused by the proposer AND by the door;
  *   (f) a negative or non-number figure → refused;
  *   (g) a label the model already has → refused, naming the tool that sets an existing factor's value.
+ *   (l)–(n) DL CHANGES_REQUIRED on #2235 (1): a figure is the user's for THIS factor only where they wrote it about it —
+ *       the two figures swapped, or the £400k limit typed in the same message, are refused; the correct pairing holds.
  *
  * ⛔ SOURCE. The ruling's `user_specified` is not a legal `ObservedStateV3.source` (see `add-factor-transaction.test.ts`
  * S0); the door stamps `USER_EDIT_SOURCE`, the product's literal for a figure the user typed in chat.
@@ -158,6 +160,7 @@ const toolOutputIn = (body: Record<string, unknown>): Record<string, unknown> =>
 describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held on the product\'s own seam (the add-risk door\'s twin)', () => {
   let app: FastifyInstance;
   let USER_SOURCE = '';
+  let GM_HELD_USER_TODAY = '';
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: string }) => {
       if (!String(url).includes('openai')) throw new Error(`non-OpenAI network call: ${String(url)}`);
@@ -173,6 +176,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
     USER_SOURCE = (await import('../../../orchestrator/canonicalise-value-ops.js')).USER_EDIT_SOURCE;
+    GM_HELD_USER_TODAY = (await import('../../routing/add-factor-transaction.js')).GM_HELD_USER_TODAY_KEY;
     app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async (req) => {
       const id = (req.params as { id: string }).id;
@@ -343,6 +347,62 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect(approveChipOf(t2)).toBeUndefined();
     expect(bytes()).toBe(before);
     expect(newFactors()).toEqual([]);
+  }, 120_000);
+
+  // ⛔ DL CHANGES_REQUIRED on #2235 (1): a figure is the user's for THIS factor only where they wrote it ABOUT it. The
+  // unscoped matcher asked only whether the figure is somewhere in the message, so a swap and the £400k limit passed.
+  const CONJOINED = 'Seniors are £120k a year and juniors £65k a year, with a £400k salary budget.';
+  it.each([
+    ['the seeded model', FIG_MSG, 'seed'],
+    ['journey E\'s served graph', FIG_MSG, 'e07'],
+    ['journey E\'s served graph, "…a year and juniors…"', CONJOINED, 'e07'],
+  ] as const)('(l) RED: on %s, the two figures SWAPPED (senior 65000, junior 120000) → refused today_not_set naming both, nothing held, byte-identical', async (_what, message, which) => {
+    graphOf.set(SCENARIO, which === 'seed' ? seedGraph() : journeyE());
+    const target = which === 'seed' ? 'Annual salary spend' : 'Incremental platform delivery…';
+    const before = bytes();
+    let out: Record<string, unknown> = {};
+    const t1 = await propose(factorArgs([{ today: { value: 65000 } }, { today: { value: 120000 } }], target), message, (o) => { out = o; });
+    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'today_not_set' }));
+    expect((out['today_not_set'] as { factor: string }[]).map((x) => x.factor).sort(), JSON.stringify(out)).toEqual(['Junior engineer salary', 'Senior engineer salary']);
+    expect(approveChipOf(t1)).toBeUndefined();
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(bytes()).toBe(before);
+    expect(newFactors()).toEqual([]);
+  }, 120_000);
+
+  it.each([
+    ['the seeded model', 'Senior engineers cost £120k a year each and juniors £65k a year each, and annual salary spend must stay under £400k.', 'seed'],
+    ['journey E\'s served graph', 'Senior engineers cost £120k a year each and juniors £65k a year each, and our salary budget is £400k.', 'e07'],
+  ] as const)('(m) RED: on %s, the £400k limit typed in the SAME message offered as a factor\'s figure → refused today_not_set naming that factor, nothing held, byte-identical', async (_what, message, which) => {
+    graphOf.set(SCENARIO, which === 'seed' ? seedGraph() : journeyE());
+    const target = which === 'seed' ? 'Annual salary spend' : 'Incremental platform delivery…';
+    const before = bytes();
+    let out: Record<string, unknown> = {};
+    const t1 = await propose(factorArgs([{ today: { value: 400000 } }], target), message, (o) => { out = o; });
+    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'today_not_set' }));
+    expect((out['today_not_set'] as { factor: string }[]).map((x) => x.factor), JSON.stringify(out)).toEqual(['Senior engineer salary']);
+    expect(approveChipOf(t1)).toBeUndefined();
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(bytes()).toBe(before);
+    expect(newFactors()).toEqual([]);
+  }, 120_000);
+
+  it.each([
+    ['journey E\'s sentence', FIG_MSG],
+    ['"…a year and juniors…"', CONJOINED],
+  ] as const)('(n) CONTROL (RED under a scope that lets "New senior engineers hired" claim "senior"): on journey E\'s served graph, %s with the CORRECT pairing → ONE hold carrying both figures as the user\'s', async (_what, message) => {
+    graphOf.set(SCENARIO, journeyE());
+    const t1 = await propose(factorArgs([], 'Incremental platform delivery…'), message);
+    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    const held = await heldOnLatestRow();
+    expect(held, 'exactly ONE live hold').toHaveLength(1);
+    const ops = held[0]!.action.inline_patch!.operations!;
+    const idOf = (label: string) => ops.find((o) => o.op === 'add_node' && o.value?.['label'] === label)!.path;
+    const member = held[0]!.action.inline_patch![GM_HELD_USER_TODAY] as { factor_id: string; observed_state: Record<string, unknown> }[];
+    const figureOf = (label: string) => member.find((m) => m.factor_id === idOf(label))!.observed_state;
+    expect(figureOf('Senior engineer salary'), JSON.stringify(member)).toEqual(expect.objectContaining({ raw_value: 120000, source: USER_SOURCE }));
+    expect(figureOf('Junior engineer salary'), JSON.stringify(member)).toEqual(expect.objectContaining({ raw_value: 65000, source: USER_SOURCE }));
+    expect(USER_SOURCE).toBe('user_override');
   }, 120_000);
 
   it('(b) RED: a figure the user did NOT write → refused and said; NOTHING held (all-or-nothing, the written one too); byte-identical', async () => {

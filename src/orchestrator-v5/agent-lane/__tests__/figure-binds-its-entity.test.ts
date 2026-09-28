@@ -108,3 +108,42 @@ describe('a figure the user wrote about THIS entity, or about nothing named, sta
     expect(figureTheUserWroteFor(49, 'GBP per month', undefined, PRICE)).toBe(false);
   });
 });
+
+describe('PJ-E-FIG (DL CHANGES_REQUIRED on #2235): a word the target shares only with quantities that cannot hold the figure is the target\'s', () => {
+  // Journey E's served quantities (journey-e-e07-draft-graph.json) plus the other new factor in the same call.
+  const E07 = ['ship the new platform', 'New senior engineers hired', 'New junior engineers hired', 'Annual salary spend',
+    'Senior hiring lead-time risk', 'Junior ramp-up risk', 'Budget cap breach risk', 'Incremental platform delivery…'];
+  /** RIVALS: the others a £ figure could be — not the headcounts (engineers) and not the risks (likelihoods). */
+  const COULD_HOLD_MONEY = ['ship the new platform', 'Annual salary spend', 'Incremental platform delivery…'];
+  const scope = (target: string, sibling: string, rivals: boolean) => ({
+    target: [target],
+    others: [...E07, sibling],
+    ...(rivals ? { rivals: [...COULD_HOLD_MONEY, sibling] } : {}),
+  });
+  const UNIT = 'GBP/year per engineer';
+  const SAID = 'Senior engineers cost £120k a year each and juniors £65k a year each.';
+
+  it('RED: with rivals the user\'s OWN pairing binds (without them "senior" is shared with the headcount and the risk, and £120k was refused)', () => {
+    expect(figureTheUserWroteFor(120000, UNIT, SAID, scope('Senior engineer salary', 'Junior engineer salary', false)), 'the defect').toBe(false);
+    expect(figureTheUserWroteFor(120000, UNIT, SAID, scope('Senior engineer salary', 'Junior engineer salary', true))).toBe(true);
+    expect(figureTheUserWroteFor(65000, UNIT, SAID, scope('Junior engineer salary', 'Senior engineer salary', true))).toBe(true);
+  });
+
+  it('CONTRAST: the swap and the limit stay refused with rivals — a word only a non-rival has still marks the figure as another\'s', () => {
+    expect(figureTheUserWroteFor(65000, UNIT, SAID, scope('Senior engineer salary', 'Junior engineer salary', true))).toBe(false);
+    expect(figureTheUserWroteFor(120000, UNIT, SAID, scope('Junior engineer salary', 'Senior engineer salary', true))).toBe(false);
+    const budget = `${SAID.slice(0, -1)}, and our salary budget is £400k.`;
+    expect(figureTheUserWroteFor(400000, UNIT, budget, scope('Senior engineer salary', 'Junior engineer salary', true)), '"budget" is the budget risk\'s word').toBe(false);
+  });
+
+  it('RED: an "and" straight after a figure starts the next item — "Seniors are £120k a year and juniors…" never reads £120k as the juniors\'', () => {
+    const t = 'Seniors are £120k a year and juniors £65k a year.';
+    expect(figureTheUserWroteFor(120000, UNIT, t, scope('Junior engineer salary', 'Senior engineer salary', true))).toBe(false);
+    expect(figureTheUserWroteFor(120000, UNIT, t, scope('Senior engineer salary', 'Junior engineer salary', true))).toBe(true);
+    expect(figureTheUserWroteFor(65000, UNIT, t, scope('Junior engineer salary', 'Senior engineer salary', true))).toBe(true);
+    // CONTROL: a label word before the "and" still binds ("1 developer and 0 tech leads").
+    const hiring = { target: ['Developers hired'], others: ['Tech leads hired'] };
+    expect(figureTheUserWroteFor(1, 'hires', 'Backfill 1 developer and 0 tech leads.', hiring)).toBe(true);
+    expect(figureTheUserWroteFor(0, 'hires', 'Backfill 1 developer and 0 tech leads.', hiring)).toBe(false);
+  });
+});

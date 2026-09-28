@@ -201,6 +201,15 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
 export interface EntityScope {
   readonly target: readonly string[];
   readonly others: readonly string[];
+  /**
+   * ⭐ The others that could HOLD this figure (a subset of `others`; absent = every other, as before). Only THEIR words
+   * make a word of the target's shared, and so name neither. An other that cannot hold it — a headcount for a money
+   * figure, a risk's likelihood — still claims every word of its own the target lacks, so a figure written beside it is
+   * never the target's. PJ-E-FIG (DL CHANGES_REQUIRED on #2235): on journey E's "Senior engineers cost £120k a year
+   * each" the word "senior" is shared with "New senior engineers hired" (a count) and "Senior hiring lead-time risk",
+   * neither of which a £ figure can be; without this, the user's own £120k for "Senior engineer salary" was refused.
+   */
+  readonly rivals?: readonly string[];
 }
 
 /** A label's words, lower-cased, three characters or more ("Pro plan price" → pro, plan, price; "MRR" → mrr). */
@@ -255,12 +264,14 @@ export function factorTheUserNamed(
  * THE RULE, read with the model's OWN labels — no word list. Within the clause the figure was written in (a clause
  * ends at . ! ? ; , : a dash or a new line; same unit rules as `figureTheUserWrote`), the figure is ABOUT the entity it
  * sits beside:
- *   1. a label word in the two words right after it ("1 developer", "0 tech leads", "a 5% price rise");
+ *   1. a label word in the two words right after it, unless an "and" straight after it starts the next item
+ *      ("1 developer", "0 tech leads", "a 5% price rise");
  *   2. else the nearest label word before it ("our MRR is £12,000", "price from £49 to £59");
  *   3. else the nearest label word after it ("£59 for the Pro plan");
  *   4. no label word in the clause at all ("Test £54 vs £59") — the figure is about what the user is asking for: theirs.
  * It is the user's for the target when that word is the target's. A word shared by the target's and another entity's
- * labels ("monthly" in churn and MRR) names neither and is passed over. Every miss fails toward under-claiming: the
+ * labels ("monthly" in churn and MRR) names neither and is passed over — another that could hold the figure, when the
+ * caller says which (`EntityScope.rivals`). Every miss fails toward under-claiming: the
  * figure is left unset or recorded as Olumi's, and said.
  */
 export function figureTheUserWroteFor(value: number, unit: unknown, userText: string | null | undefined, scope: EntityScope): boolean {
@@ -268,7 +279,8 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
   const family = unitPhraseFamily(unit);
   const targetWords = [...new Set(scope.target.flatMap(wordsOf))];
   const otherWords = [...new Set(scope.others.flatMap(wordsOf))];
-  const decisiveTarget = targetWords.filter((t) => !otherWords.some((o) => sameWord(t, o)));
+  const rivalWords = scope.rivals === undefined ? otherWords : [...new Set(scope.rivals.flatMap(wordsOf))];
+  const decisiveTarget = targetWords.filter((t) => !rivalWords.some((o) => sameWord(t, o)));
   const decisiveOther = otherWords.filter((o) => !targetWords.some((t) => sameWord(t, o)));
   // The figure's own unit names no entity (R&C #2013 B1): "£59 per month" in GBP/month is not about "Monthly churn".
   const unitWords = typeof unit === 'string' ? wordsOf(unit) : [];
@@ -310,14 +322,19 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
       : null;
     const skipped = rate ?? purpose;
     const afterRate = right.slice(skipped === null ? 0 : [...skipped[0].matchAll(/[\p{L}\p{N}]+/gu)].length);
+    // ⛔ A figure followed straight away by a conjunction has ended its own phrase: what follows "and" is the NEXT item,
+    // never what this figure was written about (PJ-E-FIG, DL CR on #2235: "Seniors are £120k a year and juniors £65k a
+    // year" read £120k as the juniors'). Rule 1 then finds nothing and the nearest word before it decides; the words
+    // after the conjunction still count last. ("one senior and two juniors": "senior" comes first, so it is read as before.)
+    const rightAfter = /^(?:and|or|but|plus|while|whereas)$/.test(afterRate[0] ?? '') ? [] : afterRate.slice(0, 2);
     if (a.kind === 'words') {
       // ⭐ A count in WORDS is an idiom far more often than a digit is ("That's one option we could try", "One more
       // thing"; AIQ #70 5859477600). It is the user's only when a label word of THIS entity sits within two words of it:
       // never by the "names nothing, so theirs" fallback below that a written digit gets.
-      const near = firstMention(afterRate.slice(0, 2)) ?? firstMention([...left].reverse().slice(0, 2));
+      const near = firstMention(rightAfter) ?? firstMention([...left].reverse().slice(0, 2));
       return near === 'target';
     }
-    const about = firstMention(afterRate.slice(0, 2)) ?? firstMention([...left].reverse()) ?? firstMention(afterRate.slice(2));
+    const about = firstMention(rightAfter) ?? firstMention([...left].reverse()) ?? firstMention(afterRate.slice(rightAfter.length));
     return about === null || about === 'target';
   });
 }

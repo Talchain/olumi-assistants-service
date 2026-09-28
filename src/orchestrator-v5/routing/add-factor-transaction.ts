@@ -15,9 +15,10 @@
  *   · then ONE `add_edge` per factor, new factor → its target, Olumi's PLACEHOLDER (`hypothesisEdgeValue`: default
  *     strength, `defaulted`, `cee_hypothesis`) — never `user_specified`: nobody sized the link.
  *
- * ⛔ THE TARGET KINDS ARE DECIDED HERE. A new factor links to the goal, an outcome, or a factor nothing sets (observable
- * or external) — the add-option new-factor rule (`isAffectsTarget`) without risks, and NEVER an option, a decision, a
- * risk or a lever the options set (`INVALID_FACTOR_TO_CONTROLLABLE`). Any other target is refused with nothing built.
+ * ⛔ THE TARGET KINDS ARE DECIDED HERE. A new factor links to an outcome or a non-lever factor (one no option sets:
+ * observable or external) — the add-option new-factor rule (`isAffectsTarget`) without risks or the goal, and NEVER the
+ * goal (no validator admits factor → goal), an option, a decision, a risk or a lever the options set
+ * (`INVALID_FACTOR_TO_CONTROLLABLE`). Any other target is refused with nothing built.
  *
  * THE USER'S FIGURE rides the hold, not the ops: a CEE-written member (`GM_HELD_USER_TODAY_KEY`) the confirm stamps into
  * each factor's `add_node` after the re-referee and before the apply (`stampNewUserTodayLevels`), exactly where the
@@ -79,7 +80,7 @@ export type AddFactorBuildResult =
 const CANONICAL_ID_RE = /^[a-z0-9_:-]+$/;
 const fail = (reason: AddFactorSkipReason): AddFactorBuildResult => ({ matched: false, reason });
 
-/** What a new factor may drive: the goal, an outcome, or a factor nothing sets. Never an option, decision, risk or lever. */
+/** What a new factor may drive: an outcome or a non-lever factor (one no option sets). Never the goal, an option, decision, risk or lever. */
 export function isNewFactorTarget(node: { kind: string; category?: string } | undefined): boolean {
   if (node === undefined) return false;
   // Canonical (#72, the door's review): NOT the goal. factor → goal is in neither validator allow-list (v3-validator,

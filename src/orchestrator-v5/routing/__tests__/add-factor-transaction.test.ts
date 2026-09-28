@@ -250,9 +250,14 @@ describe('PJ-E-FIG — a hold is re-checked against the graph it lands on, never
   it('R1 RED: the confirm refuses the WHOLE batch when the model now has a node by a new factor\'s name (a second "Senior engineer salary" is never committed); CONTROL: an unrelated new node confirms', () => {
     const held = hold(params());
     const p = held.pendingActions[0] as PendingAction;
-    const dup = confirmOn(p, movedWith('Senior engineer salary'));
+    const moved = movedWith('Senior engineer salary');
+    const movedBytes = JSON.stringify(moved);
+    const dup = confirmOn(p, moved);
     expect(dup.status, JSON.stringify(dup)).not.toBe('executed');
     expect(dup).toEqual({ status: 'apply_failed', reason: 'apply_error' });
+    // C3 (DL on #2235): the refused confirm leaves the graph it was HANDED byte-identical — never a node or link pushed
+    // into `currentGraph` in place (the caller's object is the persisted authority it re-reads).
+    expect(JSON.stringify(moved), 'the input graph is untouched by a refused confirm').toBe(movedBytes);
     const ok = confirmOn(p, movedWith('Office rent'));
     expect(ok.status, JSON.stringify(ok)).toBe('executed');
     expect((ok.mutatedGraph.nodes as Json[]).filter((n) => n.label === 'Senior engineer salary')).toHaveLength(1);
