@@ -272,6 +272,84 @@ describe('G12 — option-surface invariance + readiness no-downgrade', () => {
     expect(res.after_status).toBe('needs_user_input');
   });
 
+  // G12(ii) blind spot (Canonical #72 5861770361; DL 5861785834 → MG). Since #2164 a REAL first draft whose goal roots
+  // have no levels is already `needs_user_input` (MISSING_FACTOR_LEVEL), so a merge that ADDS a blocker keeps the same
+  // status and a status compare cannot see it. The guard now compares the blocking-issue SETS, MISSING_FACTOR_LEVEL
+  // excluded on both sides.
+  function realFirstDraft(): GraphV3T {
+    const g = readyGraph();
+    const price = g.nodes.find((n) => n.id === 'fac_price') as { observed_state?: unknown };
+    delete price.observed_state;
+    return g;
+  }
+  const edge = (from: string, to: string, mean: number) => ({
+    from, to, strength: { mean, std: 0.1 }, exists_probability: 0.9, effect_direction: mean >= 0 ? 'positive' : 'negative',
+  }) as GraphV3T['edges'][number];
+
+  it('PRECONDITION: the real first draft is already needs_user_input (its root has no level)', () => {
+    expect(checkReadinessNoDowngrade(realFirstDraft(), realFirstDraft()).before_status).toBe('needs_user_input');
+  });
+
+  it('⭐ RED: a value-less option merged into a REAL first draft FAILS, though both statuses are needs_user_input', () => {
+    const after = realFirstDraft();
+    after.nodes.push({ id: 'opt_new', kind: 'option', label: 'Third way' });
+    after.edges.push(edge('dec_launch', 'opt_new', 1), edge('opt_new', 'fac_price', 0.5));
+    const res = checkReadinessNoDowngrade(realFirstDraft(), after);
+    expect(res.before_status).toBe('needs_user_input');
+    expect(res.after_status).toBe('needs_user_input');
+    expect(res.ok).toBe(false);
+    expect(res.added_blockers).toEqual(['MISSING_OPTION_VALUE|opt_new|fac_price']);
+  });
+
+  it('CONTRAST: a risk merged into a REAL first draft passes (its level gap is on both sides; nothing new)', () => {
+    const after = realFirstDraft();
+    after.nodes.push({ id: 'risk_new', kind: 'risk', label: 'New risk' });
+    after.edges.push(edge('risk_new', 'goal_revenue', -0.2));
+    const res = checkReadinessNoDowngrade(realFirstDraft(), after);
+    expect(res.ok).toBe(true);
+    expect(res.added_blockers).toEqual([]);
+  });
+
+  it('a new level-less EXTERNAL factor adds only its own level gap: an honest ask, not a downgrade (ready → needs_user_input passes)', () => {
+    const after = readyGraph();
+    after.nodes.push({ id: 'fac_market', kind: 'factor', label: 'Market size', category: 'external' } as GraphV3T['nodes'][number]);
+    after.edges.push(edge('fac_market', 'goal_revenue', 0.3));
+    const res = checkReadinessNoDowngrade(readyGraph(), after);
+    expect(res.before_status).toBe('ready');
+    expect(res.after_status).toBe('needs_user_input');
+    expect(res.added_blockers).toEqual([]);
+    expect(res.ok).toBe(true);
+  });
+
+  it('CONTRAST: a level gap never excuses another new blocker (an external factor AND a value-less option FAIL)', () => {
+    const after = realFirstDraft();
+    after.nodes.push({ id: 'fac_market', kind: 'factor', label: 'Market size', category: 'external' } as GraphV3T['nodes'][number]);
+    after.edges.push(edge('fac_market', 'goal_revenue', 0.3));
+    after.nodes.push({ id: 'opt_new', kind: 'option', label: 'Third way' });
+    after.edges.push(edge('dec_launch', 'opt_new', 1), edge('opt_new', 'fac_price', 0.5));
+    const res = checkReadinessNoDowngrade(realFirstDraft(), after);
+    expect(res.ok).toBe(false);
+    expect(res.added_blockers).toContain('MISSING_OPTION_VALUE|opt_new|fac_price');
+  });
+
+  it('a SECOND id-less structural issue is new too (counted, not a set): a second orphan FAILS', () => {
+    const before = readyGraph();
+    before.nodes.push({ id: 'risk_orphan_a', kind: 'risk', label: 'Orphan A' });
+    const after = readyGraph();
+    after.nodes.push({ id: 'risk_orphan_a', kind: 'risk', label: 'Orphan A' }, { id: 'risk_orphan_b', kind: 'risk', label: 'Orphan B' });
+    const res = checkReadinessNoDowngrade(before, after);
+    expect(res.added_blockers).toEqual(['ORPHAN_NODE||']);
+    expect(res.ok).toBe(false);
+  });
+
+  it('an UNDERIVABLE merged graph FAILS with no blocker to name (only the status check sees it)', () => {
+    const after = { nodes: 'not a list', edges: [] } as unknown as GraphV3T;
+    const res = checkReadinessNoDowngrade(readyGraph(), after);
+    expect(res.after_status).toBeNull();
+    expect(res.added_blockers).toEqual([]);
+    expect(res.ok).toBe(false);
+  });
+
   it('no-downgrade FAILS when the goal node disappears (readiness becomes underivable)', () => {
     const before = readyGraph();
     const after = readyGraph();
