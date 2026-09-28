@@ -105,6 +105,25 @@ describe('⭐ a consent subject says a figure as the user writes it', () => {
     expect(r.public_label).toBe('Change the limit on "Monthly churn" from less than 4% to less than 3%');
   });
 
+  it('RED (option levels, count and money): each level said as written, in the subject and in Olumi’s-estimate lines', async () => {
+    const msg = 'Put £15,000 into advertising, and assume 1,200 Pro subscribers under that option.';
+    const r = await produce(C05, 'propose_option_interventions', {
+      interventions: [
+        { option_label: 'Additional advertising', factor_label: 'Advertising spend', value: 15000, unit: 'GBP over 6 months', basis: msg },
+        { option_label: 'Additional advertising', factor_label: 'Pro paying subscribers', value: 1200, unit: 'subscribers', basis: msg },
+      ],
+    }, msg);
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true }));
+    expect(String(r.public_label)).toContain('to £15,000 over 6 months');
+    expect(String(r.public_label)).toContain('to 1,200 subscribers');
+    expect(String(r.public_label)).not.toMatch(RAW);
+    // Olumi's estimate, said by the one-call template's own line.
+    const estimated = { ok: true, mutated: false, proposal_id: r.proposal_id, public_label: r.public_label, base_revision: r.base_revision, interventions: [{ option: 'Additional advertising', factor: 'Advertising spend', value: 15000, unit: 'GBP over 6 months', basis: 'a planning figure', stated_by: 'olumi_estimate' }] };
+    const reply = composeProposalReply('propose_option_interventions', { interventions: [], whole_request: true }, estimated, msg);
+    expect(reply).toContain('‘Advertising spend’ under ‘Additional advertising’ is set to £15,000 over 6 months, Olumi’s estimate');
+    expect(reply).not.toMatch(RAW);
+  });
+
   it('RED (a revised starting value): both figures said as written', async () => {
     const msg = 'Advertising spend is now £15,000 over the six months.';
     const r = await produce(C05, 'propose_assumptions', {

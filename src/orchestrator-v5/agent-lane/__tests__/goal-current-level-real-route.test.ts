@@ -192,7 +192,7 @@ describe('BLOCKING — a magnitude suffix on the goal\'s currency is scaled exac
     expect(mRung.provenance_unit_normalised).toStrictEqual({ rule: 'agent_lane_limit_magnitude_v1', original_value: 12, original_unit: '£k' });
     expect(goalOf(h.stored()).observed_state).toStrictEqual(levelOf(12000, { provenance_unit_normalised: mRung.provenance_unit_normalised }));
     // The approval shows the figure as the user gave it AND what it is recorded as — never a silent rescale.
-    expect(proposed.public_label).toBe('Record the current level of "MRR" as your figure: 12 £k, which is 12000 GBP MRR (target 20000 GBP MRR)');
+    expect(proposed.public_label).toBe('Record the current level of "MRR" as your figure: 12 £k, which is £12,000 MRR (target £20,000 MRR)');
   });
 
   it('RED: 0.012 £m → raw 12000 (the M-rung\'s other suffix)', async () => {
@@ -221,7 +221,7 @@ describe('BLOCKING — a magnitude suffix on the goal\'s currency is scaled exac
     expect(goalOf(h.stored()).observed_state).toHaveProperty('provenance_unit_normalised');
     const revised = await h.call(TOOL, { ...T2, value: 13000 }) as Proposed;
     expect(revised.ok, JSON.stringify(revised)).toBe(true);
-    expect(revised.public_label).toBe('Record the current level of "MRR" as your figure: 12000 GBP MRR → 13000 GBP (target 20000 GBP MRR)');
+    expect(revised.public_label).toBe('Record the current level of "MRR" as your figure: £12,000 MRR → £13,000 (target £20,000 MRR)');
     const again = await h.call('authorise_change', { proposal_id: revised.proposal_id });
     expect(again.applied, JSON.stringify(again)).toBe(true);
     expect(goalOf(h.stored()).observed_state).toStrictEqual(levelOf(13000));
@@ -254,17 +254,18 @@ describe('FAIL CLOSED — the headline goal-fit number is never fed by an unclas
 });
 
 describe('the approval label shows the figure as the user stated it — never relabelled in the goal\'s unit', () => {
-  it('RED: 12000 GBP is shown as "12000 GBP", with the target in the goal\'s own unit', async () => {
+  // The currency is said by its symbol, figures grouped (DL #72 5866282787); the user's figure never takes the goal's "MRR".
+  it('RED: 12000 GBP is shown as "£12,000", with the target in the goal\'s own unit', async () => {
     const h = await harness(paulCbd15f83Stored());
     const r = await h.call(TOOL, T2) as Proposed;
     expect(r.ok, JSON.stringify(r)).toBe(true);
-    expect(r.public_label).toBe('Record the current level of "MRR" as your figure: 12000 GBP (target 20000 GBP MRR)');
+    expect(r.public_label).toBe('Record the current level of "MRR" as your figure: £12,000 (target £20,000 MRR)');
   });
 
   it('RED: 12000 £ is shown with the £ the user gave', async () => {
     const h = await harness(paulCbd15f83Stored());
     const r = await h.call(TOOL, { ...T2, unit: '£' }) as Proposed;
-    expect(r.public_label).toBe('Record the current level of "MRR" as your figure: 12000 £ (target 20000 GBP MRR)');
+    expect(r.public_label).toBe('Record the current level of "MRR" as your figure: £12,000 (target £20,000 MRR)');
   });
 });
 
