@@ -27,6 +27,7 @@ import { scaffoldingProvenance } from "../../../draft/records/projector.js";
 import { fuzzyMatchNodeId } from "../../../../validators/structural-reconciliation.js";
 import { NAN_FIX_SIGNATURE_STD } from "../../../constants.js";
 import { validateGraph as validateGraphDeterministic } from "../../../../validators/graph-validator.js";
+import { ALLOWED_EDGE_KIND_PAIRS } from "../../../../validators/graph-validator.types.js";
 import { sweepNodePath, pathsNameNode } from "../../../../validators/violation-paths.js";
 import { detectEdgeFormat, canonicalStructuralEdge, patchEdgeNumeric } from "../../utils/edge-format.js";
 import type { EdgeFormat } from "../../utils/edge-format.js";
@@ -991,9 +992,11 @@ function fixInvalidInterventionRefs(graph: GraphT): Repair[] {
 // Proactive: Remaining forbidden edge removal
 // ---------------------------------------------------------------------------
 
+// R10: `outcome → outcome` left this list; it is a LEGAL link (AI Quality #72 5872082179) in the ONE table
+// (`ALLOWED_EDGES`). tests/unit/r10-one-edge-kind-table.test.ts pins that the sweep keeps it.
 const SIMPLE_REMOVE_PATTERNS: ReadonlyArray<[string, string]> = [
   ["decision", "outcome"], ["decision", "risk"], ["decision", "factor"],
-  ["outcome", "outcome"], ["risk", "risk"],
+  ["risk", "risk"],
 ];
 
 /**
@@ -1600,14 +1603,12 @@ export function fixFactorGoalEdges(graph: GraphT, format: EdgeFormat): {
  * ensuring the outcome reaches goal via a valid causal chain — not through
  * another forbidden shortcut.
  */
-const REACHABILITY_ALLOWED: Array<[string, string]> = [
-  ["factor", "outcome"],
-  ["factor", "risk"],
-  ["factor", "factor"],
-  ["outcome", "goal"],
-  ["risk", "goal"],
-  ["risk", "outcome"],
-];
+// R10: DERIVED from the ONE table: its causal pairs (every rule whose source is not the decision or an option).
+// Before, this hand-kept copy lacked outcome→outcome / outcome→risk, so an outcome reaching the goal through
+// another outcome read as unreachable.
+const REACHABILITY_ALLOWED: ReadonlyArray<[string, string]> = ALLOWED_EDGE_KIND_PAIRS
+  .filter((p) => p.from !== "decision" && p.from !== "option")
+  .map((p) => [p.from, p.to] as [string, string]);
 
 /**
  * Check if a node can reach a goal node following only allowed edge patterns.

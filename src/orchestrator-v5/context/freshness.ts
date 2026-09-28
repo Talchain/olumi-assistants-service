@@ -43,6 +43,7 @@ import {
   extractAnalysedLeaderId,
   extractAnalysedOptionIds,
 } from './option-identity.js';
+import { isAnalysisRefusalFact } from './analysis-refusal-continuity.js';
 
 /**
  * Four-valued freshness state. Reachable from new code paths only as
@@ -432,7 +433,13 @@ export function selectRunAnalysisFact(
 export function selectClaimBearingRunAnalysisFact(
   priorFacts: readonly HandlerFact[],
 ): SelectedRunAnalysisFact | null {
-  return selectNewestRunAnalysisFact(priorFacts, { requireSuccessfulStatus: false });
+  // ⭐ A REFUSAL MAKES NO CLAIM (Canonical, single-projection parity case C, 28 Sep). The refusal marker
+  // (`buildAnalysisRefusalFact`: "Analysis attempt was refused before computation", no leader, no verdict) was read as
+  // the newest claim-bearing Run, so the turn withheld the leader for `constraint_verdict_withheld` — a limits reason on
+  // a Run that computed nothing — while the read route and the figures shown described the older success. Only the
+  // refusal marker is passed over: a `partial` or degraded Run still MAKES claims, and its withheld verdict still wins
+  // over an older permitted one (#730's shadow case, unchanged).
+  return selectNewestRunAnalysisFact(priorFacts, { requireSuccessfulStatus: false, skipRefusals: true });
 }
 
 /**
@@ -448,7 +455,7 @@ export function selectClaimBearingRunAnalysisFact(
  */
 function orderRunAnalysisFacts(
   priorFacts: readonly HandlerFact[],
-  opts: { readonly requireSuccessfulStatus: boolean },
+  opts: { readonly requireSuccessfulStatus: boolean; readonly skipRefusals?: boolean },
 ): RunAnalysisFactView[] {
   const candidates: RunAnalysisFactView[] = [];
   for (let i = 0; i < priorFacts.length; i += 1) {
@@ -470,6 +477,8 @@ function orderRunAnalysisFacts(
     if (opts.requireSuccessfulStatus && !isSuccessfulRunAnalysisFact(fact)) {
       continue;
     }
+    // ENTITLEMENT ONLY: the refusal marker computed nothing and claims nothing (`selectClaimBearingRunAnalysisFact`).
+    if (opts.skipRefusals === true && isAnalysisRefusalFact(fact)) continue;
     candidates.push(view);
   }
 
@@ -532,7 +541,7 @@ export function orderClaimBearingRunAnalysisFactsNewestFirst(
 /** The shared newest-first pick: the head of {@link orderRunAnalysisFacts}. */
 function selectNewestRunAnalysisFact(
   priorFacts: readonly HandlerFact[],
-  opts: { readonly requireSuccessfulStatus: boolean },
+  opts: { readonly requireSuccessfulStatus: boolean; readonly skipRefusals?: boolean },
 ): SelectedRunAnalysisFact | null {
   return orderRunAnalysisFacts(priorFacts, opts)[0] ?? null;
 }

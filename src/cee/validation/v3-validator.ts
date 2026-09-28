@@ -14,6 +14,7 @@ import { hasPathToGoal } from "../extraction/factor-matcher.js";
 import { detectCycles } from "../../utils/graphGuards.js";
 import { normaliseOptionInterventions } from "../extraction/intervention-extractor.js";
 import { CANONICAL_ID_REGEX } from "../utils/id-normalizer.js";
+import { ALLOWED_EDGE_KIND_PAIRS } from "../../validators/graph-validator.types.js";
 
 /**
  * Normalise raw response options before schema validation.
@@ -215,17 +216,9 @@ function validateNodes(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
  * V4 topology: decision→option→factor→outcome/risk→goal
  * Options exist in BOTH nodes[] AND options[] array.
  */
-const ALLOWED_EDGE_PATTERNS: Array<{ from: string; to: string }> = [
-  { from: "decision", to: "option" },  // Decision branches to options
-  { from: "option", to: "risk" },    // Retained hypothesis, not a configured intervention
-  { from: "option", to: "factor" },    // Options set controllable factors
-  { from: "factor", to: "outcome" },
-  { from: "factor", to: "risk" },
-  { from: "factor", to: "factor" },    // Target must be exogenous (checked separately)
-  { from: "outcome", to: "goal" },
-  { from: "risk", to: "goal" },
-  { from: "risk", to: "outcome" },
-];
+// R10: derived from the ONE typed table (`validators/graph-validator.types.ts` ALLOWED_EDGES), never hand-kept.
+// factor→factor's target rule is still checked separately below (INVALID_FACTOR_TO_CONTROLLABLE).
+const ALLOWED_EDGE_PATTERNS: ReadonlyArray<{ from: string; to: string }> = ALLOWED_EDGE_KIND_PAIRS;
 
 // Canonical strength range for CEE edges
 const MIN_STRENGTH = -1.0;

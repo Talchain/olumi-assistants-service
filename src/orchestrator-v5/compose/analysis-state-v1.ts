@@ -947,7 +947,12 @@ function composeLeaderClaim(input: AnalysisStateComposeInput, runState: Analysis
    */
   const everyOptionBreaksLimit = (input.everyOptionLimit === 'none_meets' || input.everyOptionLimit === 'likely_breaks')
     && runState.kind !== 'complete_stale';
-  const entitled = input.mayNameLeadingOption === true && !everyOptionBreaksLimit;
+  // ⭐ STALE IS DECIDED BEFORE ANY ROBUSTNESS FALLBACK (Canonical ruling, 28 Sep, parity case E). An out-of-date run
+  // is never entitled, so the reason chain below reaches `analysis_out_of_date` instead of the separation fallback: a
+  // stale turn ships no result block (prose-grounding-block.ts), and `rawRobustness: null` used to publish
+  // `separation_unavailable` here while the read route, judging the same Run, published `analysis_out_of_date`.
+  const entitled = input.mayNameLeadingOption === true && !everyOptionBreaksLimit
+    && runState.kind !== 'complete_stale';
   const raw: RawRobustnessSignals | null = input.rawRobustness;
   const separationKnown = raw !== null;
   const separates = separationEstablishedFromRobustness(raw);

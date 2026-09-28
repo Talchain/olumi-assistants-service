@@ -342,6 +342,12 @@ export interface SelectCanonicalAnalysisStateInput {
    * NEITHER source yielded a usable fact — which is exactly the ambiguous case.
    */
   readonly priorFactsReadOk?: boolean;
+  /**
+   * The DB-stamped restore marker, threaded verbatim to `deriveAnalysisFreshness` (see
+   * `DeriveAnalysisFreshnessOptions.analysisInvalidatedAt`). Supplied by the scenario read route, which builds its
+   * verdict through this function so it gets the same degraded-fact detection as a turn. Omitted ⇒ byte-identical.
+   */
+  readonly analysisInvalidatedAt?: string | null;
 }
 
 /** Defensive read of a fact's run-time `computed_at`. */
@@ -379,9 +385,13 @@ export function selectCanonicalAnalysisState(
     input.currentGraphOptionIds,
     // Defect 4: distinguishes "the store says no analysis" from "the store
     // could not be read". Absent => pre-fix behaviour, by construction.
-    input.priorFactsReadOk === undefined
+    // The restore marker rides the same options object; absent => unchanged.
+    input.priorFactsReadOk === undefined && input.analysisInvalidatedAt === undefined
       ? undefined
-      : { priorFactsReadOk: input.priorFactsReadOk },
+      : {
+          ...(input.priorFactsReadOk === undefined ? {} : { priorFactsReadOk: input.priorFactsReadOk }),
+          ...(input.analysisInvalidatedAt === undefined ? {} : { analysisInvalidatedAt: input.analysisInvalidatedAt }),
+        },
   );
   const selected = selectRunAnalysisFact(unifiedFacts);
   const degraded = selectDegradedRunAnalysisFact(unifiedFacts);
