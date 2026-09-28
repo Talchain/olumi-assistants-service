@@ -123,8 +123,9 @@ export function approvedLevelSourceFor(
  * with these. Please make these updates", and gave permission four times; one link of eight was recorded, because the
  * link writer (`adjust_edge_strength`) knows one author only, the user, and the Agent would not stamp Olumi's band as his.
  *
- * An Olumi band the user approved is Olumi's size, adopted: the link keeps its `source`, `provenance.magnitude` becomes
- * `olumi_estimate` (an existing `EdgeProvenanceV3` literal), and Olumi's default flag goes. Never `user_specified`.
+ * An Olumi band the user agreed to is REVIEW, not authorship (DL ruling 5873648311; AIQ R11): the link's provenance
+ * stays byte-identical and its `defaulted` flag is kept, so no placeholder reader or leader census moves; only the mean
+ * takes the agreed band's midpoint. Never `user_specified`. (`'olumi_estimate'` below names the authority, not a stamp.)
  * Matched on the same scenario, link and |mean| the write carries; a band the user named runs with no adoption.
  */
 export interface ApprovedLinkAdoption {

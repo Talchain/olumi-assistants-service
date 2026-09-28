@@ -211,7 +211,7 @@ function linkSetReply(r: Rec): string | null {
   if (!nonEmpty(r.public_label) || !Array.isArray(r.links) || r.links.length === 0) return null;
   const olumis = r.links.filter((l) => recordOf(l)?.whose !== 'yours').length;
   return reply(subjectOf(r.public_label),
-    olumis > 0 ? ['Olumi\u2019s estimates are stored as \u201cOlumi\u2019s estimate, approved by you\u201d, never as your own.'] : [],
+    olumis > 0 ? ['Olumi\u2019s estimates stay marked as Olumi\u2019s, never as your own: approving applies them.'] : [],
     question(undefined));
 }
 

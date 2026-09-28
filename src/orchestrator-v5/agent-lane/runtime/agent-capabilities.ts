@@ -1998,8 +1998,10 @@ export function createAgentCapabilities(
       const mean = e?.strength !== null && typeof e?.strength === 'object' ? (e.strength as { mean?: unknown }).mean : undefined;
       const want = l.expected.effect_direction === 'negative' ? -l.magnitude : l.magnitude;
       const prov = (e?.provenance ?? {}) as { source?: unknown; magnitude?: unknown };
+      // An agreed Olumi band is never the user's own: an estimate is only ever proposed where it was not (`usersOwn`).
+      const usersOwn = prov.source === 'user_specified' && (e as { defaulted?: unknown } | undefined)?.defaulted !== true;
       return typeof mean === 'number' && Math.abs(mean - want) < 1e-9
-        && (l.author === 'user_specified' ? prov.source === 'user_specified' : prov.magnitude === 'olumi_estimate');
+        && (l.author === 'user_specified' ? prov.source === 'user_specified' : !usersOwn);
     });
     if (!holds) {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
@@ -2012,7 +2014,7 @@ export function createAgentCapabilities(
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
       // What the user reads (typed-approval fast path); the Agent's next step stays in `note`.
       follow_up: `${parent.public_label.replace(/^Record /, 'Recorded ')}.`
-        + (olumis > 0 ? ' Olumi\u2019s estimates are stored as \u201cOlumi\u2019s estimate, approved by you\u201d, not as your own.' : ''),
+        + (olumis > 0 ? ' Olumi\u2019s estimates stay marked as Olumi\u2019s, not yours: your approval applied them, it did not make them your judgement.' : ''),
       note: 'Recorded as one change. Offer to run the analysis again so they can see what these links change.',
     };
   };
@@ -2390,7 +2392,7 @@ export function createAgentCapabilities(
         ...(already.length > 0 ? { already } : {}),
         note: 'Nothing has changed yet. ONE approval records every link in this set, all together or none. '
           + (olumis > 0
-            ? `${olumis === shown.length ? 'Every strength here is' : `${olumis} of these strengths are`} Olumi\u2019s estimate, not the user\u2019s: say so, and that approving stores each as "Olumi\u2019s estimate, approved by you", never as theirs. `
+            ? `${olumis === shown.length ? 'Every strength here is' : `${olumis} of these strengths are`} Olumi\u2019s estimate, not the user\u2019s: say so, and that approving applies them while they stay marked as Olumi\u2019s, never as theirs. `
             : '')
           + 'Tell the user what each link will hold, never the id, and call authorise_change with this proposal_id once they agree.',
       };

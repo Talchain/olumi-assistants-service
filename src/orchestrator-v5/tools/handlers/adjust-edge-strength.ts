@@ -474,15 +474,13 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         // stamp, the model's WHY for the link was read back as the user's: decision review presents it as "the
         // producer's stated reason" (`decision-review-graph-projection.ts` `readEdgeReasoning`).
         if (invocation.edgeStrengthAdoptedEstimateAuthority === 'olumi_estimate') {
-          // ⭐ OLUMI'S BAND, ADOPTED (Canonical 5871633483, DL 5871661097): the size is still Olumi's, so the link keeps its
-          // `source`, `provenance_display` and Olumi's `reasoning`, and `magnitude` says Olumi chose it. Never the user's
-          // stamp: an approval of Olumi's size is ratification, not authorship (AIQ R11 5872082179). Only
-          // `natural_effect` goes: it restated the OLD size in natural units.
+          // ⭐ OLUMI'S BAND, AGREED (DL ruling 5873648311 on #2255; AIQ R11 5872082179): agreement is REVIEW, not authorship.
+          // The link's provenance stays byte-identical (`source`, `magnitude`, `reasoning`, `provenance_display`) and
+          // `defaulted` is kept below, so every reader still reads a figure the user has not judged. Only `natural_effect`
+          // goes: it restated the OLD size in natural units. (The review record, `reviewed_by_user`, waits for Canonical's
+          // writer — named row in `agent-link-set-is-one-commit.test.ts`.)
           const { natural_effect: _oldNaturalEffect, ...keptProvenance } = (edge.provenance ?? {}) as Record<string, unknown>;
-          edge.provenance = {
-            ...keptProvenance,
-            magnitude: 'olumi_estimate',
-          } as typeof edge.provenance;
+          edge.provenance = keptProvenance as typeof edge.provenance;
         } else {
           const {
             natural_effect: _naturalEffect,
@@ -504,8 +502,13 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         // ⭐ A6e — but `defaulted` is WHOLE-EDGE, and this write adopts only the strength: `exists_probability` is
         // untouched and still Olumi's. Deleting the flag alone lost that, so the edge read as entirely the user's.
         // The per-field half is kept (`exists_defaulted`, Canonical #70 5855416983).
-        if (edge.defaulted === true) edge.exists_defaulted = true;
-        delete edge.defaulted;
+        // ⛔ NOT for Olumi's band, adopted (DL R11 question on #2255, 5873588605; AIQ R11 5872082179): every figure on the
+        // link is still this system's, so `defaulted` stays and every reader of it — the placeholder caveats, the coaching
+        // card's authorship — reads exactly what it read before the approval. Only a value the user wrote ends it.
+        if (invocation.edgeStrengthAdoptedEstimateAuthority !== 'olumi_estimate') {
+          if (edge.defaulted === true) edge.exists_defaulted = true;
+          delete edge.defaulted;
+        }
         // ⭐ A6f — and the SPREAD is the same kind of fact (AIQ N1 on #2096, 5856128077). A write that states it (a named
         // band, an explicit std) makes it the user's; an exact figure states none, so the std above is still Olumi's
         // and says so per field, as existence does. Every user write sets the flag's state, so a stale one never
