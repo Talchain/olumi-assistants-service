@@ -269,7 +269,7 @@ describe('rule 1: a declared product whose inputs move apart is marked sign_not_
     const lines = said(out).filter((s) => s.includes('"Pro MRR"') && s.includes('multipl'));
     expect(lines).toHaveLength(1);
     const [line] = lines as [string];
-    for (const phrase of ['"Pro plan price"', '"Pro subscribers"', '"Raise Pro to £59"', '"Phase to £54"', 'opposite directions', 'cannot yet multiply', 'which option does better on "MRR"']) {
+    for (const phrase of ['"Pro plan price"', '"Pro subscribers"', '"Raise Pro to £59"', '"Phase to £54"', 'opposite directions', 'multiplies them when every part has a figure and together they match "Pro MRR" (within 5%); otherwise it adds up each effect separately.', 'which option does better on "MRR"']) {
       expect(line, phrase).toContain(phrase);
     }
     // N-c: the declaration is the drafter's inference, so the sentence says it is Olumi's reading.
@@ -289,8 +289,8 @@ describe('rule 1: a declared product whose inputs move apart is marked sign_not_
 
 /** B1: the provisional sentence, exactly. It never says a comparison's direction holds. */
 const PROVISIONAL_ADD_ON =
-  'Olumi reads "Pro MRR" as "Revenue per Pro user" and "Pro subscribers" multiplied together, and Olumi\'s analysis ' +
-  'adds effects up rather than multiplying them, so its figures for "Pro MRR" are an approximation. Each option that ' +
+  'Olumi reads "Pro MRR" as "Revenue per Pro user" and "Pro subscribers" multiplied together. Olumi\'s analysis ' +
+  'multiplies them when every part has a figure and together they match "Pro MRR" (within 5%); otherwise it adds effects up, and its figures for "Pro MRR" are then an approximation. Each option that ' +
   'changes them moves them only one way, so whether that option raises or lowers "Pro MRR" should hold; treat the size ' +
   'of every effect, and any gap between the options, as provisional.';
 
@@ -642,7 +642,8 @@ describe('rule 7: a route around the product that opposes the route through it c
       comparisons_not_sign_stable: [['offer_annual_discount', 'referral_scheme']],
     }]);
     const [line] = markLine(wire);
-    expect(line?.startsWith('Olumi reads part of "MRR" as "Pro plan price" and "Pro subscribers" multiplied together, but')).toBe(true);
+    expect(line?.startsWith('Olumi reads part of "MRR" as "Pro plan price" and "Pro subscribers" multiplied together. Olumi\'s analysis multiplies them')).toBe(true);
+    expect(line).toContain('otherwise it adds up each effect separately.');
     expect(line).toContain(DISCOUNT_BOTH_WAYS);
     expect(line).not.toContain('should hold');
     // Said once, in its own words — not again as merely "other than through".
@@ -664,7 +665,8 @@ describe('rule 7: a route around the product that opposes the route through it c
     const wire = discountWire('positive', false);
     expect(summary(wire)).toEqual([['sign_stable_provisional', [], []]]);
     const [line] = markLine(wire);
-    expect(line?.startsWith('Olumi reads part of "MRR" as "Pro plan price" and "Pro subscribers" multiplied together, and')).toBe(true);
+    expect(line?.startsWith('Olumi reads part of "MRR" as "Pro plan price" and "Pro subscribers" multiplied together. Olumi\'s analysis multiplies them')).toBe(true);
+    expect(line).toContain('otherwise it adds effects up, and its figures for');
     expect(line).toContain('whether that option raises or lowers "MRR" should hold');
   });
 
@@ -843,8 +845,8 @@ describe('rule 6 (B3): the rules the verification found unpinned', () => {
     const [line] = markLine(wire);
     expect(line).not.toContain('only one way');
     expect(line).toBe(
-      'Olumi reads "Pro MRR" as "Revenue per Pro user" and "Pro subscribers" multiplied together, and Olumi\'s analysis ' +
-      'adds effects up rather than multiplying them, so its figures for "Pro MRR" are an approximation; treat the size of ' +
+      'Olumi reads "Pro MRR" as "Revenue per Pro user" and "Pro subscribers" multiplied together. Olumi\'s analysis ' +
+      'multiplies them when every part has a figure and together they match "Pro MRR" (within 5%); otherwise it adds effects up, and its figures for "Pro MRR" are then an approximation; treat the size of ' +
       'every effect, and any gap between the options, as provisional.');
   });
 
@@ -971,7 +973,10 @@ describe('N-c: whose reading it is, and whether it is the whole of the total', (
 
   it('RED: a declaration the brief itself states is not attributed to Olumi', () => {
     const [line] = markLine(pricing([{ ...PRO_MRR_IDENTITY, provenance: 'explicit' }]));
-    expect(line?.startsWith('"Pro MRR" is "Pro plan price" and "Pro subscribers" multiplied together, but')).toBe(true);
+    expect(line?.startsWith('"Pro MRR" is "Pro plan price" and "Pro subscribers" multiplied together. Olumi\'s analysis multiplies them')).toBe(true);
+    // AIQ meaning ACK 5866856884: a product the brief STATES is never added up — Olumi asks which figure is right.
+    expect(line).toContain('otherwise Olumi will ask you which figure is right before it analyses.');
+    expect(line).not.toMatch(/\badd(?:s|ing|ed)?\b[^.]*\bup\b/);
   });
 });
 

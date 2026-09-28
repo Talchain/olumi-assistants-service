@@ -1269,13 +1269,20 @@ function markProductIdentities(
       field_path: `nodes[${outcomeId}].nonlinear_identity`,
       before: { operation: 'product', factor_ids: factorIds },
       after: { verdict, options_not_sign_stable: notStable, comparisons_not_sign_stable: pairs },
-      reason: verdict === 'sign_not_provable'
-        ? `${head}, but Olumi's analysis cannot yet multiply quantities: it adds up each effect separately.` +
+      reason: stated
+        // A stated product is never added up (STATED_OTHERWISE): nothing about adding applies to it.
+        ? `${head}. ${multipliesWhen(outcomeLabel)}; ${STATED_OTHERWISE}`
+        : verdict === 'sign_not_provable'
+        // ⛔ R3-4b (AIQ #72 5866734772; DL 5866746362): since PLoT #383/#386 the engine MULTIPLIES a product whose parts
+        // all have levels consistent with it (served: journey A names its leader by evaluating it), so a pre-Run sentence
+        // must never say the analysis cannot multiply. It says when it does, and what happens otherwise (#385: withdrawn,
+        // added up). The Run-time sentences are keyed on the typed evaluated set and fire only when it did not.
+        ? `${head}. ${multipliesWhen(outcomeLabel)}; otherwise it adds up each effect separately.` +
           oppositeSentence + separateSentence + routesDisagreeSentence + differSentence + aroundSentence +
-          ` So this model cannot yet show which option does better on "${labelOf(goalId)}": treat its figures as a ` +
-          'rough approximation, not a decision.'
-        : `${head}, and Olumi's analysis adds effects up rather than multiplying them, so its figures for ` +
-          `"${outcomeLabel}" are an approximation` +
+          ` If it adds them up, this model cannot show which option does better on "${labelOf(goalId)}": treat its ` +
+          'figures then as a rough approximation, not a decision.'
+        : `${head}. ${multipliesWhen(outcomeLabel)}; otherwise it adds effects up, and its figures for ` +
+          `"${outcomeLabel}" are then an approximation` +
           (oneWay
             ? `. Each option that changes them moves them only one way, so whether that option raises or lowers ` +
               `"${outcomeLabel}" should hold; treat the size of every effect, and any gap between the options, as provisional.`
@@ -1285,6 +1292,19 @@ function markProductIdentities(
   }
   return { marks, loss, accepted, analyses };
 }
+
+/**
+ * What the engine does with a declared product, said before any Run (R3-4b): it multiplies the parts when every part has a
+ * level consistent with the product's own (PLoT #383/#386 → ISL; an inconsistent one is withdrawn by #385 and added up).
+ */
+const multipliesWhen = (productLabel: string): string =>
+  `Olumi's analysis multiplies them when every part has a figure and together they match "${productLabel}" (within 5%)`;
+/**
+ * What happens otherwise depends on WHO declared the product (AIQ meaning ACK #72 5866856884): Olumi's inference is withdrawn
+ * and the effects added up (#385); a product the brief STATES is never added up — the Run is refused and the user is asked
+ * which figure is right (R3-W 422 → #2165's ask).
+ */
+const STATED_OTHERWISE = 'otherwise Olumi will ask you which figure is right before it analyses.';
 
 /** `"a" times "b"`, `"a" times "b" times "c"` — labels, never ids. */
 const timesList = (labels: readonly string[]): string => labels.map((l) => `"${l}"`).join(' times ');
@@ -1317,8 +1337,9 @@ export function productIdentityOpenQuestions(admitted: Pick<AdmittedModel, 'node
     .map((m) => {
       const stated = admitted.nodes.find((n) => n.id === m.outcome_id)?.nonlinear_identity?.stated_in_brief === true;
       const clause = productIdentityClause(goal.label, labelOf(m.outcome_id), m.factor_ids.map(labelOf), stated, m.outcome_id === goal.id);
-      return `Which option does better on "${goal.label}"? This model cannot answer that yet: ${clause}, and the model ` +
-        'adds those effects up rather than multiplying them.';
+      // R3-4b: a question the Run can answer, never a claim that the analysis cannot multiply (see `multipliesWhen`).
+      return `Which option does better on "${goal.label}"? ${clause}. ${multipliesWhen(labelOf(m.outcome_id))}; ` +
+        (stated ? STATED_OTHERWISE : `otherwise it adds those effects up and cannot say which option does better on "${goal.label}".`);
     });
 }
 
