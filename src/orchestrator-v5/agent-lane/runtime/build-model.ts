@@ -46,6 +46,7 @@ import {
   type ConstructionSizeVerdict,
 } from '../construction-size-gate.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { LIMIT_OPERATOR_WORDS } from '../admit-constraint.js';
 import { holdStatedGoalAttributes, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
 import type { ToolResult } from './agent-tools.js';
@@ -488,7 +489,7 @@ export interface DemotedProvenance { readonly option: string; readonly factor: s
  * count, not a sentence. Named here from the candidate's own words, so the Agent can tell the user
  * exactly which limit the analysis will not check. No remedy is offered: the withheld limit is not kept.
  */
-const OPERATOR_WORDS: Readonly<Record<string, string>> = { '>=': 'at least', '<=': 'at most', '>': 'more than', '<': 'less than' };
+const OPERATOR_WORDS: Readonly<Record<string, string>> = LIMIT_OPERATOR_WORDS;
 function unattachedLimitLines(model: CandidateModel, loss: readonly { readonly field_path: string; readonly before?: unknown }[]): string[] {
   // Admission withholds BY METRIC (`admit-constraint.ts` resolves `c.metric` to a node, or not), so every
   // bound on an unattached metric shares that fate. Iterate the BOUNDS, not the loss entries: a loss entry
@@ -509,31 +510,6 @@ function unattachedLimitLines(model: CandidateModel, loss: readonly { readonly f
     if (seen.has(key)) continue;
     seen.add(key);
     lines.push(`${users ? `Your limit "${limit}"` : `The limit Olumi proposed ("${limit}")`} is not in the model: no part of the model is "${c.metric}", so the analysis cannot check it.`);
-  }
-  return lines;
-}
-/**
- * ⛔ A STRICT LIMIT THE STORE WIDENS IS SAID (Codex PJ-A2 row 14; MG bank `strict-operator` 4e6f0511, rebuilt here).
- * "under 4%" arrives typed as `<`, and admission keeps it only where the canonical store can hold it
- * (`admit-constraint.ts` `admittedOperator`). Today it cannot, so the limit is held as "at most 4%" and exactly 4%
- * counts as meeting it. Admission records that widening per limit (`goal_constraints[<node>].operator`, `before` the
- * typed operator, `after` the held one); until now it never reached the Agent, so the user's excluded boundary was
- * counted as met without a word. Words, never symbols, from the typed operators alone; the user's only when they stated it.
- */
-function widenedLimitLines(admitted: Pick<AdmittedModel, 'loss' | 'goal_constraints'>): string[] {
-  const lines: string[] = [];
-  for (const l of admitted.loss) {
-    const nodeId = /^goal_constraints\[(.+)\]\.operator$/.exec(l.field_path)?.[1];
-    if (nodeId === undefined || typeof l.before !== 'string' || typeof l.after !== 'string') continue;
-    const c = admitted.goal_constraints.find((x) => x.node_id === nodeId && x.operator === l.after);
-    const stated = OPERATOR_WORDS[l.before];
-    const held = OPERATOR_WORDS[l.after];
-    if (c === undefined || c.label === undefined || stated === undefined || held === undefined) continue;
-    const unit = c.unit === undefined || c.unit === '' ? '' : c.unit.startsWith('%') ? c.unit : ` ${c.unit}`;
-    const amount = `${c.value}${unit}`;
-    const limit = `${c.label} ${stated} ${amount}`;
-    lines.push(`${c.provenance === 'explicit' ? `Your limit "${limit}"` : `The limit Olumi proposed ("${limit}")`} is held as `
-      + `"${held} ${amount}": the model cannot hold a strict limit yet, so exactly ${amount} counts as meeting it.`);
   }
   return lines;
 }
@@ -1539,7 +1515,6 @@ export async function buildModelFromBrief(
         .map((l) => l.after)
         .filter((a): a is string => typeof a === 'string'),
       ...unattachedLimitLines(candidate, admitted.loss),
-      ...widenedLimitLines(admitted),
       ...preparation.additions_without_total.map(sayAdditionWithoutTotal),
       ...preparation.provenance_demoted.map((d) =>
         `I've treated your ${d.value} for "${d.factor}" in "${d.option}" as a working figure because the current ` +

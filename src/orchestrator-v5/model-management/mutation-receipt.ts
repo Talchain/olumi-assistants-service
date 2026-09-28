@@ -65,6 +65,16 @@ const Lineage = z.discriminatedUnion("kind", [
  */
 type CanonicalReceiptGraph = NonNullable<OlumiResponse['model_version_receipt']>['graph'];
 
+/**
+ * The receipt's ADMISSIBILITY question, exported so a writer can ask it BEFORE its durable write (writer audit 27 Sep,
+ * finding 7: the restore route committed, then this check threw inside the receipt, so the user got a 500 while the
+ * server held the restored graph). One policy: `GraphVerbatim` below asks exactly this. Empty means receiptable.
+ */
+export function receiptGraphIssues(graph: unknown): z.ZodIssue[] {
+  const parsed = GraphV3.passthrough().safeParse(floorGraphSigmaForCompute(graph).graph);
+  return parsed.success ? [] : parsed.error.issues;
+}
+
 const GraphVerbatim = z.unknown().superRefine((value, ctx) => {
   // The ADMISSIBILITY question must be the same one the version carrier asked,
   // or a version it legitimately created cannot be receipted — and the commit
@@ -79,11 +89,7 @@ const GraphVerbatim = z.unknown().superRefine((value, ctx) => {
   // The floor is used for the CHECK ONLY. `z.unknown()` performs no transform,
   // so `value` still passes through by reference and `full_hash === H(graph)`
   // is preserved.
-  const parsed = GraphV3.passthrough().safeParse(
-    floorGraphSigmaForCompute(value).graph,
-  );
-  if (parsed.success) return;
-  for (const issue of parsed.error.issues) {
+  for (const issue of receiptGraphIssues(value)) {
     ctx.addIssue(issue);
   }
 })

@@ -385,14 +385,25 @@ describe("register — the atomic writer, and the trusted CAS base", () => {
     await app.close();
   });
 
-  it("proceeds UNINSTRUMENTED (not 5xx) when the base read throws — a blip must not lock the user out", async () => {
+  // REVERSED 28 Sep 2026 (writer audit finding 9): the blip used to proceed with NO CAS, and a register that omitted
+  // `goal_constraints` then erased the stored limits. `loadGraph` throws only on a store error, so a retry clears it.
+  it("REFUSES (retryable 503, nothing written) when the base read throws — a blip must not write blind", async () => {
     loadGraph.mockRejectedValueOnce(new Error("db blip"));
     const app = await buildApp();
     const res = await post(app, SCENARIO, { graph: IMPORTED });
 
+    expect(res.statusCode).toBe(503);
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("CONTROL: a scenario with NO stored graph (null, not a throw) still registers", async () => {
+    loadGraph.mockResolvedValueOnce(null);
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED });
+
     expect(res.statusCode).toBe(200);
-    const write = append.mock.calls[0][0];
-    expect(write.expectedGraphIdentityHash).toBeUndefined();
+    expect(append).toHaveBeenCalledTimes(1);
     await app.close();
   });
 
@@ -759,23 +770,17 @@ describe("register — the terminal persisted-graph invariant (C3 shared floor)"
     await app.close();
   });
 
-  it("DISCRIMINATING TWIN: when the base read THROWS, the SAME graph is written — the degrade keys on an ABSENT base, never on a null one", async () => {
-    // Identical payload to the case above; the only difference is that the base
-    // is unreadable, so `baseGraphForInvariants` stays at its declared
-    // `undefined` and the check is observe-only. A blip must not lock a user
-    // out — but a fresh scenario is not a blip, and the pair pins that they are
-    // handled differently.
+  it("DISCRIMINATING TWIN: when the base read THROWS, the route refuses as an OUTAGE (503), not as an invariant (422) — and writes nothing", async () => {
+    // Identical payload to the case above; the only difference is that the base is unreadable. REVERSED 28 Sep 2026
+    // (writer audit finding 9): this used to write the violating graph observe-only ("a blip must not lock a user
+    // out"), which also wrote with NO CAS and erased stored limits. `loadGraph` throws only on a store error, so the
+    // honest answer is a retryable outage. The pair still discriminates: null base → 422 invariant; throw → 503.
     loadGraph.mockRejectedValueOnce(new Error("db blip"));
     const app = await buildApp();
     const res = await post(app, SCENARIO, { graph: DUPLICATE_INTRODUCED });
 
-    expect(res.statusCode).toBe(200);
-    expect(append).toHaveBeenCalledTimes(1);
-    // The write really did carry the violating graph — otherwise this case
-    // would agree with its twin for the wrong reason.
-    expect(append.mock.calls[0]![0].graph.nodes.filter(
-      (n: { id: string }) => n.id === DUPLICATED_ID,
-    )).toHaveLength(2);
+    expect(res.statusCode).toBe(503);
+    expect(append).not.toHaveBeenCalled();
     await app.close();
   });
 });

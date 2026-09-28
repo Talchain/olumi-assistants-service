@@ -88,6 +88,12 @@ const edge = (from: string, to: string, mean = 0.5) => ({
  * `valued` controls the ONE variable under test: whether each option states an
  * effect value on every factor. Valueless options + valueless factors is the
  * witnessed state; the valued variant is the `ready` control.
+ *
+ * ⚠ The valued variant also gives each factor a status-quo level (0.5, between
+ * the options' 0.4 and 0.6). Since #2164 a goal root with no level is a
+ * factor-scoped `MISSING_FACTOR_LEVEL` that refuses the Run, so without it the
+ * `ready` control is not ready. The unvalued variant is untouched: it is still
+ * the witnessed state, valueless everywhere.
  */
 function graphWithFourValuelessFactors(valued: boolean): any {
   const interventions = (v: number) =>
@@ -116,8 +122,15 @@ function graphWithFourValuelessFactors(valued: boolean): any {
   ];
   const edges: any[] = [edge("dec_1", "opt_a", 1), edge("dec_1", "opt_b", 1)];
   VALUELESS.forEach((label, i) => {
-    // THE STATE UNDER TEST: a factor with no value anywhere.
-    nodes.push({ id: `fac_${i}`, kind: "factor", label, category: "controllable" });
+    // THE STATE UNDER TEST: a factor with no value anywhere (the level is the
+    // `ready` control's only, see above).
+    nodes.push({
+      id: `fac_${i}`,
+      kind: "factor",
+      label,
+      category: "controllable",
+      ...(valued ? { observed_state: { value: 0.5 } } : {}),
+    });
     edges.push(edge(`fac_${i}`, "out_1", 0.4));
     edges.push(edge("opt_a", `fac_${i}`, 1));
     edges.push(edge("opt_b", `fac_${i}`, 1));

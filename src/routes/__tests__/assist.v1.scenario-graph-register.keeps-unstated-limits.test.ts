@@ -129,10 +129,10 @@ describe('/graph/register never erases limits it was not told about', () => {
     expect(ids(writtenLimits())).toEqual([]);
   });
 
-  it('a failed read of the stored graph degrades to today: the register proceeds, nothing is carried', async () => {
+  it('a failed read of the stored graph refuses the register (503): the stored limits are never erased blind', async () => {
     loadGraph.mockRejectedValue(new Error('read failed'));
     const res = await register(structuredClone(GRAPH));
-    expect(res.statusCode, res.body).toBe(200);
-    expect(ids(writtenLimits())).toEqual([]);
+    expect(res.statusCode, res.body).toBe(503);
+    expect(append).not.toHaveBeenCalled();
   });
 });

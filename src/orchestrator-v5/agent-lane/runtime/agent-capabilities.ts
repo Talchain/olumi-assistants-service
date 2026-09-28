@@ -139,6 +139,7 @@ import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confi
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
 
 import { defaultFrameFor, framedObservedState, nonlinearIdentityForAgent, readEvaluatedIdentityNodeIds } from '../admit-model.js';
+import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../admit-constraint.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
@@ -724,15 +725,25 @@ function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'ana
   const limits = (Array.isArray(g.raw.goal_constraints) ? g.raw.goal_constraints : [])
     .filter((c): c is Record<string, unknown> => c !== null && typeof c === 'object')
     .filter((c) => str(c.operator) && num(c.value))
-    .map((c) => ({
-      // Named as the run-turn limit card names it (#1935): the node the limit sits on, joined by id; the row's
-      // own label only when that node is absent — so the card and the Agent say the same words for one limit.
-      on: (str(c.node_id) ? labelOf.get(c.node_id) : undefined) ?? (str(c.label) ? c.label : 'the goal'),
-      operator: c.operator,
-      value: c.value,
-      ...(str(c.unit) ? { unit: c.unit } : {}),
-      ...(str(c.provenance) ? { stated_by: c.provenance } : {}),
-    }));
+    .map((c) => {
+      // ⭐ A2: the limit as the user STATED it ("less than 4%"), from `operator_as_stated` beside the held `operator`
+      // (`statedOperatorOf`: only its strict twin, never a contradicting stamp). `operator` stays the held one: it is
+      // the key `propose_limit_change` names the row by. The engine's "<=" differs only for a level pinned exactly at
+      // the threshold (`admit-constraint.ts` header: disclosed, not modelled).
+      const stated = statedOperatorOf(c);
+      const unit = str(c.unit) ? (c.unit.startsWith('%') ? c.unit : ` ${c.unit}`) : '';
+      return {
+        // Named as the run-turn limit card names it (#1935): the node the limit sits on, joined by id; the row's
+        // own label only when that node is absent — so the card and the Agent say the same words for one limit.
+        on: (str(c.node_id) ? labelOf.get(c.node_id) : undefined) ?? (str(c.label) ? c.label : 'the goal'),
+        operator: c.operator,
+        ...(stated !== undefined && stated !== c.operator ? { operator_as_stated: stated } : {}),
+        value: c.value,
+        ...(str(c.unit) ? { unit: c.unit } : {}),
+        ...(stated !== undefined ? { in_words: `${LIMIT_OPERATOR_WORDS[stated]} ${String(c.value)}${unit}` } : {}),
+        ...(str(c.provenance) ? { stated_by: c.provenance } : {}),
+      };
+    });
   const links = g.edges.map((e) => {
     const source = (e.provenance !== null && typeof e.provenance === 'object') ? (e.provenance as { source?: unknown }).source : e.provenance;
     const st = (e.strength !== null && typeof e.strength === 'object') ? e.strength as { mean?: unknown; std?: unknown } : undefined;

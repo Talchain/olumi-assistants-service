@@ -689,10 +689,14 @@ export default async function route(app: FastifyInstance) {
       const store = getSessionStore();
 
       // ── 4. The trusted CAS base — the SERVER's bytes, never the request's ─
-      // A read failure here is NOT fatal: it degrades to "uninstrumented"
-      // (undefined), which the RPC treats as no base to compare. Failing the
-      // whole registration because we could not read the OLD graph would leave
-      // the user permanently unable to register a new one.
+      // ⛔ A READ FAILURE REFUSES THE WRITE (retryable 503), REVERSED 28 Sep 2026 (writer audit
+      // finding 9). This read used to degrade to "uninstrumented", on the premise that failing
+      // would leave the user "permanently unable to register". Measured: `loadGraph` throws only
+      // on a store ERROR (a missing row is `null`, `supabase-store.ts` loadGraphAndBriefText), so a
+      // throw is an outage, not a stuck scenario, and a retry succeeds once it clears. The degrade
+      // was not neutral: with no stored bytes, the #2080 limit carry and the #2162 edge-fact carry
+      // both carry nothing and the RPC writes with NO CAS, so a UI register that omits
+      // `goal_constraints` wholesale-erased the stored limits on a transient error.
       let expectedGraphIdentityHash: string | null | undefined;
       let expectedGraphAnalysisHash: string | null | undefined;
       // The SAME server-read bytes serve two different questions: the trusted
@@ -716,10 +720,9 @@ export default async function route(app: FastifyInstance) {
             scenario_id: scenarioId,
             err: err instanceof Error ? err.message : String(err),
           },
-          "Graph registration — base read failed; proceeding uninstrumented",
+          "Graph registration — base read failed; refusing (nothing written, retryable)",
         );
-        expectedGraphIdentityHash = undefined;
-        expectedGraphAnalysisHash = undefined;
+        return unavailable();
       }
 
       // An absent `goal_constraints` keeps the stored limits, and an unchanged edge keeps the
