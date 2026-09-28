@@ -80,7 +80,7 @@ import {
 // numbers it ran on. See inferred-value-disclosure.ts for the measurement.
 import {
   buildInferredValueDisclosure,
-  deriveInferredValues,
+  deriveOlumiAuthoredValues,
 } from '../../coaching/inferred-value-disclosure.js';
 import { composeObjectiveContradictionDisclosure } from '../../coaching/objective-contradiction.js';
 import type { PLoTClient, V2RunError } from '../../../orchestrator/plot-client.js';
@@ -2352,8 +2352,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     //
     // Read from the graph the analysis actually RAN on, so the sentence can
     // never describe a different model than the result it rides on.
+    //
+    // ⭐ A6 (P2 re-measure, 523e18d): it counts EVERY Olumi value the model
+    // carries into the run — factor baselines, option levels and link
+    // strengths — not only baselines. Served journey A said "6 of the values"
+    // over 22.
     const inferredValueDisclosure = buildInferredValueDisclosure(
-      deriveInferredValues(graphForAnalysis),
+      deriveOlumiAuthoredValues(graphForAnalysis),
     );
     const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}`;
 
