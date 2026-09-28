@@ -14,6 +14,8 @@ import { readFileSync } from 'node:fs';
 import { planNewFactors, planNewOption } from '../propose-new-option.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { AGENT_TOOLS } from '../runtime/agent-tools.js';
+import { statedTodayLevelsFor } from '../../handlers/add-option-authorship-context.js';
 
 type Node = { id: string; kind: string; label: string; category?: string };
 const served = JSON.parse(readFileSync(new URL('./fixtures/served-f4-before-addon-fbb12b8.json', import.meta.url), 'utf8')) as { nodes: Node[]; edges: unknown[] };
@@ -177,13 +179,15 @@ describe('A1 — propose_new_option sends a new SWITCH switched on, in the same 
     expect(params, JSON.stringify(r)).toBeDefined();
     expect(params!['new_factors']).toEqual([{ key: 'ai_add_on_offered', label: 'AI add-on offered',
       affects: [{ node_id: 'monthly_recurring_revenue_mrr', effect_direction: 'positive' }], kind: 'switch' }]);
-    expect(params!['interventions']).toEqual([{ factor_key: 'ai_add_on_offered', value: 1, source: 'cee_hypothesis' }]);
+    // ⛔ AIQ (c) (#70 5859422189; DL CHANGES_REQUIRED on #2132 @510bfa00): the ON level is structural, never Olumi's
+    // estimate — no `source`, so it is stored as every non-estimate level is (the builder's `user_specified`).
+    expect(params!['interventions']).toEqual([{ factor_key: 'ai_add_on_offered', value: 1 }]);
   });
 
   it('RED: a level of exactly 1 is on and is sent; any other figure for a switch is refused with nothing sent', async () => {
     const on = setup();
     await on.caps.proposeNewOption(ctx, call({ value: 1 }) as never);
-    expect((paramsOf(on.sent)!['interventions'] as unknown[])[0]).toEqual({ factor_key: 'ai_add_on_offered', value: 1, source: 'cee_hypothesis' });
+    expect((paramsOf(on.sent)!['interventions'] as unknown[])[0]).toEqual({ factor_key: 'ai_add_on_offered', value: 1 });
     for (const value of [100, 50, 0, 0.5]) {
       const { caps, sent } = setup();
       const r = await caps.proposeNewOption(ctx, call({ value, unit: '%' }) as never) as { refusal?: string; detail?: string };
@@ -206,7 +210,9 @@ describe('A1 — propose_new_option sends a new SWITCH switched on, in the same 
     ["'0.5' (a string)", { value: '0.5' }],
     ["'50%' (a string)", { value: '50%' }],
     ['100%', { value: 100, unit: '%' }],
-    ["1 as Olumi's estimate", { value: 1, estimate: true, basis: 'the option turns it on' }],
+    ["2 as Olumi's estimate", { value: 2, estimate: true, basis: 'a guess' }],
+    ["1% as Olumi's estimate", { value: 1, unit: '%', estimate: true, basis: 'a guess' }],
+    ["an estimate with no figure", { estimate: true, basis: 'a guess' }],
   ])('RED: a switch given %s is refused with nothing sent — its figure is never dropped and read as on', async (_name, level) => {
     const { caps, sent } = setup();
     const r = await caps.proposeNewOption(ctx, call(level) as never) as { refusal?: string; detail?: string };
@@ -219,11 +225,32 @@ describe('A1 — propose_new_option sends a new SWITCH switched on, in the same 
   });
 
   it('CONTRAST: a bare 1 (no unit, no estimate) is on and is sent — as is a level that says estimate: false', async () => {
-    for (const level of [{ value: 1 }, { value: 1, estimate: false }, { value: 1, unit: '' }]) {
+    for (const level of [undefined, { value: 1 }, { value: 1, estimate: false }, { value: 1, unit: '' }, { value: 1, estimate: true, basis: 'the option turns it on' }]) {
       const { caps, sent } = setup();
       const r = await caps.proposeNewOption(ctx, call(level) as never);
-      expect(paramsOf(sent)?.['interventions'], JSON.stringify(r)).toEqual([{ factor_key: 'ai_add_on_offered', value: 1, source: 'cee_hypothesis' }]);
+      expect(paramsOf(sent)?.['interventions'], JSON.stringify(r)).toEqual([{ factor_key: 'ai_add_on_offered', value: 1 }]);
     }
+  });
+
+  /**
+   * ⛔ AIQ CONDITION (c) (#70 5859422189; DL CHANGES_REQUIRED on #2132 @510bfa00): on a new switch's accepted
+   * `{ 1, estimate: true }`, the STORED on-level carries no estimate stamp. The on-state is structural — the option turns
+   * the switch on — never Olumi's estimate: `cee_hypothesis` there marked the option as resting on Olumi's figure, which
+   * can make results provisional and withhold a leader over a structural 1. Only the today-0 is Olumi's (`cee_inference`,
+   * written by the confirm: agent-add-option-held-seam). It is stored exactly as a 1 the user's own words name is.
+   */
+  it('RED (AIQ c): the ON level carries no estimate stamp, whether or not the user\'s words name the switch — both store identically', async () => {
+    const named = { ...ctx, user_turn_text: 'Add the AI add-on offered as an option.' };
+    const stored: string[] = [];
+    for (const [c, level] of [[ctx, { value: 1, estimate: true, basis: 'the option turns it on' }], [named, { value: 1, estimate: true, basis: 'the option turns it on' }], [named, { value: 1 }]] as const) {
+      const { caps, sent } = setup();
+      const r = await caps.proposeNewOption(c as never, call(level) as never);
+      const iv = (paramsOf(sent)?.['interventions'] as Record<string, unknown>[] | undefined)?.[0];
+      expect(iv, JSON.stringify(r)).toBeDefined();
+      expect(iv, 'the on-state is structural, never Olumi\'s estimate').not.toHaveProperty('source');
+      stored.push(JSON.stringify(iv));
+    }
+    expect(new Set(stored).size, stored.join(' | ')).toBe(1);
   });
 
   it('RED: an unknown kind is refused before anything is sent — never read as switch or graded', async () => {
@@ -243,5 +270,237 @@ describe('A1 — propose_new_option sends a new SWITCH switched on, in the same 
     expect(withoutId(paramsOf(graded.sent))).toBe(withoutId(paramsOf(absent.sent)));
     expect(paramsOf(graded.sent)!['interventions']).toEqual([{ factor_key: 'ai_add_on_offered', value: null, source: 'cee_hypothesis' }]);
     expect(JSON.stringify(paramsOf(graded.sent))).not.toContain('switch');
+  });
+
+  /**
+   * ⛔ EVERY ENTRY THAT NAMES THE SWITCH IS READ, AND A FACTOR IS NAMED ONCE PER OPTION (independent verification of A1
+   * round 2, VERIFIER-S1 at the r2 head; the same line is on staging, CEE #2107). The level check read only the FIRST
+   * acts_on entry naming the switch (`.find`): a bare entry followed by `{ value: 1, unit: '%' }` was sent, held,
+   * approved and committed — today-0 written as Olumi's, the option at a bare 1, the user's "1%" dropped without a word —
+   * while the reverse order was refused. The result hung on entry order.
+   */
+  it.each([
+    ['bare first, then 1%', [{}, { level: { value: 1, unit: '%' } }]],
+    ['1% first, then bare', [{ level: { value: 1, unit: '%' } }, {}]],
+    ['bare 1 first, then 1%', [{ level: { value: 1 } }, { level: { value: 1, unit: '%' } }]],
+  ])('RED: the switch named twice (%s) is refused as a switch conflict naming the 1%, nothing sent — whatever the order', async (_name, entries) => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx, { ...call(), acts_on: (entries as Record<string, unknown>[]).map((e) => ({ factor_label: 'AI add-on offered', direction: 'positive', ...e })) } as never) as
+      { ok?: boolean; refusal?: string; detail?: string; switch_level_conflicts?: unknown[] };
+    expect(r.refusal, JSON.stringify(r)).toBe('switch_level_not_on');
+    expect(r.switch_level_conflicts).toEqual([{ option: 'Keep £49 and offer a paid AI add-on', factor: 'AI add-on offered', value: 1, unit: '%' }]);
+    expect(r.detail).toContain('it was given a level: 1%.');
+    expect(sent).toEqual([]);
+  });
+
+  /**
+   * ⛔ ONE ENTRY PER FACTOR IN ONE OPTION — refused whatever the entries say, even two identical bare 1s. The planner keeps
+   * the FIRST entry's direction and the level reader the LAST entry's figure, so for any factor, whichever the Agent wrote
+   * second decided silently. The only order-free rule is one entry per factor; the refusal costs one more call and sends
+   * nothing. Bound by the factor each entry RESOLVES to, never by its spelling.
+   */
+  it.each([
+    ['the new switch, two bare 1s', [
+      { factor_label: 'AI add-on offered', direction: 'positive', level: { value: 1 } },
+      { factor_label: 'AI add-on offered', direction: 'positive', level: { value: 1 } }], 'AI add-on offered'],
+    ['the new switch, twice with no level', [
+      { factor_label: 'AI add-on offered', direction: 'positive' },
+      { factor_label: ' ai ADD-ON offered ', direction: 'positive' }], 'AI add-on offered'],
+    ['an existing factor with two figures (the last one used to win)', [
+      { factor_label: 'AI add-on offered', direction: 'positive' },
+      { factor_label: 'Pro plan price', direction: 'positive', level: { value: 54, unit: 'GBP per month' } },
+      { factor_label: 'Pro plan price', direction: 'positive', level: { value: 59, unit: 'GBP per month' } }], 'Pro plan price'],
+    ['an existing factor spelt two ways, opposite directions (the first one used to win)', [
+      { factor_label: 'AI add-on offered', direction: 'positive' },
+      { factor_label: 'Pro plan price', direction: 'positive' },
+      { factor_label: '  pro plan PRICE', direction: 'negative' }], 'Pro plan price'],
+  ])('RED: a factor named twice in one option (%s) is refused as duplicate_acts_on, nothing sent', async (_name, actsOn, factor) => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx, { ...call(), acts_on: actsOn } as never) as { ok?: boolean; refusal?: string; detail?: string; duplicate_acts_on?: unknown[] };
+    expect(r.refusal, JSON.stringify(r)).toBe('duplicate_acts_on');
+    expect(r.duplicate_acts_on).toEqual([{ option: 'Keep £49 and offer a paid AI add-on', factor, entries: 2 }]);
+    expect(r.detail).toContain(`"${factor}" is named 2 times in "Keep £49 and offer a paid AI add-on"`);
+    expect(r.detail).toContain('Nothing was prepared.');
+    expect(sent).toEqual([]);
+  });
+
+  it('CONTRAST: the same factor in two DIFFERENT options is not a duplicate — one change is sent carrying both', async () => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx, { options: [
+      { label: 'Keep £49 and offer a paid AI add-on', acts_on: [{ factor_label: 'AI add-on offered', direction: 'positive' }, { factor_label: 'Pro plan price', direction: 'positive' }] },
+      { label: 'Push AI adoption at the current price', acts_on: [{ factor_label: 'Pro plan price', direction: 'positive' }, { factor_label: 'AI feature adoption rate', direction: 'positive' }] },
+    ], new_factors: [SWITCH], rationale: 'x' } as never) as { refusal?: string };
+    expect(r.refusal, JSON.stringify(r)).not.toBe('duplicate_acts_on');
+    const options = paramsOf(sent)?.['options'] as { label: string; interventions: { factor_id?: string; factor_key?: string; value: unknown }[] }[] | undefined;
+    expect(options?.map((o) => o.label), JSON.stringify(r)).toEqual(['Keep £49 and offer a paid AI add-on', 'Push AI adoption at the current price']);
+    // Pro plan price is linked once in EACH option; the switch is on (1) in the one that names it.
+    expect(options!.map((o) => o.interventions.filter((i) => i.factor_id === 'pro_plan_price').length)).toEqual([1, 1]);
+    expect(options![0]!.interventions.filter((i) => i.factor_key === 'ai_add_on_offered')).toEqual([{ factor_key: 'ai_add_on_offered', value: 1 }]);
+  });
+
+  /**
+   * ⛔ SERVED (OpenAI Runtime #70 5859406197; X3 runs 192916Z / 193756Z / 194514Z on CEE cd489f1): journey A's
+   * add-two-options was NOT DONE in 3/3 runs. `propose_new_option` was refused `switch_level_not_on`, told "call again
+   * with no level", and sent a level again. The rule refused ANY estimate on a new switch, so `{ value: 1, estimate: true }`
+   * — "just add it with your assumptions" — could never land. A numeric 1 with no unit IS on, whoever's word it is: the
+   * option turns the switch on, and its today-0 stays Olumi's stamp. Which field the model sent is UNVERIFIED (the served
+   * artefacts keep no tool arguments), so every refusal now also says which parts of the level were not a bare 1.
+   */
+  const ANNUAL = { label: 'Annual plan offered', kind: 'switch', affects: [{ label: 'Monthly recurring revenue (MRR)', direction: 'positive' }] };
+  const twoSwitchOptions = (level: Record<string, unknown>, graded = false) => ({
+    options: [
+      { label: 'Keep £49 and offer a paid AI add-on', acts_on: [{ factor_label: 'AI add-on offered', direction: 'positive', level }] },
+      { label: 'Keep £49 and offer an annual plan', acts_on: [{ factor_label: 'Annual plan offered', direction: 'positive', level }] },
+    ],
+    new_factors: [SWITCH, ANNUAL].map((f) => { const { kind: _k, ...rest } = f; return graded ? rest : { ...rest, kind: 'switch' }; }),
+    rationale: 'the user asked for both, with Olumi\u2019s assumptions',
+  });
+  const optionsSent = (sent: { body: unknown }[]) =>
+    paramsOf(sent)?.['options'] as { label: string; interventions: { factor_key?: string; value: unknown }[] }[] | undefined;
+
+  it('RED (served shape): two options, each with a new switch given { value: 1, estimate: true } → ONE change sent, both switches on, no refusal', async () => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx, twoSwitchOptions({ value: 1, estimate: true, basis: 'the option turns it on' }) as never) as { ok?: boolean; refusal?: string };
+    // This harness answers every inner request 500 (`not_prepared`): what matters here is that the ONE change was SENT,
+    // with no refusal before it. The real route (agent-add-option-held-seam) holds, approves and commits it.
+    expect(r.refusal, JSON.stringify(r)).toBe('not_prepared');
+    expect(sent).toHaveLength(1);
+    const options = optionsSent(sent);
+    expect(options?.map((o) => o.label), JSON.stringify(r)).toEqual(['Keep £49 and offer a paid AI add-on', 'Keep £49 and offer an annual plan']);
+    expect(options!.map((o) => o.interventions.filter((i) => i.factor_key !== undefined))).toEqual([
+      [{ factor_key: 'ai_add_on_offered', value: 1 }],
+      [{ factor_key: 'annual_plan_offered', value: 1 }],
+    ]);
+    expect((paramsOf(sent)!['new_factors'] as { kind?: string }[]).map((f) => f.kind)).toEqual(['switch', 'switch']);
+  });
+
+  it('CONTRAST (served shape): a bare 1 for each switch sends the same levels, byte for byte, as { value: 1, estimate: true }', async () => {
+    const estimate = setup();
+    await estimate.caps.proposeNewOption(ctx, twoSwitchOptions({ value: 1, estimate: true, basis: 'the option turns it on' }) as never);
+    const bare = setup();
+    await bare.caps.proposeNewOption(ctx, twoSwitchOptions({ value: 1 }) as never);
+    const levels = (sent: { body: unknown }[]) => JSON.stringify(optionsSent(sent)?.map((o) => o.interventions.filter((i) => i.factor_key !== undefined)));
+    expect(levels(estimate.sent)).toBe(levels(bare.sent));
+    expect(levels(bare.sent)).not.toContain('source');
+  });
+
+  it.each([
+    ["{ 1, '%' }", { value: 1, unit: '%' }, ['unit']],
+    ["'0.5'", { value: '0.5' }, ['non_number']],
+    ['{ 2, estimate: true }', { value: 2, estimate: true, basis: 'a guess' }, ['not_one', 'estimate']],
+    ["{ 1, '%', estimate: true }", { value: 1, unit: '%', estimate: true, basis: 'a guess' }, ['unit', 'estimate']],
+    ['a level that is not an object', 1, ['not_object']],
+    ["{ 1, estimate: 'yes' } (not a boolean)", { value: 1, estimate: 'yes' }, ['estimate']],
+  ])('CONTRAST: a new switch given %s in the served shape is still refused, nothing sent, and says which parts fired', async (_name, level, fields) => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx, twoSwitchOptions(level as never) as never) as { refusal?: string; detail?: string; conflict_fields?: unknown };
+    expect(r.refusal, JSON.stringify(r)).toBe('switch_level_not_on');
+    expect(r.conflict_fields).toEqual(fields);
+    expect(r.detail).toContain('A switch has no level of its own');
+    expect(r.detail).toContain('call propose_new_option again with no level for it');
+    expect(sent).toEqual([]);
+  });
+
+  it('CONTRAST: the served shape named twice in one option ({ 1, estimate: true } twice) is still refused as duplicate_acts_on', async () => {
+    const { caps, sent } = setup();
+    const level = { value: 1, estimate: true, basis: 'the option turns it on' };
+    const r = await caps.proposeNewOption(ctx, { ...call(), acts_on: [
+      { factor_label: 'AI add-on offered', direction: 'positive', level },
+      { factor_label: 'AI add-on offered', direction: 'positive', level }] } as never) as { refusal?: string };
+    expect(r.refusal, JSON.stringify(r)).toBe('duplicate_acts_on');
+    expect(sent).toEqual([]);
+  });
+
+  it('CONTRAST: a GRADED new factor given { 1, estimate: true } is never written — no level, never 0, never 1, no kind on the wire', async () => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx, twoSwitchOptions({ value: 1, estimate: true, basis: 'a guess' }, true) as never) as { refusal?: string };
+    expect(r.refusal, JSON.stringify(r)).toBe('not_prepared');
+    expect(sent).toHaveLength(1);
+    const options = optionsSent(sent);
+    expect(options!.map((o) => o.interventions.filter((i) => i.factor_key !== undefined).map((i) => i.value))).toEqual([[null], [null]]);
+    expect(JSON.stringify(paramsOf(sent))).not.toContain('switch');
+  });
+});
+
+/**
+ * ⛔ THE RULE IS WHERE THE MODEL WRITES A LEVEL (OpenAI Runtime #70 5859406197, proposed fix 1). The switch's "give it no
+ * level" sat only on `new_factors.kind`; the model writes a level in `acts_on[].level`, which said nothing about switches.
+ * Both acts_on forms (one option, several) share the one ACTS_ON schema, so each is read here.
+ */
+describe('the acts_on level the model writes says a new switch takes no level', () => {
+  const RULE = "never give a level for a factor you add in new_factors with kind 'switch'";
+  const levelDoc = (path: 'single' | 'several'): string => {
+    const p = (AGENT_TOOLS.find((t) => t.name === 'propose_new_option')!.parameters as { properties: Record<string, any> }).properties;
+    const actsOn = path === 'single' ? p['acts_on'] : p['options'].items.properties['acts_on'];
+    return String(actsOn.items.properties['level'].description ?? '');
+  };
+  it.each(['single', 'several'] as const)('RED: the %s-option acts_on level description carries the rule', (path) => {
+    expect(levelDoc(path).toLowerCase()).toContain(RULE);
+  });
+});
+
+/**
+ * ⭐ PJ-A1 £49 (DL #70 5860365834; AIQ 5860384275 / 5860839793) — A NEW GRADED FACTOR'S TODAY LEVEL IS TAKEN ONLY FROM THE
+ * USER'S OWN WORDS, AND NEVER RIDES THE WIRE. The Agent may give `new_factors[].today`; the capability keeps it only when
+ * `figureTheUserWrote` finds that figure in the user's typed words, frames it as admission frames a stated baseline, and
+ * hands it to the hold through the in-process authorship context — read here INSIDE the dispatch, exactly where route-v2
+ * reads it. The chip's `parameters` are byte-identical with or without it.
+ */
+describe('PJ-A1 £49 — propose_new_option carries a new graded factor\'s today level only when the user wrote it', () => {
+  const SAID = `${F4} We already sell the add-on at £5 a month to a pilot group.`;
+  const setup = () => {
+    const sent: { path: string; body: unknown }[] = [];
+    const carried: unknown[] = [];
+    const d: InternalDispatch = async (path, body) => {
+      if (path.endsWith('/graph')) return { status: 200, json: { graph: served, graph_hash: 'h0' } };
+      sent.push({ path, body });
+      const b = body as { scenario_id?: string; turn_id?: string };
+      carried.push(statedTodayLevelsFor(String(b.scenario_id), String(b.turn_id)));
+      return { status: 500, json: {} };
+    };
+    return { caps: createAgentCapabilities(d, new ProposalStore()), sent, carried };
+  };
+  const call = (today?: unknown, kind?: 'switch') => ({
+    label: 'Keep £49 and add a paid AI add-on',
+    acts_on: [{ factor_label: 'AI add-on price', direction: 'positive', ...(kind === 'switch' ? { level: { value: 1 } } : {}) }],
+    new_factors: [{ ...ADDON, ...(kind !== undefined ? { kind } : {}), ...(today !== undefined ? { today } : {}) }],
+    rationale: 'the user asked for it',
+  });
+  const paramsOf = (sent: { body: unknown }[]) =>
+    (sent[0]?.body as { chip?: { parameters?: Record<string, unknown> } } | undefined)?.chip?.parameters;
+
+  it('RED: the user wrote £5 → the context names the add-on price\'s today level, framed as a stated baseline; the wire carries nothing new', async () => {
+    const withToday = setup();
+    await withToday.caps.proposeNewOption({ ...ctx, user_text: SAID }, call({ value: 5, unit: 'GBP/month' }) as never);
+    expect(withToday.carried).toEqual([[{ label: 'AI add-on price',
+      observed_state: { value: 0.5, raw_value: 5, cap: 10, declared_scale: 'unit_interval', unit: 'GBP/month', source: 'brief_extraction' } }]]);
+    const without = setup();
+    await without.caps.proposeNewOption({ ...ctx, user_text: SAID }, call() as never);
+    expect(without.carried).toEqual([[]]);
+    // The option id is minted per call; everything else on the wire is byte-identical.
+    const wire = (x: { body: unknown }[]) => JSON.stringify({ ...paramsOf(x), option_id: '<minted>' });
+    expect(wire(withToday.sent)).toBe(wire(without.sent));
+    expect(JSON.stringify(paramsOf(withToday.sent))).not.toMatch(/today|observed_state|brief_extraction/);
+  });
+
+  it.each([
+    ['a figure the user never wrote (7)', { value: 7, unit: 'GBP/month' }, undefined],
+    ['a money figure the user wrote only as a percentage', { value: 4, unit: 'GBP' }, undefined],
+    ['a non-number', { value: '5', unit: 'GBP/month' }, undefined],
+    ['a negative level', { value: -5, unit: 'GBP/month' }, undefined],
+    ['a today level for a SWITCH (its today is Olumi\'s off)', { value: 5, unit: 'GBP/month' }, 'switch' as const],
+  ])('CONTRAST: %s → nothing is carried; the change is still sent', async (_name, today, kind) => {
+    const { caps, sent, carried } = setup();
+    await caps.proposeNewOption({ ...ctx, user_text: `${SAID} Keep churn under 4%.` }, call(today, kind) as never);
+    expect(sent).toHaveLength(1);
+    expect(carried).toEqual([[]]);
+  });
+
+  it('the tool tells the model: today\'s level for a factor it adds ONLY if the user stated it — never an estimate, never 0', () => {
+    const p = (AGENT_TOOLS.find((t) => t.name === 'propose_new_option')!.parameters as { properties: Record<string, any> }).properties;
+    const today = p['new_factors'].items.properties['today'];
+    expect(today.properties.value.type).toBe('number');
+    expect(String(today.description)).toContain('ONLY if the user stated it');
+    expect(String(today.description)).toMatch(/never your own estimate, never a placeholder or 0/i);
   });
 });

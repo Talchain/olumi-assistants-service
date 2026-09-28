@@ -43,9 +43,12 @@ import { TYPED_TRANSACTION_ENVELOPE_CAP, type FrameFreshness } from '../graph-ma
 import type { PendingAction } from '../session/pending-action.js';
 import {
   buildAddOptionsTransaction,
+  GM_HELD_GRADED_TODAY_KEY,
   GM_HELD_SWITCH_FACTORS_KEY,
   GM_HELD_USER_STATED_NODES_KEY,
+  isStatedTodayObservedState,
   MAX_OPTIONS_PER_TRANSACTION,
+  sameLabel,
   type AddOptionGraphView,
   type AddOptionsSkipReason,
 } from '../routing/add-option-transaction.js';
@@ -76,6 +79,13 @@ export interface AddOptionTransactionInput {
    * stamps exactly those `user_set`. Absent or empty — every other caller — records nothing.
    */
   readonly userStatedOptionIds?: readonly string[];
+  /**
+   * ⭐ PJ-A1 £49 (DL #70 5860365834) — the NEW graded factors' today levels the user's own typed words state, framed, by
+   * label, from the Agent's in-process context (`statedTodayLevelsFor`), NEVER from `parameters`. Each one this batch
+   * adds as a new GRADED factor is recorded on the hold (`GM_HELD_GRADED_TODAY_KEY`) by its id; the confirm stamps it.
+   * Absent or empty — every other caller — records nothing.
+   */
+  readonly statedTodayLevels?: readonly { readonly label: string; readonly observed_state: Readonly<Record<string, unknown>> }[];
 }
 
 export type AddOptionTransactionOutcome =
@@ -375,7 +385,18 @@ export function dispatchAddOptionTransaction(
   const userStatedNodeIds = operations
     .filter((o) => o.op === 'add_node' && statedIds.has(o.path) && (o.value as { kind?: unknown } | undefined)?.kind === 'option')
     .map((o) => o.path);
-  const heldPendings: readonly PendingAction[] = switchFactorIds.length === 0 && userStatedNodeIds.length === 0
+  /**
+   * ⭐ PJ-A1 £49 (DL #70 5860365834) — THE HOLD NAMES EACH NEW GRADED FACTOR'S STATED TODAY LEVEL, by the id THIS batch
+   * gives it. Only a factor this batch adds, never a switch (its today-0 is Olumi's), and only a level shaped exactly as a
+   * stated baseline is framed. Never read from `parameters`.
+   */
+  const switchSet = new Set(switchFactorIds);
+  const gradedToday = (input.statedTodayLevels ?? []).flatMap((l) => {
+    const f = built.newFactors.find((nf) => sameLabel(nf.label, l.label));
+    return f === undefined || switchSet.has(f.id) || !isStatedTodayObservedState(l.observed_state)
+      ? [] : [{ factor_id: f.id, observed_state: { ...l.observed_state } }];
+  });
+  const heldPendings: readonly PendingAction[] = switchFactorIds.length === 0 && userStatedNodeIds.length === 0 && gradedToday.length === 0
     ? decision.pendingActions
     : decision.pendingActions.map((p) => {
         const ip = p.action.kind === 'apply_proposed_change' ? p.action.inline_patch : null;
@@ -384,6 +405,7 @@ export function dispatchAddOptionTransaction(
           ...ip,
           ...(switchFactorIds.length > 0 ? { [GM_HELD_SWITCH_FACTORS_KEY]: [...switchFactorIds] } : {}),
           ...(userStatedNodeIds.length > 0 ? { [GM_HELD_USER_STATED_NODES_KEY]: userStatedNodeIds } : {}),
+          ...(gradedToday.length > 0 ? { [GM_HELD_GRADED_TODAY_KEY]: gradedToday } : {}),
         } } } as PendingAction;
       });
 

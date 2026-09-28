@@ -554,8 +554,12 @@ const inferenceClassFor = (provenance: string): InferenceClass => {
  * the engine compares across factors. The range is the model's proposal and is
  * recorded in the ledger as such — it is not a forecast, and it never replaces
  * what the user said.
+ *
+ * ⭐ EXPORTED FOR ONE OTHER WRITER (PJ-A1 £49, DL #70 5860365834): the today level the user stated for a NEW graded factor
+ * the Agent adds (`propose_new_option` `new_factors[].today`) is framed by THIS function, so it is stored exactly as a
+ * baseline the brief states — never a second framer.
  */
-function framedObservedState(f: {
+export function framedObservedState(f: {
   baseline_value: number | null; unit: string | null; provenance: string; plausible_max?: number | null;
 }): Record<string, unknown> {
   const raw = f.baseline_value as number;
