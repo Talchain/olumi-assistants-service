@@ -151,6 +151,8 @@ export interface AgentTurnResult {
     proposal_id?: string; outcome?: string; refusal?: string;
     /** A refused call's conflict fields — which parts of what the model sent fired (names only, never the figure). */
     conflict_fields?: readonly string[];
+    /** A refused switch level's entries AS SENT — option, factor, value, unit, estimate; bounded (`rejectedLevelsOf`). */
+    rejected_levels?: readonly RejectedLevel[];
     /** Why a construction ended without an answer (`max_output_tokens`, `construction_timeout`) — for exports. */
     incomplete_reason?: string;
   }[];
@@ -179,6 +181,42 @@ const textOf = (items: readonly Record<string, unknown>[]): string => {
 
 /** The refusal a withheld tool returns. It consumed nothing and moved nothing. */
 export const WITHHELD_ON_CHIP_TURN = 'withheld_on_chip_turn';
+
+/** One refused switch-level entry as the model sent it: labels and the level's own scalars, each bounded. */
+export interface RejectedLevel {
+  readonly option: string;
+  readonly factor: string;
+  readonly value: unknown;
+  readonly unit?: unknown;
+  readonly estimate?: unknown;
+}
+
+/** A scalar as sent, bounded: numbers, booleans and null kept; a string cut to 40 characters; anything else its type. */
+const scalarAsSent = (v: unknown): unknown =>
+  typeof v === 'string' ? v.slice(0, 40) : typeof v === 'number' || typeof v === 'boolean' || v === null ? v : typeof v;
+
+/**
+ * ⭐ WHAT A REFUSED SWITCH LEVEL WAS, NOT ONLY WHICH FIELD FIRED (DL #72 5862693164). The `switch_level_not_on` loop grew
+ * run to run (1 → 2 → 7 → 10 refusals, `conflict_fields: ["unit","estimate"]`) while the served record kept no arguments,
+ * so every fix was built on inference. The refused entries — option and factor labels, and the level's value, unit and
+ * estimate — are kept: at most 4 entries, labels cut to 80 characters, scalars bounded (`scalarAsSent`). Never the basis
+ * or any other text the model wrote.
+ */
+const rejectedLevelsOf = (result: ToolResult): { rejected_levels?: readonly RejectedLevel[] } => {
+  const conflicts = (result as { switch_level_conflicts?: unknown }).switch_level_conflicts;
+  if (result.ok !== false || result.refusal !== 'switch_level_not_on' || !Array.isArray(conflicts)) return {};
+  const levels = conflicts
+    .filter((c): c is Record<string, unknown> => typeof c === 'object' && c !== null && !Array.isArray(c))
+    .slice(0, 4)
+    .map((c) => ({
+      option: String(c.option ?? '').slice(0, 80),
+      factor: String(c.factor ?? '').slice(0, 80),
+      value: scalarAsSent(c.value),
+      ...('unit' in c ? { unit: scalarAsSent(c.unit) } : {}),
+      ...('estimate' in c ? { estimate: scalarAsSent(c.estimate) } : {}),
+    }));
+  return levels.length > 0 ? { rejected_levels: levels } : {};
+};
 
 /** A refused result's `conflict_fields` (short field names), or nothing: never the tool's payload. */
 const conflictFieldsOf = (result: ToolResult): { conflict_fields?: readonly string[] } => {
@@ -237,7 +275,7 @@ export async function runAgentTurn(
   ];
   /** What this turn hands on as history: everything but the state it was given. */
   const handedOn = (): unknown[] => (stateItem === undefined ? items : items.filter((i) => i !== stateItem));
-  const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; conflict_fields?: readonly string[]; incomplete_reason?: string }[] = [];
+  const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; conflict_fields?: readonly string[]; rejected_levels?: readonly RejectedLevel[]; incomplete_reason?: string }[] = [];
   const toolResults: ToolResult[] = [];
   let mutated = false;
   const now = input.now ?? (() => Date.now());
@@ -419,6 +457,7 @@ export async function runAgentTurn(
         // ⭐ What a REFUSED call sent, by field name (OpenAI Runtime #70 5859406197 item 3: the served artefacts keep no
         // tool arguments, so which part of a refused level fired could not be told). Names only, bounded.
         ...conflictFieldsOf(result),
+        ...rejectedLevelsOf(result),
         ...(typeof result.incomplete_reason === 'string' ? { incomplete_reason: result.incomplete_reason } : {}),
       });
       toolResults.push(result);
