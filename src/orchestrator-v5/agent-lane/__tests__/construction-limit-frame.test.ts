@@ -86,17 +86,17 @@ describe('a framed limit is also canonicalised against its node', () => {
 });
 
 describe('every limit the drafter writes carries the frame the user stated', () => {
-  it('the drafter schema REQUIRES a frame on every limit, level or delta only', () => {
+  it('the drafter schema REQUIRES a frame on every limit, from the contract\'s writable frames (R1 0.61.0: no new `delta`)', () => {
     const items = (buildCandidateSchema() as { properties: { constraints: { items: { properties: Record<string, { enum?: string[] }>; required: string[] } } } })
       .properties.constraints.items;
-    expect(items.properties['frame']?.enum).toEqual(['level', 'delta']);
+    expect(items.properties['frame']?.enum).toEqual(['level', 'change_abs', 'change_rel']);
     expect(items.required).toContain('frame');
   });
 
   it('the drafter is told how to read the frame, to give a limited cost its current spend, and any other limited quantity Olumi\'s labelled estimate', async () => {
     const { reqs } = await run(candidate('level'));
     expect(reqs[0]!.instructions).toMatch(/State the `frame` of each limit: "level" when the user limits the value itself/);
-    expect(reqs[0]!.instructions).toMatch(/"delta" only when they limit a CHANGE from today/);
+    expect(reqs[0]!.instructions).toMatch(/"change_abs" when they limit a CHANGE from today/);
     expect(reqs[0]!.instructions).toMatch(/When the limit is on a cost, budget or spend, give that factor a `baseline_value` at what is spent on it today/);
     // DL ruling #72 5863840239 (ii): the prompt and the coverage retry say the same thing — never "never set a level".
     expect(reqs[0]!.instructions).toMatch(/When the user limits a quantity whose current level the brief does not state, still give it a `baseline_value`: your provisional estimate, with baseline_known:false and provenance ai_proposed, never the user\u2019s/);
@@ -113,10 +113,12 @@ describe('every limit the drafter writes carries the frame the user stated', () 
     expect(said).not.toMatch(/cap is an upper bound \("<="\)/);
   });
 
-  it.each(['level', 'delta'] as const)('WIRE: a limit framed "%s" reaches /graph/register with that value_frame', async (frame) => {
+  // R1 S4-core: the pre-R1 drafter's `delta` ("a CHANGE from today") is written as `change_abs`; the contract's `delta`
+  // (a change from the MODEL'S ORIGIN) gets no new writers (r1-s4-change-frame-limits.test.ts S4L-6).
+  it.each([['level', 'level'], ['change_abs', 'change_abs'], ['delta', 'change_abs']] as const)('WIRE: a limit framed "%s" reaches /graph/register as value_frame %s', async (frame, written) => {
     const { r, registered } = await run(candidate(frame));
     expect(r.goal_constraints_carried, 'PRECONDITION: the limit attached').toBe(1);
-    expect(registered?.goal_constraints?.[0]?.['value_frame']).toBe(frame);
+    expect(registered?.goal_constraints?.[0]?.['value_frame']).toBe(written);
   });
 
   it('NEVER GUESSED: a limit the drafter did not frame is registered with no value_frame key', async () => {

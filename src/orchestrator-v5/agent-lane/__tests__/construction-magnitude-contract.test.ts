@@ -372,7 +372,7 @@ describe('Run 1 wording: churn as "% of Pro subscribers per month" is a percenta
 
   it('CONTRAST: a DELTA limit in % on churn ("no more than 10% higher") does not make it a level — ±0.5 kept', async () => {
     const c = run1();
-    c.constraints = [{ ...c.constraints[0]!, frame: 'delta' }];
+    c.constraints = [{ ...c.constraints[0]!, frame: 'change_abs' }];
     const { graph } = await register(c);
     expect(edge(graph, 'price_sensitivity', CHURN).strength).toMatchObject({ mean: 0.5, std: 0.125 });
   });

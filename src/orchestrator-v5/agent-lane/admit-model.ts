@@ -17,6 +17,7 @@
  */
 
 import { REPAIR_CODES, type RepairEntry, type GoalThresholdFrameType, type QuantityFrameType } from '@talchain/schemas';
+import { isChangeFrame } from './limit-frame.js';
 import {
   CEE_GOAL_THRESHOLD_FRAME,
   resolveGoalThresholdCapWithProvenance,
@@ -628,6 +629,9 @@ const inferenceClassFor = (provenance: string): InferenceClass => {
  * see that quantity as the level-less factor admission registers.
  */
 export function limitedOutcomeFrame(c: Pick<CandidateConstraint, 'provenance' | 'value' | 'unit' | 'frame'>): number | undefined {
+  // A CHANGE (`limit-frame.ts`) pins no level frame on its quantity: "no more than 10% above today" says nothing about
+  // the scale "Cloud cost" is held on.
+  if (isChangeFrame(c.frame)) return undefined;
   return inferenceClassFor(c.provenance) === 'brief_stated' ? percentLevelFrame(c.value, c.unit, c.frame) : undefined;
 }
 
