@@ -279,6 +279,15 @@ export const NodeV3 = z.object({
   goal_direction: z.enum(['>=', '<=', '>', '<']).optional().catch(undefined),
   goal_horizon_months: z.number().int().positive().optional().catch(undefined),
   /**
+   * ⛔ THE DEADLINE AS THE BRIEF STATES IT (goal nodes only; PJ-E-A2 part 2, MG #72 5867208469, Canonical 5867397963).
+   * The brief's own words, verbatim, at most 60 characters ("by Q3"). NOT a month count: turning "by Q3" into months
+   * needs a year and a fiscal calendar, which would be inventing (`goal_horizon_months` holds a stated "N months").
+   * The same G1 contract as the two fields above: written ONLY by construction (MG), kept by every write, OUT of the
+   * analysis hash, IN the identity hash, CEE-owned (`field-safety.ts`), and a malformed value (over 60 characters,
+   * blank, not a string) is absence, never a refused graph.
+   */
+  goal_deadline_as_stated: z.string().max(60).refine((s) => s.trim() !== '').optional().catch(undefined),
+  /**
    * ⛔ THE SAVED-EXAMPLE STAMPS (the UI's register writes them on the nodes of a loaded saved example).
    *
    * THIS DECLARATION IS LOAD-BEARING, for the same reason as `threshold_source` above. The UI registers
