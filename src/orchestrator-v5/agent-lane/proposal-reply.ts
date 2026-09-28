@@ -30,6 +30,12 @@ const NEW_OPTION_KEYS: ReadonlySet<string> = new Set([
   // that entry, so the user is told nothing more than that change's own reply.
   'switch_off_entries_dropped', 'switch_off_entries_note',
 ]);
+/** Every key `proposeNewRisk` returns on success (agent-capabilities.ts): every disclosure is typed in `risk`. */
+const NEW_RISK_KEYS: ReadonlySet<string> = new Set([
+  'ok', 'mutated', 'proposal_id', 'public_label', 'held_message', 'held_detail', 'base_revision', 'risk', 'note',
+]);
+/** The capability's one strength disclosure for a new risk; any other wording has no template here. */
+const RISK_PLACEHOLDER_STRENGTH = 'not known yet: Olumi uses a placeholder strength for each link, not an estimate';
 /** Every key `proposeLinkStrength` returns on success: its reading is already in its consent label. */
 const LINK_KEYS: ReadonlySet<string> = new Set(['ok', 'mutated', 'proposal_id', 'public_label', 'base_revision', 'link', 'interpretation', 'note']);
 
@@ -89,6 +95,32 @@ function newOptionReply(r: Rec): string | null {
   return reply(subject, lines, question(r.public_label));
 }
 
+/** The consent subject the product minted for a held change: its confirm message without "Yes, " and the full stop. */
+const heldSubject = (r: Rec): string | undefined => {
+  const subject = typeof r.held_message === 'string' ? /^Yes, ([\s\S]+?)\.?$/.exec(r.held_message.trim())?.[1] : undefined;
+  return subject !== undefined && subject.trim() !== '' ? subject : undefined;
+};
+const phrases = (x: unknown): string[] | null =>
+  Array.isArray(x) && x.every(nonEmpty) ? x.map((s) => s.trim()) : null;
+
+/**
+ * ⭐ A NEW RISK (PJ-C1; live replay of 68 served two-call turns, 28 Sep): what it threatens and what drives it are the
+ * capability's own typed phrases, and how strongly is its one fixed disclosure. Anything else keeps the second call.
+ */
+function newRiskReply(r: Rec): string | null {
+  const subject = heldSubject(r);
+  const risk = recordOf(r.risk);
+  if (subject === undefined || risk === undefined || !nonEmpty(risk.label)) return null;
+  const threatens = phrases(risk.threatens);
+  const drivenBy = phrases(risk.driven_by ?? []);
+  if (threatens === null || threatens.length === 0 || drivenBy === null || risk.how_strongly !== RISK_PLACEHOLDER_STRENGTH) return null;
+  return reply(subject, [
+    `It threatens ${threatens.join(' and ')}.`,
+    ...(drivenBy.length > 0 ? [`It is driven by ${drivenBy.join(' and ')}.`] : []),
+    'How strongly it acts is not known yet: Olumi uses a placeholder strength for each link, not an estimate, for you to correct.',
+  ], question(r.public_label));
+}
+
 function linkStrengthReply(r: Rec): string | null {
   if (!nonEmpty(r.public_label)) return null;
   const label = r.public_label.trim().replace(/\.$/, '');
@@ -101,7 +133,8 @@ export function composeProposalReply(tool: string, args: unknown, result: unknow
   if (typeof userMessage === 'string' && userMessage.includes('?')) return null;
   const r = recordOf(result);
   if (r === undefined || r.ok !== true || r.mutated !== false || !nonEmpty(r.proposal_id)) return null;
-  const allowed = tool === 'propose_new_option' ? NEW_OPTION_KEYS : tool === 'propose_link_strength' ? LINK_KEYS : undefined;
+  const allowed = tool === 'propose_new_option' ? NEW_OPTION_KEYS : tool === 'propose_link_strength' ? LINK_KEYS
+    : tool === 'propose_new_risk' ? NEW_RISK_KEYS : undefined;
   if (allowed === undefined || Object.keys(r).some((k) => !allowed.has(k))) return null;
-  return tool === 'propose_new_option' ? newOptionReply(r) : linkStrengthReply(r);
+  return tool === 'propose_new_option' ? newOptionReply(r) : tool === 'propose_new_risk' ? newRiskReply(r) : linkStrengthReply(r);
 }

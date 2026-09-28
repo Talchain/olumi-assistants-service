@@ -387,6 +387,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         }, ['factor_label', 'direction']),
       },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
+      whole_request: WHOLE_REQUEST,
     }, ['label', 'affects', 'rationale']),
   },
   {
