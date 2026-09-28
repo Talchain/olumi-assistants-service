@@ -35,7 +35,7 @@
 
 import { createHash } from 'node:crypto';
 import { FRESH_READ } from '../turn-read-cache.js';
-import { admitCandidateModel, canonicalLabel, carryWithheldOptions, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, productIdentityOpenQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
+import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, productIdentityOpenQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -1416,7 +1416,20 @@ export async function buildModelFromBrief(
   // ⭐ MG's HORIZON ATTESTATION (`attestHorizon`, PJ-A2 rows 25–27) decides the deadline G1 holds, and its verdict is
   // `statedGoal.horizon` whatever it is. ⚠ HAND-OFF: an `unresolved` deadline's own words ("by Q3") have no stored field
   // yet; they stay on this typed result until the joint work frame (Codex rows 2–3, 27) gives them one.
-  const statedGoal = holdStatedGoalAttributes(withdrawUnstatedBaselineStamps(admitted.nodes, brief), candidate.goal, brief);
+  const heldGoal = holdStatedGoalAttributes(withdrawUnstatedBaselineStamps(admitted.nodes, brief), candidate.goal, brief);
+  if (heldGoal.held.horizon || heldGoal.held.direction) {
+    admitted = {
+      ...admitted,
+      loss: admitted.loss.filter((l) => !(heldGoal.held.horizon && /\.horizon_months$/.test(l.field_path))
+        && !(heldGoal.held.direction && /\.goal_operator$/.test(l.field_path))),
+    };
+  }
+  // ⭐ A HELD CEILING's stated current level (MG #72 5870097103): admission withheld every `<=` level before the brief
+  // attested the comparator; with `'<='` now held, the run minimises that goal, so the same rule is asked again
+  // (`admitGoalLevelBesideHeldCeiling`). Any other goal: untouched, byte for byte.
+  const ceilingLevel = admitGoalLevelBesideHeldCeiling(heldGoal.nodes, candidate.goal, admitted.loss);
+  if (ceilingLevel.loss !== admitted.loss) admitted = { ...admitted, loss: ceilingLevel.loss };
+  const statedGoal = { ...heldGoal, nodes: [...ceilingLevel.nodes] };
   /**
    * ⭐ T2 PART 2 (PJ-E-A2; Canonical #2231 `NodeV3.goal_deadline_as_stated`, G1 contract): an `unresolved` deadline's
    * own words ("by Q3") are HELD on the goal — verbatim, never converted to a month count (that needs a year and a
@@ -1428,13 +1441,6 @@ export async function buildModelFromBrief(
   const goalNodes = deadlineHeld
     ? statedGoal.nodes.map((n) => (n.kind === 'goal' ? { ...n, goal_deadline_as_stated: deadlineWords } : n))
     : statedGoal.nodes;
-  if (statedGoal.held.horizon || statedGoal.held.direction) {
-    admitted = {
-      ...admitted,
-      loss: admitted.loss.filter((l) => !(statedGoal.held.horizon && /\.horizon_months$/.test(l.field_path))
-        && !(statedGoal.held.direction && /\.goal_operator$/.test(l.field_path))),
-    };
-  }
 
   const parked = (candidate as { unknowns?: unknown }).unknowns;
   const openQuestions = userFacingDrafterQuestions(parked);

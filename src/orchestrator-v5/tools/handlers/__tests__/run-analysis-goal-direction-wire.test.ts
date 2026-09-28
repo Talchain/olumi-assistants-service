@@ -37,10 +37,10 @@ const happyFixture = JSON.parse(
 const TEST_SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TEST_REQUEST_ID = 'req-goal-direction-wire';
 
-function graphWithGoalLabel(label: string): GraphV3T {
+function graphWithGoalLabel(label: string, held?: string): GraphV3T {
   return GraphV3.parse({
     nodes: [
-      { id: 'goal_metric', kind: 'goal', label },
+      { id: 'goal_metric', kind: 'goal', label, ...(held !== undefined ? { goal_direction: held } : {}) },
       { id: 'opt_a', kind: 'option', label: 'Option A', interventions: { fac_lever: 0.8 } },
       { id: 'opt_b', kind: 'option', label: 'Option B', interventions: { fac_lever: 0.2 } },
       { id: 'fac_lever', kind: 'factor', label: 'Lever' },
@@ -85,8 +85,8 @@ function makeInvocation(): HandlerInvocation {
 }
 
 /** Drive the real handler and return the payload PLoT received. */
-async function payloadForGoalLabel(label: string): Promise<Record<string, unknown>> {
-  const graph = graphWithGoalLabel(label);
+async function payloadForGoalLabel(label: string, held?: string): Promise<Record<string, unknown>> {
+  const graph = graphWithGoalLabel(label, held);
   const snapshot: RunAnalysisScenarioSnapshot = {
     graph,
     options: [
@@ -165,4 +165,30 @@ describe('goal_direction reaches the PLoT payload', () => {
       expect('goal_direction' in payload).toBe(false);
     });
   }
+});
+
+/**
+ * ⭐ THE USER'S HELD COMPARATOR COMES FIRST (MG #72 5870097103). Construction holds `goal_direction` on the goal node
+ * only beside a target the user wrote (G1). A held ceiling sends `minimise` whatever the label says (the label
+ * classifier reads nothing for "Monthly spend"); a held floor sends nothing, whatever the label says.
+ */
+describe('a held comparator on the goal node decides goal_direction before the label', () => {
+  for (const held of ['<=', '<']) {
+    it(`RED: held "${held}" on a label the classifier cannot read ("Monthly spend") → minimise`, async () => {
+      const payload = await payloadForGoalLabel('Monthly spend', held);
+      expect(payload.goal_direction).toBe('minimise');
+    });
+  }
+
+  for (const held of ['>=', '>']) {
+    it(`RED: held "${held}" beats a label that reads reduce ("Minimise monthly churn") → no key at all`, async () => {
+      const payload = await payloadForGoalLabel('Minimise monthly churn', held);
+      expect('goal_direction' in payload).toBe(false);
+    });
+  }
+
+  it('CONTROL: no held comparator ("Monthly spend") → no key, exactly as before', async () => {
+    const payload = await payloadForGoalLabel('Monthly spend');
+    expect('goal_direction' in payload).toBe(false);
+  });
 });
