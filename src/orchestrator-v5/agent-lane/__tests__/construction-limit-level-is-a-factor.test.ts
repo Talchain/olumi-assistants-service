@@ -17,6 +17,7 @@ import { readFileSync } from 'node:fs';
 import { Ajv } from 'ajv';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
+import { asServedBeforeOneForm } from './fixtures/one-form-levels.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
@@ -80,6 +81,7 @@ function outcomeDraft(over: Record<string, unknown> = {}) {
     ],
     identities: [],
     unknowns: [],
+    decision_question: null,
     ...over,
   };
 }
@@ -121,6 +123,7 @@ function factorDraft() {
     ],
     identities: [],
     unknowns: [],
+    decision_question: null,
   };
 }
 
@@ -157,8 +160,10 @@ describe('a limit the user states on a level is admitted on a factor that can ho
   it('FIDELITY: the rebuilt served outcome draft reproduces the served graph on every other node and every edge', async () => {
     const { graph } = await register(outcomeDraft());
     expect(edgeKeys(graph)).toEqual(edgeKeys(SERVED_OUTCOME));
+    // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
+    const asServed = asServedBeforeOneForm(graph, SERVED_OUTCOME);
     for (const s of SERVED_OUTCOME.nodes.filter((n) => n.id !== 'monthly_churn')) {
-      expect(byId(graph, s.id), s.id).toStrictEqual(asServedNow(s));
+      expect(byId(asServed, s.id), s.id).toStrictEqual(asServedNow(s));
     }
   });
 
@@ -228,7 +233,8 @@ describe('a limit the user states on a level is admitted on a factor that can ho
 describe('CONTROLS — what the rule must leave alone', () => {
   it('the served FACTOR-kind draft registers byte-identical to what was served', async () => {
     const { graph } = await register(factorDraft());
-    expect(graph.nodes).toStrictEqual(SERVED_FACTOR.nodes.map(asServedNow));
+    // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
+    expect(asServedBeforeOneForm(graph, SERVED_FACTOR).nodes).toStrictEqual(SERVED_FACTOR.nodes.map(asServedNow));
     expect(edgeKeys(graph)).toEqual(edgeKeys(SERVED_FACTOR));
     expect(graph.goal_constraints).toStrictEqual(SERVED_FACTOR_GC_FRAMED);
   });

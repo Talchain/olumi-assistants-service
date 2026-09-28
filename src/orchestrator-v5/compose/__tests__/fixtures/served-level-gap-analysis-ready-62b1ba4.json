@@ -1,0 +1,92 @@
+{
+ "_source": "served CEE 62b1ba4 /agent/v1/turn, scenario 38c8b723 (Canonical consumer-parity probe 28 Sep 00:3xZ); analysis_ready verbatim",
+ "analysis_ready": {
+  "status": "needs_user_input",
+  "may_run": false,
+  "blockers": [
+   {
+    "option_id": "d7984718",
+    "option_label": "Improve trial-to-Pro conversion",
+    "factor_id": "fac_trial_to_pro_conversion",
+    "factor_label": "Trial-to-Pro conversion",
+    "blocker_type": "missing_value",
+    "message": "Factor \"Trial-to-Pro conversion\" needs a numeric value for option \"Improve trial-to-Pro conversion\"",
+    "suggested_action": "add_value"
+   },
+   {
+    "option_id": "e7128d22",
+    "option_label": "Retention intervention for at-risk accounts",
+    "factor_id": "fac_at_risk_account_retention",
+    "factor_label": "At-risk account retention",
+    "blocker_type": "missing_value",
+    "message": "Factor \"At-risk account retention\" needs a numeric value for option \"Retention intervention for at-risk accounts\"",
+    "suggested_action": "add_value"
+   },
+   {
+    "factor_id": "fac_trial_to_pro_conversion",
+    "factor_label": "Trial-to-Pro conversion",
+    "blocker_type": "missing_value",
+    "message": "What is \"Trial-to-Pro conversion\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+    "suggested_action": "add_value"
+   },
+   {
+    "factor_id": "fac_at_risk_account_retention",
+    "factor_label": "At-risk account retention",
+    "blocker_type": "missing_value",
+    "message": "What is \"At-risk account retention\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+    "suggested_action": "add_value"
+   }
+  ],
+  "readiness_issues": [
+   {
+    "issue_id": "semantic_1",
+    "repairability": "human_input_required",
+    "option_id": "d7984718",
+    "option_label": "Improve trial-to-Pro conversion",
+    "factor_id": "fac_trial_to_pro_conversion",
+    "factor_label": "Trial-to-Pro conversion",
+    "code": "MISSING_OPTION_VALUE",
+    "category": "option_values",
+    "message": "Factor \"Trial-to-Pro conversion\" needs a numeric value for option \"Improve trial-to-Pro conversion\"",
+    "provenance": "unattributed",
+    "obligation": "offered"
+   },
+   {
+    "issue_id": "semantic_2",
+    "repairability": "human_input_required",
+    "option_id": "e7128d22",
+    "option_label": "Retention intervention for at-risk accounts",
+    "factor_id": "fac_at_risk_account_retention",
+    "factor_label": "At-risk account retention",
+    "code": "MISSING_OPTION_VALUE",
+    "category": "option_values",
+    "message": "Factor \"At-risk account retention\" needs a numeric value for option \"Retention intervention for at-risk accounts\"",
+    "provenance": "unattributed",
+    "obligation": "offered"
+   },
+   {
+    "issue_id": "level_1",
+    "code": "MISSING_FACTOR_LEVEL",
+    "category": "option_values",
+    "message": "What is \"Trial-to-Pro conversion\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+    "repairability": "human_input_required",
+    "factor_id": "fac_trial_to_pro_conversion",
+    "factor_label": "Trial-to-Pro conversion",
+    "provenance": "unattributed",
+    "obligation": "required"
+   },
+   {
+    "issue_id": "level_2",
+    "code": "MISSING_FACTOR_LEVEL",
+    "category": "option_values",
+    "message": "What is \"At-risk account retention\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+    "repairability": "human_input_required",
+    "factor_id": "fac_at_risk_account_retention",
+    "factor_label": "At-risk account retention",
+    "provenance": "unattributed",
+    "obligation": "required"
+   }
+  ],
+  "goal_node_id": "mrr"
+ }
+}

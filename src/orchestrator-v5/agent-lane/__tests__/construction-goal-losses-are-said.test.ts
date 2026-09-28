@@ -55,6 +55,7 @@ const GTM = (goal: Record<string, unknown>) => ({
   ],
   identities: [],
   unknowns: [],
+  decision_question: null,
 });
 
 // `target_stated: true` — both briefs here DO name £3m, and the field is now required

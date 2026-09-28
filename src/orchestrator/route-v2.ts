@@ -230,7 +230,7 @@ import { deriveAnalysisFreshness } from '../orchestrator-v5/context/freshness.js
 import { deriveAuthoritativeStage } from '../orchestrator-v5/context/derive-stage.js';
 import { extractGraphOptionIds } from '../orchestrator-v5/context/option-identity.js';
 import { dispatchAddOptionTransaction } from '../orchestrator-v5/handlers/add-option-dispatch.js';
-import { userNamedOptionIdsFor } from '../orchestrator-v5/handlers/add-option-authorship-context.js';
+import { statedTodayLevelsFor, userNamedOptionIdsFor } from '../orchestrator-v5/handlers/add-option-authorship-context.js';
 import { detectAddOptionIntent } from '../orchestrator-v5/routing/add-option-intent.js';
 import {
   buildAddOptionGrounding,
@@ -4244,6 +4244,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // ⭐ A6b (DL CR on #2131, option (a)) — the options the USER named, from the Agent's in-process context for
           // THIS scenario and turn only; never from the chip's wire parameters. Empty for every UI chip.
           userStatedOptionIds: userNamedOptionIdsFor(ingress.scenario_id, ingress.turn_id),
+          // ⭐ PJ-A1 £49 (DL #70 5860365834) — a new graded factor's today level the user's own words state, from the same
+          // in-process context for THIS scenario and turn only; never from the chip's wire. Empty for every UI chip.
+          statedTodayLevels: statedTodayLevelsFor(ingress.scenario_id, ingress.turn_id),
         });
         if (addOptionOutcome.kind === 'held') {
           // Honest supersession (edit-graph-dispatch precedent): a fresh hold

@@ -131,12 +131,13 @@ describe('the reader and the ask agree with the writer', () => {
   });
 
   it('⭐ a cell stored under £ reads as ANSWERED for a GBP constraint', () => {
-    // Otherwise the product re-asks a question it already holds the answer to.
+    // Otherwise the product re-asks a question it already holds the answer to. The cell is the user's answer as the
+    // writer stores it: `user_specified` (AIQ Q1, CEE #2139 — Olumi's own estimate in this unit does not answer it).
     const ask = decideOptionCostAsk({
       notDecisionGrade: true,
       ratified: [{ node_id: 'fac_cost', unit: 'GBP', label: 'Budget limit' }],
       nodes: [{ id: 'fac_cost', kind: 'factor', label: 'Hiring and Salary Cost' }],
-      options: [{ id: 'opt_a', label: 'A', interventions: { fac_cost: { value: 0.7, raw_value: 150000, unit: '£' } } }],
+      options: [{ id: 'opt_a', label: 'A', interventions: { fac_cost: { value: 0.7, raw_value: 150000, unit: '£', source: 'user_specified' } } }],
     });
     expect(ask).toBeNull();
   });

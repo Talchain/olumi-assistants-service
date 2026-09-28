@@ -26,14 +26,26 @@
  *
  * So: preserve the number, widen the operator, and record the widening as a
  * loss that names the admitted boundary value explicitly.
+ *
+ * ⭐ THE WIDENING IS THE STORE'S LIMIT, NOT ADMISSION'S CHOICE (G1 drafting half; Codex PJ-A2 row 14). The drafter
+ * emits the TYPED operator (`buildCandidateSchema`: `>= <= > <`, no word is read), and admission keeps it whenever the
+ * canonical store can hold it: {@link CANONICAL_CONSTRAINT_OPERATORS} is `GoalConstraintSchema`'s own list, never a
+ * second one. Today that list is `>= <=`, so "under 4%" is still held as "at most 4%", recorded here and said to the
+ * user (`build-model.ts`, `widenedLimitLines`). ⚠ WIDENING THE SCHEMA ALONE IS NOT ENOUGH: PLoT's preflight refuses
+ * any other operator (`CONSTRAINT_INVALID_OPERATOR`, plot-lite-service `src/validation/preflight-v2.ts`
+ * `VALID_OPERATORS`), so the store and PLoT move together, and `admit-constraint-typed-operator.test.ts` pins today's
+ * list so that move cannot happen unseen.
  */
 
 import { REPAIR_CODES, type RepairEntry } from '@talchain/schemas';
+import { GoalConstraintSchema, type GoalConstraintT } from '../../schemas/assist.js';
 import { classifyUnitScaleClass, UNIT_SCALE_CLASS_TOKENS, unitPinnedScaleFrame } from '../../cee/draft/records/unit-scale-class.js';
 import { isCurrencyUnit, sameUnit } from '../../utils/currency-alphabet.js';
 
 export type CandidateOperator = '>=' | '<=' | '>' | '<';
-export type CanonicalOperator = '>=' | '<=';
+/** The comparators the canonical store holds: `GoalConstraintSchema.operator`, derived, never restated. */
+export type CanonicalOperator = GoalConstraintT['operator'];
+export const CANONICAL_CONSTRAINT_OPERATORS: readonly CanonicalOperator[] = GoalConstraintSchema.shape.operator.options;
 
 export interface CandidateConstraint {
   readonly metric: string;
@@ -101,7 +113,16 @@ export interface AdmittedConstraint {
  */
 const PERCENT_HEADS: readonly string[] = [...(UNIT_SCALE_CLASS_TOKENS.find(([cls]) => cls === 'percent')?.[1] ?? [])]
   .sort((a, b) => b.length - a.length);
-const PERIOD_TAIL = /^(?:(?:per|a|an|each|\/)\s*(?:month|year|annum|quarter|week|day)|monthly|annually|annual|yearly|quarterly|weekly|daily|p\.?a\.?)?$/;
+// The groups name the period a match states (`periodOf`); they do not change what the grammar accepts.
+const PERIOD_TAIL = /^(?:(?:per|a|an|each|\/)\s*(month|year|annum|quarter|week|day)|(monthly|annually|annual|yearly|quarterly|weekly|daily)|(p\.?a\.?))?$/;
+/** The one period each word PERIOD_TAIL accepts names ("p.a." is a year): the grammar's own words, never a wider list. */
+const PERIOD_NAME: Readonly<Record<string, string>> = {
+  month: 'month', monthly: 'month',
+  year: 'year', annum: 'year', annual: 'year', annually: 'year', yearly: 'year',
+  quarter: 'quarter', quarterly: 'quarter',
+  week: 'week', weekly: 'week',
+  day: 'day', daily: 'day',
+};
 /** The classifier's own `percentage_points` row ("pp", "ppt", "pps"), longest first: never a private copy. */
 const POINTS_HEADS: readonly string[] = [...(UNIT_SCALE_CLASS_TOKENS.find(([cls]) => cls === 'percentage_points')?.[1] ?? [])]
   .sort((a, b) => b.length - a.length);
@@ -187,6 +208,66 @@ export function isPercentagePointsWithPeriod(unit: string): boolean {
   return points !== null && PERIOD_TAIL.test((points[1] ?? '').trim());
 }
 
+/** The period a PERIOD_TAIL match states, or `null` for the empty tail (no period). */
+function periodOf(m: RegExpExecArray): string | null {
+  if (m[3] !== undefined) return 'year';
+  const word = m[1] ?? m[2];
+  return word === undefined ? null : (PERIOD_NAME[word] ?? null);
+}
+
+/**
+ * The period a percent-LEVEL spelling states, read by the grammar that admits it: "% per month" / "%/month" / "percent
+ * monthly" → `month`; "% p.a." / "percent per annum" / "pp per year" → `year`. `null` when it states none ("%",
+ * "percent", "% of Pro subscribers"), or it is not one of these spellings. A "% of <population>" spelling states one only
+ * as its last word or two ("% of Pro subscribers per month").
+ */
+function percentLevelPeriod(unit: string): string | null {
+  const t = norm(unit);
+  const cls = classifyUnitScaleClass(unit);
+  const tailPeriod = (tail: string): string | null => {
+    const m = PERIOD_TAIL.exec(tail.trim());
+    return m === null ? null : periodOf(m);
+  };
+  if (cls === 'percentage_points') {
+    const head = POINTS_HEADS.find((h) => t.startsWith(h));
+    return head === undefined ? null : tailPeriod(t.slice(head.length));
+  }
+  if (cls !== 'percent') return null;
+  const head = PERCENT_HEADS.find((h) => t.startsWith(h));
+  if (head === undefined) return null;
+  const rest = t.slice(head.length).trim();
+  if (PERIOD_TAIL.test(rest)) return tailPeriod(rest);
+  const points = POINTS_TAIL.exec(rest);
+  if (points !== null) return tailPeriod(points[1] ?? '');
+  if (!OF_TAIL.test(rest)) return null;
+  const words = rest.split(/\s+/);
+  // "of", at least one population word, then the period: never the population word itself.
+  for (const n of [2, 1]) {
+    if (words.length < n + 2) continue;
+    const period = tailPeriod(words.slice(-n).join(' '));
+    if (period !== null) return period;
+  }
+  return null;
+}
+
+/**
+ * ⛔⛔ A PERIOD IS PART OF A PERCENT LIMIT'S MEANING (rule1-limit-period, engine-direct on PLoT 22f3d94).
+ *
+ * `"%"` is read on the NODE's period: PLoT never reads the relabel stamp. So "annual churn under 10 %" relabelled onto
+ * a `% per month` node (level 3 %/month, roughly 31 %/year) was scored as "monthly churn ≤ 10 %": P = 1 on every option,
+ * decision-grade — a wrong pass. In its own unit PLoT refuses it and names the unit: the honest outcome.
+ *
+ * True only when BOTH spellings state a period and they differ. A spelling that states none ("%", "percent") is not
+ * "different", so a bare `"%"` keeps today's reading on any node. Bound to the two units — the limit's own and the
+ * unit of the node its `node_id` names — never to the metric's words.
+ */
+export function percentPeriodsDiffer(limitUnit: string, nodeUnit: string | undefined): boolean {
+  if (nodeUnit === undefined) return false;
+  const limitPeriod = percentLevelPeriod(limitUnit);
+  const nodePeriod = percentLevelPeriod(nodeUnit);
+  return limitPeriod !== null && nodePeriod !== null && limitPeriod !== nodePeriod;
+}
+
 /**
  * True only when the node's level IS the percentage ÷ 100 — the one scale PLoT's `"%"` rung lands on. A frame of
  * exactly 100 (`cap`, else the estimate's `scale_frame` — the served agent-lane churn estimate, `{value 0.07,
@@ -260,6 +341,9 @@ export function canonicaliseLimitUnit(
       ? nodeUnit !== undefined && norm(nodeUnit) === norm(unit)
       : nodeUnit === undefined || isPercentWithPeriod(nodeUnit) || isPercentagePointsWithPeriod(nodeUnit) || isPercentOfPopulation(nodeUnit);
     if (!nodeIsPercentLevel) return verbatim;
+    // ⛔ Another period is another quantity ("10 % per year" is not "≤ 10 %" of a monthly level): verbatim, before
+    // either relabel below (`"%"`, or the capped node's own spelling), so PLoT refuses it rather than scoring it.
+    if (percentPeriodsDiffer(unit, nodeUnit)) return verbatim;
     // The same spelling on a capped node: PLoT already reconciles it against the cap.
     if (target.cap !== undefined && nodeUnit !== undefined && norm(nodeUnit) === norm(unit)) return verbatim;
     if (levelIsPercentOver100(target)) return relabel('%');
@@ -320,6 +404,17 @@ export function isStrictnessLost(op: CandidateOperator): boolean {
   return op === '<' || op === '>';
 }
 
+/** The typed operator as stated when the store can hold it; otherwise its non-strict widening (`RELAXES_TO`). */
+export function admittedOperator(
+  op: CandidateOperator,
+  operators: readonly string[] = CANONICAL_CONSTRAINT_OPERATORS,
+): CanonicalOperator {
+  return operators.includes(op) ? (op as CanonicalOperator) : RELAXES_TO[op];
+}
+
+/** A lower bound (`>=`, `>`) as opposed to an upper one; strict or not, it is the same side. */
+const isLowerBound = (op: string): boolean => op.startsWith('>');
+
 /** Only a bound the user actually stated may be reported as theirs. */
 function isUserAuthored(candidateProvenance: string): boolean {
   return candidateProvenance === 'explicit';
@@ -333,6 +428,8 @@ export function admitCandidateConstraints(
   candidates: readonly CandidateConstraint[],
   nodeIdFor: (metric: string) => string | undefined,
   targetScaleFor: (nodeId: string) => LimitTargetScale | undefined = () => undefined,
+  /** The store's comparators (`GoalConstraintSchema`'s own list); a parameter only so a test can hold a wider store. */
+  operators: readonly string[] = CANONICAL_CONSTRAINT_OPERATORS,
 ): ConstraintAdmissionResult {
   const constraints: AdmittedConstraint[] = [];
   const loss: RepairEntry[] = [];
@@ -355,7 +452,7 @@ export function admitCandidateConstraints(
       continue;
     }
 
-    const operator = RELAXES_TO[c.operator];
+    const operator = admittedOperator(c.operator, operators);
     // The user's number is never adjusted to compensate for the operator. It is rescaled ONLY by a stated magnitude
     // suffix (£k) onto a node in the bare currency, and every rewrite is stamped (`canonicaliseLimitUnit`).
     const { value, unit, ...unitProvenance } = canonicaliseLimitUnit(c.value, c.unit, targetScaleFor(nodeId), c.frame);
@@ -375,7 +472,7 @@ export function admitCandidateConstraints(
       ...(c.frame === 'level' || c.frame === 'delta' ? { value_frame: c.frame } : {}),
     };
 
-    if (isStrictnessLost(c.operator)) {
+    if (operator !== c.operator) {
       loss.push({
         code: REPAIR_CODES.NORMALISE_STRENGTH_RANGE,
         layer: 'cee',
@@ -402,8 +499,8 @@ export function admitCandidateConstraints(
   // are withheld together and the loss is said in words; neither side is guessed. A genuine range still attaches.
   const contradicted = new Set<string>();
   for (const lower of constraints) {
-    if (lower.operator !== '>=') continue;
-    const upper = constraints.find((u) => u.node_id === lower.node_id && u.operator === '<=' && lower.value >= u.value);
+    if (!isLowerBound(lower.operator)) continue;
+    const upper = constraints.find((u) => u.node_id === lower.node_id && !isLowerBound(u.operator) && lower.value >= u.value);
     if (upper === undefined || contradicted.has(lower.node_id)) continue;
     contradicted.add(lower.node_id);
     const metric = candidates.find((c) => nodeIdFor(c.metric) === lower.node_id)?.metric ?? lower.node_id;
@@ -430,7 +527,7 @@ export function admitCandidateConstraints(
   const directions = new Map<string, Set<CanonicalOperator>>();
   for (const c of kept) directions.set(c.node_id, (directions.get(c.node_id) ?? new Set<CanonicalOperator>()).add(c.operator));
   const named = kept.map((c) => ((directions.get(c.node_id)?.size ?? 0) > 1 && c.label !== undefined
-    ? { ...c, label: `${c.label} ${c.operator === '>=' ? 'floor' : 'cap'}` }
+    ? { ...c, label: `${c.label} ${isLowerBound(c.operator) ? 'floor' : 'cap'}` }
     : c));
   return { constraints: named, loss };
 }

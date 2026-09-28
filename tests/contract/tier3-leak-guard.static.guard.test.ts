@@ -97,6 +97,13 @@ const ALLOWLIST = new Map<string, 'cage' | 'transport' | 'structured'>([
   // no warning content, warning prose, or numeric magnitude is returned,
   // logged, or made available to a user-facing composer.
   ['coaching/select-factor-evppi.ts', 'structured'],
+  // PJ-B3 unvalued-driver card (#2154) — reads `inference_warnings[]` only to
+  // decide ONE boolean: does the run's `GOAL_ANCESTOR_DATA_GAP` warning name the
+  // top unvalued factor's id (exact quoted-slug match against the id it already
+  // holds)? If so, the card adds a fixed CEE-authored sentence ("These figures
+  // treat it as 0 until you give it."). No warning prose, value or other id is
+  // returned, logged or quoted; the card's words come from the graph's label.
+  ['coaching/unvalued-driver-card.ts', 'structured'],
   ['routing/post-analysis-advice-gate.ts', 'structured'],
   // ⭐ NEW SITE, AND IT IS DELIBERATELY CLASSIFIED `transport` RATHER THAN
   // `structured` — the classification that asks for the most scrutiny, because

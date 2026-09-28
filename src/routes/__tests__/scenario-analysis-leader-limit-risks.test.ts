@@ -52,7 +52,7 @@ vi.mock('../../utils/telemetry.js', () => ({
 }));
 
 import { readScenarioAnalysis } from '../scenario-graph-analysis-read.js';
-import { readLeaderLimitRisksFromResult, readRatifiedConstraints } from '../../orchestrator/context/constraint-feasibility.js';
+import { readLeaderLimitRisksFromResult, readLimitVerdictsFromResult, readRatifiedConstraints } from '../../orchestrator/context/constraint-feasibility.js';
 import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js';
 import type { GraphStateIngress } from '../../orchestrator-v5/boundary/request-extensions.js';
 
@@ -163,5 +163,41 @@ describe('the reload carries the run\'s own leader-limit risks', () => {
     expect(read.analysis_state?.run_state.kind, 'premise: the fact is fresh').toBe('complete_current');
     expect(read.analysis_result, 'premise: the binding withheld the block').toBeNull();
     expect('analysis_leader_limit_risks' in read).toBe(false);
+  });
+});
+
+/**
+ * B5 (DL 5859845823): the run's own per-limit verdict rides the reload beside the block it describes. Read by the ONE
+ * reader (`readLimitVerdictsFromResult`) off the SAME fact, under the SAME freshness and delivered-block gates as
+ * `analysis_constraint_verdict_state`; ABSENT when the fact attests no rows (absent = not attested, never defaulted).
+ */
+describe('the reload carries the run\'s own per-limit verdicts (analysis_limit_verdicts)', () => {
+  const STORED = {
+    may_name_leading_option: true,
+    constraint_verdict_state: 'evaluated_feasible',
+    per_limit: [{ constraint_id: 'gc_u3b', state: 'estimate_only', reason: 'level_olumi_estimate' }],
+    joint: { state: 'estimate_only' },
+  };
+  const withVerdict = (verdict: Json) => {
+    const base = runFact(u3b());
+    return RunAnalysisHandlerFactSchema.parse({ ...base, result: { ...(base.result as Json), constraint_verdict: verdict } });
+  };
+  it('⭐ a current run whose fact stores per_limit → exactly that fact\'s rows and joint', async () => {
+    const fact = withVerdict(STORED);
+    const read = await reloadWith(fact, GRAPH, 'lv-current');
+    expect(read.analysis_result, 'premise: the block is delivered').not.toBeNull();
+    expect(read.analysis_limit_verdicts).toEqual({ per_limit: STORED.per_limit, joint: STORED.joint });
+    expect(read.analysis_limit_verdicts).toEqual(readLimitVerdictsFromResult(fact.result));
+  });
+  it('CONTRAST: a fact whose verdict attests no rows → the key is ABSENT (the block still delivered)', async () => {
+    const read = await reloadWith(withVerdict({ may_name_leading_option: true, constraint_verdict_state: 'evaluated_feasible' }), GRAPH, 'lv-none');
+    expect(read.analysis_result).not.toBeNull();
+    expect(read.analysis_constraint_verdict_state, 'control: the same fact\'s state is carried').toBe('evaluated_feasible');
+    expect('analysis_limit_verdicts' in read).toBe(false);
+  });
+  it('STALE: after an edit the key is ABSENT, exactly as analysis_result is', async () => {
+    const read = await reloadWith(withVerdict(STORED), EDITED, 'lv-stale');
+    expect(read.analysis_result).toBeNull();
+    expect('analysis_limit_verdicts' in read).toBe(false);
   });
 });

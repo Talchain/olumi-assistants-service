@@ -25,7 +25,7 @@
  */
 import { z } from 'zod';
 import type { CandidateMutationEnvelope } from './types.js';
-import { InterventionV3 } from '../../schemas/cee-v3.js';
+import { EdgeV3, InterventionV3 } from '../../schemas/cee-v3.js';
 import {
   aiEditableFieldRoots,
   aiEditableObservedSubkeys,
@@ -242,6 +242,24 @@ export const PIPELINE_OWNED_ROOTS: ReadonlySet<string> = new Set([
 /** The CEE-local half of the union, exported so the direction rule (this set is
  *  a SUBSET of the union, always) is assertable rather than assumed. */
 export const CEE_ANALYSIS_OWNED_ROOTS_FOR_TEST: readonly string[] = CEE_ANALYSIS_OWNED_ROOTS;
+
+/**
+ * ⭐ THE CEE-OWNED EDGE FIELDS — DERIVED from the owned union above, never listed a second time.
+ *
+ * Every key `EdgeV3` DECLARES whose name `PIPELINE_OWNED_ROOTS` holds: today `provenance`, `provenance_display`,
+ * `origin`, `validation`, `defaulted`, `exists_defaulted`, `std_defaulted`. Restricted to declared keys because an
+ * undeclared key does not survive a `GraphV3` re-parse, so no reader could rely on it (and the union also holds
+ * node-only names such as `source`, `raw_value` and `starterid`, which are not edge fields).
+ *
+ * Its reader is the whole-graph register (`withStoredEdgeFactsWhenUnstated`, `assist.v1.scenario-graph-register.ts`):
+ * a re-register that OMITS one of these on an unchanged edge keeps the stored value rather than erasing it (served
+ * `dd456fe`, scratch `01500753`: provenance and Olumi's flags were silently dropped). A new owned edge field joins
+ * this set by joining the union, so the screen above and that carry cannot disagree about what CEE owns on an edge.
+ * The exact membership is pinned in `assist.v1.scenario-graph-register.keeps-stored-edge-facts.test.ts`.
+ */
+export const CEE_OWNED_EDGE_FIELDS: readonly string[] = Object.keys(EdgeV3.shape).filter((key) =>
+  PIPELINE_OWNED_ROOTS.has(key.toLowerCase()),
+);
 
 
 /** Conservative engine-claim patterns applied to every candidate string leaf (G14). */
