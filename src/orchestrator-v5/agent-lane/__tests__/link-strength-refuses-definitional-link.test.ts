@@ -8,7 +8,7 @@
  *
  * The rule, from the same module (`definitionalLinkInUse` + `definitionalLinkRefusalText`):
  *   - refused while the identity is IN USE, i.e. no Run yet, or the last Run evaluated the carrier;
- *   - the words say whose reading it is: an inferred identity is "Olumi reads …", with the way out;
+ *   - the words say whose reading it is: an inferred identity is "Olumi reads …", and it promises no move nobody can make;
  *   - a carrier the last Run did not attest as evaluated (withdrawn, or no list) is prepared as an ordinary belief. On
  *     approval, the product's link writer decides from the run facts themselves. A lever the analysis DID use is never
  *     blocked here on a guess.
@@ -54,7 +54,9 @@ describe('⛔ R3-9: the Agent never prepares a change to a link an identity defi
       const { r, puts } = await propose(STRONG_ARGS, STRONG, last);
       expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'definitional_link' }));
       expect(String(r.detail)).toContain(OLUMI_READS);
-      expect(String(r.detail)).toContain('or tell me if MRR isn\'t that, and I\'ll stop reading it that way.');
+      expect(String(r.detail)).toContain('That reading is Olumi\'s, not yours; if MRR isn\'t that, say so.');
+      // AIQ 5868909577: no promise of a move nobody can make (there is no identity-withdrawal writer).
+      expect(String(r.detail)).not.toMatch(/I'll|I will|stop reading/);
       expect(r).not.toHaveProperty('proposal_id');
       expect(puts, 'nothing is prepared').toEqual([]);
     });
