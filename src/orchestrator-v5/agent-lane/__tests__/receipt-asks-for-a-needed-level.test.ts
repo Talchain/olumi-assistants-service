@@ -10,9 +10,27 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { readinessViewOf } from '../readiness-view.js';
 
-const served = JSON.parse(readFileSync(new URL('./fixtures/served-u3-receipt-79c299a.json', import.meta.url), 'utf8')) as {
+const capture = JSON.parse(readFileSync(new URL('./fixtures/served-u3-receipt-79c299a.json', import.meta.url), 'utf8')) as {
   assistant_text: string; analysis_ready: { may_run: boolean; status: string }; graph: unknown;
 };
+
+/** The capture's graph with ONE factor given a status-quo level; the capture's bytes on disk are untouched. */
+function withStatusQuoLevel(graph: unknown, factorId: string, value: number): unknown {
+  const g = graph as { nodes: Record<string, unknown>[] };
+  if (!g.nodes.some((n) => n.id === factorId)) throw new Error(`overlay target ${factorId} is not in the capture`);
+  return { ...g, nodes: g.nodes.map((n) => (n.id === factorId
+    ? { ...n, observed_state: { ...(n.observed_state as object | undefined), value } }
+    : n)) };
+}
+
+/**
+ * ⚠ OVERLAY, not the served bytes. Since #2164 this served graph would be REFUSED at the Run: "Paid AI add-on price" is
+ * a goal root with no status-quo level (a factor-scoped `MISSING_FACTOR_LEVEL`, which no waiver answers), so readiness
+ * now reads `may_run: false` where 79c299a read `true`. This test pins what the receipt says when the run IS admitted,
+ * so the overlay restores that "admitted run" premise: £0 a month (0 on the scale where the option's £10 is 0.1), as today
+ * there is no paid add-on and only "Keep £49 and add a paid AI add-on" introduces one. Everything else is as served.
+ */
+const served = { ...capture, graph: withStatusQuoLevel(capture.graph, 'fac_paid_ai_add_on_price', 0) };
 const ADD_ON = 'Keep £49 and add a paid AI add-on';
 const ASK = `One level is not set yet: what does "${ADD_ON}" set AI feature availability to?`;
 
