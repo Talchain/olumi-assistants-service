@@ -22,9 +22,11 @@ import {
 import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
 
 type Json = Record<string, any>;
+/** A served draft graph, as the producer and the verdict readers take it. */
+type Graph = Json & { nodes: any[]; edges: any[]; goal_constraints: any[] };
 const SERVED = JSON.parse(
   readFileSync(new URL('./fixtures/served-journey-c-budget-limit-063347Z.json', import.meta.url), 'utf8'),
-) as { c02: Json; c10: Json };
+) as { c02: Graph; c10: Graph };
 const clone = <T>(x: T): T => structuredClone(x);
 const LIMIT = 'agent-lane:total_investment:<=';
 const CHURN = 'agent-lane:monthly_churn:<=';
@@ -34,7 +36,7 @@ const C10_ASK = 'What is "Total investment" today, and what would it be under "F
   + '£20,000 over 6 months each under those options), not figures you gave, until you give yours.';
 
 /** The served C10 graph with one option's (or the node's) figure made the user's own. */
-function answered(g: Json, which: { today?: boolean; options?: readonly string[] }): Json {
+function answered(g: Graph, which: { today?: boolean; options?: readonly string[] }): Graph {
   const out = clone(g);
   for (const n of out.nodes as Json[]) {
     if (which.today === true && n.id === 'total_investment') n.observed_state = { ...n.observed_state, source: 'user_override' };
