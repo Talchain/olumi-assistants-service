@@ -28,7 +28,8 @@
  *   · FILL-ONLY: an existing baseline, whoever wrote it, is never overwritten;
  *   · its level has an author, as above;
  *   · PLoT reads the limit and the level on one scale, decision-grade (`levelLimitReadsOnNodeLevel`, B1), or the limit
- *     is in the factor's own unit on its own cap and the level's pair attests that cap (`levelLimitReadsOnNodeCap`).
+ *     is in the factor's own unit on its own cap and the level's pair attests that cap (`levelLimitReadsOnNodeCap`) AND
+ *     no option PLoT scores moves the factor only through its parts (`noOptionMovesTheTargetOnlyThroughItsParts`).
  */
 import { valuesMatch } from '../../../utils/reduction-framing.js';
 import { deriveInferredValues } from '../../coaching/inferred-value-disclosure.js';
@@ -98,6 +99,47 @@ export function levelLimitReadsOnNodeCap(graph: unknown, c: Rec, node: Rec, os: 
   return typeof os.value === 'number' && typeof os.raw_value === 'number' && valuesMatch(os.value, os.raw_value / cap);
 }
 
+/**
+ * ⛔ GUARD — verifier FIX_FIRST (T4): a component-set option without the total would be scored through 0.5 placeholder
+ * edges. Superseded once the `sum` carrier is minted (AIQ #72 5867700610).
+ *
+ * With a baseline carried by the cap proof, ISL scores the limit as `baseline + (option − status quo)`. An option that
+ * sets the limited factor itself is read at the level it sets. An option that sets a PART of it — a factor upstream of
+ * it (a direct parent, or further up) — and not the factor itself moves it only through the draft's edges, which are
+ * defaulted 0.5 placeholders, not the sum the user means: "Additional Advertising" at £18k on a £15k limit scored
+ * P 0.695 (the verifier's measurement). So such a target carries NO baseline, and its limit keeps the honest
+ * `missing_target_baseline` refusal it had before the cap proof. The options read are the ones PLoT scores (the run's
+ * final wire options); without them nothing is proven, so nothing carries (fail closed). Pure.
+ */
+function noOptionMovesTheTargetOnlyThroughItsParts(
+  targetId: string,
+  edges: readonly Rec[],
+  kindById: ReadonlyMap<unknown, unknown>,
+  options: ReadonlyArray<Record<string, unknown>> | undefined,
+): boolean {
+  if (options === undefined) return false;
+  const parts = new Set<unknown>();
+  const queue: unknown[] = [targetId];
+  while (queue.length > 0) {
+    const at = queue.shift();
+    for (const e of edges) {
+      if (e.to !== at || parts.has(e.from) || e.from === targetId) continue;
+      const k = kindById.get(e.from);
+      if (typeof k !== 'string' || k === 'option' || k === 'decision') continue;
+      parts.add(e.from);
+      queue.push(e.from);
+    }
+  }
+  if (parts.size === 0) return true;
+  const setsLevel = (v: unknown): boolean =>
+    (typeof v === 'number' && Number.isFinite(v)) || (isRec(v) && typeof v.value === 'number' && Number.isFinite(v.value));
+  return options.every((o) => {
+    const iv = isRec(o.interventions) ? o.interventions : {};
+    const movesAPart = Object.keys(iv).some((k) => parts.has(k));
+    return !movesAPart || setsLevel(iv[targetId]);
+  });
+}
+
 /** The level's author is known: the user's own figure, or Olumi's in the form the run discloses. */
 function levelHasAnAuthor(node: Rec, os: Rec): boolean {
   const source = typeof os.source === 'string' ? os.source : undefined;
@@ -105,8 +147,16 @@ function levelHasAnAuthor(node: Rec, os: Rec): boolean {
   return deriveInferredValues({ nodes: [node] }).length === 1;
 }
 
-/** The ids of the nodes whose current level a level limit is checked against on this run. */
-export function levelLimitBaselineNodeIds(graph: unknown, goalConstraints: unknown, goalNodeId?: string): Set<string> {
+/**
+ * The ids of the nodes whose current level a level limit is checked against on this run. `options` are the options PLoT
+ * scores (the run's final wire options); the cap proof carries nothing without them.
+ */
+export function levelLimitBaselineNodeIds(
+  graph: unknown,
+  goalConstraints: unknown,
+  goalNodeId?: string,
+  options?: ReadonlyArray<Record<string, unknown>>,
+): Set<string> {
   const out = new Set<string>();
   if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(goalConstraints)) return out;
   const nodes = graph.nodes.filter(isRec);
@@ -130,15 +180,22 @@ export function levelLimitBaselineNodeIds(graph: unknown, goalConstraints: unkno
     if (!levelHasAnAuthor(node, os)) continue;
     if (statedUnitAcrossPeriod(c, node) !== undefined) continue;
     const unit = typeof c.unit === 'string' ? c.unit : undefined;
-    if (!levelLimitReadsOnNodeLevel(c.value, unit, node, os) && !levelLimitReadsOnNodeCap(graph, c, node, os)) continue;
+    const onLevel = levelLimitReadsOnNodeLevel(c.value, unit, node, os);
+    const onCap = !onLevel && levelLimitReadsOnNodeCap(graph, c, node, os) && noOptionMovesTheTargetOnlyThroughItsParts(node.id, edges, kindById, options);
+    if (!onLevel && !onCap) continue;
     out.add(node.id);
   }
   return out;
 }
 
 /** The wire graph with each such node's current level carried as its baseline. Returns `graph` itself when none. */
-export function carryLevelLimitBaselines<G>(graph: G, goalConstraints: unknown, goalNodeId?: string): G {
-  const ids = levelLimitBaselineNodeIds(graph, goalConstraints, goalNodeId);
+export function carryLevelLimitBaselines<G>(
+  graph: G,
+  goalConstraints: unknown,
+  goalNodeId?: string,
+  options?: ReadonlyArray<Record<string, unknown>>,
+): G {
+  const ids = levelLimitBaselineNodeIds(graph, goalConstraints, goalNodeId, options);
   if (ids.size === 0 || !isRec(graph) || !Array.isArray(graph.nodes)) return graph;
   return {
     ...graph,
