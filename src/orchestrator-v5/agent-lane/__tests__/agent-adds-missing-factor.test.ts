@@ -188,11 +188,13 @@ describe('A1 — propose_new_option sends a new SWITCH switched on, in the same 
     const on = setup();
     await on.caps.proposeNewOption(ctx, call({ value: 1 }) as never);
     expect((paramsOf(on.sent)!['interventions'] as unknown[])[0]).toEqual({ factor_key: 'ai_add_on_offered', value: 1 });
-    for (const value of [100, 50, 0, 0.5]) {
+    // 100% means on (MG, served A05 pj-20260927T233309Z: agent-switch-level-refusal-loop.test.ts); every other share is refused.
+    for (const value of [50, 0, 0.5, 1, 150]) {
       const { caps, sent } = setup();
       const r = await caps.proposeNewOption(ctx, call({ value, unit: '%' }) as never) as { refusal?: string; detail?: string };
       expect(r.refusal, String(value)).toBe('switch_level_not_on');
-      expect(r.detail).toContain('leave kind out');
+      expect(r.detail).toContain('remove "level" from the acts_on entry for "AI add-on offered"');
+      if (value !== 0) expect(r.detail, String(value)).toContain('declare "AI add-on offered" as a graded factor instead');
       expect(sent).toEqual([]);
     }
   });
@@ -201,7 +203,8 @@ describe('A1 — propose_new_option sends a new SWITCH switched on, in the same 
    * ⛔ A SWITCH HAS NO LEVEL OF ITS OWN (independent verification, round 2). Before this, only the NUMBER was compared
    * with 1: £1/month, 1% or 1 hire — and a figure that is not a number at all — were taken as ON, the unit or string
    * dropped without a word and today-0 written as Olumi's; and 100% was refused while 1% was accepted. Every level
-   * that is not a bare 1 now carries a figure the switch cannot keep, so it is refused and nothing is sent.
+   * that does not mean on now carries a figure the switch cannot keep, so it is refused and nothing is sent. (100% — the
+   * whole of a share — MEANS on since the served A05 loop: agent-switch-level-refusal-loop.test.ts.)
    */
   it.each([
     ['£1/month', { value: 1, unit: '£/month' }],
@@ -209,7 +212,6 @@ describe('A1 — propose_new_option sends a new SWITCH switched on, in the same 
     ['1 hire', { value: 1, unit: 'hire' }],
     ["'0.5' (a string)", { value: '0.5' }],
     ["'50%' (a string)", { value: '50%' }],
-    ['100%', { value: 100, unit: '%' }],
     ["2 as Olumi's estimate", { value: 2, estimate: true, basis: 'a guess' }],
     ["1% as Olumi's estimate", { value: 1, unit: '%', estimate: true, basis: 'a guess' }],
     ["an estimate with no figure", { estimate: true, basis: 'a guess' }],
@@ -218,10 +220,10 @@ describe('A1 — propose_new_option sends a new SWITCH switched on, in the same 
     const r = await caps.proposeNewOption(ctx, call(level) as never) as { refusal?: string; detail?: string };
     expect(r.refusal).toBe('switch_level_not_on');
     expect(sent).toEqual([]);
-    // Why, in the user's terms: a switch has no level; say it is on under this option; ask for the figure if one was meant.
+    // Why, in the user's terms: a switch has no level; say it is on under this option; the exact next call names this entry.
     expect(r.detail).toContain('A switch has no level of its own');
     expect(r.detail).toContain('tell the user it is on under this option');
-    expect(r.detail).toContain('leave kind out, and ask the user for that figure');
+    expect(r.detail).toContain('call propose_new_option again with exactly the same arguments, except remove "level" from the acts_on entry for "AI add-on offered"');
   });
 
   it('CONTRAST: a bare 1 (no unit, no estimate) is on and is sent — as is a level that says estimate: false', async () => {
@@ -397,7 +399,7 @@ describe('A1 — propose_new_option sends a new SWITCH switched on, in the same 
     expect(r.refusal, JSON.stringify(r)).toBe('switch_level_not_on');
     expect(r.conflict_fields).toEqual(fields);
     expect(r.detail).toContain('A switch has no level of its own');
-    expect(r.detail).toContain('call propose_new_option again with no level for it');
+    expect(r.detail).toContain('call propose_new_option again with exactly the same arguments, except remove "level" from the acts_on entry for');
     expect(sent).toEqual([]);
   });
 
