@@ -973,9 +973,20 @@ function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'ana
         ...(str(c.provenance) ? { stated_by: c.provenance } : {}),
       };
     });
+  /**
+   * ⭐ PJ-C1 TOKENS, LEVER 2 (DL #72 5866036457): a STRUCTURAL link — from the decision to an option, or from an option
+   * to a factor it sets — is said by its ends only. Measured on served A09 (`c35f1c7`): 13 of the 26 links, all
+   * `{mean: 1, std: 0.01}`, "very strong", present for certain; 2,838 of the links' 5,533 characters, re-sent on every
+   * model call. Those figures are the engine's structure, not a strength anyone judged, and nothing the Agent says or
+   * proposes reads them. A link from an option that carries any other strength or existence keeps its full form.
+   */
+  const structuralFrom = new Set(g.nodes.filter((n) => n.kind === 'decision' || n.kind === 'option').map((n) => n.id));
   const links = g.edges.map((e) => {
     const source = (e.provenance !== null && typeof e.provenance === 'object') ? (e.provenance as { source?: unknown }).source : e.provenance;
     const st = (e.strength !== null && typeof e.strength === 'object') ? e.strength as { mean?: unknown; std?: unknown } : undefined;
+    const fixed = (st === undefined || (st.mean === 1 && (st.std === undefined || st.std === 0.01)))
+      && (e.exists_probability === undefined || e.exists_probability === 1) && e.effect_direction !== 'negative';
+    if (structuralFrom.has(e.from) && fixed) return { from: e.from, to: e.to };
     return {
       from: e.from,
       to: e.to,
