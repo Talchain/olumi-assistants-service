@@ -408,6 +408,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         + '< for less than or under, <= for at most, > for more than, >= for at least. Omit it for a new figure alone: the limit keeps its own.' },
       unit: { type: 'string', description: 'The unit the user wrote the figure in, if any.' },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
+      whole_request: WHOLE_REQUEST,
     }, ['limit_label', 'operator', 'new_value', 'rationale']),
   },
   {
@@ -507,6 +508,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         type: 'boolean',
         description: 'true ONLY when the USER gave this figure as the goal’s current level. Never set it for a figure you estimated.',
       },
+      whole_request: WHOLE_REQUEST,
     }, ['goal_label', 'value', 'unit', 'goal_is', 'user_stated']),
   },
   {
