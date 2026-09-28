@@ -29,12 +29,40 @@ export function limitNeedsTodaysLevel(frame: unknown): boolean {
 export function sayRelativeChange(operator: '>=' | '<=' | '>' | '<', fraction: number): string {
   const pct = Math.round(Math.abs(fraction) * 100 * 1e6) / 1e6;
   const side = fraction < 0 ? 'below' : 'above';
-  // A bound on a RISE caps it (<=) or floors it (>=); on a FALL the same comparator reads the other way round:
-  // "change <= -15%" is a fall of AT LEAST 15%.
-  const rising = fraction >= 0;
-  const words = operator === '<=' ? (rising ? 'no more than' : 'at least')
+  return `${changeWords(operator, fraction >= 0)} ${pct}% ${side} today`;
+}
+
+/**
+ * The comparator of a CHANGE, in words. A bound on a RISE caps it (<=) or floors it (>=); on a FALL the same comparator
+ * reads the other way round: "change <= -15%" is a fall of AT LEAST 15%.
+ */
+function changeWords(operator: '>=' | '<=' | '>' | '<', rising: boolean): string {
+  return operator === '<=' ? (rising ? 'no more than' : 'at least')
     : operator === '<' ? (rising ? 'less than' : 'more than')
       : operator === '>=' ? (rising ? 'at least' : 'no more than')
         : (rising ? 'more than' : 'less than');
-  return `${words} ${pct}% ${side} today`;
+}
+
+/**
+ * ⭐ THE ONE WAY A STORED LIMIT IS SAID (R1 S4-core; consumer map 28 Sep: 9 CEE sites printed "operator value unit").
+ * A LEVEL (or no frame, or legacy `delta`) is said exactly as before: `${words} ${figure(value, unit)}`, byte-identical.
+ * A CHANGE is said as the change it is, from today: `change_rel` 0.1 → "no more than 10% above today" (never "at most
+ * 0.1"); `change_abs` 5000 GBP → "no more than £5,000 above today". `words` is the level vocabulary
+ * (`LIMIT_OPERATOR_WORDS`) and `figure` the caller's own number formatter, passed in so this leaf stays import-free.
+ */
+export function sayLimitInFrame(args: {
+  readonly operator: '>=' | '<=' | '>' | '<';
+  readonly value: number;
+  readonly unit?: string;
+  readonly frame?: unknown;
+  readonly words: Readonly<Record<'>=' | '<=' | '>' | '<', string>>;
+  readonly figure: (value: number, unit: string | undefined) => string;
+}): string {
+  const { operator, value, unit, frame, words, figure } = args;
+  if (frame === 'change_rel') return sayRelativeChange(operator, value);
+  if (frame === 'change_abs') {
+    const rising = value >= 0;
+    return `${changeWords(operator, rising)} ${figure(Math.abs(value), unit)} ${rising ? 'above' : 'below'} today`;
+  }
+  return `${words[operator]} ${figure(value, unit)}`;
 }

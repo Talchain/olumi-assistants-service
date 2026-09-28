@@ -475,6 +475,8 @@ function summariseAddConstraint(
     operator,
     value,
     ...(unit !== undefined ? { unit } : {}),
+    // R1 S4-core: a change from today is said as the change, never "at most 0.1" (`sayLimitInFrame`).
+    ...(typeof after.value_frame === 'string' ? { valueFrame: after.value_frame } : {}),
   });
 
   // ⭐ THE VERDICT, JOINED BY IDENTITY.
