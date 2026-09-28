@@ -1890,7 +1890,9 @@ export function createAgentCapabilities(
       if (edge === undefined) {
         return { ok: false, mutated: false, refusal: 'no_such_link',
           detail: `The model has no link from "${from.label}" to "${to.label}", so there is no strength to record. Nothing was prepared. `
-            + 'If the user wants that link, offer to add it with propose_model_change.' };
+            // PJ-C3 (DL GO #72 5861666870): an "offer" is a second ask; the add IS the one change they approve.
+            + 'If the user has just sized that link, propose it now with propose_model_change, with the same strength and from_words: '
+            + 'one change for them to approve, not a question first. Otherwise, offer to add it.' };
       }
       const mean = (edge.strength !== null && typeof edge.strength === 'object') ? (edge.strength as { mean?: unknown }).mean : undefined;
       if (typeof mean !== 'number' || !Number.isFinite(mean)) {
