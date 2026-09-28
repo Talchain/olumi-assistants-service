@@ -1376,7 +1376,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(option.interventions?.[NEW_PRICE_FAC], JSON.stringify(option)).toEqual(expect.objectContaining({ value: 0.59, raw_value: 59 }));
   }, 120_000);
 
-  it('[PJ-A1 £49] CONTRAST (the probe\'s positive control): no today level given → committed with NO observed_state (never 0), and ISL\'s rule names the new price in the PLoT-bound request', async () => {
+  it('[PJ-A1 £49] CONTRAST (the probe\'s positive control): no today level given → committed with NO observed_state (never 0), and the Run is refused naming the new price (MISSING_FACTOR_LEVEL, #2164) — never a silent 0 to PLoT', async () => {
     graphOf.set(SCENARIO, structuredClone(JOURNEY_A));
     const t1 = await proposeJourneyA(undefined);
     const approve = approveChipOf(t1)!;
@@ -1386,7 +1386,23 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(g.nodes.find((x) => x.id === NEW_PRICE_FAC)).toBeDefined();
     expect(g.nodes.find((x) => x.id === NEW_PRICE_FAC)!.observed_state).toBeUndefined();
     expect(t2.assistant_text).toMatch(/Tell me its value today|Tell me today's value for "New Pro customer price"/);
-    expect(islDefaultedRootsReachingGoal(await plotBoundRequest())).toEqual([NEW_PRICE_FAC]);
+    // The SAME £59 follow-up as the positive row, so the ONLY difference between the two rows is the today level.
+    script = [
+      () => fnCall('propose_option_interventions', { interventions: [{ option_label: OPT_A, factor_label: NEW_PRICE, value: 59, unit: 'GBP/month', basis: 'the user said £59 for new Pro customers', user_stated: true }] }),
+      () => say('I would set it. Shall I?'),
+    ];
+    const t3 = await turn({ message: `Set "${NEW_PRICE}" to £59 under "${OPT_A}".` });
+    const approveLevel = approveChipOf(t3);
+    expect(approveLevel?.id, JSON.stringify(t3._agent.tool_calls)).toBeDefined();
+    await turn({ message: approveLevel!.message, source: 'chip', chip: { id: approveLevel!.id } });
+    // ⭐ With #2164's placeholder-zero readiness (merged in at this head), a new factor with no status-quo level never
+    // reaches PLoT as a silent 0: the Run is refused, and the ONE gap it names is the new price, by id. The positive row
+    // above (same path + the user's £49) passes this same loader, so the refusal is bound to the missing today level.
+    const refused = await plotBoundRequest().then(() => null, (e: unknown) => e) as
+      { name?: string; verdict?: { reasonCodes?: readonly string[]; issues?: readonly { code?: string; factor_id?: string }[] } } | null;
+    expect(refused?.name, 'the Run is refused before PLoT (never a silent 0)').toBe('AnalysisNotReadyError');
+    expect(refused!.verdict!.reasonCodes, JSON.stringify(refused!.verdict!.reasonCodes)).toContain('MISSING_FACTOR_LEVEL');
+    expect((refused!.verdict!.issues ?? []).filter((i) => i.code === 'MISSING_FACTOR_LEVEL').map((i) => i.factor_id)).toEqual([NEW_PRICE_FAC]);
   }, 120_000);
 
   it('[PJ-A1 £49] CONTRAST: a today figure only OLUMI wrote (never the user) → not stamped: no graded_today on the hold, no observed_state, and the Agent is told why', async () => {
