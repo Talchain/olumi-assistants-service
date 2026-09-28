@@ -292,7 +292,16 @@
                         "type": "string",
                         "enum": [
                           "level",
-                          "delta"
+                          "delta",
+                          "change_abs",
+                          "change_rel"
+                        ]
+                      },
+                      "quantity_frame": {
+                        "type": "string",
+                        "enum": [
+                          "level",
+                          "change"
                         ]
                       }
                     },
