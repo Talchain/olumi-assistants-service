@@ -118,7 +118,8 @@ describe('PJ-E-FIG (DL CHANGES_REQUIRED on #2235): a word the target shares only
   const scope = (target: string, sibling: string, rivals: boolean) => ({
     target: [target],
     others: [...E07, sibling],
-    ...(rivals ? { rivals: [...COULD_HOLD_MONEY, sibling] } : {}),
+    // The door passes its rivals AND the strict reading (`newFactorScopeIn`).
+    ...(rivals ? { rivals: [...COULD_HOLD_MONEY, sibling], strict: true as const } : {}),
   });
   const UNIT = 'GBP/year per engineer';
   const SAID = 'Senior engineers cost £120k a year each and juniors £65k a year each.';
@@ -145,5 +146,71 @@ describe('PJ-E-FIG (DL CHANGES_REQUIRED on #2235): a word the target shares only
     const hiring = { target: ['Developers hired'], others: ['Tech leads hired'] };
     expect(figureTheUserWroteFor(1, 'hires', 'Backfill 1 developer and 0 tech leads.', hiring)).toBe(true);
     expect(figureTheUserWroteFor(0, 'hires', 'Backfill 1 developer and 0 tech leads.', hiring)).toBe(false);
+    // Straight after the figure: no rate words in between, so only the conjunction rule keeps "juniors" off £120k.
+    const bare = 'Seniors are £120k and juniors £65k.';
+    expect(figureTheUserWroteFor(120000, UNIT, bare, scope('Junior engineer salary', 'Senior engineer salary', true))).toBe(false);
+    expect(figureTheUserWroteFor(120000, UNIT, bare, scope('Senior engineer salary', 'Junior engineer salary', true))).toBe(true);
+    expect(figureTheUserWroteFor(65000, UNIT, bare, scope('Junior engineer salary', 'Senior engineer salary', true))).toBe(true);
+  });
+});
+
+/**
+ * ⛔ DL RE-REVIEW OF #2235 (13:07Z 28 Sep), BLOCKING: journey E's OWN typed clarification — served with `source: composer`
+ * in pj-20260927T162124Z E04 and pj-20260927T181846Z E06 — let the SWAP through the add-factor door and refused the
+ * correct pairing. Three causes in the shared reading: "per senior" was read as a denominator and dropped the figure's
+ * owner; £65,000 took the previous item's "senior" across the "and"; and £120,000, with no label word left, fell through
+ * to "the user's, for any target". THE RULING: the door's reading is STRICT and opt-in (a); an unattributed figure among
+ * two or more is refused, never credited (b); rivals decide only for an amount in the unit's own kind (F1).
+ */
+describe('DL #2235 re-review: the add-factor door\'s STRICT reading (opt-in; every other door reads as before)', () => {
+  const E07 = ['ship the new platform', 'New senior engineers hired', 'New junior engineers hired', 'Annual salary spend',
+    'Senior hiring lead-time risk', 'Junior ramp-up risk', 'Budget cap breach risk', 'Incremental platform delivery…'];
+  const COULD_HOLD_MONEY = ['ship the new platform', 'Annual salary spend', 'Incremental platform delivery…'];
+  const door = (target: string) => {
+    const sibling = target.startsWith('Senior') ? 'Junior engineer salary' : 'Senior engineer salary';
+    return { target: [target], others: [...E07, sibling], rivals: [...COULD_HOLD_MONEY, sibling], strict: true as const };
+  };
+  const SENIOR = 'Senior engineer salary';
+  const JUNIOR = 'Junior engineer salary';
+
+  it.each([
+    ['"£120,000 … £65,000" (the served words)', 'Record them as annual salaries: £120,000 per senior engineer and £65,000 per junior engineer.'],
+    ['"£120k … £65k"', 'Record them as annual salaries: £120k per senior engineer and £65k per junior engineer.'],
+  ] as const)('RED: E04 %s — the swap is refused and the correct pairing binds, in both units', (_what, said) => {
+    for (const unit of ['GBP/year per engineer', 'GBP/year']) {
+      expect(figureTheUserWroteFor(65000, unit, said, door(SENIOR)), `swap senior 65000 (${unit})`).toBe(false);
+      expect(figureTheUserWroteFor(120000, unit, said, door(JUNIOR)), `swap junior 120000 (${unit})`).toBe(false);
+      expect(figureTheUserWroteFor(120000, unit, said, door(SENIOR)), `pair senior 120000 (${unit})`).toBe(true);
+      expect(figureTheUserWroteFor(65000, unit, said, door(JUNIOR)), `pair junior 65000 (${unit})`).toBe(true);
+      expect(figureTheUserWroteFor(99000, unit, said, door(SENIOR)), 'a figure not written').toBe(false);
+    }
+  });
+
+  it('RED (b) FAIL CLOSED: two figures no label word owns are refused for EVERY target — asked, never credited', () => {
+    const said = 'Record them as annual salaries: £120,000 and £65,000.';
+    for (const [value, target] of [[120000, SENIOR], [65000, SENIOR], [120000, JUNIOR], [65000, JUNIOR]] as const) {
+      expect(figureTheUserWroteFor(value, 'GBP/year per engineer', said, door(target)), `${value} → ${target}`).toBe(false);
+    }
+    // CONTROL: ONE figure no label word owns is still the user's (rule 4) — there is nothing it could be swapped with.
+    expect(figureTheUserWroteFor(120000, 'GBP/year per engineer', 'Record it as £120,000.', door(SENIOR))).toBe(true);
+    // CONTROL (a): opt-in — without `strict` the same two figures fall through to the user's, as every other door reads them.
+    const shared = { target: [SENIOR], others: [...E07, JUNIOR] };
+    expect(figureTheUserWroteFor(120000, 'GBP/year per engineer', said, shared)).toBe(true);
+  });
+
+  it('RED (F1): a bare count is never taken as a salary through the rivals — "hire 2 senior engineers" is a headcount', () => {
+    expect(figureTheUserWroteFor(2, 'GBP/year per engineer', 'We will hire 2 senior engineers.', door(SENIOR))).toBe(false);
+    expect(figureTheUserWroteFor(2, 'GBP/year per engineer', 'Hire 2 senior engineers and 3 juniors; seniors cost £120k.', door(SENIOR))).toBe(false);
+    expect(figureTheUserWroteFor(3, 'GBP/year per engineer', 'Hire 2 senior engineers and 3 juniors; seniors cost £120k.', door(JUNIOR))).toBe(false);
+    // CONTRAST: the £ amount in the same message still binds through the rivals.
+    expect(figureTheUserWroteFor(120000, 'GBP/year per engineer', 'Hire 2 senior engineers and 3 juniors; seniors cost £120k.', door(SENIOR))).toBe(true);
+  });
+
+  it('RED (a) OPT-IN: another door keeps its reading — a quoted option name "Keep £49 and add…" never gives £49 to a subscriber count', () => {
+    // The DL's corpus Scope B regression (8 typed messages at 0efb03f6): the option-level door's scope, `scopeIn(g, factor, option)`.
+    const said = 'For "Test £54 versus £59 by customer cohort before rollout": use £54 per month as its Pro plan price. '
+      + 'For "Keep £49 and add a paid AI add-on": it sets AI add-on price to £10 per month.';
+    const others = ['Pro plan price', 'Monthly churn', 'MRR', 'AI add-on price', 'AI feature availability'];
+    expect(figureTheUserWroteFor(49, 'GBP', said, { target: ['Pro paying subscribers', 'Keep Pro at £49'], others })).toBe(false);
   });
 });

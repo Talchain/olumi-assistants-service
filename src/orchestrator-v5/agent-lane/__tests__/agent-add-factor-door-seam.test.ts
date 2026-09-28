@@ -18,7 +18,9 @@
  *   (f) a negative or non-number figure → refused;
  *   (g) a label the model already has → refused, naming the tool that sets an existing factor's value.
  *   (l)–(n) DL CHANGES_REQUIRED on #2235 (1): a figure is the user's for THIS factor only where they wrote it about it —
- *       the two figures swapped, or the £400k limit typed in the same message, are refused; the correct pairing holds.
+ *       the two figures swapped, or the £400k limit typed in the same message, are refused; the correct pairing holds —
+ *       including journey E's own typed E04 clarification, in "£120,000" and "£120k" (DL re-review, 13:07Z, blocking);
+ *   (o) DL ruling (b): two figures no label word owns are refused for every factor (fail closed), never credited.
  *
  * ⛔ SOURCE. The ruling's `user_specified` is not a legal `ObservedStateV3.source` (see `add-factor-transaction.test.ts`
  * S0); the door stamps `USER_EDIT_SOURCE`, the product's literal for a figure the user typed in chat.
@@ -352,10 +354,15 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
   // ⛔ DL CHANGES_REQUIRED on #2235 (1): a figure is the user's for THIS factor only where they wrote it ABOUT it. The
   // unscoped matcher asked only whether the figure is somewhere in the message, so a swap and the £400k limit passed.
   const CONJOINED = 'Seniors are £120k a year and juniors £65k a year, with a £400k salary budget.';
+  // ⛔ DL re-review of #2235 (13:07Z), BLOCKING: journey E's OWN typed clarification (served, `source: composer`, pj E04/E06).
+  const E04 = 'Record them as annual salaries: £120,000 per senior engineer and £65,000 per junior engineer.';
+  const E04_K = 'Record them as annual salaries: £120k per senior engineer and £65k per junior engineer.';
   it.each([
     ['the seeded model', FIG_MSG, 'seed'],
     ['journey E\'s served graph', FIG_MSG, 'e07'],
     ['journey E\'s served graph, "…a year and juniors…"', CONJOINED, 'e07'],
+    ['journey E\'s served graph, E04 "£120,000 per senior engineer and £65,000 per junior engineer"', E04, 'e07'],
+    ['journey E\'s served graph, E04 in "£120k … £65k"', E04_K, 'e07'],
   ] as const)('(l) RED: on %s, the two figures SWAPPED (senior 65000, junior 120000) → refused today_not_set naming both, nothing held, byte-identical', async (_what, message, which) => {
     graphOf.set(SCENARIO, which === 'seed' ? seedGraph() : journeyE());
     const target = which === 'seed' ? 'Annual salary spend' : 'Incremental platform delivery…';
@@ -390,6 +397,8 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
   it.each([
     ['journey E\'s sentence', FIG_MSG],
     ['"…a year and juniors…"', CONJOINED],
+    ['E04 "£120,000 per senior engineer and £65,000 per junior engineer" (RED at 0efb03f6: the pairing was refused)', E04],
+    ['E04 in "£120k … £65k" (RED at 0efb03f6)', E04_K],
   ] as const)('(n) CONTROL (RED under a scope that lets "New senior engineers hired" claim "senior"): on journey E\'s served graph, %s with the CORRECT pairing → ONE hold carrying both figures as the user\'s', async (_what, message) => {
     graphOf.set(SCENARIO, journeyE());
     const t1 = await propose(factorArgs([], 'Incremental platform delivery…'), message);
@@ -403,6 +412,19 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect(figureOf('Senior engineer salary'), JSON.stringify(member)).toEqual(expect.objectContaining({ raw_value: 120000, source: USER_SOURCE }));
     expect(figureOf('Junior engineer salary'), JSON.stringify(member)).toEqual(expect.objectContaining({ raw_value: 65000, source: USER_SOURCE }));
     expect(USER_SOURCE).toBe('user_override');
+  }, 120_000);
+
+  it('(o) RED (DL ruling (b), fail closed): two figures no label word owns — "£120,000 and £65,000" — are the user\'s for NEITHER factor → refused today_not_set naming both, nothing held, byte-identical', async () => {
+    graphOf.set(SCENARIO, journeyE());
+    const before = bytes();
+    let out: Record<string, unknown> = {};
+    const t1 = await propose(factorArgs([], 'Incremental platform delivery…'), 'Record them as annual salaries: £120,000 and £65,000.', (o) => { out = o; });
+    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'today_not_set' }));
+    expect((out['today_not_set'] as { factor: string }[]).map((x) => x.factor).sort(), JSON.stringify(out)).toEqual(['Junior engineer salary', 'Senior engineer salary']);
+    expect(approveChipOf(t1)).toBeUndefined();
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(bytes()).toBe(before);
+    expect(newFactors()).toEqual([]);
   }, 120_000);
 
   it('(b) RED: a figure the user did NOT write → refused and said; NOTHING held (all-or-nothing, the written one too); byte-identical', async () => {

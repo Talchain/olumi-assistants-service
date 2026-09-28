@@ -208,8 +208,22 @@ export interface EntityScope {
    * never the target's. PJ-E-FIG (DL CHANGES_REQUIRED on #2235): on journey E's "Senior engineers cost £120k a year
    * each" the word "senior" is shared with "New senior engineers hired" (a count) and "Senior hiring lead-time risk",
    * neither of which a £ figure can be; without this, the user's own £120k for "Senior engineer salary" was refused.
+   * Only for an amount written in the unit's own kind (a £ amount for a money unit): a bare "2" in "hire 2 senior
+   * engineers" is a headcount's figure, so every other still shares the target's words (DL #2235 re-review F1).
    */
   readonly rivals?: readonly string[];
+  /**
+   * ⛔ THE STRICT READING — opt-in, passed only by the add-factor door, whose figure lands as the user's own on a factor
+   * that did not exist (DL ruling on the #2235 re-review, 13:07Z 28 Sep). Every other door keeps its reading byte for byte.
+   * Journey E's own typed clarification, "Record them as annual salaries: £120,000 per senior engineer and £65,000 per
+   * junior engineer.", passed the SWAP and refused the correct pairing under the shared reading:
+   *  · a rate names its OWNER: only its word ("per", "a", "each", "every") is passed over, never its noun, so "per senior
+   *    engineer" is about seniors (the door's unit is always declared, and its own words are passed over already);
+   *  · a conjunction straight after a figure ends its phrase: what follows "and" is the NEXT item;
+   *  · FAIL CLOSED: in a message that writes two figures or more, a figure no label word attributes is nobody's — never
+   *    "the user's, for any target". The user is asked.
+   */
+  readonly strict?: true;
 }
 
 /** A label's words, lower-cased, three characters or more ("Pro plan price" → pro, plan, price; "MRR" → mrr). */
@@ -264,15 +278,14 @@ export function factorTheUserNamed(
  * THE RULE, read with the model's OWN labels — no word list. Within the clause the figure was written in (a clause
  * ends at . ! ? ; , : a dash or a new line; same unit rules as `figureTheUserWrote`), the figure is ABOUT the entity it
  * sits beside:
- *   1. a label word in the two words right after it, unless an "and" straight after it starts the next item
- *      ("1 developer", "0 tech leads", "a 5% price rise");
+ *   1. a label word in the two words right after it ("1 developer", "0 tech leads", "a 5% price rise");
  *   2. else the nearest label word before it ("our MRR is £12,000", "price from £49 to £59");
  *   3. else the nearest label word after it ("£59 for the Pro plan");
  *   4. no label word in the clause at all ("Test £54 vs £59") — the figure is about what the user is asking for: theirs.
  * It is the user's for the target when that word is the target's. A word shared by the target's and another entity's
  * labels ("monthly" in churn and MRR) names neither and is passed over — another that could hold the figure, when the
- * caller says which (`EntityScope.rivals`). Every miss fails toward under-claiming: the
- * figure is left unset or recorded as Olumi's, and said.
+ * caller says which (`EntityScope.rivals`). `EntityScope.strict` reads rate owners and conjunctions, and refuses rule 4
+ * among two figures or more. Every miss fails toward under-claiming: the figure is left unset or recorded as Olumi's, and said.
  */
 export function figureTheUserWroteFor(value: number, unit: unknown, userText: string | null | undefined, scope: EntityScope): boolean {
   if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return false;
@@ -280,19 +293,27 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
   const targetWords = [...new Set(scope.target.flatMap(wordsOf))];
   const otherWords = [...new Set(scope.others.flatMap(wordsOf))];
   const rivalWords = scope.rivals === undefined ? otherWords : [...new Set(scope.rivals.flatMap(wordsOf))];
-  const decisiveTarget = targetWords.filter((t) => !rivalWords.some((o) => sameWord(t, o)));
+  const decisiveAmong = (rivals: readonly string[]): string[] => targetWords.filter((t) => !rivals.some((o) => sameWord(t, o)));
+  // Rivals decide only for an amount in the unit's own kind (`EntityScope.rivals`, F1): a bare "2" beside a £ unit is not.
+  const decisiveOwnKind = decisiveAmong(rivalWords);
+  const decisiveAnyKind = scope.rivals === undefined ? decisiveOwnKind : decisiveAmong(otherWords);
+  const ownKind = (kind: string): boolean => (family === 'currency' ? kind === 'currency' : family === 'percent' ? kind === 'percent' : true);
   const decisiveOther = otherWords.filter((o) => !targetWords.some((t) => sameWord(t, o)));
   // The figure's own unit names no entity (R&C #2013 B1): "£59 per month" in GBP/month is not about "Monthly churn".
   const unitWords = typeof unit === 'string' ? wordsOf(unit) : [];
-  const mentionOf = (w: string): 'target' | 'other' | null => {
+  const mentionOf = (w: string, decisiveTarget: readonly string[]): 'target' | 'other' | null => {
     if (w.length < 3) return null;
     if (unitWords.some((u) => sameWord(u, w))) return null;
     const t = decisiveTarget.some((x) => sameWord(x, w));
     const o = decisiveOther.some((x) => sameWord(x, w));
     return t && !o ? 'target' : o && !t ? 'other' : null;
   };
-  return [...findStatedAmounts(userText), ...countsInWords(userText)].some((a) => {
+  const strict = scope.strict === true;
+  const written = [...findStatedAmounts(userText), ...countsInWords(userText)];
+  const severalFigures = written.length >= 2;
+  return written.some((a) => {
     if (!amountIs(a, value, unit, family, userText)) return false;
+    const decisiveTarget = ownKind(a.kind) ? decisiveOwnKind : decisiveAnyKind;
     const amountEnd = a.index + a.matchedText.length;
     const before = userText.slice(0, a.index);
     const after = userText.slice(amountEnd);
@@ -307,7 +328,7 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
       else if (at >= amountEnd) right.push(m[0].toLowerCase());
     }
     const firstMention = (ws: readonly string[]): 'target' | 'other' | null => {
-      for (const w of ws) { const k = mentionOf(w); if (k !== null) return k; }
+      for (const w of ws) { const k = mentionOf(w, decisiveTarget); if (k !== null) return k; }
       return null;
     };
     // The figure's own RATE names no entity either (AI Conversation #70 5848429576): "£10 per month" on a factor with
@@ -321,12 +342,14 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
       ? /^\s*to\s+\p{L}+(?=\s*$|\s+(?:on|in|for|across|over|with|into|at|by)(?![\p{L}\p{N}]))/iu.exec(userText.slice(amountEnd, clauseEnd))
       : null;
     const skipped = rate ?? purpose;
-    const afterRate = right.slice(skipped === null ? 0 : [...skipped[0].matchAll(/[\p{L}\p{N}]+/gu)].length);
-    // ⛔ A figure followed straight away by a conjunction has ended its own phrase: what follows "and" is the NEXT item,
-    // never what this figure was written about (PJ-E-FIG, DL CR on #2235: "Seniors are £120k a year and juniors £65k a
-    // year" read £120k as the juniors'). Rule 1 then finds nothing and the nearest word before it decides; the words
-    // after the conjunction still count last. ("one senior and two juniors": "senior" comes first, so it is read as before.)
-    const rightAfter = /^(?:and|or|but|plus|while|whereas)$/.test(afterRate[0] ?? '') ? [] : afterRate.slice(0, 2);
+    const skippedWords = skipped === null ? 0 : [...skipped[0].matchAll(/[\p{L}\p{N}]+/gu)].length;
+    // STRICT: a rate names its OWNER — only the rate's own word is passed over ("per senior engineer" is about seniors).
+    const afterRate = right.slice(strict && rate !== null ? skippedWords - 1 : skippedWords);
+    // ⛔ STRICT: a figure followed straight away by a conjunction has ended its own phrase: what follows "and" is the NEXT
+    // item, never what this figure was written about (PJ-E-FIG, DL CR on #2235: "Seniors are £120k and juniors £65k" read
+    // £120k as the juniors'). Rule 1 then finds nothing and the nearest word before it decides; the words after the
+    // conjunction still count last. Opt-in (DL ruling (a)): every other door reads the two words after it, as before.
+    const rightAfter = strict && /^(?:and|or|but|plus|while|whereas)$/.test(afterRate[0] ?? '') ? [] : afterRate.slice(0, 2);
     if (a.kind === 'words') {
       // ⭐ A count in WORDS is an idiom far more often than a digit is ("That's one option we could try", "One more
       // thing"; AIQ #70 5859477600). It is the user's only when a label word of THIS entity sits within two words of it:
@@ -335,7 +358,10 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
       return near === 'target';
     }
     const about = firstMention(rightAfter) ?? firstMention([...left].reverse()) ?? firstMention(afterRate.slice(rightAfter.length));
-    return about === null || about === 'target';
+    // ⛔ STRICT, FAIL CLOSED (DL ruling (b)): among two figures or more, one no label word attributes is nobody's, never
+    // "the user's, for any target" — that fallthrough let a SWAP through the door. The user is asked.
+    if (about === null) return !(strict && severalFigures);
+    return about === 'target';
   });
 }
 

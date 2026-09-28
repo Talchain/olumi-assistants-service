@@ -182,7 +182,8 @@ function scopeIn(g: { readonly nodes: readonly { readonly label?: unknown; reado
  * this factor's. RIVALS (`EntityScope.rivals`): the others that could HOLD this figure. A factor measured in another kind
  * of unit ("New senior engineers hired", engineers, for a £ figure) and a risk (a likelihood, for any figure not a
  * percentage) cannot, so the words they share with the target ("senior") stay the target's; every word of their own
- * still marks a figure as not the target's.
+ * still marks a figure as not the target's. STRICT (`EntityScope.strict`): journey E's typed "£120,000 per senior engineer
+ * and £65,000 per junior engineer" binds each figure to its owner, and a figure nobody's words own, among two or more, is refused.
  */
 function newFactorScopeIn(
   g: { readonly raw?: unknown; readonly nodes: readonly { readonly id?: unknown; readonly label?: unknown; readonly kind?: unknown; readonly observed_state?: unknown }[] },
@@ -199,6 +200,8 @@ function newFactorScopeIn(
     target: [target],
     others: [...quantities.map((n) => n.label as string), ...siblings.map((s) => s.label)],
     rivals: [...quantities.filter(couldHold).map((n) => n.label as string), ...siblings.filter((s) => unitsConflict(figureUnit, s.unit) === null).map((s) => s.label)],
+    // The strict reading (DL ruling on the #2235 re-review): this door alone; every other door reads as before.
+    strict: true,
   };
 }
 
