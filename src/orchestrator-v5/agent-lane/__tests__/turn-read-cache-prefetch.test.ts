@@ -105,6 +105,18 @@ describe('turnReadCache.prefetch: the first read starts at the top of the turn, 
     expect(reads(s.calls)).toBe(2);
   });
 
+  it('CONTROL (discriminating): a reader that arrives AFTER a write while the prefetch is STILL held never joins it', async () => {
+    const s = fakeStore();
+    s.hold();
+    const c = turnReadCache(s.inner, READ);
+    c.prefetch();
+    await c.dispatch('/assist/v1/scenarios/s1/graph/register', {});
+    const pending = c.dispatch(READ, {}); // the prefetch (epoch 0) is still in flight; this reader is in epoch 1
+    s.release();
+    expect((await pending).json.graph_hash).toBe('v2');
+    expect(reads(s.calls)).toBe(2);
+  });
+
   it('CONTROL: a read that must see other writers (`{ fresh: true }`) never takes the prefetched read', async () => {
     const s = fakeStore();
     const c = turnReadCache(s.inner, READ);
