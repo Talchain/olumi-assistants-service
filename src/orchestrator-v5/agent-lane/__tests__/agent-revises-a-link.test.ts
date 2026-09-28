@@ -120,7 +120,7 @@ describe('the Agent records a link\'s strength as the user\'s own, through the p
   it('a stated reversal of direction is carried as the user said it; a negative link keeps its sign on the wire', async () => {
     const w = world(graphWith(-0.4, 'negative'));
     const caps = createAgentCapabilities(w.d, new ProposalStore());
-    const p = await caps.proposeLinkStrength!(ctxWeak, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'weak', direction: 'positive', rationale: 'x' });
+    const p = await caps.proposeLinkStrength!(ctxWeak, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'weak', direction: 'positive', direction_from_words: 'it pushes the other way', rationale: 'x' });
     await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     parsesOnTheWire(w.sent[0]!);
     expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ intent: 'set', direction_intent: 'positive', magnitude: 0.1, expected: { mean: -0.4, effect_direction: 'negative' } }));
