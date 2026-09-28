@@ -112,3 +112,28 @@ describe('unchanged', () => {
     expect(p.baseline_gaps).toEqual([{ factor: 'Pro paying subscribers' }]);
   });
 });
+
+describe('a USER-NAMED part keeps its authorship when the retry levels it as asked (verifier ALSO REPORT on T1 f773a217)', () => {
+  // Measured at f773a217: the identity gap's words ask for "provenance ai_proposed"; a retry obeying them re-authored the
+  // user's quantity as Olumi's, `keepsEveryUserStatedIdentity` refused it (`kept_first`), and the product stayed partless.
+  const NAMED_BRIEF = `${BRIEF} We have Pro paying subscribers today.`;
+  const userNamed = (subs: number | null, provenance: string) => {
+    const d = journeyC(subs);
+    return { ...d, factors: d.factors.map((f) => (f.label === 'Pro paying subscribers' ? { ...f, provenance } : f)) };
+  };
+
+  it('⭐ RED: the retry\'s Olumi estimate is adopted — cee_inference level, the quantity still the user\'s (from_brief)', async () => {
+    const { graph, inputs } = await construct(NAMED_BRIEF, userNamed(null, 'explicit'), userNamed(1500, 'ai_proposed'));
+    expect(inputs).toHaveLength(2);
+    expect(subscribers(graph)).toMatchObject({ provenance: 'from_brief', observed_state: { source: 'cee_inference', raw_value: 1500 } });
+  });
+
+  it('CONTRAST: a retry claiming the user\'s KNOWN level for that part is not re-authored — its figure faces the brief as before', async () => {
+    const known = (subs: number) => {
+      const d = userNamed(subs, 'explicit');
+      return { ...d, factors: d.factors.map((f) => (f.label === 'Pro paying subscribers' ? { ...f, baseline_known: true } : f)) };
+    };
+    const { graph } = await construct(NAMED_BRIEF, userNamed(null, 'explicit'), known(1500));
+    expect(subscribers(graph).observed_state).toMatchObject({ source: 'cee_inference', raw_value: 1500 });
+  });
+});

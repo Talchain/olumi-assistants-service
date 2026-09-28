@@ -606,6 +606,17 @@ export function limitedOutcomeFrame(c: Pick<CandidateConstraint, 'provenance' | 
   return inferenceClassFor(c.provenance) === 'brief_stated' ? percentLevelFrame(c.value, c.unit, c.frame) : undefined;
 }
 
+/**
+ * Whether a limit's `metric` names the entity labelled `label`, as admission attaches a limit to its node
+ * (`nodeIdForMetric`): the exact label, else the same text ignoring case and surrounding space — never a fuzzy guess
+ * (inner spacing is not collapsed). ONE rule, read by admission and by `findCoverageGaps` (`build-model.ts`), so a limit
+ * that re-kinds an outcome here is the limit gap there (verifier FIX_FIRST (4) on f773a217: "Monthly Churn" vs
+ * "Monthly churn" was re-kinded by admission and matched by nothing in the gap count).
+ */
+export function metricNamesLabel(metric: string, label: string): boolean {
+  return metric === label || metric.trim().toLowerCase() === label.trim().toLowerCase();
+}
+
 
 /**
  * ⭐ A BARE AMOUNT IS UNANALYSABLE, AND THAT IS THE PRODUCT'S OWN RULE.
@@ -2604,8 +2615,7 @@ function admitOnce(
   const nodeIdForMetric = (metric: string): string | undefined => {
     const exact = ids.get(metric);
     if (exact !== undefined) return exact;
-    const wanted = metric.trim().toLowerCase();
-    for (const [label, id] of ids) if (label.trim().toLowerCase() === wanted) return id;
+    for (const [label, id] of ids) if (metricNamesLabel(metric, label)) return id;
     return undefined;
   };
 

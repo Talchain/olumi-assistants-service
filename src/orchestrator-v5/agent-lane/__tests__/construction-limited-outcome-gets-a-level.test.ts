@@ -61,7 +61,8 @@ const withChurnLimit = (d: Draft, patch: Record<string, unknown>): Draft =>
 
 const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
 
-async function construct(...drafts: Draft[]) {
+const construct = (...drafts: Draft[]) => constructOn(BRIEF, ...drafts);
+async function constructOn(brief: string, ...drafts: Draft[]) {
   for (const d of drafts) expect(strict(d), JSON.stringify(strict.errors)).toBe(true);
   let graph: unknown;
   let trace: ConstructionTrace | undefined;
@@ -70,7 +71,7 @@ async function construct(...drafts: Draft[]) {
     if (path.endsWith('/graph/register')) { graph = structuredClone((body as { graph: unknown }).graph); return { status: 200, json: { model_version: { version_number: 1 } } }; }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const result = await buildModelFromBrief('7c7c7c7c-2222-4333-8444-555566667777', BRIEF, dispatch, async (req) => {
+  const result = await buildModelFromBrief('7c7c7c7c-2222-4333-8444-555566667777', brief, dispatch, async (req) => {
     inputs.push(String((req as { input: unknown }).input));
     return { text: JSON.stringify(drafts[Math.min(inputs.length - 1, drafts.length - 1)]) };
   }, (t) => { trace = t; }) as Record<string, unknown>;
@@ -200,5 +201,99 @@ describe('CONTRASTS — shapes that must not change', () => {
     expect(gapsOf(levelless('explicit', null))).toEqual([{ factor: 'Additional advertising spend' }]);
     const { trace } = await construct(levelless('explicit', null), levelless('ai_proposed', 0));
     expect(trace).toMatchObject({ retried: true, outcome: 'kept_first' });
+  });
+});
+
+/**
+ * VERIFIER FIX_FIRST on f773a217 (T1). (1) HIGH: the limit's OWN figure ("under 4%") returned by the retry as today's
+ * level, explicit and known, passed admission's user-figure check (4 IS in the brief — as the limit) and registered as
+ * the user's today-level. (2) MEDIUM: a today-level the brief DOES state could only be adopted as Olumi's ("not a figure
+ * you gave" — false). (3) LOW: a quantity drafted as factor AND outcome got two gaps and two retry lines. (4) LOW:
+ * admission names a limit's quantity case-insensitively (`nodeIdForMetric`), the outcome gap matched exactly.
+ */
+const BRIEF_STATED = BRIEF.replace(', while keeping monthly churn under 4%.', '. Monthly churn is 3% today, and we must keep it under 4%.');
+/** The retry's construction issues, one line per gap, as it was told them. */
+const retryLines = (input: string): string[] => JSON.parse(/Construction issues: (\[.*?\])\nCandidate to repair/.exec(input)![1]!) as string[];
+const churnLines = (input: string): string[] => retryLines(input).filter((l) => l.startsWith(`${CHURN}:`));
+
+describe('(1) the limit\'s own figure is never the user\'s level; (2) a level the brief states is', () => {
+  it('the contrast brief states churn today AND keeps the limit', () => {
+    expect(BRIEF_STATED).toContain('Monthly churn is 3% today, and we must keep it under 4%.');
+    expect(BRIEF_STATED).not.toBe(BRIEF);
+  });
+
+  it('⭐ RED (1): a retry giving the limit\'s own 4 as today\'s level (explicit, known, "%") is not the user\'s — Olumi\'s estimate, and the user is still asked', async () => {
+    const { graph, result, trace } = await construct(firstPass(), churnAsFactor('explicit', 4, { baseline_known: true }, '%'));
+    expect(trace).toMatchObject({ retried: true, outcome: 'adopted' });
+    const churn = node(graph, 'monthly_churn')!;
+    expect(churn.provenance).toBe('from_brief');
+    expect(churn.observed_state).toMatchObject({ raw_value: 4, source: 'cee_inference', extractionType: 'inferred' });
+    expect(asks(result).map((a) => [a.node_id, a.estimate])).toEqual([['monthly_churn', { value: 4, unit: '%' }]]);
+  });
+
+  it('INVARIANT (holds at base too; measured on 7 units at f773a217): the limit figure as a proportion (0.04 on a 0–1 frame) is never adopted as the user\'s', async () => {
+    for (const unit of ['proportion', 'share', 'rate', 'fraction', 'ratio', '%', 'decimal']) {
+      const { graph, trace } = await construct(firstPass(), churnAsFactor('explicit', 0.04, { baseline_known: true, plausible_max: 1 }, unit));
+      expect(trace, unit).toMatchObject({ outcome: 'kept_first' });
+      expect(node(graph, 'monthly_churn')!.observed_state?.source, unit).not.toBe('brief_extraction');
+    }
+  });
+
+  it('CONTRAST (1): the brief states today\'s level ("3% today … under 4%") — the retry\'s 3 registers as the user\'s (brief_extraction), and no ask calls it Olumi\'s', async () => {
+    const { graph, result, trace } = await constructOn(BRIEF_STATED, firstPass(), churnAsFactor('explicit', 3, { baseline_known: true }, '%'));
+    expect(trace).toMatchObject({ retried: true, outcome: 'adopted' });
+    expect(node(graph, 'monthly_churn')!.observed_state).toMatchObject({ raw_value: 3, source: 'brief_extraction' });
+    expect(asks(result)).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain('not a figure you gave');
+  });
+
+  it('CONTRAST (1): on that same brief, the limit\'s 4 given as today\'s level is still not the user\'s', async () => {
+    const { graph } = await constructOn(BRIEF_STATED, firstPass(), churnAsFactor('explicit', 4, { baseline_known: true }, '%'));
+    expect(node(graph, 'monthly_churn')!.observed_state).toMatchObject({ raw_value: 4, source: 'cee_inference' });
+  });
+
+  it('⭐ RED (2): the outcome gap tells the retry that a today-level the BRIEF states is given as the user\'s — never the limit\'s figure', async () => {
+    const { inputs } = await constructOn(BRIEF_STATED, firstPass(), churnAsFactor('explicit', 3, { baseline_known: true }, '%'));
+    const [line] = churnLines(inputs[1]!);
+    expect(line).toContain(`If the brief itself states today's level of ${CHURN} (never the limit's own figure), give that figure instead, with baseline_known:true, provenance explicit`);
+  });
+});
+
+describe('(3) one gap per quantity; (4) the quantity a limit names is read as admission reads it', () => {
+  const alsoAnOutcome = (d: Draft): Draft => ({ ...d, outcomes: firstPass().outcomes });
+
+  it('⭐ RED (3): churn drafted as BOTH a level-less factor and an outcome is ONE gap, and ONE retry line', async () => {
+    const d = alsoAnOutcome(churnAsFactor('explicit', null));
+    expect(gapsOf(d)).toEqual([{ factor: CHURN, because: 'limit' }]);
+    const { inputs } = await construct(d, churnAsFactor('ai_proposed', 3));
+    expect(churnLines(inputs[1]!)).toHaveLength(1);
+  });
+
+  it('⭐ RED (3): a churn FACTOR with a level beside the same outcome is no gap — admission registers the factor, level and all', async () => {
+    const d = alsoAnOutcome(churnAsFactor('ai_proposed', 3, {}, '%'));
+    expect(gapsOf(d)).toEqual([]);
+    const { graph, inputs } = await construct(d);
+    expect(inputs).toHaveLength(1);
+    expect(node(graph, 'monthly_churn')!.observed_state).toMatchObject({ raw_value: 3, source: 'cee_inference' });
+  });
+
+  it('(3 × 4): one outcome written twice ("Monthly churn", "monthly churn": one identity, one node) is ONE gap', () => {
+    const d = firstPass();
+    d.outcomes = [...d.outcomes, { label: 'monthly churn', provenance: 'explicit' }];
+    expect(gapsOf(d)).toEqual([{ factor: CHURN, because: 'limit', outcome: true }]);
+  });
+
+  it('⭐ RED (4): a limit on "Monthly Churn" names the outcome "Monthly churn" (admission re-kinds it) — a gap', async () => {
+    const d = withChurnLimit(firstPass(), { metric: 'Monthly Churn' });
+    expect(gapsOf(d)).toEqual([{ factor: CHURN, because: 'limit', outcome: true }]);
+    const { graph } = await construct(d);
+    expect(node(graph, 'monthly_churn')!.kind).toBe('factor');
+  });
+
+  it('CONTRAST (4): a metric admission does NOT resolve ("Monthly  churn", two spaces) re-kinds nothing and is no gap', async () => {
+    const d = withChurnLimit(firstPass(), { metric: 'Monthly  churn' });
+    expect(gapsOf(d)).toEqual([]);
+    const { graph } = await construct(d);
+    expect(node(graph, 'monthly_churn')!.kind).toBe('outcome');
   });
 });
