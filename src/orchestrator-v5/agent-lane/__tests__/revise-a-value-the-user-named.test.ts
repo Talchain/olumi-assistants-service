@@ -77,8 +77,8 @@ describe('the user can change an assumption the analysis named', () => {
       assumptions: [{ factor_label: 'Monthly churn rate', value: 6, unit: '%', basis: 'b', revise: true }],
     });
     // The old figure must be in the label the receipt quotes, not only the new one.
-    expect(r.public_label).toContain('4 %');
-    expect(r.public_label).toContain('6 %');
+    expect(r.public_label).toContain('4%');
+    expect(r.public_label).toContain('6%');
     expect(r.public_label).toMatch(/^Revise 1 value you asked to change: /);
   });
 

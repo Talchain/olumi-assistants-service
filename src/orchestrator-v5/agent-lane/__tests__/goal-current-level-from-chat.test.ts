@@ -152,7 +152,7 @@ describe('T2 — "Our current MRR is £12,000." is recorded on the goal, held fo
     expect(proposed.mutated).toBe(false);
     expect(typeof proposed.proposal_id).toBe('string');
     expect(proposed.public_label).toContain('MRR');
-    expect(proposed.public_label).toContain('12000');
+    expect(proposed.public_label).toContain('£12,000');
     // HELD: the proposer wrote nothing, and the stored goal is still the served one.
     expect(s.registers, 'nothing is written before the user approves').toEqual([]);
     expect(goalOf(s.graph())).not.toHaveProperty('observed_state');
@@ -365,7 +365,7 @@ describe('CONTROLS — the approval is the write, and only onto the model the us
     const revised = await s.call(TOOL, { ...T2, value: 13000 }) as ToolResult & { public_label?: string; replaces?: number };
     expect(revised.ok, JSON.stringify(revised)).toBe(true);
     expect(revised.replaces).toBe(12000);
-    expect(revised.public_label).toContain('12000');
-    expect(revised.public_label).toContain('13000');
+    expect(revised.public_label).toContain('£12,000');
+    expect(revised.public_label).toContain('£13,000');
   });
 });

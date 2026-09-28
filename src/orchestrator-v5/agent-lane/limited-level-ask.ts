@@ -18,9 +18,9 @@
  * `estimated-limit-card.ts`). Pure.
  */
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
-import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
 import { collectInterventionControlledFactorIds } from '../context/intervention-controlled-drivers.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from './limit-operator-words.js';
+import { sayFigure } from './say-figure.js';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
 
 export interface LimitedLevelAsk {
@@ -49,30 +49,6 @@ interface GraphNode {
   readonly kind: string;
   readonly label?: string;
   readonly observed_state?: unknown;
-}
-
-/**
- * A prefix symbol by itself or by its code, DERIVED from the one currency vocabulary (never a list of our own: the
- * `currency-vocabulary.union` guard): its single-character, non-letter keys, as that guard reads them. "GBP" and the
- * pound sign both say the pound sign; "CHF", "kr" and the dollar variants stay after the figure.
- */
-const PREFIX_SYMBOL: ReadonlyMap<string, string> = new Map(Object.entries(CURRENCY_SYMBOL_TO_CODE)
-  .filter(([symbol]) => [...symbol].length === 1 && !/[a-z]/i.test(symbol))
-  .flatMap(([symbol, code]) => [[symbol, symbol], [code, symbol]] as const));
-
-/**
- * As the user writes a figure: "3%", "£49 per month", "1,500 subscribers". A currency CODE unit says its symbol
- * ("GBP" → "£30,000", DL copy nit on #2205 5864058391), never "30,000 GBP".
- */
-function sayFigure(value: number, unit: string): string {
-  const n = value.toLocaleString('en-GB', { maximumFractionDigits: 2 });
-  if (unit === '') return n;
-  if (unit.startsWith('%')) return `${n}${unit}`;
-  // The leading token, up to a space or a "/" (served journey E: "GBP/year"); the rest keeps its own separator.
-  const [, head = '', rest = ''] = /^([^\s/]+)(.*)$/u.exec(unit) ?? [];
-  const symbol = PREFIX_SYMBOL.get(head.toUpperCase()) ?? PREFIX_SYMBOL.get(head);
-  if (symbol !== undefined) return `${symbol}${n}${rest}`;
-  return `${n} ${unit}`;
 }
 
 function sayLimit(row: LimitRow): string {

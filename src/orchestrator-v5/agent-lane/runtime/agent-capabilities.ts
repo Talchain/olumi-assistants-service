@@ -154,6 +154,7 @@ import { howStronglyWords } from '../strength-authorship-words.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel } from '../goal-current-level.js';
+import { sayFigureExactly } from '../say-figure.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
@@ -1132,8 +1133,13 @@ function riskUnreachableWhy(g: Pick<GraphRead, 'nodes'>, risk: string, links: re
 
 /** A goal target's direction, in words (the product's own receipt says "at least" / "at most"). */
 const DIRECTION_WORDS = { at_least: 'at least', at_most: 'at most' } as const;
-/** A goal target's figure in the user's units: the approve chip's own formatter, else the target writer's receipt formatter. */
-const targetFigure = (value: number, unit: string): string => figureInUserUnits(value, unit) ?? formatValueWithUnit(value, unit);
+/**
+ * A goal target's or a limit's figure as the user writes it ("£20,000 over 6 months", "£100,000 per month", "5%"): the
+ * lane's one figure formatter (DL #72 5866282787: "20000 £ over 6 months" reached a consent subject). A figure it cannot
+ * say exactly keeps the approve chip's own formatter, else the target writer's receipt formatter.
+ */
+const targetFigure = (value: number, unit: string): string =>
+  sayFigureExactly(value, unit) ?? figureInUserUnits(value, unit) ?? formatValueWithUnit(value, unit);
 
 /**
  * ⛔ A GOAL TARGET IS CONFIRMED WHERE THE PRODUCT'S WRITER PUTS IT, never from a status code. `add_constraint` (behind
@@ -2411,10 +2417,11 @@ export function createAgentCapabilities(
       const revisions = ordered.filter((a) => typeof a.replaces === 'number');
       const fresh = ordered.filter((a) => typeof a.replaces !== 'number');
       const notWritten = revisions.filter((a) => !a.userWrote);
-      const withUnit = (a: { value: number; unit: string }) => `${a.value}${a.unit !== '' ? ' ' + a.unit : ''}`;
+      const said = (value: number, unit: string) => sayFigureExactly(value, unit) ?? `${value}${unit !== '' ? ' ' + unit : ''}`;
+      const withUnit = (a: { value: number; unit: string }) => said(a.value, a.unit);
       const describe = (a: { label: string; value: number; unit: string; replaces?: number }) =>
         typeof a.replaces === 'number'
-          ? `${a.label}: ${a.replaces}${a.unit !== '' ? ' ' + a.unit : ''} \u2192 ${withUnit(a)}`
+          ? `${a.label}: ${said(a.replaces, a.unit)} \u2192 ${withUnit(a)}`
           : `${a.label} = ${withUnit(a)}`;
       const heading =
         revisions.length === 0
@@ -2859,7 +2866,7 @@ export function createAgentCapabilities(
         provenance: { authored_by: 'model_proposed', basis: 'what each option does, for the user to confirm or correct' },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label:
-          ordered.map((i) => `${i.option.label} ${i.needsLink ? `acts on ${i.factor.label} (a new link) and sets it` : `sets ${i.factor.label}`} to ${i.raw}${i.unit !== '' ? ' ' + i.unit : ''}`).join('; ') +
+          ordered.map((i) => `${i.option.label} ${i.needsLink ? `acts on ${i.factor.label} (a new link) and sets it` : `sets ${i.factor.label}`} to ${sayFigureExactly(i.raw, i.unit) ?? `${i.raw}${i.unit !== '' ? ' ' + i.unit : ''}`}`).join('; ') +
           ambiguousClause(ambiguous),
       });
       proposals.put(proposal);

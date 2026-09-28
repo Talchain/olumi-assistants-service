@@ -68,7 +68,7 @@ describe('⭐ PJ-C1 journey C: a goal level and a limit figure are answered from
     const parts = reply!.split('\n\n');
     // The consent subject itself says the re-derivation (#2214), so the reply adds no line of its own.
     expect(parts[0]).toBe(`I’ve prepared this change: ${String(r.public_label).charAt(0).toLowerCase()}${String(r.public_label).slice(1).replace(/\.$/, '')}.`);
-    expect(parts[0]).toMatch(/your figure: 72000 .*Olumi's estimate of "Pro paying subscribers" becomes about 1,469 .*\(was 1,300 .*it stays Olumi's estimate, not your figure — this assumes all of your "MRR" comes from "Pro plan monthly price" × "Pro paying subscribers"; tell me if some comes from elsewhere\.$/);
+    expect(parts[0]).toMatch(/your figure: £72,000\/month .*Olumi's estimate of "Pro paying subscribers" becomes about 1,469 .*\(was 1,300 .*it stays Olumi's estimate, not your figure — this assumes all of your "MRR" comes from "Pro plan monthly price" × "Pro paying subscribers"; tell me if some comes from elsewhere\.$/);
     expect(parts[1]).toBe('Approve this change?');
     expect(parts).toHaveLength(2);
     expect(reply).not.toMatch(/\.\./);

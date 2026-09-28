@@ -182,7 +182,15 @@ function money(n: number, unit: string): string {
   return `${symbol}${/^[A-Za-z]+$/.test(symbol) ? ' ' : ''}${digits}${m[2] !== undefined ? `/${m[2].replace(/\s*\bper\s+/gi, '/')}` : ''}`;
 }
 const whose = (by: FigureBy): string => (by === 'user' ? '' : by === 'approved' ? ' (an assumption you approved)' : ' (Olumi’s estimate)');
-const count = (n: number): string => n.toLocaleString('en-GB');
+/**
+ * A count, said as a whole number (DL #72 5866480722; MG 5866456413): a re-derived estimate is stored as the exact
+ * quotient (72,000 / 49 = 1,469.388…, so the identity holds exactly), and served run 3 said "1,469.388 Pro paying
+ * subscribers" and "a loss of at most 248.388". A fractional count is said "about 1,469"; the stored level is untouched.
+ */
+const count = (n: number): string =>
+  (Number.isInteger(n) ? n.toLocaleString('en-GB') : `about ${Math.round(n).toLocaleString('en-GB')}`);
+/** "of the 1,300", or "of about 1,469" when the count is itself an estimate's quotient. */
+const ofThe = (n: number): string => `of ${Number.isInteger(n) ? 'the ' : ''}${count(n)}`;
 
 /** The one paragraph the user reads (draft wording; AI Experience owns the words, MG reviews the maths). */
 export function breakEvenLine(be: BreakEven): string {
@@ -199,7 +207,7 @@ export function breakEvenLine(be: BreakEven): string {
   for (const r of be.options) {
     if (r.keep_at_least !== undefined) {
       parts.push(`At ${money(r.price, be.unit)}${whose(r.price_by)}, ${be.goal} stays at least that while ${count(r.keep_at_least)} or more `
-        + `of the ${count(be.baseline_volume)} stay (a loss of at most ${count(be.baseline_volume - r.keep_at_least)}).`);
+        + `${ofThe(be.baseline_volume)} stay (a loss of at most ${count(be.baseline_volume - r.keep_at_least)}).`);
     } else if (r.need_at_least !== undefined) {
       parts.push(`At ${money(r.price, be.unit)}${whose(r.price_by)}, it needs ${count(r.need_at_least)} or more (a gain of at least `
         + `${count(r.need_at_least - be.baseline_volume)}).`);
