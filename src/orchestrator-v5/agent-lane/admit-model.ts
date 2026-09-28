@@ -2929,7 +2929,10 @@ function admitOnce(
     (nodeId) => {
       const n = nodeById.get(nodeId);
       if (n === undefined) return undefined;
-      return { ...(n.observed_state ?? {}), ...(n.scale_frame !== undefined ? { scale_frame: n.scale_frame } : {}) };
+      return {
+        ...(n.observed_state ?? {}), ...(n.scale_frame !== undefined ? { scale_frame: n.scale_frame } : {}),
+        ...(typeof n.label === 'string' ? { label: n.label } : {}),
+      };
     },
   );
 

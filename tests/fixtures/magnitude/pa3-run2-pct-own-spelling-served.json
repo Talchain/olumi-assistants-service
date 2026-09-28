@@ -1,0 +1,30 @@
+{
+ "_provenance": "DL acceptance-f-runs pj-20260928T101026Z A14-run2-final.json (journey A run 2, CEE d202fc5, OpenAI): the churn node and its limit, verbatim; the only run of three whose limit unit was the node's own \"% monthly churn\" spelling, refused CONSTRAINT_REFUSED_FRAME_FIDELITY (threshold_clamped)",
+ "goal_node_id": "mrr",
+ "node": {
+  "id": "monthly_churn",
+  "kind": "factor",
+  "label": "Monthly churn",
+  "category": "observable",
+  "provenance": "ai_inferred",
+  "scale_frame": 100,
+  "observed_state": {
+   "unit": "% monthly churn",
+   "value": 0.03,
+   "source": "cee_inference",
+   "raw_value": 3,
+   "extractionType": "inferred"
+  }
+ },
+ "limit": {
+  "unit": "% monthly churn",
+  "label": "Monthly churn",
+  "value": 4,
+  "node_id": "monthly_churn",
+  "operator": "<=",
+  "provenance": "explicit",
+  "value_frame": "level",
+  "constraint_id": "agent-lane:monthly_churn:<=",
+  "operator_as_stated": "<"
+ }
+}
