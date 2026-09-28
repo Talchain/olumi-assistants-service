@@ -47,6 +47,19 @@ export const NODE_SIZE_MEANS_LINK_FROM =
   + 'what it affects: the link FROM it, to the outcome they name or imply. If it has several and they named none, ask which.';
 
 /**
+ * ⛔ PJ-C3 — THE USER'S BAND MUST REACH THE OUTCOME THEY NAME (DL #72 5864154474; Runtime re-land of the reverted #2183,
+ * with no domain example). Served, the Agent sized the link INTO a node: into the node named for what they sized
+ * (price → "Price-sensitive customer loss", `pj-20260928T052306Z`) or into a node between cause and outcome (price →
+ * "Price-driven churn", `…053022Z`). Either way, the node's own link on to churn stayed Olumi's estimate, so their
+ * "very high" never reached churn.
+ */
+export const THE_BAND_MUST_REACH_THE_OUTCOME =
+  'Their band must reach the outcome they name, and a link INTO a node never does: that node\u2019s own link on stays '
+  + 'Olumi\u2019s estimate. If a node is named for what they sized (a qualifier such as "risk" or "loss" still counts), record '
+  + 'the link FROM it to that outcome. If none is, record the link from its cause straight to that outcome, proposing it with '
+  + 'propose_model_change at their band if the model lacks it.';
+
+/**
  * ⛔ THE CARVE-OUT (DL CHANGES_REQUIRED on #2153, words verbatim): "how big a factor IS" also matches a FIGURE for the
  * factor itself ("churn is 6%"). That is the factor's value (`propose_assumptions`), never a link strength.
  */
@@ -310,7 +323,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'Record how strong an EXISTING link is, as the user\u2019s own estimate, when the user has just said it (for example '
       + '"that effect is strong", or "it actually pushes the other way"). This does NOT change anything: it prepares ONE change '
       + 'and returns its id, which you keep for authorise_change: show the user what it records, never the id, before they approve. '
-      + NODE_SIZE_MEANS_LINK_FROM + ' ' + A_FIGURE_IS_THE_FACTORS_VALUE + ' '
+      + NODE_SIZE_MEANS_LINK_FROM + ' ' + A_FIGURE_IS_THE_FACTORS_VALUE + ' ' + THE_BAND_MUST_REACH_THE_OUTCOME + ' '
       + 'The user\u2019s word is one of Olumi\u2019s strength bands. If the link already sits in that band, its strength is kept and only '
       + 'recorded as theirs; otherwise it is set to the middle of that band, and the result says the figure so you can tell them. '
       + 'Give `direction` ONLY when the user said the link pushes the other way. When they described the strength in their own words '
