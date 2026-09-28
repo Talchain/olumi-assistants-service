@@ -110,6 +110,8 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
       'beliefexistssource',
       'directionsource',
       // G1 (27 Sep): the goal's stated direction and deadline — CEE-owned; construction writes them from the brief.
+      // PJ-E-A2 part 2 (28 Sep): the deadline in the brief's own words — the same G1 class (sorted list).
+      'goal_deadline_as_stated',
       'goal_direction',
       'goal_horizon_months',
       // The saved-example stamps: CEE-owned and deliberately unread here (writer audit 2026-09-27).
@@ -153,6 +155,8 @@ const SIX_SMUGGLE_NAMES = [
   // G1 (27 Sep): the goal's stated direction and deadline joined the CEE-owned roots.
   'goal_direction',
   'goal_horizon_months',
+  // PJ-E-A2 part 2 (28 Sep): the deadline in the brief's own words — the same G1 class.
+  'goal_deadline_as_stated',
 ] as const;
 
 describe('corpus B — the six (now eight) smuggle names, hand-written', () => {

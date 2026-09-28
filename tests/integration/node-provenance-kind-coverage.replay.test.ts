@@ -615,6 +615,9 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       // it is the frame the target is stated in (the sibling of `goal_threshold_frame`), and a goal carrying only a
       // deadline carries no level of its metric, so its label binding must still be judged. Joining would let a
       // month count read as a level of the goal.
+      // PJ-E-A2 part 2, 28 Sep — THE VALUE-BEARING DECISION: `goal_deadline_as_stated` is NOT value-bearing, for the
+      // same reason and more plainly: it is the brief's WORDS for when ("by Q3"), never a number of the goal metric.
+      "goal_deadline_as_stated",
       "goal_direction",
       "goal_horizon_months",
       "goal_threshold",
