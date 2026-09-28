@@ -244,7 +244,7 @@ describe('§3 — the precondition, the user\'s direction, and the one exemption
     c.links = c.links.filter((l: Json) => !(l.from === 'Pro plan price' && l.to === 'MRR'));
     c.links.push({ from: 'Monthly churn', to: 'Pro plan price', direction: 'negative', provenance: 'explicit', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
   };
-  const reachersOfGoal = (edges: readonly { from: string; to: string }[]): Set<string> => {
+  const reachersOfGoal = (edges: readonly Json[]): Set<string> => {
     const seen = new Set<string>([GOAL]);
     for (let grew = true; grew;) {
       grew = false;
