@@ -72,9 +72,13 @@ describe('the route passes the read’s limit rows to the no-leader sentence', (
     expect(body.assistant_text).not.toContain('give me a real figure you know');
   });
 
-  it('CONTRAST: the read carries no rows → the default sentence, unchanged', async () => {
+  it('CONTRAST: the read carries no rows → the default limit clause, not the estimate-only one', async () => {
     const body = await turn();
     expect(body.assistant_text).not.toContain(RANKING);
-    expect(body.assistant_text).toContain('ask me what the limit needs before it can be checked');
+    expect(body.assistant_text).toContain('a limit on your model was not shown to be met on this run');
+    expect(body.assistant_text).not.toContain('checked only against Olumi’s estimates');
+    // R13 (DL 5871699334): this served run is ALSO a near tie (`leader_claim.separation: 'near_tie'`), so the near tie is
+    // said first and its action closes the sentence; the limit clause keeps its why.
+    expect(body.assistant_text).toContain('the options came out too close together on this run to tell apart, and a limit on your model');
   });
 });
