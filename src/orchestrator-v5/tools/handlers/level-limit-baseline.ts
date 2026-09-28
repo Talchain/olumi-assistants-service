@@ -27,7 +27,8 @@
  *     node that is not an option or the decision — PLoT strips those; ISL reads a root at its own level);
  *   · FILL-ONLY: an existing baseline, whoever wrote it, is never overwritten;
  *   · its level has an author, as above;
- *   · PLoT reads the limit and the level on one scale, decision-grade (`levelLimitReadsOnNodeLevel`, B1).
+ *   · PLoT reads the limit and the level on one scale, decision-grade (`levelLimitReadsOnNodeLevel`, B1), or the limit
+ *     is in the factor's own unit on its own cap and the level's pair attests that cap (`levelLimitReadsOnNodeCap`).
  */
 import { valuesMatch } from '../../../utils/reduction-framing.js';
 import { deriveInferredValues } from '../../coaching/inferred-value-disclosure.js';
@@ -48,8 +49,9 @@ const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !
  *   · the node's level is ATTESTED to be that percentage ÷ 100: framed on exactly 100 (`cap`, or the agent-lane estimate's
  *     `scale_frame`) AND `value` = `raw_value` ÷ 100 on the node itself. A unitless level in [0, 1) is NOT proof of a
  *     proportion on the `"%"` scale, and a node framed on 20 is read "≤ 10%" against raw/20 — neither carries.
- * Every other shape — unitless, currency, a percent phrasing PLoT does not read as `"%"` — carries nothing and fails
- * closed at ISL's `missing_target_baseline`: an honest "could not be checked", never a guessed frame.
+ * Every other shape — unitless, a percent phrasing PLoT does not read as `"%"`, a currency in another unit — carries
+ * nothing through THIS proof and fails closed at ISL's `missing_target_baseline`: an honest "could not be checked", never
+ * a guessed frame. A limit in the factor's OWN unit, read on its own cap, has its own proof (`levelLimitReadsOnNodeCap`).
  */
 export function levelLimitReadsOnNodeLevel(value: number, unit: string | undefined, node: Rec, os: Rec): boolean {
   if (unit === undefined || unit.trim() !== '%') return false;
@@ -74,6 +76,26 @@ function statedUnitAcrossPeriod(c: Rec, node: Rec | undefined): string | undefin
   const os = isRec(node.observed_state) ? node.observed_state : {};
   const nodeUnit = typeof os.unit === 'string' ? os.unit : undefined;
   return percentPeriodsDiffer(stamp.pre_normalisation_unit, nodeUnit) ? stamp.pre_normalisation_unit : undefined;
+}
+
+/**
+ * ⛔ A LIMIT IN THE FACTOR'S OWN UNIT IS READ ON ITS OWN CAP — AND SO IS THE LEVEL IT IS CHECKED AGAINST (served journey C,
+ * `pj-20260928T082121Z`: "£30,000 to spend" came back `unscored / CONSTRAINT_NOT_CONVERTIBLE` before AND after the user
+ * gave every figure).
+ *
+ * The budget factor is NON-ROOT on the scored model (the draft wired `feature spend → total spend` and `advertising spend
+ * → total spend`), so ISL checks the limit as `baseline + (option − status quo)` and refuses without a baseline
+ * (`missing_target_baseline`), and PLoT's sample-frame gate withholds it for the same reason (CONSTRAINT_TARGET_UNRELIABLE).
+ * `limitTargetCaps` already proves the THRESHOLD is read on `[0, cap]` (it carries the cap as `goal_threshold_cap`); the
+ * node's level is on that same scale when its own pair attests it — `value` = `raw_value` ÷ that cap. Then the carrier is
+ * the node's `value`, exactly as for the `"%"` shape: the same number, on the same scale as the threshold, never a new one.
+ * A level whose pair does not attest that cap (no `raw_value`, or `value` on another frame) carries nothing and keeps its
+ * honest refusal. Pure.
+ */
+export function levelLimitReadsOnNodeCap(graph: unknown, c: Rec, node: Rec, os: Rec): boolean {
+  const cap = limitTargetCaps(graph, [c]).get(node.id as string);
+  if (cap === undefined) return false;
+  return typeof os.value === 'number' && typeof os.raw_value === 'number' && valuesMatch(os.value, os.raw_value / cap);
 }
 
 /** The level's author is known: the user's own figure, or Olumi's in the form the run discloses. */
@@ -107,7 +129,8 @@ export function levelLimitBaselineNodeIds(graph: unknown, goalConstraints: unkno
     if (!isRec(os) || typeof os.value !== 'number' || !Number.isFinite(os.value) || os.baseline !== undefined) continue;
     if (!levelHasAnAuthor(node, os)) continue;
     if (statedUnitAcrossPeriod(c, node) !== undefined) continue;
-    if (!levelLimitReadsOnNodeLevel(c.value, typeof c.unit === 'string' ? c.unit : undefined, node, os)) continue;
+    const unit = typeof c.unit === 'string' ? c.unit : undefined;
+    if (!levelLimitReadsOnNodeLevel(c.value, unit, node, os) && !levelLimitReadsOnNodeCap(graph, c, node, os)) continue;
     out.add(node.id);
   }
   return out;
