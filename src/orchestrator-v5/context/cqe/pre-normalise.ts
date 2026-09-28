@@ -47,7 +47,12 @@ function truncateToCap(input: string): { text: string; messageTooLong: boolean }
 
 function normaliseText(input: string): string {
   const nfkc = input.normalize('NFKC');
-  const whitespaceCollapsed = nfkc.replace(/\s+/g, ' ').trim();
+  // ⛔ A BULLET IS NOT A MINUS (DL CHANGES_REQUIRED on CEE #2247). Collapsing whitespace erases the line starts, and after
+  // it "Costs:\n-£500" reads like "Costs: -£500", which the currency rule takes as a negative figure. So, BEFORE the
+  // collapse, a line-start "-" directly before a currency symbol is spaced off it ("- £500"): after a newline, or at the
+  // start of a message of more than one line. A one-line "-£500" is untouched, and so is every bullet before a digit.
+  const bulletsSpaced = nfkc.replace(/\n/.test(nfkc) ? /(^|\n)([ \t]*)-(?=[£$€])/g : /(\n)([ \t]*)-(?=[£$€])/g, '$1$2- ');
+  const whitespaceCollapsed = bulletsSpaced.replace(/\s+/g, ' ').trim();
   return stripThousandSeparators(whitespaceCollapsed);
 }
 
