@@ -174,10 +174,18 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   // The deadline's attestation, whatever it finds: held below only when `attested`; otherwise returned, never stored.
   const attestation = attestHorizon(brief, goal);
   if (goal === null || goal === undefined || goals.length !== 1) return { nodes: [...nodes], held: none, horizon: attestation };
-  const node = goals[0] as N & { readonly goal_threshold_raw?: unknown; readonly goal_threshold_unit?: unknown };
+  const node = goals[0] as N & { readonly goal_threshold_raw?: unknown; readonly goal_threshold_unit?: unknown; readonly goal_threshold_frame?: unknown };
   const raw = node.goal_threshold_raw;
+  // R1 S4-core: a CHANGE target is stored as the contract's figure (a fraction r for `change_rel`, a signed c for
+  // `change_abs`) and the brief writes it as the user said it: "cut it by 15%" is 15 in "%", "by 2 points" is 2 in the
+  // metric's unit. The sign is the comparator's and the verb's, never a written "-15".
+  const written = node.goal_threshold_frame === 'change_rel' && typeof raw === 'number'
+    ? { figure: Math.abs(raw * 100), unit: '%' as unknown }
+    : node.goal_threshold_frame === 'change_abs' && typeof raw === 'number'
+      ? { figure: Math.abs(raw), unit: goal.unit ?? node.goal_threshold_unit }
+      : { figure: raw, unit: goal.unit ?? node.goal_threshold_unit };
   const target = typeof raw === 'number' && Number.isFinite(raw) && goal.provenance === 'explicit'
-    && figureTheUserWrote(raw, goal.unit ?? node.goal_threshold_unit, brief);
+    && typeof written.figure === 'number' && figureTheUserWrote(Math.round(written.figure * 1e9) / 1e9, written.unit, brief);
   // The stored comparator's own schema reads it (one list, `NodeV3`): anything else is undefined, i.e. not held.
   const operator = target ? NodeV3.shape.goal_direction.parse(goal.operator) : undefined;
   const direction = operator !== undefined;

@@ -83,6 +83,9 @@ export function buildCandidateSchema(): Record<string, unknown> {
       target_stated: { type: 'boolean' },
       value: { anyOf: [{ type: 'number' }, { type: 'null' }] }, unit: { type: 'string' },
       horizon_months: { anyOf: [{ type: 'integer' }, { type: 'null' }] }, provenance,
+      // R1 (`@talchain/schemas` 0.61.0, `limit-frame.ts`): the frame the TARGET is stated in. REQUIRED, so strict output
+      // must say "level" rather than omit it; `admit-model.ts` writes a change only beside the user's stated level.
+      frame: { type: 'string', enum: ['level', 'change_abs', 'change_rel'] },
       // ⭐ THE GOAL'S CURRENT LEVEL, in the factor pattern (`baseline_known` beside a
       // nullable value). Without it a level-framed goal has no baseline and ISL
       // refuses Goal fit (`missing_goal_baseline`). REQUIRED so strict output must
@@ -101,7 +104,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
         stated_in_brief: { type: 'boolean', description: 'True only when the brief itself says which.' },
       }, ['modelled', 'alternative', 'stated_in_brief'])], description:
         'Null unless the goal metric could mean one part (a plan, product, segment or region) or the whole.' },
-    }, ['metric', 'operator', 'target_stated', 'value', 'unit', 'horizon_months', 'provenance', 'baseline_known', 'baseline_value', 'baseline_provenance', 'scope']),
+    }, ['metric', 'operator', 'target_stated', 'value', 'unit', 'horizon_months', 'provenance', 'frame', 'baseline_known', 'baseline_value', 'baseline_provenance', 'scope']),
     constraints: { type: 'array', items: obj({
       metric: { type: 'string' }, operator: { type: 'string', enum: ['>=', '<=', '>', '<'] },
       value: { type: 'number' }, unit: { type: 'string' }, provenance,
@@ -249,7 +252,7 @@ export const BUILD_INSTRUCTIONS = [
    * is a capability no caller uses — and a 0 attributed to the user is the worst of the
    * available wrong answers, because it reads as a deliberate choice they made.
    */
-  'A GOAL TARGET THE BRIEF DOES NOT STATE MUST BE LEFT UNSTATED. If the user named a number to reach \u2014 "to 40%", "by \u00a33m", "under 4 weeks" \u2014 set `target_stated: true` and put that number in `goal.value`. If they only named a DIRECTION \u2014 "increase productivity", "cut churn", "improve velocity" \u2014 then set `target_stated: false` and `goal.value: null`. Never substitute 0, never invent a plausible target, and never treat the absence of a number as a target of zero: a direction with no number is a complete and ordinary goal, and the analysis compares options against it perfectly well. Getting this wrong tells the user they asked for something they did not ask for.',
+  'A GOAL TARGET THE BRIEF DOES NOT STATE MUST BE LEFT UNSTATED. If the user named a number to reach \u2014 "to 40%", "by \u00a33m", "under 4 weeks" \u2014 set `target_stated: true` and put that number in `goal.value`. If they only named a DIRECTION \u2014 "increase productivity", "cut churn", "improve velocity" \u2014 then set `target_stated: false` and `goal.value: null`. Never substitute 0, never invent a plausible target, and never treat the absence of a number as a target of zero: a direction with no number is a complete and ordinary goal, and the analysis compares options against it perfectly well. Getting this wrong tells the user they asked for something they did not ask for. State the goal\u2019s `frame`: "level" when the user names the level to reach ("MRR to \u00a3250k", "keep the bill under \u00a340k"); "change_rel" when they name a PERCENTAGE change from today ("cut the cloud bill by 15%", "grow MRR by 10%"): `value` is that signed percentage (-15, or 10); "change_abs" when they name a change from today in the metric\u2019s own unit ("reduce churn by 2 points", "grow revenue by \u00a35k"): `value` is that signed amount. With no number, "level". `unit` is always the goal metric\u2019s own unit, the unit of its current level.',
   // ⛔ C46 (#70 5841314428): "£20k MRR" silently became Pro MRR on Paul's captured brief.
   'NEVER PICK THE SCOPE OF THE GOAL SILENTLY. When the goal metric could mean one part or the whole — the brief says "MRR" or "revenue" and the decision is about one plan, product, segment or region — set `goal.scope`: `modelled` is what your model actually measures (e.g. "the Pro plan only"), `alternative` is the other reading (e.g. "all plans together"), and `stated_in_brief` is true only when the brief itself says which. Keep `goal.metric` in the user’s own words: Olumi states the modelled scope as its own assumption and asks the user which they meant from `goal.scope`. When the goal metric has no part-or-whole reading, `goal.scope` is null.',
   // ⛔ C46 (#70 5841215337): the analysis adds effects up, so a product is approximated and its sign can flip.
