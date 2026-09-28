@@ -70,12 +70,16 @@ const edge = (from: string, to: string) => ({
   effect_direction: 'positive' as const,
 });
 
+// placeholder-zero (48f2e12f): every factor carries a status-quo level on the
+// canonical carrier (`observed_state.value`), matching its legacy `data.value`,
+// so an unvalued goal root never becomes the refusal these shapes are about.
 const factor = (id: string, label: string, category = 'controllable') => ({
   id,
   kind: 'factor',
   label,
   category,
   data: { value: 0.5, extractionType: 'explicit' },
+  observed_state: { value: 0.5 },
 });
 
 const GRAPH_BASE = { version: '1', default_seed: 42 };

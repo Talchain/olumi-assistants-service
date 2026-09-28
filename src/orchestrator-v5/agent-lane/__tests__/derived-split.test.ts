@@ -12,7 +12,7 @@
  * Anything else is not the user's derivation (Olumi's arithmetic, stamped and shown as such).
  */
 import { describe, it, expect } from 'vitest';
-import { readUserSplit, type StatedTotal } from '../derived-split.js';
+import { partUnit, readUserSplit, type StatedTotal } from '../derived-split.js';
 
 const SPEND: StatedTotal = { node_id: 'incremental_6_month_spend', label: 'Incremental 6-month spend', value: 30000, unit: 'GBP', by: 'user' };
 const C08 = "Let's spit it 50/50 at this stage.";
@@ -64,5 +64,18 @@ describe('any condition failing is NOT the user\'s derivation', () => {
   it('the "50/50 chance" idiom is a probability, not a split; no typed ratio at all is nothing', () => {
     expect(readUserSplit("It's a 50/50 chance it works.", [SPEND], 2)).toEqual({ kind: 'not_derived' });
     expect(readUserSplit('Add a third option.', [SPEND], 2)).toEqual({ kind: 'not_derived' });
+  });
+});
+
+describe('partUnit: the unit a proposed part is compared in', () => {
+  it('no unit, or the bare currency of the factor\'s unit, is the factor\'s unit; another period keeps its own', () => {
+    const F = 'GBP over 6 months';
+    expect(partUnit(undefined, F)).toBe(F);
+    expect(partUnit('GBP', F)).toBe(F);
+    expect(partUnit('£', F)).toBe(F);
+    expect(partUnit('GBP over 6 months', F)).toBe(F);
+    expect(partUnit('GBP per month', F)).toBe('GBP per month');
+    expect(partUnit('GBP', 'engineers')).toBe('GBP');
+    expect(partUnit('GBP', undefined)).toBe('GBP');
   });
 });

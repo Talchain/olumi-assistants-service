@@ -1,0 +1,1452 @@
+{
+ "_source": "SERVED capture: DL journey harness acceptance-f-runs/pj-20260927T214809Z/E01-brief-msg1.json (journey E, auto first pass, OpenAI). PJ-B3 FAIL: unvalued factor(s) ranked <=3 in factor_sensitivity/top_drivers (R&C root #70 5860314787; DL 5860325629).",
+ "trigger": "auto_first_pass",
+ "graph_hash": "916397661c087e82",
+ "draft_graph": {
+  "nodes": [
+   {
+    "id": "decision_new_platform_shipped_by_q3",
+    "kind": "decision",
+    "label": "Decision: New platform shipped…",
+    "provenance": "ai_inferred",
+    "description": "Decision: New platform shipped by Q3"
+   },
+   {
+    "id": "new_platform_shipped_by_q3",
+    "kind": "goal",
+    "label": "New platform shipped by Q3",
+    "provenance": "from_brief",
+    "goal_threshold_unit": "shipment (0/1)",
+    "goal_threshold_frame": "level"
+   },
+   {
+    "id": "two_senior_engineers",
+    "kind": "option",
+    "label": "Two senior engineers",
+    "provenance": "from_brief",
+    "interventions": {
+     "junior_engineers_hired": {
+      "value": 0,
+      "source": "cee_hypothesis"
+     },
+     "senior_engineers_hired": {
+      "value": 0.1,
+      "source": "brief_extraction"
+     }
+    }
+   },
+   {
+    "id": "four_junior_engineers",
+    "kind": "option",
+    "label": "Four junior engineers",
+    "provenance": "from_brief",
+    "interventions": {
+     "junior_engineers_hired": {
+      "value": 0.13333333333333333,
+      "source": "brief_extraction"
+     },
+     "senior_engineers_hired": {
+      "value": 0,
+      "source": "cee_hypothesis"
+     }
+    }
+   },
+   {
+    "id": "carry_on_as_now",
+    "kind": "option",
+    "label": "Carry on as now",
+    "provenance": "ai_inferred",
+    "is_baseline": true
+   },
+   {
+    "id": "senior_engineers_hired",
+    "kind": "factor",
+    "label": "Senior engineers hired",
+    "category": "controllable",
+    "provenance": "from_brief",
+    "observed_state": {
+     "cap": 20,
+     "unit": "engineers",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "junior_engineers_hired",
+    "kind": "factor",
+    "label": "Junior engineers hired",
+    "category": "controllable",
+    "provenance": "from_brief",
+    "observed_state": {
+     "cap": 30,
+     "unit": "engineers",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "annual_senior_engineer_salary",
+    "kind": "factor",
+    "label": "Annual senior engineer salary",
+    "category": "external",
+    "provenance": "ai_inferred",
+    "scale_frame": 250000,
+    "observed_state": {
+     "unit": "GBP/engineer/year",
+     "value": 0.52,
+     "source": "cee_inference",
+     "raw_value": 130000,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "annual_junior_engineer_salary",
+    "kind": "factor",
+    "label": "Annual junior engineer salary",
+    "category": "external",
+    "provenance": "ai_inferred",
+    "scale_frame": 150000,
+    "observed_state": {
+     "unit": "GBP/engineer/year",
+     "value": 0.4666666666666667,
+     "source": "cee_inference",
+     "raw_value": 70000,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "current_annual_salary_spend",
+    "kind": "factor",
+    "label": "Current annual salary spend",
+    "category": "observable",
+    "provenance": "from_brief",
+    "scale_frame": 1000000
+   },
+   {
+    "id": "budget_overrun_risk",
+    "kind": "risk",
+    "label": "Budget overrun risk",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "junior_onboarding_risk",
+    "kind": "risk",
+    "label": "Junior onboarding risk",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "engineering_delivery_capacity",
+    "kind": "outcome",
+    "label": "Engineering delivery capacity",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "annual_salary_spend",
+    "kind": "outcome",
+    "label": "Annual salary spend",
+    "provenance": "from_brief"
+   }
+  ],
+  "edges": [
+   {
+    "to": "two_senior_engineers",
+    "from": "decision_new_platform_shipped_by_q3",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "four_junior_engineers",
+    "from": "decision_new_platform_shipped_by_q3",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "carry_on_as_now",
+    "from": "decision_new_platform_shipped_by_q3",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "senior_engineers_hired",
+    "from": "two_senior_engineers",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "junior_engineers_hired",
+    "from": "two_senior_engineers",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "senior_engineers_hired",
+    "from": "four_junior_engineers",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "junior_engineers_hired",
+    "from": "four_junior_engineers",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "senior_engineers_hired",
+    "from": "carry_on_as_now",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "junior_engineers_hired",
+    "from": "carry_on_as_now",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "engineering_delivery_capacity",
+    "from": "senior_engineers_hired",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "engineering_delivery_capacity",
+    "from": "junior_engineers_hired",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "junior_onboarding_risk",
+    "from": "junior_engineers_hired",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "engineering_delivery_capacity",
+    "from": "junior_onboarding_risk",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "new_platform_shipped_by_q3",
+    "from": "engineering_delivery_capacity",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "annual_salary_spend",
+    "from": "senior_engineers_hired",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "annual_salary_spend",
+    "from": "junior_engineers_hired",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "annual_salary_spend",
+    "from": "annual_senior_engineer_salary",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "annual_salary_spend",
+    "from": "annual_junior_engineer_salary",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "annual_salary_spend",
+    "from": "current_annual_salary_spend",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "budget_overrun_risk",
+    "from": "annual_salary_spend",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "new_platform_shipped_by_q3",
+    "from": "budget_overrun_risk",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   }
+  ],
+  "node_count": 14,
+  "edge_count": 21,
+  "goal_constraints": [
+   {
+    "unit": "GBP/year",
+    "label": "Annual salary spend",
+    "value": 400000,
+    "node_id": "annual_salary_spend",
+    "operator": "<=",
+    "provenance": "explicit",
+    "value_frame": "level",
+    "constraint_id": "agent-lane:annual_salary_spend:<="
+   }
+  ]
+ },
+ "analysis_result": {
+  "type": "analysis_result",
+  "summary": "Olumi ran a first pass on the model it had just drafted. Nothing in it is confirmed yet, so no option is put forward and no result is called reliable. Use it to find what is wrong.",
+  "leading_option_id": null,
+  "computed_against_hash": "916397661c087e82",
+  "enrichment": {
+   "option_comparison": [
+    {
+     "id": "two_senior_engineers",
+     "label": "Two senior engineers",
+     "status": "computed",
+     "outcome": {
+      "p10": -0.15222756247894734,
+      "p50": -0.04232887504144915,
+      "p90": 0.023780641616696938,
+      "std": 0.07157819483278449,
+      "mean": -0.054722848317287014,
+      "n_samples": 10000,
+      "validity_ratio": 1,
+      "n_valid_samples": 10000,
+      "percentiles_source": "samples"
+     },
+     "downside": {
+      "p05": -0.18919764747636122,
+      "cvar_10": -0.20355033316729124,
+      "expected_regret": 0.010870867120251005
+     },
+     "option_id": "two_senior_engineers",
+     "option_label": "Two senior engineers"
+    },
+    {
+     "id": "four_junior_engineers",
+     "label": "Four junior engineers",
+     "status": "computed",
+     "outcome": {
+      "p10": -0.15105736631577502,
+      "p50": -0.03880542043383514,
+      "p90": 0.030459224755751458,
+      "std": 0.07319229665264035,
+      "mean": -0.05168239191797709,
+      "n_samples": 10000,
+      "validity_ratio": 1,
+      "n_valid_samples": 10000,
+      "percentiles_source": "samples"
+     },
+     "downside": {
+      "p05": -0.18911561006204397,
+      "cvar_10": -0.2025878489147343,
+      "expected_regret": 0.007830410720941084
+     },
+     "option_id": "four_junior_engineers",
+     "option_label": "Four junior engineers"
+    },
+    {
+     "id": "carry_on_as_now",
+     "label": "Carry on as now",
+     "status": "computed",
+     "outcome": {
+      "p10": -0.15735432162658808,
+      "p50": -0.05167413259241545,
+      "p90": 0,
+      "std": 0.06770134212218601,
+      "mean": -0.0643286788133378,
+      "n_samples": 10000,
+      "validity_ratio": 1,
+      "n_valid_samples": 10000,
+      "percentiles_source": "samples"
+     },
+     "downside": {
+      "p05": -0.19237022788071095,
+      "cvar_10": -0.20755663345553987,
+      "expected_regret": 0.020476697616301796
+     },
+     "option_id": "carry_on_as_now",
+     "option_label": "Carry on as now"
+    }
+   ],
+   "factor_sensitivity": [
+    {
+     "source": "graph",
+     "direction": "negative",
+     "factor_id": "annual_senior_engineer_salary",
+     "confidence": 0.4155,
+     "elasticity": 1,
+     "evpi_method": "heuristic",
+     "driver_label": "biggest",
+     "factor_label": "Annual senior engineer salary",
+     "value_source": "cee_inference",
+     "evidence_hint": false,
+     "influence_rank": 3,
+     "rank_flip_rate": 0.3,
+     "importance_rank": 1,
+     "influence_score": 1,
+     "importance_basis": "graph_structural",
+     "confidence_source": "plot_unified_from_isl_bootstrap",
+     "sensitivity_score": -0.125,
+     "flip_risk_category": "correlated",
+     "value_of_information": 0,
+     "attribution_stability": "low",
+     "confidence_components": {
+      "sampling_stability": 0.25,
+      "structural_certainty": 0.5
+     },
+     "confidence_provenance": {
+      "input_quality": "standard",
+      "is_provisional": true,
+      "formula_version": "plot_unified_v3",
+      "calibration_status": "provisional_pending_pilot_calibration",
+      "computation_source": "plot_unified_from_isl_bootstrap"
+     },
+     "value_extraction_type": "inferred",
+     "evpi_percentage_points": 0
+    },
+    {
+     "source": "graph",
+     "direction": "negative",
+     "factor_id": "annual_junior_engineer_salary",
+     "confidence": 0.4235,
+     "elasticity": 1,
+     "evpi_method": "heuristic",
+     "driver_label": "strong",
+     "factor_label": "Annual junior engineer salary",
+     "value_source": "cee_inference",
+     "evidence_hint": false,
+     "influence_rank": 4,
+     "rank_flip_rate": 0.6,
+     "importance_rank": 2,
+     "influence_score": 1,
+     "importance_basis": "graph_structural",
+     "confidence_source": "plot_unified_from_isl_bootstrap",
+     "sensitivity_score": -0.125,
+     "flip_risk_category": "correlated",
+     "value_of_information": 0,
+     "attribution_stability": "low",
+     "confidence_components": {
+      "sampling_stability": 0.25,
+      "structural_certainty": 0.5
+     },
+     "confidence_provenance": {
+      "input_quality": "standard",
+      "is_provisional": true,
+      "formula_version": "plot_unified_v3",
+      "calibration_status": "provisional_pending_pilot_calibration",
+      "computation_source": "plot_unified_from_isl_bootstrap"
+     },
+     "value_extraction_type": "inferred",
+     "evpi_percentage_points": 0
+    },
+    {
+     "source": "graph",
+     "direction": "negative",
+     "factor_id": "current_annual_salary_spend",
+     "confidence": 0.5,
+     "elasticity": 1,
+     "evpi_method": "heuristic",
+     "driver_label": "strong",
+     "factor_label": "Current annual salary spend",
+     "evidence_hint": false,
+     "influence_rank": 5,
+     "importance_rank": 3,
+     "influence_score": 1,
+     "importance_basis": "graph_structural",
+     "confidence_source": "plot_unified_from_graph",
+     "sensitivity_score": -0.125,
+     "flip_risk_category": "correlated",
+     "value_of_information": 0,
+     "confidence_components": {
+      "sampling_stability": null,
+      "structural_certainty": 0.5
+     },
+     "confidence_provenance": {
+      "input_quality": "degenerate_fallback",
+      "is_provisional": true,
+      "formula_version": "plot_unified_v2",
+      "calibration_status": "provisional_pending_pilot_calibration",
+      "computation_source": "plot_unified_from_graph"
+     },
+     "evpi_percentage_points": 0
+    },
+    {
+     "source": "graph",
+     "direction": "positive",
+     "factor_id": "senior_engineers_hired",
+     "confidence": 0.3,
+     "elasticity": 0,
+     "zero_reason": "intervention_override",
+     "driver_label": "strong",
+     "factor_label": "Senior engineers hired",
+     "value_source": "cee_inference",
+     "influence_rank": 1,
+     "rank_flip_rate": 0.2,
+     "importance_rank": 4,
+     "influence_score": 1,
+     "importance_basis": "graph_structural",
+     "confidence_source": "plot_unified_from_isl_bootstrap",
+     "sensitivity_score": 0,
+     "flip_risk_category": "isolated",
+     "value_of_information": 0,
+     "attribution_stability": "negligible",
+     "confidence_components": {
+      "sampling_stability": 0,
+      "structural_certainty": 0.5
+     },
+     "confidence_provenance": {
+      "input_quality": "standard",
+      "is_provisional": true,
+      "formula_version": "plot_unified_v3",
+      "calibration_status": "provisional_pending_pilot_calibration",
+      "computation_source": "plot_unified_from_isl_bootstrap"
+     },
+     "range_derivation_source": "default"
+    },
+    {
+     "source": "graph",
+     "direction": "positive",
+     "factor_id": "junior_engineers_hired",
+     "confidence": 0.3,
+     "elasticity": 0,
+     "zero_reason": "intervention_override",
+     "driver_label": "strong",
+     "factor_label": "Junior engineers hired",
+     "value_source": "cee_inference",
+     "influence_rank": 2,
+     "rank_flip_rate": 0.2,
+     "importance_rank": 5,
+     "influence_score": 1,
+     "importance_basis": "graph_structural",
+     "confidence_source": "plot_unified_from_isl_bootstrap",
+     "sensitivity_score": 0,
+     "flip_risk_category": "isolated",
+     "value_of_information": 0,
+     "attribution_stability": "negligible",
+     "confidence_components": {
+      "sampling_stability": 0,
+      "structural_certainty": 0.5
+     },
+     "confidence_provenance": {
+      "input_quality": "standard",
+      "is_provisional": true,
+      "formula_version": "plot_unified_v3",
+      "calibration_status": "provisional_pending_pilot_calibration",
+      "computation_source": "plot_unified_from_isl_bootstrap"
+     },
+     "range_derivation_source": "default"
+    }
+   ],
+   "robustness": {
+    "near_tie": {
+     "gap": 0.16614999999999597,
+     "is_tie": false,
+     "threshold": 0.1
+    },
+    "robust_edges": [],
+    "fragile_edges": [
+     {
+      "to_id": "engineering_delivery_capacity",
+      "edge_id": "junior_engineers_hired->engineering_delivery_capacity",
+      "from_id": "junior_engineers_hired",
+      "visible": true,
+      "severity": "error",
+      "to_label": "Engineering delivery capacity",
+      "from_label": "Junior engineers hired",
+      "switch_probability": 0.6328,
+      "alternative_winner_id": "two_senior_engineers",
+      "alternative_winner_label": "Two senior engineers",
+      "marginal_switch_probability": 0.33
+     },
+     {
+      "to_id": "new_platform_shipped_by_q3",
+      "edge_id": "engineering_delivery_capacity->new_platform_shipped_by_q3",
+      "from_id": "engineering_delivery_capacity",
+      "visible": true,
+      "severity": "warning",
+      "to_label": "New platform shipped by Q3",
+      "from_label": "Engineering delivery capacity",
+      "switch_probability": 0.4768,
+      "alternative_winner_id": "carry_on_as_now",
+      "alternative_winner_label": "Carry on as now",
+      "marginal_switch_probability": 0.27
+     },
+     {
+      "to_id": "budget_overrun_risk",
+      "edge_id": "senior_engineers_hired->budget_overrun_risk",
+      "from_id": "senior_engineers_hired",
+      "visible": true,
+      "severity": "warning",
+      "to_label": "Budget overrun risk",
+      "from_label": "Senior engineers hired",
+      "switch_probability": 0.4697554697554698,
+      "alternative_winner_id": "two_senior_engineers",
+      "alternative_winner_label": "Two senior engineers"
+     },
+     {
+      "to_id": "annual_salary_spend",
+      "edge_id": "senior_engineers_hired->annual_salary_spend",
+      "from_id": "senior_engineers_hired",
+      "visible": true,
+      "severity": "warning",
+      "to_label": "Annual salary spend",
+      "from_label": "Senior engineers hired",
+      "switch_probability": 0.35,
+      "alternative_winner_id": "two_senior_engineers",
+      "alternative_winner_label": "Two senior engineers",
+      "marginal_switch_probability": 0
+     },
+     {
+      "to_id": "new_platform_shipped_by_q3",
+      "edge_id": "budget_overrun_risk->new_platform_shipped_by_q3",
+      "from_id": "budget_overrun_risk",
+      "visible": true,
+      "severity": "warning",
+      "to_label": "New platform shipped by Q3",
+      "from_label": "Budget overrun risk",
+      "switch_probability": 0.348,
+      "alternative_winner_id": "two_senior_engineers",
+      "alternative_winner_label": "Two senior engineers",
+      "marginal_switch_probability": 0
+     },
+     {
+      "to_id": "annual_salary_spend",
+      "edge_id": "current_annual_salary_spend->annual_salary_spend",
+      "from_id": "current_annual_salary_spend",
+      "visible": true,
+      "severity": "warning",
+      "to_label": "Annual salary spend",
+      "from_label": "Current annual salary spend",
+      "switch_probability": 0.3468,
+      "alternative_winner_id": "two_senior_engineers",
+      "alternative_winner_label": "Two senior engineers"
+     },
+     {
+      "to_id": "annual_salary_spend",
+      "edge_id": "annual_junior_engineer_salary->annual_salary_spend",
+      "from_id": "annual_junior_engineer_salary",
+      "visible": true,
+      "severity": "warning",
+      "to_label": "Annual salary spend",
+      "from_label": "Annual junior engineer salary",
+      "switch_probability": 0.3452,
+      "alternative_winner_id": "two_senior_engineers",
+      "alternative_winner_label": "Two senior engineers",
+      "marginal_switch_probability": 0
+     },
+     {
+      "to_id": "budget_overrun_risk",
+      "edge_id": "annual_junior_engineer_salary->budget_overrun_risk",
+      "from_id": "annual_junior_engineer_salary",
+      "visible": true,
+      "severity": "warning",
+      "to_label": "Budget overrun risk",
+      "from_label": "Annual junior engineer salary",
+      "switch_probability": 0.34421980300673927,
+      "alternative_winner_id": "two_senior_engineers",
+      "alternative_winner_label": "Two senior engineers",
+      "marginal_switch_probability": 0
+     },
+     {
+      "to_id": "junior_onboarding_risk",
+      "edge_id": "junior_engineers_hired->junior_onboarding_risk",
+      "from_id": "junior_engineers_hired",
+      "visible": true,
+      "severity": "warning",
+      "to_label": "Junior onboarding risk",
+      "from_label": "Junior engineers hired",
+      "switch_probability": 0.3436,
+      "alternative_winner_id": "two_senior_engineers",
+      "alternative_winner_label": "Two senior engineers"
+     },
+     {
+      "to_id": "budget_overrun_risk",
+      "edge_id": "annual_senior_engineer_salary->budget_overrun_risk",
+      "from_id": "annual_senior_engineer_salary",
+      "visible": true,
+      "severity": "warning",
+      "to_label": "Budget overrun risk",
+      "from_label": "Annual senior engineer salary",
+      "switch_probability": 0.3383516203113039,
+      "alternative_winner_id": "two_senior_engineers",
+      "alternative_winner_label": "Two senior engineers",
+      "marginal_switch_probability": 0
+     },
+     {
+      "to_id": "annual_salary_spend",
+      "edge_id": "annual_senior_engineer_salary->annual_salary_spend",
+      "from_id": "annual_senior_engineer_salary",
+      "visible": true,
+      "severity": "warning",
+      "to_label": "Annual salary spend",
+      "from_label": "Annual senior engineer salary",
+      "switch_probability": 0.3356,
+      "alternative_winner_id": "two_senior_engineers",
+      "alternative_winner_label": "Two senior engineers",
+      "marginal_switch_probability": 0
+     },
+     {
+      "to_id": "budget_overrun_risk",
+      "edge_id": "current_annual_salary_spend->budget_overrun_risk",
+      "from_id": "current_annual_salary_spend",
+      "visible": true,
+      "severity": "warning",
+      "to_label": "Budget overrun risk",
+      "from_label": "Current annual salary spend",
+      "switch_probability": 0.32999486389316895,
+      "alternative_winner_id": "two_senior_engineers",
+      "alternative_winner_label": "Two senior engineers"
+     },
+     {
+      "to_id": "engineering_delivery_capacity",
+      "edge_id": "senior_engineers_hired->engineering_delivery_capacity",
+      "from_id": "senior_engineers_hired",
+      "visible": true,
+      "severity": "warning",
+      "to_label": "Engineering delivery capacity",
+      "from_label": "Senior engineers hired",
+      "switch_probability": 0.2412,
+      "alternative_winner_id": "carry_on_as_now",
+      "alternative_winner_label": "Carry on as now",
+      "marginal_switch_probability": 0.51
+     },
+     {
+      "to_id": "budget_overrun_risk",
+      "edge_id": "junior_engineers_hired->budget_overrun_risk",
+      "from_id": "junior_engineers_hired",
+      "visible": true,
+      "severity": "warning",
+      "to_label": "Budget overrun risk",
+      "from_label": "Junior engineers hired",
+      "switch_probability": 0.22131773085728823,
+      "alternative_winner_id": "two_senior_engineers",
+      "alternative_winner_label": "Two senior engineers",
+      "marginal_switch_probability": 0.29
+     }
+    ]
+   },
+   "option_comparison_status": "computed",
+   "edge_e_values": [
+    {
+     "to_id": "engineering_delivery_capacity",
+     "e_value": 1.2,
+     "edge_id": "senior_engineers_hired::engineering_delivery_capacity",
+     "from_id": "senior_engineers_hired",
+     "to_label": "Engineering delivery capacity",
+     "flip_mean": 0.6,
+     "stability": {
+      "n_seeds": 10,
+      "band_max": 0.895646,
+      "band_min": 0.246722,
+      "band_width": 0.648924,
+      "band_median": 0.44911,
+      "n_seeds_flipped": 6,
+      "seed_flip_means": [
+       null,
+       0.895646,
+       0.527358,
+       0.246722,
+       0.393125,
+       0.323164,
+       null,
+       null,
+       0.505095,
+       null
+      ]
+     },
+     "from_label": "Senior engineers hired",
+     "current_mean": 0.5,
+     "flip_direction": "increase"
+    },
+    {
+     "to_id": "engineering_delivery_capacity",
+     "e_value": 1,
+     "edge_id": "junior_engineers_hired::engineering_delivery_capacity",
+     "from_id": "junior_engineers_hired",
+     "to_label": "Engineering delivery capacity",
+     "flip_mean": 0.425,
+     "stability": {
+      "n_seeds": 10,
+      "band_max": 0.800908,
+      "band_min": 0.093198,
+      "band_width": 0.70771,
+      "band_median": 0.292386,
+      "n_seeds_flipped": 8,
+      "seed_flip_means": [
+       0.300448,
+       0.410142,
+       0.219766,
+       0.284325,
+       null,
+       0.623769,
+       0.126645,
+       0.093198,
+       0.800908,
+       null
+      ]
+     },
+     "from_label": "Junior engineers hired",
+     "current_mean": 0.5,
+     "flip_direction": "decrease"
+    },
+    {
+     "to_id": "new_platform_shipped_by_q3",
+     "e_value": 1,
+     "edge_id": "engineering_delivery_capacity::new_platform_shipped_by_q3",
+     "from_id": "engineering_delivery_capacity",
+     "to_label": "New platform shipped by Q3",
+     "flip_mean": 0.199999,
+     "stability": {
+      "n_seeds": 10,
+      "band_max": 0.865535,
+      "band_min": -1e-06,
+      "band_width": 0.865536,
+      "band_median": 0.091616,
+      "n_seeds_flipped": 10,
+      "seed_flip_means": [
+       -1e-06,
+       -1e-06,
+       0.865535,
+       0.248001,
+       0.281382,
+       -1e-06,
+       0.09335,
+       0.089882,
+       -1e-06,
+       0.289921
+      ]
+     },
+     "from_label": "Engineering delivery capacity",
+     "current_mean": 0.5,
+     "flip_direction": "decrease"
+    },
+    {
+     "to_id": "budget_overrun_risk",
+     "e_value": 1,
+     "edge_id": "senior_engineers_hired::budget_overrun_risk",
+     "from_id": "senior_engineers_hired",
+     "to_label": "Budget overrun risk",
+     "flip_mean": 0.125,
+     "stability": {
+      "n_seeds": 10,
+      "band_max": 0.680538,
+      "band_min": -0.818993,
+      "band_width": 1.499531,
+      "band_median": 0.287737,
+      "n_seeds_flipped": 8,
+      "seed_flip_means": [
+       -0.144104,
+       null,
+       0.611242,
+       0.680538,
+       0.355215,
+       0.35569,
+       -0.818993,
+       null,
+       0.22026,
+       -1e-06
+      ]
+     },
+     "from_label": "Senior engineers hired",
+     "current_mean": 0.25,
+     "flip_direction": "decrease"
+    },
+    {
+     "to_id": "budget_overrun_risk",
+     "e_value": 1.375,
+     "edge_id": "junior_engineers_hired::budget_overrun_risk",
+     "from_id": "junior_engineers_hired",
+     "to_label": "Budget overrun risk",
+     "flip_mean": 0.343751,
+     "stability": {
+      "n_seeds": 10,
+      "band_max": 0.744053,
+      "band_min": -0.309185,
+      "band_width": 1.053238,
+      "band_median": 0.166168,
+      "n_seeds_flipped": 8,
+      "seed_flip_means": [
+       0.326823,
+       null,
+       -1e-06,
+       -0.309185,
+       0.279991,
+       0.179456,
+       0.744053,
+       null,
+       0.15288,
+       -1e-06
+      ]
+     },
+     "from_label": "Junior engineers hired",
+     "current_mean": 0.25,
+     "flip_direction": "increase"
+    }
+   ],
+   "inference_warnings": [
+    {
+     "code": "CONSTRAINT_TARGET_UNRELIABLE",
+     "message": "The target on \"Annual salary spend\" can't be scored against this model: \"Annual salary spend\" is calculated from the factors feeding into it, so the analysis produces a modelled change for it, not a reading on the same scale as your target. Comparing the two would report a near-zero chance for every option no matter how good the options are, so goal-fit probabilities were withheld for this run rather than shown. Setting a current value for \"Annual salary spend\" would not change that — it is calculated from its inputs, so it has no measured starting point of its own to anchor to. Your limit is recorded and was left unscored rather than scored against the wrong number.",
+     "severity": "warning"
+    },
+    {
+     "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+     "message": "10 edge E-value entries were omitted from edge_e_values: 10 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+     "severity": "info"
+    },
+    {
+     "code": "CONSTRAINT_NODE_DEFAULT_BASE",
+     "field": "nodes[annual_salary_spend].base",
+     "message": "Node 'annual_salary_spend' has no ParameterUncertainty — defaulted to base=0.0, and its root ancestor(s) 'current_annual_salary_spend' carry no observed value or ParameterUncertainty (defaulted to 0.0); constraint probability may be unreliable",
+     "severity": "info"
+    },
+    {
+     "code": "ROOT_NODE_DEFAULT_VALUE",
+     "field": "nodes[current_annual_salary_spend].observed_state.value",
+     "message": "No starting value was provided for \"Current annual salary spend\", so the analysis used a default of 0.0. Results for downstream nodes may be unreliable until a real value or range is set.",
+     "severity": "info",
+     "node_label": "Current annual salary spend"
+    },
+    {
+     "code": "CONSTRAINT_NOT_CONVERTIBLE",
+     "field": "nodes[annual_salary_spend].observed_state.baseline",
+     "message": "A 'level' frame requires constraint target node 'annual_salary_spend' to carry observed_state.baseline to convert the level into the samples' frame, but it carries no observed_state at all.",
+     "severity": "warning"
+    },
+    {
+     "code": "GOAL_DIRECTION_UNATTESTED",
+     "field": "goal_direction",
+     "message": "No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team's stated aim: if the goal is a quantity to reduce, or the aim is to land near a target rather than as high as possible, this ranking answers a different question. Send goal_direction to rank against the stated objective.",
+     "severity": "warning"
+    },
+    {
+     "code": "GOAL_ANCESTOR_DATA_GAP",
+     "field": "nodes[new_platform_shipped_by_q3]",
+     "message": "Goal node 'new_platform_shipped_by_q3' is scored from its forward-propagated outcome distribution, but root ancestor(s) 'current_annual_salary_spend' carry no observed value or ParameterUncertainty and defaulted to 0.0 — goal-level probabilities partially rest on placeholder zeros (insufficient data).",
+     "severity": "info"
+    },
+    {
+     "code": "EVPI_UNAVAILABLE",
+     "field": "p_win_sensitivity",
+     "message": "Win-probability sensitivity (p_win_sensitivity) was skipped: its metric is P(joint_goal) and at least one goal constraint could not be resolved into its target's sample frame. Base analysis is unaffected.",
+     "severity": "warning",
+     "elapsed_ms": 2223.7
+    }
+   ],
+   "confidence_tier": "needs_work",
+   "flip_thresholds": [
+    {
+     "unit": "engineers",
+     "factor_id": "senior_engineers_hired",
+     "flip_value": null,
+     "flip_reason": "structurally_invariant",
+     "probes_used": 0,
+     "value_scale": "display",
+     "factor_label": "Senior engineers hired",
+     "current_value": 0,
+     "current_display": "0 engineers",
+     "iterations_used": 0,
+     "no_flip_in_range": true,
+     "alternative_winner_id": null,
+     "alternative_winner_label": null
+    },
+    {
+     "unit": "engineers",
+     "factor_id": "junior_engineers_hired",
+     "flip_value": null,
+     "flip_reason": "structurally_invariant",
+     "probes_used": 0,
+     "value_scale": "display",
+     "factor_label": "Junior engineers hired",
+     "current_value": 0,
+     "current_display": "0 engineers",
+     "iterations_used": 0,
+     "no_flip_in_range": true,
+     "alternative_winner_id": null,
+     "alternative_winner_label": null
+    },
+    {
+     "unit": "GBP/engineer/year",
+     "factor_id": "annual_senior_engineer_salary",
+     "flip_value": null,
+     "flip_reason": "structurally_invariant",
+     "probes_used": 0,
+     "value_scale": "normalised",
+     "factor_label": "Annual senior engineer salary",
+     "current_value": 0.52,
+     "iterations_used": 0,
+     "no_flip_in_range": true,
+     "alternative_winner_id": null,
+     "alternative_winner_label": null
+    },
+    {
+     "unit": "GBP/engineer/year",
+     "factor_id": "annual_junior_engineer_salary",
+     "flip_value": null,
+     "flip_reason": "structurally_invariant",
+     "probes_used": 0,
+     "value_scale": "normalised",
+     "factor_label": "Annual junior engineer salary",
+     "current_value": 0.4666666666666667,
+     "iterations_used": 0,
+     "no_flip_in_range": true,
+     "alternative_winner_id": null,
+     "alternative_winner_label": null
+    }
+   ],
+   "decision_brief": {
+    "options": [
+     {
+      "label": "Carry on as now",
+      "option_id": "carry_on_as_now"
+     },
+     {
+      "label": "Four junior engineers",
+      "option_id": "four_junior_engineers"
+     },
+     {
+      "label": "Two senior engineers",
+      "option_id": "two_senior_engineers"
+     }
+    ],
+    "version": "1",
+    "brief_id": "cf86e8d8-06d9-475b-b01c-2de8970fdccd",
+    "warnings": [
+     {
+      "code": "CONSTRAINT_NODE_DEFAULT_BASE",
+      "message": "Constraint node 'annual_salary_spend' has no ParameterUncertainty and is non-root — defaulted to base=0.0, and its root ancestor(s) 'current_annual_salary_spend' carry no observed value or ParameterUncertainty (defaulted to 0.0); constraint probability may be unreliable",
+      "severity": "warning"
+     },
+     {
+      "code": "CONSTRAINT_OUT_OF_DOMAIN",
+      "message": "Constraint agent-lane:annual_salary_spend:<= targets outcome node \"annual_salary_spend\" with threshold 400000 outside [0,1] range",
+      "severity": "warning"
+     },
+     {
+      "code": "CONSTRAINT_UNGROUNDED",
+      "message": "Constraint on \"Annual salary spend\" lacks a baseline value. The feasibility assessment for this constraint is based on defaults rather than evidence.",
+      "severity": "warning"
+     },
+     {
+      "code": "GOAL_ANCESTOR_DATA_GAP",
+      "message": "Goal node 'new_platform_shipped_by_q3' is scored from its forward-propagated outcome distribution, but root ancestor(s) 'current_annual_salary_spend' carry no observed value or ParameterUncertainty and defaulted to 0.0 — goal-level probabilities partially rest on placeholder zeros (insufficient data)",
+      "severity": "warning"
+     },
+     {
+      "code": "INFLUENTIAL_EXTERNALS",
+      "message": "External factors Annual senior engineer salary, Annual junior engineer salary significantly affect your outcome but are inherently uncertain. How might you bound these?",
+      "severity": "warning"
+     },
+     {
+      "code": "M2_UNAVAILABLE",
+      "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+      "severity": "warning"
+     },
+     {
+      "code": "MARGINAL_SWITCH_TRUNCATED",
+      "message": "Marginal switch probability was computed for the 10 most elastic fragile edge(s) of 14; the remaining 4 carry marginal_switch_probability=null. Each edge's sweep costs 100 isolated re-evaluations per option, so the set is bounded to keep the analysis inside its compute-admission budget. Retained values are unaffected — each is computed independently of the others",
+      "severity": "warning"
+     }
+    ],
+    "created_at": "2026-09-27T21:54:41.599Z",
+    "top_drivers": [
+     {
+      "direction": "negative",
+      "sensitivity": 1,
+      "factor_label": "Annual senior engineer salary"
+     },
+     {
+      "direction": "negative",
+      "sensitivity": 1,
+      "factor_label": "Annual junior engineer salary"
+     },
+     {
+      "direction": "negative",
+      "sensitivity": 1,
+      "factor_label": "Current annual salary spend"
+     }
+    ],
+    "warning_codes": [
+     "CONSTRAINT_NOT_CONVERTIBLE",
+     "CONSTRAINT_TARGET_UNRELIABLE",
+     "EVPI_UNAVAILABLE",
+     "GOAL_DIRECTION_UNATTESTED"
+    ],
+    "key_assumptions": [
+     "Annual senior engineer salary",
+     "Annual junior engineer salary",
+     "Current annual salary spend"
+    ],
+    "what_would_change": [
+     "Engineering delivery capacity → New platform shipped by Q3",
+     "Budget overrun risk → New platform shipped by Q3",
+     "Current annual salary spend → Annual salary spend",
+     "Annual junior engineer salary → Annual salary spend",
+     "Annual junior engineer salary → Budget overrun risk",
+     "Annual senior engineer salary → Budget overrun risk",
+     "Annual senior engineer salary → Annual salary spend",
+     "Current annual salary spend → Budget overrun risk"
+    ],
+    "defaulted_assumptions": [
+     {
+      "code": "CONSTRAINT_NODE_DEFAULT_BASE",
+      "note": "Node 'annual_salary_spend' has no ParameterUncertainty — defaulted to base=0.0, and its root ancestor(s) 'current_annual_salary_spend' carry no observed value or ParameterUncertainty (defaulted to 0.0); constraint probability may be unreliable",
+      "source": "default_disclosure",
+      "doctrine": "provisional_doctrine_v0",
+      "factor_label": null
+     },
+     {
+      "code": "ROOT_NODE_DEFAULT_VALUE",
+      "note": "No starting value was provided for \"Current annual salary spend\", so the analysis used a default of 0.0. Results for downstream nodes may be unreliable until a real value or range is set.",
+      "source": "default_disclosure",
+      "doctrine": "provisional_doctrine_v0",
+      "factor_label": "Current annual salary spend"
+     }
+    ]
+   },
+   "factor_evppi": [
+    {
+     "evppi": 0,
+     "units": "outcome",
+     "method": "regression_evppi_v1",
+     "status": "below_resolution",
+     "evppi_raw": 0,
+     "factor_id": "annual_senior_engineer_salary",
+     "n_samples": 10000,
+     "clamped_low": false,
+     "noise_floor": 1.7e-05,
+     "clamped_high": false,
+     "regression_degree": 4,
+     "correlation_active": false,
+     "baseline_max_expected_utility": -0.051682,
+     "conditional_max_expected_utility": -0.051682
+    },
+    {
+     "evppi": 0,
+     "units": "outcome",
+     "method": "regression_evppi_v1",
+     "status": "below_resolution",
+     "evppi_raw": 0,
+     "factor_id": "annual_junior_engineer_salary",
+     "n_samples": 10000,
+     "clamped_low": false,
+     "noise_floor": 2e-06,
+     "clamped_high": false,
+     "regression_degree": 4,
+     "correlation_active": false,
+     "baseline_max_expected_utility": -0.051682,
+     "conditional_max_expected_utility": -0.051682
+    }
+   ],
+   "decision_evpi": 0.007830410720941084,
+   "conditional_winners": [],
+   "run_provenance": {
+    "provisional": true,
+    "initiated_by": "auto_post_construction",
+    "construction_turn_id": "graph_registration:5e28112f-2317-4a9d-8f78-9588a109d0ee"
+   }
+  }
+ },
+ "analysis_state": {
+  "run_state": {
+   "kind": "complete_current",
+   "computed_at": "2026-09-27T21:54:36.918Z"
+  },
+  "readiness": {
+   "status": "ready",
+   "blockers": []
+  },
+  "leader_claim": {
+   "permitted": false,
+   "withheld_reason": "constraint_verdict_withheld"
+  },
+  "robustness": {},
+  "usable_for_prose": true,
+  "usable_for_chips": true,
+  "usable_for_followup": true,
+  "requires_rerun": false,
+  "blocked_unusable": false,
+  "contradictions": []
+ },
+ "analysis_ready": {
+  "options": [
+   {
+    "option_id": "two_senior_engineers",
+    "label": "Two senior engineers",
+    "status": "ready",
+    "interventions": {
+     "junior_engineers_hired": 0,
+     "senior_engineers_hired": 0.1
+    },
+    "is_baseline": false,
+    "intervention_details": {
+     "junior_engineers_hired": {
+      "display_value": "0 engineers",
+      "normalised_value": 0,
+      "raw_value": 0,
+      "unit": "engineers"
+     },
+     "senior_engineers_hired": {
+      "display_value": "2 engineers",
+      "normalised_value": 0.1,
+      "raw_value": 2,
+      "unit": "engineers"
+     }
+    },
+    "status_reason": "2 intervention(s) ready for analysis"
+   },
+   {
+    "option_id": "four_junior_engineers",
+    "label": "Four junior engineers",
+    "status": "ready",
+    "interventions": {
+     "junior_engineers_hired": 0.13333333333333333,
+     "senior_engineers_hired": 0
+    },
+    "is_baseline": false,
+    "intervention_details": {
+     "junior_engineers_hired": {
+      "display_value": "4 engineers",
+      "normalised_value": 0.13333333333333333,
+      "raw_value": 4,
+      "unit": "engineers"
+     },
+     "senior_engineers_hired": {
+      "display_value": "0 engineers",
+      "normalised_value": 0,
+      "raw_value": 0,
+      "unit": "engineers"
+     }
+    },
+    "status_reason": "2 intervention(s) ready for analysis"
+   },
+   {
+    "option_id": "carry_on_as_now",
+    "label": "Carry on as now",
+    "status": "ready",
+    "interventions": {},
+    "is_baseline": true,
+    "status_reason": "Baseline: every factor holds at its observed value, so no effect values are needed"
+   }
+  ],
+  "goal_node_id": "new_platform_shipped_by_q3",
+  "status": "ready",
+  "bias_findings": [],
+  "may_run": true,
+  "analysis_admission": {
+   "structurally_analysable": true,
+   "missing_important_inputs": [],
+   "semantic_quality_sufficient": false,
+   "permitted_analysis_mode": "quantified_provisional",
+   "reasons": [
+    {
+     "field": "structurally_analysable",
+     "code": "READY_TO_COMPARE",
+     "message": "Analysis can run on this model as it stands."
+    },
+    {
+     "field": "semantic_quality_sufficient",
+     "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+     "message": "Every estimate this comparison rests on is Olumi’s, not yours. Figures, and which option they favour, can be shown only as provisional, and no result can be called stable or robust until you have set at least one of them."
+    },
+    {
+     "field": "permitted_analysis_mode",
+     "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+     "message": "Every estimate this comparison rests on is Olumi’s, not yours. Figures, and which option they favour, can be shown only as provisional, and no result can be called stable or robust until you have set at least one of them."
+    }
+   ],
+   "graph_hash": "916397661c087e823c5a8f2b53f041a6d77480bdb671bf436c546409c0a041ae",
+   "semantic_signals": {
+    "confidence_parameters_total": 22,
+    "confidence_parameters_user_stated": 0,
+    "confidence_parameters_machine_authored": 16,
+    "confidence_parameters_unattributed": 6,
+    "material_parameters_total": 11,
+    "material_parameters_user_stated": 0,
+    "intervened_factor_baselines_total": 2,
+    "intervened_factor_baselines_user_stated": 0,
+    "material_parameters_awaiting_user_node_ids": [
+     "senior_engineers_hired",
+     "junior_engineers_hired"
+    ],
+    "goal_target_stated": false
+   }
+  },
+  "freshness": "fresh",
+  "freshness_reason": "agent_readback_run_state_current",
+  "graph_hash_at_run": "916397661c087e82",
+  "current_graph_hash": "916397661c087e82",
+  "computed_at": "2026-09-27T21:54:36.918Z"
+ },
+ "constraint_verdict_state": null,
+ "served_card_signal_ids": [
+  "coach:fragile_link:junior_engineers_hired→engineering_delivery_capacity:916397661c087e82:2026-09-27T21:54:36.918Z:auto_first_pass:assumed"
+ ],
+ "served_summary": "Olumi ran a first pass on the model it had just drafted. Nothing in it is confirmed yet, so no option is put forward and no result is called reliable. Use it to find what is wrong."
+}

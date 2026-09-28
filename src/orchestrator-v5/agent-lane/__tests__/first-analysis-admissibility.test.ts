@@ -199,12 +199,15 @@ describe('a freshly built model is admissible for a provisional first analysis (
     expect(graph.nodes.find((n) => n.id === 'pro_plan_price')?.observed_state?.source).toBe('brief_extraction');
   });
 
-  it('HELD-OUT: proceeds, provisional; zero is kept, the unframeable guess stays missing', async () => {
+  it('HELD-OUT: refused on the unframeable guess’s missing level; zero is kept, the unframeable guess stays missing', async () => {
     const { graph } = await registered(HELD_OUT());
+    // placeholder-zero (48f2e12f): an unvalued goal root now blocks the Run — `parcel_backlog` has no level, so it is asked.
     expect(verdict(graph)).toEqual({
-      willProceed: true, mode: 'quantified_provisional', blockers: [],
+      willProceed: false, mode: 'none', blockers: ['MISSING_FACTOR_LEVEL'],
       ceeInference: ['depots', 'courier_partners'],
     });
+    // By identity: the one level ask is the unframeable guess, and the kept zero (`courier_partners`) is not asked.
+    expect(resolveRunAdmission(graph).assessment.blockingIssues.map((i) => i.factor_id)).toEqual(['parcel_backlog']);
     expect(graph.nodes.find((n) => n.id === 'courier_partners')?.observed_state).toStrictEqual({ value: 0, raw_value: 0, unit: 'partners', source: 'cee_inference', extractionType: 'inferred' });
     expect(graph.nodes.find((n) => n.id === 'parcel_backlog')).not.toHaveProperty('observed_state');
   });

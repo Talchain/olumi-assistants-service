@@ -273,7 +273,10 @@ describe('the claim-strength bound discriminates across real state classes', () 
         === 'brief_extraction',
     );
     expect(stamped.length, 'PRECONDITION: the capture must carry the stamp').toBeGreaterThan(0);
-    for (const node of stamped) delete (node as { observed_state?: unknown }).observed_state;
+    // placeholder-zero (48f2e12f): remove ONLY the stamp (`source`) and keep the
+    // level. Deleting the whole `observed_state` also removed £49 — the status
+    // quo's price — and the graph was then refused on that missing level instead.
+    for (const node of stamped) delete (node as { observed_state: { source?: unknown } }).observed_state.source;
 
     const verdict = analysisAdmissionFrom(resolveRunAdmission(graph), graph);
     expect(verdict.semantic_quality_sufficient).toBe(false);

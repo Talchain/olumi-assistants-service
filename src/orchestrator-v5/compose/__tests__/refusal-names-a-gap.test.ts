@@ -118,6 +118,12 @@ function mutedReadinessPayload() {
   graph.edges = (graph.edges as unknown as Array<{ from: string; to: string }>)
     .filter((e) => keptIds.has(e.from) && keptIds.has(e.to))
     .filter((e) => !(e.from === MUTE_OPTION_ID && kindById.get(e.to) === 'factor')) as never;
+  // placeholder-zero (48f2e12f): the capture's external root "NHS data regulation
+  // outcome" (`6d178dfd`) has no status-quo level, which would add a factor-scoped
+  // blocker unrelated to the mute case. Give it one (a disclosed in-test patch;
+  // the capture file is not edited).
+  graph.nodes = (graph.nodes as unknown as Array<Record<string, unknown>>).map((n) =>
+    n.id === '6d178dfd' ? { ...n, observed_state: { value: 0.5 } } : n) as never;
   return assessCanonicalAnalysisReadiness(graph).analysisReady;
 }
 

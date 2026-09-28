@@ -502,8 +502,7 @@ export function applyIntakeToLeaderPermission(
   intake: IntakeOptionReconciliation,
 ): PersistedClaimSafety {
   if (intake.mayNameLeadingOption) return persisted;
-  return {
-    may_name_leading_option: false,
-    constraint_verdict_state: persisted.constraint_verdict_state,
-  };
+  // Spread, so B5's `per_limit` / `joint` survive: they are constraint evidence this axis has nothing to say about.
+  // With no rows present this is the same two keys, in the same order, as before.
+  return { ...persisted, may_name_leading_option: false };
 }

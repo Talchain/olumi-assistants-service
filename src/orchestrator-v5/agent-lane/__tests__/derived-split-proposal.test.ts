@@ -125,3 +125,62 @@ describe('any condition failing takes today\'s path (unset and said), never the 
     expect(iv('incremental_feature_investment_6_months')?.derived_from).toBeUndefined();
   });
 });
+
+/**
+ * SERVED `pj-aic-C-9303888` (C08 on 9303888): here the limit and every spend factor are in "GBP over 6 months". An
+ * offline replay on that graph left both parts UNSET when the Agent spelt the level "GBP", and set them when it spelt
+ * "GBP over 6 months" or gave no unit: whether C08 moved depended on the model's spelling of the unit.
+ */
+describe('the split binds in the FACTOR\'s unit, never the Agent\'s spelling of it (served run 2 graph)', () => {
+  const g2 = JSON.parse(readFileSync(new URL('./fixtures/journey-c-c08-run2-draft-graph.json', import.meta.url), 'utf8')) as unknown;
+  const run = async (unit: string | undefined) => {
+    const { caps, sent } = setup(g2);
+    const lvl = (v: number) => (unit === undefined ? { value: v } : { value: v, unit });
+    await caps.proposeNewOption(
+      { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r', user_turn_text: C08, user_text: C08 },
+      { label: 'Split £30k equally between features and advertising', rationale: 'r', acts_on: [
+        { factor_label: 'Incremental feature spend', direction: 'positive', level: lvl(15000) },
+        { factor_label: 'Additional advertising spend', direction: 'positive', level: lvl(15000) },
+      ] } as never,
+    );
+    const ivs = ((sent[0]?.body as { chip?: { parameters?: { interventions?: Iv[] } } } | undefined)?.chip?.parameters?.interventions ?? []);
+    return (id: string) => ivs.find((x) => x.factor_id === id);
+  };
+
+  it('RED: the Agent spells the level "GBP" → both parts still set at £15,000 (served: unset)', async () => {
+    const iv = await run('GBP');
+    expect(iv('incremental_feature_spend')?.raw_value).toBe(15000);
+    expect(iv('additional_advertising_spend')?.raw_value).toBe(15000);
+    expect(iv('incremental_feature_spend')?.source).toBe('cee_hypothesis');
+  });
+
+  it('CONTROL: the factor\'s own unit, or none, binds as before', async () => {
+    expect((await run('GBP over 6 months'))('incremental_feature_spend')?.raw_value).toBe(15000);
+    expect((await run(undefined))('incremental_feature_spend')?.raw_value).toBe(15000);
+  });
+
+  it('RED (AIQ 5860429146): factors measured PER MONTH under a six-month total → unset with the period reason, even as Olumi\'s estimate', async () => {
+    const perMonth = JSON.parse(JSON.stringify(g2)) as { nodes: { id: string; observed_state?: { unit?: string } }[] };
+    for (const n of perMonth.nodes) if (n.id === 'incremental_feature_spend' || n.id === 'additional_advertising_spend') n.observed_state!.unit = 'GBP per month';
+    for (const estimate of [false, true]) {
+      const { caps, sent } = setup(perMonth);
+      const lvl = { value: 15000, unit: 'GBP', ...(estimate ? { estimate: true, basis: 'half of the £30,000' } : {}) };
+      const r = await caps.proposeNewOption(
+        { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r', user_turn_text: C08, user_text: C08 },
+        { label: 'Split £30k equally between features and advertising', rationale: 'r', acts_on: [
+          { factor_label: 'Incremental feature spend', direction: 'positive', level: lvl },
+          { factor_label: 'Additional advertising spend', direction: 'positive', level: lvl },
+        ] } as never,
+      ) as { levels_not_set?: { factor: string; reason: string }[] };
+      const ivs = ((sent[0]?.body as { chip?: { parameters?: { interventions?: Iv[] } } } | undefined)?.chip?.parameters?.interventions ?? []);
+      expect(ivs.find((x) => x.factor_id === 'incremental_feature_spend')?.value, `estimate=${estimate}`).toBeNull();
+      expect(r.levels_not_set?.find((l) => l.factor === 'Incremental feature spend')?.reason, `estimate=${estimate}`).toMatch(/measured in GBP per month.*never convert it/);
+    }
+  });
+
+  it('CONTRAST: a level in another period ("GBP per month") is never a part of a six-month total', async () => {
+    const iv = await run('GBP per month');
+    expect(iv('incremental_feature_spend')?.value).toBeNull();
+    expect(iv('additional_advertising_spend')?.value).toBeNull();
+  });
+});
