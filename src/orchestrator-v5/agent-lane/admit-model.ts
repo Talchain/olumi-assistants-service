@@ -288,10 +288,79 @@ export interface WidenerAdditions {
  * only the writer, on a user's approved change, mints that stamp.
  */
 export type ConstructedLevelSource = Exclude<InterventionV3T['source'], 'user_specified'>;
-export interface ConstructedLevel { value: number; source: ConstructedLevelSource }
+export interface ConstructedLevel {
+  value: number;
+  source: ConstructedLevelSource;
+  /** The factor this level is keyed by — `InterventionV3.target_match`, which the contract requires. */
+  target_match?: { node_id: string; match_type: 'exact_id'; confidence: 'high' };
+  /**
+   * The drafter's own figure, present exactly when `value` is that figure read on the factor's OWN frame: its
+   * `observed_state.cap`, or (a factor with no cap) its node `scale_frame`.
+   */
+  raw_value?: number;
+  /** The factor's own unit, beside `raw_value`: its `observed_state.unit`, else the unit the construction declared for it. */
+  unit?: string;
+}
 
 const levelSourceFor = (provenance: string): ConstructedLevelSource =>
   provenance === 'explicit' ? 'brief_extraction' : 'cee_hypothesis';
+
+/**
+ * ⭐ ONE FORM FOR AN OPTION'S LEVEL, WHICHEVER WRITER WROTE IT (P2 A5; DL #70 order 5858777018 item 3).
+ *
+ * MEASURED on served CEE 523e18d (journey A, `build_model_from_brief` at A01): this writer stored "Raise Pro to £59"
+ * as `{ value: 0.295, source }`. The brief's 59, the factor's unit and the factor match were all in hand here and all
+ * dropped, while the add-option writer stores the same level on the same factor as
+ * `{ value, raw_value: 59, unit, source, target_match }` (A06). Every `{source, value}` level on the five fresh journeys
+ * (18 of them) came from the one line that calls this.
+ *
+ * EVERY MEMBER COMES FROM THIS CONSTRUCTION — nothing is guessed, and nothing is filled later at projection (which runs
+ * on every write, and would rewrite cells nobody touched):
+ *  · `target_match` names the key the level is stored under, exactly as the encoder synthesises it for an entry that
+ *    lacks one (`encode-option-interventions.ts` `buildInterventionV3`) and the add-option writer writes it;
+ *  · `raw_value` is the drafter's figure itself, and `unit` is the FACTOR's own `observed_state.unit` (the contract:
+ *    "should match target factor's observed_state.unit"), never the option's spelling of it. Both are written ONLY when
+ *    the level was divided by the factor's OWN frame, so `raw_value / frame === value` is re-checkable from the stored
+ *    bytes:
+ *      – the cap its `observed_state` stores; or
+ *      – ⭐ its node `scale_frame`, for a factor with no cap (AIQ Q2, CEE #2139 5859746452). PLoT #373 rung 1.6 scales
+ *        every intervened cap-less factor on [0, scale_frame], so it expects the RAW figure, and the egress ships a bare
+ *        `{value}` there unchanged (`plot-intervention-scale.ts`, rule `no_cap`). EXECUTED on served PLoT a6da42b
+ *        (`monthly_new_pro_subscribers`, scale_frame 1000): raw 90 gave +£18.08, the unframed 0.09 gave −£90.27, a sign
+ *        flip. With the pair the egress takes `raw_value_used` and ships 90, as it already does for every add-option
+ *        and encoder cell on such a factor (AIQ census 5859754585: 24 of 24). Such a node may store no observed state,
+ *        and so no unit; its unit is then the one the construction declared for it, the same `f.unit` an observed
+ *        state is written with.
+ *
+ * ⚠ AND ONLY THEN, DELIBERATELY: an UNFRAMED level (no range; the level is its own figure) keeps
+ * `{ value, source, target_match }` — `InterventionV3`: "value = raw_value (or raw_value omitted)".
+ */
+function constructedLevel(
+  factorId: string,
+  figure: number,
+  cap: number | undefined,
+  source: ConstructedLevelSource,
+  factor: Pick<AdmittedNode, 'observed_state' | 'scale_frame'> | undefined,
+  declaredUnit: string | undefined,
+): ConstructedLevel {
+  const level: ConstructedLevel = {
+    value: cap !== undefined ? figure / cap : figure,
+    source,
+    target_match: { node_id: factorId, match_type: 'exact_id', confidence: 'high' },
+  };
+  const os = factor?.observed_state;
+  const usable = (u: unknown): u is string => typeof u === 'string' && u.trim() !== '';
+  if (cap !== undefined && os?.cap === cap) {
+    level.raw_value = figure;
+    if (usable(os.unit)) level.unit = os.unit;
+  } else if (cap !== undefined && typeof os?.cap !== 'number' && factor?.scale_frame === cap) {
+    level.raw_value = figure;
+    const stored = os?.unit;
+    const unit = usable(stored) ? stored : declaredUnit;
+    if (usable(unit)) level.unit = unit;
+  }
+  return level;
+}
 
 export interface AdmittedNode {
   /** The full text, when the label had to be shortened to stay editable. */
@@ -2532,6 +2601,16 @@ function admitOnce(
     const c = capByLabel.get(f.label);
     if (fid !== undefined && c !== undefined) capByFactorId.set(fid, c);
   }
+  /**
+   * Each factor's unit as the construction declares it: the same `f.unit` its observed state is written with. Read by
+   * the level writer (a factor framed only by `scale_frame` may store no observed state, so no unit, at all) and by
+   * the link sizing below.
+   */
+  const unitById = new Map<string, string>();
+  for (const f of model.factors) {
+    const id = ids.get(f.label);
+    if (id !== undefined && typeof f.unit === 'string') unitById.set(id, f.unit);
+  }
   for (const d of defaultedFrames) {
     // "Your own figures" only when a figure the user stated fed the frame; when
     // every figure is Olumi's, saying so is the honest record.
@@ -2642,7 +2721,7 @@ function admitOnce(
         continue;
       }
       const cap = capByFactorId.get(factorId);
-      bundle[factorId] = { value: cap !== undefined ? iv.value / cap : iv.value, source: levelSourceFor(iv.provenance) };
+      bundle[factorId] = constructedLevel(factorId, iv.value, cap, levelSourceFor(iv.provenance), nodes.find((n) => n.id === factorId), unitById.get(factorId));
     }
     if (Object.keys(bundle).length > 0) interventionsByOption.set(optionId, bundle);
   }
@@ -2689,11 +2768,6 @@ function admitOnce(
    * Only a link whose direction is stated and whose mean nobody supplied directly is sized. A link with no usable
    * size and nothing to check it against keeps today's projection exactly.
    */
-  const unitById = new Map<string, string>();
-  for (const f of model.factors) {
-    const id = ids.get(f.label);
-    if (id !== undefined && typeof f.unit === 'string') unitById.set(id, f.unit);
-  }
   const optionLevelsById = new Map<string, number[]>();
   for (const bundle of interventionsByOption.values()) {
     for (const [factorId, level] of Object.entries(bundle)) optionLevelsById.set(factorId, [...(optionLevelsById.get(factorId) ?? []), level.value]);
