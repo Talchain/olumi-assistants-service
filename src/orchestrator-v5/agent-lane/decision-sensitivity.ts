@@ -60,7 +60,9 @@ export function decisionSensitivityOf(enrichment: unknown): DecisionSensitivity 
     const label = typeof labelled === 'string' && labelled !== '' ? labelled : d.factorId;
     const evppi = recordOf(enrichment)?.factor_evppi;
     const own = Array.isArray(evppi) ? evppi.map(recordOf).find((r) => r?.factor_id === d.factorId) : undefined;
-    const range = typeof own?.spread_source === 'string' ? RANGE_OF[own.spread_source] : undefined;
+    // Own keys only (DL nit on #2246): a plain-object lookup would hand back `constructor` / `toString` as a "range".
+    const source = own?.spread_source;
+    const range = typeof source === 'string' && Object.hasOwn(RANGE_OF, source) ? RANGE_OF[source] : undefined;
     if (range === undefined) return { status: 'measured', most_sensitive: { factor_id: d.factorId, label } };
     return {
       status: 'measured',

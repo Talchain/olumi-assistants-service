@@ -69,7 +69,7 @@ describe('⛔ the Agent says whose range makes a factor decision-sensitive (AIQ 
   });
 
   it('CONTROL (inert until PLoT sends it): no field, or an unknown value, makes no claim, exactly as before', () => {
-    for (const extra of [{}, { 0: { spread_source: 'default' } }, { 0: { spread_source: null } }] as Record<number, Record<string, unknown>>[]) {
+    for (const extra of [{}, { 0: { spread_source: 'default' } }, { 0: { spread_source: null } }, { 0: { spread_source: 'constructor' } }, { 0: { spread_source: 'toString' } }] as Record<number, Record<string, unknown>>[]) {
       const ds = measuredOf(withRows(0, extra));
       expect(ds, JSON.stringify(extra)).toEqual({ status: 'measured', most_sensitive: { factor_id: String(ROWS[0]!.factor_id), label: labelOf(withRows(0)) } });
     }
