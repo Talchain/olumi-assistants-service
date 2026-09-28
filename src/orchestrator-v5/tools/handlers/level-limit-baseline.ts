@@ -31,7 +31,7 @@
  */
 import { valuesMatch } from '../../../utils/reduction-framing.js';
 import { deriveInferredValues } from '../../coaching/inferred-value-disclosure.js';
-import { percentLimitFrameProvable, percentPeriodsDiffer, type LimitTargetScale } from '../../agent-lane/admit-constraint.js';
+import { percentLimitFrameProvable, percentPeriodsDiffer, statedOperatorOf, type LimitTargetScale } from '../../agent-lane/admit-constraint.js';
 import { classifyUnitScaleClass } from '../../../cee/draft/records/unit-scale-class.js';
 
 type Rec = Record<string, unknown>;
@@ -269,4 +269,59 @@ export function withholdUnprovablePercentFrames<C>(graph: unknown, goalConstrain
     }
     return out;
   }) as C;
+}
+
+/**
+ * ⭐ A2 FOLLOW-UP (DL verdict on #2180): THE ONE CASE WHERE "LESS THAN" AND "AT MOST" DIFFER. An option that SETS the
+ * limited quantity at EXACTLY a strict limit's threshold does not meet it: "keep churn under 4%" is not met by an option
+ * that sets churn at 4%. The store holds that limit as `operator: "<="` + `operator_as_stated: "<"`, and PLoT/ISL get
+ * `<=` only (`run-analysis.ts` `withholdStatedOperator`), so the engine counts that option as meeting it. Over continuous
+ * draws P(X < 4) = P(X <= 4) and the engine's score IS the stated limit's; the pinned level is the exception.
+ *
+ * Returned per option (option id → the constraint ids it pins at the threshold) for the verdict's one owner,
+ * `deriveConstraintVerdict` (`constraint-feasibility.ts`), which withholds that option's result for that limit. Nothing
+ * is modelled: no P is rewritten and the wire is unchanged.
+ *
+ * SAME FRAME, from the two proofs this module already owns and nothing else — no unit is parsed here:
+ *   · a `"%"` limit PLoT reads on the node's own level (`levelLimitReadsOnNodeLevel`): the level is the percentage ÷ 100;
+ *   · a limit in the factor's own unit read on its own cap (`limitTargetCaps`): the level is the figure ÷ cap.
+ * The option's level is the number PLoT received (the run's final wire options), compared with `valuesMatch`. A limit in
+ * any other shape proves no frame and is left alone: PLoT does not score it against the node's level either (it is
+ * refused or unscored upstream). Level-framed rows only (a delta limit is on a change, not a level). A strict row is
+ * read through `statedOperatorOf`, so a stamp that contradicts the held operator is never strict here. Pure.
+ */
+export function strictLimitsPinnedAtThreshold(
+  graph: unknown,
+  goalConstraints: unknown,
+  options: ReadonlyArray<Record<string, unknown>>,
+): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(goalConstraints)) return out;
+  const nodes = graph.nodes.filter(isRec);
+  for (const c of goalConstraints) {
+    if (!isRec(c) || c.value_frame !== 'level' || typeof c.constraint_id !== 'string' || typeof c.node_id !== 'string') continue;
+    const stated = statedOperatorOf(c);
+    if (stated !== '<' && stated !== '>') continue;
+    const node = nodes.find((n) => n.id === c.node_id);
+    if (node === undefined || typeof c.value !== 'number' || !Number.isFinite(c.value)) continue;
+    const threshold = thresholdOnNodeLevel(graph, c, node, c.value);
+    if (threshold === undefined) continue;
+    for (const o of options) {
+      const id = typeof o.option_id === 'string' && o.option_id !== '' ? o.option_id : typeof o.id === 'string' && o.id !== '' ? o.id : undefined;
+      const level = isRec(o.interventions) ? o.interventions[c.node_id] : undefined;
+      if (id === undefined || typeof level !== 'number' || !valuesMatch(level, threshold)) continue;
+      const ids = out.get(id) ?? new Set<string>();
+      ids.add(c.constraint_id);
+      out.set(id, ids);
+    }
+  }
+  return out;
+}
+
+/** A level limit's threshold on its node's own level, where this module proves PLoT reads it there; else `undefined`. */
+function thresholdOnNodeLevel(graph: unknown, c: Rec, node: Rec, value: number): number | undefined {
+  const os = isRec(node.observed_state) ? node.observed_state : {};
+  if (levelLimitReadsOnNodeLevel(value, typeof c.unit === 'string' ? c.unit : undefined, node, os)) return value / 100;
+  const cap = limitTargetCaps(graph, [c]).get(node.id as string);
+  return cap === undefined ? undefined : value / cap;
 }

@@ -1248,6 +1248,11 @@ function deriveLeaderClaimVerdict(
    * derived at the call site that holds the analysed graph. OPTIONAL, and omitted is today's verdict exactly.
    */
   leaderEstimatedTargetIds?: ReadonlySet<string>,
+  /**
+   * A2 follow-up: the STRICT limits the LEADING option sets at exactly their threshold ({@link STRICT_THRESHOLD_PIN_REASON}),
+   * derived at the call site that holds the wire options. OPTIONAL, and omitted is today's verdict exactly.
+   */
+  leaderStrictThresholdPinIds?: ReadonlySet<string>,
 ): ConstraintVerdict {
   // Computed unconditionally so it can be carried on every state (see
   // `leaderInfeasibility`). Fails open to `{ infeasible: false }`.
@@ -1373,7 +1378,11 @@ function deriveLeaderClaimVerdict(
   //        the user's ({@link collectLeaderEstimatedTargetIds}): its score is
   //        Olumi's own estimate restated, so it licenses neither a compliance
   //        nor a breach claim (AI Quality, #70 5844226031).
-  //    `codes` stays `[]` for (b) and (d): the producer shipped no code, and a
+  //    (e) the LEADING option sets a STRICT limit's own target at EXACTLY its
+  //        threshold (A2 follow-up, DL verdict on #2180): "under 4%" is not met
+  //        at 4%, and the engine, holding "<=", counts it as met. Its score is
+  //        withheld, never read as a pass (nor as a breach: nothing is modelled).
+  //    `codes` stays `[]` for (b), (d) and (e): the producer shipped no code, and a
   //    CEE-minted one must never be filed as a producer code.
   const notDecisionGrade = collectProducerNotDecisionGradeConstraintIds(envelope);
   const leaderScored = collectLeaderScoredConstraintIds(envelope, leadingOptionId);
@@ -1382,7 +1391,8 @@ function deriveLeaderClaimVerdict(
       !evaluated.has(c.constraint_id) ||
       notDecisionGrade.has(c.constraint_id) ||
       (leaderScored !== null && !leaderScored.has(c.constraint_id)) ||
-      leaderEstimatedTargetIds?.has(c.constraint_id) === true,
+      leaderEstimatedTargetIds?.has(c.constraint_id) === true ||
+      leaderStrictThresholdPinIds?.has(c.constraint_id) === true,
   );
   if (unverified.length > 0) {
     return verdict('unevaluated', {
@@ -1429,6 +1439,13 @@ export function deriveConstraintVerdict(
    * attested (never a defaulted `scored`). Both sets are required when it is given, so no caller can omit the owner.
    */
   perLimitInput?: { readonly userBaselineIds: ReadonlySet<string>; readonly userAssumptionIds: ReadonlySet<string> },
+  /**
+   * ⭐ A2 follow-up (DL verdict on #2180): option id → the STRICT limits that option sets at EXACTLY their threshold
+   * (`strictLimitsPinnedAtThreshold`, `level-limit-baseline.ts`). That option's result for that limit is WITHHELD, here,
+   * so every surface inherits it: the leader's under rule 3 (e), and the limit's per-limit row as `unscored` with
+   * {@link STRICT_THRESHOLD_PIN_REASON} whichever option pins it. OPTIONAL, and omitted is today's verdict exactly.
+   */
+  strictThresholdPins?: ReadonlyMap<string, ReadonlySet<string>>,
 ): ConstraintVerdict {
   const leaderVerdict = deriveLeaderClaimVerdict(
     envelope,
@@ -1436,15 +1453,25 @@ export function deriveConstraintVerdict(
     leadingOptionId,
     unmeasuredTargetIds,
     leaderEstimatedTargetIds,
+    typeof leadingOptionId === 'string' ? strictThresholdPins?.get(leadingOptionId) : undefined,
   );
   if (perLimitInput === undefined || ratified.length === 0) return leaderVerdict;
-  const perLimit = derivePerLimitVerdicts(envelope, ratified, perLimitInput, leaderEstimatedTargetIds);
+  const pinnedIds = new Set([...(strictThresholdPins?.values() ?? [])].flatMap((ids) => [...ids]));
+  const perLimit = derivePerLimitVerdicts(envelope, ratified, perLimitInput, leaderEstimatedTargetIds, pinnedIds);
   return { ...leaderVerdict, perLimit, joint: deriveJointLimitVerdict(perLimit) };
 }
 
 // ===========================================================================
 // B5 — ONE TYPED VERDICT PER LIMIT
 // ===========================================================================
+
+/**
+ * ⭐ A2 follow-up (DL verdict on #2180): CEE's per-limit reason for a STRICT limit ("under 4%", held `<=` beside
+ * `operator_as_stated: "<"`) that some option sets at EXACTLY its threshold. The producer scored `<=`, so that option's P
+ * says the limit is met where the user's words say it is not; the row is `unscored` and this names why. Ranked LAST: it
+ * is the reason only when every producer precondition held (a limit with no P keeps its own reason).
+ */
+export const STRICT_THRESHOLD_PIN_REASON = 'level_set_at_strict_threshold';
 
 /**
  * The per-limit `reason` codes, ranked by the precondition they report (AI Quality 5855511541: "reason names the FIRST
@@ -1463,7 +1490,8 @@ export function deriveConstraintVerdict(
  *     absent, malformed or not decision-grade for a reason it does not name).
  *
  * `target_unanchored` and `tally_units_incoherent` are ranked but NOT PRODUCED today: no producer field reports them
- * yet (ISL B1a's `level_anchor_source` is the planned carrier for the first).
+ * yet (ISL B1a's `level_anchor_source` is the planned carrier for the first). {@link STRICT_THRESHOLD_PIN_REASON} is
+ * CEE's own and ranks after every other code.
  */
 export const PER_LIMIT_REASON_RANK: ReadonlyMap<string, number> = new Map([
   ['threshold_unframed', 1],
@@ -1477,6 +1505,7 @@ export const PER_LIMIT_REASON_RANK: ReadonlyMap<string, number> = new Map([
   ['constraint_block_withheld', 9],
   ['no_score_returned', 10],
   ['not_decision_grade', 11],
+  [STRICT_THRESHOLD_PIN_REASON, 12],
 ]);
 /** A producer removal reason CEE does not map, passed verbatim: after the named preconditions, before CEE's own codes. */
 const UNMAPPED_PRODUCER_REASON_RANK = 7;
@@ -1561,6 +1590,8 @@ function derivePerLimitVerdicts(
   ratified: readonly RatifiedConstraint[],
   levels: { readonly userBaselineIds: ReadonlySet<string>; readonly userAssumptionIds: ReadonlySet<string> },
   leaderEstimatedTargetIds: ReadonlySet<string> | undefined,
+  /** A2 follow-up: the strict limits some option sets at exactly their threshold ({@link STRICT_THRESHOLD_PIN_REASON}). */
+  strictThresholdPinnedIds: ReadonlySet<string>,
 ): PerLimitVerdict[] {
   const { userBaselineIds, userAssumptionIds } = levels;
   const seen = new Set<string>();
@@ -1658,6 +1689,8 @@ function derivePerLimitVerdicts(
       if (effective.length === 1 && unattributed.length > 0) reasons.push(...unattributed);
       else reasons.push('constraint_block_withheld');
     }
+    // Pushed after `certified` is read: it is CEE's reading of the words, never producer evidence about the block.
+    if (strictThresholdPinnedIds.has(c.constraint_id)) reasons.push(STRICT_THRESHOLD_PIN_REASON);
     if (reasons.length > 0) return { constraint_id: c.constraint_id, state: 'unscored', reason: firstFailed(reasons) };
     const usersOwnLevel =
       userBaselineIds.has(c.constraint_id) && leaderEstimatedTargetIds?.has(c.constraint_id) !== true;

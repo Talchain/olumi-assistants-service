@@ -30,11 +30,13 @@
  * `operator: "<="` WITH `operator_as_stated: "<"`: every surface that states the limit says "less than 4%"
  * (`statedOperatorOf`, `LIMIT_OPERATOR_WORDS`), and the strictness is no longer recorded as a loss.
  *
- * ⚠ WHAT IS DISCLOSED, NOT MODELLED. PLoT and ISL still receive `<=` (the run wire withholds `operator_as_stated`).
+ * ⚠ WHAT IS WITHHELD, NOT MODELLED. PLoT and ISL still receive `<=` (the run wire withholds `operator_as_stated`).
  * Over continuous draws P(X < 4) = P(X <= 4), so that is the same limit. The ONE case where they differ is a level
  * PINNED exactly at the threshold (an option that sets churn to exactly 4%, or a deterministic path that resolves to
  * it — `context/cqe/__tests__/strictness-is-destroyed-at-extraction.test.ts`): the engine counts it as meeting the
- * limit. Pinned by `limit-operator-as-stated.test.ts` (R4, "disclosed, not modelled").
+ * limit. The wire is unchanged for it (`limit-operator-as-stated.test.ts` R4); an OPTION that sets the level at the
+ * threshold has its result for that limit withheld by the verdict (`strictLimitsPinnedAtThreshold` →
+ * `deriveConstraintVerdict`), never said as met. A deterministic path that resolves to the threshold is not detected.
  *
  * ⚠ WIDENING THE SCHEMA'S `operator` ENUM IS NOT THE FIX: `GraphV3.safeParse` fails the whole graph on an unknown
  * operator (Canonical 5860723311), and PLoT's preflight refuses

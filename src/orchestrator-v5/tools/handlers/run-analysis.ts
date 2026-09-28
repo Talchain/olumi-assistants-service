@@ -121,6 +121,7 @@ import {
   carryLimitTargetCaps,
   levelLimitBaselineNodeIds,
   limitTargetCaps,
+  strictLimitsPinnedAtThreshold,
   unprovablePercentFrameIds,
   withholdUnprovablePercentFrames,
 } from './level-limit-baseline.js';
@@ -255,9 +256,10 @@ export const PLOT_BRIEF_MAX_CHARS = 10_000;
  * unchanged and receive `operator` alone, so the field is withheld from this wire copy. The stored row is never
  * touched: a row that carries it is copied without it, and an array with none is returned as the SAME reference.
  *
- * ⚠ DISCLOSED, NOT MODELLED: over continuous draws P(X < 4) = P(X <= 4). A level PINNED exactly at the threshold is
- * the one case the engine scores differently from the words ("exactly 4%" meets "<= 4"); pinned by
- * `limit-operator-as-stated.test.ts` (R4).
+ * ⚠ NOT MODELLED: over continuous draws P(X < 4) = P(X <= 4). A level PINNED exactly at the threshold is the one case
+ * the engine scores differently from the words ("exactly 4%" meets "<= 4"). The wire stays "<=" for it too (R4 in
+ * `limit-operator-as-stated.test.ts`); CEE withholds that option's result for that limit instead
+ * (`strictLimitsPinnedAtThreshold` → `deriveConstraintVerdict`; `strict-limit-pinned-at-threshold.test.ts`).
  */
 function withholdStatedOperator<C>(goalConstraints: C): C {
   if (!Array.isArray(goalConstraints)) return goalConstraints;
@@ -1873,6 +1875,27 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         'run_analysis: a limit on a quantity the leading option sets at Olumi\'s estimate is not counted as checked',
       );
     }
+    // ⭐ A2 follow-up (DL verdict on #2180): an option that sets a STRICT limit's own quantity at EXACTLY its threshold
+    // ("under 4%", the option sets 4%) does not meet it, and PLoT, holding "<=", scores it met. Read off the SAME stored
+    // rows the verdict reads (the snapshot's, which keep `operator_as_stated`) and the numbers PLoT received; the verdict
+    // withholds that option's result for that limit (`deriveConstraintVerdict`, its seventh argument).
+    const strictThresholdPins = strictLimitsPinnedAtThreshold(
+      graphForAnalysis,
+      snapshot.goal_constraints ?? (snapshot.rawPersistedGraph as { goal_constraints?: unknown } | undefined)?.goal_constraints,
+      finalWireOptions,
+    );
+    if (strictThresholdPins.size > 0) {
+      log.info(
+        {
+          event: 'run_analysis.strict_limit_level_at_threshold',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          // Redacted: ids only, no thresholds or levels.
+          pins: [...strictThresholdPins].map(([option_id, ids]) => ({ option_id, constraint_ids: [...ids] })),
+        },
+        'run_analysis: an option sets a strict limit\'s quantity exactly at its threshold; its result for that limit is withheld',
+      );
+    }
     // ⭐ B5 (AI Quality 5855511541): one typed verdict PER ratified limit, stored on the fact's `constraint_verdict`
     // (`per_limit` + `joint`, schemas 0.60.0). Precondition (e), "the level is the user's", is read off the SAME
     // analysed graph as rule (d) above, through the same authorship authority. Paul's 17d1 churn limit compared
@@ -1885,6 +1908,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       leaderEstimatedTargetIds,
       // (a) and WHOSE figure an estimate_only row was checked against (DL CR 5859853452), from the same one walk.
       collectLimitLevelOwners(graphForAnalysis, ratifiedConstraints),
+      strictThresholdPins,
     );
     // ⚠ NO TELEMETRY EVENT FOR THE UNMEASURED-TARGET PARTITION, AND THAT IS A
     // DISCLOSED GAP RATHER THAN AN OVERSIGHT — the same call, for the same

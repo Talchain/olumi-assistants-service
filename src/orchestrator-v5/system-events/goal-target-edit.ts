@@ -256,13 +256,15 @@ export async function applyConstraintEditThroughAddConstraint(params: {
   readonly unit?: string;
   readonly label?: string;
   readonly confirmedConstraintValueFrame?: HandlerInvocation['confirmedConstraintValueFrame'];
+  /** A2 follow-up: a comparator the user STATED on this edit, typed (`limit-edit.ts`); absent keeps the row's own. */
+  readonly statedConstraintOperator?: HandlerInvocation['statedConstraintOperator'];
   /** The writer's name in its logs (`goal_target_edit`, `limit_edit`). */
   readonly eventName: string;
   readonly logBase: Readonly<Record<string, unknown>>;
 }): Promise<GoalTargetEditResult> {
   const {
     payload, requestId, persistedGraph, graph, priorFacts, targetId, constraintType, rawValue, unit, label,
-    confirmedConstraintValueFrame, eventName, logBase,
+    confirmedConstraintValueFrame, statedConstraintOperator, eventName, logBase,
   } = params;
   // ── 4. the SAME proposal the typed chip builds ───────────────────────────
   const built = buildTypedChipMutationProposal(
@@ -360,6 +362,9 @@ export async function applyConstraintEditThroughAddConstraint(params: {
     // The caller's attestation of the row's frame, relayed through the
     // handler's own side-band (absent: the handler's own rules decide).
     ...(confirmedConstraintValueFrame !== undefined ? { confirmedConstraintValueFrame } : {}),
+    // A comparator the user stated on this edit (typed), relayed through the handler's side-band the same way; absent,
+    // the handler keeps the row's own `operator_as_stated`.
+    ...(statedConstraintOperator !== undefined ? { statedConstraintOperator } : {}),
   };
 
   let outcome;

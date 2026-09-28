@@ -18,6 +18,10 @@
  *   · then the written row is CHECKED, not trusted: the same constraint_id and operator, exactly the new value, the
  *     row's unit and value_frame unchanged, and `provenance: 'explicit'` — the user's own figure (the user approved it;
  *     `admit-constraint.ts` reads 'explicit' as user-authored). Anything else is refused with nothing written.
+ *   · ⭐ A2 follow-up (DL verdict on #2180): the comparator as the user stated it. A new figure alone KEEPS the row's
+ *     `operator_as_stated` ("under 4%" → "under 5%"; `add_constraint` carries it). A comparator the user STATED on this
+ *     edit (`stated_operator`, typed by the Agent, same direction as the row) is relayed through the handler's side-band
+ *     and replaces it: "at most" clears it, "less than" sets it. The written row is checked for that comparator too.
  *
  * This file owns no mutation logic: every byte it could write is written by `add_constraint`.
  */
@@ -25,6 +29,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import type { SystemEventTurnPayload } from '@talchain/schemas/boundary';
 
 import { GraphV3 } from '../../schemas/cee-v3.js';
+import { statedOperatorOf, type CandidateOperator } from '../agent-lane/admit-constraint.js';
 import { log } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { FRACTION_SPELLED_UNIT } from '../coaching/bound-graph.js';
@@ -42,6 +47,12 @@ export interface LimitEditRequest {
   readonly raw_value: number;
   /** The analysis-space hash of the model the user approved against. */
   readonly base_graph_hash: string;
+  /**
+   * A2 follow-up: the comparator the user STATED for the limit on this edit, when they stated one (typed, never from
+   * words), in the row's direction: `<`/`<=` for a `<=` row, `>`/`>=` for a `>=` row. ABSENT for a new figure alone,
+   * which keeps the row's own `operator_as_stated`.
+   */
+  readonly stated_operator?: CandidateOperator;
 }
 
 export interface ApplyLimitEditParams {
@@ -54,7 +65,9 @@ export interface ApplyLimitEditParams {
 
 const refused = (reason: string): GoalTargetEditResult => ({ kind: 'refused', reason });
 
-type Row = { constraint_id?: unknown; node_id?: unknown; operator?: unknown; value?: unknown; unit?: unknown; value_frame?: unknown; label?: unknown; provenance?: unknown };
+type Row = { constraint_id?: unknown; node_id?: unknown; operator?: unknown; operator_as_stated?: unknown; value?: unknown; unit?: unknown; value_frame?: unknown; label?: unknown; provenance?: unknown };
+/** The held operator a stated comparator is the twin of (`<` → `<=`, `>` → `>=`). */
+const heldOf = (op: CandidateOperator): '<=' | '>=' => (op === '<' || op === '<=' ? '<=' : '>=');
 const rowsOf = (g: unknown): Row[] => {
   const raw = g !== null && typeof g === 'object' ? (g as { goal_constraints?: unknown }).goal_constraints : undefined;
   return Array.isArray(raw) ? raw.filter((c): c is Row => c !== null && typeof c === 'object') : [];
@@ -104,6 +117,11 @@ export async function applyLimitEdit(params: ApplyLimitEditParams): Promise<Goal
   if (unit !== undefined && FRACTION_SPELLED_UNIT.test(unit)) return refused('limit_stored_as_fraction');
   const label = typeof row.label === 'string' && row.label !== '' ? row.label : undefined;
   const frame = typeof row.value_frame === 'string' ? (row.value_frame as NonNullable<Parameters<typeof applyConstraintEditThroughAddConstraint>[0]['confirmedConstraintValueFrame']>) : undefined;
+  // A2: a comparator stated on this edit must be in the row's own direction ("at most" on an "at least" limit is a
+  // different limit, which this path never writes).
+  if (request.stated_operator !== undefined && heldOf(request.stated_operator) !== request.operator) return refused('stated_operator_direction');
+  /** The comparator the written row must state: the one the user stated now, else the row's own (kept). */
+  const statedAfter = request.stated_operator ?? statedOperatorOf(row);
 
   // ── 4–7. the product's own writer, with the row's own unit, label and frame ─────────────────────────
   const result = await applyConstraintEditThroughAddConstraint({
@@ -119,6 +137,8 @@ export async function applyLimitEdit(params: ApplyLimitEditParams): Promise<Goal
     ...(label !== undefined ? { label } : {}),
     // ⭐ KEPT, NEVER RELABELLED: the row's frame, which the handler would drop for a new figure.
     ...(frame !== undefined ? { confirmedConstraintValueFrame: frame } : {}),
+    // A2: only a comparator the user STATED is relayed; a new figure alone leaves the handler to keep the row's own.
+    ...(request.stated_operator !== undefined ? { statedConstraintOperator: request.stated_operator } : {}),
     eventName: 'limit_edit',
     logBase,
   });
@@ -134,6 +154,8 @@ export async function applyLimitEdit(params: ApplyLimitEditParams): Promise<Goal
     && w!.value_frame === row.value_frame
     && (label === undefined || w!.label === label)
     && w!.provenance === 'explicit'
+    // A2: the comparator as the user stated it — kept on a new figure alone, replaced when they stated one.
+    && statedOperatorOf(w!) === statedAfter
     // Every other limit is untouched.
     && rowsOf(result.mutatedGraph).length === rowsOf(persistedGraph).length;
   if (!kept) {
