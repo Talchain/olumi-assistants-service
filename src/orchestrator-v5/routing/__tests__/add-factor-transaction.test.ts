@@ -362,3 +362,21 @@ describe('DL ruling on #2235: the hold records WHY each figure is the user\'s �
     expect(readUserTodayMember([{ factor_id: 'f1', observed_state: os, basis: 'confirmed_by_approval', quote: '  ' }])).toBeUndefined();
   });
 });
+
+describe('R11 × #2235: the committed node keeps HOW its figure became the user\'s', () => {
+  const os = { value: 0.12, raw_value: 120000, cap: 1000000, declared_scale: 'unit_interval', unit: 'GBP/year', source: 'user_override' };
+  const ops = () => [{ op: 'add_node', path: 'f1', value: { id: 'f1', kind: 'factor', label: 'Senior engineer salary' } }] as never[];
+  it('RED: a pairing CONFIRMED on the card carries its quote into observed_state.reviewed_by_user', () => {
+    const quote = 'Record them as annual salaries: £120,000 per senior engineer and £65,000 per junior engineer.';
+    const r = stampNewUserTodayLevels(ops(), [{ factor_id: 'f1', observed_state: os, basis: 'confirmed_by_approval', quote }]);
+    expect(r.ok).toBe(true);
+    const stamped = ((r as { operations: { value: { observed_state: Record<string, unknown> } }[] }).operations[0]!.value.observed_state);
+    expect(stamped).toEqual({ ...os, reviewed_by_user: { intent: 'confirm_pairing', quote } });
+  });
+  it('CONTROL: a figure written about this factor alone (and a legacy member with no record) records nothing', () => {
+    for (const extra of [{ basis: 'written_about' as const, quote: '£120k for seniors' }, {}]) {
+      const r = stampNewUserTodayLevels(ops(), [{ factor_id: 'f1', observed_state: os, ...extra }]);
+      expect(((r as { operations: { value: { observed_state: Record<string, unknown> } }[] }).operations[0]!.value.observed_state)).toEqual(os);
+    }
+  });
+});
