@@ -260,7 +260,7 @@ describe('CONTROLS — what the rule must leave alone', () => {
 
   it('a relative-change limit ("must not rise by more than 2 points") leaves the outcome an outcome', async () => {
     for (const unit of ['percentage points', 'pp']) {
-      const { graph } = await register(outcomeDraft({ constraints: [{ metric: 'Monthly churn', operator: '<=', value: 2, unit, provenance: 'explicit', frame: 'delta' }] }));
+      const { graph } = await register(outcomeDraft({ constraints: [{ metric: 'Monthly churn', operator: '<=', value: 2, unit, provenance: 'explicit', frame: 'change_abs' }] }));
       expect(byId(graph, 'monthly_churn'), unit).toStrictEqual(byId(SERVED_OUTCOME, 'monthly_churn'));
       expect(graph.goal_constraints?.map((c) => c.node_id), unit).toEqual(['monthly_churn']);
     }
