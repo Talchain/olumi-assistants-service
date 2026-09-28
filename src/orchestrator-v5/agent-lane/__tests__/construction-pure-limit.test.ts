@@ -30,8 +30,8 @@ const SPEND = 'annual_salary_spend';
 const GOAL = 'ship_the_new_platform';
 const DROPPED = `${SPEND}::${GOAL}`;
 const LIMIT = 'agent-lane:annual_salary_spend:<=';
-const SENTENCE = '"Annual salary spend" is kept as your limit, not as a cause: Olumi does not assume it changes '
-  + '"ship the new platform", so no link between them was drawn. If it does, say which way and the link can be added.';
+const SENTENCE = '"Annual salary spend" is kept as your limit, not as a cause of "ship the new platform": Olumi does not assume '
+  + 'it changes "ship the new platform" directly, so no link between them was drawn. If it does, say which way and the link can be added.';
 const E_PURE_LIMIT = [{ node_id: SPEND, label: 'Annual salary spend', dropped_edge_to: GOAL }];
 
 const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
@@ -124,12 +124,20 @@ describe('CONTRAST — shapes that must NOT change', () => {
     expect(pureOf(C.c10)).toEqual([]);
   });
 
-  it('same unit family: a £ goal (cost → profit is arithmetic) keeps the edge', () => {
-    unchanged(candidate((c) => { c.goal.unit = 'GBP'; }));
+  // AIQ #72 5867700610 WITHDREW "same unit family (£ → £) keeps the edge": spend → a £ goal is not accounting. The goal's
+  // unit no longer decides; only a goal DECLARED as an identity containing the cost does (below).
+  it('AIQ correction: a £ goal no longer keeps the edge — the rule fires whatever the goal\'s unit', () => {
+    for (const unit of ['GBP', 'milestones']) {
+      const m = admit(candidate((c) => { c.goal.unit = unit; }));
+      expect(m.pure_limits).toEqual(E_PURE_LIMIT);
+      expect(pairs(m.edges)).not.toContain(DROPPED);
+    }
   });
 
-  it('a goal whose unit family is not recognised keeps the edge (never guessed different)', () => {
-    unchanged(candidate((c) => { c.goal.unit = 'milestones'; }));
+  it('the ONLY exemption: a goal declared as an identity containing the spend keeps the edge', () => {
+    unchanged(candidate((c) => {
+      c.identities = [{ outcome: 'ship the new platform', operation: 'product', factors: ['Annual salary spend', 'Engineering delivery capacity'], provenance: 'inferred' }];
+    }));
   });
 
   it('a user-stated direction into the goal is always drawn, as theirs', () => {
@@ -172,10 +180,15 @@ describe('CONTRAST — shapes that must NOT change', () => {
     unchanged(candidate((c) => { c.links = c.links.filter((l: Json) => l.to !== 'Annual salary spend'); }));
   });
 
-  it('a quantity with a second edge out (spend → hiring lead time) keeps its edge into the goal', () => {
-    unchanged(candidate((c) => {
+  it('AIQ 5867700610 (non-terminal roll-ups too): a second edge out (spend → hiring lead time) is kept, the edge into the goal is not drawn', () => {
+    const m = admit(candidate((c) => {
       c.links.push({ from: 'Annual salary spend', to: 'Hiring lead time', direction: 'negative', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
     }));
+    expect(m.pure_limits).toEqual(E_PURE_LIMIT);
+    expect(pairs(m.edges)).toContain(`${SPEND}::hiring_lead_time`);
+    expect(pairs(m.edges)).not.toContain(DROPPED);
+    // It still reaches the goal (through the risk), so admission never calls it unconnected.
+    expect(m.loss.filter((l) => l.field_path === `nodes[${SPEND}]`)).toEqual([]);
   });
 
   it('a limited £ roll-up whose one edge out goes elsewhere is not reported (no edge into the goal to drop)', () => {
