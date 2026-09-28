@@ -250,6 +250,42 @@ describe('PJ-A1 £49 — stampNewGradedTodayLevels is fail-closed and by identit
   });
 });
 
+/**
+ * ⭐ A1 £59 (DL 5861782245; served CEE 0db4f43, DL run pj-20260928T013016Z A05) — the option's own level on the new graded
+ * factor rides the option's `add_node` in the SAME hold as today's level, so it lands in the same apply and commit. The
+ * confirm binds the two to ONE frame: an option level on that factor that is not on today's frame declines the batch whole.
+ */
+describe('A1 £59 — the option\'s level on the new graded factor lands in the SAME apply, on today\'s frame', () => {
+  const LEVEL_59 = { factor_key: 'new_pro_customer_price', value: 0.59, raw_value: 59, unit: 'GBP per month' };
+  const withLevel = (iv: Json): Json => {
+    const spec = GRADED_SPEC(true);
+    spec.interventions[1] = iv;
+    return spec;
+  };
+
+  it('CARRIER: the hold carries the option\'s £59 on 0–100 beside today\'s £49 → one confirm → both land, the level the user\'s', () => {
+    const held = hold(withLevel(LEVEL_59), [{ label: LABEL, observed_state: STATED }]);
+    expect(held.kind, JSON.stringify(held.reason ?? held.governing ?? '')).toBe('held');
+    const executed = confirm(held.pendingActions[0]);
+    expect(executed.status, JSON.stringify(executed.reason ?? '')).toBe('executed');
+    expect(nodeOf(executed.mutatedGraph, FAC)!.observed_state).toEqual(STATED);
+    expect(nodeOf(executed.mutatedGraph, OPT)!.interventions[FAC]).toEqual({ value: 0.59, raw_value: 59, unit: 'GBP per month',
+      source: 'user_specified', target_match: { node_id: FAC, match_type: 'exact_id', confidence: 'high' } });
+  });
+
+  it.each([
+    ['another frame (59 on 0–200)', { ...LEVEL_59, value: 0.295 }],
+    ['a figure its value does not hold on that frame (0.59 of 100 is not 60)', { ...LEVEL_59, raw_value: 60 }],
+    ['no figure (a bare 0.59 beside a framed today level)', { factor_key: 'new_pro_customer_price', value: 0.59, unit: 'GBP per month' }],
+  ])('RED: an option level on it on %s → stampNewGradedTodayLevels refuses, and the confirm declines the batch WHOLE', (_name, iv) => {
+    const held = hold(withLevel(iv), [{ label: LABEL, observed_state: STATED }]);
+    expect(held.kind).toBe('held');
+    const ops = (held.pendingActions[0].action.inline_patch as Json).operations as Json[];
+    expect(stampNewGradedTodayLevels(ops as never, [{ factor_id: FAC, observed_state: STATED }])).toEqual({ ok: false });
+    expect(confirm(held.pendingActions[0])).toEqual(expect.objectContaining({ status: 'apply_failed', reason: 'apply_error' }));
+  });
+});
+
 // ─── consent-all ("all of them"): each hold's own member reaches ITS step of the ONE commit ─────────────────────────
 let pendingActionsForRead: readonly PendingAction[] = [];
 const appendCalls: Array<Record<string, unknown>> = [];

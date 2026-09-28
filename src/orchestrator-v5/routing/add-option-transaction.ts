@@ -857,13 +857,42 @@ export function readGradedTodayMember(raw: unknown): readonly GradedTodayLevel[]
 }
 
 /**
+ * ⭐ A1 £59 (DL 5861782245; served CEE 0db4f43, DL run pj-20260928T013016Z A05) — ONE FRAME FOR TODAY AND THE OPTION.
+ * The Agent writes an option's own level on a new graded factor into the option's `add_node` in the SAME hold as that
+ * factor's stated today level, framed on the frame today's level carries. Every VALUED level an option this batch adds
+ * sets on `l.factor_id` must be on exactly that frame: with a cap, `{ value: raw / cap, raw_value: raw }` with
+ * 0 ≤ raw ≤ cap; with none (a bare today level within [0, 1]), a bare value within [0, 1]. A link with no level (no bundle
+ * entry) is not a level. Anything else means two scales for one factor, and the whole batch is refused.
+ */
+function optionLevelsOnFrame(operations: readonly PatchOperation[], l: GradedTodayLevel): boolean {
+  const cap = l.observed_state['cap'];
+  for (const o of operations) {
+    if (o.op !== 'add_node' || o.value === null || typeof o.value !== 'object') continue;
+    const v = o.value as { kind?: unknown; interventions?: unknown };
+    if (v.kind !== 'option' || v.interventions === null || typeof v.interventions !== 'object') continue;
+    if (!Object.prototype.hasOwnProperty.call(v.interventions, l.factor_id)) continue;
+    const entry = (v.interventions as Record<string, unknown>)[l.factor_id];
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return false;
+    const { value, raw_value: raw } = entry as { value?: unknown; raw_value?: unknown };
+    if (!finiteNum(value) || value < 0 || value > 1) return false;
+    if (cap === undefined) {
+      if (raw !== undefined) return false;
+      continue;
+    }
+    if (!finiteNum(cap) || !finiteNum(raw) || raw < 0 || raw > cap || Math.abs(value - raw / cap) > 1e-9) return false;
+  }
+  return true;
+}
+
+/**
  * Write each named new graded factor's stated today level INTO its `add_node` op — run by the confirm AFTER the
  * re-referee (whose R4 screen keeps values off a producer's `add_node`) and AFTER the switch stamp, BEFORE the apply,
  * exactly as `stampNewSwitchFactors` does. The one commit carries the factor, its today level, the option and the links.
  *
  * FAIL-CLOSED, and by identity: each id must name exactly ONE `add_node` of a FACTOR in this batch that carries no value
  * yet (so never a switch, whose today-0 is already stamped), that an option this batch adds links to; its level must be
- * exactly a stated framed level (`isStatedTodayObservedState`). Anything else is `{ ok: false }` and the caller refuses
+ * exactly a stated framed level (`isStatedTodayObservedState`); and every level an option this batch adds sets on it must be
+ * on that same frame (`optionLevelsOnFrame`, A1 £59). Anything else is `{ ok: false }` and the caller refuses
  * the whole batch. Pure and total; never mutates its inputs; with no levels, the operations come back unchanged.
  */
 export function stampNewGradedTodayLevels<T extends PatchOperation>(
@@ -886,6 +915,8 @@ export function stampNewGradedTodayLevels<T extends PatchOperation>(
     const actedOn = out.some((o) => o.op === 'add_edge' && o.path.endsWith(`::${l.factor_id}`)
       && addedOptionIds.has(o.path.slice(0, o.path.length - `::${l.factor_id}`.length)));
     if (!actedOn) return { ok: false };
+    // ⭐ A1 £59 (DL 5861782245): an option this batch adds that sets a level on the factor sets it on today's frame.
+    if (!optionLevelsOnFrame(out, l)) return { ok: false };
     out[at[0]!] = { ...out[at[0]!]!, value: { ...node, observed_state: { ...l.observed_state } } };
   }
   return { ok: true, operations: out };
