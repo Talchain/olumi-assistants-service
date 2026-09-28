@@ -570,6 +570,48 @@ describe('SLICE C2 — the Agent reaches the product\'s own writers: a new risk 
     expect((graphNow().goal_constraints ?? []).find((c) => c['constraint_id'] === 'constraint_out_nrr_min')).toEqual(NRR_ROW);
   }, 120_000);
 
+  /**
+   * R1 S4-core: a limit stated as a CHANGE from today ("cloud cost no more than 10% above today" → `change_rel` 0.1, no
+   * unit). Both writer paths write a new LEVEL figure, so the user's "15%" would land as 15 in a fraction's place.
+   * Refused by name by the proposer AND the door until a change is edited as a change; byte-identical.
+   */
+  const CHANGE_ROW = {
+    constraint_id: 'agent-lane:out_nrr:<=:change_rel', node_id: 'out_nrr', operator: '<=', value: 0.1,
+    label: 'Net revenue retention', value_frame: 'change_rel', provenance: 'explicit',
+  };
+  const changeGraph = (): G => {
+    const g = nrrGraph();
+    return { ...g, goal_constraints: [...(g.goal_constraints ?? []).filter((c) => c['node_id'] !== 'out_nrr'), CHANGE_ROW] };
+  };
+
+  it('(12c) RED: a limit stated as a change from today is refused by the proposer by name — nothing prepared, byte-identical', async () => {
+    graphOf.set(SCENARIO, changeGraph());
+    const before = bytes();
+    let out: Record<string, unknown> = {};
+    script = [
+      () => fnCall('propose_limit_change', { limit_label: 'Net revenue retention', operator: '<=', new_value: 15, rationale: 'x' }),
+      (body) => { out = toolOutputIn(body); return say('That limit cannot be changed here.'); },
+    ];
+    const t1 = await turn({ message: 'Make that no more than 15% above today.' });
+    expect(t1._agent.tool_calls.find((c) => c.name === 'propose_limit_change'), JSON.stringify(t1._agent.tool_calls))
+      .toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'limit_is_a_change' }));
+    expect(String(out['detail']), JSON.stringify(out)).toContain('stated as a change from today');
+    expect(approveChipOf(t1)).toBeUndefined();
+    expect(bytes()).toBe(before);
+  }, 120_000);
+
+  it('(12d) RED: the DOOR refuses a change-framed row on its own — no row appended, byte-identical (never 15 in a fraction\'s place)', async () => {
+    graphOf.set(SCENARIO, changeGraph());
+    const before = bytes();
+    const { commitLimitEditInProcess } = await import('../../system-events/dispatch.js');
+    const rowsBefore = order.length;
+    const r = await commitLimitEditInProcess({ scenario_id: SCENARIO, turn_id: randomUUID(), base_graph_hash: await hashNow(),
+      node_id: 'out_nrr', operator: '<=', raw_value: 15 }, 'req-change');
+    expect(r).toEqual(expect.objectContaining({ status: 'refused', reason: 'limit_is_a_change' }));
+    expect(order.length, 'no row appended').toBe(rowsBefore);
+    expect(bytes()).toBe(before);
+  }, 120_000);
+
   it('(13) the % row: an edit 4% → 5% keeps the unit and DROPS the old unit audit — no stale "original 4" survives the new figure', async () => {
     const g = seedGraph();
     const churnRow = {

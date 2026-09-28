@@ -285,6 +285,20 @@ describe('R5 — the Agent\'s model-facing limit says it as the user did', () =>
   });
 });
 
+describe('R5-S4 — a limit stated as a CHANGE from today reaches the Agent as the change (R1 S4-core)', () => {
+  it('R5-S4: change_rel 0.1 is said "no more than 10% above today" with its frame, never "at most 0.1"; the level price cap is unchanged', async () => {
+    const { stored } = await build(BRIEF_AT_MOST, '<=');
+    const rows = (stored.goal_constraints as Rec[]).map((c) => (c.label === 'Monthly churn'
+      ? (({ unit: _u, ...rest }) => ({ ...rest, value: 0.1, value_frame: 'change_rel' }))(c as Rec & { unit?: unknown })
+      : c));
+    const limits = await agentLimits({ ...stored, goal_constraints: rows });
+    const churn = limits.find((l) => l.on === 'Monthly churn');
+    expect(churn).toMatchObject({ frame: 'change_rel', value: 0.1, in_words: 'no more than 10% above today' });
+    expect(JSON.stringify(churn)).not.toMatch(/at most 0\.1/);
+    expect(limits.find((l) => l.on === 'Pro plan price')?.in_words, 'CONTROL: a level is said exactly as before').toBe('at most 100 GBP');
+  });
+});
+
 describe('R6 — an older reader (a schema without the field) strips it and the graph stays valid', () => {
   it('R6: parsed by a GraphV3 whose constraint schema lacks operator_as_stated, the graph is valid and the row keeps "<="', async () => {
     const { stored } = await build(BRIEF_A, '<');

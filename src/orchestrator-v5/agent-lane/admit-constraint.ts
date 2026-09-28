@@ -50,8 +50,8 @@ import { GoalConstraintSchema, type GoalConstraintT } from '../../schemas/assist
 import { classifyUnitScaleClass, UNIT_SCALE_CLASS_TOKENS, unitPinnedScaleFrame } from '../../cee/draft/records/unit-scale-class.js';
 import { isCurrencyUnit, sameUnit } from '../../utils/currency-alphabet.js';
 
-import type { CandidateOperator } from './limit-operator-words.js';
-import { isChangeFrame } from './limit-frame.js';
+import { LIMIT_OPERATOR_WORDS, type CandidateOperator } from './limit-operator-words.js';
+import { isChangeFrame, sayLimitInFrame } from './limit-frame.js';
 export { type CandidateOperator, LIMIT_OPERATOR_WORDS, statedOperatorOf } from './limit-operator-words.js';
 /** The comparators the canonical store holds: `GoalConstraintSchema.operator`, derived, never restated. */
 export type CanonicalOperator = GoalConstraintT['operator'];
@@ -572,15 +572,19 @@ export function admitCandidateConstraints(
     contradicted.add(lower.node_id);
     const metric = candidates.find((c) => nodeIdFor(c.metric) === lower.node_id)?.metric ?? lower.node_id;
     const authored = lower.provenance === 'explicit' || upper.provenance === 'explicit';
+    // R1 S4-core: both bounds share one frame (above); a change is said as the change, a level exactly as before.
+    const said = (row: AdmittedConstraint, words: string): string => (isChangeFrame(row.value_frame)
+      ? sayLimitInFrame({ operator: row.operator, value: row.value, unit: row.unit, frame: row.value_frame, words: LIMIT_OPERATOR_WORDS, figure: (v, u) => `${v}${u ?? ''}` })
+      : `${words} ${row.value}${row.unit ?? ''}`);
     loss.push({
       code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE,
       layer: 'cee',
       field_path: `goal_constraints[${lower.node_id}].bound_direction`,
-      before: `${metric}: at least ${lower.value}${lower.unit ?? ''} and at most ${upper.value}${upper.unit ?? ''}`,
+      before: `${metric}: ${said(lower, 'at least')} and ${said(upper, 'at most')}`,
       after: null,
       reason:
-        `${authored ? 'Your limit' : 'The limit Olumi proposed'} on "${metric}" was drafted both as at least ` +
-        `${lower.value}${lower.unit ?? ''} and as at most ${upper.value}${upper.unit ?? ''}, which would count every ` +
+        `${authored ? 'Your limit' : 'The limit Olumi proposed'} on "${metric}" was drafted both as ` +
+        `${said(lower, 'at least')} and as ${said(upper, 'at most')}, which would count every ` +
         `option on one side of it as breaking it. Neither was attached, so the analysis will not check this limit ` +
         `until you say which way it runs (a budget is usually at most).`,
       severity: 'warn',

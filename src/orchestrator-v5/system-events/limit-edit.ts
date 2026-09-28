@@ -33,6 +33,7 @@ import { statedOperatorOf, type CandidateOperator } from '../agent-lane/admit-co
 import { log } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { FRACTION_SPELLED_UNIT } from '../coaching/bound-graph.js';
+import { isChangeFrame } from '../agent-lane/limit-frame.js';
 import { BASE_HASH_DIVERGED } from '../graph-management/reason-codes.js';
 import {
   applyConstraintEditThroughAddConstraint,
@@ -115,6 +116,10 @@ export async function applyLimitEdit(params: ApplyLimitEditParams): Promise<Goal
   // the figure as given, in the row's unit, and the user states a percent: 115 would land as 11,500%. The percent →
   // fraction conversion is the unit/frame slice's (A3); until then this path refuses, and nothing is written.
   if (unit !== undefined && FRACTION_SPELLED_UNIT.test(unit)) return refused('limit_stored_as_fraction');
+  // ⛔ R1 S4-core: a limit stated as a CHANGE from today (`change_rel` holds a fraction of today's level; `change_abs` a
+  // change). This door writes the figure as a new value in the row's own frame, and the user states a level or a percent:
+  // "15%" would land as 15 in a fraction's place. Until a change is edited as a change, it is refused and nothing written.
+  if (isChangeFrame(row.value_frame)) return refused('limit_is_a_change');
   const label = typeof row.label === 'string' && row.label !== '' ? row.label : undefined;
   const frame = typeof row.value_frame === 'string' ? (row.value_frame as NonNullable<Parameters<typeof applyConstraintEditThroughAddConstraint>[0]['confirmedConstraintValueFrame']>) : undefined;
   // A2: a comparator stated on this edit must be in the row's own direction ("at most" on an "at least" limit is a

@@ -309,6 +309,20 @@ describe('read_workspace — the model as it stands', () => {
     expect(out).not.toContain('NO TARGET SET');
   });
 
+  it('R1 S4-core: a target stated as a CHANGE from today is shown as a change, never as a level ("<= 0.1")', () => {
+    const out = workspace(
+      graph({
+        goal_constraints: [
+          { constraint_id: 'c_rel', node_id: GOAL, operator: '<=', value: 0.1, label: 'Cost rise cap', value_frame: 'change_rel' },
+          { constraint_id: 'c_abs', node_id: GOAL, operator: '>=', value: -2, unit: 'points', label: 'Churn fall', value_frame: 'change_abs' },
+        ],
+      } as never),
+    );
+    expect(out).toContain('Cost rise cap: <= +10% change from today');
+    expect(out).toContain('Churn fall: >= -2 points change from today');
+    expect(out).not.toMatch(/<= 0\.1\b/);
+  });
+
   it('an empty graph, and no graph at all, both say there is nothing to read', () => {
     expect(workspace(null)).toBe(READ_WORKSPACE_EMPTY);
     expect(workspace({ nodes: [], edges: [] } as unknown as GraphStateIngress)).toBe(

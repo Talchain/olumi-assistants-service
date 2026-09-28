@@ -172,3 +172,58 @@ describe('S4Q — a node\'s `quantity_frame` survives the run path\'s parse (con
     expect(JSON.parse(JSON.stringify(parsed.data))).not.toHaveProperty('quantity_frame');
   });
 });
+
+describe('S4D — every place CEE says a stored limit says a change as the change (consumer map 28 Sep)', () => {
+  it('S4D-1: sayLimitInFrame — a level is byte-identical; a change is said from today, rise and fall', async () => {
+    const { sayLimitInFrame } = await import('../limit-frame.js');
+    const { LIMIT_OPERATOR_WORDS } = await import('../limit-operator-words.js');
+    const figure = (v: number, u: string | undefined) => `${v}${u ? ` ${u}` : ''}`;
+    expect(sayLimitInFrame({ operator: '<=', value: 250000, unit: 'GBP', frame: 'level', words: LIMIT_OPERATOR_WORDS, figure })).toBe('at most 250000 GBP');
+    expect(sayLimitInFrame({ operator: '<=', value: 250000, unit: 'GBP', words: LIMIT_OPERATOR_WORDS, figure }), 'no frame = level').toBe('at most 250000 GBP');
+    expect(sayLimitInFrame({ operator: '<=', value: 0.1, frame: 'change_rel', words: LIMIT_OPERATOR_WORDS, figure })).toBe('no more than 10% above today');
+    expect(sayLimitInFrame({ operator: '<=', value: -0.15, frame: 'change_rel', words: LIMIT_OPERATOR_WORDS, figure })).toBe('at least 15% below today');
+    expect(sayLimitInFrame({ operator: '>=', value: 0.05, frame: 'change_rel', words: LIMIT_OPERATOR_WORDS, figure })).toBe('at least 5% above today');
+    expect(sayLimitInFrame({ operator: '<=', value: 5000, unit: 'GBP', frame: 'change_abs', words: LIMIT_OPERATOR_WORDS, figure })).toBe('no more than 5000 GBP above today');
+    expect(sayLimitInFrame({ operator: '>=', value: -2, unit: 'points', frame: 'change_abs', words: LIMIT_OPERATOR_WORDS, figure })).toBe('no more than 2 points below today');
+  });
+
+  it('S4D-2: the add/update receipts say a change as the change; a level receipt is byte-identical', async () => {
+    const f = await import('../../tools/handlers/d1-shared/format-confirmation.js');
+    expect(f.formatConstraintAdded({ targetLabel: 'Cloud cost', operator: '<=', value: 0.1, valueFrame: 'change_rel' }))
+      .toBe('Added constraint: Cloud cost must be no more than 10% above today.');
+    expect(f.formatConstraintUpdated({ targetLabel: 'Cloud cost', operator: '<=', value: 0.1, valueFrame: 'change_rel' }))
+      .toBe('Updated constraint: Cloud cost must be no more than 10% above today.');
+    const level = f.formatConstraintAdded({ targetLabel: 'Cloud cost', operator: '<=', value: 40000, unit: 'GBP' });
+    expect(level, 'CONTROL: a level').toMatch(/^Added constraint: Cloud cost must be at most /);
+    expect(level).not.toMatch(/today/);
+  });
+
+  it('S4D-3: a change-framed limit that could not be attached is named as the change, never "of at most 10%"', async () => {
+    const payload = candidate({ value: 10, unit: '%', frame: 'change_rel', metric: 'Egress fees' });
+    const { r } = await run(payload);
+    const said = JSON.stringify(r);
+    expect(said).toContain('Egress fees, no more than 10% above today');
+    expect(said).not.toMatch(/Egress fees of at most 10/);
+  });
+
+  it('S4D-4: two contradicting CHANGE bounds are said as changes', async () => {
+    const { admitCandidateConstraints } = await import('../admit-constraint.js');
+    const res = admitCandidateConstraints([
+      { metric: 'Cost', operator: '>=', value: 15, unit: '%', provenance: 'explicit', frame: 'change_rel' },
+      { metric: 'Cost', operator: '<=', value: 10, unit: '%', provenance: 'explicit', frame: 'change_rel' },
+    ], () => 'fac_cost');
+    expect(res.constraints).toEqual([]);
+    const reason = String(res.loss.find((l) => String(l.field_path).endsWith('.bound_direction'))?.reason);
+    expect(reason).toContain('drafted both as at least 15% above today and as no more than 10% above today');
+  });
+
+  it('S4D-5: a level and a change on one node never "contradict" (different frames are not comparable numbers)', async () => {
+    const { admitCandidateConstraints } = await import('../admit-constraint.js');
+    const res = admitCandidateConstraints([
+      { metric: 'Cost', operator: '>=', value: 1000, unit: 'GBP', provenance: 'explicit', frame: 'level' },
+      { metric: 'Cost', operator: '<=', value: 10, unit: '%', provenance: 'explicit', frame: 'change_rel' },
+    ], () => 'fac_cost');
+    expect(res.constraints.map((c) => c.value_frame).sort()).toEqual(['change_rel', 'level']);
+    expect(new Set(res.constraints.map((c) => c.constraint_id)).size, 'two ids, not one id twice').toBe(2);
+  });
+});
