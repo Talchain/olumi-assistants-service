@@ -1986,6 +1986,72 @@ function buildStructuralFallback(
 }
 
 /**
+ * ⭐⭐ AN EDIT ON A STRUCTURALLY-INVALID BASE NEVER WRITES (writer audit
+ * 27 Sep 2026, `field_loss` #5; reproduced at CEE staging `ec90bc88`).
+ *
+ * `buildStructuralFallback` hands `handleEditGraph` bare `{id, kind, label}`
+ * nodes and inert-default edges. The handler applies the edit to THAT, skips
+ * strict validation because the base is invalid, and
+ * `mergeAppliedGraphForPersistence` replaced the stored `nodes`/`edges` with
+ * the result — so one rename wiped `observed_state`, `interventions`,
+ * `goal_threshold*`, `category`, provenance … from EVERY element, and the
+ * `std: 0` it wrote kept the base invalid, so every later edit wiped again.
+ * Measured on a real served graph with one `std: 0` edge: one rename changed
+ * 10/10 nodes and 12/12 edges (GM mode `shadow`/`off`); in GM mode `live` the
+ * same wipe committed through a batch that projects to zero referee envelopes,
+ * under the reply "No change … Nothing was updated."
+ *
+ * WHY WITHHOLD, NOT MERGE. Carrying the stored raw form for the untouched
+ * elements would stop their wipe, but the TARGETED element's result is itself
+ * computed against the fallback, and is lossy in ways no merge can repair.
+ * Measured on the same graph: a value write the valid path refuses as
+ * scale-ambiguous ("0.05 reads as a proportion, but … is recorded as an
+ * amount") APPLIED on the fallback — the screen reads the `scale_frame` /
+ * `raw_value` the fallback had dropped — and landed as `{value, source}` with
+ * no `raw_value`, so a merge would pair the new `value` with the stored
+ * `raw_value` (which the formatter reads first). A strength write landed as the
+ * inert `{mean: 0, std: 0}`. So the one safe rule is the one the sibling
+ * writers already keep on an unparseable persisted graph
+ * (`applyAndValidateMutation`, `edge_strength_edit`): fail closed, write
+ * nothing, and say so — with a typed code and the NOTHING-FAILS-SILENTLY
+ * disclosure (request id, fault `olumi`, plain English).
+ *
+ * @internal Exported for testing.
+ */
+export const BASE_GRAPH_INVALID_REJECTION_CODE = 'BASE_GRAPH_INVALID' as const;
+export const BASE_GRAPH_INVALID_ASSISTANT_TEXT =
+  "I haven't changed anything. The saved copy of this model has a fault on our side, " +
+  "and editing it now could erase details you didn't ask me to touch. " +
+  'This model needs a repair before it can be edited.';
+const BASE_GRAPH_INVALID_READABLE =
+  'Your change was not saved, and nothing in your model has changed. The saved copy of ' +
+  'this model is missing details Olumi needs to edit it safely, so an edit now could ' +
+  'erase parts you did not ask to change. This is a fault on our side, not a problem ' +
+  'with your request. The model needs a repair before it can be edited.';
+
+/**
+ * The wire block for the withhold above: the same `INTERNAL_ERROR` + `warn`
+ * advisory shape every recoverable edit rejection ships (see
+ * `buildBoundaryBlocks`), with the disclosure fields in the passthrough
+ * `details`. Content-free: fixed copy, never interpolated from the model.
+ */
+function buildInvalidBaseWithheldBlock(requestId: string): OlumiResponse['blocks'][number] {
+  return {
+    type: 'error',
+    error_code: 'INTERNAL_ERROR',
+    severity: 'warn',
+    details: {
+      source: 'edit_graph',
+      rejection_code: BASE_GRAPH_INVALID_REJECTION_CODE,
+      failure_branch: 'base_graph_invalid',
+      request_id: requestId,
+      fault: 'olumi',
+      readable: BASE_GRAPH_INVALID_READABLE,
+    },
+  } as OlumiResponse['blocks'][number];
+}
+
+/**
  * Adapter: permissive `AnalysisStateIngress` → `V2RunResponseEnvelope`.
  *
  * Mirrors `coerceIngressAnalysis` in turn-executor.ts (the existing V5
@@ -3752,12 +3818,32 @@ export async function dispatchEditGraph(
       modelNodeLabels: projectModelNodeLabels(parsedGraph),
     }) === 'withheld_deliberation';
 
+  // ⭐⭐ AN EDIT ON A STRUCTURALLY-INVALID BASE NEVER WRITES — see
+  // `BASE_GRAPH_INVALID_REJECTION_CODE`. A non-strict parse is exactly the case
+  // in which `handleEditGraph` edited the structural fallback, so the applied
+  // graph is the fallback's, not the user's: committing it wipes every field
+  // the fallback dropped, on every element. Withheld THROUGH the effective
+  // predicate for the reason its siblings are: persist, edit fact,
+  // `analysis_ready` and the returned graph then cannot disagree.
+  //
+  // ⚠ NOT a referee concern and deliberately independent of the GM mode: the
+  // wipe committed in `shadow`/`off` (the gate never blocks there) AND in `live`
+  // through a batch that projects to zero referee envelopes. Where the live
+  // gate DOES govern (it holds CURRENT_GRAPH_UNREADABLE), its hold keeps the
+  // reply; this only withholds the write.
+  const invalidBaseWriteWithheld = !graphStrictlyCanonical && successfulAppliedMutation;
+  // The reply, the turn event and the freshness re-derivation are this
+  // withhold's only when the live referee did not already block the turn.
+  const invalidBaseRefusalOwnsReply = invalidBaseWriteWithheld && !gmBlockedApply;
+
   // Structural honesty: every downstream success effect (persist, edit fact,
   // analysis_ready, returned graph) gates on the EFFECTIVE predicate so a
   // live-blocked verdict — or a part-accounting substitution block, or a
   // withheld wrong-entity write, or a turn that asked for a VIEW rather than an
-  // edit — can never surface an applied-mutation signal.
+  // edit, or an edit computed against the structural fallback — can never
+  // surface an applied-mutation signal.
   const effectiveAppliedMutation =
+    !invalidBaseWriteWithheld &&
     successfulAppliedMutation &&
     !gmBlockedApply &&
     !paSubstitutionBlocked &&
@@ -3819,6 +3905,7 @@ export async function dispatchEditGraph(
         option_own_value_withheld: optionOwnValueWithheld,
         recorded_answer_not_landed: recordedAnswerNotLanded,
         ordinary_text_authority_withheld: ordinaryTextAuthorityWithheld,
+        invalid_base_write_withheld: invalidBaseWriteWithheld,
       },
       'edit_graph: withdrew an applied-changes headline for a turn that persisted nothing',
     );
@@ -3922,7 +4009,10 @@ export async function dispatchEditGraph(
     // added to prevent, because it is staleness claimed off a write we refused.
     optionScopeUnresolved ||
     optionOwnValueWithheld ||
-    recordedAnswerNotLanded
+    recordedAnswerNotLanded ||
+    // The invalid-base withhold shares this re-derivation rather than adding a
+    // second call site (anti-rederivation-callsite-pin): same reason, same base.
+    invalidBaseRefusalOwnsReply
   ) {
     // The graph did NOT change this turn — re-derive the wire freshness against
     // the UNCHANGED frame base, exactly as the GM-blocked and part-accounting
@@ -3948,10 +4038,16 @@ export async function dispatchEditGraph(
           : { priorFactsReadOk: priorFactsReadOkForRecovery },
       );
     }
-    ev.branch = optionInterventionWriteWithheld
-      ? 'option_intervention_write_withheld'
-      : 'option_own_value_write_withheld';
-    ev.outcome = 'clarify';
+    if (invalidBaseRefusalOwnsReply) {
+      ev.branch = 'invalid_base_write_withheld';
+      ev.outcome = 'rejected';
+      ev.failure_code = BASE_GRAPH_INVALID_REJECTION_CODE;
+    } else {
+      ev.branch = optionInterventionWriteWithheld
+        ? 'option_intervention_write_withheld'
+        : 'option_own_value_write_withheld';
+      ev.outcome = 'clarify';
+    }
   }
   if (paSubstitutionBlocked && partAccounting !== null) {
     // Defect-B fail-closed branch: replace the V4 narration with the
@@ -4882,13 +4978,48 @@ export async function dispatchEditGraph(
     };
   }
 
+  // ⭐⭐ THE INVALID-BASE WITHHOLD SAYS SO — and it REPLACES the reply, it does
+  // not sit under it. Placed AFTER the sibling withholds on purpose: their
+  // verdicts were computed from `parsedGraph`, which on this path IS the
+  // structural fallback, so their copy describes a graph that is not the
+  // user's; the one true statement is that nothing was written and why.
+  // Skipped only when the live referee gate already blocked the turn — its hold
+  // owns the reply there (the write is withheld either way).
+  if (invalidBaseRefusalOwnsReply) {
+    response = {
+      ...response,
+      assistant_text: BASE_GRAPH_INVALID_ASSISTANT_TEXT,
+      suggested_actions: [],
+      blocks: [buildInvalidBaseWithheldBlock(requestId)],
+    };
+    // Wire freshness was already re-derived against the UNCHANGED frame base,
+    // and the turn event labelled, in the shared withheld-write block above.
+    log.warn(
+      {
+        event: 'v5.edit_graph.invalid_base_write_withheld',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        gm_mode: gmMode,
+        operations_count: editResult.operations?.length ?? 0,
+      },
+      'V5 edit_graph — edit was applied to the structural fallback of a GraphV3-invalid base; write withheld (it would overwrite stored fields the edit did not touch)',
+    );
+  }
+
   // Part-accounting disclosure (defect A) — appended as the LAST content
   // step before the egress guard, so ONE seam covers every emit branch
   // (applied narration, GM held ask, no-op recovery copy). The builder is
   // null unless at least one part WAS covered (a full no-op turn keeps its
   // own clarify copy) and something is genuinely unaccounted.
+  // Not on the invalid-base withhold: nothing was covered there, and a
+  // "this part was done" line would contradict "I haven't changed anything".
   let paDisclosureAppended = false;
-  if (partAccounting !== null && !paSubstitutionBlocked && !editResult.wasRejected) {
+  if (
+    partAccounting !== null &&
+    !paSubstitutionBlocked &&
+    !editResult.wasRejected &&
+    !invalidBaseRefusalOwnsReply
+  ) {
     const paDisclosure = buildPartAccountingDisclosure(partAccounting);
     if (paDisclosure !== null) {
       response = {
