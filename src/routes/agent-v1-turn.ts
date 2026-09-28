@@ -77,6 +77,7 @@ import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-g
 import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
 import { readBrief, BRIEF_READING_TIMEOUT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
 import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
+import { limitAskIdsOf } from '../orchestrator-v5/agent-lane/limit-checks.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runDeltaBoundToReadback, runTurnNextMove, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
 import { breakEvenFor, goalNotCheckedLine, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
@@ -2484,7 +2485,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // user's model followed a reply about public evidence).
         sayWhyWithheld: fastPath !== 'research' && !(fa !== undefined && fastPath !== 'run' && !result.tool_calls.some((c) => c.name === 'run_analysis')),
         // The run's per-limit rows from the SAME readback: an estimate-only limit is said to have been checked.
-        ...(limitVerdicts !== undefined ? { limitVerdicts } : {}),
+        ...(limitVerdicts !== undefined ? { limitVerdicts, limitAskIds: limitAskIdsOf(readbackGraph) } : {}),
       });
       if (enforced.changed) {
         leaderClaimEnforced = true;
@@ -2525,7 +2526,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // The Agent's own words pass the user-facing scrub first (`sanitiseProvisionalView`); a code left refuses the view.
     const givenView = rawView === null ? null : sanitiseProvisionalView(rawView, parsedGraphOrNull(readbackGraph));
     if (rawView !== null && givenView === null) log.warn({ scenario_id: scenarioId }, 'agent-lane: a provisional view carried an internal code after the scrub — it is not shown');
-    const standing = givenView === null ? null : leaderStandingOf({ analysisState, analysisReady, analysisResult, limitVerdicts });
+    const standing = givenView === null ? null : leaderStandingOf({ analysisState, analysisReady, analysisResult, limitVerdicts, limitAskIds: limitAskIdsOf(readbackGraph) });
     // Typed only (never appended to `assistant_text`): see `provisionalViewSidecar`.
     const provisionalView = givenView !== null && standing !== null && standing.analysis_on_record && standing.withheld
       ? provisionalViewSidecar(givenView, standing.because)

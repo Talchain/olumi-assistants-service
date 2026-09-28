@@ -60,6 +60,11 @@ function asksByLimit(graph: unknown): ReadonlyMap<string, string> {
   }
 }
 
+/** The limits MG asks about on this graph (`limitCheckAsks`), by `constraint_id` — never throws (see `asksByLimit`). */
+export function limitAskIdsOf(graph: unknown): ReadonlySet<string> {
+  return new Set(asksByLimit(graph).keys());
+}
+
 /** `undefined` when the run carries no per-limit rows, or none can be named. */
 export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdicts | null | undefined): LimitCheck[] | undefined {
   if (verdicts === null || verdicts === undefined) return undefined;

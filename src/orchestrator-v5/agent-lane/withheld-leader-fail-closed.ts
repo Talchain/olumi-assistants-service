@@ -1007,13 +1007,17 @@ const BY_CONSTRAINT_CODE: Readonly<Record<string, string>> = {
  * `estimate_only` on `level_olumi_estimate`: an `unscored` limit really does need something first, and a figure the user
  * accepted as an assumption is not Olumi's.
  */
-const estimateOnlyClauseFor = (count: number): string =>
-  `because your ${count === 1 ? 'limit was' : 'limits were'} checked only against Olumi’s estimates, not figures you gave, and running the analysis again as it stands will not change that; give me a real figure you know`;
+const estimateOnlyClauseFor = (count: number, asked = false): string =>
+  `because your ${count === 1 ? 'limit was' : 'limits were'} checked only against Olumi’s estimates, not figures you gave, and running the analysis again as it stands will not change that`
+  // ⭐ ONE ASK, IN MG'S WORDS (seam 5865508951; DL "one wording, one producer" 5865003207): when every such limit has
+  // MG's question (`limitCheckAsks`, carried on its `limit_checks` row as `ask`), the reply asks THAT, so this sentence
+  // adds no second, generic ask.
+  + (asked ? '' : '; give me a real figure you know');
 
-function estimateOnlyClause(limitVerdicts: StoredLimitVerdicts | undefined): string | undefined {
+function estimateOnlyClause(limitVerdicts: StoredLimitVerdicts | undefined, limitAskIds?: ReadonlySet<string>): string | undefined {
   const rows = limitVerdicts?.per_limit ?? [];
   if (rows.length === 0 || !rows.every((r) => r.state === 'estimate_only' && r.reason === 'level_olumi_estimate')) return undefined;
-  return estimateOnlyClauseFor(rows.length);
+  return estimateOnlyClauseFor(rows.length, limitAskIds !== undefined && rows.every((r) => limitAskIds.has(r.constraint_id)));
 }
 
 /**
@@ -1059,7 +1063,7 @@ const sentence = (clause: string): string => `${NO_LEADER_OPENING}, ${clause}.`;
 /** Every sentence this module can append — the build-time probe and the idempotence check read this. */
 export const AGENT_NO_LEADER_SENTENCES: readonly string[] = [
   ...new Set([...Object.values(BY_WITHHELD_REASON), ...Object.values(BY_CONSTRAINT_CODE), ...Object.values(BY_ADMISSION_REASON),
-    estimateOnlyClauseFor(1), estimateOnlyClauseFor(2), REASON_NOT_RECORDED].map(sentence)),
+    estimateOnlyClauseFor(1), estimateOnlyClauseFor(2), estimateOnlyClauseFor(1, true), estimateOnlyClauseFor(2, true), REASON_NOT_RECORDED].map(sentence)),
 ];
 
 /**
@@ -1117,20 +1121,22 @@ function admissionClause(analysisReady: unknown): string | undefined {
  */
 export function agentNoLeaderSentence(
   withheldReason: string | undefined, analysisReady: unknown, limitCauseCodes: readonly string[] = [], limitVerdicts?: StoredLimitVerdicts,
+  limitAskIds?: ReadonlySet<string>,
 ): string {
-  return sentence(agentNoLeaderClause(withheldReason, analysisReady, limitCauseCodes, limitVerdicts));
+  return sentence(agentNoLeaderClause(withheldReason, analysisReady, limitCauseCodes, limitVerdicts, limitAskIds));
 }
 
 /** The clause `agentNoLeaderSentence` closes on — the why and its one next action — chosen by the SAME rule. */
 function agentNoLeaderClause(
   withheldReason: string | undefined, analysisReady: unknown, limitCauseCodes: readonly string[] = [], limitVerdicts?: StoredLimitVerdicts,
+  limitAskIds?: ReadonlySet<string>,
 ): string {
   const admission = admissionClause(analysisReady);
   if (admission !== undefined) return admission;
   if (withheldReason === WITHHELD_CONSTRAINT_VERDICT) {
     const cause = limitCauseCodes.find((c) => BY_CONSTRAINT_CODE[c] !== undefined);
     if (cause !== undefined) return BY_CONSTRAINT_CODE[cause]!;
-    const estimateOnly = estimateOnlyClause(limitVerdicts);
+    const estimateOnly = estimateOnlyClause(limitVerdicts, limitAskIds);
     if (estimateOnly !== undefined) return estimateOnly;
   }
   if (withheldReason !== undefined && BY_WITHHELD_REASON[withheldReason] !== undefined) return BY_WITHHELD_REASON[withheldReason]!;
@@ -1143,8 +1149,9 @@ function agentNoLeaderClause(
  */
 export function agentNoLeaderReason(
   withheldReason: string | undefined, analysisReady: unknown, limitCauseCodes: readonly string[] = [], limitVerdicts?: StoredLimitVerdicts,
+  limitAskIds?: ReadonlySet<string>,
 ): string {
-  return agentNoLeaderClause(withheldReason, analysisReady, limitCauseCodes, limitVerdicts).split(';')[0]!.trim();
+  return agentNoLeaderClause(withheldReason, analysisReady, limitCauseCodes, limitVerdicts, limitAskIds).split(';')[0]!.trim();
 }
 
 // ── the projection ─────────────────────────────────────────────────────────────────────────────
@@ -1514,6 +1521,8 @@ export function enforceAgentLaneLeaderClaimsAtWire(
     readonly sayWhyWithheld?: boolean;
     /** The run's per-limit rows from the SAME readback (`readBackState`'s `limitVerdicts`); absent = not attested. */
     readonly limitVerdicts?: StoredLimitVerdicts;
+    /** The limits MG asks about on the same readback's graph (`limitAskIdsOf`): their ask replaces the generic one. */
+    readonly limitAskIds?: ReadonlySet<string>;
   },
 ): WireLeaderClaimEnforcementResult {
   let next = response;
@@ -1535,7 +1544,7 @@ export function enforceAgentLaneLeaderClaimsAtWire(
         const noResult = runStateSaysNoResult((response as { analysis_state?: unknown }).analysis_state) && admissionClause(opts.analysisReady) === undefined;
         const closing = noResult
           ? sentence(REASON_NOT_RECORDED)
-          : agentNoLeaderSentence(withheldReason, opts.analysisReady, limitCauseCodesOf((response as { blocks?: unknown }).blocks), opts.limitVerdicts);
+          : agentNoLeaderSentence(withheldReason, opts.analysisReady, limitCauseCodesOf((response as { blocks?: unknown }).blocks), opts.limitVerdicts, opts.limitAskIds);
         const body = projected.text.trimEnd();
         const alreadySaid = closing === PRODUCT_IDENTITY_SENTENCE && replyAlreadySaysProductReason(body, opts.graph);
         next = { ...response, assistant_text: body.length === 0 ? closing : opts.sayWhyWithheld === false || noResult || alreadySaid ? body : `${body}\n\n${closing}` } as OlumiResponse;

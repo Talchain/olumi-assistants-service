@@ -107,12 +107,30 @@ describe('⭐ the no-leader sentence reads the limit rows', () => {
     }
   });
 
-  it('the new sentences are the module’s own (kept by identity) and none reads as a ranking', () => {
-    for (const n of [1, 2]) {
-      const s = agentNoLeaderSentence('constraint_verdict_withheld', undefined, [], rows(...Array.from({ length: n }, () => ['estimate_only', 'level_olumi_estimate'] as [string, string])));
-      expect(AGENT_NO_LEADER_SENTENCES).toContain(s);
+  it('the new sentences are the module’s own, word for word (kept by identity), and none reads as a ranking', () => {
+    // Bound to the literal words (DL #2218 review: a row reading the sentence back from the module passed at base too).
+    const OPEN = 'No single option can be put forward yet, because your ';
+    const MID = ' checked only against Olumi’s estimates, not figures you gave, and running the analysis again as it stands will not change that';
+    for (const s of [
+      `${OPEN}limit was${MID}; give me a real figure you know.`, `${OPEN}limits were${MID}; give me a real figure you know.`,
+      `${OPEN}limit was${MID}.`, `${OPEN}limits were${MID}.`,
+    ]) {
+      expect(AGENT_NO_LEADER_SENTENCES, s).toContain(s);
       expect(sentenceRanksOptions(s)).toBe(false);
     }
+  });
+
+  it('⭐ ONE ASK (seam 5865508951): when every such limit has MG’s question, the sentence adds no generic ask; one without keeps it', () => {
+    const two = rows(['estimate_only', 'level_olumi_estimate'], ['estimate_only', 'level_olumi_estimate']);
+    const ids = two.per_limit.map((r) => r.constraint_id);
+    const asked = agentNoLeaderSentence('constraint_verdict_withheld', undefined, [], two, new Set(ids));
+    expect(asked).toMatch(/limits were checked only against Olumi’s estimates, not figures you gave, and running the analysis again as it stands will not change that\.$/);
+    expect(asked).not.toContain('give me a real figure you know');
+    expect(agentNoLeaderSentence('constraint_verdict_withheld', undefined, [], two, new Set([ids[0]!])), 'one limit without an ask').toContain('give me a real figure you know');
+    expect(agentNoLeaderSentence('constraint_verdict_withheld', undefined, [], two, new Set()), 'no asks').toContain('give me a real figure you know');
+    expect(agentNoLeaderSentence('constraint_verdict_withheld', undefined, [], two), 'not given').toContain('give me a real figure you know');
+    // The provisional view gives the same cause either way: only the next action differs.
+    expect(agentNoLeaderReason('constraint_verdict_withheld', undefined, [], two, new Set(ids))).toBe(agentNoLeaderReason('constraint_verdict_withheld', undefined, [], two));
   });
 
   it('C5: the provisional view’s "because" gives the same cause from the same rows', () => {
