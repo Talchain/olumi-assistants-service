@@ -1036,6 +1036,8 @@ function earlierAnalysisOf(state: unknown): { analysis: Record<string, unknown> 
  * "strong" stored 0.825, which the canvas drew "Very strong" — R&C #70 5846846471.)
  */
 const bandMidpoint = (band: InfluenceBand): number => EDGE_STRENGTH_MIDPOINTS[band];
+/** The most links one set carries: Paul's served set was eight; twelve covers a whole starting model's causal links. */
+const MAX_LINK_SET = 12;
 
 /** What the Agent tells the user about a reading: whose words, which band, and that approving it approves the reading. */
 const readingNote = (i: ProposalInterpretation): string =>
@@ -1870,6 +1872,90 @@ export function createAgentCapabilities(
     };
   };
   /**
+   * ⭐ A SET OF LINK STRENGTHS AS ONE COMMIT (seam Canonical #72 5871633483; DL 5871661097): the level door
+   * (`commitOptionLevels`) with `link_strengths` alone. The writer checks every link BEFORE any write — a link that moved
+   * since the proposal, or a definitional link the last Run used, refuses the whole set and writes nothing. Landed is
+   * what the model holds, read back: each link at exactly its approved strength, stamped as the approval said (the
+   * user's band as theirs; Olumi's band as `olumi_estimate`, never the user's).
+   */
+  const applyLinkStrengthSet = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0],
+    parent: StructuredProposal,
+    approvedRead: GraphRead,
+  ): Promise<ToolResult> => {
+    const notApplied = (reason: string, detail: string, extra: Record<string, unknown> = {}): ToolResult => ({
+      ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id, refusal: 'not_applied', reason, detail, receipts: [], ...extra,
+    });
+    if (approvedRead.graph_hash !== parent.base_graph_identity_hash) {
+      return notApplied('model_changed_since_approval', 'The model changed after these links were prepared, so none of them was recorded. Read it again and propose afresh.');
+    }
+    if (opts.commitOptionLevels === undefined) {
+      return notApplied('links_writer_unavailable', 'These links could not be recorded as one change, so none of them was recorded.');
+    }
+    const labelOf = (id: string): string => approvedRead.nodes.find((n) => n.id === id)?.label ?? id;
+    const links = parent.operations.map((o) => {
+      const [from, to] = o.path.split('::');
+      const v = (o.value ?? {}) as { magnitude?: unknown; intent?: unknown; expected?: { mean?: unknown; effect_direction?: unknown }; band?: unknown; author?: unknown };
+      return { from: from ?? '', to: to ?? '', magnitude: v.magnitude, intent: v.intent, expected: v.expected, band: v.band, author: v.author };
+    });
+    const readable = links.every((l) => l.from !== '' && l.to !== '' && typeof l.magnitude === 'number' && (l.intent === 'set' || l.intent === 'confirm_current')
+      && isInfluenceBand(l.band) && typeof l.expected?.mean === 'number' && (l.expected.effect_direction === 'positive' || l.expected.effect_direction === 'negative')
+      && (l.author === 'user_stated' || l.author === 'model_proposed'));
+    if (!readable) return notApplied('unreadable_proposal', 'These links could not be read from the stored proposal, so none of them was recorded. Offer to prepare them again.');
+    const sent = links.map((l) => ({
+      from: l.from, to: l.to, magnitude: l.magnitude as number, intent: l.intent as 'set' | 'confirm_current',
+      expected: { mean: l.expected!.mean as number, effect_direction: l.expected!.effect_direction as 'positive' | 'negative' },
+      band: l.band as InfluenceBand, author: l.author === 'user_stated' ? 'user_specified' as const : 'model_proposed' as const,
+    }));
+    const res = await opts.commitOptionLevels({
+      scenario_id: ctx.scenario_id,
+      base_graph_hash: parent.base_graph_identity_hash,
+      turn_id: authorisationTurnId(`${parent.proposal_id}#links`),
+      links: [],
+      levels: [],
+      link_strengths: sent,
+    });
+    if (res.status === 'unconfirmed') {
+      return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed', receipts: [],
+        detail: 'These links were sent as one change, but Olumi could not read the model back to confirm them. Say exactly that; never say they were recorded or not recorded.' };
+    }
+    if (res.status === 'stale') {
+      return notApplied('model_changed_since_approval', 'The model changed after these links were approved, so none of them was recorded. Read it again and propose afresh.');
+    }
+    if (res.status === 'refused') {
+      const which = res.link !== undefined ? `"${labelOf(res.link.from)}" \u2192 "${labelOf(res.link.to)}"` : 'One of the links';
+      const why = res.reason === 'link_definitional_link'
+        ? 'is defined by a calculation the model declares, so its strength is not an estimate anyone sets'
+        : res.reason === 'link_expected_mismatch' ? 'changed after this was prepared' : 'could not be recorded';
+      return notApplied('link_refused', `${which} ${why}, so none of these links was recorded and the model is exactly as it was. Say so, and offer the set again without it.`,
+        { refused_link: which });
+    }
+    const receipts: ReceiptSummary[] = res.receipt !== null ? [{ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' }] : [];
+    const check = await readGraph(ctx.scenario_id);
+    const holds = check !== null && sent.every((l) => {
+      const e = check.edges.find((x) => x.from === l.from && x.to === l.to) as { strength?: unknown; provenance?: unknown } | undefined;
+      const mean = e?.strength !== null && typeof e?.strength === 'object' ? (e.strength as { mean?: unknown }).mean : undefined;
+      const want = l.expected.effect_direction === 'negative' ? -l.magnitude : l.magnitude;
+      const prov = (e?.provenance ?? {}) as { source?: unknown; magnitude?: unknown };
+      return typeof mean === 'number' && Math.abs(mean - want) < 1e-9
+        && (l.author === 'user_specified' ? prov.source === 'user_specified' : prov.magnitude === 'olumi_estimate');
+    });
+    if (!holds) {
+      return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
+        detail: 'These links were sent as one change, but reading the model back did not show all of them as approved. Say exactly that; never say they were recorded or not recorded.' };
+    }
+    proposals.markApplied(parent.proposal_id, receipts);
+    const olumis = sent.filter((l) => l.author === 'model_proposed').length;
+    return {
+      ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
+      revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
+      // What the user reads (typed-approval fast path); the Agent's next step stays in `note`.
+      follow_up: `${parent.public_label.replace(/^Record /, 'Recorded ')}.`
+        + (olumis > 0 ? ' Olumi\u2019s estimates are stored as \u201cOlumi\u2019s estimate, approved by you\u201d, not as your own.' : ''),
+      note: 'Recorded as one change. Offer to run the analysis again so they can see what these links change.',
+    };
+  };
+  /**
    * ⛔ A STARTING POINT MUST COVER EVERY FACTOR EACH OPTION ACTS ON.
    *
    * MEASURED on served 63cf4dcf (journey witness, direct transport): the
@@ -2127,6 +2213,125 @@ export function createAgentCapabilities(
         note: (interpretation === undefined ? '' : readingNote(interpretation)) + (confirm
           ? 'Nothing has changed yet. The link already sits in that band, so its strength is kept and only recorded as the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree.'
           : `Nothing has changed yet. Tell the user it will be recorded as ${linkBandWord(band)}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree.`),
+      };
+    },
+
+    /**
+     * ⭐ A SET OF LINK STRENGTHS, ONE APPROVAL (DL #72 5871594233; seam Canonical 5871633483, DL 5871661097). Paul's
+     * production test (`64c5eccc`): he asked Olumi for "educated guesses", said "I'm aligned with these. Please make these
+     * updates", then named the bands himself for eight links; four permissions recorded ONE link, because
+     * `propose_link_strength` holds one link and refuses a band the user did not type.
+     *
+     * Each link here is the user's estimate when they named its band in THIS turn's typed words (`bandTheUserWrote`, the
+     * one matcher), and otherwise OLUMI'S ESTIMATE: the approval adopts it and the writer stamps it as Olumi's size
+     * (`olumi_estimate`), never as the user's. A strength that is already the user's own is never replaced by an
+     * estimate. Directions are kept (a reversal is one link, in the user's words). One proposal, one chip, one commit.
+     */
+    async proposeLinkStrengths(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const asked: readonly Record<string, unknown>[] = Array.isArray(args?.links) ? args.links as Record<string, unknown>[] : [];
+      if (asked.length < 1 || asked.length > MAX_LINK_SET) {
+        return { ok: false, mutated: false, refusal: 'unreadable_links', detail: `Give between 1 and ${MAX_LINK_SET} links. Nothing was prepared.` };
+      }
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      type Shown = { from: string; to: string; band: InfluenceBand; magnitude: number; yours: boolean; keeps: boolean; was: InfluenceBand; wasStrength: number };
+      const ops: ProposalOperation[] = [];
+      const shown: Shown[] = [];
+      const already: string[] = [];
+      const seen = new Set<string>();
+      for (const l of asked) {
+        const name = `"${String(l?.from_label ?? '')}" \u2192 "${String(l?.to_label ?? '')}"`;
+        // ⛔ THE SET IS WHOLE OR NOT AT ALL: one unpreparable link prepares none, and names itself.
+        const refuseSet = (refusal: string, detail: string, extra: Record<string, unknown> = {}): ToolResult => ({
+          ok: false, mutated: false, refusal, link: name, ...extra,
+          detail: `${detail} Nothing was prepared for any of the links.` });
+        if (!isInfluenceBand(l?.strength)) {
+          return refuseSet('unreadable_strength', `The strength for ${name} must be one of weak (the canvas\u2019s Slight), moderate, strong or very strong.`);
+        }
+        const band = l.strength;
+        const fromRes = resolveNamed(g, String(l.from_label ?? ''), () => true);
+        const toRes = resolveNamed(g, String(l.to_label ?? ''), () => true);
+        const ambiguousEnds = [
+          ...(fromRes.kind === 'ambiguous' ? [describeAmbiguity(g, String(l.from_label ?? ''), fromRes.candidates)] : []),
+          ...(toRes.kind === 'ambiguous' ? [describeAmbiguity(g, String(l.to_label ?? ''), toRes.candidates)] : []),
+        ];
+        if (ambiguousEnds.length > 0) {
+          return refuseSet('ambiguous_entity', `More than one entity carries a name in ${name}.`, { ambiguous_targets: ambiguousEnds, ambiguous_note: AMBIGUOUS_NOTE });
+        }
+        if (fromRes.kind !== 'one' || toRes.kind !== 'one') {
+          return refuseSet('unresolved_entity', `No entity is labelled as in ${name}. Read the state again and use each label exactly as it appears.`);
+        }
+        const from = fromRes.node;
+        const to = toRes.node;
+        const key = `${from.id}::${to.id}`;
+        if (seen.has(key)) return refuseSet('duplicate_link', `${name} is listed twice.`);
+        seen.add(key);
+        const edge = g.edges.find((e) => e.from === from.id && e.to === to.id);
+        if (edge === undefined) {
+          return refuseSet('no_such_link', `The model has no link from "${from.label}" to "${to.label}". Leave it out of the set, or offer to add it.`);
+        }
+        const mean = (edge.strength !== null && typeof edge.strength === 'object') ? (edge.strength as { mean?: unknown }).mean : undefined;
+        if (typeof mean !== 'number' || !Number.isFinite(mean)) {
+          return refuseSet('unreadable_link', `"${from.label}" \u2192 "${to.label}" carries no readable strength.`);
+        }
+        const direction: 'positive' | 'negative' = edge.effect_direction === 'negative' || edge.effect_direction === 'positive'
+          ? edge.effect_direction : (mean < 0 ? 'negative' : 'positive');
+        const currentBand = edgeBandFromMagnitude(Math.abs(mean));
+        const pair = `"${from.label}" \u2192 "${to.label}"`;
+        if (bandTheUserWrote(band, ctx.user_turn_text)) {
+          // The user named this band: recorded as theirs, exactly as `propose_link_strength` records one link.
+          const keeps = currentBand === band;
+          const magnitude = keeps ? Math.abs(mean) : bandMidpoint(band);
+          ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set', expected: { mean, effect_direction: direction }, band, author: 'user_stated' } });
+          shown.push({ from: from.label, to: to.label, band, magnitude, yours: true, keeps, was: currentBand, wasStrength: Math.abs(mean) });
+          continue;
+        }
+        // Olumi's estimate. A strength the user set is theirs: an estimate never replaces it.
+        const usersOwn = (edge.provenance as { source?: unknown } | undefined)?.source === 'user_specified'
+          && (edge as { defaulted?: unknown }).defaulted !== true;
+        if (usersOwn) {
+          if (currentBand === band) { already.push(`${pair} is already ${linkBandWord(band)}, as the user set it`); continue; }
+          return refuseSet('users_own_strength', `The strength of ${pair} is the user\u2019s own (${linkBandWord(currentBand)}), and an estimate never replaces it. `
+            + 'NEXT CALL: the same links without this one \u2014 unless the user names its band in their own words.');
+        }
+        const magnitude = bandMidpoint(band);
+        if (Math.abs(mean) === magnitude) { already.push(`${pair} already holds ${quotable(magnitude)}, Olumi\u2019s figure for ${linkBandWord(band)}`); continue; }
+        ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: 'set', expected: { mean, effect_direction: direction }, band, author: 'model_proposed' } });
+        shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps: false, was: currentBand, wasStrength: Math.abs(mean) });
+      }
+      if (ops.length === 0) {
+        return { ok: false, mutated: false, refusal: 'nothing_to_change', already,
+          detail: 'Every link already holds what was asked, so nothing was prepared. Say so plainly.' };
+      }
+      const whose = (x: Shown): string => x.yours
+        ? (x.keeps ? `your estimate (strength kept at ${quotable(x.magnitude)})` : `your estimate (${quotable(x.magnitude)})`)
+        : `Olumi\u2019s estimate (${quotable(x.magnitude)})`;
+      const proposal = createProposal({
+        scenario_id: ctx.scenario_id,
+        user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash,
+        operations: ops,
+        provenance: { authored_by: shown.every((x) => x.yours) ? 'user_stated' : 'model_proposed', basis: String(args?.rationale ?? '') },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: `Record ${shown.length === 1 ? 'this link strength' : `these ${shown.length} link strengths`}, on Olumi\u2019s 0\u20131 scale: `
+          + shown.map((x) => `"${x.from}" \u2192 "${x.to}" as ${linkBandWord(x.band)}, ${whose(x)}`).join('; '),
+      });
+      proposals.put(proposal);
+      const olumis = shown.filter((x) => !x.yours).length;
+      return {
+        ok: true, mutated: false,
+        proposal_id: proposal.proposal_id,
+        public_label: proposal.public_label,
+        base_revision: g.graph_hash,
+        links: shown.map((x) => ({ from: x.from, to: x.to, was: { band: linkBandWord(x.was), strength: quotable(x.wasStrength) },
+          becomes: { band: linkBandWord(x.band), strength: quotable(x.magnitude) }, whose: x.yours ? 'yours' : 'Olumi\u2019s estimate', keeps_current_strength: x.keeps })),
+        ...(already.length > 0 ? { already } : {}),
+        note: 'Nothing has changed yet. ONE approval records every link in this set, all together or none. '
+          + (olumis > 0
+            ? `${olumis === shown.length ? 'Every strength here is' : `${olumis} of these strengths are`} Olumi\u2019s estimate, not the user\u2019s: say so, and that approving stores each as "Olumi\u2019s estimate, approved by you", never as theirs. `
+            : '')
+          + 'Tell the user what each link will hold, never the id, and call authorise_change with this proposal_id once they agree.',
       };
     },
 
@@ -3183,6 +3388,9 @@ export function createAgentCapabilities(
           follow_up: `The limit on "${label}" is now ${words} ${figure(v.raw_value)} (it was ${figure(v.before)}), as you stated it.`,
         };
       }
+
+      // ⭐ A set of link strengths: ONE commit through the level door's link half (seam Canonical #72 5871633483).
+      if (ops.length > 0 && ops.every((o) => o.op === 'set_link_strength')) return applyLinkStrengthSet(ctx, decision.proposal, before);
 
       // A starting point mixes kinds; each single-kind path below handles one.
       if (new Set(ops.map((o) => o.op)).size > 1) return applyCompound(ctx, decision.proposal, before);

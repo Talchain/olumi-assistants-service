@@ -262,6 +262,14 @@ export interface HandlerInvocation {
    */
   readonly edgeStrengthBandAuthority?: import('../format/influence-bands.js').InfluenceBand;
   /**
+   * ⭐ Olumi's band, ADOPTED by the user's approval of a set of links (`agent-lane/approved-adoption-context.ts`).
+   *
+   * Present only on the strict `edge_strength_edit` path, and only when a verified approval carried this exact link at
+   * this exact |mean| in-process. The handler then stamps the size as Olumi's (`provenance.magnitude: 'olumi_estimate'`,
+   * the link's `source` kept) instead of the user's. A routing model cannot populate it: it is not a proposal parameter.
+   */
+  readonly edgeStrengthAdoptedEstimateAuthority?: 'olumi_estimate';
+  /**
    * ⭐⭐ THIS TURN IS AN ANSWER TO A BASELINE QUESTION THE PRODUCT ASKED, AND
    * THE AUTHORITY IT CARRIES IS FOR THE BASELINE FIELD ONLY.
    *

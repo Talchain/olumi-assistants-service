@@ -57,6 +57,8 @@ const LIMIT_CHANGE_KEYS: ReadonlySet<string> = new Set(['ok', 'mutated', 'propos
 const RISK_PLACEHOLDER_STRENGTH = 'not known yet: Olumi uses a placeholder strength for each link, not an estimate';
 /** Every key `proposeLinkStrength` returns on success: its reading is already in its consent label. */
 const LINK_KEYS: ReadonlySet<string> = new Set(['ok', 'mutated', 'proposal_id', 'public_label', 'base_revision', 'link', 'interpretation', 'note']);
+/** Every key `proposeLinkStrengths` returns on success: each link's band, figure and whose it is are in its consent label. */
+const LINK_SET_KEYS: ReadonlySet<string> = new Set(['ok', 'mutated', 'proposal_id', 'public_label', 'base_revision', 'links', 'already', 'note']);
 
 const q = (label: string): string => `‘${label}’`;
 /** A level as the user writes it ("£15,000 over 6 months"): the lane's one figure formatter, as the consent subject says it. */
@@ -165,6 +167,18 @@ function linkStrengthReply(r: Rec): string | null {
   return reply(label.charAt(0).toLowerCase() + label.slice(1), [], question(undefined));
 }
 
+/**
+ * ⭐ A SET OF LINK STRENGTHS (DL #72 5871594233): the label names every link, its band, its figure and whose estimate it
+ * is; when any is Olumi's, one line says how it is stored. Its words are the capability's own, so nothing is re-derived.
+ */
+function linkSetReply(r: Rec): string | null {
+  if (!nonEmpty(r.public_label) || !Array.isArray(r.links) || r.links.length === 0) return null;
+  const olumis = r.links.filter((l) => recordOf(l)?.whose !== 'yours').length;
+  return reply(subjectOf(r.public_label),
+    olumis > 0 ? ['Olumi\u2019s estimates are stored as \u201cOlumi\u2019s estimate, approved by you\u201d, never as your own.'] : [],
+    question(undefined));
+}
+
 /** A verb-led consent label ("Record…", "Change…") read after "I’ve prepared this change:". */
 const subjectOf = (label: string): string => {
   const l = label.trim().replace(/\.$/, '');
@@ -205,10 +219,10 @@ export function composeProposalReply(tool: string, args: unknown, result: unknow
   const r = recordOf(result);
   if (r === undefined || r.ok !== true || r.mutated !== false || !nonEmpty(r.proposal_id)) return null;
   const allowed = tool === 'propose_new_option' ? NEW_OPTION_KEYS : tool === 'propose_link_strength' ? LINK_KEYS
-    : tool === 'propose_new_risk' ? NEW_RISK_KEYS : tool === 'propose_option_interventions' ? OPTION_LEVELS_KEYS
+    : tool === 'propose_link_strengths' ? LINK_SET_KEYS : tool === 'propose_new_risk' ? NEW_RISK_KEYS : tool === 'propose_option_interventions' ? OPTION_LEVELS_KEYS
       : tool === 'propose_goal_current_level' ? GOAL_LEVEL_KEYS : tool === 'propose_limit_change' ? LIMIT_CHANGE_KEYS : undefined;
   if (allowed === undefined || Object.keys(r).some((k) => !allowed.has(k))) return null;
   return tool === 'propose_new_option' ? newOptionReply(r) : tool === 'propose_new_risk' ? newRiskReply(r)
     : tool === 'propose_option_interventions' ? optionLevelsReply(r) : tool === 'propose_goal_current_level' ? goalLevelReply(r)
-      : tool === 'propose_limit_change' ? limitChangeReply(r) : linkStrengthReply(r);
+      : tool === 'propose_limit_change' ? limitChangeReply(r) : tool === 'propose_link_strengths' ? linkSetReply(r) : linkStrengthReply(r);
 }

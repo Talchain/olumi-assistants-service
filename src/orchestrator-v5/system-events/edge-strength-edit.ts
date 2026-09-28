@@ -17,6 +17,7 @@ import { isDeepStrictEqual } from 'node:util';
 
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { log } from '../../utils/telemetry.js';
+import { approvedLinkAdoptionFor } from '../agent-lane/approved-adoption-context.js';
 import { statedLinkBandFor } from '../agent-lane/stated-link-band-context.js';
 import { composeToolCallResponse } from '../compose.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../compose/definitional-links.js';
@@ -542,6 +543,18 @@ export async function applyEdgeStrengthEdit(
       ? edgeBandFromStrengthBand(event.band)
       : statedLinkBandFor(payload.scenario_id, event.from, event.to, event.magnitude);
 
+  // ⭐ Olumi's band, adopted by a verified approval of a set of links (`approved-adoption-context.ts`): stamped as Olumi's
+  // size, never the user's. Only a `set` that moves the link can adopt, and never beside a band the user named: either
+  // would otherwise fall through to the user's stamp, so both refuse with nothing written.
+  const adoptedEstimate = approvedLinkAdoptionFor(payload.scenario_id, event.from, event.to, event.magnitude);
+  if (adoptedEstimate !== undefined && (event.intent !== 'set' || statedBand !== undefined)) {
+    return refuse(
+      payload,
+      'adopted_estimate_not_a_set',
+      `I couldn't record Olumi's estimate for that link as its own, so I haven't changed anything.`,
+    );
+  }
+
   // `set` and `confirm_current` are intentionally different acts. A set that
   // resolves to the already-persisted scientific tuple has changed nothing,
   // so it must not reach the handler merely to stamp human provenance. Only
@@ -641,6 +654,7 @@ export async function applyEdgeStrengthEdit(
     // The same last-Run reading the refusal above used, so the handler's R3-9 check agrees with it.
     identityRunUseAuthority: params.lastRunIdentityUse ?? null,
     ...(statedBand !== undefined ? { edgeStrengthBandAuthority: statedBand } : {}),
+    ...(adoptedEstimate !== undefined ? { edgeStrengthAdoptedEstimateAuthority: adoptedEstimate } : {}),
     // Give the canonical handler the strict raw persisted shape. It performs
     // its own GraphV3 narrowing for mutation while its existing merge helper
     // preserves additive top-level fields; the parsed `graph` above remains

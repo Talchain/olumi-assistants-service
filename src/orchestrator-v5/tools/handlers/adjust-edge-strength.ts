@@ -473,17 +473,29 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         // ⭐ A6c — and so does Olumi's `reasoning`, on EVERY user write including a confirm. Kept under the user's
         // stamp, the model's WHY for the link was read back as the user's: decision review presents it as "the
         // producer's stated reason" (`decision-review-graph-projection.ts` `readEdgeReasoning`).
-        const {
-          natural_effect: _naturalEffect,
-          magnitude: _magnitude,
-          reasoning: _reasoning,
-          ...existingProvenance
-        } = (edge.provenance ?? {}) as Record<string, unknown>;
-        edge.provenance = {
-          ...existingProvenance,
-          source: 'user_specified',
-        } as typeof edge.provenance;
-        edge.provenance_display = 'user_set';
+        if (invocation.edgeStrengthAdoptedEstimateAuthority === 'olumi_estimate') {
+          // ⭐ OLUMI'S BAND, ADOPTED (Canonical 5871633483, DL 5871661097): the size is still Olumi's, so the link keeps its
+          // `source`, `provenance_display` and Olumi's `reasoning`, and `magnitude` says Olumi chose it. Never the user's
+          // stamp: an approval of Olumi's size is ratification, not authorship (AIQ R11 5872082179). Only
+          // `natural_effect` goes: it restated the OLD size in natural units.
+          const { natural_effect: _oldNaturalEffect, ...keptProvenance } = (edge.provenance ?? {}) as Record<string, unknown>;
+          edge.provenance = {
+            ...keptProvenance,
+            magnitude: 'olumi_estimate',
+          } as typeof edge.provenance;
+        } else {
+          const {
+            natural_effect: _naturalEffect,
+            magnitude: _magnitude,
+            reasoning: _reasoning,
+            ...existingProvenance
+          } = (edge.provenance ?? {}) as Record<string, unknown>;
+          edge.provenance = {
+            ...existingProvenance,
+            source: 'user_specified',
+          } as typeof edge.provenance;
+          edge.provenance_display = 'user_set';
+        }
         // The same stamp ends Olumi's default: `defaulted: true` says a default
         // strength was applied (EdgeV3), and this write makes the strength the
         // user's. Left in place, the Agent's canonical view, admissibility and

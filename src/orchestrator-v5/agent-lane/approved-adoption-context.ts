@@ -116,3 +116,49 @@ export function approvedLevelSourceFor(
   return adoptions.some(a => a.scenarioId === scenarioId && a.optionId === optionId && a.factorId === factorId
     && a.modelValue === modelValue) ? APPROVED_LEVEL_ADOPTION_SOURCE : undefined;
 }
+
+/**
+ * ⭐ THE SAME IDENTITY FOR A LINK'S STRENGTH (DL #72 5871594233; seam ruling Canonical 5871633483, DL 5871661097).
+ * Served on Paul's production test (`64c5eccc`): he asked Olumi for "educated guesses" on the links, said "I'm aligned
+ * with these. Please make these updates", and gave permission four times; one link of eight was recorded, because the
+ * link writer (`adjust_edge_strength`) knows one author only, the user, and the Agent would not stamp Olumi's band as his.
+ *
+ * An Olumi band the user approved is Olumi's size, adopted: the link keeps its `source`, `provenance.magnitude` becomes
+ * `olumi_estimate` (an existing `EdgeProvenanceV3` literal), and Olumi's default flag goes. Never `user_specified`.
+ * Matched on the same scenario, link and |mean| the write carries; a band the user named runs with no adoption.
+ */
+export interface ApprovedLinkAdoption {
+  readonly scenarioId: string;
+  readonly proposalId: string;
+  readonly from: string;
+  readonly to: string;
+  /** The approved |mean| — exactly what the write sends. */
+  readonly magnitude: number;
+}
+
+/** Olumi's own link size, adopted: the contract's member for a size Olumi chose (`EdgeProvenanceV3.magnitude`). */
+export const APPROVED_LINK_ADOPTION_MAGNITUDE = 'olumi_estimate' as const;
+
+const linkStore = new AsyncLocalStorage<readonly ApprovedLinkAdoption[]>();
+
+/** Run ONE verified approved set of links inside the adoption identity of every Olumi band it carries. */
+export function runWithApprovedLinkAdoptions<T>(adoptions: readonly ApprovedLinkAdoption[], fn: () => Promise<T>): Promise<T> {
+  return linkStore.run([...adoptions], fn);
+}
+
+/**
+ * The stamp for THIS link write if — and only if — it is an approved adoption the context names: same scenario, same
+ * `(from, to)`, same |mean|. Otherwise `undefined` (the writer keeps its own stamp).
+ */
+export function approvedLinkAdoptionFor(
+  scenarioId: string,
+  from: string,
+  to: string,
+  magnitude: unknown,
+): typeof APPROVED_LINK_ADOPTION_MAGNITUDE | undefined {
+  const adoptions = linkStore.getStore();
+  if (adoptions === undefined) return undefined;
+  if (typeof magnitude !== 'number' || !Number.isFinite(magnitude)) return undefined;
+  return adoptions.some(a => a.scenarioId === scenarioId && a.from === from && a.to === to && a.magnitude === Math.abs(magnitude))
+    ? APPROVED_LINK_ADOPTION_MAGNITUDE : undefined;
+}
