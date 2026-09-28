@@ -2500,9 +2500,8 @@ export function admitStatedGoalChange(goal: CandidateModel['goal'], raw: number)
       `Olumi's own estimate of the current level of "${goal.metric}" (${today}) was not used, so no chance of a change of ` +
       `${change} is shown: that figure would rest on a guess, not on anything you said.` };
   }
-  const target = frame === 'change_rel' ? today * (1 + stored) : today + stored;
-  const resolved = today > 0 && target >= 0 ? resolveGoalThresholdCapWithProvenance(undefined, Math.max(today, target), goal.unit, undefined) : null;
-  if (resolved === null) {
+  const scale = changeGoalScale(frame, stored, today, goal.unit);
+  if (scale === null) {
     return { node, withheld:
       `The current level of "${goal.metric}" (${today}) and a change of ${change} from it do not sit on a scale starting at ` +
       'zero, so no chance of reaching it can be shown. If either figure is wrong, say which and it can be corrected.' };
@@ -2510,12 +2509,37 @@ export function admitStatedGoalChange(goal: CandidateModel['goal'], raw: number)
   return {
     node: {
       ...node,
-      goal_threshold_cap: resolved.cap,
-      goal_threshold_cap_provenance: resolved.provenance,
-      goal_threshold: frame === 'change_rel' ? stored : stored / resolved.cap,
+      goal_threshold_cap: scale.goal_threshold_cap,
+      goal_threshold_cap_provenance: scale.goal_threshold_cap_provenance,
+      goal_threshold: scale.goal_threshold,
       // Only the user's stated level reaches here (`goalLevelIsEstimated` above).
-      observed_state: briefGoalObservedState(today / resolved.cap, goal.unit, today, resolved.cap),
+      observed_state: briefGoalObservedState(today / scale.goal_threshold_cap, goal.unit, today, scale.goal_threshold_cap),
     },
+  };
+}
+
+/**
+ * ⭐ THE ONE SCALE A CHANGE GOAL IS MEASURED ON, given today's level (R1 S4-core). Construction (`admitStatedGoalChange`)
+ * and the chat recorder (`goal-current-level.ts`) both write it, so the two can never disagree about a goal's cap.
+ *
+ * The target LEVEL is today × (1 + r) (`change_rel`) or today + c (`change_abs`). The cap is the one cap rule
+ * (`resolveGoalThresholdCapWithProvenance`) on the larger of today and the target level, and `goal_threshold` is r (a
+ * relative change is scale-free) or c ÷ cap. `null` when the two do not sit on a scale starting at zero (today ≤ 0, or
+ * a target level below zero): nothing is written, and the caller says so.
+ */
+export function changeGoalScale(
+  frame: 'change_rel' | 'change_abs',
+  stored: number,
+  today: number,
+  unit: string | undefined,
+): { readonly goal_threshold_cap: number; readonly goal_threshold_cap_provenance: NonNullable<ReturnType<typeof resolveGoalThresholdCapWithProvenance>>['provenance']; readonly goal_threshold: number } | null {
+  const target = frame === 'change_rel' ? today * (1 + stored) : today + stored;
+  const resolved = today > 0 && target >= 0 ? resolveGoalThresholdCapWithProvenance(undefined, Math.max(today, target), unit, undefined) : null;
+  if (resolved === null) return null;
+  return {
+    goal_threshold_cap: resolved.cap,
+    goal_threshold_cap_provenance: resolved.provenance,
+    goal_threshold: frame === 'change_rel' ? stored : stored / resolved.cap,
   };
 }
 
