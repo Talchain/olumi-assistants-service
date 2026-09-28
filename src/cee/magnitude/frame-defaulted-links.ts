@@ -20,6 +20,7 @@ import { STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 import { percentLevelFrame } from '../../orchestrator-v5/agent-lane/admit-constraint.js';
 import { sizeLink, type MagnitudeNode } from './link-effect.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
+import { edgeReviewedByUser } from '../graph-readiness/obligation-provenance.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -38,6 +39,8 @@ function isDefaultSize(strength: unknown): boolean {
 
 /** The size on this edge is Olumi's own, so the magnitude contract may re-derive it. */
 function sizedByOlumi(edge: Rec): boolean {
+  // R11: a size the user CONFIRMED is their settled view of it — never silently re-derived, though it stays Olumi's.
+  if (edgeReviewedByUser(edge)) return false;
   const p = isRec(edge.provenance) ? edge.provenance : {};
   if (p.source !== 'cee_hypothesis') return false;
   if (p.magnitude === undefined) return p.natural_effect === undefined && isDefaultSize(edge.strength);

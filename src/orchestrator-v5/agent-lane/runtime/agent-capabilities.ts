@@ -164,6 +164,7 @@ import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitud
 import { notModelledContext, notModelledOfRead } from '../not-modelled-carrier.js';
 import type { NotModelledManifest } from '../../../cee/context-integrity/not-modelled-manifest.js';
 import { FRACTION_SPELLED_UNIT } from '../../coaching/bound-graph.js';
+import { edgeReviewedByUser } from '../../../cee/graph-readiness/obligation-provenance.js';
 
 /**
  * Whose figure: the labels it is FOR, and every other QUANTITY's label (`figureTheUserWroteFor`). Options and the
@@ -1026,6 +1027,8 @@ function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'ana
       from: e.from,
       to: e.to,
       ...(str(source) ? { source } : {}),
+      // R11: the user confirmed Olumi's strength for this link — still Olumi's figure, but not one to ask about again.
+      ...(edgeReviewedByUser(e) ? { confirmed_by_user: true } : {}),
       ...(str(e.effect_direction) ? { direction: e.effect_direction } : {}),
       ...(st !== undefined && num(st.mean) ? { strength: { mean: st.mean, ...(num(st.std) ? { std: st.std } : {}) } } : {}),
       // ⭐ The band, in the canvas's own WORD (`format/edge-strength-bands.ts`, #2003): without it the Agent named
@@ -3085,13 +3088,20 @@ export function createAgentCapabilities(
         const after = await readGraph(ctx.scenario_id);
         const dir = v.direction_intent === 'preserve' ? v.expected.effect_direction : v.direction_intent;
         const want = dir === 'negative' ? -v.magnitude : v.magnitude;
-        /** The link as it was approved: exactly this strength, stamped as the user's — in whichever graph holds it. */
+        /**
+         * The link as it was approved: exactly this strength, recorded as the user's act — in whichever graph holds it.
+         * ⭐ R11 (AIQ #72 5872082179): a `set` that changed the strength is stamped as the user's (`user_specified`); a
+         * `confirm_current` is REVIEW, not authorship, so the writer keeps who authored the link and records the review
+         * (`provenance.reviewed_by_user`, intent `confirm`) — that record is what this confirm landed as.
+         */
         const holdsApproved = (edges: unknown): boolean => {
           const x = (Array.isArray(edges) ? edges as { from?: unknown; to?: unknown; strength?: unknown; provenance?: unknown }[] : [])
             .find((y) => y?.from === fromId && y?.to === toId);
           const mean = x?.strength !== null && typeof x?.strength === 'object' ? (x.strength as { mean?: unknown }).mean : undefined;
-          const source = x?.provenance !== null && typeof x?.provenance === 'object' ? (x.provenance as { source?: unknown }).source : undefined;
-          return typeof mean === 'number' && Math.abs(mean - want) < 1e-9 && source === 'user_specified';
+          const p = x?.provenance !== null && typeof x?.provenance === 'object' ? x.provenance as { source?: unknown; reviewed_by_user?: unknown } : undefined;
+          const review = p?.reviewed_by_user !== null && typeof p?.reviewed_by_user === 'object' ? p.reviewed_by_user as { intent?: unknown } : undefined;
+          const recorded = v.intent === 'confirm_current' ? review?.intent === 'confirm' : p?.source === 'user_specified';
+          return typeof mean === 'number' && Math.abs(mean - want) < 1e-9 && recorded;
         };
         /**
          * ⛔ LANDED IS WHAT THE MODEL HOLDS, NOT WHETHER TWO REVISIONS ARE EQUAL (round-2 review of

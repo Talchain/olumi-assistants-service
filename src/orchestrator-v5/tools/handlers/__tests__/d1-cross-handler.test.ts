@@ -315,9 +315,11 @@ describe('D1 cross-handler family invariants', () => {
     expect(edgeAfter?.strength.mean).toBe(edgeBefore?.strength.mean);
     expect(edgeAfter?.strength.std).toBe(edgeBefore?.strength.std);
     expect(edgeAfter?.effect_direction).toBe(edgeBefore?.effect_direction);
-    // Provenance stamping on noop is intentional — see file header.
-    expect(edgeAfter?.provenance?.source).toBe('user_specified');
-    expect(edgeAfter?.provenance_display).toBe('user_set');
+    // R11 (AIQ #72 5872082179): a set that leaves the strength unchanged is a CONFIRM — review, not authorship — so
+    // the edge writer no longer stamps `user_specified` / `user_set` on a noop. This fixture edge carries no
+    // provenance record, so nothing is recorded and nothing is invented. (Before R11 this row pinned the stamp.)
+    expect(edgeAfter?.provenance).toBeUndefined();
+    expect(edgeAfter?.provenance_display).toBeUndefined();
   });
 
   it('Real mutations flip the analysis-affecting graph hash for every D1 handler', async () => {

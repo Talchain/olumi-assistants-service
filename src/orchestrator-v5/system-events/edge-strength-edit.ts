@@ -177,38 +177,42 @@ function rawExactEdge(
 }
 
 /**
- * What Olumi said about a link that the writer drops on EVERY user write
- * (`adjust-edge-strength.ts`): `natural_effect` states Olumi's β in natural units
- * and `magnitude` says who chose it (magnitude contract, R&C 5845818897);
- * `reasoning` is the model's WHY for the link (A6c). Once the user adopts the
- * strength, none of them is the user's, and each would read as theirs under the
- * user's stamp.
+ * ⭐ R11 — the ONE record a confirmation writes (AIQ #72 5872082179; storage by the Canonical lead, accepted by the DL
+ * in the #2235 verdict): `provenance.reviewed_by_user = { intent: 'confirm', at: <ISO instant>, band? }`, with `band`
+ * present exactly when the user named the band this confirm is judged by. No other key.
  */
-const USER_WRITE_PROVENANCE_REMOVALS = ['natural_effect', 'magnitude', 'reasoning'] as const;
+function isConfirmReview(value: unknown, statedBand: InfluenceBand | undefined): boolean {
+  if (!isRecord(value)) return false;
+  if (!Object.keys(value).every((key) => key === 'intent' || key === 'at' || key === 'band')) return false;
+  if (value.intent !== 'confirm') return false;
+  if (typeof value.at !== 'string' || !Number.isFinite(Date.parse(value.at))) return false;
+  return statedBand === undefined ? !('band' in value) : value.band === statedBand;
+}
+
+/** The intent of an edge's review record (R11), or `undefined` when it carries none. */
+export function reviewIntentOf(provenance: unknown): unknown {
+  return isRecord(provenance) && isRecord(provenance.reviewed_by_user)
+    ? provenance.reviewed_by_user.intent
+    : undefined;
+}
 
 /**
- * Full-graph confirmation guard. The only permitted differences on the target
- * edge are:
- * - `provenance.source` and `provenance_display` (the stamp itself);
- * - removal of its `defaulted` flag (adopting the strength ends Olumi's default)
- *   TOGETHER WITH `exists_defaulted` absent → `true` when that flag was `true`: the
- *   link's existence is still Olumi's (A6e, Canonical #70 5855416983);
- * - removal of `provenance.natural_effect` and `provenance.magnitude`, because the
- *   magnitude contract drops Olumi's sizing on any user write. Without these, every
- *   confirm on an Olumi-sized link refused (served CEE `1226b3e`, Canvas #70 5848798561);
- * - removal of `provenance.reasoning`, the model's WHY (A6c);
- * - ONLY when `statedBand` is given — the user named the band the link already sits
- *   in (the Agent's confirm, AIQ #70 5855430153; or the canvas pill's 0.60.0 `band`
- *   on a `confirm_current`) — `strength.std` becoming exactly that band's spread
- *   (`edgeBandStd`). The mean never moves. No band, no std change: a figure confirm.
- * - `std_defaulted` (A6f, AIQ N1 on #2096): a FIGURE confirm states no spread, so the
- *   kept std is still Olumi's and the flag MUST arrive `true`; a BAND confirm states
- *   the spread, so the flag MUST be absent after (present → absent admitted). The
- *   figure confirm's std itself never moves: its mean is kept, so Olumi's relative
- *   spread IS the stored std.
- * Each removal is PRESENT → ABSENT only: a field added or rewritten still fails.
- * Every other byte of persisted JSON — including cosmetic/additive fields outside
- * the analysis hash — must remain deeply equal.
+ * Full-graph confirmation guard. ⭐ R11 — A CONFIRMATION IS REVIEW, NOT AUTHORSHIP (AIQ #72 5872082179, adopted by the
+ * DL): a confirm never stamps the user's authorship, so it may not change who authored anything. The only permitted
+ * differences on the target edge are:
+ * - `provenance.reviewed_by_user` becoming exactly the confirm's review record ({@link isConfirmReview}) — required
+ *   whenever the edge has a provenance record to hold it (an edge with none has no source to keep and none may be
+ *   invented, so its provenance must stay absent);
+ * - ONLY when `statedBand` is given — the user named the band the link already sits in (the Agent's confirm, AIQ #70
+ *   5855430153; or the canvas pill's 0.60.0 `band` on a `confirm_current`) — `strength.std` becoming exactly that
+ *   band's spread (`edgeBandStd`), with that band in the review record. The mean never moves. No band, no std change:
+ *   a figure confirm.
+ * ⛔ Everything else is KEPT, and a change to any of it fails: `provenance.source` (so a confirm that stamps
+ * `user_specified` — the bypass R11 closes — is refused), `magnitude`, `natural_effect`, `reasoning`,
+ * `provenance_display`, and the edge's `defaulted` / `exists_defaulted` / `std_defaulted` flags. (Before R11 this
+ * guard REQUIRED the `user_specified` / `user_set` stamp and admitted the removal of `defaulted` and of Olumi's sizing
+ * and reasoning: Canvas #70 5848798561, A6c, A6e, A6f.) Every other byte of persisted JSON — including
+ * cosmetic/additive fields outside the analysis hash — must remain deeply equal.
  */
 export function isProvenanceOnlyEdgeConfirmation(stored: {
   readonly before: unknown;
@@ -242,12 +246,7 @@ export function isProvenanceOnlyEdgeConfirmation(stored: {
       : edgeBandFromMagnitude(Math.abs(beforeEdge.strength.mean)) === args.statedBand &&
         afterEdge.strength.mean === beforeEdge.strength.mean &&
         afterEdge.strength.std === edgeBandStd(args.statedBand);
-  if (
-    !strengthAdmitted ||
-    beforeEdge.effect_direction !== afterEdge.effect_direction ||
-    afterEdge.provenance?.source !== 'user_specified' ||
-    afterEdge.provenance_display !== 'user_set'
-  ) {
+  if (!strengthAdmitted || beforeEdge.effect_direction !== afterEdge.effect_direction) {
     return false;
   }
 
@@ -256,64 +255,20 @@ export function isProvenanceOnlyEdgeConfirmation(stored: {
   const rawAfterEdge = rawExactEdge(normalisedAfter, args.from, args.to);
   if (rawBeforeEdge === null || rawAfterEdge === null) return false;
 
+  // The review record is the confirm's ONLY provenance change: checked, then the before-state restored so the byte
+  // comparison below judges the rest — including `source`, which is deliberately NOT restored.
   const beforeProvenance = rawBeforeEdge.provenance;
   const afterProvenance = rawAfterEdge.provenance;
   if (isRecord(beforeProvenance)) {
     if (!isRecord(afterProvenance)) return false;
-    if ('source' in beforeProvenance) {
-      afterProvenance.source = structuredClone(beforeProvenance.source);
+    if (!isConfirmReview(afterProvenance.reviewed_by_user, args.statedBand)) return false;
+    if ('reviewed_by_user' in beforeProvenance) {
+      afterProvenance.reviewed_by_user = structuredClone(beforeProvenance.reviewed_by_user);
     } else {
-      delete afterProvenance.source;
+      delete afterProvenance.reviewed_by_user;
     }
-    // Olumi's sizing and reasoning may go from present to absent. A value the
-    // write adds or rewrites is left in place and fails the equality below.
-    for (const key of USER_WRITE_PROVENANCE_REMOVALS) {
-      if (key in beforeProvenance && !(key in afterProvenance)) {
-        afterProvenance[key] = structuredClone(beforeProvenance[key]);
-      }
-    }
-  } else if (isRecord(afterProvenance)) {
-    delete afterProvenance.source;
-    if (Object.keys(afterProvenance).length === 0) delete rawAfterEdge.provenance;
   } else if (afterProvenance !== beforeProvenance) {
     return false;
-  }
-
-  if ('provenance_display' in rawBeforeEdge) {
-    rawAfterEdge.provenance_display = structuredClone(
-      rawBeforeEdge.provenance_display,
-    );
-  } else {
-    delete rawAfterEdge.provenance_display;
-  }
-
-  // Adopting the strength ends Olumi's default on this edge, so the target's
-  // `defaulted` may go from present to absent. Nothing else about it may change:
-  // a flag the write adds or rewrites still fails the equality below.
-  if ('defaulted' in rawBeforeEdge && !('defaulted' in rawAfterEdge)) {
-    // ⭐ A6e — and when it WAS a default, the per-field existence flag must arrive
-    // with it: the pair moves together or not at all. `exists_defaulted` anywhere
-    // else (added to a never-defaulted edge, `false`, rewritten) fails below.
-    if (rawBeforeEdge.defaulted === true && !('exists_defaulted' in rawBeforeEdge)) {
-      if (rawAfterEdge.exists_defaulted !== true) return false;
-      delete rawAfterEdge.exists_defaulted;
-    }
-    rawAfterEdge.defaulted = structuredClone(rawBeforeEdge.defaulted);
-  }
-
-  // ⭐ A6f — who chose the SPREAD. A figure confirm leaves Olumi's std, so the per-field
-  // flag must say so (`true`); a band confirm states the spread, so no flag may
-  // remain. Anything else (`false`, missing on a figure, kept or added on a band)
-  // fails; the before-state is restored so the byte comparison judges the rest.
-  if (args.statedBand === undefined) {
-    if (rawAfterEdge.std_defaulted !== true) return false;
-  } else if ('std_defaulted' in rawAfterEdge) {
-    return false;
-  }
-  if ('std_defaulted' in rawBeforeEdge) {
-    rawAfterEdge.std_defaulted = structuredClone(rawBeforeEdge.std_defaulted);
-  } else {
-    delete rawAfterEdge.std_defaulted;
   }
 
   // The band's spread was checked on the parsed edges above; restore the stored
@@ -703,9 +658,9 @@ export async function applyEdgeStrengthEdit(
     );
   }
 
-  // `confirm_current` is permission to stamp the user's provenance (and, for a
-  // band the user named, the band's spread) — not permission to repair, normalise
-  // or cosmetically rewrite anything else. Analysis-hash equality alone is
+  // `confirm_current` is permission to record the user's REVIEW (R11: never their
+  // authorship) and, for a band the user named, the band's spread — not permission
+  // to restamp, repair, normalise or cosmetically rewrite anything else. Analysis-hash equality alone is
   // insufficient: it ignores labels and other additive persisted fields whose loss
   // would still corrupt the shared model.
   if (

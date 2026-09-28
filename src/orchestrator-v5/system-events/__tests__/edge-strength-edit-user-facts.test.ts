@@ -185,6 +185,10 @@ describe('(1) Paul’s served edge, recorded "very strong" by the user through t
 // ─────────────────────────────────────────────────────────────────────────────
 // (2) confirm_current from a band — keep the figure, record it as theirs
 // ─────────────────────────────────────────────────────────────────────────────
+// R11 (AIQ #72 5872082179, adopted by the DL): a confirm is REVIEW, not authorship. The mean is kept, a named band still
+// stores its spread (A6e), and every authorship byte — source, magnitude, reasoning, `defaulted`, the per-field flags —
+// is KEPT, with the review recorded in `provenance.reviewed_by_user`. Before R11 these rows pinned the `user_specified`
+// stamp, `defaulted` → `exists_defaulted`, and (figure) `std_defaulted: true`.
 describe('(2) confirm_current from a band: the mean is kept and the std is the band’s', () => {
   /** The link already sits in the band the user named (0.85 is very strong), still Olumi's. */
   const inBand = () => paulGraph({ strength: { mean: 0.85, std: OLUMI_STD } });
@@ -196,8 +200,11 @@ describe('(2) confirm_current from a band: the mean is kept and the std is the b
     const edge = persistedEdge(result);
     expect(edge.strength.mean).toBe(0.85);
     expect(edge.strength.std).toBe(edgeBandStd('very strong'));
-    expect(edge.provenance).toStrictEqual({ source: 'user_specified' });
-    expect(edge.exists_defaulted).toBe(true);
+    const { reviewed_by_user: review, ...kept } = edge.provenance!;
+    expect(kept).toStrictEqual({ source: 'cee_hypothesis', magnitude: 'olumi_placeholder', reasoning: SERVED_REASONING });
+    expect(review).toMatchObject({ intent: 'confirm', band: 'very strong' });
+    expect(edge.defaulted).toBe(true);
+    expect(edge).not.toHaveProperty('exists_defaulted');
     expect(edge.exists_probability).toBe(0.8);
     expect(edge.effect_direction).toBe('positive');
     expect(result.kind === 'mutated' && result.response.assistant_text).toContain('Confirmed the current strength');
@@ -216,9 +223,13 @@ describe('(2) confirm_current from a band: the mean is kept and the std is the b
     expect(result.kind === 'refused' ? result.reason : result.kind).toBe('mutated');
     const edge = persistedEdge(result);
     expect(edge.strength).toStrictEqual({ mean: 0.85, std: OLUMI_STD });
-    expect(edge.std_defaulted).toBe(true); // A6f: the kept std is Olumi's, and says so
-    expect(edge.provenance).toStrictEqual({ source: 'user_specified' });
-    expect(edge.exists_defaulted).toBe(true);
+    // R11: flags kept exactly (the whole-edge `defaulted` still says the numbers are Olumi's).
+    expect(edge).not.toHaveProperty('std_defaulted');
+    expect(edge.defaulted).toBe(true);
+    const { reviewed_by_user: review, ...kept } = edge.provenance!;
+    expect(kept).toStrictEqual({ source: 'cee_hypothesis', magnitude: 'olumi_placeholder', reasoning: SERVED_REASONING });
+    expect(review).toMatchObject({ intent: 'confirm' });
+    expect(review).not.toHaveProperty('band');
     if (result.kind !== 'mutated') return;
     expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(computeAnalysisAffectingGraphHash(graph as GraphV3T));
   });
@@ -235,8 +246,23 @@ describe('(2) confirm_current from a band: the mean is kept and the std is the b
 describe('(3) isProvenanceOnlyEdgeConfirmation admits the user-fact changes and nothing else', () => {
   const before = () => paulGraph({ strength: { mean: 0.85, std: OLUMI_STD } });
 
-  /** The writer's projection for a confirm of `before`. */
-  function stamped(b: RawGraph, opts: { bandStd?: number } = {}): RawGraph {
+  /**
+   * The writer's projection for a confirm of `before` — R11: everything kept, the review recorded (with the band the
+   * `bandStd` belongs to, when the caller names one). Before R11 this modelled the #2096 stamp (`user_specified`,
+   * `user_set`, reasoning/sizing dropped, `defaulted` → `exists_defaulted`, A6f flag).
+   */
+  function stamped(b: RawGraph, opts: { bandStd?: number; band?: InfluenceBand } = {}): RawGraph {
+    const after = structuredClone(b);
+    const e = after.edges[0]!;
+    e.provenance = {
+      ...e.provenance!,
+      reviewed_by_user: { intent: 'confirm', at: '2026-09-28T15:00:00.000Z', ...(opts.band ? { band: opts.band } : {}) },
+    };
+    if (opts.bandStd !== undefined) e.strength = { ...e.strength, std: opts.bandStd };
+    return after;
+  }
+  /** The pre-R11 adoption stamp, kept so the guard is shown to REFUSE it. */
+  function adopted(b: RawGraph, opts: { bandStd?: number } = {}): RawGraph {
     const after = structuredClone(b);
     const e = after.edges[0]!;
     const { natural_effect: _n, magnitude: _m, reasoning: _r, ...rest } = e.provenance ?? {};
@@ -245,21 +271,22 @@ describe('(3) isProvenanceOnlyEdgeConfirmation admits the user-fact changes and 
     if (e.defaulted === true) e.exists_defaulted = true;
     delete e.defaulted;
     if (opts.bandStd !== undefined) e.strength = { ...e.strength, std: opts.bandStd };
-    // A6f: a figure confirm leaves Olumi's std and flags it; a band confirm states the spread (no flag).
     if (opts.bandStd === undefined) e.std_defaulted = true;
     return after;
   }
   const guard = (b: RawGraph, a: RawGraph, statedBand?: InfluenceBand) =>
     isProvenanceOnlyEdgeConfirmation({ before: b, after: a, from: FROM, to: TO, ...(statedBand ? { statedBand } : {}) });
 
-  it('⭐ RED: reasoning present → absent, defaulted → exists_defaulted, std → the stated band’s: admitted', () => {
+  it('⭐ R11: reasoning, sizing and `defaulted` KEPT, std → the stated band’s, band recorded: admitted; the old adoption stamp: refused', () => {
     const b = before();
-    expect(guard(b, stamped(b, { bandStd: edgeBandStd('very strong') }), 'very strong')).toBe(true);
+    expect(guard(b, stamped(b, { bandStd: edgeBandStd('very strong'), band: 'very strong' }), 'very strong')).toBe(true);
+    expect(guard(b, adopted(b, { bandStd: edgeBandStd('very strong') }), 'very strong')).toBe(false);
   });
 
-  it('⭐ RED: the same removals with the std kept and no stated band (a figure confirm): admitted', () => {
+  it('⭐ R11: a figure confirm (std kept, no stated band): everything kept, review recorded: admitted; the old adoption stamp: refused', () => {
     const b = before();
     expect(guard(b, stamped(b))).toBe(true);
+    expect(guard(b, adopted(b))).toBe(false);
   });
 
   it('TAMPER: reasoning ADDED (absent before, present after) → refused', () => {
@@ -279,8 +306,8 @@ describe('(3) isProvenanceOnlyEdgeConfirmation admits the user-fact changes and 
 
   it('TAMPER: a std that is NOT the stated band’s → refused', () => {
     const b = before();
-    expect(guard(b, stamped(b, { bandStd: 0.05 }), 'very strong')).toBe(false);
-    expect(guard(b, stamped(b, { bandStd: edgeBandStd('weak') }), 'very strong')).toBe(false);
+    expect(guard(b, stamped(b, { bandStd: 0.05, band: 'very strong' }), 'very strong')).toBe(false);
+    expect(guard(b, stamped(b, { bandStd: edgeBandStd('weak'), band: 'very strong' }), 'very strong')).toBe(false);
   });
 
   it('TAMPER: the band’s std with NO stated band → refused (a figure confirm keeps its std)', () => {
@@ -290,24 +317,27 @@ describe('(3) isProvenanceOnlyEdgeConfirmation admits the user-fact changes and 
 
   it('TAMPER: a stated band the link does not sit in → refused, even with that band’s std', () => {
     const b = before();
-    expect(guard(b, stamped(b, { bandStd: edgeBandStd('strong') }), 'strong')).toBe(false);
+    expect(guard(b, stamped(b, { bandStd: edgeBandStd('strong'), band: 'strong' }), 'strong')).toBe(false);
   });
 
   it('TAMPER: the mean moves on a band confirm → refused', () => {
     const b = before();
-    const a = stamped(b, { bandStd: edgeBandStd('very strong') });
+    const a = stamped(b, { bandStd: edgeBandStd('very strong'), band: 'very strong' });
     a.edges[0]!.strength = { ...a.edges[0]!.strength, mean: 0.8500001 };
     expect(guard(b, a, 'very strong')).toBe(false);
   });
 
-  it('TAMPER: `defaulted` removed WITHOUT `exists_defaulted` → refused (the pair moves together)', () => {
+  // R11: a confirm keeps `defaulted` exactly — removed alone or with the per-field pair, it is refused.
+  it('TAMPER (R11): `defaulted` removed, with or without `exists_defaulted` → refused', () => {
     const b = before();
     const a = stamped(b);
-    delete a.edges[0]!.exists_defaulted;
+    delete a.edges[0]!.defaulted;
+    expect(guard(b, a)).toBe(false);
+    a.edges[0]!.exists_defaulted = true;
     expect(guard(b, a)).toBe(false);
   });
 
-  it('TAMPER: `exists_defaulted: false` instead of true → refused', () => {
+  it('TAMPER: `exists_defaulted: false` added → refused', () => {
     const b = before();
     const a = stamped(b);
     a.edges[0]!.exists_defaulted = false;
@@ -324,7 +354,7 @@ describe('(3) isProvenanceOnlyEdgeConfirmation admits the user-fact changes and 
 
   it('TAMPER: exists_probability changed → refused', () => {
     const b = before();
-    const a = stamped(b, { bandStd: edgeBandStd('very strong') });
+    const a = stamped(b, { bandStd: edgeBandStd('very strong'), band: 'very strong' });
     a.edges[0]!.exists_probability = 0.9;
     expect(guard(b, a, 'very strong')).toBe(false);
   });
@@ -338,7 +368,7 @@ describe('(3) isProvenanceOnlyEdgeConfirmation admits the user-fact changes and 
 
   it('TAMPER: any other change (a node label) → refused, band or not', () => {
     const b = before();
-    const a = stamped(b, { bandStd: edgeBandStd('very strong') });
+    const a = stamped(b, { bandStd: edgeBandStd('very strong'), band: 'very strong' });
     a.nodes[0]!.label = 'Price sensitivity (edited)';
     expect(guard(b, a, 'very strong')).toBe(false);
     const a2 = stamped(b);

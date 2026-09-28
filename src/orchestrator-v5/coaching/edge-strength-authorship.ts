@@ -18,6 +18,7 @@
  * Pure: no clock, no LLM, no telemetry.
  */
 import { readRecord } from './fragile-link-challenge.js';
+import { edgeReviewedByUser } from '../../cee/graph-readiness/obligation-provenance.js';
 
 export type EdgeAuthorship = 'olumi_assumed' | 'not_olumi_assumed' | 'not_tested';
 
@@ -27,7 +28,8 @@ export const OLUMI_ASSUMED_EDGE_SOURCES: readonly string[] = Object.freeze(['cee
 /** Classify one graph edge record. */
 export function classifyEdgeAuthorship(edge: Record<string, unknown>): Exclude<EdgeAuthorship, 'not_tested'> {
   const source = readRecord(edge.provenance)?.source;
-  return edge.defaulted === true && typeof source === 'string' && OLUMI_ASSUMED_EDGE_SOURCES.includes(source)
+  // R11: a confirmed link is still Olumi's size, but the user has given their view of it: it is not asked about again.
+  return edge.defaulted === true && !edgeReviewedByUser(edge) && typeof source === 'string' && OLUMI_ASSUMED_EDGE_SOURCES.includes(source)
     ? 'olumi_assumed'
     : 'not_olumi_assumed';
 }

@@ -279,8 +279,11 @@ describe('applyEdgeStrengthEdit — canonical adapter', () => {
     const confirmed = edgeIn(result.graph);
     expect(confirmed.strength).toEqual(edge.strength);
     expect(confirmed.effect_direction).toBe('negative');
-    expect(confirmed.provenance?.source).toBe('user_specified');
-    expect(confirmed.provenance_display).toBe('user_set');
+    // R11 (AIQ #72 5872082179): a confirm is REVIEW, not authorship — the source and display are KEPT and the review
+    // is recorded. (Before R11 this row pinned the `user_specified` / `user_set` stamp.)
+    expect(confirmed.provenance?.source).toBe('cee_hypothesis');
+    expect(confirmed.provenance_display).toBe('ai_inferred');
+    expect((confirmed.provenance as Record<string, unknown>).reviewed_by_user).toMatchObject({ intent: 'confirm' });
     expect(result.handlerFacts[0]).toMatchObject({ noop: true });
     expect(result.response.assistant_text).toContain('Confirmed the current strength');
     expect(result.response.assistant_text).toContain('as your judgement');
@@ -331,7 +334,9 @@ describe('applyEdgeStrengthEdit — canonical adapter', () => {
         intent: 'confirm_current',
       });
 
-    it('⭐ adopts it: mutated, strength unchanged, stamped as the user\'s, natural_effect and magnitude gone', async () => {
+    // R11 (AIQ #72 5872082179): a confirm is REVIEW, not authorship. Before R11 this row pinned the adoption stamp
+    // (`user_specified` / `user_set`, Olumi's sizing dropped); now every byte of who-sized-it is KEPT and the review added.
+    it('⭐ R11: confirms it: mutated, strength unchanged, source + Olumi\'s sizing KEPT, review recorded', async () => {
       const graph = sizedGraph();
       const beforeStrength = structuredClone(edgeIn(graph).strength);
       const beforeAnalysisHash = computeAnalysisAffectingGraphHash(graph);
@@ -343,17 +348,19 @@ describe('applyEdgeStrengthEdit — canonical adapter', () => {
       const confirmed = edgeIn(result.graph);
       expect(confirmed.strength).toStrictEqual(beforeStrength);
       expect(confirmed.effect_direction).toBe('positive');
-      expect(confirmed.provenance?.source).toBe('user_specified');
-      expect(confirmed.provenance_display).toBe('user_set');
-      expect(confirmed.provenance).not.toHaveProperty('natural_effect');
-      expect(confirmed.provenance).not.toHaveProperty('magnitude');
+      expect(confirmed.provenance?.source).toBe('cee_hypothesis');
+      expect(confirmed.provenance_display).toBeUndefined();
+      expect(confirmed.provenance?.natural_effect).toStrictEqual(edgeIn(graph).provenance!.natural_effect);
+      expect(confirmed.provenance?.magnitude).toBe('olumi_estimate');
       expect(result.response.assistant_text).toContain('Confirmed the current strength');
       expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(beforeAnalysisHash);
       // The persisted bytes the dispatcher writes, not only the parsed view.
       const persistedEdge = (result.mutatedGraph as { edges: Array<Record<string, unknown>> }).edges.find(
         (edge) => edge.from === 'f-budget' && edge.to === 'g-revenue',
       )!;
-      expect(persistedEdge.provenance).toStrictEqual({ source: 'user_specified' });
+      const { reviewed_by_user: review, ...kept } = persistedEdge.provenance as Record<string, unknown>;
+      expect(kept).toStrictEqual(edgeIn(graph).provenance);
+      expect(review).toMatchObject({ intent: 'confirm' });
     });
 
     it('CONTRAST: the same confirm still refuses when it would also drop an additive target-edge field', async () => {
@@ -369,28 +376,29 @@ describe('applyEdgeStrengthEdit — canonical adapter', () => {
       });
     });
 
-    describe('the pure guard admits the two removals and nothing wider', () => {
-      /** The writer's projection for a confirm: source + display stamped, Olumi's sizing dropped. */
+    // R11 (AIQ #72 5872082179): the guard now admits the review record and NOTHING about who sized the link. Before
+    // R11 it admitted exactly the removal of `natural_effect` / `magnitude` alongside the `user_specified` stamp.
+    describe('the pure guard admits the review record and nothing wider', () => {
+      /** The writer's projection for a confirm (R11): everything kept, the review recorded. */
       function stamped(before: GraphV3T): GraphV3T {
         const after = structuredClone(before);
         const target = edgeIn(after);
-        const {
-          natural_effect: _naturalEffect,
-          magnitude: _magnitude,
-          ...rest
-        } = (target.provenance ?? {}) as Record<string, unknown>;
-        target.provenance = { ...rest, source: 'user_specified' } as typeof target.provenance;
-        target.provenance_display = 'user_set';
-        // A6f: a figure confirm leaves Olumi's std, and says so per field.
-        target.std_defaulted = true;
+        target.provenance = {
+          ...target.provenance!,
+          reviewed_by_user: { intent: 'confirm', at: '2026-09-28T15:00:00.000Z' },
+        } as typeof target.provenance;
         return after;
       }
       const guard = (before: GraphV3T, after: GraphV3T) =>
         isProvenanceOnlyEdgeConfirmation({ before, after, from: 'f-budget', to: 'g-revenue' });
 
-      it('⭐ natural_effect and magnitude PRESENT → ABSENT: admitted', () => {
+      it('⭐ R11: natural_effect and magnitude KEPT, review added: admitted; PRESENT → ABSENT (the old adoption): refused', () => {
         const before = sizedGraph();
         expect(guard(before, stamped(before))).toBe(true);
+        const dropped = stamped(before);
+        const { natural_effect: _n, magnitude: _m, ...rest } = edgeIn(dropped).provenance!;
+        edgeIn(dropped).provenance = rest as GraphV3T['edges'][number]['provenance'];
+        expect(guard(before, dropped)).toBe(false);
       });
 
       it('natural_effect ADDED (absent before, present after): refused', () => {
@@ -464,10 +472,15 @@ describe('applyEdgeStrengthEdit — canonical adapter', () => {
 
   it('the full-graph allowlist rejects an unrelated cosmetic change', () => {
     const before = buildD1Fixture();
+    edgeIn(before).provenance = { source: 'cee_hypothesis' };
     const after = structuredClone(before);
     const target = edgeIn(after);
-    target.provenance = { ...(target.provenance ?? {}), source: 'user_specified' };
-    target.provenance_display = 'user_set';
+    // R11: the confirm's own record, so the cosmetic change is the ONLY other difference.
+    target.provenance = {
+      ...target.provenance!,
+      reviewed_by_user: { intent: 'confirm', at: '2026-09-28T15:00:00.000Z' },
+    } as typeof target.provenance;
+    expect(isProvenanceOnlyEdgeConfirmation({ before, after: structuredClone(after), from: 'f-budget', to: 'g-revenue' })).toBe(true);
     after.nodes[0]!.label = `${after.nodes[0]!.label} changed`;
 
     expect(isProvenanceOnlyEdgeConfirmation({

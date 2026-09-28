@@ -46,6 +46,7 @@ import { GraphV3 } from '../../schemas/cee-v3.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { selectRunAnalysisFact, type FreshnessDerivation } from '../context/freshness.js';
 import { summariseReadiness } from '../routing/readiness-summary.js';
+import { edgeReviewedByUser } from '../../cee/graph-readiness/obligation-provenance.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -368,8 +369,9 @@ function deriveDefaultedValueSignals(
   // The object + edges-array gate is the shared `isGraphProjectionEvaluable` predicate.
   if (!isGraphProjectionEvaluable(persistedGraph)) return [];
   const edges = (persistedGraph as { edges: unknown[] }).edges;
+  // R11: a defaulted strength the user CONFIRMED is not an unseen default (it keeps `defaulted` for credit only).
   const hasDefaulted = edges.some(
-    (e) => e != null && typeof e === 'object' && (e as { defaulted?: unknown }).defaulted === true,
+    (e) => e != null && typeof e === 'object' && (e as { defaulted?: unknown }).defaulted === true && !edgeReviewedByUser(e),
   );
   if (!hasDefaulted) return [];
   return [
