@@ -47,7 +47,7 @@ import {
 } from '../construction-size-gate.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { LIMIT_OPERATOR_WORDS } from '../admit-constraint.js';
-import { holdStatedGoalAttributes, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
+import { figureTheUserWrote, holdStatedGoalAttributes, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
@@ -1427,7 +1427,8 @@ export async function buildModelFromBrief(
   // ⭐ A HELD CEILING's stated current level (MG #72 5870097103): admission withheld every `<=` level before the brief
   // attested the comparator; with `'<='` now held, the run minimises that goal, so the same rule is asked again
   // (`admitGoalLevelBesideHeldCeiling`). Any other goal: untouched, byte for byte.
-  const ceilingLevel = admitGoalLevelBesideHeldCeiling(heldGoal.nodes, candidate.goal, admitted.loss);
+  const ceilingLevel = admitGoalLevelBesideHeldCeiling(heldGoal.nodes, candidate.goal, admitted.loss,
+    (value, unit) => figureTheUserWrote(value, unit, brief));
   if (ceilingLevel.loss !== admitted.loss) admitted = { ...admitted, loss: ceilingLevel.loss };
   const statedGoal = { ...heldGoal, nodes: [...ceilingLevel.nodes] };
   /**

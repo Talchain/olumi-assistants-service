@@ -249,11 +249,22 @@ describe('CONTROLS — what the user did not write a ceiling for is exactly as b
     expect(directionLogs()).toEqual([expect.objectContaining({ provenance: 'derived_from_goal_label' })]);
   });
 
-  it('⭐ RED row 8: a held FLOOR wins over a label that reads reduce → nothing sent (the reduction is what the user wants to rise; authored label on the real cloud-0 draft)', async () => {
+  it('row 8 (DL E13, 5872375159): a held FLOOR reads exactly as base — the label "Reduce monthly cloud costs" still sends minimise, logged derived_from_goal_label (the floor\'s own sense is S4\'s; authored label on the real cloud-0 draft)', async () => {
     const { graph, goal } = await build(CLOUD, withGoal('cloud-0', { metric: 'Reduce monthly cloud costs' }));
     expect(goal.goal_direction, 'the real cloud-0 comparator is held: "20%" is written').toBe('>=');
     const req = await plotRequestFor(graph);
+    expect(req.goal_direction).toBe('minimise');
+    expect(directionLogs()).toEqual([expect.objectContaining({ provenance: 'derived_from_goal_label' })]);
+  });
+
+  it('⭐ RED row 12 (DL E12, 5872375159): the brief never states today\'s level, the drafter gives one "explicit" (the real cloud-2 draft: 45 £k/month) → NOT stored as the user\'s, nothing sent', async () => {
+    const brief = 'Should we switch our cloud provider from AWS to GCP? We want monthly spend to be at most £36k a month without more than 2 weeks of migration downtime risk.';
+    const d = draft('cloud-2');
+    expect((d.goal as Rec).baseline_value, 'the real draft carries a level the brief does not state').toBe(45);
+    const { graph, goal } = await build(brief, d);
+    expect(goal.goal_direction).toBe('<=');
+    expect(Object.hasOwn(goal, 'observed_state'), 'no level stored as the user\'s').toBe(false);
+    const req = await plotRequestFor(graph);
     expect('goal_direction' in req).toBe(false);
-    expect(directionLogs()).toEqual([]);
   });
 });

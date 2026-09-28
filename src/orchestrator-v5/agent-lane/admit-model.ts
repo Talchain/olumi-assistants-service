@@ -2246,6 +2246,12 @@ export function admitGoalLevelBesideHeldCeiling<N extends { readonly kind?: unkn
   nodes: readonly N[],
   goal: CandidateModel['goal'] | null | undefined,
   loss: readonly RepairEntry[],
+  /**
+   * ⛔ DL E12 (5872375159): the level is the USER's only if the brief states it — `figureTheUserWrote(value, unit, brief)`,
+   * injected by the caller (stated-by-user.ts imports this module). The drafter's `explicit` is not enough: without
+   * this, a level the brief never states was stored `brief_extraction` and `minimise` was sent beside it. REQUIRED.
+   */
+  userWroteLevel: (value: number, unit: unknown) => boolean,
 ): { readonly nodes: readonly N[]; readonly loss: readonly RepairEntry[] } {
   const unchanged = { nodes, loss };
   const goals = nodes.filter((n) => n.kind === 'goal');
@@ -2261,6 +2267,8 @@ export function admitGoalLevelBesideHeldCeiling<N extends { readonly kind?: unkn
   if (typeof raw !== 'number' || !Number.isFinite(raw) || raw !== goal.value) return unchanged;
   if (typeof cap !== 'number' || !Number.isFinite(cap)) return unchanged;
   if (typeof baselineRaw !== 'number' || !Number.isFinite(baselineRaw) || goalLevelIsEstimated(goal)) return unchanged;
+  // DL E12: a level the brief never states is not the user's, however the drafter marked it — it stays withheld, as today.
+  if (!userWroteLevel(baselineRaw, goal.unit)) return unchanged;
   const path = `nodes[${slugId(goal.metric)}].observed_state.baseline`;
   if (loss.filter((l) => l.field_path === path).length !== 1) return unchanged;
   const verdict = admitStatedGoalLevel({

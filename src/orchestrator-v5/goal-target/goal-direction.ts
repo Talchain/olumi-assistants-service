@@ -61,17 +61,16 @@
  *
  *   | the goal node holds  | sent                          | provenance              |
  *   |----------------------|-------------------------------|-------------------------|
- *   | `'<='` or `'<'`      | `'minimise'` — ONLY beside the stated level (below) | `stated_comparator` |
- *   | `'>='` or `'>'`      | nothing (today's maximiser)   | —                       |
- *   | nothing              | the label classifier, as before | `derived_from_goal_label` |
+ *   | `'<='` or `'<'`, PROVEN (below) | `'minimise'`       | `stated_comparator`     |
+ *   | anything else (a held floor, an unproven ceiling, none) | the label classifier, exactly as base | `derived_from_goal_label` |
  *
  * ⚠ R1 S1 (AIQ 5871459631, DL 5871433038): a held ceiling sends `minimise` only when the goal carries the current
  * level the user stated in the target's own unit (`ceilingTargetIsALevelOnItsNode`) — the one proof, before R1 types
  * the frame, that the target is a LEVEL of the node and not a change ("reduce costs by at most 10%" is a floor on
  * cost). Otherwise nothing is sent. `maximise` for a held floor waits for R1 S4 (a real draft, `cloud-0`: "costs >=
  * 20 % reduction", would otherwise be attested a false maximiser, MG 5871403407).
- * `maximise` is still never sent — the one-sided argument above is unchanged. A held floor wins over a label that
- * reads "reduce" (the quantity it measures is then the reduction, which the user wants to rise).
+ * `maximise` is still never sent — the one-sided argument above is unchanged. A held floor (and an unproven ceiling)
+ * reads exactly as base — the label classifier (DL E13, 5872375159); the held floor's own sense belongs to S4.
  */
 
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
@@ -182,15 +181,12 @@ export function resolveGoalDirection(
   graph: unknown,
   goalNodeId: unknown,
 ): { readonly direction: EmittedGoalDirection; readonly provenance: GoalDirectionProvenance } | undefined {
-  const held = readHeldGoalComparator(graph, goalNodeId);
-  if (held !== null) {
-    const sense = heldComparatorSense(held);
-    // AIQ R1 ruling 5871459631: a held ceiling attests `minimise` ONLY when its target is a LEVEL in the node's own
-    // unit family ("reduce costs by at most 10%" is a floor on cost). Until R1 types the frame (S4), the one structural
-    // proof is a current level the user stated, admitted on the goal in the target's own unit; without it, nothing is
-    // sent and ISL's GOAL_DIRECTION_UNATTESTED stays — silence, never a guessed sense.
-    if (sense === 'minimise' && !ceilingTargetIsALevelOnItsNode(graph, goalNodeId)) return undefined;
-    return sense === undefined ? undefined : { direction: sense, provenance: 'stated_comparator' };
+  // R1 S1: the held comparator speaks ONLY for a PROVEN ceiling (AIQ 5871459631 / 5872082179: a target that is a LEVEL of
+  // the node, shown by the user's stated level in the target's own non-percent, non-points unit). EVERY other goal — a
+  // held floor, an unproven ceiling, no comparator — reads exactly as base: the label classifier (DL E13, 5872375159:
+  // "nothing else moves"; a held floor's own sense belongs to S4, with the typed frame).
+  if (heldComparatorSense(readHeldGoalComparator(graph, goalNodeId)) === 'minimise' && ceilingTargetIsALevelOnItsNode(graph, goalNodeId)) {
+    return { direction: 'minimise', provenance: 'stated_comparator' };
   }
   const derived = directionFromGoalLabel(graph, goalNodeId);
   return derived === undefined ? undefined : { direction: derived, provenance: 'derived_from_goal_label' };

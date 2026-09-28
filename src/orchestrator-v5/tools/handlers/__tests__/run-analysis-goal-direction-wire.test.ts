@@ -221,12 +221,17 @@ describe('a held comparator on the goal node decides goal_direction before the l
     expect('goal_direction' in payload).toBe(false);
   });
 
+  // DL E13 (5872375159): a held floor reads exactly as base — the label decides (its own sense is S4's).
   for (const held of ['>=', '>']) {
-    it(`RED: held "${held}" beats a label that reads reduce ("Minimise monthly churn") → no key at all`, async () => {
+    it(`held "${held}" + a label that reads reduce ("Minimise monthly churn") → minimise from the LABEL, exactly as base`, async () => {
       const payload = await payloadForGoalLabel('Minimise monthly churn', held);
-      expect('goal_direction' in payload).toBe(false);
+      expect(payload.goal_direction).toBe('minimise');
     });
   }
+  it('an UNPROVEN held "<=" + a label that reads reduce → minimise from the LABEL, exactly as base', async () => {
+    const payload = await payloadForGoalLabel('Minimise monthly churn', '<=');
+    expect(payload.goal_direction).toBe('minimise');
+  });
 
   it('CONTROL: no held comparator ("Monthly spend") → no key, exactly as before', async () => {
     const payload = await payloadForGoalLabel('Monthly spend');
