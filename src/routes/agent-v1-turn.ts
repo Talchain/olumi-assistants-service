@@ -1517,7 +1517,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * (served 84440ff A13: ~560 ms of those, then a 1,011 ms read). The claim row writes no graph
      * (`writesGraph: false`), so the read returns what a read started after it would. See `turnReadCache`.
      */
-    const readCache = turnReadCache(dispatch, `/assist/v1/scenarios/${scenarioId}/graph`);
+    const readCache = turnReadCache(dispatch, `/assist/v1/scenarios/${scenarioId}/graph`, [`/assist/v1/scenarios/${scenarioId}/versions`]);
     readCache.prefetch();
 
     const approvedProposal = typedApprovalOf(body);
