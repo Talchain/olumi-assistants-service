@@ -1611,3 +1611,61 @@ describe("POST /versions/restore — C8 persisted-graph invariants", () => {
     expect(sent.nodes.map((n: { id: string }) => n.id)).toEqual(["n1", "n2"]);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RESTORE — A VERSION THE RECEIPT CANNOT CARRY IS REFUSED BEFORE THE WRITE (writer audit 27 Sep, finding 7)
+//
+// The route admitted the target with the permissive ingress schema, committed the atomic RPC, and only THEN built the
+// receipt, whose `GraphVerbatim` check is strict GraphV3 (sigma-floored). A version passing the first and failing the
+// second was written durably and answered with a 500 and no receipt: the UI showed a failure while the server held the
+// restored graph, and each retry committed another restore row. The receipt's own admissibility question now runs
+// BEFORE the write, so the route can never commit a restore it cannot receipt.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("POST /versions/restore — a version the receipt cannot carry is refused before the write", () => {
+  /** Passes the ingress schema; fails GraphV3 on `edge_type` (enum directed | bidirected). */
+  const NON_RECEIPTABLE_VERSION_GRAPH = {
+    nodes: [
+      { id: "n1", label: "Take the job", kind: "option" },
+      { id: "n2", label: "Commute time", kind: "factor" },
+    ],
+    edges: [{
+      from: "n1",
+      to: "n2",
+      strength: { mean: 0.4, std: 0.1 },
+      exists_probability: 0.9,
+      effect_direction: "positive",
+      edge_type: "undirected",
+    }],
+  };
+
+  beforeEach(() => {
+    // The RPC returns the graph it WROTE, as the real one does — a fixed valid stub would hide the post-write throw.
+    restoreVersionAtomic.mockImplementation(async (args: { graph: unknown }) => {
+      const ok = atomicRestoreOk();
+      return { ...ok, value: { ...ok.value, graph: args.graph } };
+    });
+  });
+
+  it("RED: 422 VERSION_GRAPH_INCOMPATIBLE, and the atomic RPC never runs", async () => {
+    getVersion.mockResolvedValue({ status: "ok", value: { ...summary(), graph: NON_RECEIPTABLE_VERSION_GRAPH } });
+    const app = await buildApp();
+
+    const res = await post(app, "/versions/restore", { version_id: VERSION_A });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json().details.code).toBe("VERSION_GRAPH_INCOMPATIBLE");
+    expect(JSON.stringify(res.json().details.issues)).toContain("edge_type");
+    expect(restoreVersionAtomic).not.toHaveBeenCalled();
+  });
+
+  it("CONTROL: a receiptable version still restores and returns its receipt", async () => {
+    const app = await buildApp();
+
+    const res = await post(app, "/versions/restore", { version_id: VERSION_A });
+
+    expect(res.statusCode).toBe(200);
+    expect(restoreVersionAtomic).toHaveBeenCalledTimes(1);
+    expect(res.json().receipt?.version_id).toBe(RESTORED_VERSION);
+  });
+});
