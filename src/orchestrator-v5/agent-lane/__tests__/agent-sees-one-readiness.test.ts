@@ -87,9 +87,12 @@ describe('(B) get_canonical_state carries the ONE readiness verdict, in plain wo
 
   it('RED (C33): each link carries whose it is and how strong — so a challenge can say "an assumption Olumi made"', async () => {
     const r = await capsOver(paulGraph).getCanonicalState(ctx) as { links?: { from: string; to: string; source?: string; strength?: { mean?: number } }[] };
-    const first = r.links?.find((l) => l.from === 'decision_mrr' && l.to === 'keep_49_price');
-    expect(first, JSON.stringify(r.links?.slice(0, 3))).toBeDefined();
-    expect(first).toEqual(expect.objectContaining({ source: 'cee_hypothesis', strength: expect.objectContaining({ mean: 1 }) }));
+    // A BELIEF link (a factor's effect) is what a challenge can call "an assumption Olumi made". Rebound from the
+    // decision → option link it first named: that one is structure, said by its ends only (PJ-C1 lever 2).
+    const belief = r.links?.find((l) => l.from === 'pro_plan_price' && l.to === 'mrr');
+    expect(belief, JSON.stringify(r.links?.slice(0, 3))).toBeDefined();
+    expect(belief).toEqual(expect.objectContaining({ source: 'cee_hypothesis', strength: expect.objectContaining({ mean: 0.5 }) }));
+    expect(r.links?.find((l) => l.from === 'decision_mrr' && l.to === 'keep_49_price')).toEqual({ from: 'decision_mrr', to: 'keep_49_price' });
   });
 });
 
