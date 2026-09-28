@@ -157,6 +157,9 @@ describe('canonical readiness authority', () => {
       kind: 'factor',
       label: 'Delivery quality',
       category: 'controllable',
+      // A status-quo level, as `fac_cost` has in the base graph. The two missing inputs this row is about are
+      // OPTION values; since #2164 an unvalued goal root would add a third, factor-scoped `MISSING_FACTOR_LEVEL`.
+      observed_state: { value: 0.5 },
     });
     (graph.edges as Dict[]).push(
       edge('opt_a', 'fac_quality'),
