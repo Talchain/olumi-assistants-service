@@ -40,6 +40,15 @@ const NEW_RISK_KEYS: ReadonlySet<string> = new Set([
  * carry a reason the user needs, so they keep the second call.
  */
 const OPTION_LEVELS_KEYS: ReadonlySet<string> = new Set(['ok', 'mutated', 'proposal_id', 'public_label', 'base_revision', 'interventions', 'note']);
+/**
+ * Every key `proposeGoalCurrentLevel` returns on a clean success (goal-current-level.ts). The figure is the user's by
+ * construction (`user_stated`). `replaces` (a revision) and a figure recorded in another unit keep the second call.
+ */
+const GOAL_LEVEL_KEYS: ReadonlySet<string> = new Set([
+  'ok', 'mutated', 'proposal_id', 'public_label', 'base_revision', 'goal', 'current_level', 'as_stated', 'target', 'rederived', 'note',
+]);
+/** Every key `proposeLimitChange` returns on success; the new figure is the user's by construction (`figure_not_stated`). */
+const LIMIT_CHANGE_KEYS: ReadonlySet<string> = new Set(['ok', 'mutated', 'proposal_id', 'public_label', 'base_revision', 'limit', 'note']);
 /** The capability's one strength disclosure for a new risk; any other wording has no template here. */
 const RISK_PLACEHOLDER_STRENGTH = 'not known yet: Olumi uses a placeholder strength for each link, not an estimate';
 /** Every key `proposeLinkStrength` returns on success: its reading is already in its consent label. */
@@ -151,6 +160,39 @@ function linkStrengthReply(r: Rec): string | null {
   return reply(label.charAt(0).toLowerCase() + label.slice(1), [], question(undefined));
 }
 
+/** A verb-led consent label ("Record…", "Change…") read after "I’ve prepared this change:". */
+const subjectOf = (label: string): string => {
+  const l = label.trim().replace(/\.$/, '');
+  return l.charAt(0).toLowerCase() + l.slice(1);
+};
+
+/**
+ * ⭐ A GOAL'S CURRENT LEVEL (PJ-C1, journey C). The consent subject says the figure is the user's and, when the same
+ * approval re-derives Olumi's one estimated part of the product (#2214), says that too and that it stays Olumi's — so
+ * the reply adds nothing. A re-derivation the label does not state keeps the second call.
+ */
+function goalLevelReply(r: Rec): string | null {
+  if (!nonEmpty(r.public_label)) return null;
+  const level = recordOf(r.current_level);
+  const stated = recordOf(r.as_stated);
+  // The same figure: a unit only spelled another way ("GBP/month", "GBP per month") is matched by the capability, which
+  // refuses any other; a figure it RESCALED ("£72k" → 72000) differs here and keeps the second call.
+  if (level === undefined || stated === undefined || typeof level.value !== 'number' || level.value !== stated.value) return null;
+  if (r.rederived !== undefined) {
+    const d = recordOf(r.rederived);
+    if (d === undefined || d.whose !== "Olumi's estimate" || !nonEmpty(d.factor)) return null;
+    if (!r.public_label.includes(`Olumi's estimate of "${d.factor}"`) || !r.public_label.includes("it stays Olumi's estimate")) return null;
+  }
+  return reply(subjectOf(r.public_label), [], question(undefined));
+}
+
+/** ⭐ A LIMIT'S NEW FIGURE (PJ-C1, journey C): the subject names the limit, its figure now and the one it becomes. */
+function limitChangeReply(r: Rec): string | null {
+  const limit = recordOf(r.limit);
+  if (!nonEmpty(r.public_label) || limit === undefined || !nonEmpty(limit.on) || !nonEmpty(limit.now) || !nonEmpty(limit.becomes)) return null;
+  return reply(subjectOf(r.public_label), ['The new figure is the one you gave.'], question(undefined));
+}
+
 export function composeProposalReply(tool: string, args: unknown, result: unknown, userMessage: string): string | null {
   // The model's own typed word that this call is the WHOLE request: a message asking for two things never loses one.
   if (recordOf(args)?.whole_request !== true) return null;
@@ -158,8 +200,10 @@ export function composeProposalReply(tool: string, args: unknown, result: unknow
   const r = recordOf(result);
   if (r === undefined || r.ok !== true || r.mutated !== false || !nonEmpty(r.proposal_id)) return null;
   const allowed = tool === 'propose_new_option' ? NEW_OPTION_KEYS : tool === 'propose_link_strength' ? LINK_KEYS
-    : tool === 'propose_new_risk' ? NEW_RISK_KEYS : tool === 'propose_option_interventions' ? OPTION_LEVELS_KEYS : undefined;
+    : tool === 'propose_new_risk' ? NEW_RISK_KEYS : tool === 'propose_option_interventions' ? OPTION_LEVELS_KEYS
+      : tool === 'propose_goal_current_level' ? GOAL_LEVEL_KEYS : tool === 'propose_limit_change' ? LIMIT_CHANGE_KEYS : undefined;
   if (allowed === undefined || Object.keys(r).some((k) => !allowed.has(k))) return null;
   return tool === 'propose_new_option' ? newOptionReply(r) : tool === 'propose_new_risk' ? newRiskReply(r)
-    : tool === 'propose_option_interventions' ? optionLevelsReply(r) : linkStrengthReply(r);
+    : tool === 'propose_option_interventions' ? optionLevelsReply(r) : tool === 'propose_goal_current_level' ? goalLevelReply(r)
+      : tool === 'propose_limit_change' ? limitChangeReply(r) : linkStrengthReply(r);
 }
