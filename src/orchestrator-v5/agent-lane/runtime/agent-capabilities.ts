@@ -154,7 +154,7 @@ import { howStronglyWords } from '../strength-authorship-words.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel } from '../goal-current-level.js';
-import { sayFigureExactly } from '../say-figure.js';
+import { sayFigureExactly, sayFigureRead } from '../say-figure.js';
 import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
@@ -2441,7 +2441,8 @@ export function createAgentCapabilities(
       const withUnit = (a: { value: number; unit: string }) => said(a.value, a.unit);
       const describe = (a: { label: string; value: number; unit: string; replaces?: number }) =>
         typeof a.replaces === 'number'
-          ? `${a.label}: ${said(a.replaces, a.unit)} \u2192 ${withUnit(a)}`
+          // The replaced figure is not written: an inexact one is said "about", rounded (DL #2227 follow-up A).
+          ? `${a.label}: ${sayFigureRead(a.replaces, a.unit)} \u2192 ${withUnit(a)}`
           : `${a.label} = ${withUnit(a)}`;
       const heading =
         revisions.length === 0

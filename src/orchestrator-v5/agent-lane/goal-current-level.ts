@@ -48,7 +48,7 @@ import { createProposal, type ProposalOperation, type ProposalStore, type Receip
 import { registrationTurnId } from '../graph-registration/registration-identity.js';
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 import type { AgentToolContext, ToolResult } from './runtime/agent-tools.js';
-import { sayFigure, sayFigureExactly } from './say-figure.js';
+import { sayFigure, sayFigureExactly, sayFigureRead } from './say-figure.js';
 
 /** The proposal op: the estate's existing node-update op, carrying the goal's new `observed_state`. */
 export const GOAL_CURRENT_LEVEL_OP = 'update_node' as const;
@@ -477,7 +477,7 @@ export async function proposeGoalCurrentLevel(
     validation: { admitted: true, loss_count: 0, refusals: [] },
     public_label:
       `Record the current level of "${goal.label}" as your figure: ` +
-      (replaces !== undefined ? `${withUnit(replaces)} → ${figure}` : figure) +
+      (replaces !== undefined ? `${sayFigureRead(replaces, goalUnit ?? '')} → ${figure}` : figure) +
       ` (target ${withUnit(target)})` +
       (rederived !== null ? `. ${sayRederived(goal.label, rederived)}` : ''),
   });
