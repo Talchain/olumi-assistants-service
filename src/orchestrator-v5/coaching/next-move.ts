@@ -48,7 +48,7 @@ import {
   type RunTurnCoachingEligibility,
 } from './fragile-link-challenge.js';
 import { buildNoFlaggedLinkCard } from './no-flagged-link-card.js';
-import { definitionalLinks as declaredDefinitionalLinks } from '../compose/definitional-links.js';
+import { definitionalLinksInUse, identityRunUseOfResult } from '../compose/definitional-links.js';
 import { composeEdgeIdentity } from '../compose/edge-address.js';
 import { buildLimitUncheckedCard, everyOptionBreaksALimit, leaderWithheldForALimit } from './limit-unchecked-card.js';
 import { buildUntestedOptionCard, untestedOptions } from './untested-option-card.js';
@@ -120,13 +120,14 @@ export interface NextMoveSelection {
 }
 
 /**
- * The edge identities (`${fromId}→${toId}`, the card's own composite) the bound graph declares as DEFINITIONS: each
- * operand and addend of a node's `nonlinear_identity`, into that node. No graph → empty (today's selection).
+ * The edge identities (`${fromId}→${toId}`, the card's own composite) the bound graph declares as DEFINITIONS AND the
+ * card's own Run kept in use: each operand and addend of a node's `nonlinear_identity`, into that node, unless that Run
+ * withdrew the identity (it then used the link's strength, so the link is the user's to weigh). No graph → empty.
  * R3-9: the ONE predicate every edge writer refuses on (`compose/definitional-links.ts`), so the card never offers a
- * link the writers would refuse.
+ * link the writers would refuse, and never hides one they would take (DL #2229 follow-up).
  */
-export function definitionalLinks(boundGraph: Record<string, unknown> | null): ReadonlySet<string> {
-  return declaredDefinitionalLinks(boundGraph);
+export function definitionalLinks(boundGraph: Record<string, unknown> | null, analysisResult?: unknown): ReadonlySet<string> {
+  return definitionalLinksInUse(boundGraph, analysisResult === undefined || analysisResult === null ? null : identityRunUseOfResult(analysisResult));
 }
 
 /**
@@ -247,7 +248,7 @@ export function selectNextMove(args: NextMoveInputs): NextMoveSelection {
 
   // 4 — the user's view of the link the result rests on.
   const built = buildFragileLinkChallenge({
-    ...input, definitionalLinks: definitionalLinks(boundGraph), modelLinks: modelLinks(boundGraph),
+    ...input, definitionalLinks: definitionalLinks(boundGraph, input.analysisResult), modelLinks: modelLinks(boundGraph),
   });
   const chosen = built.block === null && built.reason === 'no_groundable_fragile_edge' ? buildNoFlaggedLinkCard(input) : built;
   if (chosen.block !== null) return { move: withCaveatSentence(moveOf('link_view', chosen.block), caveats), reason: null, caveats };

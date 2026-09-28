@@ -149,6 +149,18 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
     expect(breakEvenFor(g)).toBeNull();
   });
 
+  // MG #72 5870097103: the one direction authority reads the comparator the user stated before the label, so a goal
+  // that HOLDS a ceiling is a goal to reduce here too — whatever its label says (the run minimises it).
+  it('RED (held ceiling): a goal holding `<=` gets no "stays at least that" / "needs" answer, label unchanged', () => {
+    const g = graph((ns) => { node(ns, 'mrr').goal_direction = '<='; });
+    // R1 S1 (AIQ 5871459631): with no stated level the wire cannot prove the ceiling a level, so nothing is SENT —
+    // yet break-even stays silent on the held ceiling itself (its floor words would read backwards).
+    expect(deriveEmittedGoalDirection(g, 'mrr')).toBeUndefined();
+    expect(breakEvenFor(g)).toBeNull();
+    // CONTROL: a held floor keeps the served answer.
+    expect(breakEvenFor(graph((ns) => { node(ns, 'mrr').goal_direction = '>='; }))).not.toBeNull();
+  });
+
   it('BOUNDARY (MG P3): exact division — 14,700 ÷ £60 = 245 exactly → keep 245, not 246', () => {
     const be = breakEvenFor(graph((ns) => { (node(ns, 'raise_pro_to_59').interventions as Record<string, unknown>).pro_plan_price = { value: 0.3, source: 'brief_extraction' }; }));
     expect(be!.options[0]).toMatchObject({ price: 60, keep_at_least: 245 });

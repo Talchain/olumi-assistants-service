@@ -22,6 +22,7 @@ import {
   resolveGoalThresholdCapWithProvenance,
 } from '../../utils/goal-threshold-cap.js';
 import { admitGoalBaseline } from '../../cee/factor-extraction/goal-baseline-admissibility.js';
+import { ceilingTargetUnitMayBeALevel, heldComparatorSense } from '../goal-target/goal-direction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { MAY_NAME_LEADING_OPTION } from '../../orchestrator/context/constraint-feasibility.js';
 import type { InterventionV3T } from '../../schemas/cee-v3.js';
@@ -613,6 +614,27 @@ const inferenceClassFor = (provenance: string): InferenceClass => {
   if (provenance === 'ai_proposed') return 'model_proposed';
   return 'builder_inferred';
 };
+
+/**
+ * The frame an OUTCOME this limit names is admitted on as an observable FACTOR (see "A LIMIT THE USER STATED ON A LEVEL
+ * NAMES A QUANTITY THAT CAN HOLD ONE" in `admitCandidateModel`): a limit the user stated, in a percentage. Undefined
+ * when the limit re-kinds nothing. ONE rule, read by admission and by `findCoverageGaps` (`build-model.ts`), which must
+ * see that quantity as the level-less factor admission registers.
+ */
+export function limitedOutcomeFrame(c: Pick<CandidateConstraint, 'provenance' | 'value' | 'unit' | 'frame'>): number | undefined {
+  return inferenceClassFor(c.provenance) === 'brief_stated' ? percentLevelFrame(c.value, c.unit, c.frame) : undefined;
+}
+
+/**
+ * Whether a limit's `metric` names the entity labelled `label`, as admission attaches a limit to its node
+ * (`nodeIdForMetric`): the exact label, else the same text ignoring case and surrounding space — never a fuzzy guess
+ * (inner spacing is not collapsed). ONE rule, read by admission and by `findCoverageGaps` (`build-model.ts`), so a limit
+ * that re-kinds an outcome here is the limit gap there (verifier FIX_FIRST (4) on f773a217: "Monthly Churn" vs
+ * "Monthly churn" was re-kinded by admission and matched by nothing in the gap count).
+ */
+export function metricNamesLabel(metric: string, label: string): boolean {
+  return metric === label || metric.trim().toLowerCase() === label.trim().toLowerCase();
+}
 
 
 /**
@@ -2305,6 +2327,12 @@ export function carryWithheldOptions(first: AdmittedModel, retry: AdmittedModel)
   return (first.options_withheld ?? []).filter((w) => !present.has(canonicalLabel(w.option)));
 }
 
+/** A stated current level off the target's own cap scale, said (one sentence for the floor and the ceiling). */
+const offCapScaleSentence = (metric: string, baselineRaw: number, raw: number, cap: number): string =>
+  `The current level of "${metric}" (${baselineRaw}) is outside the range the target of ${raw} ` +
+  `is measured on (0 to ${cap}), so the chance of reaching the target cannot be shown. The target ` +
+  'is kept. If either figure is wrong, say which and it can be corrected.';
+
 /** A stated current level of the goal: admitted (on the target's own cap) or withheld with the sentence to say. */
 export type StatedGoalLevelVerdict =
   | { readonly admitted: true; readonly normalised: number }
@@ -2327,6 +2355,15 @@ export type StatedGoalLevelVerdict =
  * Withheld, and said with the shortest truthful repair, until the comparator
  * is carried and honoured end to end. The target itself is kept as before.
  *
+ * ⭐ EXCEPT `<=` BESIDE A HELD CEILING (MG #72 5870097103). The comparator IS now carried and honoured for one case:
+ * a goal node that HOLDS `goal_direction: '<='` (held by construction only beside a target the user wrote) is sent
+ * with `goal_direction: 'minimise'` (`resolveGoalDirection`), and ISL then scores `baseline + effect <= threshold`.
+ * So a `<=` level is admitted ONLY when `heldComparator` is that held `'<='` — the same reading the wire uses
+ * (`heldComparatorSense`), so a level is never admitted where the run would read it `>=`. The rule is mirrored: a
+ * level already at or below the target is withheld and said, a level off the cap's scale is withheld and said.
+ * `<` stays refused, as `>` is. With no held ceiling, `<=` is refused exactly as before. And a held ceiling makes a
+ * `>=` reading (the chat path's `goal_is`) a contradiction of the user's own comparator: refused, never scored `>=`.
+ *
  * Then the shared scale/direction rule (`admitGoalBaseline`): a level above the target is a decrease the `>=`
  * frame would invert; a level off the target's own cap is on another scale. Both withheld and said.
  *
@@ -2339,8 +2376,35 @@ export function admitStatedGoalLevel(args: {
   readonly rawTarget: number;
   readonly rawBaseline: number;
   readonly cap: number;
+  /** The comparator the goal node HOLDS (`goal_direction`, G1), when the caller reads one; absent ⇒ none held. */
+  readonly heldComparator?: unknown;
+  /** The target's unit: a `<=` level is admitted beside a held ceiling only where it may be a level (AIQ 5872082179). */
+  readonly targetUnit?: unknown;
 }): StatedGoalLevelVerdict {
-  const { metric, operator, rawTarget: raw, rawBaseline: baselineRaw, cap } = args;
+  const { metric, operator, rawTarget: raw, rawBaseline: baselineRaw, cap, heldComparator } = args;
+  const heldCeiling = heldComparatorSense(heldComparator) === 'minimise';
+  if (operator === '<=' && heldComparator === '<=' && heldCeiling && ceilingTargetUnitMayBeALevel(args.targetUnit)) {
+    const admission = admitGoalBaseline({ rawTarget: raw, rawBaseline: baselineRaw, cap, ceiling: true });
+    if (admission.admitted) return { admitted: true, normalised: admission.normalised };
+    if (admission.reason === 'baseline_off_cap_scale') return { admitted: false, reason: offCapScaleSentence(metric, baselineRaw, raw, cap) };
+    return {
+      admitted: false,
+      reason:
+        `The current level of "${metric}" (${baselineRaw}) is already at or below the target ` +
+        `of ${raw}, so the chance of getting down to the target cannot be shown: read that way the question ` +
+        'would be upside down. The target is kept. If the goal is to get above a level, or if either figure ' +
+        'is wrong, say which and it can be corrected.',
+    };
+  }
+  if (operator === '>=' && heldCeiling) {
+    return {
+      admitted: false,
+      reason:
+        `"${metric}" is held as a goal to stay ${heldComparator === '<' ? 'below' : 'at or below'} ${raw}, as the brief ` +
+        `put it, so a current level (${baselineRaw}) read as reaching at least ${raw} would be scored the wrong way ` +
+        'round, and it was not used. If the goal is to stay under the target, say so and give the current level again.',
+    };
+  }
   if (operator === '>') {
     return {
       admitted: false,
@@ -2363,15 +2427,7 @@ export function admitStatedGoalLevel(args: {
   }
   const admission = admitGoalBaseline({ rawTarget: raw, rawBaseline: baselineRaw, cap });
   if (admission.admitted) return { admitted: true, normalised: admission.normalised };
-  if (admission.reason === 'baseline_off_cap_scale') {
-    return {
-      admitted: false,
-      reason:
-        `The current level of "${metric}" (${baselineRaw}) is outside the range the target of ${raw} ` +
-        `is measured on (0 to ${cap}), so the chance of reaching the target cannot be shown. The target ` +
-        'is kept. If either figure is wrong, say which and it can be corrected.',
-    };
-  }
+  if (admission.reason === 'baseline_off_cap_scale') return { admitted: false, reason: offCapScaleSentence(metric, baselineRaw, raw, cap) };
   return {
     admitted: false,
     reason:
@@ -2379,6 +2435,76 @@ export function admitStatedGoalLevel(args: {
       `of ${raw}, so the chance of reaching the target cannot be shown: read that way the question ` +
       'would be upside down. The target is kept. If the goal is to get back below a level, or if ' +
       'either figure is wrong, say which and it can be corrected.',
+  };
+}
+
+/**
+ * Whether the candidate's current level of its goal is Olumi's, not the user's: "known" alone is not enough (verdict
+ * 5824647383) — a level the model marks known but attributes to itself (`ai_proposed`/`inferred`) is Olumi's too.
+ */
+function goalLevelIsEstimated(goal: CandidateModel['goal']): boolean {
+  return !(goal.baseline_known === true && (goal.baseline_provenance ?? goal.provenance) === 'explicit');
+}
+
+/** #1840's goal `observed_state` for a level the brief states: `{ value: B, baseline: B, unit?, source, raw_value, cap }`. */
+function briefGoalObservedState(normalised: number, unit: string | null | undefined, raw: number, cap: number): NonNullable<AdmittedNode['observed_state']> {
+  return { value: normalised, baseline: normalised, ...(unit ? { unit } : {}), source: 'brief_extraction', raw_value: raw, cap };
+}
+
+/**
+ * ⭐ THE STATED CURRENT LEVEL OF A GOAL WITH A HELD CEILING (MG #72 5870097103; AIQ defect 1, "£45k dropped").
+ *
+ * Admission runs before the brief attests the comparator, so it withholds every `<=` level
+ * (`admitStatedGoalLevel`, no held comparator). Once `holdStatedGoalAttributes` has HELD `goal_direction: '<='`
+ * beside a target the user wrote, the run sends `goal_direction: 'minimise'` for that goal (`resolveGoalDirection`),
+ * so the SAME rule is asked again with the held comparator: admitted ⇒ the goal carries the level in #1840's shape on
+ * the threshold's OWN cap (`goal_threshold_cap`, from `resolveGoalThresholdCapWithProvenance` — never re-derived) and
+ * the "not used" ledger line goes, because the level IS used; withheld ⇒ the line says the new reason (at or below
+ * the target; off the cap's scale) instead. Olumi's estimate stays withheld with its own line (`goalLevelIsEstimated`).
+ *
+ * Anything else — no held comparator, a held `<`/`>=`/`>`, no target on a cap, a level the goal already carries —
+ * returns the input untouched, so every other goal is byte-identical.
+ */
+export function admitGoalLevelBesideHeldCeiling<N extends { readonly kind?: unknown }>(
+  nodes: readonly N[],
+  goal: CandidateModel['goal'] | null | undefined,
+  loss: readonly RepairEntry[],
+  /**
+   * ⛔ DL E12 (5872375159): the level is the USER's only if the brief states it — `figureTheUserWrote(value, unit, brief)`,
+   * injected by the caller (stated-by-user.ts imports this module). The drafter's `explicit` is not enough: without
+   * this, a level the brief never states was stored `brief_extraction` and `minimise` was sent beside it. REQUIRED.
+   */
+  userWroteLevel: (value: number, unit: unknown) => boolean,
+): { readonly nodes: readonly N[]; readonly loss: readonly RepairEntry[] } {
+  const unchanged = { nodes, loss };
+  const goals = nodes.filter((n) => n.kind === 'goal');
+  if (goal === null || goal === undefined || goals.length !== 1) return unchanged;
+  const node = goals[0] as N & {
+    readonly goal_direction?: unknown; readonly goal_threshold_raw?: unknown; readonly goal_threshold_cap?: unknown;
+    readonly observed_state?: unknown;
+  };
+  if (node.goal_direction !== '<=' || goal.operator !== '<=' || node.observed_state !== undefined) return unchanged;
+  const raw = node.goal_threshold_raw;
+  const cap = node.goal_threshold_cap;
+  const baselineRaw = goal.baseline_value;
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw !== goal.value) return unchanged;
+  if (typeof cap !== 'number' || !Number.isFinite(cap)) return unchanged;
+  if (typeof baselineRaw !== 'number' || !Number.isFinite(baselineRaw) || goalLevelIsEstimated(goal)) return unchanged;
+  // DL E12: a level the brief never states is not the user's, however the drafter marked it — it stays withheld, as today.
+  if (!userWroteLevel(baselineRaw, goal.unit)) return unchanged;
+  const path = `nodes[${slugId(goal.metric)}].observed_state.baseline`;
+  if (loss.filter((l) => l.field_path === path).length !== 1) return unchanged;
+  const verdict = admitStatedGoalLevel({
+    metric: goal.metric, operator: goal.operator, rawTarget: raw, rawBaseline: baselineRaw, cap, heldComparator: node.goal_direction,
+    targetUnit: goal.unit,
+  });
+  if (!verdict.admitted) {
+    return { nodes, loss: loss.map((l) => (l.field_path === path ? { ...l, reason: verdict.reason } : l)) };
+  }
+  const observed_state = briefGoalObservedState(verdict.normalised, goal.unit, baselineRaw, cap);
+  return {
+    nodes: nodes.map((n) => (n === node ? { ...node, observed_state } : n)),
+    loss: loss.filter((l) => l.field_path !== path),
   };
 }
 
@@ -2604,8 +2730,7 @@ function admitOnce(
         // ⛔ "Known" alone is not enough (verdict 5824647383): the strict schema cannot tie
         // `baseline_known` to its provenance, so a level the model marks known but
         // attributes to itself (`ai_proposed`/`inferred`) is Olumi's, and is withheld too.
-        const estimated = !(model.goal.baseline_known === true
-          && (model.goal.baseline_provenance ?? model.goal.provenance) === 'explicit');
+        const estimated = goalLevelIsEstimated(model.goal);
         if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw) && estimated) {
           withheld(
             `Olumi's own estimate of the current level of "${model.goal.metric}" (${baselineRaw}) was not used, ` +
@@ -2616,17 +2741,11 @@ function admitOnce(
           // ONE rule for a stated current level, shared with the chat path (`goal-current-level.ts`).
           const verdict = admitStatedGoalLevel({
             metric: model.goal.metric, operator: model.goal.operator, rawTarget: raw, rawBaseline: baselineRaw, cap: resolved.cap,
+            targetUnit: model.goal.unit,
           });
           if (verdict.admitted) {
             // Only the user's stated level reaches here (see `estimated` above).
-            observed_state = {
-              value: verdict.normalised,
-              baseline: verdict.normalised,
-              ...(model.goal.unit ? { unit: model.goal.unit } : {}),
-              source: 'brief_extraction',
-              raw_value: baselineRaw,
-              cap: resolved.cap,
-            };
+            observed_state = briefGoalObservedState(verdict.normalised, model.goal.unit, baselineRaw, resolved.cap);
           } else {
             withheld(verdict.reason);
           }
@@ -2825,8 +2944,7 @@ function admitOnce(
   const nodeIdForMetric = (metric: string): string | undefined => {
     const exact = ids.get(metric);
     if (exact !== undefined) return exact;
-    const wanted = metric.trim().toLowerCase();
-    for (const [label, id] of ids) if (label.trim().toLowerCase() === wanted) return id;
+    for (const [label, id] of ids) if (metricNamesLabel(metric, label)) return id;
     return undefined;
   };
 
@@ -2851,8 +2969,7 @@ function admitOnce(
    */
   const limitedLevelFrames = new Map<string, number>();
   for (const c of model.constraints) {
-    if (inferenceClassFor(c.provenance) !== 'brief_stated') continue;
-    const frame = percentLevelFrame(c.value, c.unit, c.frame);
+    const frame = limitedOutcomeFrame(c);
     if (frame === undefined) continue;
     const id = nodeIdForMetric(c.metric);
     if (id !== undefined) limitedLevelFrames.set(id, frame);

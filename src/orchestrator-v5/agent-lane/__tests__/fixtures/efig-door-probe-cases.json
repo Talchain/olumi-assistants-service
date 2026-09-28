@@ -1,0 +1,1996 @@
+[
+{
+"id": "E04",
+"msg": "Record them as annual salaries: \u00a3120,000 per senior engineer and \u00a365,000 per junior engineer.",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "S=400000",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 400000
+}
+]
+},
+{
+"name": "S=99000+J",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 99000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+},
+{
+"id": "E04k",
+"msg": "Record them as annual salaries: \u00a3120k per senior engineer and \u00a365k per junior engineer.",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "S=400000",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 400000
+}
+]
+},
+{
+"name": "S=99000+J",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 99000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+},
+{
+"id": "E04+400k",
+"msg": "Record them as annual salaries: \u00a3120,000 per senior engineer and \u00a365,000 per junior engineer. Our salary budget is \u00a3400k.",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "S=400000+J",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 400000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "S=400000",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 400000
+}
+]
+}
+]
+},
+{
+"id": "hire2",
+"msg": "We will hire 2 senior engineers.",
+"calls": [
+{
+"name": "S=2",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 2
+}
+]
+}
+]
+},
+{
+"id": "hire2+3",
+"msg": "Hire 2 senior engineers and 3 juniors; seniors cost \u00a3120k.",
+"calls": [
+{
+"name": "S=2",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 2
+}
+]
+},
+{
+"name": "J=3",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 3
+}
+]
+},
+{
+"name": "S=120000",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+}
+]
+},
+{
+"id": "N1",
+"msg": "Seniors cost \u00a3120k and juniors \u00a365k",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+},
+{
+"id": "N2",
+"msg": "\u00a365k for juniors, \u00a3120k for seniors",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+},
+{
+"id": "N3",
+"msg": "Each senior engineer earns \u00a3120,000 a year",
+"calls": [
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "pair(J unwritten)",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+},
+{
+"id": "N4",
+"msg": "Juniors: \u00a365k. Seniors: \u00a3120k.",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+},
+{
+"id": "N5",
+"msg": "The senior salary is \u00a3120k while junior pay is \u00a365k",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+},
+{
+"id": "N6",
+"msg": "Hire 1 senior at \u00a3120k",
+"calls": [
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=1",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 1
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=1",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 1
+}
+]
+}
+]
+},
+{
+"id": "N7",
+"msg": "\u00a3120k",
+"calls": [
+{
+"name": "S=s (one factor)",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=s (one factor)",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+}
+]
+},
+{
+"id": "N8",
+"msg": "\u00a3120k",
+"calls": [
+{
+"name": "S=s,J=s (two factors)",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s,J=65000",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+},
+{
+"id": "N9",
+"msg": "\u00a3120k a year for seniors and \u00a365k a year for juniors",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+},
+{
+"id": "N10",
+"msg": "\u00a3120k per year per senior engineer and \u00a365k per year per junior engineer",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+},
+{
+"id": "N11",
+"msg": "\u00a3120,000 a year per senior engineer and \u00a365,000 a year per junior engineer",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+},
+{
+"id": "N12",
+"msg": "\u00a3120k for a senior and \u00a365k for a junior",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+},
+{
+"id": "N13",
+"msg": "Seniors and juniors cost \u00a3120k and \u00a365k respectively",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+},
+{
+"id": "N14",
+"msg": "\u00a3120k and \u00a365k for seniors and juniors respectively",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+},
+{
+"id": "N15",
+"msg": "Seniors \u00a3120k (juniors \u00a365k)",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+},
+{
+"id": "N16",
+"msg": "A senior costs \u00a3120k, which is \u00a355k more than a junior",
+"calls": [
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=55000",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 55000
+}
+]
+},
+{
+"name": "S=s,J=55000",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 55000
+}
+]
+}
+]
+},
+{
+"id": "N17",
+"msg": "Pay seniors \u00a3120k and juniors \u00a365k, within the \u00a3400k budget",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "S=400000",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 400000
+}
+]
+}
+]
+},
+{
+"id": "N18",
+"msg": "Seniors: \u00a3120k a year each; juniors: \u00a365k a year each",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+},
+{
+"id": "N19",
+"msg": "\u00a3120k each",
+"calls": [
+{
+"name": "S=s,J=s (two factors)",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+}
+]
+},
+{
+"id": "N20",
+"msg": "Senior engineers cost \u00a3120k a year each and juniors \u00a365k a year each.",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+},
+{
+"id": "N21",
+"msg": "Juniors at \u00a365k a year, seniors at \u00a3120k a year",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+},
+{
+"id": "N22",
+"msg": "We'd pay \u00a3120k a year to each senior and \u00a365k a year to each junior",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+},
+{
+"id": "N23",
+"msg": "Senior: 120000, junior: 65000",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+},
+{
+"id": "N24",
+"msg": "Salaries: 120k for seniors, 65k for juniors",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+},
+{
+"id": "N25",
+"msg": "Seniors cost \u00a3120k a year and juniors cost \u00a365k a year",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+},
+{
+"id": "N26",
+"msg": "\u00a3120k a year for each senior engineer, \u00a365k a year for each junior engineer",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+},
+{
+"id": "N27",
+"msg": "Budget \u00a3120k per annum for a senior and \u00a365k per annum for a junior",
+"s": 120000,
+"j": 65000,
+"calls": [
+{
+"name": "pair",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+},
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "swap",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+},
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=s",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "S=j",
+"factors": [
+{
+"label": "Senior engineer salary",
+"value": 65000
+}
+]
+},
+{
+"name": "J=s",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 120000
+}
+]
+},
+{
+"name": "J=j",
+"factors": [
+{
+"label": "Junior engineer salary",
+"value": 65000
+}
+]
+}
+]
+}
+]

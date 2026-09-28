@@ -42,6 +42,8 @@
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { applyPatchOperations } from '../../orchestrator/patch-applier.js';
 import { sizeNewFactorLinks } from './size-new-factor-links.js';
+import { GM_HELD_USER_TODAY_KEY, readUserTodayMember, recheckAddFactorBatch, stampNewUserTodayLevels, type UserTodayLevel } from '../routing/add-factor-transaction.js';
+import { toGraphView } from './add-option-dispatch.js';
 import {
   canonicaliseValueOps,
   stampUserEditProvenance,
@@ -494,6 +496,11 @@ export type GmHeldResumeRead =
        * confirm writes in the same apply (`stampNewGradedTodayLevels`). Absent on every other hold.
        */
       readonly gradedToday?: readonly GradedTodayLevel[];
+      /**
+       * ⭐ PJ-E-FIG — the user's figure for each factor the add-factor door adds (`GM_HELD_USER_TODAY_KEY`), which the
+       * confirm writes in the same apply (`stampNewUserTodayLevels`). Absent on every other hold.
+       */
+      readonly userToday?: readonly UserTodayLevel[];
     };
 
 /**
@@ -527,6 +534,11 @@ export function readGmHeldResume(pending: PendingAction): GmHeldResumeRead {
   // ⭐ PJ-A1 £49 — a new graded factor's stated today level. A malformed member is read as NO signal (nothing stamped): the
   // batch is whole without it, and the factor is then asked for — under-claiming, never a guessed value.
   const gradedToday = readGradedTodayMember(patch[GM_HELD_GRADED_TODAY_KEY]);
+  // ⭐ PJ-E-FIG — the add-factor door's figures. FAIL-CLOSED like a switch: the door exists to carry them, so a malformed
+  // member is a hold nothing can safely execute (declined), never factors landed without the user's values.
+  const rawUserToday = patch[GM_HELD_USER_TODAY_KEY];
+  const userToday = rawUserToday === undefined ? undefined : readUserTodayMember(rawUserToday);
+  if (rawUserToday !== undefined && userToday === undefined) return { kind: 'no_payload' };
   return {
     kind: 'ok',
     operations: parsed.data,
@@ -534,6 +546,7 @@ export function readGmHeldResume(pending: PendingAction): GmHeldResumeRead {
     ...(rawSwitches !== undefined ? { switchFactorIds: [...(rawSwitches as string[])] } : {}),
     ...(userStatedNodeIds !== undefined ? { userStatedNodeIds } : {}),
     ...(gradedToday !== undefined ? { gradedToday } : {}),
+    ...(userToday !== undefined ? { userToday } : {}),
   };
 }
 
@@ -554,6 +567,8 @@ export interface GmHeldExecuteInput {
   readonly userStatedNodeIds?: readonly string[];
   /** ⭐ PJ-A1 £49 — the hold's new graded factors' stated today levels (`readGmHeldResume`); they land in this apply. */
   readonly gradedToday?: readonly GradedTodayLevel[];
+  /** ⭐ PJ-E-FIG — the add-factor door's figures, the user's (`readGmHeldResume`); they land in this apply. */
+  readonly userToday?: readonly UserTodayLevel[];
   /** The CURRENT graph (persisted authority; hash-verified by the caller). */
   readonly currentGraph: unknown;
   /** Like-for-like hash of `currentGraph` (already matched the pin). */
@@ -745,7 +760,39 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
     );
     return { status: 'apply_failed', reason: 'apply_error' };
   }
-  const stampedOperations: PatchOperation[] = todayStamp.operations;
+  // ⭐ PJ-E-FIG (DL #72 5866036457) — the user's figure for each factor the add-factor door adds: the same carrier, the
+  // same place, the same fail-closed identity rule, after the graded-today stamp. The factors, their figures and their
+  // placeholder links land in ONE apply and ONE commit; a member that does not match the batch declines it whole.
+  // The door's own rules are re-run on THIS graph first (a name taken since the proposal, a target that changed kind):
+  // a threaded or multi-step confirm lands on a graph the proposal never saw, and the referee has no name rule.
+  if (input.userToday !== undefined && input.userToday.length > 0) {
+    const conflict = recheckAddFactorBatch(operations, toGraphView(input.currentGraph));
+    if (conflict !== null) {
+      log.warn(
+        {
+          request_id: input.requestId,
+          scenario_id: input.scenarioId,
+          operations_count: operations.length,
+          reason: conflict,
+        },
+        'GM held-execute — the add-factor batch no longer meets its door\'s rules on the current graph; declining whole batch (nothing persisted)',
+      );
+      return { status: 'apply_failed', reason: 'apply_error' };
+    }
+  }
+  const userTodayStamp = stampNewUserTodayLevels(todayStamp.operations, input.userToday ?? []);
+  if (!userTodayStamp.ok) {
+    log.warn(
+      {
+        request_id: input.requestId,
+        scenario_id: input.scenarioId,
+        operations_count: operations.length,
+      },
+      'GM held-execute — the hold names a user figure for a factor its batch does not add as a bare new factor; declining whole batch (nothing persisted)',
+    );
+    return { status: 'apply_failed', reason: 'apply_error' };
+  }
+  const stampedOperations: PatchOperation[] = userTodayStamp.operations;
 
   // ── 2b. Canonicalise value-op field spellings (R1 residual) ────────────
   // The confirm re-applies LOCALLY (no PLoT round-trip), so a tunable value op
