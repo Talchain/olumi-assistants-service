@@ -720,7 +720,7 @@ export async function buildTurnContext(
   // second query or independently drifting source. Concurrent ⇒ these reads
   // cost the batch's max latency, not their sum.
   const [
-    priorTurnsRead,
+    { priorTurnsRead, priorFactsRead },
     priorTurnsTotal,
     durableMutationFactRead,
     durableScenarioAnalysisFactRead,
@@ -729,7 +729,9 @@ export async function buildTurnContext(
     mostRecentPendingActionsRead,
     priorCoachingStateRead,
   ] = await Promise.all([
-    fetchPriorTurns(payload.scenario_id, requestId, store),
+    // C1: the facts for the prior turns are chained onto the turns read, so they load while the rest of
+    // this batch is still in flight (`readTurnsThenFacts`), not after its slowest read.
+    readTurnsThenFacts(payload.scenario_id, requestId, store),
     fetchPriorTurnsTotal(payload.scenario_id, requestId, store),
     fetchRecentAppliedMutationFacts(payload.scenario_id, requestId, store),
     fetchScenarioAnalysisFacts(payload.scenario_id, requestId, store),
@@ -827,12 +829,7 @@ export async function buildTurnContext(
     facts: priorFacts,
     factsWithTurn: priorFactsWithTurn,
     readOk: factsReadOk,
-  } = await fetchPriorFacts(
-    priorTurns,
-    requestId,
-    payload.scenario_id,
-    store,
-  );
+  } = priorFactsRead;
   /**
    * DID THE READ THAT PRODUCED `priorFacts` SUCCEED — ALL OF IT?
    *
@@ -2207,6 +2204,29 @@ async function enrichRecentMutationLabelTransitions(
   }
 }
 
+/**
+ * C1 (DL #72 5862738581, Canonical 5862863093) — THE TURNS, THEN THEIR FACTS, AS ONE MEMBER OF A BATCH.
+ *
+ * The hot-window facts are read for exactly the prior turns' row ids, so they depend on the turns read
+ * and on nothing else in either batch. Awaited AFTER the batch, their round trip (~0.31 s on staging)
+ * sat behind the batch's slowest read on every graph read and every turn context. Chained here, it runs
+ * while that read is still in flight. The queries, their arguments and their results are unchanged, and
+ * so is the failure contract: neither helper throws (each degrades to `readOk: false`), so this member
+ * can never reject the shared `Promise.all`.
+ */
+async function readTurnsThenFacts(
+  scenarioId: string,
+  requestId: string,
+  store: SessionStore | undefined,
+): Promise<{
+  readonly priorTurnsRead: Awaited<ReturnType<typeof fetchPriorTurns>>;
+  readonly priorFactsRead: Awaited<ReturnType<typeof fetchPriorFacts>>;
+}> {
+  const priorTurnsRead = await fetchPriorTurns(scenarioId, requestId, store);
+  const priorFactsRead = await fetchPriorFacts(priorTurnsRead.turns, requestId, scenarioId, store);
+  return { priorTurnsRead, priorFactsRead };
+}
+
 async function fetchPriorFacts(
   priorTurns: readonly SessionTurn[],
   requestId: string,
@@ -2764,16 +2784,13 @@ export async function loadScenarioAnalysisFactsForRead(
       factSet: reconcileScenarioAnalysisFacts({ scenarioId, hotWindowFacts: [] }),
     };
   }
-  const [priorTurnsRead, durableRead] = await Promise.all([
-    fetchPriorTurns(scenarioId, requestId, store),
+  // C1: the hot-window facts depend ONLY on the turns, so they are read as soon as the turns land, inside
+  // the batch — not after its slowest read (see `readTurnsThenFacts`). Same queries, same result.
+  const [{ priorTurnsRead, priorFactsRead }, durableRead] = await Promise.all([
+    readTurnsThenFacts(scenarioId, requestId, store),
     fetchScenarioAnalysisFacts(scenarioId, requestId, store),
   ]);
-  const { facts, factsWithTurn, readOk } = await fetchPriorFacts(
-    priorTurnsRead.turns,
-    requestId,
-    scenarioId,
-    store,
-  );
+  const { facts, factsWithTurn, readOk } = priorFactsRead;
   const hotReadOk = readOk && priorTurnsRead.readOk;
   return {
     hotWindow: hotReadOk ? { status: 'ok', facts } : { status: 'degraded', facts: [] },

@@ -156,6 +156,15 @@ export const AUTHORITY_ALLOWLIST: Readonly<
     count: 4,
     allowedArgs: ['boundGraph', '{ options: runOptions }'],
   },
+  'orchestrator-v5/agent-lane/limited-level-ask.ts': {
+    // DL ruling #72 5863840239 (ii), CEE #2205: construction asks the user for today's level of a quantity they limit,
+    // and — as the estimated-limit card does — not when an option SETS that factor (the option is checked at the level
+    // it sets). `graph` is the model `build-model.ts` is about to REGISTER: CEE's own admitted nodes and
+    // goal_constraints, the same bytes written to `/graph/register` (never a browser or request graph — the UI sends a
+    // brief, not a graph). Read-only, and it can only SILENCE an ask (an empty set ⇒ every eligible limit is asked).
+    count: 1,
+    allowedArgs: ['graph'],
+  },
 };
 
 /**

@@ -133,6 +133,7 @@ import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
 import { classifyUnitScaleClass } from '../../../cee/draft/records/unit-scale-class.js';
 import { unitFamilyOf } from '../../routing/value-unit-resolution.js';
 import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
+import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, factorTheUserNamed, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
@@ -168,6 +169,18 @@ function scopeIn(g: { readonly nodes: readonly { readonly label?: unknown; reado
     .map((n) => (typeof n.label === 'string' ? n.label : ''))
     .filter((l) => l !== '' && !target.includes(l));
   return { target, others };
+}
+
+/**
+ * The LIMIT door's scope (DL #2195 CHANGES_REQUIRED 5863720934, served journey-C budget limits): the user calls a limit
+ * a "limit" ("change the budget limit to £30,000"), so that word is the limit's own; and a RISK is no quantity a limit's
+ * figure measures, so its label ("Budget overrun risk") makes no claim on the figure. Every other quantity still does:
+ * "300 Pro paying subscribers" is never a £300 limit on the price.
+ */
+export function limitScopeIn(g: { readonly nodes: readonly { readonly label?: unknown; readonly kind?: unknown }[] }, limitLabel: string): EntityScope {
+  const risks = new Set(g.nodes.filter((n) => n.kind === 'risk').map((n) => (typeof n.label === 'string' ? n.label : '')));
+  const { target, others } = scopeIn(g, limitLabel);
+  return { target: [...target, 'limit'], others: others.filter((l) => !risks.has(l)) };
 }
 
 /**
@@ -400,18 +413,6 @@ function withoutStateGlossary(unit: string): string {
     (tokenReadsAsQuantity(after ?? before ?? '') ? pair : ' '));
 }
 
-/**
- * The things a count is OF that `unitFamilyOf` does not list ("1 unit", "1 customer"): a miss here only refuses, as
- * before, so the set may stay small — it only closes the inverted test's open side (`unitReadsAsQuantity`).
- */
-const COUNTED_NOUNS: ReadonlySet<string> = new Set([
-  'unit', 'item', 'piece', 'count', 'number', 'amount', 'quantity', 'customer', 'subscriber', 'account', 'client',
-  'member', 'order', 'sale', 'licence', 'license', 'store', 'location', 'product', 'feature',
-]);
-function countedNoun(token: string): boolean {
-  const t = token.toLowerCase();
-  return COUNTED_NOUNS.has(t) || (t.length > 1 && t.endsWith('s') && COUNTED_NOUNS.has(t.slice(0, -1)));
-}
 
 /**
  * A switch figure that says ON: a bare 1 or `true` with no unit; a 1 or `true` in a unit that reads as no quantity
@@ -1965,6 +1966,25 @@ export function createAgentCapabilities(
       const current: 'positive' | 'negative' = edge.effect_direction === 'negative' || edge.effect_direction === 'positive'
         ? edge.effect_direction : (mean < 0 ? 'negative' : 'positive');
       const wanted = args.direction === 'positive' || args.direction === 'negative' ? args.direction : current;
+      /**
+       * ⛔ A REVERSAL IS THE USER'S WORDS, NEVER THE MODEL'S GUESS (DL #72 5863691992; served pj-20260928T044420Z A16: "Get on
+       * and update it to very strong" — the Agent sent `direction: 'positive'` and the risk that lowers MRR was prepared
+       * "pushing up", disclosed only as a trailing ", pushing up"; the harness approved it and the Run reported the
+       * reversal as a modelling error). The band was grounded (`bandGrounding`); the direction was not. A direction
+       * other than the link's own is taken ONLY with the user's phrase for it in THIS turn (`direction_from_words`,
+       * `wordsTheUserWrote` — the Agent cannot invent it), and the preview then says plainly that it REVERSES the link.
+       * Otherwise nothing is prepared, and the next call is named: the same arguments without `direction`.
+       */
+      const reverses = wanted !== current;
+      const directionWords = typeof args.direction_from_words === 'string' ? args.direction_from_words.trim() : '';
+      if (reverses && !wordsTheUserWrote(directionWords, ctx.user_turn_text)) {
+        const way = (d: 'positive' | 'negative'): string => (d === 'positive' ? 'raises' : 'lowers');
+        return { ok: false, mutated: false, refusal: 'direction_not_stated',
+          detail: `"${from.label}" \u2192 "${to.label}" ${way(current)} "${to.label}" in the model; this call would reverse it so that it ${way(wanted)} it, `
+            + 'and the user has not said in this message, in their own words, that it runs the other way. Nothing was prepared. '
+            + `NEXT CALL: call propose_link_strength again with exactly the same arguments, except leave out "direction": the link keeps its direction and only its strength is recorded. `
+            + 'Give "direction" only when the user said it runs the other way, with their exact words in "direction_from_words".' };
+      }
       const currentBand = edgeBandFromMagnitude(Math.abs(mean));
       // Already in the band the user named, pushing the same way: KEEP the figure, record it as theirs.
       const confirm = currentBand === band && wanted === current;
@@ -1988,7 +2008,7 @@ export function createAgentCapabilities(
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: confirm
           ? `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords}, as your own estimate (strength kept at ${quotable(Math.abs(mean))} on Olumi's 0\u20131 scale)`
-          : `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords} (${magnitude} on Olumi's 0\u20131 scale), as your own estimate${wanted !== current ? `, pushing ${wanted === 'positive' ? 'up' : 'down'}` : ''}`,
+          : `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords} (${magnitude} on Olumi's 0\u20131 scale), as your own estimate${reverses ? `, and REVERSE its direction so that it ${wanted === 'positive' ? 'raises' : 'lowers'} "${to.label}" (your "${directionWords}")` : ''}`,
         ...(interpretation === undefined ? {} : { interpretation }),
       });
       proposals.put(proposal);
@@ -2022,12 +2042,11 @@ export function createAgentCapabilities(
           detail: 'A target needs the figure, its unit, and whether the goal must be at least or at most that figure. Nothing was prepared; ask the user for whichever is missing.' };
       }
       const figure = targetFigure(value, unit);
+      const targetNotStated: ToolResult = { ok: false, mutated: false, refusal: 'target_not_stated',
+        detail: `${figure} is not a figure the user wrote, so nothing was prepared: it would be recorded as their target. `
+          + 'Ask them what figure the goal must reach, in their own words, and never offer a figure of your own as theirs.' };
       // ⛔ The figure is recorded as the user's target, so it must be one the user wrote.
-      if (!figureTheUserWrote(value, unit, ctx.user_text)) {
-        return { ok: false, mutated: false, refusal: 'target_not_stated',
-          detail: `${figure} is not a figure the user wrote, so nothing was prepared: it would be recorded as their target. `
-            + 'Ask them what figure the goal must reach, in their own words, and never offer a figure of your own as theirs.' };
-      }
+      if (!figureTheUserWrote(value, unit, ctx.user_text)) return targetNotStated;
       // ⛔ And so is which way it binds: said, affirmed, in this turn's own typed words.
       const said = comparatorTheUserWrote(ctx.user_turn_text);
       if (said !== type) {
@@ -2062,6 +2081,8 @@ export function createAgentCapabilities(
           detail: `The goal "${goal.label}" is measured in ${String(goalUnit)}, and ${figure} is a different kind of figure, so nothing was prepared. `
             + 'Ask the user for the target in the goal’s own units, and never record a figure given for something else as this goal’s target.' };
       }
+      // ⛔ …and written ABOUT this goal (DL #72 5862394804): "300 Pro paying subscribers" is never a £300 MRR target.
+      if (!figureTheUserWroteFor(value, unit, ctx.user_text, scopeIn(g, goal.label))) return targetNotStated;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -4533,6 +4554,8 @@ export function createAgentCapabilities(
             reason: `${shown} is not a level "${f.label}" can hold today, so its value today is not set. Ask the user what it is today.` });
           continue;
         }
+        // Not bound to the factor (unlike the goal target and limit doors): journey A's accepted A1 row grounds the NEW price
+        // factor's today with the brief's "£49", written about the existing "Pro plan price" (#2132; DL #72 5862394804).
         if (!figureTheUserWrote(t.value, unit, ctx.user_text)) {
           todayNotSet.push({ factor: f.label, value: t.value,
             reason: `The user's own words do not state ${shown}, so today's value for "${f.label}" is not set: it is never taken from Olumi's words or a guess. Ask the user what it is today.` });
@@ -5214,8 +5237,9 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'limit_unit_mismatch',
           detail: `The limit on "${node.label}" is in ${String(unit)}, and the figure given is a different kind of figure, so nothing was prepared. Ask the user for the limit in its own units.` };
       }
-      // ⛔ Recorded as the user's own figure, so it must be one the user wrote.
-      if (!figureTheUserWrote(value, unit, ctx.user_text)) {
+      // ⛔ Recorded as the user's own figure, so it must be one the user wrote, ABOUT this limit's quantity (DL #72
+      // 5862394804): "300 Pro paying subscribers" is never a £300 limit on the price.
+      if (!figureTheUserWrote(value, unit, ctx.user_text) || !figureTheUserWroteFor(value, unit, ctx.user_text, limitScopeIn(g, node.label))) {
         return { ok: false, mutated: false, refusal: 'figure_not_stated',
           detail: `${figureOf(value)} is not a figure the user wrote, so nothing was prepared: it would be recorded as their limit. `
             + 'Ask them what the new limit is, in their own words, and never offer a figure of your own as theirs.' };
