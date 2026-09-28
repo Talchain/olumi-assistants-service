@@ -22,6 +22,7 @@ import { splitIntoRedactableUnits } from '../compose/redactable-units.js';
 import { sanitiseCoachingProse } from '../../orchestrator/shared/output-safety.js';
 import { withoutProposalIds } from './display-ids.js';
 import { agentLaneLeaderWithheld, agentNoLeaderReason, limitCauseCodesOf } from './withheld-leader-fail-closed.js';
+import type { StoredLimitVerdicts } from '../../orchestrator/context/constraint-feasibility.js';
 
 export const PROVISIONAL_VIEW_TOOL = 'give_provisional_view';
 /** The words the block opens on. Changing them changes what the user is told the paragraph IS. */
@@ -95,7 +96,9 @@ const COMPLETED_RUN_KINDS: ReadonlySet<string> = new Set(['complete_current', 'c
  * The standing on ONE readback — the route's `readBackState` result — through the gate's own predicate, fed exactly
  * what the route feeds `enforceAgentLaneLeaderClaimsAtWire`.
  */
-export function leaderStandingOf(readback: { readonly analysisState?: unknown; readonly analysisReady?: unknown; readonly analysisResult?: unknown }): LeaderStanding {
+export function leaderStandingOf(readback: {
+  readonly analysisState?: unknown; readonly analysisReady?: unknown; readonly analysisResult?: unknown; readonly limitVerdicts?: StoredLimitVerdicts;
+}): LeaderStanding {
   const state = readback.analysisState as { run_state?: { kind?: unknown }; leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | null | undefined;
   const claim = state?.leader_claim;
   const withheldReason = typeof claim?.withheld_reason === 'string' ? claim.withheld_reason : undefined;
@@ -109,7 +112,7 @@ export function leaderStandingOf(readback: { readonly analysisState?: unknown; r
       analysisReady: readback.analysisReady,
     }),
     because: agentNoLeaderReason(withheldReason, readback.analysisReady,
-      limitCauseCodesOf(readback.analysisResult === undefined ? [] : [readback.analysisResult])),
+      limitCauseCodesOf(readback.analysisResult === undefined ? [] : [readback.analysisResult]), readback.limitVerdicts),
   };
 }
 
