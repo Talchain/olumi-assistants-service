@@ -725,14 +725,39 @@ export function issuesAsWireBlockers(issues: readonly unknown[] | undefined): An
  * would quietly get the old behaviour — the mute refusal, back again on one
  * path only.
  */
-function wireBlockers(
+export function analysisStateWireBlockers(
   readiness: AnalysisStateComposeInput['readiness'],
   status: string,
 ): AnalysisBlocker[] {
   const stated = mapWireBlockers(readiness?.blockers, status);
-  if (stated.length > 0) return stated;
+  if (stated.length > 0) return withAuthorityLevelAsks(stated, readiness?.readiness_issues);
   return issuesAsWireBlockers(readiness?.readiness_issues);
 }
+
+/**
+ * ⭐ A FACTOR-ONLY BLOCKER THE AUTHORITY ITEMISED CARRIES THE AUTHORITY'S CODE AND SENTENCE (Canonical consumer-parity
+ * probe, served 62b1ba4, 28 Sep 2026). `mapWireBlockers` re-derives each row from its wire `blocker_type`, and the wire
+ * has one type for two different gaps: `missing_value` with an `option_id` is an option's missing effect, and without
+ * one (#2164's `MISSING_FACTOR_LEVEL`) it is the factor's missing status-quo level. Re-derived, the level gap was said as
+ * "Choose the missing effect value for X" under `MISSING_OPTION_VALUE`, while the readiness route and the Agent asked
+ * "What is X today…?". The assessor's issue is the one authority, so the row is REPLACED by that issue, joined by
+ * identity: same `factor_id`, and neither carries an `option_id`. Scoped to `MISSING_FACTOR_LEVEL`, the one code whose
+ * wire projection loses its meaning; every other row, and the count, is unchanged.
+ */
+function withAuthorityLevelAsks(
+  stated: AnalysisBlocker[],
+  issues: readonly unknown[] | undefined,
+): AnalysisBlocker[] {
+  const levelAsks = new Map(
+    issuesAsWireBlockers(issues)
+      .filter((issue) => issue.code === 'MISSING_FACTOR_LEVEL' && issue.option_id === undefined && issue.factor_id !== undefined)
+      .map((issue) => [issue.factor_id as string, issue]),
+  );
+  if (levelAsks.size === 0) return stated;
+  return stated.map((row) =>
+    row.option_id === undefined && row.factor_id !== undefined ? levelAsks.get(row.factor_id) ?? row : row);
+}
+const wireBlockers = analysisStateWireBlockers;
 
 function composeRunState(input: AnalysisStateComposeInput): AnalysisRunState {
   const canonical = input.canonical as CanonicalAnalysisState;
