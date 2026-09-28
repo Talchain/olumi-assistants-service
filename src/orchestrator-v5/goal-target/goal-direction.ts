@@ -208,6 +208,32 @@ export function deriveEmittedGoalDirection(
   return resolveGoalDirection(graph, goalNodeId)?.direction;
 }
 
+/**
+ * ⭐ R1 S4 (B) (#72 5879133964 / 5879602608): a HELD strict floor (`'>'`, "MRR above £85k") is scored STRICTLY past its
+ * target — ISL `goal_threshold_strict` (ISL #209), carried by PLoT as it stands. Only where the run MAXIMISES: a held
+ * `'>'` beside a label that reads reduce is sent `minimise` from the label (DL E13), and strict there would score
+ * strictly BELOW, the opposite of "above". ONE reading, shared by the wire (`resolveGoalThresholdStrict`) and by
+ * admission of a stated current level beside a held `'>'` (`admitStatedGoalLevel`), so a `'>'` level is admitted only
+ * where the run scores it strictly. `'<'` is not read here: its minimise sense needs the proven-ceiling rule.
+ */
+export function heldStrictFloorIsScoredStrictly(held: unknown, goalLabel: unknown): boolean {
+  if (held !== '>') return false;
+  return typeof goalLabel !== 'string' || goalLabel.trim() === '' || directionFromLabelText(goalLabel) === undefined;
+}
+
+/**
+ * `true` ⇒ the caller sends `goal_threshold_strict: true`; `false` ⇒ it omits the key (ISL's `>=`, byte-identical).
+ * ⛔ Only beside a finite `goal_threshold` on the goal node: ISL answers 422 to strict without a threshold. (PLoT, the
+ * last hop, forwards the flag only beside the threshold it forwards.)
+ */
+export function resolveGoalThresholdStrict(graph: unknown, goalNodeId: unknown): boolean {
+  if (typeof goalNodeId !== 'string' || goalNodeId === '') return false;
+  const node = readNodes(graph).find((n) => n.id === goalNodeId);
+  const threshold = node?.goal_threshold;
+  if (typeof threshold !== 'number' || !Number.isFinite(threshold)) return false;
+  return heldStrictFloorIsScoredStrictly(readHeldGoalComparator(graph, goalNodeId), readGoalLabel(graph, goalNodeId));
+}
+
 /** The label classifier alone: `'minimise'` when the goal label attests a REDUCE aim, otherwise `undefined`. */
 function directionFromGoalLabel(
   graph: unknown,
@@ -215,7 +241,11 @@ function directionFromGoalLabel(
 ): EmittedGoalDirection | undefined {
   const label = readGoalLabel(graph, goalNodeId);
   if (label === null) return undefined;
+  return directionFromLabelText(label);
+}
 
+/** The label classifier on the label's own text — `directionFromGoalLabel` and `heldStrictFloorIsScoredStrictly` share it. */
+function directionFromLabelText(label: string): EmittedGoalDirection | undefined {
   // ⚠ CONSUMED IN ITS VALIDATED CONJUNCTION, NOT BY `.direction` ALONE.
   // The incumbent surface this classifier was built for
   // (`objective-contradiction.ts`) requires `subject !== null` before it acts
