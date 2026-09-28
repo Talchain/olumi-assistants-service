@@ -1959,7 +1959,7 @@ export function createAgentCapabilities(
     const labelOf = (id: string): string => approvedRead.nodes.find((n) => n.id === id)?.label ?? id;
     const links = parent.operations.map((o) => {
       const [from, to] = o.path.split('::');
-      const v = (o.value ?? {}) as { magnitude?: unknown; intent?: unknown; expected?: { mean?: unknown; effect_direction?: unknown }; band?: unknown; author?: unknown };
+      const v = (o.value ?? {}) as { magnitude?: unknown; intent?: unknown; expected?: { mean?: unknown; effect_direction?: unknown; reviewed_at?: unknown }; band?: unknown; author?: unknown };
       return { from: from ?? '', to: to ?? '', magnitude: v.magnitude, intent: v.intent, expected: v.expected, band: v.band, author: v.author };
     });
     const readable = links.every((l) => l.from !== '' && l.to !== '' && typeof l.magnitude === 'number' && (l.intent === 'set' || l.intent === 'confirm_current')
@@ -1968,7 +1968,8 @@ export function createAgentCapabilities(
     if (!readable) return notApplied('unreadable_proposal', 'These links could not be read from the stored proposal, so none of them was recorded. Offer to prepare them again.');
     const sent = links.map((l) => ({
       from: l.from, to: l.to, magnitude: l.magnitude as number, intent: l.intent as 'set' | 'confirm_current',
-      expected: { mean: l.expected!.mean as number, effect_direction: l.expected!.effect_direction as 'positive' | 'negative' },
+      expected: { mean: l.expected!.mean as number, effect_direction: l.expected!.effect_direction as 'positive' | 'negative',
+        reviewed_at: typeof l.expected!.reviewed_at === 'string' ? l.expected!.reviewed_at : null },
       band: l.band as InfluenceBand, author: l.author === 'user_stated' ? 'user_specified' as const : 'model_proposed' as const,
     }));
     const res = await opts.commitOptionLevels({
@@ -1992,7 +1993,8 @@ export function createAgentCapabilities(
         ? 'is defined by a calculation the model declares, so its strength is not an estimate anyone sets'
         : res.reason === 'link_expected_mismatch' ? 'changed after this was prepared'
           : res.reason === 'link_became_users_own' ? 'became the user\u2019s own strength after this was prepared, so Olumi\u2019s estimate was not written over it'
-            : 'could not be recorded';
+            : res.reason === 'link_reviewed_since' ? 'was reviewed by the user after this was prepared, so it was not changed'
+              : 'could not be recorded';
       return notApplied('link_refused', `${which} ${why}, so none of these links was recorded and the model is exactly as it was. Say so, and offer the set again without it.`,
         { refused_link: which });
     }
@@ -2003,10 +2005,13 @@ export function createAgentCapabilities(
       const mean = e?.strength !== null && typeof e?.strength === 'object' ? (e.strength as { mean?: unknown }).mean : undefined;
       const want = l.expected.effect_direction === 'negative' ? -l.magnitude : l.magnitude;
       const prov = (e?.provenance ?? {}) as { source?: unknown; magnitude?: unknown };
-      // An agreed Olumi band is never the user's own: an estimate is only ever proposed where it was not (`usersOwn`).
+      // Whose, as approved: a band the user named that MOVED the link is theirs; a band they named that it already sat in,
+      // and Olumi's band they agreed to, are REVIEW (`reviewed_by_user`, R11) — never the user's stamp on Olumi's figure.
       const usersOwn = prov.source === 'user_specified' && (e as { defaulted?: unknown } | undefined)?.defaulted !== true;
-      return typeof mean === 'number' && Math.abs(mean - want) < 1e-9
-        && (l.author === 'user_specified' ? prov.source === 'user_specified' : !usersOwn);
+      const reviewed = (prov as { reviewed_by_user?: { intent?: unknown } }).reviewed_by_user?.intent === 'confirm';
+      const stamped = l.author === 'user_specified' && l.intent === 'set' ? prov.source === 'user_specified'
+        : l.author === 'user_specified' ? reviewed : reviewed && !usersOwn;
+      return typeof mean === 'number' && Math.abs(mean - want) < 1e-9 && stamped;
     });
     if (!holds) {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
@@ -2356,13 +2361,18 @@ export function createAgentCapabilities(
           ? edge.effect_direction : (mean < 0 ? 'negative' : 'positive');
         const currentBand = edgeBandFromMagnitude(Math.abs(mean));
         const pair = `"${from.label}" \u2192 "${to.label}"`;
+        // The link's review stamp as proposed (#2257's `reviewed_by_user`): the writer refuses the set if it moved since.
+        const review = (edge.provenance as { reviewed_by_user?: { intent?: unknown; at?: unknown } } | undefined)?.reviewed_by_user;
+        const reviewedAt = review?.intent === 'confirm' && typeof review.at === 'string' ? review.at : null;
         if (namedByTheUser(band, l.from_words, from.label, to.label)) {
           // ⛔ B1 (DL CR on #2255; AIQ R11 rows): naming the band a link already sits in changes no value, so it is a
-          // REVIEW, never authorship. The link is left exactly as it is and said so; only a band that moves it is theirs.
-          if (currentBand === band) { already.push(`${pair} already sits in ${linkBandWord(band)}, so it is kept as it is`); continue; }
-          const magnitude = bandMidpoint(band);
-          ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: 'set', expected: { mean, effect_direction: direction }, band, author: 'user_stated' } });
-          shown.push({ from: from.label, to: to.label, band, magnitude, yours: true, keeps: false, was: currentBand, wasStrength: Math.abs(mean) });
+          // REVIEW, never authorship: a confirm, which the link writer records as `reviewed_by_user` with the band (#2257)
+          // and never credits. Only a band that MOVES the link is theirs.
+          const keeps = currentBand === band;
+          const magnitude = keeps ? Math.abs(mean) : bandMidpoint(band);
+          ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set',
+            expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'user_stated' } });
+          shown.push({ from: from.label, to: to.label, band, magnitude, yours: true, keeps, was: currentBand, wasStrength: Math.abs(mean) });
           continue;
         }
         // Olumi's estimate. A strength the user set is theirs: an estimate never replaces it.
@@ -2375,7 +2385,7 @@ export function createAgentCapabilities(
         }
         const magnitude = bandMidpoint(band);
         if (Math.abs(mean) === magnitude) { already.push(`${pair} already holds ${quotable(magnitude)}, Olumi\u2019s figure for ${linkBandWord(band)}`); continue; }
-        ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: 'set', expected: { mean, effect_direction: direction }, band, author: 'model_proposed' } });
+        ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: 'set', expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'model_proposed' } });
         shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps: false, was: currentBand, wasStrength: Math.abs(mean) });
       }
       if (ops.length === 0) {
@@ -2383,7 +2393,7 @@ export function createAgentCapabilities(
           detail: 'Every link already holds what was asked, so nothing was prepared. Say so plainly.' };
       }
       const whose = (x: Shown): string => x.yours
-        ? (x.keeps ? `your estimate (strength kept at ${quotable(x.magnitude)})` : `your estimate (${quotable(x.magnitude)})`)
+        ? (x.keeps ? `reviewed by you, kept at ${quotable(x.magnitude)} (the figure stays as it was)` : `your estimate (${quotable(x.magnitude)})`)
         : `Olumi\u2019s estimate (${quotable(x.magnitude)})`;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,

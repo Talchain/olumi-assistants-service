@@ -125,7 +125,8 @@ export function approvedLevelSourceFor(
  *
  * An Olumi band the user agreed to is REVIEW, not authorship (DL ruling 5873648311; AIQ R11): the link's provenance
  * stays byte-identical and its `defaulted` flag is kept, so no placeholder reader or leader census moves; only the mean
- * takes the agreed band's midpoint. Never `user_specified`. (`'olumi_estimate'` below names the authority, not a stamp.)
+ * takes the agreed band's midpoint, and the agreement is recorded as review (`reviewed_by_user`, with the band). Never
+ * `user_specified`.
  * Matched on the same scenario, link and |mean| the write carries; a band the user named runs with no adoption.
  */
 export interface ApprovedLinkAdoption {
@@ -135,10 +136,9 @@ export interface ApprovedLinkAdoption {
   readonly to: string;
   /** The approved |mean| — exactly what the write sends. */
   readonly magnitude: number;
+  /** Olumi's band the user agreed to: recorded on the review (`reviewed_by_user.band`). */
+  readonly band: import('../format/influence-bands.js').InfluenceBand;
 }
-
-/** Olumi's own link size, adopted: the contract's member for a size Olumi chose (`EdgeProvenanceV3.magnitude`). */
-export const APPROVED_LINK_ADOPTION_MAGNITUDE = 'olumi_estimate' as const;
 
 const linkStore = new AsyncLocalStorage<readonly ApprovedLinkAdoption[]>();
 
@@ -148,18 +148,18 @@ export function runWithApprovedLinkAdoptions<T>(adoptions: readonly ApprovedLink
 }
 
 /**
- * The stamp for THIS link write if — and only if — it is an approved adoption the context names: same scenario, same
- * `(from, to)`, same |mean|. Otherwise `undefined` (the writer keeps its own stamp).
+ * Olumi's agreed band for THIS link write if — and only if — it is an approved adoption the context names: same scenario,
+ * same `(from, to)`, same |mean|. Otherwise `undefined` (the writer keeps its own stamp).
  */
 export function approvedLinkAdoptionFor(
   scenarioId: string,
   from: string,
   to: string,
   magnitude: unknown,
-): typeof APPROVED_LINK_ADOPTION_MAGNITUDE | undefined {
+): { readonly band: import('../format/influence-bands.js').InfluenceBand } | undefined {
   const adoptions = linkStore.getStore();
   if (adoptions === undefined) return undefined;
   if (typeof magnitude !== 'number' || !Number.isFinite(magnitude)) return undefined;
-  return adoptions.some(a => a.scenarioId === scenarioId && a.from === from && a.to === to && a.magnitude === Math.abs(magnitude))
-    ? APPROVED_LINK_ADOPTION_MAGNITUDE : undefined;
+  const a = adoptions.find(x => x.scenarioId === scenarioId && x.from === from && x.to === to && x.magnitude === Math.abs(magnitude));
+  return a === undefined ? undefined : { band: a.band };
 }

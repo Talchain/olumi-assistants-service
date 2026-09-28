@@ -501,14 +501,19 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         // ⭐ A6c — and so does Olumi's `reasoning`, on EVERY user write including a confirm. Kept under the user's
         // stamp, the model's WHY for the link was read back as the user's: decision review presents it as "the
         // producer's stated reason" (`decision-review-graph-projection.ts` `readEdgeReasoning`).
-        if (invocation.edgeStrengthAdoptedEstimateAuthority === 'olumi_estimate') {
+        const adopted = invocation.edgeStrengthAdoptedEstimateAuthority;
+        if (adopted !== undefined) {
           // ⭐ OLUMI'S BAND, AGREED (DL ruling 5873648311 on #2255; AIQ R11 5872082179): agreement is REVIEW, not authorship.
           // The link's provenance stays byte-identical (`source`, `magnitude`, `reasoning`, `provenance_display`) and
-          // `defaulted` is kept below, so every reader still reads a figure the user has not judged. Only `natural_effect`
-          // goes: it restated the OLD size in natural units. (The review record, `reviewed_by_user`, waits for Canonical's
-          // writer — named row in `agent-link-set-is-one-commit.test.ts`.)
+          // `defaulted` is kept below, so every reader still reads a figure the user has not authored. Only `natural_effect`
+          // goes: it restated the OLD size in natural units. The agreement IS recorded, as review (R11, the same record a
+          // confirm writes above, with Olumi's band): the user's settled view, so the magnitude contract never re-sizes
+          // the band they just agreed to (`sizedByOlumi`; Canonical seam check 5874263009, DL 5874274221).
           const { natural_effect: _oldNaturalEffect, ...keptProvenance } = (edge.provenance ?? {}) as Record<string, unknown>;
-          edge.provenance = keptProvenance as typeof edge.provenance;
+          edge.provenance = {
+            ...keptProvenance,
+            reviewed_by_user: { intent: 'confirm', at: new Date().toISOString(), band: adopted.band },
+          } as typeof edge.provenance;
         } else {
           const {
             natural_effect: _naturalEffect,
@@ -533,7 +538,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         // ⛔ NOT for Olumi's band, adopted (DL R11 question on #2255, 5873588605; AIQ R11 5872082179): every figure on the
         // link is still this system's, so `defaulted` stays and every reader of it — the placeholder caveats, the coaching
         // card's authorship — reads exactly what it read before the approval. Only a value the user wrote ends it.
-        if (invocation.edgeStrengthAdoptedEstimateAuthority !== 'olumi_estimate') {
+        if (invocation.edgeStrengthAdoptedEstimateAuthority === undefined) {
           if (edge.defaulted === true) edge.exists_defaulted = true;
           delete edge.defaulted;
         }

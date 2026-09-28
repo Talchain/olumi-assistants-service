@@ -155,9 +155,12 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     }
     for (const k of ['workloadHours', 'qualityHours', 'hoursFocus', 'capacityOverhead', 'aiUseQuality', 'riskQuality', 'overheadQuality'] as const) {
       const e = edge(k);
-      // Agreement is REVIEW (DL ruling 5873648311): provenance and display byte-identical, `defaulted` kept.
+      // Agreement is REVIEW (DL ruling 5873648311; #2257's record): every authorship byte kept, `defaulted` kept, and
+      // the agreement recorded as `reviewed_by_user` with Olumi's band.
       const { natural_effect: _n, ...kept } = was[k]!.provenance ?? {};
-      expect(e.provenance, k).toEqual(kept);
+      const { reviewed_by_user: review, ...rest } = (e.provenance ?? {}) as Record<string, unknown>;
+      expect(rest, k).toEqual(kept);
+      expect(review, k).toMatchObject({ intent: 'confirm', band: (STRONG as readonly string[]).includes(k) ? 'strong' : 'moderate' });
       expect(e.provenance_display, k).toEqual(was[k]!.display);
       expect(e.defaulted, k).toBe(true);
     }
@@ -165,16 +168,42 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     expect(String(out.follow_up)).toContain('Olumi’s estimates stay marked as Olumi’s, not yours');
   });
 
-  // ⏳ R11 (DL 5873648311): the agreement is to be recorded as REVIEW — Canonical's `reviewed_by_user` — once its writer
-  // lands (0 hits on staging `19750c68` at this PR). Until then nothing records it on the link; it never blocks the set.
-  it.todo('R11: an agreed Olumi band carries reviewed_by_user (Canonical’s writer), with provenance and defaulted unchanged');
+  it('R11 × P1-a (Canonical 5874263009, DL 5874274221): the band the user agreed to is their settled view — the magnitude contract never re-sizes it', async () => {
+    const { frameDefaultedLinks } = await import('../../../src/cee/magnitude/frame-defaulted-links.js');
+    // A magnitude-contract placeholder, as a served draft stamps it.
+    const e = edge('capacityOverhead');
+    e.provenance = { ...(e.provenance ?? {}), magnitude: 'olumi_placeholder' };
+    const id = 'human_assistant_capacity::assistant_coordination_overhead';
+    // CONTROL: before the approval, a level move on "Human assistant capacity" re-sizes this placeholder (the value writer's own step).
+    expect(frameDefaultedLinks(persisted, 'human_assistant_capacity').sized, 'control: re-sized while it is only a placeholder').toContain(id);
+    const { caps, ctx } = agent('I\'m aligned with these. Please make these updates.');
+    const p = await caps.proposeLinkStrengths!(ctx, { links: setOf(['capacityOverhead']) as never, rationale: 'x' });
+    expect((await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) })).ok).toBe(true);
+    expect(edge('capacityOverhead').strength.mean).toBe(0.3);
+    expect((edge('capacityOverhead').provenance as Record<string, unknown>).reviewed_by_user).toMatchObject({ intent: 'confirm', band: 'moderate' });
+    expect(frameDefaultedLinks(persisted, 'human_assistant_capacity').sized, 'the agreed band is never re-sized').not.toContain(id);
+  });
+
+  it('RED (B3, review): a link the user REVIEWED after the proposal (a canvas confirm writes only that stamp) is not changed — 0 rows', async () => {
+    const { caps, ctx } = agent('I\'m aligned with these. Please make these updates.');
+    const p = await caps.proposeLinkStrengths!(ctx, { links: setOf(MODERATE) as never, rationale: 'x' });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    const e = edge('aiUseQuality');
+    e.provenance = { ...(e.provenance ?? {}), reviewed_by_user: { intent: 'confirm', at: '2026-09-28T16:40:00.000Z' } } as never;
+    const before = JSON.stringify(persisted);
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(false);
+    expect(String(out.detail)).toContain('"AI assistant use" \u2192 "Delegation quality" was reviewed by the user after this was prepared');
+    expect(rows.size).toBe(0);
+    expect(JSON.stringify(persisted)).toBe(before);
+  });
 
   it('R11 (DL 5873588605): agreeing to Olumi\'s bands moves no leader census and no placeholder reader — only the figures', async () => {
     const { censusConfidenceParameters, semanticQualitySufficient } = await import('../../../src/orchestrator-v5/admission/analysis-admission.js');
-    const { classifyEdgeAuthorship } = await import('../../../src/orchestrator-v5/coaching/edge-strength-authorship.js');
+    const { edgeStrengthProvenance, edgeReviewedByUser } = await import('../../../src/cee/graph-readiness/obligation-provenance.js');
     const before = censusConfidenceParameters(persisted);
     const adopted = ['workloadHours', 'qualityHours', 'hoursFocus', 'capacityOverhead', 'aiUseQuality', 'riskQuality', 'overheadQuality'] as const;
-    const authorshipBefore = adopted.map((k) => classifyEdgeAuthorship(edge(k) as never));
+    const authorshipBefore = adopted.map((k) => edgeStrengthProvenance(edge(k)));
     const { caps, ctx } = agent('I\'m aligned with these. Please make these updates.');
     const p = await caps.proposeLinkStrengths!(ctx, { links: setOf([...STRONG, ...MODERATE]) as never, rationale: 'x' });
     expect((await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) })).ok).toBe(true);
@@ -184,9 +213,10 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     expect(after.confidence_parameters_user_stated).toBe(before.confidence_parameters_user_stated);
     expect(after.material_parameters_user_stated).toBe(before.material_parameters_user_stated);
     expect(semanticQualitySufficient(after)).toBe(semanticQualitySufficient(before));
-    // The coaching card still reads every adopted link as Olumi-assumed.
-    expect(adopted.map((k) => classifyEdgeAuthorship(edge(k) as never))).toEqual(authorshipBefore);
-    expect(authorshipBefore.every((a) => a === 'olumi_assumed')).toBe(true);
+    // R11's own authorship reader: every adopted link is still Olumi's size — reviewed, never authored.
+    expect(adopted.map((k) => edgeStrengthProvenance(edge(k)))).toEqual(authorshipBefore);
+    expect(authorshipBefore.every((a) => a === 'ai_drafted')).toBe(true);
+    expect(adopted.every((k) => edgeReviewedByUser(edge(k)))).toBe(true);
   });
 
   /** Paul's graph with his one link put back to Olumi's placeholder, so the leader gate starts SHUT (the DL's probe base). */
@@ -209,14 +239,16 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
       ...STRONG.map((k) => ({ from_label: L[k][0], to_label: L[k][1], strength: 'strong', from_words: PAUL_STRONG })),
       ...MODERATE.map((k) => ({ from_label: L[k][0], to_label: L[k][1], strength: 'moderate', from_words: 'all other listed effects to moderate' })),
     ];
-    const strongBefore = STRONG.map((k) => JSON.stringify(edge(k)));
+    const strongBefore = STRONG.map((k) => ({ mean: edge(k).strength.mean, source: edge(k).provenance?.source, defaulted: edge(k).defaulted }));
     const p = await caps.proposeLinkStrengths!(ctx, { links: links as never, rationale: 'the user named the bands' });
     expect(p.ok, JSON.stringify(p)).toBe(true);
-    expect(p.already, JSON.stringify(p)).toHaveLength(4);
     expect(String(p.public_label)).not.toContain('your estimate');
+    expect(String(p.public_label)).toContain('reviewed by you, kept at 0.5');
     const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     expect(out.ok, JSON.stringify(out)).toBe(true);
-    expect(STRONG.map((k) => JSON.stringify(edge(k))), 'the in-band "strong" links are byte-identical').toEqual(strongBefore);
+    // The in-band "strong" picks are REVIEW (#2257): figure, source and default flag unchanged; the review is recorded.
+    expect(STRONG.map((k) => ({ mean: edge(k).strength.mean, source: edge(k).provenance?.source, defaulted: edge(k).defaulted }))).toEqual(strongBefore);
+    for (const k of STRONG) expect((edge(k).provenance as Record<string, unknown>).reviewed_by_user, k).toMatchObject({ intent: 'confirm', band: 'strong' });
     for (const k of MODERATE) {
       expect(Math.abs(edge(k).strength.mean), k).toBe(0.3);
       expect(edge(k).provenance?.source, k).toBe('cee_hypothesis');

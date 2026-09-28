@@ -515,8 +515,12 @@ export interface ApprovedLinkStrength {
   /** |mean| the link lands on: the band's midpoint (`set`), or the current |mean| kept (`confirm_current`). */
   readonly magnitude: number;
   readonly intent: 'set' | 'confirm_current';
-  /** The link as the approval saw it: any other mean or direction refuses the whole set. */
-  readonly expected: { readonly mean: number; readonly effect_direction: 'positive' | 'negative' };
+  /**
+   * The link as the approval saw it: any other mean, direction or REVIEW refuses the whole set. `reviewed_at` is the
+   * link's `provenance.reviewed_by_user.at` (a confirm) when proposed, or null: a canvas confirm since then writes only
+   * that stamp (#2257), which neither the mean nor the analysis hash can see.
+   */
+  readonly expected: { readonly mean: number; readonly effect_direction: 'positive' | 'negative'; readonly reviewed_at?: string | null };
   readonly band: InfluenceBand;
   /**
    * Olumi's band, adopted by the approval: stamped as Olumi's size (`olumi_estimate`), never the user's. Otherwise the
@@ -578,14 +582,16 @@ async function applyApprovedLinkStrengths(
     // ⛔ B3 (DL CR on #2255): an estimate never goes over a strength that is the user's own AT WRITE TIME. The proposal
     // checked it, but a canvas confirm since then keeps the mean and direction (so expected-before passes) and changes
     // only provenance (outside the analysis hash). Checked on the graph being written, so the whole set refuses.
-    if (l.adopted) {
-      const stored = (working as EditableGraph).edges.find(e => e.from === l.from && e.to === l.to) as
-        { provenance?: { source?: unknown }; defaulted?: unknown } | undefined;
-      if (stored?.provenance?.source === 'user_specified' && stored.defaulted !== true) return refuse('link_became_users_own', i);
-    }
+    const stored = (working as EditableGraph).edges.find(e => e.from === l.from && e.to === l.to) as
+      { provenance?: { source?: unknown; reviewed_by_user?: { intent?: unknown; at?: unknown } }; defaulted?: unknown } | undefined;
+    if (l.adopted && stored?.provenance?.source === 'user_specified' && stored.defaulted !== true) return refuse('link_became_users_own', i);
+    // …and a link the user REVIEWED since the proposal (a canvas confirm writes only that stamp) is their settled view.
+    const review = stored?.provenance?.reviewed_by_user;
+    const reviewedAt = review?.intent === 'confirm' && typeof review.at === 'string' ? review.at : null;
+    if (reviewedAt !== (l.expected.reviewed_at ?? null)) return refuse('link_reviewed_since', i);
     // Direction is kept: a reversal is the user's words on one link (`propose_link_strength`), never part of a set.
     const event = { kind: 'edge_strength_edit' as const, from: l.from, to: l.to, intent: l.intent, direction_intent: 'preserve' as const,
-      magnitude: l.magnitude, expected: l.expected };
+      magnitude: l.magnitude, expected: { mean: l.expected.mean, effect_direction: l.expected.effect_direction } };
     const write = () => applyEdgeStrengthEdit({
       payload: { kind: 'system_event', turn_id: ctx.turnId, scenario_id: ctx.scenarioId, stage: ctx.stage, event } as never,
       event: event as never, requestId: ctx.requestId, persistedGraph: working, lastRunIdentityUse: ctx.lastRunIdentityUse,
@@ -593,7 +599,7 @@ async function applyApprovedLinkStrengths(
     let res: Awaited<ReturnType<typeof applyEdgeStrengthEdit>>;
     try {
       res = l.adopted
-        ? await runWithApprovedLinkAdoptions([{ scenarioId: ctx.scenarioId, proposalId: ctx.turnId, from: l.from, to: l.to, magnitude: l.magnitude }], write)
+        ? await runWithApprovedLinkAdoptions([{ scenarioId: ctx.scenarioId, proposalId: ctx.turnId, from: l.from, to: l.to, magnitude: l.magnitude, band: l.band }], write)
         : await runWithStatedLinkBand({ scenarioId: ctx.scenarioId, proposalId: ctx.turnId, from: l.from, to: l.to, band: l.band }, write);
     } catch {
       return refuse('canonical_graph_unavailable', i);

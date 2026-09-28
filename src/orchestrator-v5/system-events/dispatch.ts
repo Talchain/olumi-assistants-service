@@ -3132,7 +3132,7 @@ export type CommitOptionLevelsInput = {
     /** |mean| the link lands on. */
     readonly magnitude: number;
     readonly intent: 'set' | 'confirm_current';
-    readonly expected: { readonly mean: number; readonly effect_direction: 'positive' | 'negative' };
+    readonly expected: { readonly mean: number; readonly effect_direction: 'positive' | 'negative'; readonly reviewed_at?: string | null };
     readonly band: import('../format/influence-bands.js').InfluenceBand;
     /** Whose band: an Olumi band is stamped `olumi_estimate` through the writer's adoption authority, never as the user's. */
     readonly author: 'user_specified' | 'model_proposed';
