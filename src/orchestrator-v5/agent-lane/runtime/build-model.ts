@@ -49,6 +49,7 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { LIMIT_OPERATOR_WORDS } from '../admit-constraint.js';
 import { holdStatedGoalAttributes, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
+import { limitedLevelAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
 
@@ -251,7 +252,7 @@ export const BUILD_INSTRUCTIONS = [
   // ⛔ C46 (#70 5841215337): the analysis adds effects up, so a product is approximated and its sign can flip.
   'DECLARE A PRODUCT ONLY WHERE ONE HOLDS BY DEFINITION. When a quantity you keep is, by definition, other quantities you keep multiplied together — a plan’s revenue is its price times its paying subscribers; a cost is headcount times cost per head — add one entry to `identities`: `outcome` is that quantity’s EXACT label, `operation` "product", and `factors` the EXACT labels of every quantity multiplied. Still state each factor’s own link toward the outcome in `links`. Only a definition, never a correlation or a guess. `identities` is empty when none holds.',
   'THE GOAL METRIC MUST BE THE TERMINAL NODE. Every option needs a causal path that ends at the goal metric you named in `goal.metric`. Use that EXACT label as the endpoint of the final link \u2014 do not invent a near-synonym outcome like "X Improvement" for a goal called "X change", because a separate synonym leaves the goal disconnected and the model cannot be analysed at all.',
-  'EVERY LIMIT MUST NAME A NODE THE ANALYSIS CAN CHECK. Each `constraints[].metric` must be the EXACT label of a factor or outcome you keep in this model \u2014 a limit whose metric names no node is withheld from the model, and the analysis cannot check it. If the user limits a total such as cost, budget or spend, keep that total in the model as a factor the options set or an outcome their factors feed, wired toward the goal like every other factor, and use its exact label as the metric. State the `frame` of each limit: "level" when the user limits the value itself ("total first-year cost under \u00a3250k", "gross margin above 70%"), "delta" only when they limit a CHANGE from today ("churn no more than 2 points higher than now"). When the limit is on a cost, budget or spend, give that factor a `baseline_value` at what is spent on it today: 0 when nothing is, as for a new hire, a new system or a new budget. Never set a current level that the brief does not support just because the user named a limit on it. Keep the direction the user stated: a budget, cost or spend cap is an upper bound ("<=") and a floor such as a minimum margin is a lower bound (">="); never add the opposite bound to the same limit.',
+  'EVERY LIMIT MUST NAME A NODE THE ANALYSIS CAN CHECK. Each `constraints[].metric` must be the EXACT label of a factor or outcome you keep in this model \u2014 a limit whose metric names no node is withheld from the model, and the analysis cannot check it. If the user limits a total such as cost, budget or spend, keep that total in the model as a factor the options set or an outcome their factors feed, wired toward the goal like every other factor, and use its exact label as the metric. State the `frame` of each limit: "level" when the user limits the value itself ("total first-year cost under \u00a3250k", "gross margin above 70%"), "delta" only when they limit a CHANGE from today ("churn no more than 2 points higher than now"). When the limit is on a cost, budget or spend, give that factor a `baseline_value` at what is spent on it today: 0 when nothing is, as for a new hire, a new system or a new budget. When the user limits a quantity whose current level the brief does not state, still give it a `baseline_value`: your provisional estimate, with baseline_known:false and provenance ai_proposed, never the user\u2019s (the user is asked for theirs) \u2014 a limit on a quantity with no level cannot be checked. Keep the direction the user stated: a budget, cost or spend cap is an upper bound ("<=") and a floor such as a minimum margin is a lower bound (">="); never add the opposite bound to the same limit.',
   // ⛔ THE LINK CONTRACT (#63 ruling 5793252993). There is NO default-positive
   // factor->goal repair in admission, by ruling: a sign nobody stated would be a
   // fabricated belief. So the drafter itself must state every link toward the
@@ -678,7 +679,13 @@ export function loopIssues(admitted: Pick<AdmittedModel, 'withheld'>): string[] 
  * `changes` by preparation) is never mistaken for a missing level.
  */
 export interface LevelGap { readonly option: string; readonly factor: string }
-export interface BaselineGap { readonly factor: string }
+/**
+ * `because: 'limit'` (DL ruling #72 5863840239): a quantity the user LIMITS, at its level, with no level of its own. The
+ * limit cannot be checked against a factor with no level (served journey C: `CONSTRAINT_TARGET_NO_OBSERVED_VALUE`, and
+ * churn ranked #2 unvalued in 3 of 17 drafts), so it is a gap like an acted-on baseline: the retry gives Olumi's
+ * labelled estimate (baseline_known:false), never the user's, and the user is asked for theirs.
+ */
+export interface BaselineGap { readonly factor: string; readonly because?: 'limit' }
 export function findCoverageGaps(
   model: CandidateModel,
   additionsWithoutTotal: readonly AdditionWithoutTotal[],
@@ -703,10 +710,16 @@ export function findCoverageGaps(
       if (!levelled.has(f) && !level_gaps.some((g) => g.option === option.label && g.factor === f)) level_gaps.push({ option: option.label, factor: f });
     }
   }
-  const baseline_gaps = model.factors
+  const noBaseline = (f: CandidateModel['factors'][number]): boolean => typeof f.baseline_value !== 'number' || !Number.isFinite(f.baseline_value);
+  const baseline_gaps: BaselineGap[] = model.factors
     .filter((f) => actedOn.has(f.label) && !userOwnedBaseline.has(f.label))
-    .filter((f) => typeof f.baseline_value !== 'number' || !Number.isFinite(f.baseline_value))
+    .filter(noBaseline)
     .map((f) => ({ factor: f.label }));
+  // A LEVEL limit's own quantity (a DELTA limit is a change from today: it needs no level of its own).
+  const limited = new Set((model.constraints ?? []).filter((c) => c.frame !== 'delta').map((c) => c.metric));
+  for (const f of model.factors) {
+    if (limited.has(f.label) && !actedOn.has(f.label) && !userOwnedBaseline.has(f.label) && noBaseline(f)) baseline_gaps.push({ factor: f.label, because: 'limit' });
+  }
   return { level_gaps, baseline_gaps };
 }
 
@@ -792,7 +805,9 @@ function keepsTheHeldStatusQuo(first: Pick<AdmittedModel, 'nodes' | 'loss'>, ret
 function sayCoverageGaps(p: { level_gaps: readonly LevelGap[]; baseline_gaps: readonly BaselineGap[] }): string[] {
   return [
     ...p.level_gaps.map((g) => `${g.option} -> ${g.factor}: give the level this option sets in interventions (the user's number if stated, otherwise an ai_proposed estimate in the factor's unit and plausible_max frame); keep it only in changes if no defensible level exists`),
-    ...p.baseline_gaps.map((g) => `${g.factor}: give a baseline_value (a provisional estimate with baseline_known:false) \u2014 an option acts on it`),
+    ...p.baseline_gaps.map((g) => (g.because === 'limit'
+      ? `${g.factor}: give a baseline_value (a provisional estimate with baseline_known:false, provenance ai_proposed \u2014 never the user's) \u2014 the user limits it, and the limit cannot be checked without today's level`
+      : `${g.factor}: give a baseline_value (a provisional estimate with baseline_known:false) \u2014 an option acts on it`)),
   ];
 }
 
@@ -1306,6 +1321,12 @@ export async function buildModelFromBrief(
   // the target's range is ASKED where the user always sees it — ahead of the drafter's own questions, and behind
   // every question placed below. Admission writes each as a `.magnitude_question` ledger entry (`admit-candidate.ts`).
   openQuestions.unshift(...admitted.loss.filter((l) => /\.magnitude_question$/.test(l.field_path)).map((l) => l.reason));
+  // ⭐ DL ruling #72 5863840239 (ii), condition 2: today's level of a quantity the user limits, when the model holds none
+  // of theirs, is ASKED — typed (`level_asks`) and said here: behind the scope, deadline, withheld-option and C46
+  // product questions (C46's required row keeps its reply slot), ahead of the magnitude and drafter's own — on journey C
+  // the second question the reply shows. Non-blocking: nothing in readiness reads it (`limited-level-ask.ts`).
+  const levelAsks = limitedLevelAsks({ nodes: statedGoal.nodes, goal_constraints: admitted.goal_constraints });
+  openQuestions.unshift(...levelAsks.map((a) => a.question));
   // ⛔ C46: a declared product whose sign this model cannot prove is ASKED where the user always sees it,
   // not only said in `not_represented` (which only the Agent's model reads). After the scope and deadline
   // questions, ahead of the drafter's own; nothing for a stable product or a linear model.
@@ -1497,6 +1518,8 @@ export async function buildModelFromBrief(
     // strategic additions in `unknowns`, and on the common path (a first pass already
     // within budget — 3 of 3 live benchmark runs) nothing else ever showed them.
     ...(openQuestions.length > 0 ? { open_questions: openQuestions } : {}),
+    // Condition 2's typed twin of its sentence in `open_questions`, above.
+    ...(levelAsks.length > 0 ? { level_asks: levelAsks } : {}),
     // B1/B2 (review 5822711266), machine-readable beside the sentences below.
     ...(preparation.additions_without_total.length > 0 ? { additions_without_total: preparation.additions_without_total } : {}),
     ...(preparation.provenance_demoted.length > 0 ? { provenance_demoted: preparation.provenance_demoted } : {}),

@@ -51,7 +51,8 @@ const CANDIDATE = {
   options: [{ label: 'Raise Pro to £59', provenance: 'explicit', interventions: [] }],
   factors: [
     { label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit' },
-    { label: 'Monthly churn', role: 'observable', baseline_known: false, baseline_value: null, unit: '%', provenance: 'explicit' },
+    // Olumi's level (DL ruling #72 5863840239): a limited quantity with none is a gap that spends the one retry.
+    { label: 'Monthly churn', role: 'observable', baseline_known: false, baseline_value: 3, unit: '%', provenance: 'ai_proposed' },
   ],
   risks: [{ label: 'Churn rises', provenance: 'inferred' }],
   outcomes: [{ label: 'Monthly recurring revenue', provenance: 'inferred' }],

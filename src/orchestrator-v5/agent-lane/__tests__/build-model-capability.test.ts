@@ -29,7 +29,8 @@ const CANDIDATE = {
   factors: [
     { label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit' },
     // The constraint's metric must NAME an entity, or it cannot attach to one.
-    { label: 'Monthly churn', role: 'observable', baseline_known: false, baseline_value: null, unit: '%', provenance: 'explicit' },
+    // Olumi's level (DL ruling #72 5863840239): a limited quantity with none is a gap that spends the one retry.
+    { label: 'Monthly churn', role: 'observable', baseline_known: false, baseline_value: 3, unit: '%', provenance: 'ai_proposed' },
   ],
   risks: [{ label: 'Churn rises', provenance: 'inferred' }],
   outcomes: [{ label: 'Monthly recurring revenue', provenance: 'inferred' }],
