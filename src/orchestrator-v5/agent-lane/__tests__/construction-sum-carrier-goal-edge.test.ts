@@ -234,6 +234,54 @@ describe('§3 — the precondition, the user\'s direction, and the one exemption
     expect(pairs(graph.edges)).not.toContain(`${TALLY}::${GOAL}`);
     expect(out.pure_limits).toEqual([{ node_id: TALLY, label: 'Total investment spend', dropped_edge_to: GOAL }]);
   });
+  // ⛔ THE PARITY LOCK (DL verdict on 04dd4649, condition 1): the exemption's verdict (before loops are broken) and the
+  // final one DISAGREE. The user states "Monthly churn → Pro plan price" (negative); Olumi drafted "Pro plan price →
+  // Monthly churn". `breakLoops` may withhold only Olumi's link (rule 1: the user's links are never withheld), and with no
+  // direct price → MRR link that link is the price's only route to MRR, so "MRR = price × spend" is accepted before the
+  // loop is broken and rejected after it.
+  const loopCutsPrice = (c: Json) => {
+    c.identities = [{ outcome: 'MRR', operation: 'product', factors: ['Pro plan price', 'Total investment spend'], provenance: 'inferred' }];
+    c.links = c.links.filter((l: Json) => !(l.from === 'Pro plan price' && l.to === 'MRR'));
+    c.links.push({ from: 'Monthly churn', to: 'Pro plan price', direction: 'negative', provenance: 'explicit', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
+  };
+  const reachersOfGoal = (edges: readonly { from: string; to: string }[]): Set<string> => {
+    const seen = new Set<string>([GOAL]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const e of edges) if (seen.has(e.to) && !seen.has(e.from)) { seen.add(e.from); grew = true; }
+    }
+    return seen;
+  };
+  it('⭐ RED (parity lock): a goal identity accepted before the loop is broken and REJECTED after exempts nothing — the edge is not drawn, said once, typed', async () => {
+    const draft = candidate(G, loopCutsPrice);
+    const m = admit(draft, G.brief);
+    expect(m.withheld.some((w) => w.from === 'pro_plan_price' && w.to === 'monthly_churn'), 'the loop was broken on the price\'s only route').toBe(true);
+    expect(m.loss.find((l) => String(l.field_path) === `nodes[${GOAL}].nonlinear_identity_rejected`)?.reason, 'the final verdict rejects the declaration')
+      .toContain('"Pro plan price" does not feed into "MRR" in the model');
+    const { graph, out } = await build(G.brief, draft);
+    expect(graph.nodes.find((n) => n.id === GOAL)?.nonlinear_identity).toBeUndefined();
+    expect(pairs(graph.edges)).not.toContain(`${TALLY}::${GOAL}`);
+    expect(out.pure_limits).toEqual([{ node_id: TALLY, label: 'Total investment spend', dropped_edge_to: GOAL }]);
+    expect(said(out).filter((s) => s === G_DROP_SENTENCE)).toHaveLength(1);
+    expect(out.pure_limit_asks).toBeUndefined();
+  });
+  it('the lock leaves the TALLY, not a lever: restoring the dropped edge reconnects only the tally; both spend levers still reach MRR', async () => {
+    const { graph } = await build(G.brief, candidate(G, loopCutsPrice));
+    const without = reachersOfGoal(graph.edges);
+    const withEdge = reachersOfGoal([...graph.edges, { from: TALLY, to: GOAL }]);
+    expect([...withEdge].filter((id) => !without.has(id))).toEqual([TALLY]);
+    for (const lever of G_SUM.factor_ids) expect(without.has(lever), lever).toBe(true);
+  });
+  it('the lock\'s contrast: the same loop with the price\'s direct MRR link kept — the declaration holds at both verdicts, the edge is kept', async () => {
+    const { graph, out } = await build(G.brief, candidate(G, (c) => {
+      loopCutsPrice(c);
+      c.links.push({ from: 'Pro plan price', to: 'MRR', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
+    }));
+    expect(graph.nodes.find((n) => n.id === GOAL)?.nonlinear_identity).toEqual({ operation: 'product', factor_ids: ['pro_plan_price', TALLY], stated_in_brief: false });
+    expect(pairs(graph.edges)).toContain(`${TALLY}::${GOAL}`);
+    expect(out.pure_limits).toBeUndefined();
+    expect(out.pure_limit_asks).toBeUndefined();
+  });
   it('a goal identity that does NOT contain the cost (the served MRR = price × subscribers) exempts nothing', () => {
     expect(G.candidate.identities).toEqual([{ outcome: 'MRR', operation: 'product', factors: ['Pro plan price', 'Pro paying subscribers'], provenance: 'inferred' }]);
     expect(admit(candidate(G), G.brief).pure_limits).toEqual([{ node_id: TALLY, label: 'Total investment spend', dropped_edge_to: GOAL }]);

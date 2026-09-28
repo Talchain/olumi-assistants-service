@@ -3432,7 +3432,8 @@ function admitOnce(
   const pureLimits = findPureLimits(nodes, edgesBeforeRollups, constraintResult.constraints, goalIdentityParts);
   const pureLimitAsks = findPureLimitAsks(nodes, edgesBeforeRollups, constraintResult.constraints, goalIdentityParts);
   const pureLimitPairs = new Set(pureLimits.map((p) => `${p.node_id}::${p.dropped_edge_to}`));
-  for (const p of pureLimits) {
+  // One ledger line per drop and per ask, written the same way here and by the parity lock (below).
+  const sayPureLimit = (p: PureLimit): void => {
     const pair = `${p.node_id}::${p.dropped_edge_to}`;
     for (let i = loss.length - 1; i >= 0; i--) if (String(loss[i]!.field_path ?? '').startsWith(`edges[${pair}]`)) loss.splice(i, 1);
     const goalLabel = labelById.get(p.dropped_edge_to) ?? p.dropped_edge_to;
@@ -3445,8 +3446,8 @@ function admitOnce(
         `"${goalLabel}" directly, so no link between them was drawn. If it does, say which way and the link can be added.`,
       severity: 'info',
     } as RepairEntry);
-  }
-  for (const a of pureLimitAsks) {
+  };
+  const sayPureLimitAsk = (a: PureLimitAsk): void => {
     loss.push({
       field_path: `edges[${a.node_id}::${a.goal_id}].pure_limit_asked`,
       before: a.effect_direction,
@@ -3454,7 +3455,9 @@ function admitOnce(
       reason: a.question,
       severity: 'info',
     } as RepairEntry);
-  }
+  };
+  for (const p of pureLimits) sayPureLimit(p);
+  for (const a of pureLimitAsks) sayPureLimitAsk(a);
   const allEdges = [...topologyEdges, ...heldStatusQuoEdges, ...mechanismEdges.filter((e) => !pureLimitPairs.has(`${e.from}::${e.to}`))];
 
   /**
@@ -3494,6 +3497,19 @@ function admitOnce(
    * retained (every risk kept), structural blockers 5 -> 0.
    */
   const goalForReach = nodes.find((n) => n.kind === 'goal');
+  // One sentence for a node no chain of causes runs from to the goal, here and after the parity lock (below).
+  const sayUnreached = (n: { id: string; label?: string }, goal: { label?: string }): void => {
+    loss.push({
+      field_path: `nodes[${n.id}]`,
+      before: n.label,
+      after: n.label,
+      reason:
+        `"${n.label}" is in the model but no chain of causes runs from it to "${goal.label}", ` +
+        'so the analysis cannot be run while it is unconnected. It has been kept rather than ' +
+        'deleted — ask what it affects, and the link can be added.',
+      severity: 'warn',
+    } as RepairEntry);
+  };
 
   /**
    * ⛔ NO LOOP IS REGISTERED THAT ONE OF OLUMI'S OWN LINKS CLOSES (`breakLoops`).
@@ -3673,16 +3689,7 @@ function admitOnce(
       // terminal (`isLimitOnlyTally`). One that still feeds something is judged like any other node.
       if (n.id === goalForReach.id || n.kind === 'decision' || reachesGoal(n.id)
         || (pureLimits.some((p) => p.node_id === n.id) && !edgesNow.some((e) => e.from === n.id))) continue;
-      loss.push({
-        field_path: `nodes[${n.id}]`,
-        before: n.label,
-        after: n.label,
-        reason:
-          `"${n.label}" is in the model but no chain of causes runs from it to "${goalForReach.label}", ` +
-          'so the analysis cannot be run while it is unconnected. It has been kept rather than ' +
-          'deleted — ask what it affects, and the link can be added.',
-        severity: 'warn',
-      } as RepairEntry);
+      sayUnreached(n, goalForReach);
     }
     finalEdges = edgesNow;
   }
@@ -3700,7 +3707,7 @@ function admitOnce(
 
   // C46: declared products, checked against the FINAL admitted structure (`markProductIdentities`), resolved by
   // `resolveEntity` (above).
-  const products = markProductIdentities(
+  const judgeProducts = (): ProductIdentityFindings => markProductIdentities(
     Array.isArray(model.identities) ? model.identities : [],
     resolveEntity,
     levers.nodes,
@@ -3708,6 +3715,51 @@ function admitOnce(
     goalForReach?.id,
     declaredStatusQuoIds,
   );
+  let products = judgeProducts();
+  /**
+   * ⛔ THE PARITY LOCK (DL verdict on #2249 @ 04dd4649, merge condition 1). §3's exemption (above) read the goal
+   * identities admission accepted on `nodes` + `edgesBeforeRollups`; this verdict reads `levers.nodes` + `finalEdges`.
+   * Between them a loop may be broken (`acyclic`) and risk repairs added, so a declaration can be accepted there and
+   * rejected here: a user-stated "Monthly churn → Pro plan price" beside Olumi's "Pro plan price → Monthly churn" is a
+   * loop whose only breakable link is Olumi's, and when that is the price's only route to the goal, "MRR = price × spend"
+   * is rejected here while its spend → MRR edge was kept for it — an edge kept beside a rejected identity (Codex #72
+   * 5871853753, in a narrower shape).
+   *
+   * So every exemption this verdict no longer backs is WITHDRAWN: the withdrawn cost is judged by the same authority
+   * (`findPureLimits` / `findPureLimitAsks`) with the FINAL parts, on the FINAL structure, and dropped or asked exactly
+   * as §3 does for any cost, with the same ledger line and the same typed row. The final structure is the one the
+   * precondition must hold on: a loop broken above may have taken a lever's other route.
+   *
+   * Lever reachability is unaffected by a drop here: the precondition passes only when EVERY lever feeding the tally
+   * keeps a path to the goal avoiding it (with every other §3 shape's edge also out), and the dropped edge leaves the
+   * tally, not a lever — so nothing but the tally loses its route to the goal. For the same reason the re-judged
+   * declarations accept the same goal parts (no accepted part reaches the goal only through the tally); they are
+   * re-judged because a sign read over the dropped edge may change, as it would had §3 dropped it above.
+   */
+  const finalGoalParts = new Set<string>(goalForReach === undefined ? [] : products.accepted
+    .filter((a) => a.outcome_id === goalForReach.id).flatMap((a) => a.factor_ids));
+  const withdrawn = new Set([...goalIdentityParts].filter((id) => !finalGoalParts.has(id)));
+  if (withdrawn.size > 0 && goalForReach !== undefined) {
+    const lockedDrops = findPureLimits(levers.nodes, finalEdges, constraintResult.constraints, finalGoalParts)
+      .filter((p) => withdrawn.has(p.node_id));
+    const lockedAsks = findPureLimitAsks(levers.nodes, finalEdges, constraintResult.constraints, finalGoalParts)
+      .filter((a) => withdrawn.has(a.node_id));
+    for (const p of lockedDrops) { pureLimits.push(p); sayPureLimit(p); }
+    for (const a of lockedAsks) { pureLimitAsks.push(a); sayPureLimitAsk(a); }
+    if (lockedDrops.length > 0) {
+      const dropped = new Set(lockedDrops.map((p) => `${p.node_id}::${p.dropped_edge_to}`));
+      finalEdges = finalEdges.filter((e) => !dropped.has(`${e.from}::${e.to}`));
+      // A tally left with no edge out ends at its limit (readiness's `isLimitOnlyTally`); one that still feeds
+      // something that does not reach the goal is named, as the reachability pass above names it.
+      for (const p of lockedDrops) {
+        const n = levers.nodes.find((x) => x.id === p.node_id);
+        if (n !== undefined && finalEdges.some((e) => e.from === n.id) && findMechanismPath(finalEdges, n.id, goalForReach.id) === null) {
+          sayUnreached(n, goalForReach);
+        }
+      }
+      products = judgeProducts();
+    }
+  }
   loss.push(...products.loss);
   /**
    * ⛔ C46 (a) — THE CARRIER. Each checked declaration that bears on the goal is written on its
