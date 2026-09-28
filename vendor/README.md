@@ -7,7 +7,36 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.60.0.tgz` ← **THE CURRENT PIN**
+### `talchain-schemas-0.61.0.tgz` ← **THE CURRENT PIN**
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**
+>
+> The tarball `npm publish` produced from `olumi-schemas` `main`
+> **`4d039fab754392300965fbdb58d77ea1838b4148`** (the schemas #69 merge, R1; the
+> registry's own `gitHead` binds that commit), 2026-09-28. Registry download:
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.61.0/caba31ec2fe9cb7f427de5d0c1d4d0f4ea036ba6`.
+>
+> **611,419 bytes.** Verified against the registry's published metadata on 28 Sep:
+>
+> ```
+> npm shasum (sha1)  caba31ec2fe9cb7f427de5d0c1d4d0f4ea036ba6   ← matches
+> integrity (sha512) sha512-427890xgnS+wevQwUFWk5ykgrcI42edOAt6egTL085jKdmvomb3lV3J20V5f67K4YuPtp0IRuR72NtsLm052mQ==   ← matches
+> sha256             4e3873ddd9c80ca374d738566f423e57667acd373ca87c4e717f193b7a470a71
+> ```
+>
+> `pnpm install` wrote the same sha512 into `pnpm-lock.yaml`.
+>
+> **What 0.61.0 adds (R1, all optional/additive on the wire):** `GoalThresholdFrame`
+> gains `change_abs` and `change_rel` (so `NodeV3Schema.goal_threshold_frame` and
+> `DraftGoalConstraintSchema.value_frame` both accept them); `NodeV3Schema.quantity_frame`
+> (`level | change`); `EnrichmentConstraintResultSchema.frame_verdict` (`scored | estimate_only`);
+> and the canonical graph-hash projection v2 (+`goal_threshold_frame`, `goal_direction`,
+> `quantity_frame`). Regenerated `contracts/orchestrator-turn-payload.schema.json` adds the
+> node's `quantity_frame` and the two frame values only.
+> **Re-vendoring moves no graph hash:** `graph-hash.ts` hand-lists its node keys, and
+> adopting the v2 projection is a separate, disclosed one-time move (shared with R6).
+
+### `talchain-schemas-0.60.0.tgz` (historical — no longer vendored as of 0.61.0)
 
 > **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**
 >
