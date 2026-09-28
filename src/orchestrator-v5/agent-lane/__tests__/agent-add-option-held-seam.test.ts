@@ -108,7 +108,7 @@ vi.mock('../../../adapters/llm/prompt-loader.js', () => ({ getSystemPrompt: asyn
 
 type Chip = { id: string; label: string; message: string };
 type Body = { assistant_text: string; suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string }; _provider_calls?: { provider: string; outcome?: string }[];
-  _agent: { tool_calls: { name: string; ok: boolean; mutated?: boolean; refusal?: string; proposal_id?: string; conflict_fields?: string[] }[] } };
+  _agent: { tool_calls: { name: string; ok: boolean; mutated?: boolean; refusal?: string; proposal_id?: string; conflict_fields?: string[]; rejected_levels?: Record<string, unknown>[] }[] } };
 
 /**
  * A decision, a goal, one factor with a declared scale, two linked options: runnable before anything is added.
@@ -1112,6 +1112,31 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
   }, 120_000);
 
   /**
+   * [R7] (DL #72 5862693164) the refused entry ITSELF reaches `_agent.tool_calls`: the loop grew 1 → 2 → 7 → 10 refusals with
+   * `conflict_fields: ["unit","estimate"]` and no arguments kept. The served shape is inferred as { 1, a unit, estimate };
+   * whatever it is, the next run now shows it. Labels and the level's scalars only: never the basis.
+   */
+  it('[R7] RED: a refused switch level → its _agent.tool_calls entry keeps what was sent (option, factor, value, unit, estimate), never the basis', async () => {
+    graphOf.set(SCENARIO, structuredClone(PAUL));
+    const t1 = await proposeTwoSwitchOptions({ value: 1, unit: 'binary', estimate: true, basis: 'the user said grandfather them' });
+    const call = t1._agent.tool_calls.find((c) => c.name === 'propose_new_option')!;
+    expect(call, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, refusal: 'switch_level_not_on', conflict_fields: ['unit', 'estimate'] }));
+    expect(call.rejected_levels, JSON.stringify(call)).toEqual(expect.arrayContaining([
+      { option: GRANDFATHER, factor: 'Existing customers grandfathered', value: 1, unit: 'binary', estimate: true },
+    ]));
+    for (const r of call.rejected_levels!) expect(Object.keys(r).sort()).toEqual(['estimate', 'factor', 'option', 'unit', 'value']);
+    expect(JSON.stringify(call)).not.toContain('the user said grandfather them');
+  }, 120_000);
+
+  it('[R7] CONTRAST: a call that was not refused carries no rejected_levels', async () => {
+    graphOf.set(SCENARIO, structuredClone(PAUL));
+    const t1 = await proposeSwitchEntries([{ level: { value: 1 } }]);
+    const call = t1._agent.tool_calls.find((c) => c.name === 'propose_new_option')!;
+    expect(call, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true }));
+    expect(call).not.toHaveProperty('rejected_levels');
+  }, 120_000);
+
+  /**
    * ⛔ [A1] SERVED (DL run pj-20260927T233309Z on CEE e09b8c2, journey A step A05): "Let's add the grandfathering of
    * existing customers: …". SIX `propose_new_option` calls, every one refused `switch_level_not_on`, then hop_limit
    * (~20 s, "I was not able to finish that"). A06 re-modelled the switch as a graded factor "at 100%", so the refused
@@ -1152,8 +1177,11 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const t1 = await proposeSwitchEntries([{ level }]);
     const refused = t1._agent.tool_calls.find((c) => c.name === 'propose_new_option');
     expect(refused, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, refusal: 'switch_level_not_on', conflict_fields: fields }));
-    // Identity only: the figure itself is never in the record.
-    expect(JSON.stringify(refused)).not.toMatch(/"value"|"unit"\s*:|GBP|%/);
+    // The figure is in ONE place only, `rejected_levels` (R7, DL #72 5862693164: the refused entry as sent); the rest of
+    // the record stays identity only.
+    const { rejected_levels: sent, ...identity } = refused as Record<string, unknown>;
+    expect(JSON.stringify(identity)).not.toMatch(/"value"|"unit"\s*:|GBP|%/);
+    expect(sent).toEqual([expect.objectContaining({ value: (level as { value: unknown }).value, unit: (level as { unit: unknown }).unit })]);
     expect(inner).toEqual([]);
     expect(await heldOnLatestRow()).toEqual([]);
   }, 120_000);
