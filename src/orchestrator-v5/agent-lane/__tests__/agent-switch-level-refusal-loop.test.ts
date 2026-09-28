@@ -170,6 +170,25 @@ describe('R8 — a 1 in a unit that names the switch\'s STATE is on; a 1 in a qu
   });
 });
 
+// Served 137d3a5 (MG pj-20260928T042134Z A07/A08): the grandfather switch at `{0}` in the ONLY option, four times.
+describe('R9 — a one-option change that lists its new switch at 0 is told the exact next call, and that call is held', () => {
+  it('R9 RED: { 0 } → refused; the detail names the entry with NO "level" key (not 0)', async () => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx as never, withLevel({ value: 0 }) as never) as Result;
+    expect(r.refusal, JSON.stringify(r)).toBe('switch_level_not_on');
+    expect(sent).toEqual([]);
+    expect(r.detail).toContain(`except send the acts_on entry for "${SWITCH}" in "${GRANDFATHER}" with NO "level" key at all`);
+  });
+  it('R9 ONE HOP: following it (the entry with no level) is held, the switch on at 1, in ONE call', async () => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx as never, a05([{}]) as never) as Result;
+    // The fixture answers every inner request 500: what is bound is what was SENT, and that no refusal came first.
+    expect(r.refusal, JSON.stringify(r)).not.toBe('switch_level_not_on');
+    expect(sent).toHaveLength(1);
+    expect(switchLevelSent(sent)).toEqual([{ factor_key: SWITCH_KEY, value: 1 }]);
+  });
+});
+
 describe('R4 — a refusal is fixable in ONE hop: it names the exact next call, and the graded alternative for a share or an amount', () => {
   it.each([
     ["{ 50, '%' }", { value: 50, unit: '%' }, '50%'],
@@ -205,15 +224,15 @@ describe('R4 — a refusal is fixable in ONE hop: it names the exact next call, 
     expect(r.detail).not.toContain('graded factor');
   });
 
-  // ⛔ A 0 is not fixed by removing its level — a bare switch entry means ON (served A03, pj-20260928T011147Z): with no
-  // other option turning the switch on, the detail says to list it under the option that turns it on
-  // (`agent-switch-off-entry.test.ts` R3/R5 bind the rest).
-  it('R4 CONTRAST (A03): { 0 } as the only entry for the switch → the detail never says remove "level"; it says to list it under the option that turns it on', async () => {
+  // ⛔ A 0 is not fixed by removing its level — a bare switch entry means ON (served A03, pj-20260928T011147Z). In this
+  // ONE-option change the detail names the exact next call (R9: that entry with NO "level" key, not 0); with two options
+  // it says to list it under the option that turns it on (`agent-switch-off-entry.test.ts` R3/R5 bind the rest).
+  it('R4 CONTRAST (A03): { 0 } as the only entry for the switch → the detail never says remove "level"; it names the entry with no level key', async () => {
     const { caps } = setup();
     const r = await caps.proposeNewOption(ctx as never, withLevel({ value: 0 }) as never) as Result;
     expect(r.refusal).toBe('switch_level_not_on');
     expect(r.detail).not.toContain(REMOVE_LEVEL);
-    expect(r.detail).toContain(`No option in this change turns "${SWITCH}" on; list it under the option that turns it on`);
+    expect(r.detail).toContain(`send the acts_on entry for "${SWITCH}" in "${GRANDFATHER}" with NO "level" key at all`);
     expect(r.detail).not.toContain('graded factor');
   });
 
