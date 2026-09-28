@@ -125,6 +125,7 @@ import {
   type StoredLimitVerdicts,
 } from '../orchestrator/context/constraint-feasibility.js';
 import { deriveAnalysisFreshness, selectRunAnalysisFact } from '../orchestrator-v5/context/freshness.js';
+import { identityRunUseFromFacts } from '../orchestrator-v5/compose/definitional-links.js';
 import { isScenarioAnalysisReasoningAuthority } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import { log } from '../utils/telemetry.js';
@@ -178,6 +179,26 @@ export interface ScenarioAnalysisRead {
    * ABSENT when the fact records no list (every run before batch 7) or no fact passes the gates: absent = not attested.
    */
   readonly analysis_identity_evaluated_node_ids?: string[];
+  /**
+   * R3-9 (DL CHANGES_REQUIRED on CEE #2248, condition 1): what the newest SUCCESSFUL Run did with the declared
+   * identities — Canonical's `identityRunUseFromFacts` over the SAME facts the link writer decides from on approval
+   * (`dispatch.ts`, `edge_strength_edit`: the durable record when it is reasoning authority, else the hot window), so the
+   * Agent's door and the writer cannot disagree. NOT freshness-gated: what a Run did with an identity does not lapse when
+   * the graph is edited after it. `null` = no successful Run (every declared identity is in use). ABSENT when this leg did
+   * not answer; a consumer reads absent as unknown and refuses a definitional link, as the writer would with no Run.
+   */
+  readonly analysis_identity_run_use?: IdentityRunUseWire | null;
+}
+
+/** `IdentityRunUse` on the wire: the carriers the last successful Run WITHDREW, sorted. */
+export interface IdentityRunUseWire {
+  readonly withdrawn_node_ids: readonly string[];
+}
+
+/** The one projection of `identityRunUseFromFacts` onto the read's wire. */
+export function identityRunUseWire(facts: readonly unknown[]): IdentityRunUseWire | null {
+  const use = identityRunUseFromFacts(facts);
+  return use === null ? null : { withdrawn_node_ids: [...use.withdrawn].sort() };
 }
 
 const NOT_ANSWERED: ScenarioAnalysisRead = Object.freeze({
@@ -411,6 +432,8 @@ export async function readScenarioAnalysis(
     return {
       analysis_state: analysisState,
       analysis_result: boundResult,
+      // R3-9: every answered read carries it, from the same facts as the writer; never gated on freshness.
+      analysis_identity_run_use: identityRunUseWire(facts),
       // Gated on the DELIVERED block, not only the fact: a run-binding that withholds
       // `analysis_result` withholds this too, so it ships exactly when that block does.
       ...(fact !== null && boundResult !== null

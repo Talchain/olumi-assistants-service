@@ -626,6 +626,10 @@ export default async function route(app: FastifyInstance) {
         ...(analysis.analysis_identity_evaluated_node_ids !== undefined
           ? { analysis_identity_evaluated_node_ids: analysis.analysis_identity_evaluated_node_ids }
           : {}),
+        // R3-9 (#2248): the last successful Run's use of each declared identity — the link writer's own input, not gated.
+        ...(analysis.analysis_identity_run_use !== undefined
+          ? { analysis_identity_run_use: analysis.analysis_identity_run_use }
+          : {}),
         /**
          * ⭐ MAY A RUN BE ADMITTED RIGHT NOW — the question `analysis_state`
          * does not answer. It reports whether a FACT HAS LANDED for this graph;
