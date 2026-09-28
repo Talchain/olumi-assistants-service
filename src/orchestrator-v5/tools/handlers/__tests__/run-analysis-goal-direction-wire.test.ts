@@ -202,6 +202,15 @@ describe('a held comparator on the goal node decides goal_direction before the l
     expect('goal_direction' in payload).toBe(false);
   });
 
+  // AIQ 5872082179: on the brief route level and target share one unit, so a PERCENT or POINTS ceiling passes the unit
+  // check by construction ("gross margin 30%, reduce by at most 2%" is a floor). Until S4 types the frame: nothing sent.
+  for (const u of ['%', 'percentage points', 'pp', 'bps', 'points', 'NPS points']) {
+    it(`R1 S1 (AIQ 5872082179): held "<=" in "${u}" beside the user's level in the same unit → no key`, async () => {
+      const payload = await payloadForGoalLabel('Gross margin', '<=', { unit: u, targetUnit: u, source: 'brief_extraction' });
+      expect('goal_direction' in payload).toBe(false);
+    });
+  }
+
   it('R1 S1: held "<=" beside a level the user GAVE IN CHAT (user_override, approved) → minimise', async () => {
     const payload = await payloadForGoalLabel('Monthly spend', '<=', { ...STATED, source: 'user_override' });
     expect(payload.goal_direction).toBe('minimise');

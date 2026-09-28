@@ -76,6 +76,7 @@
 
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
 import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
+import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 
 /** The only sense this module will ever put on the wire. */
 export type EmittedGoalDirection = 'minimise';
@@ -128,6 +129,18 @@ export function readHeldGoalComparator(graph: unknown, goalNodeId: unknown): Hel
 }
 
 /**
+ * ⛔ R1 S1 (AIQ 5872082179): a ceiling's target unit that MAY be a level of the node. Not the percent family (`%`,
+ * percentage points, `pp`, `bps` — `classifyUnitScaleClass`) and not points: there "reduce by at most 2%" is a change,
+ * a floor on the quantity, and level and target share one unit so nothing structural tells them apart until S4 types
+ * the frame. ONE predicate for the wire (`ceilingTargetIsALevelOnItsNode`) and for admission (`admitStatedGoalLevel`),
+ * so a level is admitted beside a ceiling only where the run will minimise.
+ */
+export function ceilingTargetUnitMayBeALevel(unit: unknown): boolean {
+  const t = typeof unit === 'string' ? unit.trim().toLowerCase() : '';
+  return t !== '' && classifyUnitScaleClass(t) === 'unknown' && !/\bpoints?\b/.test(t);
+}
+
+/**
  * ⭐ R1 S1 (AIQ 5871459631): the proof that a held ceiling's target is a LEVEL in the goal node's own unit family — the
  * goal carries the current level the USER stated (`observed_state`, `source` `brief_extraction` or `USER_EDIT_SOURCE`,
  * admitted by `admitStatedGoalLevel` beside that very ceiling) in the target's own unit (`goal_threshold_unit`). A target whose
@@ -141,6 +154,11 @@ function ceilingTargetIsALevelOnItsNode(graph: unknown, goalNodeId: unknown): bo
   const level = os as Record<string, unknown>;
   const unit = (u: unknown): string | null => (typeof u === 'string' && u.trim() !== '' ? u.trim().toLowerCase() : null);
   const targetUnit = unit(node?.goal_threshold_unit);
+  // ⛔ AIQ 5872082179 (ACK withdrawn until this row): on the brief route the level and the target share ONE `goal.unit`,
+  // so the unit check below passes by construction — "gross margin 30%, reduce by at most 2%" would minimise a floor.
+  // Until S4 types the frame, a target in the percent family (%, percentage points, pp, bps) or in points is never
+  // proven a level here: nothing is sent.
+  if (!ceilingTargetUnitMayBeALevel(targetUnit)) return false;
   // The user's own figure: stated in the brief (`brief_extraction`) or given in chat and approved (`USER_EDIT_SOURCE`).
   return (level.source === 'brief_extraction' || level.source === USER_EDIT_SOURCE)
     && typeof level.raw_value === 'number' && Number.isFinite(level.raw_value)

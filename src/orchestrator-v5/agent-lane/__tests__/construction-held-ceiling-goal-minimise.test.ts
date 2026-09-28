@@ -184,6 +184,16 @@ describe('a ceiling the user WROTE: the run minimises, and the stated current le
     expect(directionLogs()).toEqual([]);
   });
 
+  it('⭐ RED row 11 (R1 S1, AIQ 5872082179): a held `<=` in PERCENT beside a stated level in the same unit → the level is NOT admitted and nothing is sent (level and target share one unit, so "at most 4%" cannot be told from "reduce by at most 4%" until S4)', async () => {
+    const brief = 'Should we switch our cloud provider from AWS to GCP? Downtime is 4.5% of hours today; we want to keep it to at most 4% without more than 2 weeks of migration risk.';
+    const { result, graph, goal } = await build(brief, withGoal('cloud-2', { metric: 'Downtime', operator: '<=', value: 4, unit: '%', baseline_value: 4.5 }));
+    expect(goal.goal_direction).toBe('<=');
+    expect(Object.hasOwn(goal, 'observed_state')).toBe(false);
+    expect(said(result)).toMatch(/cannot be calculated correctly yet/);
+    const req = await plotRequestFor(graph);
+    expect('goal_direction' in req).toBe(false);
+  });
+
   it('⭐ RED row 10 (R1 S1): a held `<=` with NO stated current level ("at most £36k", today not given) → nothing sent (authored variant)', async () => {
     const brief = 'Should we switch our cloud provider from AWS to GCP? We want monthly spend to be at most £36k a month without more than 2 weeks of migration downtime risk.';
     const { graph, goal } = await build(brief, withGoal('cloud-2', { baseline_value: null, baseline_known: false }));

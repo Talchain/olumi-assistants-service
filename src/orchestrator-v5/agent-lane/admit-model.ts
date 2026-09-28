@@ -22,7 +22,7 @@ import {
   resolveGoalThresholdCapWithProvenance,
 } from '../../utils/goal-threshold-cap.js';
 import { admitGoalBaseline } from '../../cee/factor-extraction/goal-baseline-admissibility.js';
-import { heldComparatorSense } from '../goal-target/goal-direction.js';
+import { ceilingTargetUnitMayBeALevel, heldComparatorSense } from '../goal-target/goal-direction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { MAY_NAME_LEADING_OPTION } from '../../orchestrator/context/constraint-feasibility.js';
 import type { InterventionV3T } from '../../schemas/cee-v3.js';
@@ -2155,10 +2155,12 @@ export function admitStatedGoalLevel(args: {
   readonly cap: number;
   /** The comparator the goal node HOLDS (`goal_direction`, G1), when the caller reads one; absent ⇒ none held. */
   readonly heldComparator?: unknown;
+  /** The target's unit: a `<=` level is admitted beside a held ceiling only where it may be a level (AIQ 5872082179). */
+  readonly targetUnit?: unknown;
 }): StatedGoalLevelVerdict {
   const { metric, operator, rawTarget: raw, rawBaseline: baselineRaw, cap, heldComparator } = args;
   const heldCeiling = heldComparatorSense(heldComparator) === 'minimise';
-  if (operator === '<=' && heldComparator === '<=' && heldCeiling) {
+  if (operator === '<=' && heldComparator === '<=' && heldCeiling && ceilingTargetUnitMayBeALevel(args.targetUnit)) {
     const admission = admitGoalBaseline({ rawTarget: raw, rawBaseline: baselineRaw, cap, ceiling: true });
     if (admission.admitted) return { admitted: true, normalised: admission.normalised };
     if (admission.reason === 'baseline_off_cap_scale') return { admitted: false, reason: offCapScaleSentence(metric, baselineRaw, raw, cap) };
@@ -2263,6 +2265,7 @@ export function admitGoalLevelBesideHeldCeiling<N extends { readonly kind?: unkn
   if (loss.filter((l) => l.field_path === path).length !== 1) return unchanged;
   const verdict = admitStatedGoalLevel({
     metric: goal.metric, operator: goal.operator, rawTarget: raw, rawBaseline: baselineRaw, cap, heldComparator: node.goal_direction,
+    targetUnit: goal.unit,
   });
   if (!verdict.admitted) {
     return { nodes, loss: loss.map((l) => (l.field_path === path ? { ...l, reason: verdict.reason } : l)) };
@@ -2507,6 +2510,7 @@ function admitOnce(
           // ONE rule for a stated current level, shared with the chat path (`goal-current-level.ts`).
           const verdict = admitStatedGoalLevel({
             metric: model.goal.metric, operator: model.goal.operator, rawTarget: raw, rawBaseline: baselineRaw, cap: resolved.cap,
+            targetUnit: model.goal.unit,
           });
           if (verdict.admitted) {
             // Only the user's stated level reaches here (see `estimated` above).

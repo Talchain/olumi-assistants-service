@@ -444,6 +444,7 @@ export async function proposeGoalCurrentLevel(
   // contradicts the user's own comparator (`admitStatedGoalLevel`, MG #72 5870097103). None held ⇒ exactly as before.
   const verdict = admitStatedGoalLevel({
     metric: goal.label, operator, rawTarget: target, rawBaseline: raw, cap, heldComparator: (goal as { goal_direction?: unknown }).goal_direction,
+    targetUnit: goalUnit,
   });
   if (!verdict.admitted) return refuse('not_admitted', verdict.reason);
 
