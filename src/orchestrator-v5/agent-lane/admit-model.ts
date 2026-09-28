@@ -596,6 +596,16 @@ const inferenceClassFor = (provenance: string): InferenceClass => {
   return 'builder_inferred';
 };
 
+/**
+ * The frame an OUTCOME this limit names is admitted on as an observable FACTOR (see "A LIMIT THE USER STATED ON A LEVEL
+ * NAMES A QUANTITY THAT CAN HOLD ONE" in `admitCandidateModel`): a limit the user stated, in a percentage. Undefined
+ * when the limit re-kinds nothing. ONE rule, read by admission and by `findCoverageGaps` (`build-model.ts`), which must
+ * see that quantity as the level-less factor admission registers.
+ */
+export function limitedOutcomeFrame(c: Pick<CandidateConstraint, 'provenance' | 'value' | 'unit' | 'frame'>): number | undefined {
+  return inferenceClassFor(c.provenance) === 'brief_stated' ? percentLevelFrame(c.value, c.unit, c.frame) : undefined;
+}
+
 
 /**
  * ⭐ A BARE AMOUNT IS UNANALYSABLE, AND THAT IS THE PRODUCT'S OWN RULE.
@@ -2620,8 +2630,7 @@ function admitOnce(
    */
   const limitedLevelFrames = new Map<string, number>();
   for (const c of model.constraints) {
-    if (inferenceClassFor(c.provenance) !== 'brief_stated') continue;
-    const frame = percentLevelFrame(c.value, c.unit, c.frame);
+    const frame = limitedOutcomeFrame(c);
     if (frame === undefined) continue;
     const id = nodeIdForMetric(c.metric);
     if (id !== undefined) limitedLevelFrames.set(id, frame);

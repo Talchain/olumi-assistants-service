@@ -35,7 +35,7 @@
 
 import { createHash } from 'node:crypto';
 import { FRESH_READ } from '../turn-read-cache.js';
-import { admitCandidateModel, canonicalLabel, carryWithheldOptions, findMechanismPath, productIdentityOpenQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
+import { admitCandidateModel, canonicalLabel, carryWithheldOptions, findMechanismPath, limitedOutcomeFrame, productIdentityOpenQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -691,7 +691,16 @@ export interface LevelGap { readonly option: string; readonly factor: string }
  * (served journey C run 2, CEE 651a7fd: "MRR = Pro price × Pro subscribers" with no subscriber level — every Run said
  * "the current number of Pro paying subscribers is missing"). The same retry, the same labelled estimate, never the user's.
  */
-export interface BaselineGap { readonly factor: string; readonly because?: 'limit' | 'identity' }
+export interface BaselineGap {
+  readonly factor: string;
+  readonly because?: 'limit' | 'identity';
+  /**
+   * The limited quantity was drafted as an OUTCOME, which admission registers as a level-less observable factor
+   * (`limitedOutcomeFrame`). Served journey C run 2 (CEE c35f1c7): "Monthly churn" drafted so, the gap was never
+   * counted, no retry ran, and the Run scored churn with no level (PJ-B3 rank 2 unvalued, PJ-A3 limit unscored).
+   */
+  readonly outcome?: true;
+}
 export function findCoverageGaps(
   model: CandidateModel,
   additionsWithoutTotal: readonly AdditionWithoutTotal[],
@@ -725,6 +734,11 @@ export function findCoverageGaps(
   const limited = new Set((model.constraints ?? []).filter((c) => c.frame !== 'delta').map((c) => c.metric));
   for (const f of model.factors) {
     if (limited.has(f.label) && !actedOn.has(f.label) && !userOwnedBaseline.has(f.label) && noBaseline(f)) baseline_gaps.push({ factor: f.label, because: 'limit' });
+  }
+  // The same quantity drafted as an OUTCOME: admission registers it as a factor with no level (`limitedOutcomeFrame`).
+  const rekinded = new Set((model.constraints ?? []).filter((c) => c.frame !== 'delta' && limitedOutcomeFrame(c) !== undefined).map((c) => c.metric));
+  for (const o of model.outcomes ?? []) {
+    if (rekinded.has(o.label)) baseline_gaps.push({ factor: o.label, because: 'limit', outcome: true });
   }
   // A quantity a declared product multiplies (and no earlier rule already names).
   const multiplied = new Set((model.identities ?? []).filter((i) => i.operation === 'product').flatMap((i) => i.factors ?? []));
@@ -814,11 +828,33 @@ function keepsTheHeldStatusQuo(first: Pick<AdmittedModel, 'nodes' | 'loss'>, ret
   return held(first).every((h) => now.some((r) => nodeIdentity(r) === nodeIdentity(h) && (h.is_baseline !== true || r.is_baseline === true)));
 }
 
+/**
+ * ⛔ A QUANTITY THE USER NAMED STAYS THEIRS WHEN OLUMI GIVES IT A LEVEL (served journey C run 2, CEE c35f1c7).
+ * A limit gap asks the retry for Olumi's estimate "with baseline_known:false, provenance ai_proposed", and a drafted
+ * factor carries ONE provenance. Obeyed, the retry re-authors the quantity the user named (their "monthly churn",
+ * `explicit` in the first draft) as Olumi's: the node leaves the user's stated material and
+ * `keepsEveryUserStatedIdentity` refuses the very retry that was asked for, so the limit still reaches the Run with no
+ * level. The quantity keeps the first draft's authorship; its LEVEL stays Olumi's (`baseline_known:false` →
+ * `cee_inference`, `estimatedObservedState`). Only for a quantity a first-draft limit gap asked about, and never when
+ * the retry claims to know today's level (that figure would read as the user's).
+ */
+function keepLimitedQuantityAuthor(retryRaw: CandidateModel, firstRaw: CandidateModel, gaps: readonly BaselineGap[]): CandidateModel {
+  const stated = new Set([...firstRaw.factors, ...(firstRaw.outcomes ?? [])].filter((e) => e.provenance === 'explicit').map((e) => canonicalLabel(e.label)));
+  const keep = new Set(gaps.filter((g) => g.because === 'limit').map((g) => canonicalLabel(g.factor)).filter((l) => stated.has(l)));
+  if (keep.size === 0) return retryRaw;
+  return {
+    ...retryRaw,
+    factors: retryRaw.factors.map((f) => (keep.has(canonicalLabel(f.label)) && f.baseline_known !== true ? { ...f, provenance: 'explicit' } : f)),
+  };
+}
+
 /** The retry's wording for each gap, naming the option and factor exactly. */
 function sayCoverageGaps(p: { level_gaps: readonly LevelGap[]; baseline_gaps: readonly BaselineGap[] }): string[] {
   return [
     ...p.level_gaps.map((g) => `${g.option} -> ${g.factor}: give the level this option sets in interventions (the user's number if stated, otherwise an ai_proposed estimate in the factor's unit and plausible_max frame); keep it only in changes if no defensible level exists`),
-    ...p.baseline_gaps.map((g) => (g.because === 'limit'
+    ...p.baseline_gaps.map((g) => (g.outcome === true
+      ? `${g.factor}: declare it in factors, not outcomes (role observable, with its plausible_max), and give it a baseline_value (a provisional estimate with baseline_known:false, provenance ai_proposed \u2014 never the user's) \u2014 the user limits its level, and the limit cannot be checked without today's level`
+      : g.because === 'limit'
       ? `${g.factor}: give a baseline_value (a provisional estimate with baseline_known:false, provenance ai_proposed \u2014 never the user's) \u2014 the user limits it, and the limit cannot be checked without today's level`
       : g.because === 'identity'
         ? `${g.factor}: give a baseline_value (a provisional estimate with baseline_known:false, provenance ai_proposed \u2014 never the user's) \u2014 a product in identities multiplies it, and the product cannot be computed without today's level of every part; when the product's own level is stated, give the level that makes the product hold`
@@ -1209,7 +1245,7 @@ export async function buildModelFromBrief(
         schema: retrySchemaPinningGoal(candidate.goal, candidate.decision_question),
       });
       if (retry.text.length > 0) {
-        const retryRaw = JSON.parse(retry.text) as CandidateModel;
+        const retryRaw = keepLimitedQuantityAuthor(JSON.parse(retry.text) as CandidateModel, firstCandidate, preparation.baseline_gaps);
         const retryPrepared = prepareProvisionalCandidate(retryRaw);
         const retryCandidate = retryPrepared.candidate;
         const retryAdmitted = admitCandidateModel(retryCandidate, {}, brief);
