@@ -151,13 +151,23 @@ function newFactorReply(r: Rec): string | null {
   const subject = heldSubject(r);
   if (subject === undefined || !Array.isArray(r.factors) || r.factors.length === 0) return null;
   const lines: string[] = [];
+  let toConfirm = false;
   for (const raw of r.factors) {
     const f = recordOf(raw);
     const cv = recordOf(f?.current_value);
-    if (f === undefined || cv === undefined || !nonEmpty(f.label) || !nonEmpty(f.affects) || cv.stated_by !== 'user'
+    if (f === undefined || cv === undefined || !nonEmpty(f.label) || !nonEmpty(f.affects)
       || typeof cv.value !== 'number' || !Number.isFinite(cv.value) || f.how_strongly !== FACTOR_PLACEHOLDER_STRENGTH) return null;
-    lines.push(`${q(f.label)} is ${shown(cv.value, cv.unit)}, the figure you gave, and affects ${f.affects.trim()}.`);
+    if (cv.stated_by === 'user') {
+      lines.push(`${q(f.label)} is ${shown(cv.value, cv.unit)}, the figure you gave, and affects ${f.affects.trim()}.`);
+    } else if (cv.stated_by === 'user_to_confirm' && nonEmpty(cv.quote)) {
+      // ⛔ DL ruling on #2235: the PAIRING is Olumi's until the user approves it, so the card shows it with their own words.
+      toConfirm = true;
+      lines.push(`${q(f.label)}: ${shown(cv.value, cv.unit)}, from your message “${cv.quote.trim()}”; it affects ${f.affects.trim()}.`);
+    } else {
+      return null;
+    }
   }
+  if (toConfirm) lines.push('Olumi matched each figure to its factor from your words: approve only if every pairing is right.');
   lines.push('How strongly each acts is not known yet: Olumi uses a placeholder strength for the link, not an estimate, for you to correct.');
   return reply(subject, lines, question(r.public_label));
 }

@@ -261,6 +261,9 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
       expect(o.value!['defaulted']).toBe(true);
     }
     expect(JSON.stringify(ops)).not.toContain('user_specified');
+    // The durable record of WHY each figure is theirs: confirmed on the card, with the words it showed.
+    expect((held[0]!.action.inline_patch![GM_HELD_USER_TODAY] as { basis?: string; quote?: string }[]).map((m) => [m.basis, m.quote]))
+      .toEqual([['confirmed_by_approval', FIG_MSG], ['confirmed_by_approval', FIG_MSG]]);
     expect(bytes(), 'nothing is written before the approval').toBe(before);
     expect(t1.suggested_actions.filter((c) => c.id.startsWith('agent-approve-proposal:')), 'ONE approve chip').toHaveLength(1);
 
@@ -294,8 +297,9 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
       { factor: 'Senior engineer salary', range: 1000000 }, { factor: 'Junior engineer salary', range: 100000 },
     ]);
     expect(t2.assistant_text, t2.assistant_text).toContain('Added "Senior engineer salary"');
-    expect(t2.assistant_text, t2.assistant_text).toMatch(/120000 GBP\/year per engineer, as you said/);
-    expect(t2.assistant_text, t2.assistant_text).toMatch(/65000 GBP\/year per engineer, as you said/);
+    // Two figures in the message: the pairing was the user's to confirm, and the receipt says they did (DL ruling on #2235).
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/120000 GBP\/year per engineer, as you confirmed/);
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/65000 GBP\/year per engineer, as you confirmed/);
     expect(t2.assistant_text, 'never asked again for a figure the user gave').not.toMatch(/tell me (?:the|its|their) (?:figure|value)/i);
     expect(routerCalls).toEqual([]);
   }, 180_000);
@@ -324,15 +328,17 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect(g.goal_constraints, 'the £400k limit is untouched').toEqual(e07.goal_constraints);
   }, 180_000);
 
-  it('(h) C1: with whole_request the reply is composed from the result — ONE model call — and names both figures as the user\'s before they approve', async () => {
+  it('(h) C1: with whole_request the reply is composed from the result — ONE model call — and shows each pairing with the user\'s own words for them to confirm', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const calls = openAiCalls;
     script = [() => fnCall('propose_new_factor', { factors: factorArgs(), rationale: 'The user stated both salaries.', whole_request: true })];
     const t1 = await turn({ message: FIG_MSG });
     expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
     expect(openAiCalls - calls, 'one model call, no narrating call').toBe(1);
-    expect(t1.assistant_text, t1.assistant_text).toMatch(/Senior engineer salary’ is £?120,?000/);
-    expect(t1.assistant_text, t1.assistant_text).toMatch(/Junior engineer salary’ is £?65,?000/);
+    // Two figures: the card shows Olumi's PAIRING with the user's own sentence, for them to confirm (DL ruling on #2235).
+    expect(t1.assistant_text, t1.assistant_text).toMatch(/‘Senior engineer salary’: [^“]*120,?000[^“]*, from your message “Senior engineers cost £120k a year each and juniors £65k a year each\.”/);
+    expect(t1.assistant_text, t1.assistant_text).toMatch(/‘Junior engineer salary’: [^“]*65,?000[^“]*, from your message “/);
+    expect(t1.assistant_text, t1.assistant_text).toMatch(/approve only if every pairing is right/);
     expect(t1.assistant_text).toMatch(/placeholder strength/);
     expect(t1.assistant_text).not.toMatch(/propose_new_factor|gmh_/);
     expect(approveChipOf(t1), 'the approve chip is offered').toBeDefined();
@@ -357,41 +363,57 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
   // ⛔ DL re-review of #2235 (13:07Z), BLOCKING: journey E's OWN typed clarification (served, `source: composer`, pj E04/E06).
   const E04 = 'Record them as annual salaries: £120,000 per senior engineer and £65,000 per junior engineer.';
   const E04_K = 'Record them as annual salaries: £120k per senior engineer and £65k per junior engineer.';
+  /**
+   * ⛔ DL RULING on #2235 (14:05Z 28 Sep, "Human Control is the provenance gate"): with two figures or more in the message,
+   * or two factors or more in the change, NOTHING is credited by the words alone. Each figure written in the message is
+   * held for the user's CONFIRMATION: the card shows Olumi's pairing with their own sentence, and nothing is written
+   * until they approve. `expectConfirmCard` pins that shape on the hold, the tool result and the reply.
+   */
+  const expectConfirmCard = async (t1: Body, out: Record<string, unknown>, pairs: readonly (readonly [string, number])[], before: string) => {
+    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    const factors = (out['factors'] as { label: string; current_value: { value: number; stated_by: string; quote?: string } }[]) ?? [];
+    expect(factors.map((f) => [f.label, f.current_value.value, f.current_value.stated_by]), JSON.stringify(out))
+      .toEqual(pairs.map(([l, v]) => [l, v, 'user_to_confirm']));
+    for (const f of factors) expect(typeof f.current_value.quote === 'string' && f.current_value.quote.length > 0, JSON.stringify(f)).toBe(true);
+    const held = await heldOnLatestRow();
+    expect(held, 'exactly ONE live hold').toHaveLength(1);
+    const member = held[0]!.action.inline_patch![GM_HELD_USER_TODAY] as { factor_id: string; basis?: string; quote?: string }[];
+    expect(member.map((m) => m.basis), JSON.stringify(member)).toEqual(pairs.map(() => 'confirmed_by_approval'));
+    expect(member.map((m) => m.quote)).toEqual(factors.map((f) => f.current_value.quote));
+    expect(approveChipOf(t1), 'the user approves the pairing, or not').toBeDefined();
+    expect(bytes(), 'nothing is written before the approval').toBe(before);
+    expect(newFactors()).toEqual([]);
+  };
+
   it.each([
     ['the seeded model', FIG_MSG, 'seed'],
     ['journey E\'s served graph', FIG_MSG, 'e07'],
     ['journey E\'s served graph, "…a year and juniors…"', CONJOINED, 'e07'],
     ['journey E\'s served graph, E04 "£120,000 per senior engineer and £65,000 per junior engineer"', E04, 'e07'],
     ['journey E\'s served graph, E04 in "£120k … £65k"', E04_K, 'e07'],
-  ] as const)('(l) RED: on %s, the two figures SWAPPED (senior 65000, junior 120000) → refused today_not_set naming both, nothing held, byte-identical', async (_what, message, which) => {
+  ] as const)('(l) RED (DL ruling, Human Control): on %s, the two figures SWAPPED are never credited by the words — held for the user\'s confirmation, each pairing shown with their own sentence; a decline writes nothing', async (_what, message, which) => {
     graphOf.set(SCENARIO, which === 'seed' ? seedGraph() : journeyE());
     const target = which === 'seed' ? 'Annual salary spend' : 'Incremental platform delivery…';
     const before = bytes();
     let out: Record<string, unknown> = {};
     const t1 = await propose(factorArgs([{ today: { value: 65000 } }, { today: { value: 120000 } }], target), message, (o) => { out = o; });
-    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'today_not_set' }));
-    expect((out['today_not_set'] as { factor: string }[]).map((x) => x.factor).sort(), JSON.stringify(out)).toEqual(['Junior engineer salary', 'Senior engineer salary']);
-    expect(approveChipOf(t1)).toBeUndefined();
-    expect(await heldOnLatestRow()).toEqual([]);
-    expect(bytes()).toBe(before);
-    expect(newFactors()).toEqual([]);
+    await expectConfirmCard(t1, out, [['Senior engineer salary', 65000], ['Junior engineer salary', 120000]], before);
+    await turn({ message: 'No, that is the wrong way round.' });
+    expect(bytes(), 'a decline writes nothing').toBe(before);
   }, 120_000);
 
   it.each([
     ['the seeded model', 'Senior engineers cost £120k a year each and juniors £65k a year each, and annual salary spend must stay under £400k.', 'seed'],
     ['journey E\'s served graph', 'Senior engineers cost £120k a year each and juniors £65k a year each, and our salary budget is £400k.', 'e07'],
-  ] as const)('(m) RED: on %s, the £400k limit typed in the SAME message offered as a factor\'s figure → refused today_not_set naming that factor, nothing held, byte-identical', async (_what, message, which) => {
+  ] as const)('(m) RED (DL ruling, Human Control): on %s, the £400k limit typed in the SAME message offered as a factor\'s figure is never credited by the words — held for confirmation, the card quoting the user\'s sentence beside Olumi\'s pairing', async (_what, message, which) => {
     graphOf.set(SCENARIO, which === 'seed' ? seedGraph() : journeyE());
     const target = which === 'seed' ? 'Annual salary spend' : 'Incremental platform delivery…';
     const before = bytes();
     let out: Record<string, unknown> = {};
     const t1 = await propose(factorArgs([{ today: { value: 400000 } }], target), message, (o) => { out = o; });
-    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'today_not_set' }));
-    expect((out['today_not_set'] as { factor: string }[]).map((x) => x.factor), JSON.stringify(out)).toEqual(['Senior engineer salary']);
-    expect(approveChipOf(t1)).toBeUndefined();
-    expect(await heldOnLatestRow()).toEqual([]);
-    expect(bytes()).toBe(before);
-    expect(newFactors()).toEqual([]);
+    await expectConfirmCard(t1, out, [['Senior engineer salary', 400000], ['Junior engineer salary', 65000]], before);
+    const quoteOf400k = (out['factors'] as { current_value: { quote: string } }[])[0]!.current_value.quote;
+    expect(quoteOf400k, 'the user sees the limit\'s own words beside the salary').toMatch(/£400k/);
   }, 120_000);
 
   it.each([
@@ -414,17 +436,29 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect(USER_SOURCE).toBe('user_override');
   }, 120_000);
 
-  it('(o) RED (DL ruling (b), fail closed): two figures no label word owns — "£120,000 and £65,000" — are the user\'s for NEITHER factor → refused today_not_set naming both, nothing held, byte-identical', async () => {
+  it('(o) RED (DL ruling, Human Control): two figures no label word owns — "£120,000 and £65,000" — are credited to NEITHER by the words: held for the user\'s confirmation with their sentence quoted', async () => {
     graphOf.set(SCENARIO, journeyE());
     const before = bytes();
     let out: Record<string, unknown> = {};
-    const t1 = await propose(factorArgs([], 'Incremental platform delivery…'), 'Record them as annual salaries: £120,000 and £65,000.', (o) => { out = o; });
-    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'today_not_set' }));
-    expect((out['today_not_set'] as { factor: string }[]).map((x) => x.factor).sort(), JSON.stringify(out)).toEqual(['Junior engineer salary', 'Senior engineer salary']);
-    expect(approveChipOf(t1)).toBeUndefined();
-    expect(await heldOnLatestRow()).toEqual([]);
-    expect(bytes()).toBe(before);
-    expect(newFactors()).toEqual([]);
+    const said = 'Record them as annual salaries: £120,000 and £65,000.';
+    const t1 = await propose(factorArgs([], 'Incremental platform delivery…'), said, (o) => { out = o; });
+    await expectConfirmCard(t1, out, [['Senior engineer salary', 120000], ['Junior engineer salary', 65000]], before);
+    expect((out['factors'] as { current_value: { quote: string } }[]).map((f) => f.current_value.quote)).toEqual([said, said]);
+  }, 120_000);
+
+  it('(p) ONE figure for ONE new factor: the strict match decides, as before — written about it → the user\'s (`written_about`); written about the other → refused', async () => {
+    graphOf.set(SCENARIO, journeyE());
+    const one = (value: number, label = 'Senior engineer salary') => [{ label, unit: UNIT, today: { value }, affects: 'Incremental platform delivery…', direction: 'positive' }];
+    let out: Record<string, unknown> = {};
+    const t1 = await propose(one(120000), 'Senior engineers cost £120k a year each.', (o) => { out = o; });
+    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    expect((out['factors'] as { current_value: { stated_by: string } }[])[0]!.current_value.stated_by).toBe('user');
+    const held = await heldOnLatestRow();
+    expect((held[0]!.action.inline_patch![GM_HELD_USER_TODAY] as { basis?: string }[])[0]!.basis).toBe('written_about');
+    nextScenario();
+    graphOf.set(SCENARIO, journeyE());
+    const t2 = await propose(one(120000, 'Junior engineer salary'), 'Senior engineers cost £120k a year each.');
+    expect(callOf(t2), JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, refusal: 'today_not_set' }));
   }, 120_000);
 
   it('(b) RED: a figure the user did NOT write → refused and said; NOTHING held (all-or-nothing, the written one too); byte-identical', async () => {

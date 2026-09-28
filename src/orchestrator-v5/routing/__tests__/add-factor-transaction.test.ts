@@ -346,3 +346,19 @@ describe('PJ-E-FIG — consent-all ("Yes, all of them.") over two live add-facto
     expect(nodeOf(g, 'fac_junior_engineer_salary')?.observed_state).toEqual(JUNIOR);
   });
 });
+
+describe('DL ruling on #2235: the hold records WHY each figure is the user\'s — read back FAIL-CLOSED', () => {
+  const os = { value: 0.12, raw_value: 120000, cap: 1000000, declared_scale: 'unit_interval', unit: 'GBP/year', source: 'user_override' };
+  it('a pairing confirmed on the card carries the quote it showed; written_about and no record still read as before', () => {
+    const quote = 'Record them as annual salaries: £120,000 per senior engineer and £65,000 per junior engineer.';
+    expect(readUserTodayMember([{ factor_id: 'f1', observed_state: os, basis: 'confirmed_by_approval', quote }]))
+      .toEqual([{ factor_id: 'f1', observed_state: os, basis: 'confirmed_by_approval', quote }]);
+    expect(readUserTodayMember([{ factor_id: 'f1', observed_state: os, basis: 'written_about', quote }])?.[0]?.basis).toBe('written_about');
+    expect(readUserTodayMember([{ factor_id: 'f1', observed_state: os }])).toEqual([{ factor_id: 'f1', observed_state: os }]);
+  });
+  it('RED: a confirmation with NO quote shown, an unknown basis, or an empty quote is a hold nothing can execute', () => {
+    expect(readUserTodayMember([{ factor_id: 'f1', observed_state: os, basis: 'confirmed_by_approval' }])).toBeUndefined();
+    expect(readUserTodayMember([{ factor_id: 'f1', observed_state: os, basis: 'user_said_so', quote: 'x' }])).toBeUndefined();
+    expect(readUserTodayMember([{ factor_id: 'f1', observed_state: os, basis: 'confirmed_by_approval', quote: '  ' }])).toBeUndefined();
+  });
+});

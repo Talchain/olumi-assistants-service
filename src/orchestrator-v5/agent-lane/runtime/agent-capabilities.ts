@@ -120,7 +120,7 @@ import { createProposal, ProposalStore, type ProposalInterpretation, type Propos
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import type { CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
 import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
-import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isNewFactorTarget, MAX_FACTORS_PER_ADD, readUserTodayMember, USER_TODAY_SOURCE } from '../../routing/add-factor-transaction.js';
+import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isNewFactorTarget, MAX_FACTORS_PER_ADD, readUserTodayMember, USER_TODAY_SOURCE, type UserTodayBasis } from '../../routing/add-factor-transaction.js';
 import { readCurrencyUnitWithQualifiers } from '../../../cee/provenance/stated-amounts.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
@@ -137,7 +137,7 @@ import { unitFamilyOf } from '../../routing/value-unit-resolution.js';
 import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
 import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, quoteOfFigure, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { figureInUserUnits } from '../approval-chips.js';
 import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -1465,8 +1465,10 @@ export function createAgentCapabilities(
         + `; ${howStronglyWords([...out, ...into])}`);
     }
     // ⭐ PJ-E-FIG: the factors the add-factor door added, each with the user's figure (`GM_HELD_USER_TODAY_KEY`).
-    const userTodayIds = new Set((readUserTodayMember((hold.action as { inline_patch?: Record<string, unknown> }).inline_patch?.[GM_HELD_USER_TODAY_KEY]) ?? [])
-      .map((l) => l.factor_id));
+    const userTodayMember = readUserTodayMember((hold.action as { inline_patch?: Record<string, unknown> }).inline_patch?.[GM_HELD_USER_TODAY_KEY]) ?? [];
+    const userTodayIds = new Set(userTodayMember.map((l) => l.factor_id));
+    // A pairing the user confirmed on the card (DL ruling on #2235) is said as that: they approved Olumi's reading of their words.
+    const confirmedIds = new Set(userTodayMember.filter((l) => l.basis === 'confirmed_by_approval').map((l) => l.factor_id));
     /** The range Olumi chose for each such figure, said ONCE — here, on the turn that writes it (`ranges_added_for_analysis`). */
     const rangesAdded: { factor: string; value: number; range: number }[] = [];
     const factorParts: AddedFactorPart[] = [];
@@ -1494,7 +1496,7 @@ export function createAgentCapabilities(
         const u = (os as { unit?: unknown }).unit;
         const cap = (os as { cap?: unknown }).cap;
         sentences.push(`Added "${String(f.label ?? fid)}" as a factor, affecting ${changes.join(', ')}; ${howStronglyWords(outgoing)} `
-          + `Its value today is ${statedRaw}${typeof u === 'string' && u !== '' ? ` ${u}` : ''}, as you said.`);
+          + `Its value today is ${statedRaw}${typeof u === 'string' && u !== '' ? ` ${u}` : ''}, ${confirmedIds.has(fid) ? 'as you confirmed' : 'as you said'}.`);
         if (typeof cap === 'number' && Number.isFinite(cap) && cap > 1) rangesAdded.push({ factor: String(f.label ?? fid), value: statedRaw, range: cap });
         continue;
       }
@@ -5293,7 +5295,7 @@ export function createAgentCapabilities(
       }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      const planned: { label: string; unit: string; value: number; to_id: string; direction: 'positive' | 'negative'; observed_state: Record<string, unknown> }[] = [];
+      const planned: { label: string; unit: string; value: number; to_id: string; direction: 'positive' | 'negative'; observed_state: Record<string, unknown>; basis: UserTodayBasis; quote: string }[] = [];
       const todayNotSet: { factor: string; value: unknown; reason: string }[] = [];
       const ambiguous: AmbiguousTarget[] = [];
       const recordOf = (x: unknown): Record<string, unknown> => (x !== null && typeof x === 'object' && !Array.isArray(x) ? x as Record<string, unknown> : {});
@@ -5302,6 +5304,14 @@ export function createAgentCapabilities(
         label: typeof x.label === 'string' ? x.label.trim() : '',
         unit: typeof x.unit === 'string' ? x.unit.trim() : '',
       }));
+      // ⛔ HUMAN CONTROL IS THE PROVENANCE GATE (DL ruling on #2235, 14:05Z 28 Sep). When this message writes two figures or
+      // more, or the change adds two factors or more, WHOSE each figure is cannot be read from word proximity: three review
+      // rounds moved the failure from one common phrasing to the next. So nothing is credited by the words alone: each
+      // figure must be WRITTEN in this message (in its kind of unit), and Olumi's pairing is shown on the approval card with
+      // the user's own sentence (`quoteOfFigure`) — their approval makes it theirs (`confirmed_by_approval`, on the hold).
+      // One figure for one new factor: the strict match decides, as before (`written_about`).
+      const turnText = ctx.user_turn_text ?? '';
+      const confirmPairing = inCall.length >= 2 || figuresWrittenIn(turnText) >= 2;
       for (const raw of requested) {
         const f = recordOf(raw);
         const label = typeof f.label === 'string' ? f.label.trim() : '';
@@ -5365,7 +5375,10 @@ export function createAgentCapabilities(
         // #2235): the figure must be written ABOUT this factor. Over the whole conversation, or anywhere in the message, a
         // figure typed about anything else — the £400k LIMIT, the other factor's figure (a swap) — could be committed as
         // this new factor's value, as the user's. A factor the user is adding now is one they state now, beside its name.
-        if (!figureTheUserWroteFor(t.value, todayUnit, ctx.user_turn_text ?? '', newFactorScopeIn(g, label, todayUnit, inCall))) {
+        const quote = quoteOfFigure(t.value, todayUnit, turnText);
+        const ownsIt = quote !== null
+          && (confirmPairing || figureTheUserWroteFor(t.value, todayUnit, turnText, newFactorScopeIn(g, label, todayUnit, inCall)));
+        if (!ownsIt || quote === null) {
           todayNotSet.push({ factor: label, value: t.value,
             reason: `The user's own words in this message do not state ${shown} for "${label}", so it was not prepared: a new factor's value is never taken from Olumi's words, a guess, or a figure said about something else (another factor, a limit, an earlier message). Ask the user what it is.` });
           continue;
@@ -5375,7 +5388,8 @@ export function createAgentCapabilities(
         const v = t.value;
         const observed = { ...framedObservedState({ baseline_value: v, unit: todayUnit, provenance: 'explicit',
           plausible_max: v > 1 ? defaultFrameFor(Math.abs(v)) : null }), source: USER_TODAY_SOURCE };
-        planned.push({ label, unit: todayUnit, value: v, to_id: res.node.id, direction, observed_state: observed });
+        planned.push({ label, unit: todayUnit, value: v, to_id: res.node.id, direction, observed_state: observed,
+          basis: confirmPairing ? 'confirmed_by_approval' : 'written_about', quote });
       }
       if (ambiguous.length > 0) {
         return { ok: false, mutated: false, refusal: 'ambiguous_target', ambiguous_targets: ambiguous, detail: AMBIGUOUS_NOTE };
@@ -5399,7 +5413,8 @@ export function createAgentCapabilities(
         scenario_id: ctx.scenario_id,
         turn_id: randomUUID(),
         base_graph_hash: g.graph_hash,
-        factors: planned.map((p, i) => ({ id: ids[i]!, label: p.label, link: { to_id: p.to_id, effect_direction: p.direction }, observed_state: p.observed_state })),
+        factors: planned.map((p, i) => ({ id: ids[i]!, label: p.label, link: { to_id: p.to_id, effect_direction: p.direction }, observed_state: p.observed_state,
+          basis: p.basis, quote: p.quote })),
       });
       if (res.status === 'stale') {
         return { ok: false, mutated: false, refusal: 'model_changed',
@@ -5418,7 +5433,9 @@ export function createAgentCapabilities(
           heldOk = built.proposal.factors.every((f) => ops.some((o) => o.op === 'add_node' && o.path === f.id)
             && ops.some((o) => o.op === 'add_edge' && o.path === `${f.id}::${f.to}`))
             && member !== undefined && member.length === planned.length
-            && planned.every((p, i) => JSON.stringify(sorted(member.find((m) => m.factor_id === ids[i])?.observed_state)) === JSON.stringify(sorted(p.observed_state)));
+            && planned.every((p, i) => JSON.stringify(sorted(member.find((m) => m.factor_id === ids[i])?.observed_state)) === JSON.stringify(sorted(p.observed_state)))
+            // The record of WHY each figure is theirs is on the hold, exactly as prepared.
+            && planned.every((p, i) => { const m = member.find((x) => x.factor_id === ids[i]); return m?.basis === p.basis && m?.quote === p.quote; });
         } catch {
           heldOk = false;
         }
@@ -5439,12 +5456,18 @@ export function createAgentCapabilities(
         base_revision: g.graph_hash,
         factors: planned.map((p) => ({
           label: p.label,
-          current_value: { value: p.value, unit: p.unit, stated_by: 'user' },
+          // `user_to_confirm`: the figure is in their words, and the PAIRING is Olumi's until they approve it (the card
+          // shows `quote`). `user`: one figure for one factor, written about it.
+          current_value: { value: p.value, unit: p.unit, stated_by: p.basis === 'confirmed_by_approval' ? 'user_to_confirm' : 'user', quote: p.quote },
           affects: `${labelOfId(p.to_id)} (${p.direction === 'positive' ? 'raises it' : 'lowers it'})`,
           how_strongly: FACTOR_PLACEHOLDER_STRENGTH,
         })),
-        note: 'Nothing has changed yet. Tell the user it will add each factor with the figure they gave, what it affects, and that '
-          + 'how strongly is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.',
+        note: confirmPairing
+          ? 'Nothing has changed yet. Show the user each factor with its figure and their own words quoted, say that Olumi paired '
+            + 'each figure with its factor and they approve only if every pairing is right, say what each affects and that how '
+            + 'strongly is a placeholder — never the id — and call authorise_change with this proposal_id once they agree.'
+          : 'Nothing has changed yet. Tell the user it will add each factor with the figure they gave, what it affects, and that '
+            + 'how strongly is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.',
       };
     },
 

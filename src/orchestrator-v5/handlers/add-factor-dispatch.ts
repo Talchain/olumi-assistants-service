@@ -19,7 +19,7 @@ import { evaluateEditGraphMutations, GM_HELD_OPERATIONS_MAX_JSON_CHARS, type Edi
 import { chipToBoundaryAction, toGraphView } from './add-option-dispatch.js';
 import { TYPED_TRANSACTION_ENVELOPE_CAP, type FrameFreshness } from '../graph-management/types.js';
 import type { PendingAction } from '../session/pending-action.js';
-import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isUserTodayObservedState, type AddFactorSkipReason } from '../routing/add-factor-transaction.js';
+import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isUserTodayObservedState, readUserTodayMember, type AddFactorSkipReason, type UserTodayBasis } from '../routing/add-factor-transaction.js';
 
 type StageIndicator = OlumiResponse['stage_indicator'];
 
@@ -28,6 +28,11 @@ export interface AddFactorTransactionInput {
   readonly params: unknown;
   /** Each factor's figure, in the order of `params.factors`: the user's, framed (`isUserTodayObservedState`). */
   readonly userToday: readonly unknown[];
+  /**
+   * Why each figure is the user's, in the same order (`UserTodayLevel.basis` / `quote`); recorded on the hold, read back
+   * fail-closed by `readUserTodayMember`. Absent → no record (as before).
+   */
+  readonly userTodayWhy?: readonly { readonly basis?: UserTodayBasis; readonly quote?: string }[];
   /** The PERSISTED pre-edit graph (the frame authority the hold is pinned to). */
   readonly currentGraph: unknown;
   /** Hash of `currentGraph`, resolved by the caller (never re-derived here). */
@@ -90,7 +95,14 @@ export function dispatchAddFactorTransaction(input: AddFactorTransactionInput): 
   if (decision.governing !== 'held' || decision.pendingActions === null || decision.pendingActions.length !== 1 || chip === undefined) {
     return { kind: 'refused', reason: 'not_held', governing: decision.governing };
   }
-  const userToday = factors.map((f, i) => ({ factor_id: f.id, observed_state: { ...(input.userToday[i] as Record<string, unknown>) } }));
+  const userToday = factors.map((f, i) => ({
+    factor_id: f.id,
+    observed_state: { ...(input.userToday[i] as Record<string, unknown>) },
+    ...(input.userTodayWhy?.[i]?.basis !== undefined ? { basis: input.userTodayWhy[i]!.basis } : {}),
+    ...(input.userTodayWhy?.[i]?.quote !== undefined ? { quote: input.userTodayWhy[i]!.quote } : {}),
+  }));
+  // The record of WHY each figure is theirs must itself read back (fail-closed), or nothing is held.
+  if (readUserTodayMember(userToday) === undefined) return { kind: 'refused', reason: 'today_invalid' };
   const pending = decision.pendingActions[0]!;
   const ip = pending.action.kind === 'apply_proposed_change' ? pending.action.inline_patch : null;
   // Only a hold carrying the executable batch can carry its figures; anything else is refused whole.

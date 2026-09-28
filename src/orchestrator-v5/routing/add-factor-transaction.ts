@@ -176,9 +176,23 @@ export const GM_HELD_USER_TODAY_KEY = 'user_today';
  */
 export const USER_TODAY_SOURCE = USER_EDIT_SOURCE;
 
+/**
+ * Why the figure is the user's (DL ruling on #2235, 14:05Z 28 Sep). `written_about`: their words wrote it about THIS factor
+ * (one figure, one new factor: the strict matcher). `confirmed_by_approval`: their message wrote two figures or more, or
+ * the change adds two factors or more, so Olumi's PAIRING was shown on the approval card with their own words (`quote`)
+ * and their approval made it theirs. The hold is the durable record (the receipt schema is strict).
+ */
+export type UserTodayBasis = 'written_about' | 'confirmed_by_approval';
+export const USER_TODAY_BASES: readonly UserTodayBasis[] = ['written_about', 'confirmed_by_approval'];
+/** The longest quote a hold carries (the card shows at most `FIGURE_QUOTE_MAX` plus its ellipses). */
+export const USER_TODAY_QUOTE_MAX = 400;
+
 export interface UserTodayLevel {
   readonly factor_id: string;
   readonly observed_state: Readonly<Record<string, unknown>>;
+  readonly basis?: UserTodayBasis;
+  /** The user's own sentence the figure was written in, verbatim (`quoteOfFigure`). Required with `confirmed_by_approval`. */
+  readonly quote?: string;
 }
 
 /**
@@ -203,9 +217,18 @@ export function readUserTodayMember(raw: unknown): readonly UserTodayLevel[] | u
   const out: UserTodayLevel[] = [];
   for (const x of raw) {
     if (x === null || typeof x !== 'object' || Array.isArray(x)) return undefined;
-    const { factor_id: id, observed_state: os } = x as { factor_id?: unknown; observed_state?: unknown };
+    const { factor_id: id, observed_state: os, basis, quote } = x as { factor_id?: unknown; observed_state?: unknown; basis?: unknown; quote?: unknown };
     if (typeof id !== 'string' || id.length === 0 || !isUserTodayObservedState(os)) return undefined;
-    out.push({ factor_id: id, observed_state: { ...(os as Record<string, unknown>) } });
+    // FAIL-CLOSED on the record of WHY the figure is theirs: an unknown basis, or a confirmation with no quote shown.
+    if (basis !== undefined && !(USER_TODAY_BASES as readonly unknown[]).includes(basis)) return undefined;
+    if (quote !== undefined && (typeof quote !== 'string' || quote.trim() === '' || quote.length > USER_TODAY_QUOTE_MAX)) return undefined;
+    if (basis === 'confirmed_by_approval' && quote === undefined) return undefined;
+    out.push({
+      factor_id: id,
+      observed_state: { ...(os as Record<string, unknown>) },
+      ...(basis !== undefined ? { basis: basis as UserTodayBasis } : {}),
+      ...(quote !== undefined ? { quote: quote as string } : {}),
+    });
   }
   return new Set(out.map((l) => l.factor_id)).size === out.length ? out : undefined;
 }

@@ -83,6 +83,7 @@ import { applyGoalTargetEdit, type GoalTargetEditResult } from './goal-target-ed
 import { applyLimitEdit, type LimitEditRequest } from './limit-edit.js';
 import { dispatchAddRiskTransaction } from '../handlers/add-risk-dispatch.js';
 import { dispatchAddFactorTransaction } from '../handlers/add-factor-dispatch.js';
+import type { UserTodayBasis } from '../routing/add-factor-transaction.js';
 import { buildHeldSupersessionNotice } from '../handlers/edit-graph-referee-gate.js';
 import { applyStructuralDelete } from './structural-delete.js';
 import { applyStructuralAdd, findFabricatedLevel } from './structural-add.js';
@@ -3309,6 +3310,9 @@ export type HoldAddFactorInput = {
     readonly label: string;
     readonly link: { readonly to_id: string; readonly effect_direction: 'positive' | 'negative' };
     readonly observed_state: Readonly<Record<string, unknown>>;
+    /** Why the figure is the user's, and their own words for the card (`UserTodayLevel`): recorded on the hold. */
+    readonly basis?: UserTodayBasis;
+    readonly quote?: string;
   }[];
 };
 export type HoldAddFactorResult =
@@ -3360,6 +3364,7 @@ export async function holdAddFactorInProcess(input: HoldAddFactorInput, requestI
   const outcome = dispatchAddFactorTransaction({
     params: { factors },
     userToday: input.factors.map((f) => f.observed_state),
+    userTodayWhy: input.factors.map((f) => ({ ...(f.basis !== undefined ? { basis: f.basis } : {}), ...(f.quote !== undefined ? { quote: f.quote } : {}) })),
     currentGraph: persistedGraph,
     currentGraphHash: currentHash,
     freshness,

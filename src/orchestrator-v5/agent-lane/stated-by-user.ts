@@ -365,6 +365,48 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
   });
 }
 
+/** How many figures a message writes: digits (`findStatedAmounts`) and counts in words (`countsInWords`). */
+export function figuresWrittenIn(text: string | null | undefined): number {
+  return typeof text === 'string' ? findStatedAmounts(text).length + countsInWords(text).length : 0;
+}
+
+/** The longest quote the approval card shows; a longer sentence is windowed around the figure. */
+export const FIGURE_QUOTE_MAX = 160;
+
+/**
+ * ⭐ THE USER'S OWN WORDS AROUND A FIGURE (DL ruling on #2235, 14:05Z 28 Sep: "Human Control is the provenance gate").
+ * When a message writes two figures or more, WHOSE each one is cannot be read from word proximity (three review rounds:
+ * each fix moved the failure to another common phrasing). The add-factor door then credits nothing by itself: it shows
+ * each pairing on the approval card with the sentence the figure was written in, verbatim, and the user's approval makes
+ * it theirs. This is that sentence: the first written amount that IS `value` in `unit` (the `figureTheUserWrote` rules),
+ * cut at . ! ? (before a space) or a new line; over FIGURE_QUOTE_MAX, a window around the figure on word boundaries with
+ * "…". Null when the figure is not written.
+ */
+export function quoteOfFigure(value: number, unit: unknown, userText: string | null | undefined): string | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return null;
+  const family = unitPhraseFamily(unit);
+  const a = [...findStatedAmounts(userText), ...countsInWords(userText)].find((x) => amountIs(x, value, unit, family, userText));
+  if (a === undefined || typeof a.index !== 'number') return null;
+  const end = a.index + a.matchedText.length;
+  const starts = [...userText.slice(0, a.index).matchAll(/[.!?](?=\s)|\n/g)];
+  const start = starts.length === 0 ? 0 : starts[starts.length - 1]!.index! + 1;
+  const stop = /[.!?](?=\s|$)|\n/.exec(userText.slice(end));
+  const stopAt = stop === null ? userText.length : end + stop.index + (stop[0] === '\n' ? 0 : 1);
+  let from = start;
+  let to = stopAt;
+  if (to - from > FIGURE_QUOTE_MAX) {
+    const room = Math.max(0, Math.floor((FIGURE_QUOTE_MAX - (end - a.index)) / 2));
+    from = Math.max(start, a.index - room);
+    to = Math.min(stopAt, end + room);
+    // Never cut a word: widen to the nearest space (or the sentence's own edge).
+    while (from > start && /\S/.test(userText.charAt(from - 1))) from -= 1;
+    while (to < stopAt && /\S/.test(userText.charAt(to))) to += 1;
+  }
+  const words = userText.slice(from, to).replace(/\s+/g, ' ').trim();
+  if (words === '') return null;
+  return `${from > start ? '…' : ''}${words}${to < stopAt ? '…' : ''}`;
+}
+
 /**
  * ⭐ A COUNT WRITTEN IN WORDS ("one senior and two juniors"), read by the repo's one cardinal grammar (no articles, no
  * fractions), for `figureTheUserWroteFor` ONLY: it then binds clause by clause exactly as its digits would. Served
