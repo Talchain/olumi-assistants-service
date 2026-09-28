@@ -784,8 +784,14 @@ function minusIsSign(unmasked: string | undefined, at: number): boolean {
 
 /** The same match one character later: the leading "-" is not part of the figure. */
 function withoutLeadingChar(m: RegExpExecArray): RegExpExecArray {
-  const next = Object.assign([m[0].slice(1), undefined, ...m.slice(2)], { index: m.index + 1, input: m.input, groups: m.groups });
-  return next as unknown as RegExpExecArray;
+  // A single cast: `string[]` is a supertype of `RegExpExecArray`. The rejected minus leaves the span and its group.
+  const next = m.slice() as RegExpExecArray;
+  next[0] = m[0].slice(1);
+  next[1] = '';
+  next.index = m.index + 1;
+  next.input = m.input;
+  next.groups = m.groups;
+  return next;
 }
 
 const P8_SYMBOL_REGEX = new RegExp(
