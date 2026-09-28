@@ -123,6 +123,12 @@ export interface CandidateModel {
       value: number;
       unit?: string;
       provenance: string;
+      /**
+       * The user's own CHANGE this level was made from (AIQ ruling (A), #72 5870443419): written only by
+       * `prepareProvisionalCandidate`, when a user-stated addition became this total on a finite baseline. Never in
+       * the drafter's schema. Registered beside the level as `stated_change` + `stated_change_source`.
+       */
+      stated_change?: { readonly value: number; readonly provenance: 'explicit' };
     }[];
     /**
      * Factors this option changes WITHOUT a stated level.
@@ -300,6 +306,16 @@ export interface ConstructedLevel {
   raw_value?: number;
   /** The factor's own unit, beside `raw_value`: its `observed_state.unit`, else the unit the construction declared for it. */
   unit?: string;
+  /**
+   * ⭐ THE USER'S OWN CHANGE BESIDE OLUMI'S LEVEL (AIQ ruling (A), #72 5870443419; Baseline v1 defect 3). "Hire two
+   * developers" on Olumi's estimate of 5: `value`/`raw_value` is the level 7 and keeps the level's own `source` (Olumi's,
+   * since it rests on Olumi's 5); `stated_change` is the user's 2, in the factor's own unit (the frame `raw_value` is
+   * in, never divided), and `stated_change_source` says it is theirs. Construction writes it only when the level is
+   * exactly today + that change. Read by `stated-change.ts`, which says it only while the stored facts still add up.
+   * `InterventionV3` is `.passthrough()`, so both keys persist.
+   */
+  stated_change?: number;
+  stated_change_source?: ConstructedLevelSource;
 }
 
 const levelSourceFor = (provenance: string): ConstructedLevelSource =>
@@ -2805,7 +2821,14 @@ function admitOnce(
         continue;
       }
       const cap = capByFactorId.get(factorId);
-      bundle[factorId] = constructedLevel(factorId, iv.value, cap, levelSourceFor(iv.provenance), nodes.find((n) => n.id === factorId), unitById.get(factorId));
+      const level = constructedLevel(factorId, iv.value, cap, levelSourceFor(iv.provenance), nodes.find((n) => n.id === factorId), unitById.get(factorId));
+      // (A): the user's change rides on the level it made, stamped by the SAME rule as a level (`levelSourceFor`); the
+      // level's own `source` above is untouched, so Olumi's 7 is never stamped as the user's.
+      if (iv.stated_change !== undefined) {
+        level.stated_change = iv.stated_change.value;
+        level.stated_change_source = levelSourceFor(iv.stated_change.provenance);
+      }
+      bundle[factorId] = level;
     }
     if (Object.keys(bundle).length > 0) interventionsByOption.set(optionId, bundle);
   }

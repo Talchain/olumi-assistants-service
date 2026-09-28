@@ -155,6 +155,7 @@ import { registrationTurnId } from '../../graph-registration/registration-identi
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel } from '../goal-current-level.js';
 import { sayFigureExactly, sayFigureRead } from '../say-figure.js';
+import { readStatedChange } from '../stated-change.js';
 import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
@@ -857,12 +858,16 @@ export function projectOptionLevels(
     const factor = factorsById.get(factorId);
     const frame = levelFrameOf(factor);
     const unit = (factor?.observed_state ?? {}).unit;
+    // (A) a level made from the user's own change is said WITH it (AIQ #72 5870443419): `set_by` stays the level's
+    // author (Olumi's, on Olumi's today), and `in_words` is how to say it — only while the stored facts add up.
+    const stated = readStatedChange(raw, factor);
     out.push({
       factor_id: factorId,
       ...(typeof factor?.label === 'string' && factor.label !== '' ? { factor: factor.label } : {}),
       level: frame === null ? cell.value : cell.value * frame,
       ...(typeof unit === 'string' && unit !== '' ? { unit } : {}),
       ...(typeof cell.source === 'string' && cell.source !== '' ? { set_by: cell.source } : {}),
+      ...(stated !== undefined ? { stated_change: stated.change, stated_change_by: stated.source, in_words: stated.words } : {}),
     });
   }
   return out;
@@ -2837,7 +2842,9 @@ export function createAgentCapabilities(
         const current = (option.interventions ?? {})[factor.id] as { value?: unknown } | number | undefined;
         const currentValue = typeof current === 'number' ? current : (current as { value?: unknown } | undefined)?.value;
         if (currentValue === normalised || currentValue === raw) {
-          unchanged.push(`${option.label} already sets ${factor.label} to ${String(currentValue)}`);
+          // (A) a stored level made from the user's own change is said with it, never as a bare model value.
+          const stated = readStatedChange(current, factor);
+          unchanged.push(`${option.label} already sets ${factor.label} to ${stated !== undefined ? stated.words : String(currentValue)}`);
           continue;
         }
         const key = `${option.id}::${factor.id}`;

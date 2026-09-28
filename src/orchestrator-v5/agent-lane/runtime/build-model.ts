@@ -579,6 +579,8 @@ export function prepareProvisionalCandidate(model: CandidateModel): {
   const options = model.options.map((option) => {
     const becameChanges: string[] = [];
     const interventions: Iv[] = [];
+    /** Each user-stated addition that became a total on this option: its factor, the total and the user's change. */
+    const statedTotals: { factor: string; total: number; change: number }[] = [];
     for (const intervention of option.interventions ?? []) {
       const kind = (intervention as Iv & { value_kind?: string }).value_kind;
       const factors = factorsByLabel(intervention.factor_label);
@@ -613,17 +615,42 @@ export function prepareProvisionalCandidate(model: CandidateModel): {
       if (!factor.unit || !intervention.unit || factor.unit.trim().toLowerCase() !== intervention.unit.trim().toLowerCase()) {
         unresolved('unit_mismatch'); continue;
       }
+      const total = factor.baseline_value + intervention.value;
+      /**
+       * ⭐ (A) THE USER'S CHANGE IS KEPT BESIDE THE TOTAL (AIQ ruling #72 5870443419; Baseline v1 defect 3). "Hire two
+       * developers" on Olumi's estimate of 5 became Olumi's 7 and the user's "2" survived nowhere. The total stays as it
+       * was, stamped as it was (it rests on today's figure); the change rides on it as `stated_change`.
+       * ⛔ ONLY A USER-STATED (`explicit`) ADDITION: an `ai_proposed` addition is Olumi's figure end to end, and recording
+       * it as a stated change would let a reader say Olumi's number back to the user as "your 2 more".
+       */
+      const stated = intervention.provenance === 'explicit';
       interventions.push({
-        ...intervention, value_kind: 'absolute', value: factor.baseline_value + intervention.value,
+        ...intervention, value_kind: 'absolute', value: total,
         provenance: factor.baseline_known && factor.provenance === 'explicit' && intervention.provenance === 'explicit'
           ? 'explicit' : 'ai_proposed',
+        ...(stated ? { stated_change: { value: intervention.value, provenance: 'explicit' as const } } : {}),
       } as Iv);
+      if (stated) statedTotals.push({ factor: intervention.factor_label, total, change: intervention.value });
     }
+    /**
+     * ⛔ THE DRAFTER WRITES THE TOTAL TOO, AND ADMISSION KEEPS THE LAST LEVEL PER FACTOR. The build instructions ask for
+     * both forms ("record the user-stated addition as explicit but keep an estimated resulting level ai_proposed"), and
+     * served techlead-1 (Runtime lever-1, medium) carried `{2, additional, explicit}` then `{7, absolute, ai_proposed}`:
+     * the 7 was registered and a change on the first entry alone would have been dropped with it. So the change also
+     * rides on the drafter's own absolute level on that factor WHEN IT IS THE SAME TOTAL. A level that differs is left
+     * exactly as it is: the user's change does not explain it.
+     */
+    const withChanges = statedTotals.length === 0 ? interventions : interventions.map((iv) => {
+      if (iv.stated_change !== undefined || (iv as Iv & { value_kind?: string }).value_kind !== 'absolute') return iv;
+      const same = statedTotals.find((t) => t.factor === iv.factor_label
+        && Math.abs(iv.value - t.total) <= 1e-9 * Math.max(1, Math.abs(t.total)));
+      return same === undefined ? iv : { ...iv, stated_change: { value: same.change, provenance: 'explicit' as const } };
+    });
     const changes = [...(option.changes ?? [])];
     for (const f of becameChanges) if (!changes.includes(f)) changes.push(f);
     return {
       ...option,
-      ...(option.interventions !== undefined ? { interventions } : {}),
+      ...(option.interventions !== undefined ? { interventions: withChanges } : {}),
       ...(option.changes !== undefined || becameChanges.length > 0 ? { changes } : {}),
     };
   });

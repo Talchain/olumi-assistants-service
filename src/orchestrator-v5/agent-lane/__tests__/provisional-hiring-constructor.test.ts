@@ -76,9 +76,11 @@ describe('provisional hiring construction uses real admission and registration p
     // P2 A5: the level names the factor it is keyed by. "Developers" is an ESTIMATED baseline, framed only by the node's
     // scale_frame (20), and since AIQ Q2 (CEE #2139 5859746452) such a level is the one form: raw 7 (5 today + 2),
     // the factor's own unit (`one-intervention-form.test.ts` (h)), so PLoT receives 7, not 0.35.
+    // AIQ ruling (A) (#72 5870443419): the 7 stays Olumi's, and the user's own "two" rides beside it as theirs.
     expect(option?.interventions).toEqual({
       developers: {
         value: 0.35, raw_value: 7, unit: 'people', source: 'cee_hypothesis',
+        stated_change: 2, stated_change_source: 'brief_extraction',
         target_match: { node_id: 'developers', match_type: 'exact_id', confidence: 'high' },
       },
     });

@@ -21,6 +21,7 @@ import { classifyValueSource } from '../../cee/graph-readiness/obligation-proven
 import { collectInterventionControlledFactorIds } from '../context/intervention-controlled-drivers.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from './limit-operator-words.js';
 import { sayFigure } from './say-figure.js';
+import { readStatedChange } from './stated-change.js';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
 
 export interface LimitedLevelAsk {
@@ -170,6 +171,8 @@ export function optionSetLimitAsks(graph: {
     const nodeUnit = typeof os?.unit === 'string' ? os.unit.trim() : '';
 
     const assumed: { option: string; value: number; unit: string }[] = [];
+    /** Per `assumed` entry: the user's own change the figure was made from, said beside it (AIQ #72 5870443419). */
+    const madeFrom: (string | undefined)[] = [];
     for (const option of options) {
       const label = typeof option.label === 'string' ? option.label.trim() : '';
       const entry = mergeInterventionSourceObjects(option as Record<string, unknown>)[nodeId];
@@ -177,6 +180,7 @@ export function optionSetLimitAsks(graph: {
       const e = entry as Record<string, unknown>;
       if (!OLUMIS.has(classifyValueSource(e.source)) || typeof e.raw_value !== 'number' || !Number.isFinite(e.raw_value)) continue;
       assumed.push({ option: label, value: e.raw_value, unit: typeof e.unit === 'string' && e.unit.trim() !== '' ? e.unit.trim() : nodeUnit });
+      madeFrom.push(readStatedChange(e, node as { observed_state?: unknown; scale_frame?: unknown })?.because);
     }
     if (assumed.length === 0) continue;
 
@@ -187,9 +191,9 @@ export function optionSetLimitAsks(graph: {
 
     const limits = rows.map(sayLimit).join(' and ');
     const said = assumed.map((a) => sayFigure(a.value, a.unit));
-    const figures = assumed.length > 1 && said.every((f) => f === said[0])
+    const figures = assumed.length > 1 && said.every((f) => f === said[0]) && madeFrom.every((m) => m === undefined)
       ? `${said[0]} each under those options`
-      : assumed.map((a, i) => `${said[i]} under "${a.option}"`).join(' and ');
+      : assumed.map((a, i) => `${said[i]} under "${a.option}"${madeFrom[i] !== undefined ? ` (${madeFrom[i]})` : ''}`).join(' and ');
     const under = names(assumed.map((a) => a.option));
     const question = today === undefined
       ? `What would "${quantity}" be under ${under}? Your limit (${limits}) can only be checked against Olumi's assumed ` +
