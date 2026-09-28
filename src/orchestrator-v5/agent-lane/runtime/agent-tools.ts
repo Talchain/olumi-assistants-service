@@ -381,6 +381,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       limit_label: { type: 'string', description: 'The limit\u2019s `on` label exactly as the CURRENT MODEL STATE lists it under limits.' },
       operator: { type: 'string', enum: ['<=', '>='], description: 'The limit\u2019s operator exactly as the state lists it.' },
       new_value: { type: 'number', description: 'The new figure the user stated, in the limit\u2019s own unit.' },
+      stated_operator: { type: 'string', enum: ['<', '<=', '>', '>='], description: 'Only when the user states the comparator in this message: '
+        + '< for less than or under, <= for at most, > for more than, >= for at least. Omit it for a new figure alone: the limit keeps its own.' },
       unit: { type: 'string', description: 'The unit the user wrote the figure in, if any.' },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
     }, ['limit_label', 'operator', 'new_value', 'rationale']),
@@ -608,6 +610,8 @@ export interface AgentCapabilities {
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). SLICE C2. */
   proposeLimitChange?(ctx: AgentToolContext, args: {
     limit_label: string; operator: '<=' | '>='; new_value: number; unit?: string; rationale: string;
+    /** A2 follow-up: the comparator the user stated in this message, typed; absent for a new figure alone. */
+    stated_operator?: '<' | '<=' | '>' | '>=';
   }): Promise<ToolResult>;
   runAnalysis(ctx: AgentToolContext, args: { reason: string }): Promise<ToolResult>;
   buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;

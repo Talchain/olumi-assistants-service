@@ -2817,7 +2817,9 @@ export function createAgentCapabilities(
        */
       if (ops.length === 1 && ops[0]!.op === 'set_limit') {
         const op = ops[0]!;
-        const v = op.value as { operator: '<=' | '>='; raw_value: number; unit: string | null; constraint_id: string; before: number };
+        const v = op.value as { operator: '<=' | '>='; raw_value: number; unit: string | null; constraint_id: string; before: number;
+          /** A2 follow-up: the comparator the user stated when proposing it, if they stated one (`proposeLimitChange`). */
+          stated_operator?: '<' | '<=' | '>' | '>=' };
         const pid = decision.proposal.proposal_id;
         if (opts.commitLimitEdit === undefined) {
           return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: pid,
@@ -2827,6 +2829,7 @@ export function createAgentCapabilities(
         const res = await opts.commitLimitEdit({
           scenario_id: ctx.scenario_id, turn_id: operationId, base_graph_hash: decision.proposal.base_graph_identity_hash,
           node_id: op.path, operator: v.operator, raw_value: v.raw_value,
+          ...(v.stated_operator !== undefined ? { stated_operator: v.stated_operator } : {}),
         });
         const label = String(before.nodes.find((x) => x.id === op.path)?.label ?? 'that limit');
         const figure = (x: number): string => (v.unit !== null ? targetFigure(x, v.unit) : String(x));
@@ -2858,7 +2861,8 @@ export function createAgentCapabilities(
         const receipt = receiptSummaryOf({ model_version_receipt: res.model_version_receipt });
         const receipts = receipt.summary !== null ? [receipt.summary] : [];
         proposals.markApplied(pid, receipts);
-        const words = v.operator === '<=' ? 'at most' : 'at least';
+        // A2: said as the model now HOLDS it ("less than 5%" for a strict limit), from the row read back above.
+        const words = LIMIT_OPERATOR_WORDS[statedOperatorOf(heldRows[0]!) ?? v.operator];
         return {
           ok: true, mutated: true, applied: true, proposal_id: pid, operation_id: operationId, receipts,
           ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
@@ -4859,6 +4863,16 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'unreadable_limit',
           detail: 'A limit change needs the limit as the model lists it, its operator, and the new figure. Nothing was prepared; ask the user for whichever is missing.' };
       }
+      // ⭐ A2 follow-up (DL verdict on #2180): the comparator the user STATED in this message, typed, when they stated one.
+      // It must be in the limit's own direction (the held `operator` names the row); absent, the limit keeps its own.
+      const statedArg: unknown = args?.stated_operator;
+      const stated = statedArg === '<' || statedArg === '<=' || statedArg === '>' || statedArg === '>=' ? statedArg : undefined;
+      if (statedArg !== undefined && statedArg !== null
+        && (stated === undefined || (stated === '<' || stated === '<=' ? '<=' : '>=') !== operator)) {
+        return { ok: false, mutated: false, refusal: 'unreadable_limit',
+          detail: `The comparator given is not one this ${operator === '<=' ? 'upper' : 'lower'} limit can take, so nothing was prepared. `
+            + 'Ask the user whether the limit is at most / less than (an upper limit) or at least / more than (a lower one).' };
+      }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const rows = (Array.isArray(g.raw.goal_constraints) ? g.raw.goal_constraints : [])
@@ -4909,19 +4923,25 @@ export function createAgentCapabilities(
             + 'Ask them what the new limit is, in their own words, and never offer a figure of your own as theirs.' };
       }
       const before = typeof row['value'] === 'number' ? row['value'] : NaN;
-      if (before === value) {
+      // A2: the limit as the user stated it NOW ("less than 4%", `statedOperatorOf`), and as it will be: the comparator
+      // the user stated in this message, else its own (a new figure alone keeps it: `limit-edit.ts`).
+      const nowOp = statedOperatorOf(row) ?? operator;
+      const becomesOp = stated ?? nowOp;
+      if (before === value && becomesOp === nowOp) {
         return { ok: false, mutated: false, refusal: 'already_that_figure',
           detail: `The limit on "${node.label}" is already ${figureOf(value)}, so nothing needs to change. Tell the user so.` };
       }
-      const words = operator === '<=' ? 'at most' : 'at least';
+      const now = `${LIMIT_OPERATOR_WORDS[nowOp]} ${figureOf(before)}`;
+      const becomes = `${LIMIT_OPERATOR_WORDS[becomesOp]} ${figureOf(value)}`;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash,
-        operations: [{ op: 'set_limit', path: node.id, value: { operator, raw_value: value, unit, constraint_id: String(row['constraint_id'] ?? ''), before } }],
+        operations: [{ op: 'set_limit', path: node.id, value: { operator, raw_value: value, unit, constraint_id: String(row['constraint_id'] ?? ''), before,
+          ...(stated !== undefined ? { stated_operator: stated } : {}) } }],
         provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Change the limit on "${node.label}" from ${words} ${figureOf(before)} to ${words} ${figureOf(value)}`,
+        public_label: `Change the limit on "${node.label}" from ${now} to ${becomes}`,
       });
       proposals.put(proposal);
       return {
@@ -4929,8 +4949,8 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        limit: { on: node.label, now: `${words} ${figureOf(before)}`, becomes: `${words} ${figureOf(value)}` },
-        note: `Nothing has changed yet. Tell the user it will change the limit on "${node.label}" from ${words} ${figureOf(before)} to ${words} ${figureOf(value)}, `
+        limit: { on: node.label, now, becomes },
+        note: `Nothing has changed yet. Tell the user it will change the limit on "${node.label}" from ${now} to ${becomes}, `
           + 'as their own figure, keeping its units — never the id — and call authorise_change with this proposal_id once they agree.',
       };
     },
