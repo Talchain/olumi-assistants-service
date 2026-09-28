@@ -170,6 +170,48 @@ describe('R8 — a 1 in a unit that names the switch\'s STATE is on; a 1 in a qu
   });
 });
 
+// ⭐ SWITCH-LOOP STEP 4 (DL #72 5864154474; served pj-20260928T053022Z A06 on a94fcb9, OpenAI): the model spelled the
+// switch's states INSIDE the unit — `{1, unit: "binary (0=no, 1=yes)", estimate: true}` — and the digit test read the
+// glossary's own 0 and 1 as an amount: refused ×4 (`["unit","estimate"]`), then the reply gave up the option. A 0 or 1
+// bound to a word by "=" or ":" names a STATE when that word reads as no quantity; every other digit still refuses.
+describe('R10 — a unit that spells its own states ("0=no, 1=yes") names the switch; its 1 is on', () => {
+  it.each([
+    ['{ 1, "binary (0=no, 1=yes)", estimate: true } (served DL A06, ×4)', { value: 1, unit: 'binary (0=no, 1=yes)', estimate: true }],
+    ['{ 1, "boolean (1 = on, 0 = off)" }', { value: 1, unit: 'boolean (1 = on, 0 = off)' }],
+    ['{ 1, "flag: yes=1, no=0" }', { value: 1, unit: 'flag: yes=1, no=0' }],
+    ['{ true, "binary (0=no, 1=yes)" }', { value: true, unit: 'binary (0=no, 1=yes)' }],
+  ])('R10 RED: a new switch at %s → accepted in ONE call; the option turns it on at 1 with no source', async (_name, level) => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx as never, withLevel(level) as never) as Result;
+    expect(r.refusal, JSON.stringify(r)).not.toBe('switch_level_not_on');
+    expect(sent).toHaveLength(1);
+    expect(switchLevelSent(sent), JSON.stringify(r)).toEqual([{ factor_key: SWITCH_KEY, value: 1 }]);
+  });
+
+  it('R10 (the DL\'s second question): { 1, estimate: true } with no unit is on — the estimate alone never refuses', async () => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx as never, withLevel({ value: 1, estimate: true }) as never) as Result;
+    expect(r.refusal, JSON.stringify(r)).not.toBe('switch_level_not_on');
+    expect(switchLevelSent(sent)).toEqual([{ factor_key: SWITCH_KEY, value: 1 }]);
+  });
+
+  it.each([
+    ['{ 1, "hires (0=none, 1=one)" } (a count beside its glossary)', { value: 1, unit: 'hires (0=none, 1=one)' }, ['unit']],
+    ['{ 1, "GBP (1=£1)" } (the pair binds a figure, not a word)', { value: 1, unit: 'GBP (1=£1)' }, ['unit']],
+    ['{ 1, "% (1=yes)" } (a user\'s 1%)', { value: 1, unit: '% (1=yes)' }, ['unit']],
+    ['{ 1, "binary (0=no, 1=customer)" } (a glossary word that is a count: fails closed)', { value: 1, unit: 'binary (0=no, 1=customer)' }, ['unit']],
+    ['{ 1, "binary (0=no, 2=yes)" } (a code that is not 0 or 1)', { value: 1, unit: 'binary (0=no, 2=yes)' }, ['unit']],
+    ['{ 1, "1 hire (0=no, 1=yes)" } (a figure outside the glossary)', { value: 1, unit: '1 hire (0=no, 1=yes)' }, ['unit']],
+    ['{ 2, "binary (0=no, 1=yes)" } (not one)', { value: 2, unit: 'binary (0=no, 1=yes)' }, ['unit', 'not_one']],
+  ])('R10 CONTRAST: a new switch at %s → refused as before, nothing sent', async (_name, level, fields) => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx as never, withLevel(level) as never) as Result;
+    expect(r.refusal, JSON.stringify(r)).toBe('switch_level_not_on');
+    expect(r.conflict_fields).toEqual(fields);
+    expect(sent).toEqual([]);
+  });
+});
+
 // Served 137d3a5 (MG pj-20260928T042134Z A07/A08): the grandfather switch at `{0}` in the ONLY option, four times.
 describe('R9 — a one-option change that lists its new switch at 0 is told the exact next call, and that call is held', () => {
   it('R9 RED: { 0 } → refused; the detail names the entry with NO "level" key (not 0)', async () => {

@@ -393,8 +393,24 @@ function newSwitchLevelConflict(level: unknown): { value: unknown; unit?: unknow
  */
 function unitReadsAsQuantity(unit: string): boolean {
   if (classifyUnitScaleClass(unit) !== 'unknown') return true;
-  if (/[\d%£$€¥₹]/u.test(unit)) return true;
-  return unit.split(/[\s/,;:()[\]{}"'-]+/u).some((t) => t !== '' && (unitFamilyOf(t) !== null || isCurrencyUnit(t) || countedNoun(t)));
+  const read = withoutStateGlossary(unit);
+  if (/[\d%£$€¥₹]/u.test(read)) return true;
+  return read.split(/[\s/,;:()[\]{}"'-]+/u).some((t) => t !== '' && tokenReadsAsQuantity(t));
+}
+const tokenReadsAsQuantity = (t: string): boolean => unitFamilyOf(t) !== null || isCurrencyUnit(t) || countedNoun(t);
+
+/**
+ * ⭐ A UNIT'S OWN STATE GLOSSARY IS NO AMOUNT (MG, switch-loop step 4; DL #72 5864154474, served pj-20260928T053022Z A06
+ * on a94fcb9): `{1, unit: "binary (0=no, 1=yes)", estimate: true}` was refused ×4 — the digit test above read the
+ * glossary's own 0 and 1 as a figure — and the reply then gave the option up. A 0 or a 1 bound to a word by "=" or ":"
+ * ("0=no", "1 = on", "yes=1") names a STATE, when that word itself reads as no quantity (`tokenReadsAsQuantity`, the
+ * same inverted test): each such pair is set aside before the unit is read. Any other digit still reads as a figure
+ * ("1 hire (0=no, 1=yes)", "GBP (1=£1)", a code 2), and so does a pair whose word is a count ("1=customer").
+ */
+const STATE_GLOSSARY_PAIR = /(?<![\p{L}\p{N}.])(?:[01]\s*[=:]\s*(\p{L}+)|(\p{L}+)\s*[=:]\s*[01])(?![\p{L}\p{N}.])/gu;
+function withoutStateGlossary(unit: string): string {
+  return unit.replace(STATE_GLOSSARY_PAIR, (pair: string, after?: string, before?: string) =>
+    (tokenReadsAsQuantity(after ?? before ?? '') ? pair : ' '));
 }
 
 

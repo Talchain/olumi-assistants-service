@@ -91,6 +91,8 @@ describe('R1/R2 — a new switch at exactly 0 under an option, turned on by anot
     // Switch-loop step 2: a 0 in a unit that names the switch's STATE is off, as its 1 is on (served shapes used "binary").
     ["{ value: 0, unit: 'binary' }", { value: 0, unit: 'binary' }],
     ["{ value: 0, unit: 'enabled' }", { value: 0, unit: 'enabled' }],
+    // Switch-loop step 4 (DL #72 5864154474, served A06): a unit that spells its own states is the switch's, off at 0.
+    ["{ value: 0, unit: 'binary (0=no, 1=yes)' }", { value: 0, unit: 'binary (0=no, 1=yes)' }],
   ])('RED: %s → ok, held; retention turns the switch on at 1; conversion sends NO intervention on it; the drop is said', async (_name, offLevel) => {
     const { caps, sent } = setup();
     const r = await caps.proposeNewOption(ctx as never, a03(offLevel) as never) as Result;
