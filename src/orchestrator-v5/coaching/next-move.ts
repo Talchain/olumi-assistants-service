@@ -57,6 +57,7 @@ import { buildEstimatedLimitCard } from './estimated-limit-card.js';
 import { buildLeaderLimitRiskCard } from './leader-limit-risk-card.js';
 import { buildUnvaluedDriverCard } from './unvalued-driver-card.js';
 import { COACHING_BLOCK_BODY_MAX } from './fragile-edge-offer-text.js';
+import { readLimitVerdicts } from '../../orchestrator/context/constraint-feasibility.js';
 
 export type NextMoveKind =
   | 'limit_risk_leader'
@@ -106,6 +107,8 @@ export interface NextMoveInputs {
   readonly leaderLimitRisks: unknown;
   /** The graph proven to be the run's own (`bound-graph.ts` `graphBoundToHash`), else null. */
   readonly boundGraph: Record<string, unknown> | null;
+  /** B5 (#2146): the READBACK's per-limit verdicts (`final.limitVerdicts`, the same read); absent → aggregate only. */
+  readonly limitVerdicts?: unknown;
 }
 
 export interface NextMoveSelection {
@@ -205,7 +208,12 @@ export function selectNextMove(args: NextMoveInputs): NextMoveSelection {
   const caveats: NextMoveCaveat[] = [];
   let noOptionMeets: CoachingBlock | null = null;
   const everyOption = everyOptionBreaksALimit(analysisState);
-  if (everyOption !== null || leaderWithheldForALimit(analysisState)) {
+  // B5 (#2146; wire C01 on 08fbba5, DL GO 5861158484): "could not check" is true ONLY for an `unscored` limit (MG
+  // 5861148718). When the typed per-limit rows attest that EVERY limit was checked — some only against Olumi's
+  // estimate — a withheld leader is not a limit the user cannot check, and saying so would be false.
+  const perLimit = readLimitVerdicts(args.limitVerdicts);
+  const everyLimitChecked = perLimit !== null && perLimit.per_limit.every((r) => r.state !== 'unscored');
+  if (everyOption !== null || (leaderWithheldForALimit(analysisState) && !everyLimitChecked)) {
     const limitLabels = boundGraph !== null ? limitNodeLabels(boundGraph) ?? undefined : undefined;
     const provedUnanchored = everyOption === null && boundGraph !== null && everyLimitProvedUnanchored(boundGraph, runOptions);
     const limit = buildLimitUncheckedCard(input, limitLabels, provedUnanchored, constraintVerdictState, everyOption);
@@ -233,7 +241,7 @@ export function selectNextMove(args: NextMoveInputs): NextMoveSelection {
   // "Checked against Olumi's estimate" presupposes the limit WAS checked: never beside a "could not be checked" caveat,
   // whatever a disagreeing verdict field says (the readback's typed claim wins, as before C4).
   const estimate = caveats.length === 0
-    ? buildEstimatedLimitCard(input, constraintVerdictState, boundGraph, runOptions)
+    ? buildEstimatedLimitCard(input, constraintVerdictState, boundGraph, runOptions, perLimit)
     : { block: null };
   if (estimate.block !== null) return { move: moveOf('real_figure', estimate.block), reason: null, caveats };
 

@@ -2343,7 +2343,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * blocks stay under `bindRunBlocksToReadback`'s rule above.
      */
     // C4: the same blocks and eligibility as `runTurnCoaching`, plus the typed move, its caveats and the science brief.
-    const runCoaching = runTurnNextMove(lastRun, { scenarioId, graphHash, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks });
+    const runCoaching = runTurnNextMove(lastRun, { scenarioId, graphHash, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, limitVerdicts });
     const coachingBound = [...runBound, ...runCoaching.blocks.filter((b) => !lastRunBlocks.includes(b))];
     // What changed since the last run: the run turn's own block and refusal reason, only beside that same run.
     const runDelta = runDeltaBoundToReadback(lastRun, { scenarioId, graphHash, analysisState, analysisResult });
