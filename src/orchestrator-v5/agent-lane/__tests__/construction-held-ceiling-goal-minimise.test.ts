@@ -164,15 +164,33 @@ describe('a ceiling the user WROTE: the run minimises, and the stated current le
     expect(said(result)).toContain('The current level of "Monthly spend" (50) is outside the range the target of 36 is measured on (0 to 45)');
   });
 
-  it('row 6: held `<` → the run minimises, and the level stays refused exactly as today (authored operator variant)', async () => {
+  it('row 6 (R1 S1, AIQ 5871459631): held `<` → the level stays refused exactly as today, so there is no proof the target is a level of the node → nothing sent (authored operator variant)', async () => {
     const brief = 'Should we switch our cloud provider from AWS to GCP? Monthly spend is £45k; we want to cut it to under £36k a month without more than 2 weeks of migration downtime risk.';
     const { result, graph, goal } = await build(brief, withGoal('cloud-2', { operator: '<' }));
     expect(goal.goal_direction).toBe('<');
     expect(Object.hasOwn(goal, 'observed_state')).toBe(false);
     expect(said(result)).toContain('"Monthly spend" is a goal to stay below 36, and the chance of meeting a goal of that kind cannot be calculated correctly yet');
     const req = await plotRequestFor(graph);
-    expect(req.goal_direction).toBe('minimise');
-    expect(directionLogs()).toEqual([expect.objectContaining({ provenance: 'stated_comparator' })]);
+    expect('goal_direction' in req).toBe(false);
+    expect(directionLogs()).toEqual([]);
+  });
+
+  it('⭐ RED row 9 (R1 S1, AIQ 5871459631): "reduce costs by at most 10%" — a held `<=` on a CHANGE target ("% reduction") → nothing sent, the comparator still held (authored variant of the real cloud-2 draft)', async () => {
+    const brief = 'Should we switch our cloud provider from AWS to GCP? Monthly spend is £45k; we want to reduce costs by at most 10% without more than 2 weeks of migration downtime risk.';
+    const { graph, goal } = await build(brief, withGoal('cloud-2', { metric: 'costs', operator: '<=', value: 10, unit: '% reduction' }));
+    expect(goal.goal_direction, 'the comparator the user wrote is still held').toBe('<=');
+    const req = await plotRequestFor(graph);
+    expect('goal_direction' in req).toBe(false);
+    expect(directionLogs()).toEqual([]);
+  });
+
+  it('⭐ RED row 10 (R1 S1): a held `<=` with NO stated current level ("at most £36k", today not given) → nothing sent (authored variant)', async () => {
+    const brief = 'Should we switch our cloud provider from AWS to GCP? We want monthly spend to be at most £36k a month without more than 2 weeks of migration downtime risk.';
+    const { graph, goal } = await build(brief, withGoal('cloud-2', { baseline_value: null, baseline_known: false }));
+    expect(goal.goal_direction).toBe('<=');
+    expect(Object.hasOwn(goal, 'observed_state')).toBe(false);
+    const req = await plotRequestFor(graph);
+    expect('goal_direction' in req).toBe(false);
   });
 });
 

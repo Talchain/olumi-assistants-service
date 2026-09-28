@@ -61,15 +61,21 @@
  *
  *   | the goal node holds  | sent                          | provenance              |
  *   |----------------------|-------------------------------|-------------------------|
- *   | `'<='` or `'<'`      | `'minimise'`                  | `stated_comparator`     |
+ *   | `'<='` or `'<'`      | `'minimise'` — ONLY beside the stated level (below) | `stated_comparator` |
  *   | `'>='` or `'>'`      | nothing (today's maximiser)   | —                       |
  *   | nothing              | the label classifier, as before | `derived_from_goal_label` |
  *
+ * ⚠ R1 S1 (AIQ 5871459631, DL 5871433038): a held ceiling sends `minimise` only when the goal carries the current
+ * level the user stated in the target's own unit (`ceilingTargetIsALevelOnItsNode`) — the one proof, before R1 types
+ * the frame, that the target is a LEVEL of the node and not a change ("reduce costs by at most 10%" is a floor on
+ * cost). Otherwise nothing is sent. `maximise` for a held floor waits for R1 S4 (a real draft, `cloud-0`: "costs >=
+ * 20 % reduction", would otherwise be attested a false maximiser, MG 5871403407).
  * `maximise` is still never sent — the one-sided argument above is unchanged. A held floor wins over a label that
  * reads "reduce" (the quantity it measures is then the reduction, which the user wants to rise).
  */
 
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
+import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 
 /** The only sense this module will ever put on the wire. */
 export type EmittedGoalDirection = 'minimise';
@@ -122,6 +128,26 @@ export function readHeldGoalComparator(graph: unknown, goalNodeId: unknown): Hel
 }
 
 /**
+ * ⭐ R1 S1 (AIQ 5871459631): the proof that a held ceiling's target is a LEVEL in the goal node's own unit family — the
+ * goal carries the current level the USER stated (`observed_state`, `source` `brief_extraction` or `USER_EDIT_SOURCE`,
+ * admitted by `admitStatedGoalLevel` beside that very ceiling) in the target's own unit (`goal_threshold_unit`). A target whose
+ * unit is a change ("% reduction") never admits a level in another unit, so it never passes; R1 S4 types the frame.
+ */
+function ceilingTargetIsALevelOnItsNode(graph: unknown, goalNodeId: unknown): boolean {
+  if (typeof goalNodeId !== 'string' || goalNodeId === '') return false;
+  const node = readNodes(graph).find((n) => n.id === goalNodeId);
+  const os = node?.observed_state;
+  if (os === null || typeof os !== 'object' || Array.isArray(os)) return false;
+  const level = os as Record<string, unknown>;
+  const unit = (u: unknown): string | null => (typeof u === 'string' && u.trim() !== '' ? u.trim().toLowerCase() : null);
+  const targetUnit = unit(node?.goal_threshold_unit);
+  // The user's own figure: stated in the brief (`brief_extraction`) or given in chat and approved (`USER_EDIT_SOURCE`).
+  return (level.source === 'brief_extraction' || level.source === USER_EDIT_SOURCE)
+    && typeof level.raw_value === 'number' && Number.isFinite(level.raw_value)
+    && targetUnit !== null && unit(level.unit) === targetUnit;
+}
+
+/**
  * The sense a HELD comparator attests: `'minimise'` for a ceiling (`'<='`, `'<'`), otherwise `undefined` (a floor
  * is today's maximiser, never sent). ONE reading, shared by the wire (`resolveGoalDirection`) and by admission of a
  * stated current level beside a ceiling (`admitStatedGoalLevel`), so a level is admitted only where the run minimises.
@@ -141,6 +167,11 @@ export function resolveGoalDirection(
   const held = readHeldGoalComparator(graph, goalNodeId);
   if (held !== null) {
     const sense = heldComparatorSense(held);
+    // AIQ R1 ruling 5871459631: a held ceiling attests `minimise` ONLY when its target is a LEVEL in the node's own
+    // unit family ("reduce costs by at most 10%" is a floor on cost). Until R1 types the frame (S4), the one structural
+    // proof is a current level the user stated, admitted on the goal in the target's own unit; without it, nothing is
+    // sent and ISL's GOAL_DIRECTION_UNATTESTED stays — silence, never a guessed sense.
+    if (sense === 'minimise' && !ceilingTargetIsALevelOnItsNode(graph, goalNodeId)) return undefined;
     return sense === undefined ? undefined : { direction: sense, provenance: 'stated_comparator' };
   }
   const derived = directionFromGoalLabel(graph, goalNodeId);
