@@ -1118,8 +1118,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...((req as { tool_choice?: unknown }).tool_choice === 'none' ? { tool_choice: 'none' } : {}),
         // C5b: on a withheld run that one call answers in a typed shape (`RUN_INTERPRETATION_FORMAT`).
         ...((req as { text?: unknown }).text !== undefined ? { text: (req as { text?: unknown }).text } : {}),
-        // PJ-C1 (batch 5): the conversation budget's own effort, as construction already sends its budget's (L~1222).
-        ...(budget.reasoning_effort !== undefined ? { reasoning: { effort: budget.reasoning_effort } } : {}),
         max_output_tokens: req.max_output_tokens,
       }),
     });

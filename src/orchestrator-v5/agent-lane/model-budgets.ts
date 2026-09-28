@@ -93,15 +93,10 @@ export const BANKED_BUDGETS: readonly CallBudget[] = [
     model: 'gpt-5.6-terra',
     role: 'conversation',
     max_output_tokens: 3400,
-    // PJ-C1 (DL #72 5860966219, batch 5): served journey A (pj-20260927T233309Z) spent 2,127 of 5,367 conversation
-    // output tokens on reasoning at the model default, ≈ 17 s at the measured 8.1 ms per output token.
-    reasoning_effort: 'low',
     evidence:
       'Banked managed_agent_terra 6 turns: out 3389 TOTAL across six turns incl. 615 reasoning, ' +
       'reasoning effort omitted (model default). Per-turn need is far below this; the figure is the ' +
-      'six-turn total and is deliberately generous for one turn. Effort LOW from 28 Sep: served journey A ' +
-      '(pj-20260927T233309Z, 20 calls) measured call ms = 1,395 + 8.1 x output tokens (r 0.89), with 40% of output ' +
-      'tokens reasoning at the default; accepted only on a served journey-A run passing AIQ\'s truth rows (#72 5860911820).',
+      'six-turn total and is deliberately generous for one turn.',
   },
   {
     model: 'gpt-5.6-sol',
