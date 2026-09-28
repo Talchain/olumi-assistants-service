@@ -100,7 +100,8 @@ describe('F-C: a LEVEL limit in percentage points is a percent', () => {
     const c = admit(RUN2, { frame: 'delta' });
     expect(c.unit).toBe('percentage points');
     expect(c.provenance_unit_relabelled).toBeUndefined();
-    expect(c.value_frame).toBe('delta');
+    // R1 S4-core: the pre-R1 drafter's `delta` ("a CHANGE from today") is written as `change_abs` (limit-frame.ts).
+    expect(c.value_frame).toBe('change_abs');
   });
 
   it('contrast: an UNFRAMED limit in percentage points is kept verbatim', () => {

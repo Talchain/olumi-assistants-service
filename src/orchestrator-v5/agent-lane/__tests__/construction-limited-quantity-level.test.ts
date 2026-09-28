@@ -36,7 +36,7 @@ const factor = (label: string, baseline_value: number | null, plausible_max: num
 const est = (factor_label: string, value: number, unit: string, provenance = 'ai_proposed') => ({ factor_label, value, value_kind: 'absolute' as const, unit, provenance });
 
 /** Journey C's shape: churn is limited (level frame), acted on by no option, and — in the served 3/17 — left with no level. */
-function journeyC(churnBaseline: number | null, frame: 'level' | 'delta' = 'level', churnKnown = false) {
+function journeyC(churnBaseline: number | null, frame: 'level' | 'change_abs' = 'level', churnKnown = false) {
   return {
     goal: { metric: 'MRR', operator: '>=', target_stated: true, value: 100000, unit: 'GBP', horizon_months: 6, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'ai_proposed', scope: null },
     constraints: [{ metric: 'Monthly churn rate', operator: '<', value: 4, unit: '%', provenance: 'explicit', frame }],
@@ -100,7 +100,7 @@ describe('a LEVEL limit\'s quantity with no level is a baseline gap the repair r
   });
 
   it('CONTRAST: a DELTA limit needs no level of its own — no gap, no retry', async () => {
-    const p = prepareProvisionalCandidate(journeyC(null, 'delta') as unknown as CandidateModel) as { baseline_gaps?: unknown[] };
+    const p = prepareProvisionalCandidate(journeyC(null, 'change_abs') as unknown as CandidateModel) as { baseline_gaps?: unknown[] };
     expect(p.baseline_gaps).toEqual([]);
   });
 
@@ -164,7 +164,7 @@ describe('condition 2 — the user is asked, typed and non-blocking, for today\'
   });
 
   it('CONTRAST: a DELTA limit needs no level of its own — no ask', async () => {
-    const { result } = await construct(BRIEF, journeyC(null, 'delta'));
+    const { result } = await construct(BRIEF, journeyC(null, 'change_abs'));
     expect(asksOf(result)).toEqual([]);
   });
 
