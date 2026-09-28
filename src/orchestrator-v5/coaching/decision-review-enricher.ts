@@ -215,6 +215,32 @@ export interface EnrichDecisionReviewInput {
    * omitted/empty → byte-identical invoke input and prompt.
    */
   readonly scaffoldedOptions?: ReadonlyArray<ScaffoldedOptionRecord>;
+  /**
+   * ⭐ THE ADMISSION'S CLAIM CAP, threaded exactly as `mayNameLeadingOption` is
+   * and for the same reason: this module cannot see it.
+   *
+   * ⚠⚠ IT IS ONE CONJUNCT, NOT THE GATE, AND CALLING IT THE GATE WOULD BE THE
+   *    #709/#737 DEFECT (CLAUDE.md trap 21). The deterministic guarantee is
+   *    `enforceLeadingOptionClaimsAtWire`'s permit-with-caveat arm, which
+   *    conjoins the turn's entitlement, the payload's SEPARATION and this mode.
+   *    Separation is payload-scoped and is genuinely not knowable here, so this
+   *    field never claims to be that conjunction — it carries the ADMISSION half
+   *    only, read by both callers with the wire gate's OWN reader
+   *    (`permittedAnalysisModeFromAnalysisReady`) rather than re-derived, so the
+   *    two can never drift into two authorities on one question.
+   *
+   * ⛔ AND ITS EFFICACY IS RATE REDUCTION, MEASURED, NOT A GUARANTEE. This
+   *    module already proves it for the sibling flag: on the POST-#710 walk
+   *    `recommendation_suppressed: true` was set and the model named a leader
+   *    anyway on 5/5 withheld bodies. The prompt text does not explain either
+   *    key — both simply ride in `winner`'s JSON. A claim never authored is
+   *    strictly better than one qualified downstream, which is why this exists;
+   *    it is NOT why the defect is closed.
+   *
+   * Optional and fail-open: omitted ⇒ no flag ⇒ byte-identical invoke input and
+   * prompt, exactly as every pre-existing caller behaves today.
+   */
+  readonly figuresProvisional?: boolean;
 }
 
 type SkipReason =
@@ -301,6 +327,9 @@ export async function enrichRunAnalysisWithDecisionReview(
     // a documented steady state, so without this the reviewing model receives
     // `<GRAPH>{}</GRAPH>` — 21 characters against a 43,100 budget, measured live.
     input.runGraph,
+    // The admission's claim cap — ONE conjunct, threaded, never re-derived.
+    // See `figuresProvisional` on the input type for why this is not the gate.
+    input.figuresProvisional,
   );
   if (!invokeInput) {
     skipTelemetry(input, 'no_winner', {
@@ -899,6 +928,8 @@ export function buildInvokeInputForTests(
   mayNameLeadingOption = true,
   /** See `buildInvokeInput`. Absent behaves exactly as before. */
   runGraph?: unknown,
+  /** See `buildInvokeInput`. Absent behaves exactly as before. */
+  figuresProvisional?: boolean,
 ): DecisionReviewInvokeInput | null {
   return buildInvokeInput(
     brief,
@@ -907,6 +938,7 @@ export function buildInvokeInputForTests(
     scaffoldDisclosure,
     mayNameLeadingOption,
     runGraph,
+    figuresProvisional,
   );
 }
 
@@ -940,6 +972,14 @@ function buildInvokeInput(
    * Optional: absent behaves exactly as before.
    */
   runGraph?: unknown,
+  /**
+   * The admission's claim cap for this run — ONE conjunct of the wire gate,
+   * threaded from the caller with the wire gate's own reader. See
+   * `figuresProvisional` on `EnrichDecisionReviewInput` for why this is a
+   * rate-reduction hint and not the guarantee.
+   * Optional: absent behaves exactly as before (no key on `winner`).
+   */
+  figuresProvisional?: boolean,
 ): DecisionReviewInvokeInput | null {
   // Phase 3A fix (2026-05-17): walk every available results source until
   // one can match `leading_option_id`. The previous "first non-empty
@@ -1054,6 +1094,35 @@ function buildInvokeInput(
   // flag can switch off is not a withhold.
   if (!mayNameLeadingOption) {
     winner = { ...winner, recommendation_suppressed: true };
+  }
+
+  // ⭐ THE SECOND CONJUNCT'S HINT — added 2026-09-21 beside the first, at the
+  // same earliest-possible point and with the same honest limits.
+  //
+  // WHY. `recommendation_suppressed` above is keyed on `mayNameLeadingOption`
+  // ALONE — the turn's ENTITLEMENT. The admission's `permitted_analysis_mode`
+  // is a SECOND, different question ("does the MODEL license the claim at
+  // all?"), and nothing on this path ever asked it. On staging build `d536aae`,
+  // beat 6, that produced a review blob that contradicted itself inside 5 KB:
+  // `readiness_rationale` read "The comparison is settled enough to act on: …
+  // holds a well evidenced share across runs" beside its own sibling
+  // `robustness_explanation.summary` reading "directional rather than settled",
+  // on a run with `material_parameters_user_stated: 0` of 18.
+  //
+  // ⚠ THIS IS NOT WHAT CLOSES THAT DEFECT, and it must not be reported as such.
+  //   The deterministic close is `leading-option-wire-enforcement.ts`'s
+  //   permit-with-caveat arm, which attaches `PROVISIONAL_FIGURES_CAVEAT` to the
+  //   narrative at egress. This flag only reduces the rate at which the claim is
+  //   AUTHORED — and the module's own measurement of the sibling flag (5/5
+  //   withheld bodies named a leader anyway) is the reason that distinction is
+  //   spelled out rather than assumed.
+  //
+  // ⚠ NOT CONJOINED WITH `recommendation_suppressed` INTO ONE FLAG. They answer
+  //   different questions and are deliberately not reconciled (CLAUDE.md trap
+  //   21) — suppressing a recommendation and qualifying a figure are different
+  //   instructions, and a withheld turn can need the first without the second.
+  if (figuresProvisional === true) {
+    winner = { ...winner, figures_provisional: true };
   }
 
   // Build label/unit lookups from enrichment.graph.nodes[]. The graph is

@@ -165,6 +165,16 @@ export interface DecisionReviewInvokeInput {
     readonly constraint_infeasible?: boolean;
     /** Set alongside `constraint_infeasible`; recommendation framing suppressed. */
     readonly recommendation_suppressed?: boolean;
+    /**
+     * Set when the admission's `permitted_analysis_mode` caps the claim at
+     * `quantified_provisional` — every estimate behind this run is
+     * machine-authored, so figures may be shown but not framed as settled or
+     * well evidenced. A DIFFERENT question from `recommendation_suppressed`
+     * (entitlement) and deliberately a separate key, never conjoined with it.
+     * Absent when the admission permits a full comparative-leader claim, or on
+     * any pre-`analysis_admission` caller (byte-identical prompt).
+     */
+    readonly figures_provisional?: boolean;
     readonly [k: string]: unknown;
   };
   readonly runner_up: {
