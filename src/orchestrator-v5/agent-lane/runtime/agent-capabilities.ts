@@ -458,17 +458,29 @@ function switchLevelMeansOff(level: unknown): boolean {
  * option that also names it another way is two answers, refused as before. Where no option turns the switch on, nothing
  * is dropped: the 0 stays a `switch_level_not_on` conflict, and its refusal says to list it under the option that turns it on.
  */
-function dropSwitchOffEntries<S extends { readonly label: string; readonly acts_on: readonly { readonly factor_label?: unknown; readonly level?: unknown }[] }>(
-  specs: readonly S[],
-  nodes: readonly { readonly kind?: string; readonly label?: string; readonly description?: string }[],
-  newFactors: readonly { readonly key: string; readonly label: string; readonly kind?: 'switch' }[],
-): { specs: S[]; dropped: { option: string; factor: string }[] } {
+type SwitchSpec = { readonly label: string; readonly acts_on: readonly { readonly factor_label?: unknown; readonly level?: unknown }[] };
+type SwitchNodes = readonly { readonly kind?: string; readonly label?: string; readonly description?: string }[];
+type SwitchNewFactors = readonly { readonly key: string; readonly label: string; readonly kind?: 'switch' }[];
+
+/**
+ * The NEW switch an acts_on label names, resolved exactly as `planNewOption` resolves it — a factor the model has first,
+ * then a factor this change adds — so a label the model already has is never a new switch.
+ */
+function newSwitchNamer(nodes: SwitchNodes, newFactors: SwitchNewFactors): (label: unknown) => { key: string; label: string } | undefined {
   const n = (v: unknown): string => String(v ?? '').trim().toLowerCase();
-  const newSwitchNamed = (label: unknown): { key: string; label: string } | undefined => {
+  return (label) => {
     const wanted = n(label);
     if (wanted === '' || nodes.some((x) => x.kind === 'factor' && (n(x.label) === wanted || n(x.description) === wanted))) return undefined;
     return newFactors.find((f) => f.kind === 'switch' && n(f.label) === wanted);
   };
+}
+
+function dropSwitchOffEntries<S extends SwitchSpec>(
+  specs: readonly S[],
+  nodes: SwitchNodes,
+  newFactors: SwitchNewFactors,
+): { specs: S[]; dropped: { option: string; factor: string }[] } {
+  const newSwitchNamed = newSwitchNamer(nodes, newFactors);
   const turnsOn = (spec: S, key: string): boolean =>
     spec.acts_on.some((a) => newSwitchNamed(a.factor_label)?.key === key && newSwitchLevelConflict(a.level) === null);
   const dropped: { option: string; factor: string }[] = [];
@@ -485,6 +497,59 @@ function dropSwitchOffEntries<S extends { readonly label: string; readonly acts_
     }),
   }));
   return { specs: out, dropped };
+}
+
+/**
+ * A level that says NOTHING but 0: `value` exactly 0, and `unit`, `estimate` and `basis` absent or empty (`estimate`
+ * false) — every field its empty default, and no other key. Any unit, `estimate: true` or basis makes it a reading.
+ */
+function placeholderSwitchZero(level: unknown): boolean {
+  if (level === null || typeof level !== 'object' || Array.isArray(level)) return false;
+  const l = level as Record<string, unknown>;
+  const blank = (v: unknown): boolean => v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
+  return l.value === 0 && Object.keys(l).every((k) => k === 'value' || k === 'unit' || k === 'estimate' || k === 'basis')
+    && blank(l.unit) && (blank(l.estimate) || l.estimate === false) && blank(l.basis);
+}
+
+/**
+ * ⭐ A PLACEHOLDER 0 ON THE ONE ENTRY THAT NAMES A NEW SWITCH IS NO LEVEL, WHERE "OFF" WOULD MAKE THE CHANGE MEAN NOTHING
+ * (MG, switch-loop step 5; OpenAI Runtime #72 5865857191 / 5865861134). After step 3, 41 served journey-A turns on 16
+ * builds still refused `switch_level_not_on` (`not_one`): 98 refusals, 25 turns proposing nothing, the model re-sending
+ * byte-identical arguments whose level was `{value: 0, unit: "", estimate: false, basis: ""}`. MG's own gate on c35f1c7
+ * (`rejected_levels`, 4 turns, 12 refusals): every one a bare 0 on the ONLY entry naming the switch, under the option that
+ * turns it on — the grandfather switch in the one-option A07/A08, the retention switch under "Retention intervention for
+ * at-risk accounts" (its only entry) in A03 — and the replies said it is "on under the option". The tool's own words
+ * forbid the placeholder ("never 0 or any placeholder to mean 'not set'"), and a bare entry turns a switch on.
+ *
+ * So that 0 (`placeholderSwitchZero`) is read as NO level — on — only where "off" would be incoherent: the change adds ONE
+ * option (off, the switch is added for nothing), or the switch is that option's ONLY entry (off, the option acts on
+ * nothing). Said in the result (`switch_placeholder_levels_read_as_on`), and the approval shows the option turning it on.
+ * Unchanged: a 0 that says more (a unit, `estimate: true`, a basis); a switch two entries name; and a 0 under an option
+ * that also acts on something else in a change of several options, where "this option leaves it off" is a reading
+ * (`dropSwitchOffEntries` drops it when another option turns the switch on; otherwise it is refused, as before). Runs
+ * AFTER `dropSwitchOffEntries`, so a 0 another option answers is still dropped as off. PURE.
+ */
+function readPlaceholderSwitchZerosAsOn<S extends SwitchSpec>(
+  specs: readonly S[],
+  nodes: SwitchNodes,
+  newFactors: SwitchNewFactors,
+): { specs: S[]; read: { option: string; factor: string }[] } {
+  const newSwitchNamed = newSwitchNamer(nodes, newFactors);
+  const namings = (key: string): number =>
+    specs.reduce((sum, spec) => sum + spec.acts_on.filter((a) => newSwitchNamed(a.factor_label)?.key === key).length, 0);
+  const read: { option: string; factor: string }[] = [];
+  const out = specs.map((spec) => ({
+    ...spec,
+    acts_on: spec.acts_on.map((a) => {
+      const sw = newSwitchNamed(a.factor_label);
+      if (sw === undefined || !placeholderSwitchZero(a.level) || namings(sw.key) !== 1) return a;
+      if (specs.length !== 1 && spec.acts_on.length !== 1) return a;
+      read.push({ option: spec.label.trim(), factor: sw.label });
+      const { level: _placeholder, ...entry } = a;
+      return entry as typeof a;
+    }),
+  }));
+  return { specs: out, read };
 }
 
 /**
@@ -4487,7 +4552,12 @@ export function createAgentCapabilities(
        * `switch_level_not_on` refusals, ~23 s). When another option in this change turns it on, that 0 says only that
        * this option does not act on it: dropped before planning (no link, no level), and said (`switch_off_entries_dropped`).
        */
-      const { specs, dropped: switchOffDropped } = dropSwitchOffEntries(askedSpecs, g.nodes, newFactors);
+      const { specs: afterOffDrop, dropped: switchOffDropped } = dropSwitchOffEntries(askedSpecs, g.nodes, newFactors);
+      /**
+       * ⭐ A PLACEHOLDER 0 ON THE ONE ENTRY NAMING A NEW SWITCH IS NO LEVEL where "off" would mean nothing (switch-loop step
+       * 5, Runtime 5865857191: 98 refusals on byte-identical re-sends). Read as on, and said (`switch_placeholder_levels_read_as_on`).
+       */
+      const { specs, read: switchPlaceholderRead } = readPlaceholderSwitchZerosAsOn(afterOffDrop, g.nodes, newFactors);
       // Each option is planned against the model PLUS the options before it: distinct ids, and no two options by one name.
       const plans: { spec: (typeof specs)[number]; plan: Extract<ReturnType<typeof planNewOption>, { ok: true }> }[] = [];
       for (const spec of specs) {
@@ -5027,6 +5097,13 @@ export function createAgentCapabilities(
           ? { option: { label: described[0]!.label, linked_from: described[0]!.linked_from, acts_on: described[0]!.acts_on }, levels: described[0]!.levels }
           : { options: described }),
         ...(levelsNotSet.some((l) => labels.includes(l.option)) ? { levels_not_set: levelsNotSet.filter((l) => labels.includes(l.option)) } : {}),
+        // A placeholder 0 on the only entry naming a new switch was no level: the option turns the switch on.
+        ...(switchPlaceholderRead.some((d) => labels.includes(d.option)) ? {
+          switch_placeholder_levels_read_as_on: switchPlaceholderRead.filter((d) => labels.includes(d.option)),
+          switch_placeholder_levels_note: 'Each of these options listed a new switch with a level of 0 that said nothing else (no unit, '
+            + 'no estimate, no basis): a placeholder, not a figure. It was read as no level, so the option turns the switch on, as the '
+            + 'approval shows. The change is otherwise exactly as asked; never send a placeholder level for a switch: leave level out.',
+        } : {}),
         // An option that listed a new switch at 0 leaves it off: that entry was dropped, and the option that turns it on sets it.
         ...(switchOffDropped.some((d) => labels.includes(d.option)) ? {
           switch_off_entries_dropped: switchOffDropped.filter((d) => labels.includes(d.option)),

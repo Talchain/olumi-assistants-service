@@ -113,7 +113,7 @@ describe('R3 — every other figure is refused, never rounded to on, with nothin
     ["{ 100, 'GBP' }", { value: 100, unit: 'GBP' }, ['unit', 'not_one']],
     ["{ 100, 'pp' } (percentage points, not a share)", { value: 100, unit: 'pp' }, ['unit', 'not_one']],
     ["{ 100, 'bps' }", { value: 100, unit: 'bps' }, ['unit', 'not_one']],
-    ['{ 0 }', { value: 0 }, ['not_one']],
+    // A bare { 0 } on the only entry is a placeholder, read as on (switch-loop step 5: `agent-switch-placeholder-zero.test.ts`).
     ["{ 0, '%' }", { value: 0, unit: '%' }, ['unit', 'not_one']],
     ["{ 'yes' }", { value: 'yes' }, ['non_number']],
     ["{ '100%' } (a string)", { value: '100%' }, ['non_number']],
@@ -213,10 +213,12 @@ describe('R10 — a unit that spells its own states ("0=no, 1=yes") names the sw
 });
 
 // Served 137d3a5 (MG pj-20260928T042134Z A07/A08): the grandfather switch at `{0}` in the ONLY option, four times.
-describe('R9 — a one-option change that lists its new switch at 0 is told the exact next call, and that call is held', () => {
-  it('R9 RED: { 0 } → refused; the detail names the entry with NO "level" key (not 0)', async () => {
+// Switch-loop step 5 (Runtime 5865857191): that PLACEHOLDER 0 is now read as on (`agent-switch-placeholder-zero.test.ts`);
+// a 0 that says more ({ 0, 'binary' }) keeps this refusal and its exact next call.
+describe('R9 — a one-option change that lists its new switch at a 0 that says off is told the exact next call, and that call is held', () => {
+  it("R9 RED: { 0, 'binary' } → refused; the detail names the entry with NO \"level\" key (not 0)", async () => {
     const { caps, sent } = setup();
-    const r = await caps.proposeNewOption(ctx as never, withLevel({ value: 0 }) as never) as Result;
+    const r = await caps.proposeNewOption(ctx as never, withLevel({ value: 0, unit: 'binary' }) as never) as Result;
     expect(r.refusal, JSON.stringify(r)).toBe('switch_level_not_on');
     expect(sent).toEqual([]);
     expect(r.detail).toContain(`except send the acts_on entry for "${SWITCH}" in "${GRANDFATHER}" with NO "level" key at all`);
@@ -269,9 +271,9 @@ describe('R4 — a refusal is fixable in ONE hop: it names the exact next call, 
   // ⛔ A 0 is not fixed by removing its level — a bare switch entry means ON (served A03, pj-20260928T011147Z). In this
   // ONE-option change the detail names the exact next call (R9: that entry with NO "level" key, not 0); with two options
   // it says to list it under the option that turns it on (`agent-switch-off-entry.test.ts` R3/R5 bind the rest).
-  it('R4 CONTRAST (A03): { 0 } as the only entry for the switch → the detail never says remove "level"; it names the entry with no level key', async () => {
+  it("R4 CONTRAST (A03): { 0, 'binary' } as the only entry for the switch → the detail never says remove \"level\"; it names the entry with no level key", async () => {
     const { caps } = setup();
-    const r = await caps.proposeNewOption(ctx as never, withLevel({ value: 0 }) as never) as Result;
+    const r = await caps.proposeNewOption(ctx as never, withLevel({ value: 0, unit: 'binary' }) as never) as Result;
     expect(r.refusal).toBe('switch_level_not_on');
     expect(r.detail).not.toContain(REMOVE_LEVEL);
     expect(r.detail).toContain(`send the acts_on entry for "${SWITCH}" in "${GRANDFATHER}" with NO "level" key at all`);

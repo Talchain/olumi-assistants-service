@@ -29,6 +29,9 @@ const NEW_OPTION_KEYS: ReadonlySet<string> = new Set([
   // A new switch listed at 0 under an option that leaves it off (served A03): the held change is exactly the one without
   // that entry, so the user is told nothing more than that change's own reply.
   'switch_off_entries_dropped', 'switch_off_entries_note',
+  // A placeholder 0 on the one entry naming a new switch, read as no level (switch-loop step 5): the held change is the
+  // option turning the switch on, which that change's own reply already says.
+  'switch_placeholder_levels_read_as_on', 'switch_placeholder_levels_note',
 ]);
 /** Every key `proposeNewRisk` returns on success (agent-capabilities.ts): every disclosure is typed in `risk`. */
 const NEW_RISK_KEYS: ReadonlySet<string> = new Set([
