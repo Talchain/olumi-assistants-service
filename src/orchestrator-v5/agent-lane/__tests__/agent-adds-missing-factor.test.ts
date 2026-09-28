@@ -488,6 +488,15 @@ describe('PJ-A1 £49 — propose_new_option carries a new graded factor\'s today
     expect(JSON.stringify(paramsOf(withToday.sent))).not.toMatch(/today|observed_state|brief_extraction/);
   });
 
+  // DL #72 5862394804: a bare count grounded any unit. "300 active Pro subscribers" is written about another quantity in
+  // the model, so it is never the add-on price's £300 today (`figureTheUserWroteFor`, bound to the entity).
+  it('⭐ RED: "300 active Pro subscribers" never grounds a new factor\'s today of £300: the figure is about another quantity', async () => {
+    const { caps, sent, carried } = setup();
+    await caps.proposeNewOption({ ...ctx, user_text: `${F4} We have 300 active Pro subscribers.` }, call({ value: 300, unit: 'GBP/month' }) as never);
+    expect(sent).toHaveLength(1);
+    expect(carried).toEqual([[]]);
+  });
+
   it.each([
     ['a figure the user never wrote (7)', { value: 7, unit: 'GBP/month' }, undefined],
     ['a money figure the user wrote only as a percentage', { value: 4, unit: 'GBP' }, undefined],
