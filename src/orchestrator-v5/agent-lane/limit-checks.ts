@@ -12,6 +12,8 @@
  * is left out, never named by guess.
  */
 import { readRatifiedConstraints, type StoredLimitVerdicts } from '../../orchestrator/context/constraint-feasibility.js';
+import { log } from '../../utils/telemetry.js';
+import { limitCheckAsks } from './limited-level-ask.js';
 
 export interface LimitCheck {
   /** The join key for MG's per-limit ask (`limited-level-ask.ts`, seam 5865033356): its sentence rides here verbatim. */
@@ -20,6 +22,11 @@ export interface LimitCheck {
   readonly state: 'scored' | 'estimate_only' | 'unscored';
   /** The one sentence the user is told about this limit. */
   readonly say: string;
+  /**
+   * MG's question for this limit, VERBATIM (`limitCheckAsks`, seam 5865508951): what the user could give so it is
+   * checked against THEIR figures. Read off the same graph; absent when MG asks nothing, and never on a `scored` limit.
+   */
+  readonly ask?: string;
 }
 
 const q = (label: string): string => `‘${label}’`;
@@ -36,7 +43,27 @@ function sentenceFor(label: string, state: LimitCheck['state'], reason: string |
 export const LIMIT_CHECKS_NOTE =
   'How each of the user’s limits was checked in this run. Say it only with its sentence here. A limit checked against '
   + 'Olumi’s estimates WAS checked: never call it not checkable or unchecked, and never ask for a way to make it checkable. '
-  + 'Only a limit whose state is unscored cannot be checked yet.';
+  + 'Only a limit whose state is unscored cannot be checked yet. Where a limit has an ask, ask it once, in its words, '
+  + 'after its sentence.';
+
+/** MG's one question per limit on this graph, by `constraint_id`. A producer failure costs only the asks, never the rows. */
+function asksByLimit(graph: unknown): ReadonlyMap<string, string> {
+  try {
+    const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
+    if (!Array.isArray(nodes)) return new Map();
+    return new Map(limitCheckAsks(graph as Parameters<typeof limitCheckAsks>[0])
+      .filter((a) => typeof a.question === 'string' && a.question.trim() !== '')
+      .map((a) => [a.constraint_id, a.question] as const));
+  } catch (err) {
+    log.warn({ event: 'agent_lane.limit_check_asks_failed', err: err instanceof Error ? err.message : String(err) }, 'agent-lane: the per-limit asks could not be read; the limit rows go without them');
+    return new Map();
+  }
+}
+
+/** The limits MG asks about on this graph (`limitCheckAsks`), by `constraint_id` — never throws (see `asksByLimit`). */
+export function limitAskIdsOf(graph: unknown): ReadonlySet<string> {
+  return new Set(asksByLimit(graph).keys());
+}
 
 /** `undefined` when the run carries no per-limit rows, or none can be named. */
 export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdicts | null | undefined): LimitCheck[] | undefined {
@@ -48,12 +75,14 @@ export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdict
     const n = nodes.find((x) => x !== null && typeof x === 'object' && (x as { id?: unknown }).id === id) as { label?: unknown } | undefined;
     return typeof n?.label === 'string' && n.label.trim() !== '' ? n.label.trim() : null;
   };
+  const asks = asksByLimit(graph);
   const out: LimitCheck[] = [];
   for (const row of verdicts.per_limit) {
     const limit = limits.find((c) => c.constraint_id === row.constraint_id);
     const label = (limit?.label ?? '').trim() !== '' ? limit!.label!.trim() : nodeLabel(limit?.node_id ?? null);
     if (label === null) continue;
-    out.push({ constraint_id: row.constraint_id, limit: label, state: row.state, say: sentenceFor(label, row.state, row.reason) });
+    const ask = row.state === 'scored' ? undefined : asks.get(row.constraint_id);
+    out.push({ constraint_id: row.constraint_id, limit: label, state: row.state, say: sentenceFor(label, row.state, row.reason), ...(ask !== undefined ? { ask } : {}) });
   }
   return out.length > 0 ? out : undefined;
 }

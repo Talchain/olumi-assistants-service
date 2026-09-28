@@ -48,7 +48,8 @@ describe('⛔ run_analysis says how each of the user’s limits was checked', ()
     const r = await world().runAnalysis(ctx, { reason: 'Run it.' });
     const checks = r.limit_checks as { limits: { limit: string; state: string; say: string }[]; note: string } | undefined;
     expect(checks, JSON.stringify(Object.keys(r))).toBeDefined();
-    expect(checks!.limits).toEqual([
+    // Each row also carries MG's ask for that limit, verbatim (`limit-checks-carry-the-ask.test.ts` binds the join).
+    expect(checks!.limits.map(({ ask: _ask, ...row }: { ask?: string } & Record<string, unknown>) => row)).toEqual([
       { constraint_id: 'agent-lane:total_investment:<=', limit: 'Total investment', state: 'estimate_only', say: '‘Total investment’ was checked, but only against Olumi’s estimates, not figures you gave.' },
       { constraint_id: 'agent-lane:monthly_churn:<=', limit: 'Monthly churn', state: 'estimate_only', say: '‘Monthly churn’ was checked, but only against Olumi’s estimates, not figures you gave.' },
     ]);

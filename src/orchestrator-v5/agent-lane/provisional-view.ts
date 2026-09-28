@@ -98,6 +98,7 @@ const COMPLETED_RUN_KINDS: ReadonlySet<string> = new Set(['complete_current', 'c
  */
 export function leaderStandingOf(readback: {
   readonly analysisState?: unknown; readonly analysisReady?: unknown; readonly analysisResult?: unknown; readonly limitVerdicts?: StoredLimitVerdicts;
+  readonly limitAskIds?: ReadonlySet<string>;
 }): LeaderStanding {
   const state = readback.analysisState as { run_state?: { kind?: unknown }; leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | null | undefined;
   const claim = state?.leader_claim;
@@ -112,7 +113,7 @@ export function leaderStandingOf(readback: {
       analysisReady: readback.analysisReady,
     }),
     because: agentNoLeaderReason(withheldReason, readback.analysisReady,
-      limitCauseCodesOf(readback.analysisResult === undefined ? [] : [readback.analysisResult]), readback.limitVerdicts),
+      limitCauseCodesOf(readback.analysisResult === undefined ? [] : [readback.analysisResult]), readback.limitVerdicts, readback.limitAskIds),
   };
 }
 

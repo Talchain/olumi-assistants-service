@@ -66,6 +66,10 @@ describe('the route passes the read’s limit rows to the no-leader sentence', (
     expect(body.assistant_text).not.toContain(RANKING);
     expect(body.assistant_text).toContain('your limits were checked only against Olumi’s estimates');
     expect(body.assistant_text).not.toContain('before it can be checked');
+    // MG's producer asks about both served limits on this graph, so the reply asks in MG's words, never a second time here.
+    const { limitAskIdsOf } = await import('../limit-checks.js');
+    expect([...limitAskIdsOf(RUN1.graph)].length, 'precondition: MG asks on this graph').toBeGreaterThan(0);
+    expect(body.assistant_text).not.toContain('give me a real figure you know');
   });
 
   it('CONTRAST: the read carries no rows → the default sentence, unchanged', async () => {
