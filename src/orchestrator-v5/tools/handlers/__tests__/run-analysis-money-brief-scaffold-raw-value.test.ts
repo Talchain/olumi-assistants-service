@@ -76,6 +76,7 @@ import {
 } from '../run-analysis.js';
 import type { HandlerInvocation } from '../../registry.js';
 import { gateAnalysableOptions } from '../analysable-option-gate.js';
+import { buildFactorScaleMap, projectRequestInterventionsToWireScale } from '../../plot-intervention-scale.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 
 const TEST_SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -290,7 +291,7 @@ describe('FIX 1 — a money brief with an unconfigured option must analyse (bank
     expect(run, 'K must still reach PLoT').toHaveBeenCalledTimes(1);
   });
 
-  it('⭐⭐ SEAM: the scaffolded neutral OBJECT keeps `raw_value` on a CAPPED factor and drops it on a CAPLESS one', () => {
+  it('⭐⭐ SEAM: the scaffolded neutral OBJECT keeps `raw_value` on a CAPPED factor and on a capless FRAMED pair — and the wire keeps one convention', () => {
     // ⚠ THIS TEST EXISTS BECAUSE A MUTANT SURVIVED, and the survivor is the
     // finding. The handler-level CAPPED TWIN below did NOT detect a mutant that
     // strips `raw_value` from EVERY factor — because its capped fixture PROVES
@@ -358,15 +359,27 @@ describe('FIX 1 — a money brief with an unconfigured option must analyse (bank
       'a capped factor that does not prove the convention ALSO keeps its raw_value — this is the case the handler-level twin was blind to',
     ).toEqual({ value: 0.4, raw_value: 20000 });
 
-    // CAPLESS: `raw_value` is the DISPLAY magnitude, undemotable, and was the
-    // whole defect. It must be absent — and the level must be the framed value.
-    expect(scaffoldedInterventions.f_capless, 'a capless factor must NOT carry its display magnitude').toEqual({
+    // CAPLESS FRAMED PAIR (re-pinned by DL #72 5865140074 / MG 5865254606). `{0.6, 600000}` is not an undemotable
+    // display magnitude any more: the projection's frame owner (`recoverScaleFrame`, 29 Aug) proves the pair and emits
+    // it DEMOTABLY, and PLoT divides a capless node by the SAME pair frame (`deriveRange` rung 1.6, `pair_frame`).
+    // Dropping the 600000 sent the status quo at 0.6 inside THIS raw request (72000 / 35000 / 20000), which PLoT then
+    // divided by 1,000,000: the held status quo at 0.0000006 of its level — served journey A's −£41,379 status quo.
+    expect(scaffoldedInterventions.f_capless, 'a capless FRAMED pair keeps its level beside its unit form').toEqual({
       value: 0.6,
+      raw_value: 600000,
     });
-    expect(
-      Object.prototype.hasOwnProperty.call(scaffoldedInterventions.f_capless as object, 'raw_value'),
-      'raw_value must be absent, not merely undefined',
-    ).toBe(false);
+    // ⭐ THE BINDING ROW IS THE WIRE: in this raw request the held status quo reaches PLoT at its raw level, the
+    // convention its siblings use; in an all-unit request the same pair demotes (observed-state-parity F4 #1b).
+    const scale = buildFactorScaleMap(graph.nodes);
+    const held = new Map(outcome.held.map((h) => [h.option_id, new Set(h.factor_ids)] as const));
+    const submitted = outcome.options as { option_id?: string; id?: string; interventions?: Record<string, unknown> }[];
+    const projection = projectRequestInterventionsToWireScale(
+      submitted.map((o) => o.interventions ?? {}),
+      scale,
+      submitted.map((o) => held.get(String(o.option_id ?? o.id)) ?? new Set<string>()),
+    );
+    expect(projection.allWithinUnitInterval, 'precondition: this request is RAW').toBe(false);
+    expect(projection.perOption[1]).toEqual({ f_capped: 35000, f_capped_noconv: 20000, f_capless: 600000 });
   });
 
   it('⭐ CAPPED TWIN (handler seam): a capped scaffolded neutral still ships raw, and the request still computes', async () => {

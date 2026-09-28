@@ -32,6 +32,7 @@ import {
 } from "../../src/orchestrator-v5/tools/handlers/analysable-option-gate.js";
 import {
   buildFactorScaleMap,
+  projectRequestInterventionsToWireScale,
   resolveRawInterventionValue,
 } from "../../src/orchestrator-v5/tools/plot-intervention-scale.js";
 
@@ -163,11 +164,13 @@ describe("F4 #1b EXACT parity — run predicate scaffolds off observed_state wit
     ).toBeUndefined();
     const fac = graph.nodes.find((n) => n.id === "fac_price")!;
     const observed = fac.observed_state as { value: number; raw_value?: number };
-    expect(observed.raw_value, "fixture precondition: the factor does carry a raw_value to drop").toBe(200);
-    // Capless ⇒ the scaffold's candidate is the framed value ALONE ⇒ rule
-    // `no_cap` ⇒ the value itself crosses the wire.
-    const expected = resolveRawInterventionValue({ value: observed.value }, factorScale);
-    expect(expected.value).toBe(observed.value);
+    expect(observed.raw_value, "fixture precondition: the factor carries a raw_value beside its value").toBe(200);
+    // Capless, but a FRAMED PAIR (0.4 × 500 = 200) ⇒ the hold keeps the pair (DL #72 5865140074 / MG 5865254606: the
+    // projection's frame owner proves it, and PLoT divides a capless node by the same pair frame) ⇒ rule 1, DEMOTABLE:
+    // the level, with the unit form beside it.
+    const expected = resolveRawInterventionValue({ value: observed.value, raw_value: observed.raw_value }, factorScale);
+    expect(expected.value).toBe(observed.raw_value);
+    expect(expected.unitIntervalEquivalent).toBe(observed.value);
 
     const outcome = gateAnalysableOptions({
       options: baselineOptions,
@@ -187,6 +190,18 @@ describe("F4 #1b EXACT parity — run predicate scaffolds off observed_state wit
     const emitted = scaffoldedOptB.interventions.fac_price;
     const viaEmitted = resolveRawInterventionValue(emitted, factorScale);
     expect(viaEmitted.value).toBe(expected.value);
+    expect(viaEmitted.unitIntervalEquivalent).toBe(expected.unitIntervalEquivalent);
+    // ⭐ AND THE WIRE, which is what PLoT reads: beside opt_a's unit-form 0.9 the held pair DEMOTES to 0.4 — the
+    // request reaches PLoT in one convention, exactly as before this fixture's pair was kept.
+    const heldIds = new Map(outcome.held.map((h) => [h.option_id, new Set(h.factor_ids)] as const));
+    const submitted = outcome.options as { option_id?: string; interventions?: Record<string, unknown> }[];
+    const projection = projectRequestInterventionsToWireScale(
+      submitted.map((o) => o.interventions ?? {}),
+      buildFactorScaleMap(graph.nodes),
+      submitted.map((o) => heldIds.get(String(o.option_id)) ?? new Set<string>()),
+    );
+    expect(projection.perOption).toEqual([{ fac_price: 0.9 }, { fac_price: observed.value }]);
+    expect(projection.allWithinUnitInterval).toBe(true);
 
     // The advertised plan (what /graph-readiness returns) agrees.
     const plan = computeScaffoldPlan({

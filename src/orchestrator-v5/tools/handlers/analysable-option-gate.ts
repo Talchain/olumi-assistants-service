@@ -79,6 +79,7 @@ import {
   resolveRawInterventionValue,
   type FactorScaleInfo,
 } from '../plot-intervention-scale.js';
+import { recoverScaleFrame } from './d1-shared/scale-frame.js';
 
 /**
  * PLoT's `/v2/run` Ajv request schema declares `options` with `minItems: 2`,
@@ -326,7 +327,22 @@ function buildHoldFactorValues(
     // Omitting it lets the candidate fall to rule `no_cap`, which emits the
     // factor's own `value` — the sibling convention, and on a capless factor
     // the level itself. An honest absence beats a fabricated magnitude.
-    if (capUsable && rawValue !== undefined) candidate.raw_value = rawValue;
+    //
+    // ⛔ EXCEPT A CAPLESS FRAMED PAIR (DL #72 5865140074; MG 5865254606). Olumi's
+    // estimated factors carry their frame as the pair itself (`{value: 0.6,
+    // raw_value: 60}`, `scale_frame` 100, no cap), and their siblings' build-time
+    // levels go out RAW (75). Dropping the 60 sent the status quo at 0.6 beside
+    // 75: one factor in two conventions, so PLoT normalised the whole request and
+    // held the status quo at 0.006 of its frame (served journey A: status quo
+    // p50 0, mean −£41,379 against today's £75,000). The projection already owns
+    // this shape (`scaleNumeric`'s `caplessPairProvesUnitForm`, through
+    // `recoverScaleFrame`): it emits the raw level DEMOTABLY, so a request whose
+    // siblings are unit-interval still demotes it. The hold asks the same owner;
+    // a pair it refuses (unframed, zero, negative, level above 1) is still held
+    // at its value, as before.
+    const framedPair =
+      value !== undefined && value <= 1 && recoverScaleFrame({ value, raw_value: rawValue }) !== undefined;
+    if ((capUsable || framedPair) && rawValue !== undefined) candidate.raw_value = rawValue;
     if (Object.keys(candidate).length === 0) continue;
     const wire = projectHoldCandidate(
       candidate,
