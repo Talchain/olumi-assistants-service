@@ -30,6 +30,7 @@ import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 import { readIsBaseline } from '../../cee/baseline-identity.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
+import { factorUnitOf, unitPhraseFamily } from './unit-conflict.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import { bindOptionLabelToBrief, bindingEarnsBriefClaim } from '../../cee/provenance/brief-binding.js';
@@ -440,6 +441,8 @@ export interface AdmittedModel {
   readonly treated_as_context?: readonly string[];
   /** Declared products that options move (`markProductIdentities`); each is also a `loss` entry. */
   readonly nonlinear_identities?: readonly NonlinearIdentityMark[];
+  /** Limited £ roll-ups whose drafted edge into a non-£ goal was not drawn (`findPureLimits`); each is also a `loss` entry. */
+  readonly pure_limits?: readonly PureLimit[];
   /**
    * Options Olumi added that nothing the model holds tells apart from another option — withheld
    * (`option_indistinct`, `admitCandidateModel`), each with the step said to the user. Not in `withheld`,
@@ -847,6 +850,65 @@ export function wireInertStatusQuo(
   if (matches.length !== 1) return null;
   const held = holdAgainst(matches[0]!);
   return held === null ? null : { optionId: matches[0]!.id, factorIds: held };
+}
+
+/**
+ * ⛔ A LIMIT THE USER SETS ON WHAT THEIR LEVERS COST IS A LIMIT, NOT A CAUSE OLUMI MAY SIGN (MG proposal #72
+ * 5866176230; Canonical's engine probe and AIQ call (a), `canonical-state/efig/`).
+ *
+ * SERVED journey E (DL run `pj-20260928T074951Z`, E01): "…while keeping annual salary spend under £400k". The drafter
+ * rolled "Annual salary spend" (GBP/year) up from the two hiring levers AND linked it straight into the goal "ship the
+ * new platform" (% completion): negative, `cee_hypothesis`, mean −0.5 — a sign nobody stated. Canonical's engine probe
+ * (that served graph through ISL's real analyser, 4,000 draws) found that one guessed edge alone chose the leader: with it
+ * "Carry on as now" leads (0.560), without it "Four junior engineers" does (0.381); the limit's reading is unchanged.
+ *
+ * So a quantity is a PURE LIMIT, and its one edge into the goal is not drawn, only when ALL of these hold:
+ *  · the user stated a limit on it (an admitted `explicit` goal constraint names it), and it is a quantity (factor or
+ *    outcome);
+ *  · it is money and the goal is measured in a RECOGNISED, DIFFERENT family (`unitPhraseFamily`): "£ spend → %
+ *    shipped". A £ quantity into a £ goal (cost → profit) and a goal whose unit family is unknown are left alone;
+ *  · every edge into it comes from a lever the options set (a controllable factor an option acts on) — a cost roll-up
+ *    — and at least one does;
+ *  · its ONLY edge out is the one into the goal, so once that is not drawn it is the limit-only tally readiness already
+ *    holds as a valid terminal (`graph-structure-validator.ts` `isLimitOnlyTally`, AIQ #70 5858730290 (a));
+ *  · that edge's direction is not the user's: a `brief_extraction` / `user_specified` link is always drawn.
+ * Nothing is invented — no edge, sign or level. The drop is said once (the `pure_limit` ledger line) and typed on the
+ * construction result (`pure_limits`).
+ */
+export interface PureLimit {
+  readonly node_id: string;
+  readonly label: string;
+  readonly dropped_edge_to: string;
+}
+const USER_STATED_LINK_SOURCES: ReadonlySet<string> = new Set(['brief_extraction', 'user_specified']);
+export function findPureLimits(
+  nodes: readonly { id: string; kind?: string; label?: string; category?: string; goal_threshold_unit?: string; observed_state?: unknown }[],
+  edges: readonly { from: string; to: string; provenance?: { source?: string } }[],
+  goalConstraints: readonly { node_id?: string; unit?: string; provenance?: string }[],
+): PureLimit[] {
+  const goal = nodes.find((n) => n.kind === 'goal');
+  const goalFamily = unitPhraseFamily(goal?.goal_threshold_unit);
+  if (goal === undefined || goalFamily === null || goalFamily === 'currency') return [];
+  const byId = new Map(nodes.map((n) => [n.id, n] as const));
+  const optionSet = new Set(edges.filter((e) => byId.get(e.from)?.kind === 'option').map((e) => e.to));
+  const isLever = (id: string): boolean => {
+    const n = byId.get(id);
+    return n?.kind === 'factor' && n.category === 'controllable' && optionSet.has(id);
+  };
+  const limited = new Set(goalConstraints.filter((c) => c.provenance === 'explicit').map((c) => c.node_id));
+  const out: PureLimit[] = [];
+  for (const q of nodes) {
+    if (!limited.has(q.id) || (q.kind !== 'factor' && q.kind !== 'outcome')) continue;
+    // Its own level's unit, else the unit of the user's limit on it (`factorUnitOf`).
+    if (unitPhraseFamily(factorUnitOf({ goal_constraints: goalConstraints }, q)) !== 'currency') continue;
+    const into = edges.filter((e) => e.to === q.id);
+    if (into.length === 0 || !into.every((e) => isLever(e.from))) continue;
+    const from = edges.filter((e) => e.from === q.id);
+    if (from.length !== 1 || from[0]!.to !== goal.id) continue;
+    if (USER_STATED_LINK_SOURCES.has(String(from[0]!.provenance?.source ?? ''))) continue;
+    out.push({ node_id: q.id, label: q.label ?? q.id, dropped_edge_to: goal.id });
+  }
+  return out;
 }
 
 /**
@@ -3180,7 +3242,24 @@ function admitOnce(
     } as RepairEntry);
   }
 
-  const allEdges = [...topologyEdges, ...heldStatusQuoEdges, ...mechanismEdges];
+  // ⛔ A PURE LIMIT'S DRAFTED EDGE INTO THE GOAL IS NOT DRAWN (`findPureLimits`), with the projection entries it made.
+  const pureLimits = findPureLimits(nodes, [...topologyEdges, ...heldStatusQuoEdges, ...mechanismEdges], constraintResult.constraints);
+  const pureLimitPairs = new Set(pureLimits.map((p) => `${p.node_id}::${p.dropped_edge_to}`));
+  for (const p of pureLimits) {
+    const pair = `${p.node_id}::${p.dropped_edge_to}`;
+    for (let i = loss.length - 1; i >= 0; i--) if (String(loss[i]!.field_path ?? '').startsWith(`edges[${pair}]`)) loss.splice(i, 1);
+    const goalLabel = labelById.get(p.dropped_edge_to) ?? p.dropped_edge_to;
+    loss.push({
+      field_path: `edges[${pair}].pure_limit`,
+      before: mechanismEdges.find((e) => `${e.from}::${e.to}` === pair)?.effect_direction ?? null,
+      after: null,
+      reason:
+        `"${p.label}" is kept as your limit, not as a cause: Olumi does not assume it changes "${goalLabel}", so no link ` +
+        'between them was drawn. If it does, say which way and the link can be added.',
+      severity: 'info',
+    } as RepairEntry);
+  }
+  const allEdges = [...topologyEdges, ...heldStatusQuoEdges, ...mechanismEdges.filter((e) => !pureLimitPairs.has(`${e.from}::${e.to}`))];
 
   /**
    * ⭐ A NODE THAT CANNOT REACH THE GOAL BLOCKS THE WHOLE ANALYSIS.
@@ -3394,7 +3473,8 @@ function admitOnce(
       return false;
     };
     for (const n of nodes) {
-      if (n.id === goalForReach.id || n.kind === 'decision' || reachesGoal(n.id)) continue;
+      // A pure limit ends at its limit by construction (above): readiness holds it as a valid terminal.
+      if (n.id === goalForReach.id || n.kind === 'decision' || reachesGoal(n.id) || pureLimits.some((p) => p.node_id === n.id)) continue;
       loss.push({
         field_path: `nodes[${n.id}]`,
         before: n.label,
@@ -3463,6 +3543,7 @@ function admitOnce(
     edges: finalEdges,
     ...(levers.demoted.length > 0 ? { treated_as_context: levers.demoted } : {}),
     ...(products.marks.length > 0 ? { nonlinear_identities: products.marks } : {}),
+    ...(pureLimits.length > 0 ? { pure_limits: pureLimits } : {}),
     goal_constraints: constraintResult.constraints,
     loss,
     // `withheld` is a list of LINKS by contract; a withheld NODE is reported

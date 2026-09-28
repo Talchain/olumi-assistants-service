@@ -1556,6 +1556,8 @@ export async function buildModelFromBrief(
     // leader permission is stamped by `run_analysis` from the node's persisted declaration
     // (`nonlinearIdentityLeaderWithhold`), re-judged on the graph each Run analyses.
     ...(admitted.nonlinear_identities !== undefined ? { nonlinear_identities: admitted.nonlinear_identities } : {}),
+    // A limited £ roll-up whose drafted edge into a non-£ goal was not drawn (`findPureLimits`), beside its `pure_limit` line below.
+    ...(admitted.pure_limits !== undefined ? { pure_limits: admitted.pure_limits } : {}),
     not_represented: [
       // ⛔ C46: the goal's unstated scope, as Olumi's assumption (the `goal_scope` entry's `after`), FIRST.
       // Said here and never written on the goal node: `get_canonical_state` shows a node's description as
@@ -1602,7 +1604,8 @@ export async function buildModelFromBrief(
         // `breakLoops`) — which link was left out, or that the user's own loop was kept.
         // `magnitude_unconvertible`: a stated size that could not be read on the two ends' frames, so the standard
         // placeholder stands in (magnitude contract, D2/D6) — never dropped unseen.
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|loop_withheld|loop_kept|magnitude_unconvertible)$|\.observed_state\.baseline$/.test(l.field_path))
+        // `pure_limit`: a limited £ roll-up's drafted edge into a non-£ goal that was not drawn (`findPureLimits`).
+        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|loop_withheld|loop_kept|magnitude_unconvertible|pure_limit)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };
