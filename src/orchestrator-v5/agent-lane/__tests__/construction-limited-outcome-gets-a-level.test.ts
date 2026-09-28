@@ -249,6 +249,41 @@ describe('(1) the limit\'s own figure is never the user\'s level; (2) a level th
     }
   });
 
+  it('⭐ RED (1, DL P20 on 0ebcad51): a limit spelt as a SHARE (< 0.04 "proportion") given back as the PERCENT 4 (known, explicit) is not the user\'s', async () => {
+    const shareLimit = { value: 0.04, unit: 'proportion' };
+    const { graph, result } = await construct(
+      withChurnLimit(churnAsFactor('explicit', null), shareLimit),
+      withChurnLimit(churnAsFactor('explicit', 4, { baseline_known: true }, '%'), shareLimit),
+    );
+    const os = node(graph, 'monthly_churn')!.observed_state;
+    expect(os?.source).not.toBe('brief_extraction');
+    expect(os).toMatchObject({ raw_value: 4, source: 'cee_inference' });
+    expect(asks(result).map((a) => a.node_id)).toEqual(['monthly_churn']);
+  });
+
+  /** A money limit whose figure ÷ 100 happens to be the level the brief states: "£100 today … under £10,000". */
+  const moneyBrief = (today: string) =>
+    BRIEF.replace(', while keeping monthly churn under 4%.', `. Monthly churn costs us £${today} today, and we must keep it under £10,000.`);
+  const moneyLimit = { value: 10000, unit: 'GBP', operator: '<' };
+  const moneyRetry = (v: number) => withChurnLimit(churnAsFactor('explicit', v, { baseline_known: true, plausible_max: 100000 }, 'GBP'), moneyLimit);
+  const moneyFirst = () => withChurnLimit(churnAsFactor('explicit', null, { plausible_max: 100000 }, 'GBP'), moneyLimit);
+
+  it('⭐ RED (1, DL P21 on 0ebcad51): "£100 today" beside a £10,000 limit is the USER\'s £100 — the ÷100 arm is for a percent limit only', async () => {
+    const { graph, result } = await constructOn(moneyBrief('100'), moneyFirst(), moneyRetry(100));
+    expect(node(graph, 'monthly_churn')!.observed_state).toMatchObject({ raw_value: 100, source: 'brief_extraction' });
+    expect(asks(result)).toEqual([]);
+  });
+
+  it('CONTRAST (DL P22): "£300 today" beside the same £10,000 limit is the user\'s at every head', async () => {
+    const { graph } = await constructOn(moneyBrief('300'), moneyFirst(), moneyRetry(300));
+    expect(node(graph, 'monthly_churn')!.observed_state).toMatchObject({ raw_value: 300, source: 'brief_extraction' });
+  });
+
+  it('CONTRAST: the £10,000 limit\'s own figure given back as today\'s level is still Olumi\'s, not the user\'s', async () => {
+    const { graph } = await constructOn(moneyBrief('100'), moneyFirst(), moneyRetry(10000));
+    expect(node(graph, 'monthly_churn')!.observed_state?.source).not.toBe('brief_extraction');
+  });
+
   it('CONTRAST (1): the brief states today\'s level ("3% today … under 4%") — the retry\'s 3 registers as the user\'s (brief_extraction), and no ask calls it Olumi\'s', async () => {
     const { graph, result, trace } = await constructOn(BRIEF_STATED, firstPass(), churnAsFactor('explicit', 3, { baseline_known: true }, '%'));
     expect(trace).toMatchObject({ retried: true, outcome: 'adopted' });

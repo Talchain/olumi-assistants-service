@@ -856,13 +856,18 @@ function keepsTheHeldStatusQuo(first: Pick<AdmittedModel, 'nodes' | 'loss'>, ret
 function neverTheLimitAsTodaysLevel(retryRaw: CandidateModel, firstRaw: CandidateModel, gaps: readonly BaselineGap[]): CandidateModel {
   const asked = new Set(gaps.filter((g) => g.because === 'limit').map((g) => canonicalLabel(g.factor)));
   if (asked.size === 0) return retryRaw;
-  const limitFigures = (label: string): number[] => [...(firstRaw.constraints ?? []), ...(retryRaw.constraints ?? [])]
+  const limitFigures = (label: string): { value: number; unit?: string | null }[] => [...(firstRaw.constraints ?? []), ...(retryRaw.constraints ?? [])]
     .filter((c) => canonicalLabel(c.metric) === label && typeof c.value === 'number' && Number.isFinite(c.value))
-    .map((c) => c.value);
+    .map((c) => ({ value: c.value, unit: c.unit }));
   const eq = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
-  // The limit's figure, or that figure as a share ("under 4%" given back as 0.04): admission's own figureTheUserWrote
-  // reads "4%" as 0.04 on a share (stated-by-user.ts), so either spelling would register the limit as the user's level.
-  const sameFigure = (v: number, limit: number): boolean => eq(v, limit) || eq(v, limit / 100);
+  // The limit's figure, or the same PERCENT in the other spelling (DL CHANGES_REQUIRED on 0ebcad51, P06/P20/P21):
+  //  · a limit spelt in percent ("under 4%") given back as the share 0.04 — admission's own figureTheUserWrote reads "4%"
+  //    as 0.04 on a share (stated-by-user.ts), so that spelling would register the limit as the user's level;
+  //  · a limit spelt as a share (|value| < 1: "under 0.04") given back as the percent 4.
+  // ÷100 only for a percent unit: "£10,000" is never "£100 today" (P21 — a stated £100 stays the user's).
+  const pct = (u: unknown): boolean => typeof u === 'string' && /%|percent/i.test(u);
+  const sameFigure = (v: number, l: { value: number; unit?: string | null }): boolean =>
+    eq(v, l.value) || (pct(l.unit) && eq(v, l.value / 100)) || (Math.abs(l.value) < 1 && eq(v, l.value * 100));
   return {
     ...retryRaw,
     factors: retryRaw.factors.map((f) => {
