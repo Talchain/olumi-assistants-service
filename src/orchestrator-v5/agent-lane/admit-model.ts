@@ -1378,6 +1378,19 @@ export function evaluatedIdentityNodeIds(enrichmentOrResponse: unknown): Readonl
 }
 
 /**
+ * ⭐ C46 × R3-4 ON THE AGENT'S VIEW — the graph read's `analysis_identity_evaluated_node_ids`, as the Agent reads it.
+ *
+ * The Agent's readers (`breakEvenFor`, `withNonlinearIdentity`) see the graph and the transport block, whose enrichment
+ * keep-list does not carry `identity_evaluations`; the graph read projects the SELECTED fact's evaluated carriers beside
+ * `analysis_result` (same fact, same gates). An array of non-empty strings → that set; anything else (absent, `null`,
+ * any malformed member) → `undefined`, i.e. today's reading (fail closed: every carrier is judged).
+ */
+export function readEvaluatedIdentityNodeIds(wire: unknown): ReadonlySet<string> | undefined {
+  if (!Array.isArray(wire) || !wire.every((id) => typeof id === 'string' && id !== '')) return undefined;
+  return new Set(wire as string[]);
+}
+
+/**
  * ⛔ C46 STAGE 1 (b) — MAY THIS RUN NAME ITS LEADER, GIVEN A PRODUCT IT CAN ONLY ADD UP?
  *
  * Reads the carrier (`cee-v3.ts` NodeV3 `nonlinear_identity`) on the graph the analysis ran on,

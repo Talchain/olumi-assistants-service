@@ -138,7 +138,7 @@ import { figureInUserUnits } from '../approval-chips.js';
 import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
 
-import { defaultFrameFor, framedObservedState, nonlinearIdentityForAgent } from '../admit-model.js';
+import { defaultFrameFor, framedObservedState, nonlinearIdentityForAgent, readEvaluatedIdentityNodeIds } from '../admit-model.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
@@ -179,10 +179,14 @@ function scopeIn(g: { readonly nodes: readonly { readonly label?: unknown; reado
  * REMOVE-ONLY: it can set `leader_may_be_named` false, never true, and it leaves `withheld_reason` as the
  * wire published it, so the limit card's cause and this one both stand. Schema-free: `claim_permissions`
  * is the Agent's internal view, never a wire member.
+ *
+ * `evaluated` (C46 × R3-4, Canonical criterion 1): the carriers the run's engine evaluated, from the SAME graph read
+ * the permission was read beside (`analysis_identity_evaluated_node_ids`). A product the engine computed is not one it
+ * "adds up", so the sentence is not said of it. Omitted ⇒ today's reading. It removes a cause, never the withhold.
  */
-function withNonlinearIdentity(permissions: unknown, graph: unknown): unknown {
+export function withNonlinearIdentity(permissions: unknown, graph: unknown, evaluated?: ReadonlySet<string>): unknown {
   const p = (permissions ?? {}) as { withheld_reason?: unknown };
-  const finding = nonlinearIdentityForAgent(graph, p.withheld_reason === WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN);
+  const finding = nonlinearIdentityForAgent(graph, p.withheld_reason === WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN, evaluated);
   if (finding === null) return permissions;
   return {
     ...(permissions as Record<string, unknown>),
@@ -528,6 +532,8 @@ interface GraphRead {
   readonly raw: Record<string, unknown>;
   /** A7: the read's own `not_modelled` (derived by the read route over this graph); absent when the read had none. */
   readonly not_modelled?: NotModelledManifest;
+  /** C46 × R3-4: the read's `analysis_identity_evaluated_node_ids` (same fact and gates as its result); absent = not attested. */
+  readonly identity_evaluated?: ReadonlySet<string>;
 }
 
 const norm = (s: unknown): string => String(s ?? '').toLowerCase().replace(/…$/, '').trim();
@@ -1068,6 +1074,7 @@ export function createAgentCapabilities(
     if (r.status !== 200) return null;
     const g = (r.json.graph ?? {}) as Record<string, unknown>;
     const notModelled = notModelledOfRead(r.json.not_modelled);
+    const identityEvaluated = readEvaluatedIdentityNodeIds(r.json.analysis_identity_evaluated_node_ids);
     return {
       graph_hash: String(r.json.graph_hash ?? ''),
       // ⛔⛔ IT IS AN ENVELOPE OBJECT, NOT A STRING. The read route emits the
@@ -1087,6 +1094,7 @@ export function createAgentCapabilities(
       analysis_state: r.json.analysis_state,
       raw: g,
       ...(notModelled !== undefined ? { not_modelled: notModelled } : {}),
+      ...(identityEvaluated !== undefined ? { identity_evaluated: identityEvaluated } : {}),
     };
   };
 
@@ -4108,9 +4116,11 @@ export function createAgentCapabilities(
           analysisAdmission: read.analysis_admission,
         });
         // ⛔ C46 (d): the first pass withholds its leader as unrequested (policy), so the product cause is
-        // carried beside that reason, read from the model just built — only where an analysis exists.
+        // carried beside that reason, read from the model just built — only where an analysis exists. C46 × R3-4: not of a
+        // product the run's engine evaluated, read from the SAME post-run read as the permission.
         if (firstAnalysis.ran === true || firstAnalysis.reason === 'already_ran_for_construction') {
-          firstAnalysis = { ...firstAnalysis, claim_permissions: withNonlinearIdentity(firstAnalysis.claim_permissions, after.raw) };
+          firstAnalysis = { ...firstAnalysis, claim_permissions: withNonlinearIdentity(firstAnalysis.claim_permissions, after.raw,
+            readEvaluatedIdentityNodeIds(read.analysis_identity_evaluated_node_ids)) };
         }
         if (outcome.ran) {
           firstAnalysisThisRequest = {
@@ -5033,8 +5043,14 @@ export function createAgentCapabilities(
       // ⛔ C46 (d): only a run that produced a result and withheld its leader is read against the model
       // (one graph read); a named leader means the Run's own stamp found no product in the way.
       let graphForProduct: unknown;
+      // C46 × R3-4: the carriers the run's engine evaluated, from the SAME graph read as the model.
+      let evaluatedForProduct: ReadonlySet<string> | undefined;
       if (result !== undefined && permissions.leader_may_be_named !== true) {
-        try { graphForProduct = (await readGraph(ctx.scenario_id))?.raw; } catch { graphForProduct = undefined; }
+        try {
+          const read = await readGraph(ctx.scenario_id);
+          graphForProduct = read?.raw;
+          evaluatedForProduct = read?.identity_evaluated;
+        } catch { graphForProduct = undefined; evaluatedForProduct = undefined; }
       }
       return {
         ok: r.status === 200,
@@ -5051,7 +5067,7 @@ export function createAgentCapabilities(
         // leader only when `leader_may_be_named` (see the route's reporting instruction). `requested`: every
         // run_analysis dispatch is one the user asked for (the Agent's own call, or the Run chip's fast path);
         // the automatic first analysis reads its permission in `describeFirstAnalysisForAgent`, not here.
-        claim_permissions: graphForProduct === undefined ? permissions : withNonlinearIdentity(permissions, graphForProduct),
+        claim_permissions: graphForProduct === undefined ? permissions : withNonlinearIdentity(permissions, graphForProduct, evaluatedForProduct),
       };
     },
   };

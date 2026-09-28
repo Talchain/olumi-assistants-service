@@ -13,6 +13,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { breakEvenFor, breakEvenLine, goalNotCheckedLine, withBreakEvenAnswer } from '../break-even.js';
 import { deriveEmittedGoalDirection } from '../../goal-target/goal-direction.js';
+import { nonlinearIdentityForAgent } from '../admit-model.js';
 
 const served = JSON.parse(readFileSync(new URL('./fixtures/served-f8-run-graph-d6b09c0.json', import.meta.url), 'utf8')) as { nodes: Record<string, unknown>[]; edges: unknown[] };
 const graph = (change?: (nodes: Record<string, unknown>[]) => void) => {
@@ -98,6 +99,21 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
 
   it('CONTRAST: no product identity on the goal → nothing (an additive goal is the analysis\'s to answer)', () => {
     expect(breakEvenFor(graph((ns) => { delete node(ns, 'mrr').nonlinear_identity; }))).toBeNull();
+  });
+
+  it('ROW B (C46 × R3-4, Canonical criterion 1): the engine EVALUATED the product on this run → no "adds those effects up" arithmetic', () => {
+    // The leader is withheld for ANOTHER reason (a limit): the Agent-view reading is `reasonNamesIt: false`.
+    const evaluated: ReadonlySet<string> = new Set(['mrr']);
+    const today = breakEvenFor(graph());
+    const todayFinding = nonlinearIdentityForAgent(graph(), false);
+    expect(today, 'premise: today the arithmetic answers').not.toBeNull();
+    expect(todayFinding, 'premise: today the product is said beside a limit').not.toBeNull();
+    expect(breakEvenFor(graph(), evaluated)).toBeNull();
+    expect(nonlinearIdentityForAgent(graph(), false, evaluated)).toBeNull();
+    // CONTRAST: no set, or a set naming another node, is today's answer exactly.
+    expect(breakEvenFor(graph(), undefined)).toEqual(today);
+    expect(breakEvenFor(graph(), new Set(['pro_paying_subscribers']))).toEqual(today);
+    expect(nonlinearIdentityForAgent(graph(), false, new Set(['pro_paying_subscribers']))).toEqual(todayFinding);
   });
 
   it('CONTRAST: a figure that is not exact or not anyone\'s → nothing, never an approximate answer', () => {

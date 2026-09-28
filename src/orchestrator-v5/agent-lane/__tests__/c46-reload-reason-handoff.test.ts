@@ -50,6 +50,14 @@ vi.mock('../../session/index.js', async (importOriginal) => ({
 }));
 
 import { readScenarioAnalysis } from '../../../routes/scenario-graph-analysis-read.js';
+import {
+  nonlinearIdentityForAgent,
+  nonlinearIdentityLeaderClaimCause,
+  readEvaluatedIdentityNodeIds,
+} from '../admit-model.js';
+import { withNonlinearIdentity } from '../runtime/agent-capabilities.js';
+import { claimPermissionsFrom } from '../first-analysis.js';
+import { breakEvenFor } from '../break-even.js';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { deriveDecisionContextGraphHash, loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
@@ -138,8 +146,11 @@ async function build(wire: Record<string, unknown>): Promise<Graph> {
   return registered as Graph;
 }
 
-/** The persisted fact the real handler writes, PLoT faked with £59 first at 0.94. */
-async function runOn(registered: Graph): Promise<RunAnalysisHandlerFact> {
+/**
+ * The persisted fact the real handler writes, PLoT faked with £59 first at 0.94 — plus, when given, batch 7's top-level
+ * `identity_evaluations` (ISL #187 / PLoT #379), which the handler stores whole with the envelope as the fact's `enrichment`.
+ */
+async function runOn(registered: Graph, identityEvaluations?: unknown): Promise<RunAnalysisHandlerFact> {
   const store = { loadGraphAndBriefText: async () => ({ graph: registered, briefText: null }) } as unknown as SessionStore;
   const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, REQUEST_ID, store);
   const env = structuredClone(happyFixture) as unknown as Record<string, unknown>;
@@ -151,6 +162,7 @@ async function runOn(registered: Graph): Promise<RunAnalysisHandlerFact> {
   env.fact_objects = [];
   env.review_cards = [];
   delete env.constraint_analysis;
+  if (identityEvaluations !== undefined) env.identity_evaluations = identityEvaluations;
   const plotClient = { run: vi.fn(() => Promise.resolve(env)), validatePatch: vi.fn().mockResolvedValue({}) } as unknown as PLoTClient;
   const invocation = {
     context: {
@@ -640,5 +652,76 @@ describe('AX2 binding: an explicit Run on the product brief keeps its run-turn c
       return { ...c, analysis_state: { ...s, leader_claim: { permitted: true, separation: 'separated' } } };
     };
     expect((await coachAfter(graph, fact, granted)).out.eligibility).toEqual({ eligible: false, reason: 'identity_mismatch' });
+  });
+});
+
+/**
+ * ⭐ C46 × R3-4 ON THE AGENT'S VIEW (Canonical review criteria 1 and 4).
+ *
+ * b5810a82 lifts the structural sign test for a carrier the engine evaluated on this run, on the Run and on the persisted
+ * readback. The Agent's two readers (`withNonlinearIdentity`, the `claim_permissions` it narrates from, and `breakEvenFor`,
+ * the AX1 arithmetic) see only the graph and the transport block, whose enrichment keep-list does not carry
+ * `identity_evaluations`. So the graph read carries the carriers the SELECTED fact's engine evaluated as
+ * `analysis_identity_evaluated_node_ids` — same fact, same gates as `analysis_result` — and the Agent reads that.
+ *
+ * Driven end to end: the REAL construction → the REAL handler (PLoT faked, reporting the carrier `evaluated: true`) → the
+ * REAL reload → the Agent's own readers, on Paul's brief WITH his churn limit, which the handler cannot score at this head,
+ * so the leader is withheld for the LIMIT (another reason) while the engine evaluated the product.
+ */
+describe('C46 × R3-4 on the Agent\'s view: the reload carries the run\'s evaluated identities', () => {
+  /** ISL #187's `IdentityEvaluation` for the carrier on `mrr`, as PLoT #379 forwards it. */
+  const EVALUATED_MRR = {
+    node_id: 'mrr', operation: 'product', factor_ids: ['pro_plan_price', 'pro_subscribers'], addends: [], stated_in_brief: false,
+    evaluated: true, level_source: 'identity_inputs',
+  };
+
+  it('ROW C (criterion 4): the engine evaluated the product while the churn limit withholds → the leader is STILL withheld, for the limit', async () => {
+    const graph = await build(PRODUCT_WITH_CHURN_LIMIT);
+    const fact = await runOn(graph, [EVALUATED_MRR]);
+    expect(fact.result.leading_option_id).toBe('raise_pro_to_59');
+    const { per_limit: _perLimit, joint: _joint, ...leaderVerdict } = fact.result.constraint_verdict!;
+    expect(leaderVerdict, 'the limit still withholds on the Run').toEqual({ may_name_leading_option: false, constraint_verdict_state: 'unevaluated' });
+    // The lift removes ONLY the product cause (b5810a82's persisted readback) ...
+    expect(nonlinearIdentityLeaderClaimCause({ graph, graphHash: deriveDecisionContextGraphHash(graph), result: fact.result, requested: true }))
+      .toEqual({ withheldBecauseUnrequested: false, withheldBecauseNonlinearIdentity: false });
+    const read = await reload(graph, fact);
+    expect(read.analysis_state?.run_state.kind, 'premise: a current run').toBe('complete_current');
+    // ... and the leader stays withheld, for the limit, on the reload and in the block.
+    expect(read.analysis_state?.leader_claim.permitted).toBe(false);
+    expect(read.analysis_state?.leader_claim.withheld_reason).toBe(WITHHELD_CONSTRAINT_VERDICT);
+    expect(leaderWithheldForALimit(read.analysis_state)).toBe(true);
+    expect((read.analysis_result as { leading_option_id?: unknown } | null)?.leading_option_id).toBeNull();
+    expect(read.analysis_identity_evaluated_node_ids).toEqual(['mrr']);
+    // The Agent's view is REMOVE-ONLY: the evaluated set never names the leader.
+    const permissions = claimPermissionsFrom(read.analysis_state, undefined, { requested: true });
+    const view = withNonlinearIdentity(permissions, graph, readEvaluatedIdentityNodeIds(read.analysis_identity_evaluated_node_ids)) as Record<string, unknown>;
+    expect(view.leader_may_be_named).toBe(false);
+    expect(view.withheld_reason).toBe(WITHHELD_CONSTRAINT_VERDICT);
+  });
+
+  it('ROW B (criterion 1): the Agent\'s readers, fed the reload\'s evaluated set, say no "adds those effects up"; CONTRAST without it, today', async () => {
+    const graph = await build(PRODUCT_WITH_CHURN_LIMIT);
+    const read = await reload(graph, await runOn(graph, [EVALUATED_MRR]));
+    const evaluated = readEvaluatedIdentityNodeIds(read.analysis_identity_evaluated_node_ids);
+    expect(evaluated === undefined ? undefined : [...evaluated]).toEqual(['mrr']);
+    const permissions = claimPermissionsFrom(read.analysis_state, undefined, { requested: true });
+    expect(permissions.withheld_reason, 'premise: withheld for ANOTHER reason').toBe(WITHHELD_CONSTRAINT_VERDICT);
+    expect(withNonlinearIdentity(permissions, graph, evaluated)).toEqual(permissions);
+    expect(nonlinearIdentityForAgent(graph, false, evaluated)).toBeNull();
+    expect(breakEvenFor(graph, evaluated)).toBeNull();
+
+    // CONTRAST: the same brief, a run whose engine reported no list (every run before batch 7) → no key, today's view.
+    const before = await reload(graph, await runOn(graph));
+    expect(before.analysis_state?.leader_claim.withheld_reason, 'control: the same limit withholds').toBe(WITHHELD_CONSTRAINT_VERDICT);
+    expect('analysis_identity_evaluated_node_ids' in before).toBe(false);
+    const none = readEvaluatedIdentityNodeIds(before.analysis_identity_evaluated_node_ids);
+    expect(none).toBeUndefined();
+    const todayFinding = nonlinearIdentityForAgent(graph, false);
+    expect(todayFinding, 'premise: today the product is said beside the limit').not.toBeNull();
+    expect(nonlinearIdentityForAgent(graph, false, none)).toEqual(todayFinding);
+    const todayView = withNonlinearIdentity(permissions, graph) as { nonlinear_identity?: { say?: unknown } };
+    expect(todayView.nonlinear_identity?.say).toBe(todayFinding!.sentence);
+    expect(withNonlinearIdentity(permissions, graph, none)).toEqual(todayView);
+    expect(breakEvenFor(graph, none)).toEqual(breakEvenFor(graph));
   });
 });
