@@ -215,6 +215,22 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     expect(JSON.stringify(persisted), 'byte-identical').toBe(before);
   });
 
+  it('RED (scope): a set that would change anything but its own links — here, drop an identity `NodeV3` cannot parse — writes nothing', async () => {
+    // A `sum` identity on the goal, off every link in the set: the raw graph keeps it, the link writer's GraphV3 pass drops it.
+    const g = persisted as { nodes: Record<string, unknown>[] };
+    g.nodes.find((n) => n.id === 'ability_to_focus_on_high_value_tasks')!.nonlinear_identity = {
+      operation: 'sum', factor_ids: ['routine_work_hours_delegated'], addends: ['annual_assistant_tool_cost'], stated_in_brief: false };
+    const { caps, ctx } = agent('I\'m aligned with these. Please make these updates.');
+    const p = await caps.proposeLinkStrengths!(ctx, { links: setOf(['capacityOverhead', 'aiUseQuality']) as never, rationale: 'x' });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    const before = JSON.stringify(persisted);
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(false);
+    expect(out.mutated).toBe(false);
+    expect(rows.size, 'nothing committed').toBe(0);
+    expect(JSON.stringify(persisted), 'byte-identical: the identity is still there').toBe(before);
+  });
+
   it('RED (retry): approving the same set again adds no commit', async () => {
     const { caps, ctx } = agent('I\'m aligned with these. Please make these updates.');
     const p = await caps.proposeLinkStrengths!(ctx, { links: setOf(MODERATE) as never, rationale: 'x' });
