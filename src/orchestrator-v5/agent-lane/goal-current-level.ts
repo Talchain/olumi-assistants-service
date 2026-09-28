@@ -31,9 +31,10 @@
  *   · IS IT IN THE GOAL'S OWN UNIT? (`readStatedGoalLevel`, below). "12%" for a GBP goal would pass the scale
  *     rule (12 / 25000 is inside [0, 1]), so the unit check is the one that refuses it — and on this path it
  *     FAILS CLOSED, because the figure feeds the headline chance of reaching the target.
- * The goal's comparator is persisted only beside a target the brief states (`goal_direction`, G1) and this path
- * does not read it, so the Agent states how the user put the target (`goal_is`) — the same model-read the brief's
- * `operator` is — and an unstated one is refused, never defaulted.
+ * The goal's comparator is persisted only beside a target the brief states (`goal_direction`, G1), so the Agent states
+ * how the user put the target (`goal_is`) — the same model-read the brief's `operator` is — and an unstated one is
+ * refused, never defaulted. The held comparator, when there is one, is handed to the shared rule with it: only beside
+ * a held `<=` is a `<=` level admitted (the run minimises that goal), and a `>=` reading of a held ceiling is refused.
  */
 import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import { sameUnit } from '../../utils/currency-alphabet.js';
@@ -438,8 +439,13 @@ export async function proposeGoalCurrentLevel(
     );
   }
 
-  // ── THE BRIEF PATH'S OWN RULE: operator tail, then scale and direction.
-  const verdict = admitStatedGoalLevel({ metric: goal.label, operator, rawTarget: target, rawBaseline: raw, cap });
+  // ── THE BRIEF PATH'S OWN RULE: operator tail, then scale and direction. The comparator the goal HOLDS (G1) is passed
+  // too: beside a held `<=` the run minimises, so a `<=` level is admitted on the mirrored rule, and a `>=` reading
+  // contradicts the user's own comparator (`admitStatedGoalLevel`, MG #72 5870097103). None held ⇒ exactly as before.
+  const verdict = admitStatedGoalLevel({
+    metric: goal.label, operator, rawTarget: target, rawBaseline: raw, cap, heldComparator: (goal as { goal_direction?: unknown }).goal_direction,
+    targetUnit: goalUnit,
+  });
   if (!verdict.admitted) return refuse('not_admitted', verdict.reason);
 
   const existing = goal.observed_state;

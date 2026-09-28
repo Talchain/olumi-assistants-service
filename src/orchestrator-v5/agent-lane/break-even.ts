@@ -16,7 +16,7 @@
  */
 import { nonlinearIdentityForAgent } from './admit-model.js';
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
-import { deriveEmittedGoalDirection } from '../goal-target/goal-direction.js';
+import { deriveEmittedGoalDirection, heldComparatorSense, readHeldGoalComparator } from '../goal-target/goal-direction.js';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
 import { totalUnitOfPerUnitPrice } from '../../cee/provenance/stated-amounts.js';
@@ -99,7 +99,9 @@ export function breakEvenFor(graph: unknown, evaluated?: ReadonlySet<string>): B
   if (finding === null || finding.outcome_id !== finding.goal_id || finding.factor_ids.length !== 2) return null;
   // MG B2 (#2051 5850436075): "stays at least that" and "needs N" are a floor's words; a goal to REDUCE reads them
   // backwards (for a cap, N at £p is the most allowed). The estate's one direction authority decides; no answer otherwise.
-  if (deriveEmittedGoalDirection(graph, finding.goal_id) === 'minimise') return null;
+  // R1 S1: a held ceiling is silent here whether or not the wire can prove it a level (the words would read backwards).
+  if (heldComparatorSense(readHeldGoalComparator(graph, finding.goal_id)) === 'minimise'
+    || deriveEmittedGoalDirection(graph, finding.goal_id) === 'minimise') return null;
   const nodes = ((graph as { nodes?: unknown } | null)?.nodes ?? []) as Node[];
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const goal = byId.get(finding.goal_id);

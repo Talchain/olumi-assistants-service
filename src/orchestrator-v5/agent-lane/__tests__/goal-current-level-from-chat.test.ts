@@ -369,3 +369,58 @@ describe('CONTROLS — the approval is the write, and only onto the model the us
     expect(revised.public_label).toContain('£13,000');
   });
 });
+
+/**
+ * ⭐ THE SAME RULE BESIDE A HELD CEILING (MG #72 5870097103). A goal node that HOLDS `goal_direction: '<='` (G1: held by
+ * construction only beside a target the user wrote) is sent with `goal_direction: 'minimise'`, so a `<=` level the user
+ * states in chat is admitted on the mirrored rule — exactly as the brief path admits it — and a `>=` reading of that
+ * ceiling contradicts the user's own comparator. ⚠ AUTHORED: Paul's stored graph with ONE field added
+ * (`goal_direction: '<='` on `mrr`); the rule is label-neutral. The no-comparator `<=` refusal is the row above.
+ */
+describe('a goal that HOLDS a `<=` ceiling: the chat path uses the same held-ceiling rule', () => {
+  const ceilingGraph = (): Graph => { const g = clone(paulGraph); goalOf(g).goal_direction = '<='; return g; };
+
+  it('⭐ RED: at_most, today ABOVE the target (£24,000 vs £20,000) → proposed; approved → the goal carries it and the Run minimises', async () => {
+    const s = setup(ceilingGraph(), {}, 'Our current MRR is £24,000.');
+    const proposed = await s.call(TOOL, { ...T2, value: 24000, goal_is: 'at_most' }) as ToolResult & { proposal_id?: string };
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    const applied = await s.call('authorise_change', { proposal_id: proposed.proposal_id });
+    expect(applied.ok, JSON.stringify(applied)).toBe(true);
+    expect(goalOf(s.graph()).observed_state).toStrictEqual({
+      value: 24000 / CAP, baseline: 24000 / CAP, unit: 'GBP MRR', source: USER_EDIT_SOURCE, raw_value: 24000, cap: CAP,
+    });
+    expect(goalOf(s.graph()).goal_direction, 'the held comparator survives the write').toBe('<=');
+    const req = await plotRequestFor(s.graph()) as { graph: Graph; goal_direction?: unknown };
+    expect(req.goal_direction).toBe('minimise');
+    expect(req.graph.nodes.find((n) => n.id === GOAL)!.observed_state).toMatchObject({ baseline: 24000 / CAP, raw_value: 24000 });
+  });
+
+  it('⭐ RED: at_most, today AT OR BELOW the target → refused, said as upside down, nothing written', async () => {
+    for (const value of [12000, 20000]) {
+      const s = setup(ceilingGraph(), {}, `Our current MRR is £${value.toLocaleString('en-GB')}.`);
+      const r = await s.call(TOOL, { ...T2, value, goal_is: 'at_most' }) as ToolResult & { refusal?: string; detail?: string };
+      expect(r.ok, JSON.stringify(r)).toBe(false);
+      expect(r.refusal).toBe('not_admitted');
+      expect(r.detail).toContain(`The current level of "MRR" (${value}) is already at or below the target of 20000`);
+      expect(s.registers).toEqual([]);
+    }
+  });
+
+  it('⭐ RED: at_least on a held ceiling contradicts the user\'s comparator → refused, never scored `>=`', async () => {
+    const s = setup(ceilingGraph());
+    const r = await s.call(TOOL, T2) as ToolResult & { refusal?: string; detail?: string };
+    expect(r.ok, JSON.stringify(r)).toBe(false);
+    expect(r.refusal).toBe('not_admitted');
+    expect(r.detail).toContain('"MRR" is held as a goal to stay at or below 20000');
+    expect(s.registers).toEqual([]);
+  });
+
+  it('CONTROL: a held FLOOR (`>=`) keeps today\'s path: at_least proposed, at_most refused with today\'s sentence', async () => {
+    const g = clone(paulGraph);
+    goalOf(g).goal_direction = '>=';
+    expect((await setup(g).call(TOOL, T2)).ok).toBe(true);
+    const r = await setup(g).call(TOOL, { ...T2, goal_is: 'at_most' }) as ToolResult & { detail?: string };
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('cannot be calculated correctly yet');
+  });
+});
