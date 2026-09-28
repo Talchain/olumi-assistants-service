@@ -17,6 +17,7 @@
  * (a question in the same message must be answered; served A08). Nothing is said that the tool did not return.
  */
 import { formatFactorValue } from '../compose/format-factor-value.js';
+import { sayFigureExactly } from './say-figure.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (x: unknown): Rec | undefined => (x !== null && typeof x === 'object' && !Array.isArray(x) ? (x as Rec) : undefined);
@@ -58,9 +59,10 @@ const RISK_PLACEHOLDER_STRENGTH = 'not known yet: Olumi uses a placeholder stren
 const LINK_KEYS: ReadonlySet<string> = new Set(['ok', 'mutated', 'proposal_id', 'public_label', 'base_revision', 'link', 'interpretation', 'note']);
 
 const q = (label: string): string => `‘${label}’`;
+/** A level as the user writes it ("£15,000 over 6 months"): the lane's one figure formatter, as the consent subject says it. */
 const shown = (value: number, unit: unknown): string => {
   const u = nonEmpty(unit) ? unit.trim() : null;
-  return formatFactorValue(value, u)?.display ?? (u === null ? String(value) : `${value} ${u}`);
+  return sayFigureExactly(value, u ?? '') ?? formatFactorValue(value, u)?.display ?? (u === null ? String(value) : `${value} ${u}`);
 };
 const question = (publicLabel: unknown): string => {
   const n = typeof publicLabel === 'string' ? /^Approve (\d+) changes$/.exec(publicLabel.trim())?.[1] : undefined;

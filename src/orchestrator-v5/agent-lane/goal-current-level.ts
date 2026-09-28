@@ -48,6 +48,7 @@ import { createProposal, type ProposalOperation, type ProposalStore, type Receip
 import { registrationTurnId } from '../graph-registration/registration-identity.js';
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 import type { AgentToolContext, ToolResult } from './runtime/agent-tools.js';
+import { sayFigure, sayFigureExactly } from './say-figure.js';
 
 /** The proposal op: the estate's existing node-update op, carrying the goal's new `observed_state`. */
 export const GOAL_CURRENT_LEVEL_OP = 'update_node' as const;
@@ -214,8 +215,8 @@ export function rederivedEstimatedPart(nodes: GoalLevelRead['nodes'], goalId: st
 
 /** "about 1,469 subscribers" — a whole figure from 100 up, two decimals below. */
 function sayPartLevel(x: number, unit: string | undefined): string {
-  const n = x.toLocaleString('en-GB', { maximumFractionDigits: Math.abs(x) >= 100 ? 0 : 2 });
-  return unit !== undefined ? `${n} ${unit}` : n;
+  const r = Math.abs(x) >= 100 ? Math.round(x) : Math.round(x * 100) / 100;
+  return sayFigure(r, unit ?? '');
 }
 
 /** What the approval says about the re-derived estimate: whose it stays, what it was, and why it moves. */
@@ -444,7 +445,7 @@ export async function proposeGoalCurrentLevel(
   const existing = goal.observed_state;
   const existingRaw = num(existing?.raw_value) ? existing!.raw_value as number : undefined;
   if (existingRaw === raw && existing?.source === USER_EDIT_SOURCE) {
-    return refuse('already_recorded', `${raw}${goalUnit !== undefined ? ` ${goalUnit}` : ''} is already recorded as the user’s current level of "${goal.label}". Nothing to change.`);
+    return refuse('already_recorded', `${sayFigureExactly(raw, goalUnit ?? '') ?? `${raw}${goalUnit !== undefined ? ` ${goalUnit}` : ''}`} is already recorded as the user’s current level of "${goal.label}". Nothing to change.`);
   }
   const observed: GoalObservedState = {
     value: verdict.normalised,
@@ -455,10 +456,11 @@ export async function proposeGoalCurrentLevel(
     cap,
     ...(stated.normalised !== undefined ? { provenance_unit_normalised: stated.normalised } : {}),
   };
-  const withUnit = (x: number) => `${x}${goalUnit !== undefined ? ` ${goalUnit}` : ''}`;
+  // As the user writes a figure ("£72,000 per month"), from the lane's one formatter (DL #72 5866282787: "72000 £ MRR").
+  const withUnit = (x: number) => sayFigureExactly(x, goalUnit ?? '') ?? `${x}${goalUnit !== undefined ? ` ${goalUnit}` : ''}`;
   // ⛔ THE USER'S OWN FIGURE AND UNIT, as they gave it — never relabelled in the goal's unit — plus, when a stated
   // suffix was scaled, what it is recorded as. The target and a replaced record are the goal's own, in its unit.
-  const asStated = `${value}${statedUnit !== '' ? ` ${statedUnit}` : ''}`;
+  const asStated = sayFigureExactly(value, statedUnit) ?? `${value}${statedUnit !== '' ? ` ${statedUnit}` : ''}`;
   const figure = stated.normalised !== undefined ? `${asStated}, which is ${withUnit(raw)}` : asStated;
   const replaces = existingRaw !== undefined && existingRaw !== raw ? existingRaw : undefined;
   // Carried INSIDE the goal's one op, so this stays one goal-level proposal with one write.
