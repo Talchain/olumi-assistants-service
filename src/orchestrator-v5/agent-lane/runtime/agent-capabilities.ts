@@ -30,7 +30,7 @@ import {
 import { GM_HELD_HANDLER_ID, GM_HELD_OPERATIONS_MAX_JSON_CHARS, gmHeldProposalRef } from '../../handlers/edit-graph-referee-gate.js';
 import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../../graph-management/types.js';
 import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
-import { definitionalLinkOf, definitionalLinkRefusalText } from '../../compose/definitional-links.js';
+import { definitionalLinkInUse, definitionalLinkOf, definitionalLinkRefusalText, type IdentityRunUse } from '../../compose/definitional-links.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
 
 /**
@@ -2061,10 +2061,22 @@ export function createAgentCapabilities(
             + 'If the user has just sized that link, propose it now with propose_model_change, with the same strength and from_words: '
             + 'one change for them to approve, not a question first. Otherwise, offer to add it.' };
       }
-      // ⛔ R3-9 (DL #72 5866746362; Canonical #2229): a link a declared identity DEFINES (MRR = price × subscribers) is
-      // not a belief. Its strength is never read, so a change would be stored and silently ignored. Refused here, by the
-      // one predicate and in its own words, for a strength and a reversal alike, before anything is prepared.
-      const definition = definitionalLinkOf(g.raw, from.id, to.id);
+      /**
+       * ⛔ R3-9 (DL #72 5866746362; Canonical #2229; AIQ 5867435409): a link a declared identity DEFINES (MRR = price ×
+       * subscribers) is not a belief WHILE THE IDENTITY IS IN USE. Its strength is never read, so a change would be
+       * stored and silently ignored. Refused by the one predicate (`definitionalLinkInUse`), in its own words, for a
+       * strength and a reversal alike. The last Run, as the Agent's read attests it:
+       *   - no Run yet → refused; the next Run decides;
+       *   - that Run evaluated the carrier → refused;
+       *   - otherwise (withdrawn, or not attested) → prepared as an ordinary belief. On approval, the product's link
+       *     writer decides from the run facts themselves (`edge_strength_edit`, Canonical's same predicate). A lever the
+       *     last Run DID use is never blocked here on a guess.
+       */
+      const runKind = (g.analysis_state as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind;
+      const declared = definitionalLinkOf(g.raw, from.id, to.id);
+      const lastRun: IdentityRunUse | null = declared === null || runKind === 'never_run' ? null
+        : { withdrawn: g.identity_evaluated?.has(declared.carrier_id) === true ? new Set<string>() : new Set([declared.carrier_id]) };
+      const definition = definitionalLinkInUse(g.raw, from.id, to.id, lastRun);
       if (definition !== null) {
         return { ok: false, mutated: false, refusal: 'definitional_link',
           detail: `${definitionalLinkRefusalText(g.raw, definition)} Tell the user exactly this. Never offer to change this link's strength or direction.` };
