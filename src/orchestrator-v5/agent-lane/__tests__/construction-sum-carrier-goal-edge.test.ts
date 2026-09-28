@@ -222,6 +222,18 @@ describe('§3 — the precondition, the user\'s direction, and the one exemption
     expect(out.pure_limits).toBeUndefined();
     expect(out.pure_limit_asks).toBeUndefined();
   });
+  it('⭐ RED (Codex #72 5871853753): a goal declaration admission REJECTS ("MRR = spend × a factor absent from the model") exempts nothing — through registration', async () => {
+    const rejectedDraft = candidate(G, (c) => {
+      c.identities = [{ outcome: 'MRR', operation: 'product', factors: ['Total investment spend', 'A factor absent from the model'], provenance: 'inferred' }];
+    });
+    const admitted = admit(rejectedDraft, G.brief);
+    expect(admitted.loss.some((l) => String(l.field_path) === `nodes[${GOAL}].nonlinear_identity_rejected`), 'admission rejected the declaration').toBe(true);
+    const { graph, out } = await build(G.brief, rejectedDraft);
+    expect(said(out).join(' '), 'the user is told it was not used').toContain('was not used and nothing about it is assumed');
+    expect(graph.nodes.find((n) => n.id === GOAL)?.nonlinear_identity).toBeUndefined();
+    expect(pairs(graph.edges)).not.toContain(`${TALLY}::${GOAL}`);
+    expect(out.pure_limits).toEqual([{ node_id: TALLY, label: 'Total investment spend', dropped_edge_to: GOAL }]);
+  });
   it('a goal identity that does NOT contain the cost (the served MRR = price × subscribers) exempts nothing', () => {
     expect(G.candidate.identities).toEqual([{ outcome: 'MRR', operation: 'product', factors: ['Pro plan price', 'Pro paying subscribers'], provenance: 'inferred' }]);
     expect(admit(candidate(G), G.brief).pure_limits).toEqual([{ node_id: TALLY, label: 'Total investment spend', dropped_edge_to: GOAL }]);

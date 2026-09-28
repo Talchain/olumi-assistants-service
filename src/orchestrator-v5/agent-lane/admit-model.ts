@@ -3420,15 +3420,15 @@ function admitOnce(
   // projection entries it made — or, where a lever reaches the goal only through the roll-up, KEPT and asked
   // (`findPureLimitAsks`). The only exemption: the goal is a DECLARED identity containing the cost.
   const goalOfModel = nodes.find((n) => n.kind === 'goal');
-  const goalIdentityParts = new Set<string>();
-  for (const d of Array.isArray(model.identities) ? model.identities : []) {
-    if (goalOfModel === undefined || resolveEntity(d.outcome) !== goalOfModel.id) continue;
-    for (const part of Array.isArray(d.factors) ? d.factors : []) {
-      const id = resolveEntity(part);
-      if (id !== undefined) goalIdentityParts.add(id);
-    }
-  }
   const edgesBeforeRollups = [...topologyEdges, ...heldStatusQuoEdges, ...mechanismEdges];
+  // ⛔ Codex review of #2249 (#72 5871853753): the exemption reads ONLY a declaration the SAME admission authority ACCEPTS
+  // (`markProductIdentities`), judged on the structure the exemption keeps (the cost -> goal edge included) — never the
+  // raw candidate text. A rejected declaration ("MRR = spend × a factor absent from the model") exempts nothing. The
+  // verdict is structural (kinds, every factor present and reaching the goal, ≥ 2 factors), so the final run below,
+  // on the same kept edge, reads it the same way.
+  const goalIdentityParts = new Set<string>(goalOfModel === undefined ? [] : markProductIdentities(
+    Array.isArray(model.identities) ? model.identities : [], resolveEntity, nodes, edgesBeforeRollups, goalOfModel.id, declaredStatusQuoIds,
+  ).accepted.filter((a) => a.outcome_id === goalOfModel.id).flatMap((a) => a.factor_ids));
   const pureLimits = findPureLimits(nodes, edgesBeforeRollups, constraintResult.constraints, goalIdentityParts);
   const pureLimitAsks = findPureLimitAsks(nodes, edgesBeforeRollups, constraintResult.constraints, goalIdentityParts);
   const pureLimitPairs = new Set(pureLimits.map((p) => `${p.node_id}::${p.dropped_edge_to}`));
