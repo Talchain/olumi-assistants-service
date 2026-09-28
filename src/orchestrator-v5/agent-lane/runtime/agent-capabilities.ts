@@ -370,30 +370,114 @@ function switchFigureMeansOn(value: unknown, unit: unknown): boolean {
 }
 
 /**
+ * ⭐ A NEW SWITCH LISTED AT EXACTLY 0 UNDER AN OPTION SAYS THAT OPTION LEAVES IT OFF (MG; served DL run
+ * pj-20260928T011147Z on CEE 84440ff, journey A step A03 "add two options to compare": FIVE `propose_new_option` calls,
+ * every one refused `switch_level_not_on` with `not_one`, ~23 s, then a 13 s clarification turn). One change carried two
+ * options and ONE new switch; the Agent also listed the switch at 0 under the option that does NOT turn it on (inferred
+ * from the served trace: the reply said the switch's "level must be omitted rather than set to zero" — the arguments are
+ * not kept). A bare 0, or 0 in a percent-class unit (`classifyUnitScaleClass`, as `switchFigureMeansOn`), as the user's
+ * word or Olumi's (`estimate: true`), and nothing else: 0 in any other unit, a string, or a malformed level stays a
+ * conflict. The switch is off today (Olumi's today-0, `cee_inference`), so an option that leaves it at 0 does not act
+ * on it at all: the entry is dropped — never linked, never set — but ONLY when another option in the same change turns
+ * it on (`dropSwitchOffEntries`).
+ */
+function switchLevelMeansOff(level: unknown): boolean {
+  if (level === null || typeof level !== 'object' || Array.isArray(level)) return false;
+  const { value, unit, estimate } = level as { value?: unknown; unit?: unknown; estimate?: unknown };
+  if (value !== 0) return false;
+  if (estimate !== undefined && estimate !== null && typeof estimate !== 'boolean') return false;
+  const hasUnit = unit !== undefined && unit !== null && !(typeof unit === 'string' && unit.trim() === '');
+  return !hasUnit || (typeof unit === 'string' && classifyUnitScaleClass(unit) === 'percent');
+}
+
+/**
+ * Drop each acts_on entry that lists a NEW switch at exactly 0 (`switchLevelMeansOff`) under an option, when ANOTHER option
+ * in the same change turns that switch on (a level that means on, or none: `newSwitchLevelConflict` is null). PURE. Each
+ * entry is resolved exactly as `planNewOption` resolves it — a factor the model has first, then a factor this change adds
+ * — so a 0 on a factor the model already has is never touched. Only an option's ONE entry for the switch is dropped: an
+ * option that also names it another way is two answers, refused as before. Where no option turns the switch on, nothing
+ * is dropped: the 0 stays a `switch_level_not_on` conflict, and its refusal says to list it under the option that turns it on.
+ */
+function dropSwitchOffEntries<S extends { readonly label: string; readonly acts_on: readonly { readonly factor_label?: unknown; readonly level?: unknown }[] }>(
+  specs: readonly S[],
+  nodes: readonly { readonly kind?: string; readonly label?: string; readonly description?: string }[],
+  newFactors: readonly { readonly key: string; readonly label: string; readonly kind?: 'switch' }[],
+): { specs: S[]; dropped: { option: string; factor: string }[] } {
+  const n = (v: unknown): string => String(v ?? '').trim().toLowerCase();
+  const newSwitchNamed = (label: unknown): { key: string; label: string } | undefined => {
+    const wanted = n(label);
+    if (wanted === '' || nodes.some((x) => x.kind === 'factor' && (n(x.label) === wanted || n(x.description) === wanted))) return undefined;
+    return newFactors.find((f) => f.kind === 'switch' && n(f.label) === wanted);
+  };
+  const turnsOn = (spec: S, key: string): boolean =>
+    spec.acts_on.some((a) => newSwitchNamed(a.factor_label)?.key === key && newSwitchLevelConflict(a.level) === null);
+  const dropped: { option: string; factor: string }[] = [];
+  const out = specs.map((spec, i) => ({
+    ...spec,
+    acts_on: spec.acts_on.filter((a) => {
+      const sw = newSwitchNamed(a.factor_label);
+      if (sw === undefined || !switchLevelMeansOff(a.level)) return true;
+      // Only the option's ONE entry for the switch: two entries in one option are two answers (`duplicate_acts_on`, VERIFIER-S1).
+      if (spec.acts_on.filter((x) => newSwitchNamed(x.factor_label)?.key === sw.key).length > 1) return true;
+      if (!specs.some((other, j) => j !== i && turnsOn(other, sw.key))) return true;
+      dropped.push({ option: spec.label.trim(), factor: sw.label });
+      return false;
+    }),
+  }));
+  return { specs: out, dropped };
+}
+
+/**
  * ⛔ A REFUSED SWITCH LEVEL IS FIXED IN ONE HOP (served A05, pj-20260927T233309Z: six refusals, hop_limit, ~20 s). The
  * detail names the exact next call — the same arguments with `level` removed from each refused acts_on entry (or, where
  * the switch is named more than once in an option, ONE entry with no level, so the next call is not refused as a
  * duplicate) — for EVERY refused entry at once. A figure that reads as a share or an amount (a number, not 0, that does
  * not mean on) may be what the user meant: then it also names the graded factor instead.
+ *
+ * ⛔ A 0 IS FIXED BY REMOVING THE ENTRY, NEVER ITS LEVEL (served A03, pj-20260928T011147Z: five refusals). A bare entry
+ * for a switch means ON, so "remove level" from a 0 asks the Agent to turn on what it meant to leave off — it would not,
+ * and looped. For a conflicting value of 0 the next call removes that option's WHOLE entry; and where no option in the
+ * change turns the switch on (`turnedOnInChange`), it says so and names the one fix: list it under the option that turns
+ * it on, and leave it out of the others.
  */
 function switchLevelRefusalDetail(
   conflicts: readonly { option: string; factor: string; value: unknown; unit?: unknown; estimate?: unknown }[],
   entriesNaming: (option: string, factor: string) => number,
+  turnedOnInChange: (factor: string) => boolean = () => true,
 ): string {
-  const given = conflicts.map((c) => `"${c.factor}" was added as a switch that "${c.option}" turns on, but it was given a level: ${shownSwitchLevel(c)}.`);
+  const zero = (c: { value: unknown }): boolean => c.value === 0;
+  const onNowhere = (c: { factor: string; value: unknown }): boolean => zero(c) && !turnedOnInChange(c.factor);
+  const given = conflicts.map((c) => (zero(c)
+    ? `"${c.option}" lists the new switch "${c.factor}" at ${shownSwitchLevel(c)}.`
+    : `"${c.factor}" was added as a switch that "${c.option}" turns on, but it was given a level: ${shownSwitchLevel(c)}.`));
   const pairs = conflicts.filter((c, i) => conflicts.findIndex((d) => d.option === c.option && d.factor === c.factor) === i);
-  const edits = pairs.map((c) => (entriesNaming(c.option, c.factor) > 1
+  const edits = pairs.filter((c) => !onNowhere(c)).map((c) => (entriesNaming(c.option, c.factor) > 1
     ? `keep ONE acts_on entry for "${c.factor}" in "${c.option}", with no "level"`
-    : `remove "level" from the acts_on entry for "${c.factor}" in "${c.option}"`));
+    : zero(c)
+      ? `remove the whole acts_on entry for "${c.factor}" from "${c.option}" (not only its "level": a bare entry turns the switch on)`
+      : `remove "level" from the acts_on entry for "${c.factor}" in "${c.option}"`));
+  const unswitched = conflicts.filter(onNowhere).map((c) => c.factor).filter((f, i, all) => all.indexOf(f) === i);
   const quantities = conflicts.filter((c) => typeof c.value === 'number' && Number.isFinite(c.value) && c.value !== 0 && !switchFigureMeansOn(c.value, c.unit));
   const graded = quantities.filter((c, i) => quantities.findIndex((d) => d.factor === c.factor) === i).map((c) =>
     ` If ${shownSwitchLevel({ value: c.value, unit: c.unit })} is the figure the user meant for "${c.factor}" (a share of the customers or an amount), `
     + `it is not a switch: declare "${c.factor}" as a graded factor instead \u2014 the same call with kind left out of its new_factors entry \u2014 `
     + 'and its level is set once it is added.');
-  return `${given.join(' ')} A switch has no level of its own \u2014 it is off today and on under this option (a bare 1 or exactly 100% `
-    + 'says the same) \u2014 so that figure would be dropped, and it is not taken as on. Nothing was prepared. NEXT CALL: call '
-    + `propose_new_option again with exactly the same arguments, except ${edits.join('; and ')}. Then tell the user it is on under this option.`
-    + graded.join('');
+  const why = conflicts.some((c) => !zero(c))
+    ? ' A switch has no level of its own \u2014 it is off today and on under this option (a bare 1 or exactly 100% says the same) \u2014 '
+      + 'so that figure would be dropped, and it is not taken as on.'
+    : '';
+  const off = conflicts.some(zero)
+    ? ' A new switch is off today, and an option that lists it turns it on, so an option that leaves it off does not list it at all.'
+    : '';
+  const nowhere = unswitched.map((f) => ` No option in this change turns "${f}" on; list it under the option that turns it on, with no "level", `
+    + `and leave it out of the others. If no option the user asked for turns it on, leave "${f}" out of new_factors too.`);
+  // With no 0 among the conflicts, the words are exactly #2172's.
+  const tell = conflicts.some(zero) ? 'Then tell the user it is on under the option that turns it on.' : 'Then tell the user it is on under this option.';
+  const next = edits.length > 0
+    ? ` NEXT CALL: call propose_new_option again with exactly the same arguments, except ${edits.join('; and ')}`
+      + `${unswitched.length > 0 ? '; and list each switch no option turns on as said above' : ''}. ${tell}`
+    : ` NEXT CALL: call propose_new_option again with exactly the same arguments, except each switch listed as said above. ${tell}`;
+  return `${given.join(' ')}${why}${off}${nowhere.join('')} Nothing was prepared.${next}${graded.join('')}`;
 }
 
 /** A switch conflict's figure as the user would read it: `1 £/month`, `1%`, `"0.5"`, `2 (as Olumi's estimate)`. */
@@ -4184,13 +4268,13 @@ export function createAgentCapabilities(
        * and B" is ONE proposal the user approves once: every option is built into ONE held batch, and it lands
        * whole or not at all. A single option may still be sent without `options`.
        */
-      const specs = Array.isArray(args?.options) && args.options.length > 0
+      const askedSpecs = Array.isArray(args?.options) && args.options.length > 0
         ? (args.options as unknown[]).map((o) => ({ label: String((o as { label?: unknown } | null)?.label ?? ''), acts_on: askedOf((o as { acts_on?: unknown } | null)?.acts_on) }))
         : [{ label: String(args?.label ?? ''), acts_on: askedOf(args?.acts_on) }];
-      if (specs.length > MAX_OPTIONS_PER_TRANSACTION) {
+      if (askedSpecs.length > MAX_OPTIONS_PER_TRANSACTION) {
         return {
           ok: false, mutated: false, refusal: 'too_many_options',
-          detail: `One change can add at most ${MAX_OPTIONS_PER_TRANSACTION} options; this asks for ${specs.length}. Nothing was prepared. `
+          detail: `One change can add at most ${MAX_OPTIONS_PER_TRANSACTION} options; this asks for ${askedSpecs.length}. Nothing was prepared. `
             + `Offer the first ${MAX_OPTIONS_PER_TRANSACTION} as one change, and add the rest after the user approves it.`,
         };
       }
@@ -4212,6 +4296,12 @@ export function createAgentCapabilities(
       const planned = planNewFactors(g.nodes as never, Array.isArray(args?.new_factors) ? args.new_factors as readonly NewFactorRequest[] : []);
       if (!planned.ok) return { ok: false, mutated: false, refusal: planned.refusal, detail: planned.detail };
       const newFactors = planned.factors;
+      /**
+       * ⭐ A NEW SWITCH AT 0 UNDER AN OPTION THAT LEAVES IT OFF IS NOT AN ENTRY (served A03, pj-20260928T011147Z: five
+       * `switch_level_not_on` refusals, ~23 s). When another option in this change turns it on, that 0 says only that
+       * this option does not act on it: dropped before planning (no link, no level), and said (`switch_off_entries_dropped`).
+       */
+      const { specs, dropped: switchOffDropped } = dropSwitchOffEntries(askedSpecs, g.nodes, newFactors);
       // Each option is planned against the model PLUS the options before it: distinct ids, and no two options by one name.
       const plans: { spec: (typeof specs)[number]; plan: Extract<ReturnType<typeof planNewOption>, { ok: true }> }[] = [];
       for (const spec of specs) {
@@ -4526,10 +4616,13 @@ export function createAgentCapabilities(
       if (switchLevelConflicts.length > 0) {
         const entriesNaming = (option: string, factor: string): number =>
           plans.find((x) => x.plan.label === option)?.spec.acts_on.filter((x) => norm(x.factor_label) === norm(factor)).length ?? 1;
+        // Whether any option in this change turns the switch on (a level that means on, or none).
+        const turnedOnInChange = (factor: string): boolean => plans.some(({ spec }) =>
+          spec.acts_on.some((x) => norm(x.factor_label) === norm(factor) && newSwitchLevelConflict(x.level) === null));
         return {
           ok: false, mutated: false, refusal: 'switch_level_not_on', switch_level_conflicts: switchLevelConflicts,
           conflict_fields: switchConflictFields,
-          detail: switchLevelRefusalDetail(switchLevelConflicts, entriesNaming),
+          detail: switchLevelRefusalDetail(switchLevelConflicts, entriesNaming, turnedOnInChange),
         };
       }
       /**
@@ -4746,6 +4839,13 @@ export function createAgentCapabilities(
           ? { option: { label: described[0]!.label, linked_from: described[0]!.linked_from, acts_on: described[0]!.acts_on }, levels: described[0]!.levels }
           : { options: described }),
         ...(levelsNotSet.some((l) => labels.includes(l.option)) ? { levels_not_set: levelsNotSet.filter((l) => labels.includes(l.option)) } : {}),
+        // An option that listed a new switch at 0 leaves it off: that entry was dropped, and the option that turns it on sets it.
+        ...(switchOffDropped.some((d) => labels.includes(d.option)) ? {
+          switch_off_entries_dropped: switchOffDropped.filter((d) => labels.includes(d.option)),
+          switch_off_entries_note: 'Each of these options listed a new switch at 0, meaning it leaves the switch off. The switch is off '
+            + 'today, so that entry was left out: the option does not act on it (no link, no level), and the option that turns it on '
+            + 'is the one that sets it. The change is otherwise exactly as asked; do not list a switch under an option that leaves it off.',
+        } : {}),
         ...(notAdded.length > 0 ? {
           not_added: notAdded,
           not_added_note: `${notAdded.map((n) => `"${n.option}" is NOT in this change: it would set exactly the same levels as "${n.same_levels_as}", so the analysis could not tell the two apart`).join('; ')}. `
