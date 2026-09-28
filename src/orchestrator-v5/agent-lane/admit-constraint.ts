@@ -50,30 +50,15 @@ import { GoalConstraintSchema, type GoalConstraintT } from '../../schemas/assist
 import { classifyUnitScaleClass, UNIT_SCALE_CLASS_TOKENS, unitPinnedScaleFrame } from '../../cee/draft/records/unit-scale-class.js';
 import { isCurrencyUnit, sameUnit } from '../../utils/currency-alphabet.js';
 
-export type CandidateOperator = '>=' | '<=' | '>' | '<';
+import type { CandidateOperator } from './limit-operator-words.js';
+export { type CandidateOperator, LIMIT_OPERATOR_WORDS, statedOperatorOf } from './limit-operator-words.js';
 /** The comparators the canonical store holds: `GoalConstraintSchema.operator`, derived, never restated. */
 export type CanonicalOperator = GoalConstraintT['operator'];
 export const CANONICAL_CONSTRAINT_OPERATORS: readonly CanonicalOperator[] = GoalConstraintSchema.shape.operator.options;
 /** `GoalConstraintSchema.operator_as_stated`: a strict comparator as the user stated it, held beside `operator`. */
 export type StatedOperator = NonNullable<GoalConstraintT['operator_as_stated']>;
 
-/** The words a limit's comparator is said in, to the user and to the Agent's model. One vocabulary, never restated. */
-export const LIMIT_OPERATOR_WORDS: Readonly<Record<CandidateOperator, string>> = {
-  '>=': 'at least', '<=': 'at most', '>': 'more than', '<': 'less than',
-};
-
-/**
- * The comparator a STORED row states: its `operator_as_stated` when that is the strict twin of its held `operator`
- * (`<` beside `<=`, `>` beside `>=`), otherwise the held `operator`. A stamp that contradicts the held comparator is
- * never said. `undefined` for a row with no readable operator.
- */
-export function statedOperatorOf(row: { readonly operator?: unknown; readonly operator_as_stated?: unknown }): CandidateOperator | undefined {
-  const held = row.operator;
-  if (held !== '<=' && held !== '>=') return undefined;
-  if (held === '<=' && row.operator_as_stated === '<') return '<';
-  if (held === '>=' && row.operator_as_stated === '>') return '>';
-  return held;
-}
+// `LIMIT_OPERATOR_WORDS` and `statedOperatorOf` live in the import-free leaf `limit-operator-words.ts`; re-exported above.
 
 export interface CandidateConstraint {
   readonly metric: string;

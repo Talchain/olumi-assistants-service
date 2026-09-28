@@ -174,7 +174,10 @@ vi.mock("../../src/cee/quality/index.js", () => ({
   computeQuality: vi.fn().mockReturnValue({ overall: 7, structure: 7, coverage: 7, safety: 7, structural_proxy: 7 }),
 }));
 
-vi.mock("../../src/schemas/assist.js", () => ({
+// The real module's other exports stay: `cee-v3.ts` reads `GoalConstraintSchema` from it at import time, and since
+// #2186 (a9bd6ffd) cee-v3 is on the repair stage's import chain (staging red from 02:12Z; DL #72).
+vi.mock("../../src/schemas/assist.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/schemas/assist.js")>()),
   DraftGraphOutput: {
     parse: vi.fn().mockImplementation((input: any) => input),
   },

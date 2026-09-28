@@ -963,6 +963,54 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(routerCalls).toEqual([]);
   }, 120_000);
 
+  // ⭐ R2 (DL #72 5862693164): a new factor's links are sized by the FIRST MODEL's own rule (D6 `frameAwarePlaceholder`),
+  // never `hypothesisEdgeValue`'s flat ±0.5. Served journey A: the grandfathering switch → Monthly churn at −0.5 moved
+  // churn by −50 points from 3%, 80% of the leader's draws fell out of churn's domain, and the churn limit withheld it.
+  // Paul's graph: churn 0.03 in "% per month" (domain [0, 1]) → −min(0.5, 0.03/4) = −0.0075; MRR 0.6 in "GBP MRR"
+  // (money, [0, ∞)) → −min(0.5, 0.6/4) = −0.15. Each std is |mean|/2, stamped `olumi_placeholder`.
+  const linkOf = (g: { edges: Record<string, any>[] }, from: string, to: string) => g.edges.find((e) => e.from === from && e.to === to)!;
+
+  it('[R2] RED: the grandfathering SWITCH\'s links are committed at the first model\'s D6 size, never the flat −0.5', async () => {
+    graphOf.set(SCENARIO, structuredClone(PAUL));
+    const t1 = await proposeGrandfathering('switch');
+    const approve = approveChipOf(t1)!;
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(t2._agent.tool_calls[0], JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: true }));
+    const g = graphNow() as unknown as { edges: Record<string, any>[] };
+    const churn = linkOf(g, SWITCH_FAC, 'monthly_churn');
+    expect(churn.strength.mean).toBeCloseTo(-0.0075, 12);
+    expect(churn.strength.std).toBeCloseTo(0.00375, 12);
+    expect(churn.provenance).toEqual(expect.objectContaining({ source: 'cee_hypothesis', magnitude: 'olumi_placeholder' }));
+    expect(churn.defaulted).toBe(true);
+    const mrr = linkOf(g, SWITCH_FAC, 'mrr');
+    expect(mrr.strength.mean).toBeCloseTo(-0.15, 12);
+    expect(mrr.strength.std).toBeCloseTo(0.075, 12);
+  }, 120_000);
+
+  it.each([['switch' as const]])('[R2] the committed new-factor links (%s) ARE the first model\'s rule: re-sizing them again changes nothing', async (kind) => {
+    const { frameDefaultedLinks } = await import('../../../cee/magnitude/frame-defaulted-links.js');
+    graphOf.set(SCENARIO, structuredClone(PAUL));
+    const t1 = await proposeGrandfathering(kind);
+    const approve = approveChipOf(t1)!;
+    await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    const g = graphNow() as unknown as { edges: Record<string, any>[] };
+    expect(g.edges.some((e) => e.from === SWITCH_FAC), 'the factor and its links landed').toBe(true);
+    // By VALUE: `frameDefaultedLinks` compares `natural_effect` with JSON.stringify, so the persisted key order alone makes it
+    // list a link as re-sized (pre-existing; disclosed on the PR). The claim here is that the numbers are the rule's.
+    const again = frameDefaultedLinks(structuredClone(g), SWITCH_FAC).graph as { edges: Record<string, any>[] };
+    const own = (x: { edges: Record<string, any>[] }) => x.edges.filter((e) => e.from === SWITCH_FAC);
+    expect(own(again)).toEqual(own(g));
+  }, 120_000);
+
+  it('[R2] CONTRAST: a GRADED new factor keeps its own path — its links commit at the default, re-sized when its level arrives', async () => {
+    graphOf.set(SCENARIO, structuredClone(PAUL));
+    const t1 = await proposeGrandfathering(undefined);
+    const approve = approveChipOf(t1)!;
+    await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    const churn = linkOf(graphNow() as unknown as { edges: Record<string, any>[] }, SWITCH_FAC, 'monthly_churn');
+    expect(churn.strength).toEqual({ mean: -0.5, std: 0.125 });
+  }, 120_000);
+
   it('[A1] CONTRAST: the same add with no kind (graded) lands exactly as before — no today value, the level asked for', async () => {
     graphOf.set(SCENARIO, structuredClone(PAUL));
     const t1 = await proposeGrandfathering(undefined);
