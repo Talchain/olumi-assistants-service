@@ -252,32 +252,68 @@ function limitChangeReply(r: Rec): string | null {
 /** Argument keys that QUOTE the user's words: a figure inside a quote is carried into no reply. */
 const QUOTE_KEY = /(?:^|_)(?:words|quote|rationale|basis|reason)$/;
 
-/** Every number and string an argument carries, outside quotes of the user's own words. */
-function carriedBy(value: unknown, key: string, into: { nums: number[]; strs: string[] }): void {
+/** A number an argument carries, with the unit written beside it in the same object (if any). */
+type Carried = { readonly value: number; readonly unit: string | null };
+
+/** Every number (with its sibling `unit`) and string an argument carries, outside quotes of the user's own words. */
+function carriedBy(value: unknown, key: string, into: { nums: Carried[]; strs: string[] }, unit: string | null): void {
   if (QUOTE_KEY.test(key)) return;
-  if (typeof value === 'number' && Number.isFinite(value)) into.nums.push(value);
+  if (typeof value === 'number' && Number.isFinite(value)) into.nums.push({ value, unit });
   else if (typeof value === 'string') into.strs.push(value);
-  else if (Array.isArray(value)) for (const v of value) carriedBy(v, key, into);
-  else if (value !== null && typeof value === 'object') for (const [k, v] of Object.entries(value)) carriedBy(v, k, into);
+  else if (Array.isArray(value)) for (const v of value) carriedBy(v, key, into, unit);
+  else if (value !== null && typeof value === 'object') {
+    const o = value as Record<string, unknown>;
+    const own = typeof o.unit === 'string' ? o.unit : null;
+    for (const [k, v] of Object.entries(o)) carriedBy(v, k, into, own);
+  }
+}
+
+const PERCENT_UNIT = /%|percent|pct|fraction|ratio|proportion/i;
+const MONEY_UNIT = /£|\$|€|\bGBP\b|\bUSD\b|\bEUR\b|pound|dollar|euro/i;
+const sameNumber = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+
+/**
+ * Whether ONE carried number evidences ONE written amount, by value AND by quantity kind (Codex CHANGES_REQUIRED on
+ * #2263: `{ value: 4, unit: 'GBP' }` must not carry both "£4" and "4%"). `unit` = the carried unit says the same kind;
+ * `bare` = no unit beside it, so it may stand for the amount but only once; null = not this amount.
+ */
+function evidences(c: Carried, a: { readonly magnitude: number; readonly kind?: unknown }): 'unit' | 'bare' | null {
+  const money = c.unit !== null && MONEY_UNIT.test(c.unit);
+  const percent = c.unit !== null && PERCENT_UNIT.test(c.unit);
+  if (a.kind === 'percent') {
+    if (money || !(sameNumber(c.value, a.magnitude) || sameNumber(c.value, a.magnitude / 100))) return null;
+    return c.unit === null ? 'bare' : percent ? 'unit' : null;
+  }
+  if (!sameNumber(c.value, a.magnitude)) return null;
+  if (c.unit === null) return 'bare';
+  if (a.kind === 'currency') return money && !percent ? 'unit' : null;
+  return money || percent ? null : 'unit';
 }
 
 /**
  * ⛔ A FIGURE THE USER WROTE THAT THE CALL DOES NOT CARRY IS SOMETHING ELSE TO ACKNOWLEDGE (served journey-A C3, real-role
  * replay 28 Sep, 15 served turns): "price sensitivity is very high, and we've seen our churn increase by 15% when we made
  * our last price increase. That was only £4." — the model called the link-strength proposal `whole_request: true` on
- * 11/15, and the reply composed from the result named the user's +15% / £4 on 4/15. The figures the repo's one extractor
- * (`findStatedAmounts`) reads in the message must each be carried by the call (a number equal to it, a percent as its
- * fraction too, or its text in a non-quote argument); otherwise the turn keeps its narrating call, for any model.
+ * 11/15, and the reply composed from the result named the user's +15% / £4 on 4/15. Each figure the repo's one extractor
+ * (`findStatedAmounts`) reads in the message needs its OWN evidence in the call: a carried number of the same quantity
+ * kind (a percent may be carried as its fraction), each number standing for one figure only, or the figure's own text
+ * in a non-quote argument. Otherwise the turn keeps its narrating call, for any model.
  */
 export function userFiguresTheCallLeaves(args: unknown, userMessage: string): string[] {
   if (typeof userMessage !== 'string' || userMessage === '') return [];
-  const c: { nums: number[]; strs: string[] } = { nums: [], strs: [] };
-  carriedBy(args, '', c);
-  const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
-  return findStatedAmounts(userMessage)
-    .filter((a) => !(c.nums.some((n) => same(n, a.magnitude) || ((a as { kind?: unknown }).kind === 'percent' && same(n, a.magnitude / 100)))
-      || c.strs.some((s) => s.includes(a.matchedText.trim()))))
-    .map((a) => a.matchedText.trim());
+  const c: { nums: Carried[]; strs: string[] } = { nums: [], strs: [] };
+  carriedBy(args, '', c, null);
+  const used = new Set<number>();
+  const left: string[] = [];
+  for (const a of findStatedAmounts(userMessage)) {
+    const text = a.matchedText.trim();
+    const pick = (want: 'unit' | 'bare'): number => c.nums.findIndex((n, i) => !used.has(i) && evidences(n, a as { magnitude: number; kind?: unknown }) === want);
+    const i = pick('unit') >= 0 ? pick('unit') : pick('bare');
+    if (i >= 0) { used.add(i); continue; }
+    if (c.strs.some((s) => s.includes(text))) continue;
+    left.push(text);
+  }
+  return left;
 }
 
 export function composeProposalReply(tool: string, args: unknown, result: unknown, userMessage: string): string | null {
