@@ -349,8 +349,9 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'Use it when the user gives strengths for more than one link in one message, or asks Olumi to size links for them '
       + '(they ask what you recommend, then agree to it). This does NOT change anything: it prepares ONE change and returns its id, '
       + 'which you keep for authorise_change: show the user what each link will hold, never the id, before they approve. '
-      + 'A link whose band the user named in THIS message is recorded as their own estimate, exactly as propose_link_strength records one. '
-      + 'Every other link is recorded as OLUMI\u2019S ESTIMATE, approved by them \u2014 never as theirs \u2014 and you must say which are which. '
+      + 'A link is recorded as the user\u2019s own ONLY when its `from_words` are the user\u2019s exact words from THIS message naming that link '
+      + '(one of its ends) AND its band; naming the band a link already sits in keeps it as it is. '
+      + 'Every other link is recorded as OLUMI\u2019S ESTIMATE, applied with their approval \u2014 never as theirs \u2014 and you must say which are which. '
       + 'Directions are kept: a link the user says runs the other way is propose_link_strength, one link at a time. '
       + 'A strength the user set themselves is never replaced by an estimate. The set is written whole or not at all.' + SLIGHT_IS_WEAK,
     parameters: obj({
@@ -361,6 +362,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
           to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
           strength: { type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'], description: 'The band the user named for this link, or Olumi\u2019s estimate when they did not.' },
+          from_words: { type: 'string', description: 'ONLY when the user named this link\u2019s band: their exact words from THIS message that name this link (one of its ends) and the band. Leave it out for Olumi\u2019s estimate.' },
         }, ['from_label', 'to_label', 'strength']),
       },
       rationale: { type: 'string', description: 'What the user asked for, in their words.' },
@@ -679,7 +681,7 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   /** Optional: a set of link strengths as ONE approval and ONE commit; a capability set without it refuses the tool plainly. */
   proposeLinkStrengths?(ctx: AgentToolContext, args: {
-    links: readonly { from_label: string; to_label: string; strength: 'weak' | 'moderate' | 'strong' | 'very strong' }[];
+    links: readonly { from_label: string; to_label: string; strength: 'weak' | 'moderate' | 'strong' | 'very strong'; from_words?: string }[];
     rationale: string;
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */

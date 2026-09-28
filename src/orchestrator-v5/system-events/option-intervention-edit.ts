@@ -575,6 +575,14 @@ async function applyApprovedLinkStrengths(
     if (seen.has(key)) return refuse('duplicate_link', i);
     seen.add(key);
     if (!Number.isFinite(l.magnitude) || l.magnitude < 0 || l.magnitude > 1) return refuse('link_strength_invalid', i);
+    // ⛔ B3 (DL CR on #2255): an estimate never goes over a strength that is the user's own AT WRITE TIME. The proposal
+    // checked it, but a canvas confirm since then keeps the mean and direction (so expected-before passes) and changes
+    // only provenance (outside the analysis hash). Checked on the graph being written, so the whole set refuses.
+    if (l.adopted) {
+      const stored = (working as EditableGraph).edges.find(e => e.from === l.from && e.to === l.to) as
+        { provenance?: { source?: unknown }; defaulted?: unknown } | undefined;
+      if (stored?.provenance?.source === 'user_specified' && stored.defaulted !== true) return refuse('link_became_users_own', i);
+    }
     // Direction is kept: a reversal is the user's words on one link (`propose_link_strength`), never part of a set.
     const event = { kind: 'edge_strength_edit' as const, from: l.from, to: l.to, intent: l.intent, direction_intent: 'preserve' as const,
       magnitude: l.magnitude, expected: l.expected };
@@ -596,7 +604,8 @@ async function applyApprovedLinkStrengths(
     if (res.response.assistant_text) confirmations.push(res.response.assistant_text);
   }
   const graph = projectGraphForPersistence(working);
-  if (!isEditableGraph(graph) || !linkStrengthsPostimageIsScoped(before, graph, links)) return refuse('link_scope_mismatch', Math.max(0, links.length - 1));
+  // No single link is to blame for a scope refusal, so none is named (-1 names none downstream).
+  if (!isEditableGraph(graph) || !linkStrengthsPostimageIsScoped(before, graph, links)) return refuse('link_scope_mismatch', -1);
   return { kind: 'applied', graph, handlerFacts, confirmations };
 }
 

@@ -1987,7 +1987,9 @@ export function createAgentCapabilities(
       const which = res.link !== undefined ? `"${labelOf(res.link.from)}" \u2192 "${labelOf(res.link.to)}"` : 'One of the links';
       const why = res.reason === 'link_definitional_link'
         ? 'is defined by a calculation the model declares, so its strength is not an estimate anyone sets'
-        : res.reason === 'link_expected_mismatch' ? 'changed after this was prepared' : 'could not be recorded';
+        : res.reason === 'link_expected_mismatch' ? 'changed after this was prepared'
+          : res.reason === 'link_became_users_own' ? 'became the user\u2019s own strength after this was prepared, so Olumi\u2019s estimate was not written over it'
+            : 'could not be recorded';
       return notApplied('link_refused', `${which} ${why}, so none of these links was recorded and the model is exactly as it was. Say so, and offer the set again without it.`,
         { refused_link: which });
     }
@@ -2298,6 +2300,15 @@ export function createAgentCapabilities(
       }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const labels = g.nodes.map((n) => String(n.label ?? ''));
+      /**
+       * ⛔ B2 (DL CHANGES_REQUIRED on #2255): a band is the user's only when THEIR words for THIS link say it — a phrase
+       * written in this turn (`wordsTheUserWrote`), holding the band word (`bandTheUserWrote`), and naming an end of this
+       * link (`factorTheUserNamed`, own words only). A band word anywhere in the message credits no link on its own.
+       */
+      const namedByTheUser = (band: InfluenceBand, words: unknown, fromLabel: string, toLabel: string): boolean =>
+        typeof words === 'string' && wordsTheUserWrote(words, ctx.user_turn_text) && bandTheUserWrote(band, words)
+        && [fromLabel, toLabel].some((end) => factorTheUserNamed(end, words, { options: [], others: labels.filter((x) => x !== end) }));
       type Shown = { from: string; to: string; band: InfluenceBand; magnitude: number; yours: boolean; keeps: boolean; was: InfluenceBand; wasStrength: number };
       const ops: ProposalOperation[] = [];
       const shown: Shown[] = [];
@@ -2342,12 +2353,13 @@ export function createAgentCapabilities(
           ? edge.effect_direction : (mean < 0 ? 'negative' : 'positive');
         const currentBand = edgeBandFromMagnitude(Math.abs(mean));
         const pair = `"${from.label}" \u2192 "${to.label}"`;
-        if (bandTheUserWrote(band, ctx.user_turn_text)) {
-          // The user named this band: recorded as theirs, exactly as `propose_link_strength` records one link.
-          const keeps = currentBand === band;
-          const magnitude = keeps ? Math.abs(mean) : bandMidpoint(band);
-          ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set', expected: { mean, effect_direction: direction }, band, author: 'user_stated' } });
-          shown.push({ from: from.label, to: to.label, band, magnitude, yours: true, keeps, was: currentBand, wasStrength: Math.abs(mean) });
+        if (namedByTheUser(band, l.from_words, from.label, to.label)) {
+          // ⛔ B1 (DL CR on #2255; AIQ R11 rows): naming the band a link already sits in changes no value, so it is a
+          // REVIEW, never authorship. The link is left exactly as it is and said so; only a band that moves it is theirs.
+          if (currentBand === band) { already.push(`${pair} already sits in ${linkBandWord(band)}, so it is kept as it is`); continue; }
+          const magnitude = bandMidpoint(band);
+          ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: 'set', expected: { mean, effect_direction: direction }, band, author: 'user_stated' } });
+          shown.push({ from: from.label, to: to.label, band, magnitude, yours: true, keeps: false, was: currentBand, wasStrength: Math.abs(mean) });
           continue;
         }
         // Olumi's estimate. A strength the user set is theirs: an estimate never replaces it.
