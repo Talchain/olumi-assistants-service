@@ -32,6 +32,7 @@ import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
+import { bindOptionLabelToBrief, bindingEarnsBriefClaim } from '../../cee/provenance/brief-binding.js';
 import { sizeLink, type LinkSizing, type MagnitudeNode } from '../../cee/magnitude/link-effect.js';
 import {
   admitCandidateConstraints,
@@ -75,8 +76,9 @@ export type CandidateNodeKind =
  * emits goal, options, factors, risks, outcomes and links — and no decision — so
  * every model admitted from it was unanalysable before anything else mattered.
  *
- * It is `ai_inferred`: nobody stated it, it is read off the question the brief
- * asks. The label is the goal metric's decision framing, not invented content.
+ * Its label is the brief's OWN question when the drafter copied it verbatim
+ * (`decision_question`, admitted by `decisionEntityFor`), and otherwise the goal
+ * metric's decision framing, "Decision: <metric>", `ai_inferred`: nobody stated it.
  */
 
 export interface CandidateModel {
@@ -154,6 +156,12 @@ export interface CandidateModel {
    * means none was declared, exactly what an older candidate meant.
    */
   readonly identities?: readonly CandidateIdentity[];
+  /**
+   * The question the brief asks, as the drafter COPIED it from the brief, or `null` when it asks none. Optional because
+   * the banked contract has no such field: absent means no question was copied, exactly what an older candidate meant.
+   * Admission takes it only when it is verbatim brief text (`decisionEntityFor`); it is never read as English.
+   */
+  readonly decision_question?: string | null;
 }
 
 /**
@@ -280,10 +288,79 @@ export interface WidenerAdditions {
  * only the writer, on a user's approved change, mints that stamp.
  */
 export type ConstructedLevelSource = Exclude<InterventionV3T['source'], 'user_specified'>;
-export interface ConstructedLevel { value: number; source: ConstructedLevelSource }
+export interface ConstructedLevel {
+  value: number;
+  source: ConstructedLevelSource;
+  /** The factor this level is keyed by — `InterventionV3.target_match`, which the contract requires. */
+  target_match?: { node_id: string; match_type: 'exact_id'; confidence: 'high' };
+  /**
+   * The drafter's own figure, present exactly when `value` is that figure read on the factor's OWN frame: its
+   * `observed_state.cap`, or (a factor with no cap) its node `scale_frame`.
+   */
+  raw_value?: number;
+  /** The factor's own unit, beside `raw_value`: its `observed_state.unit`, else the unit the construction declared for it. */
+  unit?: string;
+}
 
 const levelSourceFor = (provenance: string): ConstructedLevelSource =>
   provenance === 'explicit' ? 'brief_extraction' : 'cee_hypothesis';
+
+/**
+ * ⭐ ONE FORM FOR AN OPTION'S LEVEL, WHICHEVER WRITER WROTE IT (P2 A5; DL #70 order 5858777018 item 3).
+ *
+ * MEASURED on served CEE 523e18d (journey A, `build_model_from_brief` at A01): this writer stored "Raise Pro to £59"
+ * as `{ value: 0.295, source }`. The brief's 59, the factor's unit and the factor match were all in hand here and all
+ * dropped, while the add-option writer stores the same level on the same factor as
+ * `{ value, raw_value: 59, unit, source, target_match }` (A06). Every `{source, value}` level on the five fresh journeys
+ * (18 of them) came from the one line that calls this.
+ *
+ * EVERY MEMBER COMES FROM THIS CONSTRUCTION — nothing is guessed, and nothing is filled later at projection (which runs
+ * on every write, and would rewrite cells nobody touched):
+ *  · `target_match` names the key the level is stored under, exactly as the encoder synthesises it for an entry that
+ *    lacks one (`encode-option-interventions.ts` `buildInterventionV3`) and the add-option writer writes it;
+ *  · `raw_value` is the drafter's figure itself, and `unit` is the FACTOR's own `observed_state.unit` (the contract:
+ *    "should match target factor's observed_state.unit"), never the option's spelling of it. Both are written ONLY when
+ *    the level was divided by the factor's OWN frame, so `raw_value / frame === value` is re-checkable from the stored
+ *    bytes:
+ *      – the cap its `observed_state` stores; or
+ *      – ⭐ its node `scale_frame`, for a factor with no cap (AIQ Q2, CEE #2139 5859746452). PLoT #373 rung 1.6 scales
+ *        every intervened cap-less factor on [0, scale_frame], so it expects the RAW figure, and the egress ships a bare
+ *        `{value}` there unchanged (`plot-intervention-scale.ts`, rule `no_cap`). EXECUTED on served PLoT a6da42b
+ *        (`monthly_new_pro_subscribers`, scale_frame 1000): raw 90 gave +£18.08, the unframed 0.09 gave −£90.27, a sign
+ *        flip. With the pair the egress takes `raw_value_used` and ships 90, as it already does for every add-option
+ *        and encoder cell on such a factor (AIQ census 5859754585: 24 of 24). Such a node may store no observed state,
+ *        and so no unit; its unit is then the one the construction declared for it, the same `f.unit` an observed
+ *        state is written with.
+ *
+ * ⚠ AND ONLY THEN, DELIBERATELY: an UNFRAMED level (no range; the level is its own figure) keeps
+ * `{ value, source, target_match }` — `InterventionV3`: "value = raw_value (or raw_value omitted)".
+ */
+function constructedLevel(
+  factorId: string,
+  figure: number,
+  cap: number | undefined,
+  source: ConstructedLevelSource,
+  factor: Pick<AdmittedNode, 'observed_state' | 'scale_frame'> | undefined,
+  declaredUnit: string | undefined,
+): ConstructedLevel {
+  const level: ConstructedLevel = {
+    value: cap !== undefined ? figure / cap : figure,
+    source,
+    target_match: { node_id: factorId, match_type: 'exact_id', confidence: 'high' },
+  };
+  const os = factor?.observed_state;
+  const usable = (u: unknown): u is string => typeof u === 'string' && u.trim() !== '';
+  if (cap !== undefined && os?.cap === cap) {
+    level.raw_value = figure;
+    if (usable(os.unit)) level.unit = os.unit;
+  } else if (cap !== undefined && typeof os?.cap !== 'number' && factor?.scale_frame === cap) {
+    level.raw_value = figure;
+    const stored = os?.unit;
+    const unit = usable(stored) ? stored : declaredUnit;
+    if (usable(unit)) level.unit = unit;
+  }
+  return level;
+}
 
 export interface AdmittedNode {
   /** The full text, when the label had to be shortened to stay editable. */
@@ -404,6 +481,47 @@ export function slugId(label: string): string {
 /** Same words, ignoring case and spacing — the test for "the same thing". */
 export const canonicalLabel = (label: string): string => label.trim().toLowerCase().replace(/\s+/g, ' ');
 
+/** A copied question is 8 to 240 characters once its whitespace is collapsed; anything else is not taken as one. */
+const DECISION_QUESTION_MIN_CHARS = 8;
+const DECISION_QUESTION_MAX_CHARS = 240;
+const collapseWhitespace = (text: string): string => text.replace(/\s+/g, ' ').trim();
+
+/**
+ * ⭐ THE QUESTION CARD ASKS THE BRIEF'S OWN QUESTION. Served to Paul (27 Sep, export 17d1cd3a): the brief asked
+ * "…should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?" and the
+ * Question card read "Decision: MRR", because this label was minted from the goal metric and the UI shows it verbatim.
+ *
+ * TYPED GROUNDING, NOT READING ENGLISH. The drafter copies the question (`decision_question`); it is taken only when it
+ * is a verbatim substring of the brief once whitespace is collapsed on both sides, 8 to 240 characters. The label is
+ * that span with its first character upper-cased and nothing else changed. Anything else — null, a candidate from
+ * before the key, no brief, a paraphrase, a span too short or too long — keeps exactly "Decision: <metric>" as before.
+ * So does a span spelled like another entity: `assignIds` would fold that entity into the decision node.
+ *
+ * ⚠ The label budget still applies downstream (`shortLabel`): a question over 33 characters keeps its full text on
+ * `description`, which is also its identity (`construction-size-gate.ts` `nodeIdentity`).
+ *
+ * PROVENANCE IS THE ESTATE'S RULE, NOT A NEW ONE (`schema-v3.ts` `LABEL_BOUND_PROVENANCE_KINDS`, which lists
+ * `decision`; row 2.1205): a value-free label of at least two words that `bindOptionLabelToBrief` binds to the brief
+ * is the user's (`explicit`); otherwise it is Olumi's (`inferred`).
+ */
+export function decisionEntityFor(
+  model: Pick<CandidateModel, 'goal' | 'decision_question'>,
+  brief: string | undefined,
+  otherLabels: readonly string[],
+): { readonly label: string; readonly provenance: 'explicit' | 'inferred' } {
+  const fallback = { label: `Decision: ${model.goal.metric}`, provenance: 'inferred' as const };
+  const copied = model.decision_question;
+  if (typeof copied !== 'string' || typeof brief !== 'string') return fallback;
+  const span = collapseWhitespace(copied);
+  if (span.length < DECISION_QUESTION_MIN_CHARS || span.length > DECISION_QUESTION_MAX_CHARS) return fallback;
+  if (!collapseWhitespace(brief).includes(span)) return fallback;
+  const label = span.charAt(0).toUpperCase() + span.slice(1);
+  if (otherLabels.some((other) => canonicalLabel(other) === canonicalLabel(label))) return fallback;
+  const words = label.trim().split(/\s+/).filter(Boolean).length;
+  const users = words >= 2 && bindingEarnsBriefClaim(bindOptionLabelToBrief(label, brief));
+  return { label, provenance: users ? 'explicit' : 'inferred' };
+}
+
 /**
  * Deterministic, collision-safe id assignment in a fixed traversal order.
  *
@@ -505,8 +623,12 @@ const inferenceClassFor = (provenance: string): InferenceClass => {
  * the engine compares across factors. The range is the model's proposal and is
  * recorded in the ledger as such — it is not a forecast, and it never replaces
  * what the user said.
+ *
+ * ⭐ EXPORTED FOR ONE OTHER WRITER (PJ-A1 £49, DL #70 5860365834): the today level the user stated for a NEW graded factor
+ * the Agent adds (`propose_new_option` `new_factors[].today`) is framed by THIS function, so it is stored exactly as a
+ * baseline the brief states — never a second framer.
  */
-function framedObservedState(f: {
+export function framedObservedState(f: {
   baseline_value: number | null; unit: string | null; provenance: string; plausible_max?: number | null;
 }): Record<string, unknown> {
   const raw = f.baseline_value as number;
@@ -1965,11 +2087,13 @@ export function admitStatedGoalLevel(args: {
 export function admitCandidateModel(
   candidateModel: CandidateModel,
   widened: WidenerAdditions = {},
+  /** The user's brief, which the decision node's question must be copied from (`decisionEntityFor`). */
+  brief?: string,
 ): AdmittedModel {
   const declared = new Set(candidateModel.options
     .filter((o) => readIsBaseline({ ...(typeof o.is_status_quo === 'boolean' ? { is_baseline: o.is_status_quo } : {}) }) === true)
     .map((o) => canonicalLabel(o.label)));
-  const first = admitOnce(candidateModel, widened);
+  const first = admitOnce(candidateModel, widened, brief);
   const verdict = judgeOptionIdentity(first, declared);
   // Never withhold a name another entity shares: removing its links would take that entity's with it.
   const otherNames = new Set([
@@ -1990,6 +2114,7 @@ export function admitCandidateModel(
       ...(widened.proposed_options !== undefined ? { proposed_options: widened.proposed_options.filter((o) => !gone.has(canonicalLabel(o.label))) } : {}),
       ...(widened.proposed_links !== undefined ? { proposed_links: widened.proposed_links.filter((l) => !names(l)) } : {}),
     },
+    brief,
   );
   const options_withheld: WithheldOption[] = withheld.map((w) => ({
     option: w.option, like: w.like, reason: 'option_indistinct', sentence: indistinctStep(w.option, w.like),
@@ -2013,6 +2138,7 @@ export function admitCandidateModel(
 function admitOnce(
   candidateModel: CandidateModel,
   widened: WidenerAdditions,
+  brief: string | undefined,
 ): AdmittedModel {
   const { model, restated: restatedChanges } = restateSignedPercentChanges(candidateModel);
 
@@ -2331,8 +2457,9 @@ function admitOnce(
 
   // The decision node is prepended so it takes a stable id before any entity
   // whose label might slug to the same token.
-  const DECISION_LABEL = `Decision: ${model.goal.metric}`;
-  entities.unshift({ label: DECISION_LABEL, kind: 'decision', provenance: 'inferred' });
+  const decision = decisionEntityFor(model, brief, entities.map((e) => e.label));
+  const DECISION_LABEL = decision.label;
+  entities.unshift({ label: DECISION_LABEL, kind: 'decision', provenance: decision.provenance });
 
   const ids = assignIds(entities.map((e) => e.label));
   const nodes: AdmittedNode[] = [];
@@ -2474,6 +2601,16 @@ function admitOnce(
     const c = capByLabel.get(f.label);
     if (fid !== undefined && c !== undefined) capByFactorId.set(fid, c);
   }
+  /**
+   * Each factor's unit as the construction declares it: the same `f.unit` its observed state is written with. Read by
+   * the level writer (a factor framed only by `scale_frame` may store no observed state, so no unit, at all) and by
+   * the link sizing below.
+   */
+  const unitById = new Map<string, string>();
+  for (const f of model.factors) {
+    const id = ids.get(f.label);
+    if (id !== undefined && typeof f.unit === 'string') unitById.set(id, f.unit);
+  }
   for (const d of defaultedFrames) {
     // "Your own figures" only when a figure the user stated fed the frame; when
     // every figure is Olumi's, saying so is the honest record.
@@ -2584,7 +2721,7 @@ function admitOnce(
         continue;
       }
       const cap = capByFactorId.get(factorId);
-      bundle[factorId] = { value: cap !== undefined ? iv.value / cap : iv.value, source: levelSourceFor(iv.provenance) };
+      bundle[factorId] = constructedLevel(factorId, iv.value, cap, levelSourceFor(iv.provenance), nodes.find((n) => n.id === factorId), unitById.get(factorId));
     }
     if (Object.keys(bundle).length > 0) interventionsByOption.set(optionId, bundle);
   }
@@ -2631,11 +2768,6 @@ function admitOnce(
    * Only a link whose direction is stated and whose mean nobody supplied directly is sized. A link with no usable
    * size and nothing to check it against keeps today's projection exactly.
    */
-  const unitById = new Map<string, string>();
-  for (const f of model.factors) {
-    const id = ids.get(f.label);
-    if (id !== undefined && typeof f.unit === 'string') unitById.set(id, f.unit);
-  }
   const optionLevelsById = new Map<string, number[]>();
   for (const bundle of interventionsByOption.values()) {
     for (const [factorId, level] of Object.entries(bundle)) optionLevelsById.set(factorId, [...(optionLevelsById.get(factorId) ?? []), level.value]);

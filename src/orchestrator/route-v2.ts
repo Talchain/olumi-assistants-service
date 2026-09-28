@@ -215,6 +215,7 @@ import {
 } from '../orchestrator-v5/boundary/request-extensions.js';
 import {
   buildTurnContext,
+  type ContinuationRead,
   loadDraftLossStands,
   loadHasOtherAdmittedLiveTurn,
   loadHasPriorTurns,
@@ -230,6 +231,7 @@ import { deriveAnalysisFreshness } from '../orchestrator-v5/context/freshness.js
 import { deriveAuthoritativeStage } from '../orchestrator-v5/context/derive-stage.js';
 import { extractGraphOptionIds } from '../orchestrator-v5/context/option-identity.js';
 import { dispatchAddOptionTransaction } from '../orchestrator-v5/handlers/add-option-dispatch.js';
+import { statedTodayLevelsFor, userNamedOptionIdsFor } from '../orchestrator-v5/handlers/add-option-authorship-context.js';
 import { detectAddOptionIntent } from '../orchestrator-v5/routing/add-option-intent.js';
 import {
   buildAddOptionGrounding,
@@ -4240,6 +4242,12 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           turnId: ingress.turn_id,
           requestId,
           stage: ingress.stage,
+          // ⭐ A6b (DL CR on #2131, option (a)) — the options the USER named, from the Agent's in-process context for
+          // THIS scenario and turn only; never from the chip's wire parameters. Empty for every UI chip.
+          userStatedOptionIds: userNamedOptionIdsFor(ingress.scenario_id, ingress.turn_id),
+          // ⭐ PJ-A1 £49 (DL #70 5860365834) — a new graded factor's today level the user's own words state, from the same
+          // in-process context for THIS scenario and turn only; never from the chip's wire. Empty for every UI chip.
+          statedTodayLevels: statedTodayLevelsFor(ingress.scenario_id, ingress.turn_id),
         });
         if (addOptionOutcome.kind === 'held') {
           // Honest supersession (edit-graph-dispatch precedent): a fresh hold
@@ -4497,15 +4505,31 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // them: "this scenario has history" and "a draft is in flight right now"
     // are different facts, and only the first one is safe to lift on. The
     // short-circuit is preserved exactly — the fence is read ONLY when the
-    // committed-rows answer is false, which is the phantom-shaped state.
-    const hasPriorCommittedTurns = frameStageNoGraph
+    // committed-rows answer is a clean "no", which is the phantom-shaped state.
+    //
+    // ROADMAP 2.717 — AN UNREADABLE ANSWER IS A CONTINUATION. Both reads are
+    // three-state (`ContinuationRead`). The draft commit carries NO expected
+    // hash (draft-graph-dispatch.ts, "DELIBERATELY uninstrumented"), so this
+    // guard is the only thing between a brief-shaped message and a wholesale
+    // replace of the stored model. When either read FAILED the scenario is
+    // classified as a continuation — the non-destructive branch — so the
+    // persisted-model check below runs, and only a positively-read "no model,
+    // no draft in flight" lifts the guard. Not a flip to `true`: that would
+    // strand a genuine new decision, which the lift below still unstrands
+    // (and an explicit Generate Draft bypasses the guard entirely).
+    const priorTurnsRead: ContinuationRead | null = frameStageNoGraph
       ? await loadHasPriorTurns(ingress.scenario_id, requestId)
-      : false;
-    const admittedLiveTurnFromShortCircuit =
-      frameStageNoGraph && !hasPriorCommittedTurns
+      : null;
+    const hasPriorCommittedTurns = priorTurnsRead === 'yes';
+    const fenceReadFromShortCircuit: ContinuationRead | null =
+      priorTurnsRead === 'no'
         ? await loadHasOtherAdmittedLiveTurn(ingress.scenario_id, ingress.turn_id, requestId)
-        : false;
-    const isContinuationScenario = hasPriorCommittedTurns || admittedLiveTurnFromShortCircuit;
+        : null;
+    const admittedLiveTurnFromShortCircuit = fenceReadFromShortCircuit === 'yes';
+    const continuationReadUnknown =
+      priorTurnsRead === 'unknown' || fenceReadFromShortCircuit === 'unknown';
+    const isContinuationScenario =
+      hasPriorCommittedTurns || admittedLiveTurnFromShortCircuit || continuationReadUnknown;
     // ROADMAP 2.308 / System B — ONE route-level strict graph read, shared by
     // no-model unstranding, semantic empty-workspace intake, configure-option
     // anchoring, and the edit-lane reload below. TurnExecutor may later perform
@@ -4590,14 +4614,20 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // never be drafted over during a store outage. Paid only on frame-stage
     // no-request-graph continuation turns with no standing loss — the slice
     // `draftLossRedraftUnstrand` already reads in.
+    //
+    // ROADMAP 2.717 — the fence answer must be a positively-read `'no'` to
+    // lift: an `'unknown'` fence means a draft MAY be in flight, and its
+    // commit carries no expected hash either. When the short-circuit above
+    // did not read the fence (prior turns `'yes'` or `'unknown'`), it is read
+    // here, exactly as the committed-turns path always did.
     let noModelDraftUnstrand = false;
     if (frameStageNoGraph && isContinuationScenario && !draftLossRedraftUnstrand) {
       try {
-        const draftInFlight = hasPriorCommittedTurns
-          ? await loadHasOtherAdmittedLiveTurn(ingress.scenario_id, ingress.turn_id, requestId)
-          : admittedLiveTurnFromShortCircuit;
+        const draftInFlight: ContinuationRead =
+          fenceReadFromShortCircuit ??
+          (await loadHasOtherAdmittedLiveTurn(ingress.scenario_id, ingress.turn_id, requestId));
         noModelDraftUnstrand =
-          !draftInFlight && (await loadPersistedGraphOnce()) == null;
+          draftInFlight === 'no' && (await loadPersistedGraphOnce()) == null;
       } catch (err) {
         noModelDraftUnstrand = false;
         log.warn(
@@ -4621,6 +4651,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         // it. Reporting "guard_applied" on a turn that went on to draft would
         // make this event lie about the outcome it is named for.
         draft_limb_lifted_no_model: noModelDraftUnstrand,
+        // ROADMAP 2.717 — true when this turn is a continuation because a
+        // continuation read FAILED (`'unknown'`), not because history was
+        // observed; `prior_turns_present` above is not evidence on its own.
+        continuation_read_unknown: continuationReadUnknown,
       });
     }
     // ────────────────────────────────────────────────────────────────────

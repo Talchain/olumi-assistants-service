@@ -115,8 +115,12 @@ const INGRESS_GRAPH: GraphStateIngress = {
   nodes: [
     { id: 'dec_launch', kind: 'decision', label: 'Launch?' },
     { id: 'goal_revenue', kind: 'goal', label: 'Revenue' },
-    { id: 'fac_marketing', kind: 'factor', label: 'Marketing spend' },
-    { id: 'fac_price', kind: 'factor', label: 'Unit price' },
+    // Status-quo levels (V1 `data.value`, this fixture's shape; inside the options' 0.3–0.7 scale). The write this turn
+    // performs does not touch them, so the post-write graphs below carry the same two. Since #2164 an unvalued goal
+    // root is a factor-scoped `MISSING_FACTOR_LEVEL` that refuses the Run, so without them the terminal graph is
+    // never READY and the only outstanding slots are no longer the option values this spec is about.
+    { id: 'fac_marketing', kind: 'factor', label: 'Marketing spend', data: { value: 0.5 } },
+    { id: 'fac_price', kind: 'factor', label: 'Unit price', data: { value: 0.5 } },
     {
       id: 'opt_launch',
       kind: 'option',
@@ -147,8 +151,9 @@ const POST_EDIT_GRAPH_STILL_BLOCKED = {
   nodes: [
     { id: 'dec_launch', kind: 'decision', label: 'Launch?' },
     { id: 'goal_revenue', kind: 'goal', label: 'Revenue' },
-    { id: 'fac_marketing', kind: 'factor', label: 'Marketing spend' },
-    { id: 'fac_price', kind: 'factor', label: 'Unit price' },
+    // The same status-quo levels as INGRESS_GRAPH (see its note); POST_EDIT_GRAPH_READY inherits them.
+    { id: 'fac_marketing', kind: 'factor', label: 'Marketing spend', data: { value: 0.5 } },
+    { id: 'fac_price', kind: 'factor', label: 'Unit price', data: { value: 0.5 } },
     {
       id: 'opt_launch',
       kind: 'option',

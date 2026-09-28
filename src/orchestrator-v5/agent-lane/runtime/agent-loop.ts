@@ -149,6 +149,8 @@ export interface AgentTurnResult {
   readonly tool_calls: readonly {
     name: string; ok: boolean; mutated: boolean;
     proposal_id?: string; outcome?: string; refusal?: string;
+    /** A refused call's conflict fields — which parts of what the model sent fired (names only, never the figure). */
+    conflict_fields?: readonly string[];
     /** Why a construction ended without an answer (`max_output_tokens`, `construction_timeout`) — for exports. */
     incomplete_reason?: string;
   }[];
@@ -177,6 +179,14 @@ const textOf = (items: readonly Record<string, unknown>[]): string => {
 
 /** The refusal a withheld tool returns. It consumed nothing and moved nothing. */
 export const WITHHELD_ON_CHIP_TURN = 'withheld_on_chip_turn';
+
+/** A refused result's `conflict_fields` (short field names), or nothing: never the tool's payload. */
+const conflictFieldsOf = (result: ToolResult): { conflict_fields?: readonly string[] } => {
+  const f = (result as { conflict_fields?: unknown }).conflict_fields;
+  if (result.ok !== false || !Array.isArray(f)) return {};
+  const names = f.filter((x): x is string => typeof x === 'string' && /^[a-z_]{1,32}$/.test(x)).slice(0, 8);
+  return names.length > 0 ? { conflict_fields: names } : {};
+};
 
 /**
  * Opens the state item a fresh packet puts into a turn's input (and marks it, so history never keeps one).
@@ -227,7 +237,7 @@ export async function runAgentTurn(
   ];
   /** What this turn hands on as history: everything but the state it was given. */
   const handedOn = (): unknown[] => (stateItem === undefined ? items : items.filter((i) => i !== stateItem));
-  const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; incomplete_reason?: string }[] = [];
+  const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; conflict_fields?: readonly string[]; incomplete_reason?: string }[] = [];
   const toolResults: ToolResult[] = [];
   let mutated = false;
   const now = input.now ?? (() => Date.now());
@@ -406,6 +416,9 @@ export async function runAgentTurn(
         ...(typeof result.proposal_id === 'string' ? { proposal_id: result.proposal_id } : {}),
         ...(typeof result.outcome === 'string' ? { outcome: result.outcome } : {}),
         ...(typeof result.refusal === 'string' ? { refusal: result.refusal } : {}),
+        // ⭐ What a REFUSED call sent, by field name (OpenAI Runtime #70 5859406197 item 3: the served artefacts keep no
+        // tool arguments, so which part of a refused level fired could not be told). Names only, bounded.
+        ...conflictFieldsOf(result),
         ...(typeof result.incomplete_reason === 'string' ? { incomplete_reason: result.incomplete_reason } : {}),
       });
       toolResults.push(result);

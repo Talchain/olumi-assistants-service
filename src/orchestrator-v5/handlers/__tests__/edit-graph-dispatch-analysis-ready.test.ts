@@ -71,6 +71,18 @@ const INGRESS_GRAPH: GraphStateIngress = {
   edges: [{ from: 'dec_launch', to: 'goal_revenue' }],
 };
 
+/**
+ * The same graph with a GraphV3-valid edge, for the rows that pin APPLIED-edit
+ * persistence: a structurally-invalid base (INGRESS_GRAPH's bare edge) never
+ * persists an edit — see edit-graph-dispatch-fallback-keeps-untouched.test.ts.
+ */
+const STRICT_INGRESS_GRAPH: GraphStateIngress = {
+  nodes: INGRESS_GRAPH.nodes,
+  edges: [
+    { from: 'dec_launch', to: 'goal_revenue', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+  ],
+};
+
 // A complete, schema-valid post-edit graph: 1 decision, 1 goal, 2 options
 // each with an intervention edge to a factor. computeStructuralReadiness
 // should resolve goal_node_id and produce ready/needs_user_mapping.
@@ -169,7 +181,7 @@ describe('edit-graph-dispatch — analysisReady surfacing (response-finaliser br
       payload: payload(),
       requestId: 'req-edit-applied',
       request: STUB_REQUEST,
-      graphState: INGRESS_GRAPH,
+      graphState: STRICT_INGRESS_GRAPH,
       analysisState: null,
     });
 

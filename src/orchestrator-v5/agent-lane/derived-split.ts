@@ -129,6 +129,8 @@ export type DerivedLevels =
   | { readonly kind: 'derived'; readonly factor_ids: readonly string[]; readonly working: string;
       readonly derived_from: { readonly op: 'split'; readonly ratio: readonly number[]; readonly base: { readonly node_id: string; readonly value: number } } }
   | { readonly kind: 'ask_which_total'; readonly factor_ids: readonly string[]; readonly candidates: readonly StatedTotal[] }
+  /** The user split a total, but the parts' factors are measured in another period of the same currency (AIQ 5860429146). */
+  | { readonly kind: 'period_mismatch'; readonly factor_ids: readonly string[]; readonly base: StatedTotal }
   | { readonly kind: 'none' };
 
 /**
@@ -156,11 +158,41 @@ export function derivedSplitOf(message: string, totals: readonly StatedTotal[], 
       factor_ids: [...new Set(inScope.flatMap((s) => s.parts.map((p) => p.factor_id)))] };
   }
   const only = inScope[0];
-  if (only === undefined) return none;
+  if (only === undefined) {
+    /**
+     * ⛔ HALF OF A SIX-MONTH TOTAL IS NOT A MONTHLY FIGURE (AI Quality 5860429146). The split is arithmetic on the base,
+     * so each part is in the BASE's unit; a factor in another period of the same currency ("GBP per month" under a
+     * total in "GBP over 6 months") is refused with its own reason, never relabelled. Converting by the period is a
+     * separate, explicit step.
+     */
+    for (const t of totals) {
+      const tk = unitKey(t.unit);
+      if (!tk.startsWith('gbp')) continue;
+      const others = proposed.filter((p) => p.factor_id !== t.node_id && unitKey(p.unit).startsWith('gbp') && unitKey(p.unit) !== tk);
+      if (others.length >= 2 && readUserSplit(message, [t], others.length).kind === 'user_split') {
+        return { kind: 'period_mismatch', factor_ids: others.map((p) => p.factor_id), base: t };
+      }
+    }
+    return none;
+  }
   const { base, parts, reading } = only;
   if (!reading.ratio.every((r) => Math.abs(r - reading.ratio[0]!) < 1e-12)) return none;
   const each = reading.parts[0]!;
   if (!parts.every((p) => Math.abs(p.value - each) <= 1e-9 * Math.max(1, base.value))) return none;
   return { kind: 'derived', factor_ids: parts.map((p) => p.factor_id), working: reading.working,
     derived_from: { op: 'split', ratio: reading.ratio, base: { node_id: base.node_id, value: base.value } } };
+}
+
+/**
+ * The unit a proposed part is compared in (served journey C, `pj-aic-C-9303888`): the limit and the factors are in
+ * "GBP over 6 months", and an Agent level spelt "GBP" left both parts unset, because "GBP" ≠ "GBP over 6 months".
+ * A level with NO unit, or the BARE currency of the factor's own unit ("GBP", "£"), is in the factor's unit. Anything
+ * else keeps the Agent's spelling: "GBP per month" names another period, so it never binds to a six-month total.
+ */
+export function partUnit(agentUnit: string | undefined, factorUnit: string | undefined): string | undefined {
+  if (factorUnit === undefined) return agentUnit;
+  if (agentUnit === undefined || agentUnit.trim() === '') return factorUnit;
+  const bare = unitKey(agentUnit);
+  const fu = unitKey(factorUnit);
+  return (bare === 'gbp' && (fu === 'gbp' || fu.startsWith('gbp ') || fu.startsWith('gbp/'))) ? factorUnit : agentUnit;
 }

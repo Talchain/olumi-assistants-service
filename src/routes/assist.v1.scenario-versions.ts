@@ -152,6 +152,7 @@ import {
 } from "../orchestrator-v5/model-management/index.js";
 import {
   ModelVersionMutationReceiptV1LocalSchema,
+  receiptGraphIssues,
   toModelVersionMutationReceiptV1,
 } from "../orchestrator-v5/model-management/mutation-receipt.js";
 import {
@@ -1178,6 +1179,31 @@ export default async function route(app: FastifyInstance) {
       }
 
       // ── 8. ONE RPC owns graph + undo + version + head + event ───────────
+      // ⭐ THE RECEIPT'S OWN QUESTION, ASKED BEFORE THE WRITE (writer audit 27 Sep, finding 7). Ingress admitted this
+      // version, but the receipt is built from strict GraphV3 AFTER the RPC commits; a graph that fails it was written
+      // durably and then answered with a 500 and no receipt, and every retry committed another restore row. Both legs
+      // (forward and return) reach the same receipt, so both are gated here. Nothing is written on a refusal.
+      const receiptIssues = receiptGraphIssues(graphForStore);
+      if (receiptIssues.length > 0) {
+        log.warn(
+          {
+            event: "v5.scenario_versions.restore_not_receiptable",
+            request_id: requestId,
+            scenario_id: ctx.scenarioId,
+            version_id: parsedBody.data.version_id,
+            first_issue_path: receiptIssues[0]?.path.join(".") ?? "",
+          },
+          "Scenario versions — restore refused: the receipt could not carry this version's graph; nothing written",
+        );
+        return invalid(
+          reply,
+          requestId,
+          "VERSION_GRAPH_INCOMPATIBLE",
+          "This version was saved under an older model format and can no longer be restored.",
+          { issues: receiptIssues.slice(0, 5) },
+        );
+      }
+
       const restored = await service.restoreVersionAtomic({
         scenario_id: ctx.scenarioId,
         version_id: parsedBody.data.version_id,

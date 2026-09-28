@@ -40,6 +40,8 @@
  * keeps the handler pure and the test surface small.
  */
 
+import { collectUnvaluedFactorIds } from '../../coaching/unvalued-factor-ids.js';
+import { IDENTITY_NOT_EVALUATED_CODE, composeIdentityNotEvaluatedAsk } from '../../coaching/identity-not-evaluated-ask.js';
 import { RunAnalysisArgsSchema, RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import type {
   RunAnalysisArgs,
@@ -49,6 +51,7 @@ import type {
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import {
   collectLeaderEstimatedTargetIds,
+  collectLimitLevelOwners,
   deriveConstraintVerdict,
   readRatifiedConstraints,
   projectClaimSafety,
@@ -78,7 +81,7 @@ import {
 // numbers it ran on. See inferred-value-disclosure.ts for the measurement.
 import {
   buildInferredValueDisclosure,
-  deriveInferredValues,
+  deriveOlumiAuthoredValues,
 } from '../../coaching/inferred-value-disclosure.js';
 import { composeObjectiveContradictionDisclosure } from '../../coaching/objective-contradiction.js';
 import type { PLoTClient, V2RunError } from '../../../orchestrator/plot-client.js';
@@ -118,6 +121,7 @@ import {
   carryLimitTargetCaps,
   levelLimitBaselineNodeIds,
   limitTargetCaps,
+  strictLimitsPinnedAtThreshold,
   unprovablePercentFrameIds,
   withholdUnprovablePercentFrames,
 } from './level-limit-baseline.js';
@@ -245,6 +249,29 @@ export const RUN_ANALYSIS_ASSISTANT_TEMPLATES = {
  * truncation is DISCLOSED via a warn log (never a silent slice).
  */
 export const PLOT_BRIEF_MAX_CHARS = 10_000;
+
+/**
+ * ⭐ A2 (DL #72 5861407189): THE ENGINE GETS THE HELD OPERATOR ONLY. A stored limit may carry
+ * `operator_as_stated` ("<" beside "<=", `GoalConstraintSchema`) so CEE can SAY "less than 4%"; PLoT and ISL are
+ * unchanged and receive `operator` alone, so the field is withheld from this wire copy. The stored row is never
+ * touched: a row that carries it is copied without it, and an array with none is returned as the SAME reference.
+ *
+ * ⚠ NOT MODELLED: over continuous draws P(X < 4) = P(X <= 4). A level PINNED exactly at the threshold is the one case
+ * the engine scores differently from the words ("exactly 4%" meets "<= 4"). The wire stays "<=" for it too (R4 in
+ * `limit-operator-as-stated.test.ts`); CEE withholds that option's result for that limit instead
+ * (`strictLimitsPinnedAtThreshold` → `deriveConstraintVerdict`; `strict-limit-pinned-at-threshold.test.ts`).
+ */
+function withholdStatedOperator<C>(goalConstraints: C): C {
+  if (!Array.isArray(goalConstraints)) return goalConstraints;
+  const carries = (c: unknown): c is Record<string, unknown> =>
+    c !== null && typeof c === 'object' && Object.prototype.hasOwnProperty.call(c, 'operator_as_stated');
+  if (!goalConstraints.some(carries)) return goalConstraints;
+  return goalConstraints.map((c: unknown) => {
+    if (!carries(c)) return c;
+    const { operator_as_stated: _stated, ...engine } = c;
+    return engine;
+  }) as C;
+}
 
 // ============================================================================
 // ScenarioReader — dependency injection seam for reading scenario state
@@ -983,7 +1010,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     if (snapshot.goal_constraints !== undefined) {
       // A framed percent limit on a level PLoT would read on another scale is sent UNFRAMED on this wire copy, so it
       // fails closed instead of being scored against the wrong number (`level-limit-baseline.ts`). The record is untouched.
-      plotPayload.goal_constraints = withholdUnprovablePercentFrames(graphForAnalysis, snapshot.goal_constraints);
+      plotPayload.goal_constraints = withholdStatedOperator(withholdUnprovablePercentFrames(graphForAnalysis, snapshot.goal_constraints));
       const frameWithheld = unprovablePercentFrameIds(graphForAnalysis, snapshot.goal_constraints);
       if (frameWithheld.length > 0) {
         log.info(
@@ -1446,6 +1473,12 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
                 'PLoT blocked the analysis with no code CEE has copy for — honest generic refusal shipped; add copy for this code',
               );
             }
+            // Batch 7 (R3): ISL withheld the analysis on a declared identity. The reply is the one question that
+            // unblocks it, from typed facts only: the critique's typed identity (or its affected ids) and the
+            // Run's own persisted graph for labels, units and whose figure the target is.
+            const identityAsk = blockedCritiqueCodes.includes(IDENTITY_NOT_EVALUATED_CODE)
+              ? composeIdentityNotEvaluatedAsk(v2Err.critiques, snapshot.rawPersistedGraph)
+              : null;
             throw new HandlerInvocationFailedError(
               `PLoT blocked the analysis: ${runError.message}`,
               {
@@ -1461,6 +1494,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
                   ...extractPlotFailureDetails(v2Err),
                   downstream_http_status: 422,
                   plot_blocker_code_known: renderedCodeHasCopy,
+                  ...(identityAsk !== null ? { identity_ask: identityAsk } : {}),
                 },
                 cause: runError,
               },
@@ -1841,12 +1875,40 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         'run_analysis: a limit on a quantity the leading option sets at Olumi\'s estimate is not counted as checked',
       );
     }
+    // ⭐ A2 follow-up (DL verdict on #2180): an option that sets a STRICT limit's own quantity at EXACTLY its threshold
+    // ("under 4%", the option sets 4%) does not meet it, and PLoT, holding "<=", scores it met. Read off the SAME stored
+    // rows the verdict reads (the snapshot's, which keep `operator_as_stated`) and the numbers PLoT received; the verdict
+    // withholds that option's result for that limit (`deriveConstraintVerdict`, its seventh argument).
+    const strictThresholdPins = strictLimitsPinnedAtThreshold(
+      graphForAnalysis,
+      snapshot.goal_constraints ?? (snapshot.rawPersistedGraph as { goal_constraints?: unknown } | undefined)?.goal_constraints,
+      finalWireOptions,
+    );
+    if (strictThresholdPins.size > 0) {
+      log.info(
+        {
+          event: 'run_analysis.strict_limit_level_at_threshold',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          // Redacted: ids only, no thresholds or levels.
+          pins: [...strictThresholdPins].map(([option_id, ids]) => ({ option_id, constraint_ids: [...ids] })),
+        },
+        'run_analysis: an option sets a strict limit\'s quantity exactly at its threshold; its result for that limit is withheld',
+      );
+    }
+    // ⭐ B5 (AI Quality 5855511541): one typed verdict PER ratified limit, stored on the fact's `constraint_verdict`
+    // (`per_limit` + `joint`, schemas 0.60.0). Precondition (e), "the level is the user's", is read off the SAME
+    // analysed graph as rule (d) above, through the same authorship authority. Paul's 17d1 churn limit compared
+    // against Olumi's own 3 % is `estimate_only` here, never `scored` (MG EXEC #70 5856264807).
     const constraintVerdict = deriveConstraintVerdict(
       response as Record<string, unknown>,
       ratifiedConstraints,
       leadingOptionId ?? null,
       undefined,
       leaderEstimatedTargetIds,
+      // (a) and WHOSE figure an estimate_only row was checked against (DL CR 5859853452), from the same one walk.
+      collectLimitLevelOwners(graphForAnalysis, ratifiedConstraints),
+      strictThresholdPins,
     );
     // ⚠ NO TELEMETRY EVENT FOR THE UNMEASURED-TARGET PARTITION, AND THAT IS A
     // DISCLOSED GAP RATHER THAN AN OVERSIGHT — the same call, for the same
@@ -2022,6 +2084,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // sentence below is built from, so the sentence and the suppression can
       // never disagree about which factors are unset.
       unsetOptionEffectFactorIds: unsetOptionEffectFactorIds(unsetOptionEffects),
+      // PJ-B3: the factors the graph this Run analysed holds no value for — never named "the strongest driver".
+      unvaluedFactorIds: collectUnvaluedFactorIds(snapshot.rawPersistedGraph ?? null),
     };
     // ⛔ C46 STAGE 1 (b) — THE LEADER PLoT RANKED FIRST, ON A PRODUCT THIS ENGINE ONLY ADDS UP.
     //
@@ -2342,8 +2406,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     //
     // Read from the graph the analysis actually RAN on, so the sentence can
     // never describe a different model than the result it rides on.
+    //
+    // ⭐ A6 (P2 re-measure, 523e18d): it counts EVERY Olumi value the model
+    // carries into the run — factor baselines, option levels and link
+    // strengths — not only baselines. Served journey A said "6 of the values"
+    // over 22.
     const inferredValueDisclosure = buildInferredValueDisclosure(
-      deriveInferredValues(graphForAnalysis),
+      deriveOlumiAuthoredValues(graphForAnalysis),
     );
     const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}`;
 

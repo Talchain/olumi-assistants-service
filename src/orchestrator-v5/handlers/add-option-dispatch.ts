@@ -43,8 +43,12 @@ import { TYPED_TRANSACTION_ENVELOPE_CAP, type FrameFreshness } from '../graph-ma
 import type { PendingAction } from '../session/pending-action.js';
 import {
   buildAddOptionsTransaction,
+  GM_HELD_GRADED_TODAY_KEY,
   GM_HELD_SWITCH_FACTORS_KEY,
+  GM_HELD_USER_STATED_NODES_KEY,
+  isStatedTodayObservedState,
   MAX_OPTIONS_PER_TRANSACTION,
+  sameLabel,
   type AddOptionGraphView,
   type AddOptionsSkipReason,
 } from '../routing/add-option-transaction.js';
@@ -68,6 +72,20 @@ export interface AddOptionTransactionInput {
   readonly turnId: string;
   readonly requestId: string;
   readonly stage: StageIndicator;
+  /**
+   * ⭐ A6b (DL CR on #2131, option (a)) — the option ids whose label the USER'S OWN typed words named, from the Agent's
+   * in-process context (`userNamedOptionIdsFor`), NEVER from `parameters` (an untyped wire bag any client can send).
+   * Each one the held batch adds AS AN OPTION is recorded on the hold (`GM_HELD_USER_STATED_NODES_KEY`); the confirm
+   * stamps exactly those `user_set`. Absent or empty — every other caller — records nothing.
+   */
+  readonly userStatedOptionIds?: readonly string[];
+  /**
+   * ⭐ PJ-A1 £49 (DL #70 5860365834) — the NEW graded factors' today levels the user's own typed words state, framed, by
+   * label, from the Agent's in-process context (`statedTodayLevelsFor`), NEVER from `parameters`. Each one this batch
+   * adds as a new GRADED factor is recorded on the hold (`GM_HELD_GRADED_TODAY_KEY`) by its id; the confirm stamps it.
+   * Absent or empty — every other caller — records nothing.
+   */
+  readonly statedTodayLevels?: readonly { readonly label: string; readonly observed_state: Readonly<Record<string, unknown>> }[];
 }
 
 export type AddOptionTransactionOutcome =
@@ -358,12 +376,37 @@ export function dispatchAddOptionTransaction(
    * its exact bytes.
    */
   const switchFactorIds = built.switchFactorIds ?? [];
-  const heldPendings: readonly PendingAction[] = switchFactorIds.length === 0
+  /**
+   * ⭐ A6b (DL CR on #2131, option (a)) — THE HOLD NAMES THE OPTIONS THE USER SUPPLIED. Only an id the caller's typed
+   * signal names AND this batch adds as an OPTION: a `new_factors` node Olumi minted is never one, and an option Olumi
+   * proposed and the user only approves keeps its own provenance. Never read from `parameters`.
+   */
+  const statedIds = new Set(input.userStatedOptionIds ?? []);
+  const userStatedNodeIds = operations
+    .filter((o) => o.op === 'add_node' && statedIds.has(o.path) && (o.value as { kind?: unknown } | undefined)?.kind === 'option')
+    .map((o) => o.path);
+  /**
+   * ⭐ PJ-A1 £49 (DL #70 5860365834) — THE HOLD NAMES EACH NEW GRADED FACTOR'S STATED TODAY LEVEL, by the id THIS batch
+   * gives it. Only a factor this batch adds, never a switch (its today-0 is Olumi's), and only a level shaped exactly as a
+   * stated baseline is framed. Never read from `parameters`.
+   */
+  const switchSet = new Set(switchFactorIds);
+  const gradedToday = (input.statedTodayLevels ?? []).flatMap((l) => {
+    const f = built.newFactors.find((nf) => sameLabel(nf.label, l.label));
+    return f === undefined || switchSet.has(f.id) || !isStatedTodayObservedState(l.observed_state)
+      ? [] : [{ factor_id: f.id, observed_state: { ...l.observed_state } }];
+  });
+  const heldPendings: readonly PendingAction[] = switchFactorIds.length === 0 && userStatedNodeIds.length === 0 && gradedToday.length === 0
     ? decision.pendingActions
     : decision.pendingActions.map((p) => {
         const ip = p.action.kind === 'apply_proposed_change' ? p.action.inline_patch : null;
         if (ip === null || !Array.isArray((ip as { operations?: unknown }).operations)) return p;
-        return { ...p, action: { ...p.action, inline_patch: { ...ip, [GM_HELD_SWITCH_FACTORS_KEY]: [...switchFactorIds] } } } as PendingAction;
+        return { ...p, action: { ...p.action, inline_patch: {
+          ...ip,
+          ...(switchFactorIds.length > 0 ? { [GM_HELD_SWITCH_FACTORS_KEY]: [...switchFactorIds] } : {}),
+          ...(userStatedNodeIds.length > 0 ? { [GM_HELD_USER_STATED_NODES_KEY]: userStatedNodeIds } : {}),
+          ...(gradedToday.length > 0 ? { [GM_HELD_GRADED_TODAY_KEY]: gradedToday } : {}),
+        } } } as PendingAction;
       });
 
   // Proposal-time completeness disclosure (ROADMAP 2.11 doctrine, at PROPOSAL

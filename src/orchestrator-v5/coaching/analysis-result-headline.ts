@@ -664,6 +664,13 @@ export interface AnalysisResultHeadlineInput {
    */
   readonly unsetOptionEffectFactorIds?: ReadonlySet<string>;
   /**
+   * ⭐ PJ-B3 (R&C #70 5860314787; DL 5860325629): factor ids the ANALYSED graph holds no value for
+   * (`unvalued-factor-ids.ts`). PLoT ranks by structure alone, so one can top `factor_sensitivity`; "because {X} is the
+   * strongest driver" would present it as an analysed driver. Same OMIT-NOT-SUBSTITUTE remedy as the two sets above;
+   * the run-turn card asks for its value instead. Keyed on structural `factor_id`. Omitted / empty ⇒ no suppression.
+   */
+  readonly unvaluedFactorIds?: ReadonlySet<string>;
+  /**
    * P2 (Paul's manual test, 23 Sep 2026): factor ids that EVERY option sets —
    * `intervention-controlled-drivers.ts::collectFactorIdsSetByEveryOption`, the
    * INTERSECTION, not the union in {@link interventionControlledFactorIds}.
@@ -946,6 +953,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
     status_kind,
     interventionControlledFactorIds,
     unsetOptionEffectFactorIds,
+    unvaluedFactorIds,
   } = input;
 
   // Same-source resolution: the winner label, winner probability, and
@@ -1100,6 +1108,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
     enrichment,
     interventionControlledFactorIds,
     unsetOptionEffectFactorIds,
+    unvaluedFactorIds,
   );
   // Mission A (provisional_doctrine_v0): the caution candidate replaces the
   // bare fragile label. It is claim-safe by construction — a factor that is
@@ -2015,6 +2024,7 @@ function resolveTopDriverLabel(
   enrichment: Record<string, unknown>,
   controlledFactorIds?: ReadonlySet<string>,
   unsetOptionEffectFactorIds?: ReadonlySet<string>,
+  unvaluedFactorIds?: ReadonlySet<string>,
 ): string | null {
   const arr = enrichment.factor_sensitivity;
   if (!Array.isArray(arr)) return null;
@@ -2079,12 +2089,18 @@ function resolveTopDriverLabel(
       controlledMatchId.length > 0 &&
       unsetOptionEffectFactorIds.has(controlledMatchId);
 
+    // A THIRD question under a third name (PJ-B3): "does the analysed graph hold a value for this factor?".
+    const isUnvalued =
+      unvaluedFactorIds !== undefined &&
+      controlledMatchId.length > 0 &&
+      unvaluedFactorIds.has(controlledMatchId);
+
     const score = computeDriverScore(entry);
     if (score === null) continue;
     if (score > topScore) {
       topScore = score;
-      topSuppressed = isControlled || isUnsetEffect;
-    } else if (score === topScore && (isControlled || isUnsetEffect)) {
+      topSuppressed = isControlled || isUnsetEffect || isUnvalued;
+    } else if (score === topScore && (isControlled || isUnsetEffect || isUnvalued)) {
       // Tie at the top: if ANY equally-strongest driver is option-controlled,
       // treat the top as controlled — order-independent and conservative, so we
       // omit rather than present an equally-strong tunable driver as "the
@@ -2097,6 +2113,8 @@ function resolveTopDriverLabel(
     // binds the driver to the WIN — and a factor an option does not move cannot
     // be the reason that option came out ahead of another.
     if (isUnsetEffect) continue;
+    // …and never NAME a factor the analysed graph holds no value for: a structural rank is not an analysed driver.
+    if (isUnvalued) continue;
     // Mission A (provisional_doctrine_v0): a zero-score factor is not a
     // driver-of-change — never name it as "the strongest driver" (the
     // pre-doctrine code would name a sensitivity_score: 0 factor when all

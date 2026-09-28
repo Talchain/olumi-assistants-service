@@ -34,6 +34,7 @@ import {
   buildConfigureOptionChip,
   CONFIGURE_OPTION_GENERIC_CHIP,
 } from '../configure-option-chip-text.js';
+import { readIdentityAsk } from '../coaching/identity-not-evaluated-ask.js';
 
 /**
  * How many outstanding questions the refusal lists inline. Six is the witnessed
@@ -94,6 +95,22 @@ export function composeHandlerFailureBody(
   // same rule as CRITIQUE_BUCKETS' unknown→D default). PLoT's own
   // `plot_user_message` prose is deliberately NEVER rendered: this composer
   // has no label resolver or prose-safety gate, so only the code is trusted.
+  // Batch 7 (R3): ISL withheld the analysis on a declared identity it could not compute exactly. The reply IS the
+  // one question that unblocks it, composed where the graph is (`run-analysis.ts`, typed facts only) and carried
+  // on the details; this composer only renders a well-formed one (`readIdentityAsk`), never PLoT/ISL prose.
+  if (error.cause_kind === 'analysis_blocked') {
+    const ask = readIdentityAsk(details.identity_ask);
+    if (ask !== null) {
+      return {
+        body: {
+          assistant_text: ask.assistant_text,
+          suggested_actions: [{ id: `chip_prompt_identity_${ask.reason}`, label: ask.chip_label, message: ask.chip_message }],
+        },
+        template_id: `analysis_blocked_identity_${ask.reason}`,
+        chip_type: 'text_prompt',
+      };
+    }
+  }
   if (
     error.cause_kind === 'plot_error' ||
     error.cause_kind === 'analysis_failed' ||
@@ -605,6 +622,13 @@ const PLOT_FAILURE_CODE_COPY: Readonly<Record<string, PlotCodeCopy>> = {
   ISL_REJECTED: {
     assistant_text:
       "The analysis engine couldn't process your model as it stands. Adjusting the model, for example simplifying options or checking factor values, may help.",
+    chip: scenarioStatusChip,
+    chip_type: 'text_prompt',
+  },
+  // Batch 7 (R3): only reached when no ask could be composed (the graph does not label the identity's nodes).
+  IDENTITY_NOT_EVALUATED: {
+    assistant_text:
+      "One of the totals in your model can't be worked out exactly from the figures that make it up, so Olumi held the analysis back rather than approximate it. Check those figures, then run again.",
     chip: scenarioStatusChip,
     chip_type: 'text_prompt',
   },

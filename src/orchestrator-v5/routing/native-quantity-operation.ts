@@ -124,7 +124,15 @@ export function buildNativeQuantityOperation(
   // So the native reaches the existing calibration authority and the encoded
   // magnitude is RE-DERIVED from it. Every other field is still carried
   // through verbatim; siblings and unrelated meaning are untouched.
-  const { value: _staleEncoded, display_value: _staleDisplay, ...carried } = existing;
+  //
+  // ⭐ AND THE FIGURE IS NOW THE USER'S, SO THE CELL SAYS SO (AIQ Q1, CEE #2139 5859746452). The user has just stated
+  // this option's own figure in reply to the ask. Carrying the old `source` kept Olumi's `cee_hypothesis` on it —
+  // MEASURED through the real applier and encoder (`native-quantity-apply-chain.test.ts`), because the encoder
+  // preserves that one non-user source. Then rule (d) still withheld the verdict over "Olumi's estimate", and the cost
+  // ask, which now fires on an estimate, re-selected the cell the user had just answered. `user_specified` is the
+  // encoder's own default for every other prior source, so this changes only an answered Olumi estimate; its
+  // `value_confidence` and `reasoning` described Olumi's number and the encoder drops them with it.
+  const { value: _staleEncoded, display_value: _staleDisplay, source: _priorAuthor, ...carried } = existing;
 
   return {
     op: 'update_node',
@@ -135,6 +143,7 @@ export function buildNativeQuantityOperation(
       ...carried,
       raw_value: write.nativeValue,
       unit: write.unit,
+      source: 'user_specified',
     },
     old_value: existing,
     impact: 'moderate',

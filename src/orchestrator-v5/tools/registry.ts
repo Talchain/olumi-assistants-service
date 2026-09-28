@@ -293,6 +293,14 @@ export interface HandlerInvocation {
   /** Existing server-side proposal frame, relayed only after exact confirmed-tuple matching. */
   readonly confirmedConstraintValueFrame?: import('@talchain/schemas').GoalThresholdFrameType;
   /**
+   * ⭐ A2 follow-up (DL verdict on #2180): the comparator the user STATED for the limit on this write, TYPED (the Agent's
+   * `propose_limit_change` `stated_operator`, relayed by the limit door `limit-edit.ts`), never read from words.
+   * `add_constraint` writes the row's `operator_as_stated` from it: a strict one ("<" beside "<=") sets it, a non-strict
+   * one clears it. ABSENT: the prior row keeps its own, because this tool's vocabulary (`at_least | at_most`, and the
+   * canvas control's) cannot state strictness.
+   */
+  readonly statedConstraintOperator?: import('../agent-lane/admit-constraint.js').CandidateOperator;
+  /**
    * Exact persisted edge identity for the strict `edge_strength_edit` adapter.
    *
    * The legacy natural-language lane addresses an edge with a composite

@@ -30,7 +30,9 @@ function readyGraph(): GraphV3T {
       { id: 'dec_launch', kind: 'decision', label: 'Launch timing' },
       { id: 'opt_launch', kind: 'option', label: 'Launch now', interventions: { fac_price: 0.8 } },
       { id: 'opt_wait', kind: 'option', label: 'Wait 6 months', interventions: { fac_price: 0.2 } },
-      { id: 'fac_price', kind: 'factor', label: 'Price point' },
+      // A status-quo level (between the options' 0.2 and 0.8): since #2164 an unvalued goal root is a factor-scoped
+      // `MISSING_FACTOR_LEVEL`, so without it this graph is `needs_user_input` and no longer structurally READY.
+      { id: 'fac_price', kind: 'factor', label: 'Price point', observed_state: { value: 0.5 } },
       { id: 'risk_churn', kind: 'risk', label: 'Customer churn' },
     ],
     edges: [

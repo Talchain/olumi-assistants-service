@@ -109,6 +109,7 @@ function paul(opts: { identities?: Identity[]; churnLimit?: boolean } = {}): Rec
     ],
     identities: opts.identities ?? [MRR_IS_PRICE_TIMES_SUBSCRIBERS],
     unknowns: [],
+    decision_question: null,
   };
 }
 
@@ -161,6 +162,7 @@ function sameSign(options?: unknown[]): Record<string, unknown> {
     ],
     identities: [{ outcome: 'Pro MRR', operation: 'product', factors: ['Revenue per Pro user', 'Pro subscribers'], provenance: 'inferred' }],
     unknowns: [],
+    decision_question: null,
   };
 }
 const oneLever = () => sameSign([CARRY_ON, ADD_ON,
@@ -436,6 +438,7 @@ describe('(b) rule 7 on the Run: a leader whose routes through and around the pr
       ],
       identities: [MRR_IS_PRICE_TIMES_SUBSCRIBERS],
       unknowns: [],
+      decision_question: null,
     };
   }
   function refunds(direction: Dir): Record<string, unknown> {
@@ -507,7 +510,9 @@ describe('(c) precedence: the limit keeps its code and card; the unrequested fir
     const { registered, out } = await build(paul({ churnLimit: true }));
     expect((registered as unknown as { goal_constraints?: unknown[] }).goal_constraints?.length).toBe(1);
     const fact = await runOn(registered, [RAISE, KEEP]);
-    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: false, constraint_verdict_state: 'unevaluated' });
+    // B5's per-limit rows ride the same field; this row is about the leader verdict only.
+    const { per_limit: _perLimit, joint: _joint, ...leaderVerdict } = fact.result.constraint_verdict!;
+    expect(leaderVerdict).toEqual({ may_name_leading_option: false, constraint_verdict_state: 'unevaluated' });
     const { state, block } = stateFor(fact, registered);
 
     // 1. The LIMIT: `constraint_verdict_withheld` keeps the field, so the limit card fires and is built.
