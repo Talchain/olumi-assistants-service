@@ -15,7 +15,8 @@
  * Never guessed: a `change_rel` whose unit is not a percent is left unframed (ISL refuses it by name).
  */
 import { describe, expect, it, vi } from 'vitest';
-import { buildCandidateSchema, buildModelFromBrief, findCoverageGaps, type CallStructuredModel, type CandidateModel } from '../runtime/build-model.js';
+import { buildCandidateSchema, buildModelFromBrief, findCoverageGaps, type CallStructuredModel } from '../runtime/build-model.js';
+import type { CandidateModel } from '../admit-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { limitedLevelAsks } from '../limited-level-ask.js';
 
