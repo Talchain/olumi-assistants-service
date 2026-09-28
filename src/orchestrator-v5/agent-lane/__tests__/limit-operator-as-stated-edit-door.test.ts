@@ -184,7 +184,7 @@ function agentWith(row: Rec) {
     return { status: 'committed', graph_hash: hash, model_version_receipt: undefined, row: { constraint_id: CHURN_ID, value: input.raw_value } };
   };
   const caps = createAgentCapabilities(dispatch, new ProposalStore(), undefined, 'full', undefined, { commitLimitEdit });
-  const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r-a2-agent', user_text: 'Our churn limit is now 5%.' };
+  const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r-a2-agent', user_text: 'Our churn limit is now 5%.', user_turn_text: 'Our churn limit is now 5%.' };
   return { caps, ctx, commits };
 }
 
@@ -205,7 +205,9 @@ describe('THE AGENT — propose_limit_change says the limit as the user stated i
 
   it('RED: the user states "at most" → "from less than 4% to at most 5%", and "<=" is relayed to the door', async () => {
     const { caps, ctx, commits } = agentWith(strictRow);
-    const p = await caps.proposeLimitChange!(ctx, { limit_label: 'Monthly churn', operator: '<=', new_value: 5, unit: '%', rationale: 'x', stated_operator: '<=' }) as Rec;
+    // The user's own words state it (a model's comparator alone is not the user's: limit-change-comparator-from-user-words).
+    const said = 'Our churn limit is now at most 5%.';
+    const p = await caps.proposeLimitChange!({ ...ctx, user_text: said, user_turn_text: said }, { limit_label: 'Monthly churn', operator: '<=', new_value: 5, unit: '%', rationale: 'x', stated_operator: '<=' }) as Rec;
     expect(p.public_label).toBe('Change the limit on "Monthly churn" from less than 4% to at most 5%');
     const a = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) }) as Rec;
     expect(a.applied, JSON.stringify(a)).toBe(true);
@@ -221,15 +223,16 @@ describe('THE AGENT — propose_limit_change says the limit as the user stated i
 
   it('the same figure with the SAME comparator is still "already that figure"; with a new comparator it is a change', async () => {
     const { caps, ctx } = agentWith(strictRow);
-    const same = await caps.proposeLimitChange!({ ...ctx, user_text: 'Keep churn under 4%.' }, { limit_label: 'Monthly churn', operator: '<=', new_value: 4, unit: '%', rationale: 'x', stated_operator: '<' }) as Rec;
+    const same = await caps.proposeLimitChange!({ ...ctx, user_text: 'Keep churn under 4%.', user_turn_text: 'Keep churn under 4%.' }, { limit_label: 'Monthly churn', operator: '<=', new_value: 4, unit: '%', rationale: 'x', stated_operator: '<' }) as Rec;
     expect(same).toMatchObject({ ok: false, refusal: 'already_that_figure' });
-    const changed = await caps.proposeLimitChange!({ ...ctx, user_text: 'Make churn at most 4%.' }, { limit_label: 'Monthly churn', operator: '<=', new_value: 4, unit: '%', rationale: 'x', stated_operator: '<=' }) as Rec;
+    const changed = await caps.proposeLimitChange!({ ...ctx, user_text: 'Make churn at most 4%.', user_turn_text: 'Make churn at most 4%.' }, { limit_label: 'Monthly churn', operator: '<=', new_value: 4, unit: '%', rationale: 'x', stated_operator: '<=' }) as Rec;
     expect(changed.public_label).toBe('Change the limit on "Monthly churn" from less than 4% to at most 4%');
   });
 
   it('a stated comparator in the other direction is refused; nothing is prepared', async () => {
     const { caps, ctx } = agentWith(strictRow);
-    const p = await caps.proposeLimitChange!(ctx, { limit_label: 'Monthly churn', operator: '<=', new_value: 5, unit: '%', rationale: 'x', stated_operator: '>' }) as Rec;
+    const said = 'Churn must be more than 5%.';
+    const p = await caps.proposeLimitChange!({ ...ctx, user_text: said, user_turn_text: said }, { limit_label: 'Monthly churn', operator: '<=', new_value: 5, unit: '%', rationale: 'x', stated_operator: '>' }) as Rec;
     expect(p).toMatchObject({ ok: false, mutated: false, refusal: 'unreadable_limit' });
   });
 });
