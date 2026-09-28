@@ -522,6 +522,12 @@ describe('R1 S4-core — ISL frame_verdict on the per-limit rows', () => {
     expect(variant('change_abs', 'user')).toEqual({ constraint_id: CHURN, state: 'scored' });
   });
 
+  // AI Quality 5880894832 / PR Review 5880943367: the fold is min(ISL, CEE) in BOTH directions — ISL's `scored` never
+  // RAISES a row CEE reads on Olumi's base.
+  it('FV-8 (AIQ row): change_rel on Olumi\'s level, ISL says scored → estimate_only / level_olumi_estimate, NEVER scored', () => {
+    expect(variant('change_rel', 'olumi', 'scored')).toEqual({ constraint_id: CHURN, state: 'estimate_only', reason: 'level_olumi_estimate' });
+  });
+
   it('FV-7: ISL\'s estimate_only only ever LOWERS a row — on a limit CEE already reads as Olumi\'s it changes nothing', () => {
     expect(variant('level', 'olumi', 'estimate_only')).toEqual(variant('level', 'olumi'));
   });
