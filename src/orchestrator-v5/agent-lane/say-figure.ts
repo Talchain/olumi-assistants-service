@@ -32,12 +32,20 @@ function currencyOf(unit: string): { readonly symbol: string; readonly rest: str
   return symbol === undefined ? undefined : { symbol, rest };
 }
 
+/**
+ * ⛔ THE RATE SEPARATOR, ONE CONSTANT (DL ruling #72 5871074397: the design contract's spaced " / ", as the UI half of this
+ * rule writes it, #2245): "£58.80 / month", "£49 per subscriber / month", "1,500 subscribers / month".
+ */
+export const RATE_SEPARATOR = ' / ';
+
 /** A formatted number and its unit, placed as a person writes them. */
-function place(n: string, unit: string): string {
+function place(n: string, rawUnit: string): string {
+  const unit = rawUnit.replace(/\s*\/\s*/g, RATE_SEPARATOR);
   if (unit === '') return n;
   if (unit.startsWith('%')) return `${n}${unit}`;
   const c = currencyOf(unit);
-  if (c !== undefined) return `${c.symbol}${n}${c.rest}`;
+  // The sign goes before the symbol, as a person writes it and as the UI half of this rule does (#2245): "-£500".
+  if (c !== undefined) return n.startsWith('-') ? `-${c.symbol}${n.slice(1)}${c.rest}` : `${c.symbol}${n}${c.rest}`;
   return `${n} ${unit}`;
 }
 
@@ -51,7 +59,8 @@ export function sayFigureExactly(value: number, unit: string): string | null {
 }
 
 /** Percent spelled as a word is said as the sign; a machine unit's underscores are spaces. */
-const PERCENT_WORD = /^(?:percent|percentage|pct)\b/i;
+// "percentage points" is NOT "%": a change in points and a change in percent are different quantities (AIQ on #2247).
+const PERCENT_WORD = /^(?:percent|percentage|pct)\b(?![\s_]+points?\b)/i;
 
 /**
  * The unit as a person says it with THIS figure (DL #2227 follow-up B, 5867621499): "percent" → "%" (it read "5 percent"

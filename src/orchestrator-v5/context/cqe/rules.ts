@@ -761,8 +761,11 @@ const rule_P7_continuation: PatternRule = {
 
 // ---- P8 currency -----------------------------------------------------------
 
+// ⛔ A MINUS BEFORE THE SYMBOL IS THE FIGURE'S SIGN (AIQ on CEE #2247, 5871017629). "-£500" read as +500: measured on real
+// CQE, "Set the margin to -£500." gave value 500, while "£-500" gave -500. Only at a word start (start, space, "(",
+// ":" or "="), so a range's hyphen ("£100-£500") is never a sign.
 const P8_SYMBOL_REGEX = new RegExp(
-  `(${CURRENCY_SYMBOL})\\s?(${NUM})\\s*(${SUFFIX})?`,
+  `(?:(?<=^|[\\s(:=])(-))?(${CURRENCY_SYMBOL})\\s?(${NUM})\\s*(${SUFFIX})?`,
   'gi',
 );
 const P8_CODE_REGEX = new RegExp(
@@ -785,11 +788,12 @@ const rule_P8: PatternRule = {
     const out: CqePatternMatch[] = [];
 
     for (const m of scanAllExec(text, P8_SYMBOL_REGEX)) {
-      const unit = normaliseCurrencyUnit(m[1]);
-      const num = parseNum(m[2]);
-      const suffix = m[3];
+      const unit = normaliseCurrencyUnit(m[2]);
+      const num = parseNum(m[3]);
+      const suffix = m[4];
       if (!Number.isFinite(num)) continue;
-      const value = applySuffix(num, suffix);
+      // "-£-500" is not a double negative a person writes: the leading sign applies only to an unsigned figure.
+      const value = m[1] === '-' && num > 0 ? -applySuffix(num, suffix) : applySuffix(num, suffix);
       out.push(
         emit(
           m,

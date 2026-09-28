@@ -21,16 +21,18 @@ import {
 } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { sayFigureAsWritten } from '../say-figure.js';
 import { extractQuantities } from '../../context/cqe/extract-quantities.js';
-import { buildClarifyChipMessage, mapCqeQuantityToProposalValue } from '../../routing/deterministic-value-update.js';
+import { buildClarifyChipMessage, deriveOperator, mapCqeQuantityToProposalValue } from '../../routing/deterministic-value-update.js';
 
 // The ≥10-shape probe: [value, unit, as a person writes it].
 const PROBE: ReadonlyArray<readonly [number, string, string]> = [
-  [49, 'GBP/month', '£49/month'],
-  [58.8, 'GBP/month', '£58.80/month'],
+  [49, 'GBP/month', '£49 / month'],
+  [58.8, 'GBP/month', '£58.80 / month'],
   [58.8, 'GBP per month', '£58.80 per month'],
   [30000, 'GBP', '£30,000'],
   [49, '£', '£49'],
-  [100000, 'USD/year', '$100,000/year'],
+  [100000, 'USD/year', '$100,000 / year'],
+  [49, 'GBP per subscriber/month', '£49 per subscriber / month'],
+  [1500, 'subscribers/month', '1,500 subscribers / month'],
   [5, '%', '5%'],
   [5, 'percent', '5%'],
   [0.0525, '%', '0.0525%'],
@@ -41,12 +43,22 @@ const PROBE: ReadonlyArray<readonly [number, string, string]> = [
   [-5, '%', '-5%'],
   [2, 'CHF', '2 CHF'],
   [45, '£k per month', '45 £k per month'],
+  // AIQ meaning rows on #2247 (5871017629): the sign before the symbol, and points are not percent.
+  [-500, 'GBP', '-£500'],
+  [-58.8, 'GBP/month', '-£58.80 / month'],
+  [4, 'percentage points', '4 percentage points'],
+  [1, 'percentage points', '1 percentage point'],
 ];
 
 describe('⛔ CEE says a figure by one rule (Panel ROOT 5870330356, DL 5870353946)', () => {
+  it('DL row (5871074397): the served option card’s two halves read identically, "£58.80 / month → £59 / month"', () => {
+    const said = formatFactorChange({ label: 'Pro plan monthly price', before: { raw_value: 58.8, unit: 'GBP/month' }, after: { raw_value: 59, unit: 'GBP/month' } });
+    expect(said).toBe('Updated Pro plan monthly price from £58.80 / month to £59 / month.');
+  });
+
   it('RED (served f0c8814f): the price edit reads "£49/month" and "£58.80/month", never "GBP"', () => {
     const said = formatFactorChange({ label: 'Pro plan monthly price', before: { raw_value: 49, unit: 'GBP/month' }, after: { raw_value: 58.8, unit: 'GBP/month' } });
-    expect(said).toBe('Updated Pro plan monthly price from £49/month to £58.80/month.');
+    expect(said).toBe('Updated Pro plan monthly price from £49 / month to £58.80 / month.');
     expect(said).not.toMatch(/GBP/);
   });
 
@@ -65,7 +77,7 @@ describe('⛔ CEE says a figure by one rule (Panel ROOT 5870330356, DL 587035394
       formatConstraintAdded({ targetLabel: 'Budget', operator: '<=', value: 20000, unit: 'GBP' }),
     ];
     for (const t of texts) expect(t, t).not.toMatch(/\bGBP\b/);
-    expect(texts[0]).toBe('Updated Price to £59/month.');
+    expect(texts[0]).toBe('Updated Price to £59 / month.');
   });
 
   it('CONTROL: a bare number is unchanged, and it stays exact past two decimal places', () => {
@@ -76,17 +88,48 @@ describe('⛔ CEE says a figure by one rule (Panel ROOT 5870330356, DL 587035394
 
   // ⛔ The one consumer that reaches a WRITER: a clarify chip's message is replayed as the user's turn and re-parsed by
   // the real CQE. The figure it says must parse back to the same value and unit, or the click writes something else.
-  for (const typed of ['Set price to £49.50.', 'Set migration cost to £250k.', 'Set churn to 3.5%.', 'Set the delay to 3 months.', 'Increase the budget by £20k.', 'Set price to $1,299.99.']) {
-    it(`WRITER ROUND TRIP (real CQE): "${typed}" → chip message → the same value and unit`, () => {
+  // Compared WITH the message, as the writer reads it (the period rides the words, not the quantity).
+  const ROUND_TRIP: ReadonlyArray<readonly [string, { value: number; unit: string | undefined }]> = [
+    ['Set price to £49.50.', { value: 49.5, unit: '£' }],
+    ['Set migration cost to £250k.', { value: 250000, unit: '£' }],
+    ['Set churn to 3.5%.', { value: 3.5, unit: '%' }],
+    ['Set the delay to 3 months.', { value: 3, unit: 'month' }],
+    ['Increase the budget by £20k.', { value: 20000, unit: '£' }],
+    ['Set price to $1,299.99.', { value: 1299.99, unit: '$' }],
+    // AIQ 5871017629: a negative keeps its sign through the replay.
+    ['Set the margin to -£500.', { value: -500, unit: '£' }],
+    ['Set the margin to £-500.', { value: -500, unit: '£' }],
+    ['Set growth to -3%.', { value: -3, unit: '%' }],
+    // AIQ 5871084445: the spaced " / " is re-read as the same rate; "per month" is carried into the chip.
+    ['Set price to £49.50 per month.', { value: 49.5, unit: '£/month' }],
+    ['Set price to £49.50/month.', { value: 49.5, unit: '£/month' }],
+  ];
+  for (const [typed, want] of ROUND_TRIP) {
+    it(`WRITER ROUND TRIP (real CQE): "${typed}" → chip message → the same value, unit and operator`, () => {
       const [q] = extractQuantities(typed);
       expect(q, typed).toBeDefined();
+      const typedAs = mapCqeQuantityToProposalValue(q!, typed);
+      expect(typedAs.value, 'what the user typed is read as').toBeCloseTo(want.value, 9);
+      expect(typedAs.unit).toBe(want.unit);
       const msg = buildClarifyChipMessage(typed, { id: 'f1', label: 'Price', score: 1, source: 'substring' }, q!);
       const [back] = extractQuantities(msg);
       expect(back, msg).toBeDefined();
-      expect(mapCqeQuantityToProposalValue(back!), msg).toEqual(mapCqeQuantityToProposalValue(q!));
-      expect(back!.operator, msg).toBe(q!.operator);
+      // The writer's own reading of the replay: value, unit (with the period the words carry) and operator.
+      expect(mapCqeQuantityToProposalValue(back!, msg), msg).toEqual(typedAs);
+      expect(deriveOperator(msg, back!), msg).toBe(deriveOperator(typed, q!));
     });
   }
+
+  it('the rate chip SAYS the spaced notation, and a bare amount says no period (AIQ contrast)', () => {
+    const chip = (typed: string) => buildClarifyChipMessage(typed, { id: 'f1', label: 'Price', score: 1, source: 'substring' }, extractQuantities(typed)[0]!);
+    expect(chip('Set price to £49.50 per month.')).toBe('Set Price to £49.50 / month.');
+    expect(chip('Set price to £49.50.')).toBe('Set Price to £49.50.');
+  });
+
+  it('CONTRAST (CQE): a range’s hyphen is never a sign — "£100-£500" stays £100 and £500', () => {
+    expect(extractQuantities('Budget between £100-£500.').map((q) => q.value)).toEqual([100, 500]);
+    expect(extractQuantities('Price £100-£500').map((q) => q.value)).toEqual([100, 500]);
+  });
 
   it('pluraliseUnit moved with the rule and still answers its importers', () => {
     expect(pluraliseUnit('months', 1)).toBe('month');
