@@ -20,6 +20,8 @@ import {
   pluraliseUnit,
 } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { sayFigureAsWritten } from '../say-figure.js';
+import { extractQuantities } from '../../context/cqe/extract-quantities.js';
+import { buildClarifyChipMessage, mapCqeQuantityToProposalValue } from '../../routing/deterministic-value-update.js';
 
 // The ≥10-shape probe: [value, unit, as a person writes it].
 const PROBE: ReadonlyArray<readonly [number, string, string]> = [
@@ -71,6 +73,20 @@ describe('⛔ CEE says a figure by one rule (Panel ROOT 5870330356, DL 587035394
     expect(formatValueWithUnit(0.0525)).toBe('0.0525');
     expect(formatValueWithUnit(0.1234, 'GBP')).toBe('£0.1234');
   });
+
+  // ⛔ The one consumer that reaches a WRITER: a clarify chip's message is replayed as the user's turn and re-parsed by
+  // the real CQE. The figure it says must parse back to the same value and unit, or the click writes something else.
+  for (const typed of ['Set price to £49.50.', 'Set migration cost to £250k.', 'Set churn to 3.5%.', 'Set the delay to 3 months.', 'Increase the budget by £20k.', 'Set price to $1,299.99.']) {
+    it(`WRITER ROUND TRIP (real CQE): "${typed}" → chip message → the same value and unit`, () => {
+      const [q] = extractQuantities(typed);
+      expect(q, typed).toBeDefined();
+      const msg = buildClarifyChipMessage(typed, { id: 'f1', label: 'Price', score: 1, source: 'substring' }, q!);
+      const [back] = extractQuantities(msg);
+      expect(back, msg).toBeDefined();
+      expect(mapCqeQuantityToProposalValue(back!), msg).toEqual(mapCqeQuantityToProposalValue(q!));
+      expect(back!.operator, msg).toBe(q!.operator);
+    });
+  }
 
   it('pluraliseUnit moved with the rule and still answers its importers', () => {
     expect(pluraliseUnit('months', 1)).toBe('month');
