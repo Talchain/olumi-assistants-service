@@ -32,6 +32,13 @@ export const ENGINE_RUN_OUTCOMES: ReadonlySet<string> = new Set([
   'plot_unknown',
 ]);
 
+/**
+ * The Run turn's typed no-result outcome that is neither the engine's nor readiness: the model MOVED while the run was
+ * being prepared (DL #2233 follow-up 1). CEE's own words say so and offer the Run again; the model never explains it,
+ * so it can never blame readiness, and the Retry is never replaced.
+ */
+export const MOVED_RUN_OUTCOMES: ReadonlySet<string> = new Set(['analysis_snapshot_diverged']);
+
 /** The prefix of the chip `composeHandlerFailureBody` mints from a well-formed `identity_ask`, and of no other chip. */
 export const IDENTITY_ASK_CHIP_PREFIX = 'chip_prompt_identity_';
 
@@ -44,7 +51,8 @@ export interface RunOutcomeChip {
 
 export type RunOutcome =
   | { readonly kind: 'identity_ask'; readonly text: string; readonly chips: readonly RunOutcomeChip[] }
-  | { readonly kind: 'engine'; readonly reason: string; readonly text: string; readonly chips: readonly RunOutcomeChip[] };
+  | { readonly kind: 'engine'; readonly reason: string; readonly text: string; readonly chips: readonly RunOutcomeChip[] }
+  | { readonly kind: 'moved'; readonly reason: string; readonly text: string; readonly chips: readonly RunOutcomeChip[] };
 
 function rec(v: unknown): Record<string, unknown> | null {
   return v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
@@ -78,5 +86,6 @@ export function runOutcomeOf(runTurn: unknown): RunOutcome | undefined {
   if (ask !== undefined) return { kind: 'identity_ask', text, chips: [ask] };
   const reason = rec(r.analysis_ready)?.blocked_reason;
   if (typeof reason === 'string' && ENGINE_RUN_OUTCOMES.has(reason)) return { kind: 'engine', reason, text, chips };
+  if (typeof reason === 'string' && MOVED_RUN_OUTCOMES.has(reason)) return { kind: 'moved', reason, text, chips };
   return undefined;
 }

@@ -135,9 +135,11 @@ describe('⛔ a Run with no result says the engine’s typed outcome, never a re
     expect(runOutcomeOf(RUN_TURN.readiness)).toBeUndefined();
     // Today's served defect in reverse (DL CHANGES_REQUIRED on #2233, mutant 1a): no readiness or model-side cause is
     // ever read as the engine's, whatever its words and chips.
-    for (const reason of ['MISSING_OPTION_VALUE', 'analysis_not_ready', 'analysis_snapshot_diverged', 'args_validation_failed']) {
+    for (const reason of ['MISSING_OPTION_VALUE', 'analysis_not_ready', 'args_validation_failed']) {
       expect(runOutcomeOf({ ...RUN_TURN.engine, analysis_ready: { status: 'blocked', blocked_reason: reason } }), reason).toBeUndefined();
     }
+    // A model that MOVED is its own typed outcome (DL #2233 follow-up 1), never the engine's and never readiness.
+    expect(runOutcomeOf({ ...RUN_TURN.engine, analysis_ready: { status: 'blocked', blocked_reason: 'analysis_snapshot_diverged' } })?.kind).toBe('moved');
     expect(runOutcomeOf({ assistant_text: ENGINE_WORDS, analysis_ready: { status: 'blocked' } })).toBeUndefined();
     expect(runOutcomeOf({ ...RUN_TURN.engine, assistant_text: '  ' })).toBeUndefined();
     expect(runOutcomeOf(RUN_TURN.identity)).toEqual({ kind: 'identity_ask', text: IDENTITY_WORDS, chips: [IDENTITY_CHIP] });

@@ -193,14 +193,14 @@ const count = (n: number): string =>
 const ofThe = (n: number): string => `of ${Number.isInteger(n) ? 'the ' : ''}${count(n)}`;
 
 /** The one paragraph the user reads (draft wording; AI Experience owns the words, MG reviews the maths). */
-export function breakEvenLine(be: BreakEven): string {
+export function breakEvenLine(be: BreakEven, opts: { readonly afterIdentityAsk?: boolean } = {}): string {
   // The factor's own label, as the model spells it ("Pro paying subscribers": the plan name keeps its capital).
   const vol = be.volume_factor;
   const reading = be.identity_stated_in_brief ? '' : ` (Olumi’s reading of your goal)`;
   // Prices are per unit; the goal and its target are totals, written without the per-unit denominator.
   const totalUnit = totalUnitOfPerUnitPrice(be.unit);
   const parts: string[] = [
-    `The arithmetic still answers part of this. If ${be.goal} is ${be.price_factor} × ${be.volume_factor}${reading}: at `
+    `${opts.afterIdentityAsk === true ? '' : 'The arithmetic still answers part of this. '}If ${be.goal} is ${be.price_factor} × ${be.volume_factor}${reading}: at `
     + `${money(be.baseline_price, be.unit)}${whose(be.baseline_price_by)} and ${count(be.baseline_volume)} ${vol}${whose(be.baseline_volume_by)}, `
     + `${be.goal} is ${money(be.baseline_goal, totalUnit)} today.`,
   ];
@@ -228,9 +228,9 @@ export function breakEvenLine(be: BreakEven): string {
  * forward…") — so the user reads the limitation in one line and then the arithmetic, before the bullets, the save line
  * and the parked questions. A reply with one paragraph gets it at the end.
  */
-export function withBreakEvenAnswer(text: string, be: BreakEven): string {
+export function withBreakEvenAnswer(text: string, be: BreakEven, opts: { readonly afterIdentityAsk?: boolean } = {}): string {
   const cut = text.indexOf('\n\n');
-  const para = breakEvenLine(be);
+  const para = breakEvenLine(be, opts);
   return cut < 0 ? `${text}\n\n${para}` : `${text.slice(0, cut)}\n\n${para}${text.slice(cut)}`;
 }
 
