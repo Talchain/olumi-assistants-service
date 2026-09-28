@@ -95,6 +95,24 @@ describe('construction holds what the brief states on the goal, and only that', 
     expect(goal.goal_threshold_raw, 'the held target is the one the source names').toBe(100000);
   });
 
+  // DL #72 5862282849 (journey A `pj-20260928T023301Z`, CEE 79b69f8): this drafter held MRR in `£k/month` (target raw
+  // 100, today 75, cap 125). The brief's "£100k" is 100,000, so the unscaled 100 never matched it: the goal lost its
+  // `threshold_source` (and so its direction) on every turn. The £k unit's own letter scales it back to what was written.
+  it('⭐ RED: a goal the drafter holds in £k/month keeps its brief source and direction (the unit\'s k is applied)', async () => {
+    const { goal } = await build(BRIEF, candidate({ value: 100, unit: '£k/month', baseline_value: 75 }));
+    expect(goal.goal_threshold_raw).toBe(100);
+    expect(goal.goal_threshold_unit).toBe('£k/month');
+    expect(goal.threshold_source).toBe('brief_extraction');
+    expect(goal.goal_direction).toBe('>=');
+  });
+
+  it('CONTRAST: in £k/month, a target the brief does not write (£120k) still gets no source and no direction', async () => {
+    const { goal } = await build(BRIEF, candidate({ value: 120, unit: '£k/month', baseline_value: 75 }));
+    expect(goal.goal_threshold_raw).toBe(120);
+    expect(Object.hasOwn(goal, 'threshold_source')).toBe(false);
+    expect(Object.hasOwn(goal, 'goal_direction')).toBe(false);
+  });
+
   it('⭐ what the goal holds is no longer said as a loss, and the deadline question says it is held', async () => {
     const { result } = await build(BRIEF, candidate());
     expect(said(result)).not.toMatch(/12-month horizon|nowhere to put it/);
