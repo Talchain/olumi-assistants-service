@@ -149,3 +149,26 @@ describe('S4L — which limits need today\'s level', () => {
     expect(limitedLevelAsks(graph)).toEqual([]);
   });
 });
+
+describe('S4Q — a node\'s `quantity_frame` survives the run path\'s parse (contract-field-guard stripped:cee.NodeV3:quantity_frame)', () => {
+  const node = (extra: Record<string, unknown>) => ({ id: 'fac_code_quality_change', kind: 'factor', label: 'Code quality change', ...extra });
+
+  it('S4Q-1: `change` is kept, and a declared control field survives beside it while an undeclared one is stripped', async () => {
+    const { NodeV3 } = await import('../../../schemas/cee-v3.js');
+    const parsed = NodeV3.safeParse(node({ quantity_frame: 'change', not_a_node_field: 1 }));
+    expect(parsed.success, JSON.stringify(parsed.success ? {} : parsed.error.issues.slice(0, 3))).toBe(true);
+    const out = parsed.data as unknown as Record<string, unknown>;
+    expect(out['label'], 'CONTROL: a declared field survives').toBe('Code quality change');
+    expect(Object.keys(out), 'CONTROL: an undeclared key is stripped (the parse discriminates)').not.toContain('not_a_node_field');
+    expect(out['quantity_frame']).toBe('change');
+  });
+
+  it('S4Q-2: a value outside the contract is dropped, never a reason to refuse the node', async () => {
+    const { NodeV3 } = await import('../../../schemas/cee-v3.js');
+    const parsed = NodeV3.safeParse(node({ quantity_frame: 'relative' }));
+    expect(parsed.success).toBe(true);
+    // `.catch(undefined)`: the value is dropped (and a JSON write omits the key), exactly as `goal_threshold_frame`'s peers.
+    expect((parsed.data as Record<string, unknown>)['quantity_frame']).toBeUndefined();
+    expect(JSON.parse(JSON.stringify(parsed.data))).not.toHaveProperty('quantity_frame');
+  });
+});

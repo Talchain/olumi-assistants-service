@@ -646,6 +646,11 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "observed_state",
       "prior",
       "provenance",
+      // R1 S4-core, 28 Sep (`@talchain/schemas` 0.61.0) — THE VALUE-BEARING DECISION: `quantity_frame` is NOT
+      // value-bearing and must NOT join `carriesValue` (nor `NODE_QUANTITY_FIELDS`). It says WHAT the node's value
+      // measures (a level, or a change from today), never HOW MUCH: the sibling of `goal_threshold_frame` and
+      // `goal_direction` above. A node carrying only a frame carries no value; joining would let "change" read as one.
+      "quantity_frame",
       "scale_frame",
       "source_quote",
       "starterId",
