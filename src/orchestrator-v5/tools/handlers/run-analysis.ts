@@ -41,6 +41,7 @@
  */
 
 import { collectUnvaluedFactorIds } from '../../coaching/unvalued-factor-ids.js';
+import { IDENTITY_NOT_EVALUATED_CODE, composeIdentityNotEvaluatedAsk } from '../../coaching/identity-not-evaluated-ask.js';
 import { RunAnalysisArgsSchema, RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import type {
   RunAnalysisArgs,
@@ -1470,6 +1471,12 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
                 'PLoT blocked the analysis with no code CEE has copy for — honest generic refusal shipped; add copy for this code',
               );
             }
+            // Batch 7 (R3): ISL withheld the analysis on a declared identity. The reply is the one question that
+            // unblocks it, from typed facts only: the critique's typed identity (or its affected ids) and the
+            // Run's own persisted graph for labels, units and whose figure the target is.
+            const identityAsk = blockedCritiqueCodes.includes(IDENTITY_NOT_EVALUATED_CODE)
+              ? composeIdentityNotEvaluatedAsk(v2Err.critiques, snapshot.rawPersistedGraph)
+              : null;
             throw new HandlerInvocationFailedError(
               `PLoT blocked the analysis: ${runError.message}`,
               {
@@ -1485,6 +1492,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
                   ...extractPlotFailureDetails(v2Err),
                   downstream_http_status: 422,
                   plot_blocker_code_known: renderedCodeHasCopy,
+                  ...(identityAsk !== null ? { identity_ask: identityAsk } : {}),
                 },
                 cause: runError,
               },
