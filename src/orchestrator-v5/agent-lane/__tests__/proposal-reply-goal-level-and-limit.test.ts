@@ -63,7 +63,7 @@ describe('⭐ PJ-C1 journey C: a goal level and a limit figure are answered from
     const r = await produce(C03, 'propose_goal_current_level', GOAL_ARGS);
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
     expect(r.rederived, 'precondition: the served graph re-derives Olumi’s part').toEqual(expect.objectContaining({ whose: "Olumi's estimate" }));
-    const reply = composeProposalReply('propose_goal_current_level', WHOLE, r, C03.message);
+    const reply = composeProposalReply('propose_goal_current_level', { ...GOAL_ARGS, ...WHOLE }, r, C03.message);
     clean(reply);
     const parts = reply!.split('\n\n');
     // The consent subject itself says the re-derivation (#2214), so the reply adds no line of its own.
@@ -78,14 +78,14 @@ describe('⭐ PJ-C1 journey C: a goal level and a limit figure are answered from
     const r = await produce(C03, 'propose_goal_current_level', GOAL_ARGS);
     const { rederived: _r, ...plain } = r;
     const label = 'Record the current level of "MRR" as your figure: 72000 GBP/month (target 100000 GBP per month)';
-    expect(composeProposalReply('propose_goal_current_level', WHOLE, { ...plain, public_label: label }, C03.message))
+    expect(composeProposalReply('propose_goal_current_level', { ...GOAL_ARGS, ...WHOLE }, { ...plain, public_label: label }, C03.message))
       .toBe('I’ve prepared this change: record the current level of "MRR" as your figure: 72000 GBP/month (target 100000 GBP per month).\n\nApprove this change?');
   });
 
   it('RED (the PRODUCER, served C05 on 651a7fd): the limit’s new figure, said as the user’s', async () => {
     const r = await produce(C05, 'propose_limit_change', LIMIT_ARGS);
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
-    const reply = composeProposalReply('propose_limit_change', WHOLE, r, C05.message);
+    const reply = composeProposalReply('propose_limit_change', { ...LIMIT_ARGS, ...WHOLE }, r, C05.message);
     clean(reply);
     expect(reply).toBe(`I’ve prepared this change: ${String(r.public_label).charAt(0).toLowerCase()}${String(r.public_label).slice(1)}.\n\nThe new figure is the one you gave.\n\nApprove this change?`);
     expect(reply).toContain(limitLabel);
@@ -94,17 +94,17 @@ describe('⭐ PJ-C1 journey C: a goal level and a limit figure are answered from
   it('FALLBACK: every untyped or disclosing shape keeps the second call', async () => {
     const goal = await produce(C03, 'propose_goal_current_level', GOAL_ARGS);
     const limit = await produce(C05, 'propose_limit_change', LIMIT_ARGS);
-    const g = (x: Record<string, unknown>) => composeProposalReply('propose_goal_current_level', WHOLE, { ...goal, ...x }, C03.message);
+    const g = (x: Record<string, unknown>) => composeProposalReply('propose_goal_current_level', { ...GOAL_ARGS, ...WHOLE }, { ...goal, ...x }, C03.message);
     expect(g({ replaces: { value: 75000, unit: 'GBP/month' } }), 'a revision').toBeNull();
     expect(g({ as_stated: { value: 72, unit: 'GBP thousands per month' } }), 'recorded in another unit').toBeNull();
     expect(g({ rederived: { ...(goal.rederived as object), whose: 'the user' } }), 'untyped whose').toBeNull();
     expect(g({ not_represented: 'x' }), 'an unknown key').toBeNull();
     expect(g({ public_label: 'Record the current level of "MRR" as your figure: 72000 GBP/month' }), 'a re-derivation the subject does not say').toBeNull();
-    expect(composeProposalReply('propose_limit_change', WHOLE, { ...limit, limit: { on: limitLabel } }, C05.message), 'no figures').toBeNull();
-    expect(composeProposalReply('propose_limit_change', WHOLE, { ...limit, extra_note: 'x' }, C05.message), 'an unknown key').toBeNull();
+    expect(composeProposalReply('propose_limit_change', { ...LIMIT_ARGS, ...WHOLE }, { ...limit, limit: { on: limitLabel } }, C05.message), 'no figures').toBeNull();
+    expect(composeProposalReply('propose_limit_change', { ...LIMIT_ARGS, ...WHOLE }, { ...limit, extra_note: 'x' }, C05.message), 'an unknown key').toBeNull();
     expect(composeProposalReply('propose_limit_change', { whole_request: false }, limit, C05.message)).toBeNull();
     expect(composeProposalReply('propose_goal_current_level', {}, goal, C03.message)).toBeNull();
-    expect(composeProposalReply('propose_limit_change', WHOLE, limit, 'We have £30,000 now — is that enough?')).toBeNull();
+    expect(composeProposalReply('propose_limit_change', { ...LIMIT_ARGS, ...WHOLE }, limit, 'We have £30,000 now — is that enough?')).toBeNull();
   });
 
   it('RED (the loop): a single propose_limit_change marked whole → exactly ONE model call', async () => {

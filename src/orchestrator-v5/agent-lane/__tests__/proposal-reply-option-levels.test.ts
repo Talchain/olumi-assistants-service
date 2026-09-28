@@ -91,7 +91,10 @@ describe('⭐ PJ-C1: an option-levels proposal is answered from its own result',
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
     const typed = (r.interventions as { option: string; stated_by?: string }[]).map((i) => [i.option, i.stated_by]);
     expect(typed).toEqual(expect.arrayContaining([[COHORT, 'user'], [RAISE, 'olumi_estimate']]));
-    const reply = composeProposalReply('propose_option_interventions', WHOLE, r, text);
+    const reply = composeProposalReply('propose_option_interventions', { ...WHOLE, interventions: [
+      { option_label: COHORT, factor_label: 'Pro plan monthly price', value: 54, unit: '£ per month' },
+      { option_label: RAISE, factor_label: 'Pro plan monthly price', value: 59, unit: '£ per month' },
+    ] }, r, text);
     expect(reply, JSON.stringify(Object.keys(r))).not.toBeNull();
     {
       expect(reply).toMatch(new RegExp(`under ‘${RAISE}’ is set to .*Olumi’s estimate`));

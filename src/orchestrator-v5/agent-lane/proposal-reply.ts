@@ -18,6 +18,7 @@
  */
 import { formatFactorValue } from '../compose/format-factor-value.js';
 import { sayFigureExactly } from './say-figure.js';
+import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (x: unknown): Rec | undefined => (x !== null && typeof x === 'object' && !Array.isArray(x) ? (x as Rec) : undefined);
@@ -248,10 +249,42 @@ function limitChangeReply(r: Rec): string | null {
   return reply(subjectOf(r.public_label), ['The new figure is the one you gave.'], question(undefined));
 }
 
+/** Argument keys that QUOTE the user's words: a figure inside a quote is carried into no reply. */
+const QUOTE_KEY = /(?:^|_)(?:words|quote|rationale|basis|reason)$/;
+
+/** Every number and string an argument carries, outside quotes of the user's own words. */
+function carriedBy(value: unknown, key: string, into: { nums: number[]; strs: string[] }): void {
+  if (QUOTE_KEY.test(key)) return;
+  if (typeof value === 'number' && Number.isFinite(value)) into.nums.push(value);
+  else if (typeof value === 'string') into.strs.push(value);
+  else if (Array.isArray(value)) for (const v of value) carriedBy(v, key, into);
+  else if (value !== null && typeof value === 'object') for (const [k, v] of Object.entries(value)) carriedBy(v, k, into);
+}
+
+/**
+ * ⛔ A FIGURE THE USER WROTE THAT THE CALL DOES NOT CARRY IS SOMETHING ELSE TO ACKNOWLEDGE (served journey-A C3, real-role
+ * replay 28 Sep, 15 served turns): "price sensitivity is very high, and we've seen our churn increase by 15% when we made
+ * our last price increase. That was only £4." — the model called the link-strength proposal `whole_request: true` on
+ * 11/15, and the reply composed from the result named the user's +15% / £4 on 4/15. The figures the repo's one extractor
+ * (`findStatedAmounts`) reads in the message must each be carried by the call (a number equal to it, a percent as its
+ * fraction too, or its text in a non-quote argument); otherwise the turn keeps its narrating call, for any model.
+ */
+export function userFiguresTheCallLeaves(args: unknown, userMessage: string): string[] {
+  if (typeof userMessage !== 'string' || userMessage === '') return [];
+  const c: { nums: number[]; strs: string[] } = { nums: [], strs: [] };
+  carriedBy(args, '', c);
+  const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+  return findStatedAmounts(userMessage)
+    .filter((a) => !(c.nums.some((n) => same(n, a.magnitude) || ((a as { kind?: unknown }).kind === 'percent' && same(n, a.magnitude / 100)))
+      || c.strs.some((s) => s.includes(a.matchedText.trim()))))
+    .map((a) => a.matchedText.trim());
+}
+
 export function composeProposalReply(tool: string, args: unknown, result: unknown, userMessage: string): string | null {
   // The model's own typed word that this call is the WHOLE request: a message asking for two things never loses one.
   if (recordOf(args)?.whole_request !== true) return null;
   if (typeof userMessage === 'string' && userMessage.includes('?')) return null;
+  if (userFiguresTheCallLeaves(args, userMessage).length > 0) return null;
   const r = recordOf(result);
   if (r === undefined || r.ok !== true || r.mutated !== false || !nonEmpty(r.proposal_id)) return null;
   const allowed = tool === 'propose_new_option' ? NEW_OPTION_KEYS : tool === 'propose_link_strength' ? LINK_KEYS
