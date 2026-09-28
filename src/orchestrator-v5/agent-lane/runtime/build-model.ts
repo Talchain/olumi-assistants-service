@@ -417,6 +417,9 @@ export function retrySchemaPinningGoal(
     unit: { type: 'string', enum: [goal.unit] },
     horizon_months: goal.horizon_months === null ? { type: 'null' } : { type: 'integer', enum: [goal.horizon_months] },
     provenance: { type: 'string', enum: [goal.provenance] },
+    // R1 S4-core: the frame the target is stated in is part of the goal, so a compaction cannot turn "cut by 15%" into a
+    // level of 15. An absent frame (a candidate from before the field) pins to "level", exactly what it meant.
+    frame: { type: 'string', enum: [goal.frame ?? 'level'] },
     // The current level is part of the goal, so it is pinned too; an absent value
     // (a candidate from before the field) pins to "not given".
     baseline_known: { type: 'boolean', enum: [goal.baseline_known === true] },

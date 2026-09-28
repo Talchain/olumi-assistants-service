@@ -58,12 +58,12 @@ const GTM = (goal: Record<string, unknown>) => ({
   decision_question: null,
 });
 
-// `target_stated: true` — both briefs here DO name £3m, and the field is now required
+// `target_stated: true` — both briefs here DO name £3m, frame: 'level', and the field is now required
 // by `buildCandidateSchema`. The live-schema guard below is what caught its absence,
 // which is the one part of that guard this change can vouch for. The goal's current
 // level (`baseline_*`, #1840) is required the same way; neither brief states one.
-const WITH_DEADLINE = GTM({ metric: 'New ARR', operator: '>=', target_stated: true, value: 3000000, unit: 'GBP', horizon_months: 18, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null });
-const NO_DEADLINE = GTM({ metric: 'New ARR', operator: '>=', target_stated: true, value: 3000000, unit: 'GBP', horizon_months: null, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null });
+const WITH_DEADLINE = GTM({ metric: 'New ARR', operator: '>=', target_stated: true, frame: 'level', value: 3000000, unit: 'GBP', horizon_months: 18, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null });
+const NO_DEADLINE = GTM({ metric: 'New ARR', operator: '>=', target_stated: true, frame: 'level', value: 3000000, unit: 'GBP', horizon_months: null, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null });
 /**
  * G1 (27 Sep): a direction beside a target the brief STATES ("£3m") is now held on the goal (`goal_direction`), so it is
  * no longer a loss and is not said as one. A direction is still dropped, and said, when the brief does not state the

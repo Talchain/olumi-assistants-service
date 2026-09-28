@@ -68,7 +68,7 @@ function candidateFromServed(g: SGraph, opts: { olumi?: 'ai_proposed' | 'inferre
   const optionEdges = (id: string) => g.edges.filter((e) => e.from === id && byId.get(e.to)?.kind === 'factor' && e.origin !== 'repair');
   return {
     goal: {
-      metric: goal.label, operator: '>=', target_stated: true, value: goal.goal_threshold_raw ?? null, unit: goal.goal_threshold_unit ?? '',
+      metric: goal.label, operator: '>=', target_stated: true, frame: 'level', value: goal.goal_threshold_raw ?? null, unit: goal.goal_threshold_unit ?? '',
       horizon_months: opts.horizon === undefined ? 12 : opts.horizon, provenance: 'explicit',
       baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null,
     },

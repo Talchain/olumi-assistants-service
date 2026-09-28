@@ -158,6 +158,23 @@ describe('S4G — WIRE: a change goal reaches /graph/register in the contract\'s
   });
 });
 
+describe('S4G — the repair retry cannot re-frame the goal', () => {
+  it('S4G-12: the compaction retry PINS the first draft\'s frame ("cut by 15%" stays change_rel); a pre-R1 draft pins to level', async () => {
+    const { retrySchemaPinningGoal } = await import('../runtime/build-model.js');
+    const { Ajv } = await import('ajv');
+    const first = candidate({});
+    // The GOAL sub-schema of the retry (the part this row is about); the rest of the draft is pinned elsewhere.
+    const goalSchemaOf = (goal: unknown) => (retrySchemaPinningGoal(goal as never) as { properties: { goal: object } }).properties.goal;
+    const pinned = new Ajv({ strict: false }).compile(goalSchemaOf(first.goal));
+    expect(pinned(first.goal), JSON.stringify(pinned.errors)).toBe(true);
+    expect(pinned({ ...first.goal, frame: 'level' }), 'the retry cannot turn the change into a level').toBe(false);
+    const legacy = { ...first.goal } as Record<string, unknown>;
+    delete legacy['frame'];
+    const pinnedLegacy = new Ajv({ strict: false }).compile(goalSchemaOf(legacy));
+    expect(pinnedLegacy({ ...legacy, frame: 'level' }), JSON.stringify(pinnedLegacy.errors)).toBe(true);
+  });
+});
+
 describe('S4G — the held comparator is the direction of a TYPED change', () => {
   const graph = (frame: string, held: string, os?: Record<string, unknown>) => ({
     nodes: [{ id: 'goal_bill', kind: 'goal', label: 'Monthly cloud bill', goal_threshold_frame: frame, goal_direction: held, goal_threshold_unit: 'GBP per month', ...(os ? { observed_state: os } : {}) }],

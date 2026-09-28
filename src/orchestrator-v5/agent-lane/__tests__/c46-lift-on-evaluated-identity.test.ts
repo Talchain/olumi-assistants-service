@@ -48,7 +48,7 @@ const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
 
 type Dir = 'positive' | 'negative';
 const link = (from: string, to: string, direction: Dir) => ({ from, to, direction, provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
-const goal = { metric: 'MRR', operator: '>=', target_stated: true, value: 20000, unit: 'GBP', horizon_months: 12, provenance: 'explicit',
+const goal = { metric: 'MRR', operator: '>=', target_stated: true, frame: 'level', value: 20000, unit: 'GBP', horizon_months: 12, provenance: 'explicit',
   baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null };
 
 /** PAUL'S SHAPE, as `c46-leader-withheld-on-a-product.test.ts` builds it: MRR = Pro plan price × Pro subscribers. */
