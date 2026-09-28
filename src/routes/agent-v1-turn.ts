@@ -78,6 +78,7 @@ import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipelin
 import { readBrief, BRIEF_READING_TIMEOUT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
 import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { limitAskIdsOf } from '../orchestrator-v5/agent-lane/limit-checks.js';
+import type { RunOutcome } from '../orchestrator-v5/agent-lane/run-outcome.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runDeltaBoundToReadback, runTurnNextMove, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
 import { breakEvenFor, goalNotCheckedLine, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
@@ -1825,6 +1826,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let runInterpreted = false;
     /** C5b: the view the Run button's one interpreting call gave as a typed field — never composed for it. */
     let fastPathView: ProvisionalView | null = null;
+    /** A Run with no result: its typed outcome's own chips (the identity ask's "Check the figures", a retry), `run-outcome.ts`. */
+    let runOutcomeChips: OfferedAction[] = [];
+    let runOutcomeSaid = false;
     let result: AgentTurnResult | undefined;
     if (approvedProposal !== undefined) {
       const fastStartedAt = Date.now();
@@ -1951,7 +1955,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       let interpreted: { answer: string; messages: Record<string, unknown>[] } | undefined;
       // ⛔ A FAILED run is not explained by a model: there is no result to interpret, and the readback's stale state
       // invited an invented cause ("the saved graph has changed"). The user gets one true sentence (RUN_FAILED_TEXT).
-      runInterpreted = ran.refusal !== 'run_failed';
+      /**
+       * ⛔ NOR IS A RUN THE ENGINE ANSWERED WITHOUT A RESULT (DL #72 5867687155; AIQ 5867754251). Its reason is the
+       * engine's TYPED outcome, in CEE's own words for that outcome (`run-outcome.ts`), with that outcome's own chips.
+       * Served `9cd467e`: the model explained an ISL 422 as a non-blocking readiness ask from the state. Served `d202fc5`:
+       * CEE's composed identity ask became the model's prose, and its "Check the figures" chip was dropped.
+       */
+      const outcome = (ran as { run_outcome?: RunOutcome }).run_outcome;
+      if (outcome !== undefined) { runOutcomeChips = outcome.chips.map((c) => ({ ...c })); runOutcomeSaid = true; }
+      runInterpreted = ran.refusal !== 'run_failed' && outcome === undefined;
       if (runInterpreted) try {
         const resp = await callModel({
           // C5b's line goes BEFORE the interpret-only line, so the banked Interpreter v0.2 text stays last and byte-identical.
@@ -1991,7 +2003,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       fastPath = 'run';
       const ms = Date.now() - fastStartedAt;
       const providerMs = Math.min(Date.now() - providerStartedAt, ms);
-      const text = interpreted?.answer ?? interpretationUnavailableText(ran);
+      const text = interpreted?.answer ?? (outcome !== undefined ? outcome.text : interpretationUnavailableText(ran));
       result = {
         assistant_text: text,
         items: [...priorAndRun, ...(interpreted?.messages ?? [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }])],
@@ -2293,7 +2305,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...approvals,
       ...carriedApproval,
       ...(offerRun ? [RUN_OFFER_CHIP] : []),
-      ...(runBlocked || firstAnalysisBlocked || approvalLeftBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
+      // A Run the engine answered without a result offers ITS outcome's chips, never "what it still needs" (not a model gap).
+      ...runOutcomeChips,
+      ...((runBlocked && !runOutcomeSaid) || firstAnalysisBlocked || approvalLeftBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
       ...(offerRebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []),
       // The research control for each query the Agent offered THIS turn: the only way a query is ever sent.
       ...[...new Map(result.tool_results.flatMap((r) => {

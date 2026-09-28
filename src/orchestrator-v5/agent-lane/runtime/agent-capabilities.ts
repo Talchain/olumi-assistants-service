@@ -155,6 +155,7 @@ import { registrationTurnId } from '../../graph-registration/registration-identi
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel } from '../goal-current-level.js';
 import { sayFigureExactly } from '../say-figure.js';
+import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
@@ -5528,6 +5529,8 @@ export function createAgentCapabilities(
           limitChecks = limitChecksForAgent(read?.raw, read?.limit_verdicts);
         } catch { graphForProduct = undefined; evaluatedForProduct = undefined; limitChecks = undefined; }
       }
+      // ⛔ A Run with no result says the ENGINE's typed outcome, never a readiness issue it did not stop on (`run-outcome.ts`).
+      const runOutcome = result === undefined ? runOutcomeOf(r.json) : undefined;
       return {
         ok: r.status === 200,
         mutated: false,
@@ -5535,6 +5538,11 @@ export function createAgentCapabilities(
         status: ready.status ?? 'unknown',
         // Olumi's own words about what is missing. Not re-worded here.
         what_is_missing: String(r.json.assistant_text ?? ''),
+        ...(runOutcome !== undefined ? {
+          run_outcome: runOutcome,
+          run_outcome_note: 'The analysis did not produce a result, and what_is_missing is the reason, in Olumi\u2019s own words. '
+            + 'Tell the user exactly that. Never give another reason, and never name anything from the model\u2019s readiness as why it did not run.',
+        } : {}),
         blockers: ready.blockers ?? [],
         options: ready.options ?? [],
         // ⛔ The Agent reads decision sensitivity from EVPPI only, never PLoT's structural ranking (`../decision-sensitivity.ts`).
