@@ -213,9 +213,12 @@ const framedBase = (g: SGraph): SGraph => ({
  * predate that. So the registered goal must hold EXACTLY these values, which are then set aside, and everything else is
  * compared exactly as before, bytes included (removing keys keeps the others' order).
  */
-const G1_KEYS: readonly string[] = ['threshold_source', 'goal_direction', 'goal_horizon_months'];
+// T2 part 2 (Canonical #2231): an `unresolved` deadline's own words are held too — here Paul's "within 12 months",
+// which these controls' drafts leave uncounted (horizon null), so `attestHorizon` reads it as unresolved.
+const G1_KEYS: readonly string[] = ['threshold_source', 'goal_direction', 'goal_horizon_months', 'goal_deadline_as_stated'];
 const G1_WITH_HORIZON = { threshold_source: 'brief_extraction', goal_direction: '>=', goal_horizon_months: 12 };
 const G1_NO_HORIZON = { threshold_source: 'brief_extraction', goal_direction: '>=' };
+const G1_NO_HORIZON_WORDS = { ...G1_NO_HORIZON, goal_deadline_as_stated: 'within 12 months' };
 function withoutG1(g: SGraph, expected: Record<string, unknown>): SGraph {
   const goal = g.nodes.find((n) => n.kind === 'goal') as unknown as Record<string, unknown>;
   expect(Object.fromEntries(G1_KEYS.filter((k) => goal[k] !== undefined).map((k) => [k, goal[k]])), 'G1: the goal holds what the brief states').toEqual(expected);
@@ -357,9 +360,9 @@ describe('controls — what the rule must never touch', () => {
     const { graph, out } = await build(candidateFromServed(run.brief.draft_graph, { olumi: 'ai_proposed', horizon: null }));
     expect(optionIds(graph)).toContain(olumiId);
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
-    expect(withoutG1(asServedBeforeOneForm(graph, run.brief.draft_graph), G1_NO_HORIZON).nodes).toEqual(olumisKnownLevels(run.brief.draft_graph.nodes));
+    expect(withoutG1(asServedBeforeOneForm(graph, run.brief.draft_graph), G1_NO_HORIZON_WORDS).nodes).toEqual(olumisKnownLevels(run.brief.draft_graph.nodes));
     expect(unsized(graph).edges).toEqual(run.brief.draft_graph.edges);
-    expect(JSON.stringify(unsized(withoutG1(asServedBeforeOneForm(graph, baseGraph(key)), G1_NO_HORIZON)))).toBe(JSON.stringify(framedBase(baseGraph(key))));
+    expect(JSON.stringify(unsized(withoutG1(asServedBeforeOneForm(graph, baseGraph(key)), G1_NO_HORIZON_WORDS)))).toBe(JSON.stringify(framedBase(baseGraph(key))));
     expect(out).not.toHaveProperty('options_withheld');
     expect(questions(out).filter((q) => q.startsWith('I left out ') || q.startsWith('What makes '))).toEqual([]);
   });
