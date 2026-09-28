@@ -1950,6 +1950,25 @@ export function createAgentCapabilities(
       const current: 'positive' | 'negative' = edge.effect_direction === 'negative' || edge.effect_direction === 'positive'
         ? edge.effect_direction : (mean < 0 ? 'negative' : 'positive');
       const wanted = args.direction === 'positive' || args.direction === 'negative' ? args.direction : current;
+      /**
+       * ⛔ A REVERSAL IS THE USER'S WORDS, NEVER THE MODEL'S GUESS (DL #72 5863691992; served pj-20260928T044420Z A16: "Get on
+       * and update it to very strong" — the Agent sent `direction: 'positive'` and the risk that lowers MRR was prepared
+       * "pushing up", disclosed only as a trailing ", pushing up"; the harness approved it and the Run reported the
+       * reversal as a modelling error). The band was grounded (`bandGrounding`); the direction was not. A direction
+       * other than the link's own is taken ONLY with the user's phrase for it in THIS turn (`direction_from_words`,
+       * `wordsTheUserWrote` — the Agent cannot invent it), and the preview then says plainly that it REVERSES the link.
+       * Otherwise nothing is prepared, and the next call is named: the same arguments without `direction`.
+       */
+      const reverses = wanted !== current;
+      const directionWords = typeof args.direction_from_words === 'string' ? args.direction_from_words.trim() : '';
+      if (reverses && !wordsTheUserWrote(directionWords, ctx.user_turn_text)) {
+        const way = (d: 'positive' | 'negative'): string => (d === 'positive' ? 'raises' : 'lowers');
+        return { ok: false, mutated: false, refusal: 'direction_not_stated',
+          detail: `"${from.label}" \u2192 "${to.label}" ${way(current)} "${to.label}" in the model; this call would reverse it so that it ${way(wanted)} it, `
+            + 'and the user has not said in this message, in their own words, that it runs the other way. Nothing was prepared. '
+            + `NEXT CALL: call propose_link_strength again with exactly the same arguments, except leave out "direction": the link keeps its direction and only its strength is recorded. `
+            + 'Give "direction" only when the user said it runs the other way, with their exact words in "direction_from_words".' };
+      }
       const currentBand = edgeBandFromMagnitude(Math.abs(mean));
       // Already in the band the user named, pushing the same way: KEEP the figure, record it as theirs.
       const confirm = currentBand === band && wanted === current;
@@ -1973,7 +1992,7 @@ export function createAgentCapabilities(
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: confirm
           ? `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords}, as your own estimate (strength kept at ${quotable(Math.abs(mean))} on Olumi's 0\u20131 scale)`
-          : `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords} (${magnitude} on Olumi's 0\u20131 scale), as your own estimate${wanted !== current ? `, pushing ${wanted === 'positive' ? 'up' : 'down'}` : ''}`,
+          : `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords} (${magnitude} on Olumi's 0\u20131 scale), as your own estimate${reverses ? `, and REVERSE its direction so that it ${wanted === 'positive' ? 'raises' : 'lowers'} "${to.label}" (your "${directionWords}")` : ''}`,
         ...(interpretation === undefined ? {} : { interpretation }),
       });
       proposals.put(proposal);
