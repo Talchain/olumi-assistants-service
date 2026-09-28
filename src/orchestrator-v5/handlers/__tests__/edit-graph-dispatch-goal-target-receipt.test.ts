@@ -92,7 +92,10 @@ const INGRESS_GRAPH: GraphStateIngress = {
     { id: 'goal_cost_reduction', kind: 'goal', label: 'Reduce Operating Costs' },
     { id: 'fac_office_rent', kind: 'factor', label: 'Annual Office Rent Cost' },
   ],
-  edges: [{ from: 'fac_office_rent', to: 'goal_cost_reduction' }],
+  // A strictly-canonical base (GraphV3-valid edge). A structurally-invalid base
+  // never persists an edit (`BASE_GRAPH_INVALID`, edit-graph-dispatch-fallback-
+  // keeps-untouched.test.ts), and this suite pins applied-edit persistence.
+  edges: [{ from: 'fac_office_rent', to: 'goal_cost_reduction', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' }],
 };
 
 /**

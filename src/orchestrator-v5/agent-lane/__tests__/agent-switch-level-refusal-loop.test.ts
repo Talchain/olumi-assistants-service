@@ -154,7 +154,6 @@ describe('R4 — a refusal is fixable in ONE hop: it names the exact next call, 
   });
 
   it.each([
-    ['{ 0 }', { value: 0 }],
     ["{ 'yes' }", { value: 'yes' }],
     ["a level that is 'yes'", 'yes'],
     ["{ 1, estimate: 'yes' }", { value: 1, estimate: 'yes' }],
@@ -163,6 +162,18 @@ describe('R4 — a refusal is fixable in ONE hop: it names the exact next call, 
     const r = await caps.proposeNewOption(ctx as never, withLevel(level) as never) as Result;
     expect(r.refusal).toBe('switch_level_not_on');
     expect(r.detail).toContain(`except ${REMOVE_LEVEL}`);
+    expect(r.detail).not.toContain('graded factor');
+  });
+
+  // ⛔ A 0 is not fixed by removing its level — a bare switch entry means ON (served A03, pj-20260928T011147Z): with no
+  // other option turning the switch on, the detail says to list it under the option that turns it on
+  // (`agent-switch-off-entry.test.ts` R3/R5 bind the rest).
+  it('R4 CONTRAST (A03): { 0 } as the only entry for the switch → the detail never says remove "level"; it says to list it under the option that turns it on', async () => {
+    const { caps } = setup();
+    const r = await caps.proposeNewOption(ctx as never, withLevel({ value: 0 }) as never) as Result;
+    expect(r.refusal).toBe('switch_level_not_on');
+    expect(r.detail).not.toContain(REMOVE_LEVEL);
+    expect(r.detail).toContain(`No option in this change turns "${SWITCH}" on; list it under the option that turns it on`);
     expect(r.detail).not.toContain('graded factor');
   });
 

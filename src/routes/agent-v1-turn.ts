@@ -1500,6 +1500,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const dispatch = timedDispatch(dispatchFor(
       typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
     ), dispatchLedger, scenarioId);
+    /**
+     * ⭐ PJ-C1 LATENCY (#72 5861769155): the turn's read cache is made HERE, and its first graph read starts at once,
+     * so that ~1 s read runs beside the pending/committed-turn reads and the turn claim below instead of after them
+     * (served 84440ff A13: ~560 ms of those, then a 1,011 ms read). The claim row writes no graph
+     * (`writesGraph: false`), so the read returns what a read started after it would. See `turnReadCache`.
+     */
+    const readCache = turnReadCache(dispatch, `/assist/v1/scenarios/${scenarioId}/graph`);
+    readCache.prefetch();
 
     const approvedProposal = typedApprovalOf(body);
     const requestHash = agentTurnRequestHash(scenarioId, userId, message, approvedProposal !== undefined ? `approve:${approvedProposal}` : undefined);
@@ -1686,7 +1694,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * kept read carries the epoch it STARTED in. So a read after a write always sees it. Served: 22 reads at ~1.1 s in one
      * journey; an approve made 4.
      */
-    const readCache = turnReadCache(dispatch, `/assist/v1/scenarios/${scenarioId}/graph`);
     const readingDispatch: typeof dispatch = readCache.dispatch;
     const countingDispatch: typeof dispatch = async (path, body) => {
       if (path.endsWith('/graph/register') || path === '/orchestrate/v2/turn') writesDispatched += 1;

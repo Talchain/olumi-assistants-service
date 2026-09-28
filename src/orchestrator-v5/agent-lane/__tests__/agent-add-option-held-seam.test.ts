@@ -1285,14 +1285,17 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
    * Journey A's add, as served: the option acts on a NEW graded price (Olumi's £59 for the option — left for its own
    * level write, as today) and a NEW switch. `today` is what the Agent gives for the price, if anything.
    */
-  const proposeJourneyA = async (today: Record<string, unknown> | undefined, firstMessage: string = BRIEF_A, olumiSaid = 'Noted. Shall I build on the model you have?') => {
+  const proposeJourneyA = async (today: Record<string, unknown> | undefined, firstMessage: string = BRIEF_A, olumiSaid = 'Noted. Shall I build on the model you have?',
+    // A1 £59 rows: the option's label, its level on the new price (`null` = none given) and the user's message.
+    opts: { label?: string; level?: Record<string, unknown> | null; message?: string } = {}) => {
+    const level = opts.level === undefined ? { value: 59, unit: 'GBP/month', estimate: true, basis: 'the option is named for £59' } : opts.level;
     script = [() => say(olumiSaid)];
     await turn({ message: firstMessage });
     script = [
       () => fnCall('propose_new_option', {
-        label: OPT_A,
+        label: opts.label ?? OPT_A,
         acts_on: [
-          { factor_label: NEW_PRICE, direction: 'positive', level: { value: 59, unit: 'GBP/month', estimate: true, basis: 'the option is named for £59' } },
+          { factor_label: NEW_PRICE, direction: 'positive', ...(level !== null ? { level } : {}) },
           { factor_label: GF, direction: 'positive' },
         ],
         new_factors: [
@@ -1303,7 +1306,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
       }),
       (body) => { toolOutputSeen = JSON.stringify(body['input'] ?? []); return say('I would add it. Shall I?'); },
     ];
-    return turn({ message: `Let's add the grandfathering of existing customers: "${OPT_A}". Just add it with your assumptions, and I'll review it.` });
+    return turn({ message: opts.message ?? `Let's add the grandfathering of existing customers: "${OPT_A}". Just add it with your assumptions, and I'll review it.` });
   };
   /** What the Agent's model was given back from its propose_new_option call (the second model call's input). */
   let toolOutputSeen = '';
@@ -1389,8 +1392,11 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(g.nodes.find((x) => x.id === GF_FAC)!.observed_state).toEqual({ value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' });
     const option = g.nodes.find((x) => x.kind === 'option' && x.label === OPT_A)!;
     expect(option.interventions[GF_FAC]).toEqual(ON_LEVEL(GF_FAC));
-    // The option's own level on the new price is unchanged by this: set by its own write (next row), never here.
-    expect(option.interventions[NEW_PRICE_FAC]).toBeUndefined();
+    // ⭐ A1 £59 (DL 5861782245; was `toBeUndefined()`, "set by its own write"): the option's own £59 lands in this SAME
+    // commit, on today's frame (0–100). The user wrote it ("from £49 to £59", and the option's own name typed in this turn),
+    // so it is theirs (no estimate stamp) although the Agent flagged it as its estimate — as for an existing factor.
+    expect(option.interventions[NEW_PRICE_FAC]).toEqual({ value: 0.59, raw_value: 59, unit: 'GBP/month', source: 'user_specified',
+      target_match: { node_id: NEW_PRICE_FAC, match_type: 'exact_id', confidence: 'high' } });
     // The approval says what was committed: today's £49 is the user's, and it is not asked for again.
     expect(t2.assistant_text).toContain(`"${NEW_PRICE}"`);
     expect(t2.assistant_text).toMatch(/today is 49 GBP\/month, as you said/);
@@ -1403,16 +1409,8 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const t1 = await proposeJourneyA({ value: 49, unit: 'GBP/month' });
     const approve = approveChipOf(t1)!;
     await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
-    // The option's £59 on the new price: its own level write, as the approval asked — read against the SAME frame.
-    script = [
-      () => fnCall('propose_option_interventions', { interventions: [{ option_label: OPT_A, factor_label: NEW_PRICE, value: 59, unit: 'GBP/month', basis: 'the user said £59 for new Pro customers', user_stated: true }] }),
-      () => say('I would set it. Shall I?'),
-    ];
-    const t3 = await turn({ message: `Set "${NEW_PRICE}" to £59 under "${OPT_A}".` });
-    const approveLevel = approveChipOf(t3);
-    expect(approveLevel?.id, JSON.stringify(t3._agent.tool_calls)).toBeDefined();
-    const t4 = await turn({ message: approveLevel!.message, source: 'chip', chip: { id: approveLevel!.id } });
-    expect(t4._agent.tool_calls, JSON.stringify(t4._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    // ⭐ A1 £59 (DL 5861782245): the option's £59 on the new price landed in that SAME approval, on the SAME frame — the
+    // follow-up level write this row used to make (propose_option_interventions) is gone: it would now set nothing.
 
     const req = await plotBoundRequest();
     // ⛔ THE DL's MUTANT BINDS HERE FIRST: without the stamp, ISL's own rule names the new price (GOAL_ANCESTOR_DATA_GAP).
@@ -1469,5 +1467,195 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(toolOutputSeen).toMatch(/do not state 45/);
     // The switch is untouched by the dropped figure.
     expect(g.nodes.find((x) => x.id === GF_FAC)!.observed_state).toEqual({ value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' });
+  }, 120_000);
+
+  // ─── A03 (MG; served DL run pj-20260928T011147Z on CEE 84440ff, journey A step A03) ──────────────────────────────────
+  // "Please add two options to compare: "Improve trial-to-Pro conversion" and "Retention intervention for at-risk
+  // accounts"." FIVE `propose_new_option` calls, each refused `switch_level_not_on` with `not_one` (~23 s), then a 13 s
+  // clarification turn. Inferred from the served reply (the arguments are not kept — UNVERIFIED): ONE change carried both
+  // options and ONE new switch, and the Agent listed the switch at 0 under the conversion option ("this option leaves it
+  // off"). SPEC: a new switch listed at exactly 0 under an option, when ANOTHER option in the change turns it on, means
+  // that option does not act on it — the entry is dropped (no intervention, no link), the switch keeps Olumi's today-0.
+  // FIXTURE: Paul's graph (a295e4a1) with the two options A03 asked for removed — the model as A03 found it.
+  const CONV = 'Improve trial-to-Pro conversion';
+  const RET = 'Retention intervention for at-risk accounts';
+  const RET_SWITCH = 'Retention intervention in place';
+  const A03_MESSAGE = `Please add two options to compare: "${CONV}" and "${RET}".`;
+  const BEFORE_A03 = (() => {
+    const g = structuredClone(PAUL) as { nodes: { id: string; label?: string }[]; edges: { from: string; to: string }[] };
+    const gone = new Set(g.nodes.filter((x) => x.label === CONV || x.label === RET).map((x) => x.id));
+    if (gone.size !== 2) throw new Error('the fixture must hold both A03 options, removed here');
+    return { ...g, nodes: g.nodes.filter((x) => !gone.has(x.id)), edges: g.edges.filter((e) => !gone.has(e.from) && !gone.has(e.to)) };
+  })();
+  let a03ToolOutput = '';
+  const proposeA03 = (offLevel: unknown) => {
+    script = [
+      () => fnCall('propose_new_option', {
+        options: [
+          { label: CONV, acts_on: [
+            { factor_label: 'Monthly new Pro subscribers', direction: 'positive', level: { value: 90, unit: 'subscribers per month', estimate: true, basis: 'a modest conversion uplift' } },
+            { factor_label: RET_SWITCH, direction: 'positive', level: offLevel }] },
+          { label: RET, acts_on: [{ factor_label: RET_SWITCH, direction: 'positive' }] },
+        ],
+        new_factors: [{ label: RET_SWITCH, kind: 'switch', affects: [{ label: 'Monthly churn', direction: 'negative' }] }],
+        rationale: 'The user asked to compare both.',
+      }),
+      (body) => { a03ToolOutput = JSON.stringify(body['input'] ?? []); return say('I would add both. Shall I?'); },
+    ];
+    return turn({ message: A03_MESSAGE });
+  };
+
+  it.each([
+    ['{ value: 0 } (A03)', { value: 0 }],
+    ["{ value: 0, unit: '%' }", { value: 0, unit: '%' }],
+  ])('[A03] R1/R2/R6 RED: the switch at %s under the conversion option, turned on by the retention option → ONE propose_new_option call, held → one click → retention on (1), conversion NOT linked to it, today-0 Olumi\'s', async (_name, offLevel) => {
+    graphOf.set(SCENARIO, structuredClone(BEFORE_A03));
+    const t1 = await proposeA03(offLevel);
+    const calls = t1._agent.tool_calls;
+    // R6: ONE call, not refused — the served turn made five, every one refused.
+    expect(calls.filter((c) => c.name === 'propose_new_option'), JSON.stringify(calls)).toEqual([expect.objectContaining({ ok: true })]);
+    expect(calls.filter((c) => c.refusal !== undefined), JSON.stringify(calls)).toEqual([]);
+    const approve = approveChipOf(t1);
+    expect(approve?.id, JSON.stringify(calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    // The Agent is told which entry was dropped, by option and factor.
+    expect(a03ToolOutput).toContain('switch_off_entries_dropped');
+    expect(a03ToolOutput).toContain(JSON.stringify(JSON.stringify({ option: CONV, factor: RET_SWITCH })).slice(1, -1));
+
+    const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const g = graphNow() as unknown as { nodes: Record<string, any>[]; edges: { from: string; to: string }[] };
+    const sw = g.nodes.filter((x) => x.kind === 'factor' && x.label === RET_SWITCH);
+    expect(sw, 'the switch is added once').toHaveLength(1);
+    const swId = String(sw[0]!.id);
+    const conv = g.nodes.find((x) => x.kind === 'option' && x.label === CONV)!;
+    const ret = g.nodes.find((x) => x.kind === 'option' && x.label === RET)!;
+    expect(conv, 'the conversion option is added').toBeDefined();
+    expect(ret, 'the retention option is added').toBeDefined();
+    // The retention option turns the switch on: the structural 1.
+    expect(ret.interventions[swId]).toEqual(ON_LEVEL(swId));
+    expect(g.edges.some((e) => e.from === ret.id && e.to === swId), 'retention → switch').toBe(true);
+    // The conversion option does not act on it: no intervention, no link.
+    expect(Object.prototype.hasOwnProperty.call(conv.interventions ?? {}, swId), JSON.stringify(conv.interventions)).toBe(false);
+    expect(g.edges.some((e) => e.from === conv.id && e.to === swId), 'NO conversion → switch link').toBe(false);
+    // CONTRAST: the conversion option IS linked to what it does act on.
+    expect(g.edges.some((e) => e.from === conv.id && e.to === 'monthly_new_pro_subscribers'), 'conversion → Monthly new Pro subscribers').toBe(true);
+    // The switch's today is Olumi's off.
+    expect(sw[0]!.observed_state).toEqual({ value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' });
+    expect(routerCalls).toEqual([]);
+  }, 120_000);
+
+  // ---------------------------------------------------------------------------
+  // ⭐ A1 £59 — THE OPTION'S OWN LEVEL ON A NEW GRADED FACTOR LANDS IN THE SAME PROPOSAL AS ITS TODAY LEVEL (DL 5861782245).
+  // Served CEE 0db4f43, DL run pj-20260928T013016Z turn A05: "£59 for new Pro customers; grandfather existing customers"
+  // minted "New Pro customer price" with today's £49 (#2132) but left the option's £59 unset ("The £59 level needs setting
+  // after the new price factor exists, because it has no range yet"), so the approved option held no level on it and the
+  // final Run was refused MISSING_OPTION_VALUE, asking the user for the £59 they had already typed. With an accepted today
+  // level the frame is known in the proposal, so the option's level is written there, on THAT frame, in the same commit.
+  // ---------------------------------------------------------------------------
+  /** A05 as the user typed it (DL run pj-20260928T013016Z, SUMMARY.md step table), verbatim. */
+  const A05_SERVED = `Let's add the grandfathering of existing customers: "${OPT_A}".`;
+  /** The served unit (A06 draft_graph: `observed_state.unit` "GBP per month"). */
+  const STATED_49_SERVED = { ...STATED_49, unit: 'GBP per month' };
+  const levelOn = (id: string, value: number, raw: number, unit: string, source: 'user_specified' | 'cee_hypothesis') =>
+    ({ value, raw_value: raw, unit, source, target_match: { node_id: id, match_type: 'exact_id', confidence: 'high' } });
+  const heldOptionOf = (ip: Awaited<ReturnType<typeof heldPatch>>, label: string) =>
+    ip.operations.find((o) => o.op === 'add_node' && o.value?.['kind'] === 'option' && o.value?.['label'] === label)!.value as { interventions: Record<string, unknown> };
+
+  it('[A1-59 R1] RED (A05 served shape): today\'s £49 AND the option\'s £59 in ONE call → one hold → one approval → the option holds 59 user_specified on the SAME frame as the £49, and the Run reaches PLoT (never MISSING_OPTION_VALUE)', async () => {
+    graphOf.set(SCENARIO, structuredClone(JOURNEY_A));
+    const t1 = await proposeJourneyA({ value: 49, unit: 'GBP per month' }, BRIEF_A, undefined, { level: { value: 59, unit: 'GBP per month' }, message: A05_SERVED });
+    expect(t1._agent.tool_calls.filter((c) => c.name === 'propose_new_option'), JSON.stringify(t1._agent.tool_calls)).toEqual([expect.objectContaining({ ok: true })]);
+    const approve = approveChipOf(t1);
+    expect(approve?.id, JSON.stringify(t1._agent.tool_calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    // The Agent is told the level IS set, and by the user — never "no range yet", never asked again.
+    expect(toolOutputSeen).not.toMatch(/no range yet/);
+    expect(toolOutputSeen, 'no level left unset (the readiness view\'s own list is empty)').not.toMatch(/levels_not_set\\*":\[\{/);
+    expect(toolOutputSeen).toMatch(/\\"factor\\":\\"New Pro customer price\\",\\"value\\":59,\\"unit\\":\\"GBP per month\\",\\"stated_by\\":\\"user\\"/);
+    // ONE hold carries both: today's £49 (CEE's member) and the option's £59 (in the option's own add_node).
+    const ip = await heldPatch();
+    expect(ip['graded_today'], JSON.stringify(ip)).toEqual([{ factor_id: NEW_PRICE_FAC, observed_state: STATED_49_SERVED }]);
+    expect(heldOptionOf(ip, OPT_A).interventions[NEW_PRICE_FAC]).toEqual(levelOn(NEW_PRICE_FAC, 0.59, 59, 'GBP per month', 'user_specified'));
+
+    const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const g = graphNow() as unknown as { nodes: Record<string, any>[] };
+    const factor = g.nodes.find((x) => x.id === NEW_PRICE_FAC)!;
+    expect(factor.observed_state).toEqual(STATED_49_SERVED);
+    const option = g.nodes.find((x) => x.kind === 'option' && x.label === OPT_A)!;
+    // Bound by the option's label and the factor's id: 59, the user's (no estimate stamp), framed.
+    expect(option.interventions[NEW_PRICE_FAC]).toEqual(levelOn(NEW_PRICE_FAC, 0.59, 59, 'GBP per month', 'user_specified'));
+    expect(option.interventions[GF_FAC]).toEqual(ON_LEVEL(GF_FAC));
+    // ONE frame for both, and no clamp: the frame is built over the largest figure (59), so 59 and 49 both sit inside it.
+    const iv = option.interventions[NEW_PRICE_FAC] as { value: number; raw_value: number };
+    expect(factor.observed_state.cap).toBe(100);
+    expect(Math.abs(iv.value * factor.observed_state.cap - iv.raw_value)).toBeLessThan(1e-9);
+    expect(Math.abs(factor.observed_state.value * factor.observed_state.cap - factor.observed_state.raw_value)).toBeLessThan(1e-9);
+    expect(iv.raw_value).toBeLessThan(factor.observed_state.cap);
+    expect(iv.value).toBeGreaterThan(factor.observed_state.value);
+    // The approval never asks for the £59 it just recorded.
+    expect(t2.assistant_text).not.toMatch(/does not yet set a level for "New Pro customer price"/);
+    expect(t2.assistant_text).not.toMatch(/What should option "£59 for new Pro customers; grandfather existing customers" set it to/);
+
+    // The final Run: no MISSING_OPTION_VALUE for the new price — PLoT receives the option at 0.59/59 and today at 0.49/49.
+    const out = await plotBoundRequest().then((req) => ({ req, refused: undefined }), (e: unknown) => ({ req: undefined, refused: e as { verdict?: { reasonCodes?: readonly string[]; issues?: readonly { code?: string; factor_id?: string }[] } } }));
+    expect(out.refused?.verdict?.issues ?? [], JSON.stringify(out.refused?.verdict?.reasonCodes ?? [])).not.toContainEqual(expect.objectContaining({ code: 'MISSING_OPTION_VALUE' }));
+    expect(out.refused, JSON.stringify(out.refused?.verdict?.reasonCodes ?? [])).toBeUndefined();
+    const plotOption = out.req!.graph.nodes.find((n) => n.kind === 'option' && n.label === OPT_A)!;
+    expect(plotOption.interventions?.[NEW_PRICE_FAC], JSON.stringify(plotOption)).toEqual(expect.objectContaining({ value: 0.59, raw_value: 59 }));
+    expect(out.req!.graph.nodes.find((n) => n.id === NEW_PRICE_FAC)!.observed_state).toEqual(expect.objectContaining({ value: 0.49, raw_value: 49, source: 'brief_extraction' }));
+    expect(islDefaultedRootsReachingGoal(out.req!), 'ISL GOAL_ANCESTOR_DATA_GAP roots').toEqual([]);
+    expect(routerCalls).toEqual([]);
+  }, 120_000);
+
+  it('[A1-59 R2] RED: the option\'s figure only in OLUMI\'s words → set on the same frame, but stamped as Olumi\'s estimate (cee_hypothesis) and said so — never the user\'s', async () => {
+    graphOf.set(SCENARIO, structuredClone(JOURNEY_A));
+    const LABEL_R2 = 'A higher price for new Pro customers; grandfather existing customers';
+    const t1 = await proposeJourneyA({ value: 49, unit: 'GBP per month' }, 'Our Pro plan is £49 a month today. We want to reach £100k MRR within 12 months.',
+      'I would suggest £59 a month for new customers.', {
+        label: LABEL_R2,
+        level: { value: 59, unit: 'GBP per month', estimate: true, basis: 'Olumi’s suggestion: £10 above today’s £49' },
+        message: `Let's add "${LABEL_R2}". Just add it with your assumptions, and I'll review it.`,
+      });
+    const approve = approveChipOf(t1);
+    expect(approve?.id, JSON.stringify(t1._agent.tool_calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    // Said to the Agent as Olumi's estimate, with its basis.
+    expect(toolOutputSeen).toMatch(/\\"factor\\":\\"New Pro customer price\\",\\"value\\":59,\\"unit\\":\\"GBP per month\\",\\"stated_by\\":\\"olumi_estimate\\"/);
+    expect(toolOutputSeen).not.toMatch(/no range yet/);
+    const ip = await heldPatch();
+    expect(ip['graded_today']).toEqual([{ factor_id: NEW_PRICE_FAC, observed_state: STATED_49_SERVED }]);
+    expect(heldOptionOf(ip, LABEL_R2).interventions[NEW_PRICE_FAC]).toEqual(levelOn(NEW_PRICE_FAC, 0.59, 59, 'GBP per month', 'cee_hypothesis'));
+    const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    expect(t2._agent.tool_calls[0]).toEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    const g = graphNow() as unknown as { nodes: Record<string, any>[] };
+    const option = g.nodes.find((x) => x.kind === 'option' && x.label === LABEL_R2)!;
+    expect(option.interventions[NEW_PRICE_FAC], 'Olumi\'s figure is never stored as the user\'s').toEqual(levelOn(NEW_PRICE_FAC, 0.59, 59, 'GBP per month', 'cee_hypothesis'));
+    expect(g.nodes.find((x) => x.id === NEW_PRICE_FAC)!.observed_state).toEqual(STATED_49_SERVED);
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/Its level for "New Pro customer price" is Olumi's estimate, for you to correct\./);
+  }, 120_000);
+
+  it('[A1-59 R3] CONTRAST (unchanged): a new graded factor with NO today level → the option\'s level is not set ("no range yet"); nothing rides the hold', async () => {
+    graphOf.set(SCENARIO, structuredClone(JOURNEY_A));
+    const t1 = await proposeJourneyA(undefined, BRIEF_A, undefined, { level: { value: 59, unit: 'GBP per month' }, message: A05_SERVED });
+    expect(approveChipOf(t1)?.id, JSON.stringify(t1._agent.tool_calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    expect(toolOutputSeen).toMatch(/levels_not_set\\*":\[\{/);
+    expect(toolOutputSeen).toMatch(/New Pro customer price\\*" is new in this change and has no range yet/);
+    const ip = await heldPatch();
+    expect(ip['graded_today']).toBeUndefined();
+    expect(heldOptionOf(ip, OPT_A).interventions).not.toHaveProperty(NEW_PRICE_FAC);
+    expect(ip.operations.some((o) => o.op === 'add_edge' && o.path.endsWith(`::${NEW_PRICE_FAC}`) && !o.path.startsWith(`${NEW_PRICE_FAC}::`)), 'the option is still linked to it').toBe(true);
+  }, 120_000);
+
+  it.each([
+    ['a non-number ("59")', { value: '59', unit: 'GBP per month' }, /is not a figure \\*"New Pro customer price\\*" can hold/],
+    ['a figure in another kind of unit (59%)', { value: 59, unit: '%' }, /is not a level for \\*"New Pro customer price\\*", which is measured in GBP per month/],
+  ])('[A1-59 R4] RED: %s → the option\'s level is not set, and said; today\'s £49 still lands on its own frame', async (_name, level, said) => {
+    graphOf.set(SCENARIO, structuredClone(JOURNEY_A));
+    const t1 = await proposeJourneyA({ value: 49, unit: 'GBP per month' }, BRIEF_A, undefined, { level, message: A05_SERVED });
+    expect(approveChipOf(t1)?.id, JSON.stringify(t1._agent.tool_calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    expect(toolOutputSeen).toMatch(/levels_not_set\\*":\[\{/);
+    expect(toolOutputSeen).toMatch(said);
+    const ip = await heldPatch();
+    expect(ip['graded_today']).toEqual([{ factor_id: NEW_PRICE_FAC, observed_state: STATED_49_SERVED }]);
+    expect(heldOptionOf(ip, OPT_A).interventions).not.toHaveProperty(NEW_PRICE_FAC);
   }, 120_000);
 });
