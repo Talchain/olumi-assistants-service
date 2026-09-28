@@ -17,6 +17,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { admitCandidateConstraints, canonicaliseLimitUnit, type LimitTargetScale } from '../admit-constraint.js';
+import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 
 type Rec = Record<string, unknown>;
 const RUN = JSON.parse(
@@ -81,5 +82,40 @@ describe('a LEVEL limit in its node\'s own percent spelling is that percent', ()
 
   it('CONTRAST: a unit that is not a percent in its node\'s spelling ("subscribers") stays verbatim', () => {
     expect(admit('subscribers', 'level', { unit: 'subscribers', value: 0.3, raw_value: 30, scale_frame: 100 }, 20).unit).toBe('subscribers');
+  });
+});
+
+/** Through the REAL model admission: the call site must hand the limit its node's LABEL, or the rule cannot fire. */
+describe('admitCandidateModel: the served "% monthly churn" limit on its own node is "%"', () => {
+  const faithful = JSON.parse(
+    readFileSync(fileURLToPath(new URL('./fixtures/faithful.json', import.meta.url)), 'utf8'),
+  ) as CandidateModel;
+  const limitOn = (label: string, unit: string) => {
+    const candidate = {
+      ...faithful,
+      factors: [
+        ...faithful.factors.filter((f) => f.label !== 'Monthly churn rate'),
+        // An AI estimate framed on 100 (scale_frame, no cap) — the served node's shape.
+        { label, role: 'observable', provenance: 'ai_inferred', baseline_known: false, unit, baseline_value: 3, plausible_max: 100 },
+      ],
+      // The served limit's frame: the drafter said "level" (A14 `value_frame: 'level'`).
+      constraints: [{ metric: label, operator: '<', provenance: 'explicit', value: 4, unit, frame: 'level' }],
+    } as unknown as CandidateModel;
+    const m = admitCandidateModel(candidate);
+    const node = m.nodes.find((n) => n.label === label);
+    expect(node, 'the churn factor is admitted').toBeDefined();
+    const hit = m.goal_constraints.find((c) => c.constraint_id === `agent-lane:${node!.id}:<=`);
+    expect(hit, 'the limit is admitted on that node, by id').toBeDefined();
+    return hit as unknown as Rec;
+  };
+
+  it('⭐ RED (label wiring): relabelled to "%" under the own-spelling rule', () => {
+    const c = limitOn('Monthly churn', UNIT);
+    expect(c).toMatchObject({ unit: '%', value: 4 });
+    expect((c.provenance_unit_relabelled as Rec).rule).toBe('agent_lane_limit_pct_own_spelling_level_v1');
+  });
+
+  it('CONTRAST: the same spelling on a node whose name it does not carry stays verbatim', () => {
+    expect(limitOn('Customer attrition', UNIT).unit).toBe(UNIT);
   });
 });
