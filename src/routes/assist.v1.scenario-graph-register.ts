@@ -137,6 +137,7 @@ import type { FastifyInstance } from "fastify";
 
 import { GRAPH_MAX_EDGES, GRAPH_MAX_NODES } from "../config/graphCaps.js";
 import { normaliseGraphNodeKindField } from "../orchestrator-v5/graph-registration/normalise-node-kind.js";
+import { CEE_OWNED_EDGE_FIELDS } from "../orchestrator-v5/graph-management/field-safety.js";
 import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-extensions.js";
 import { GraphStateIngressSchema } from "../orchestrator-v5/boundary/request-extensions.js";
 import type { GraphStateIngress } from "../orchestrator-v5/boundary/request-extensions.js";
@@ -195,6 +196,92 @@ function withStoredLimitsWhenUnstated<T extends { nodes: ReadonlyArray<{ id?: un
     (c) => c !== null && typeof c === "object" && nodeIds.has(String((c as { node_id?: unknown }).node_id)),
   );
   return carried.length === 0 ? graph : { ...graph, goal_constraints: carried };
+}
+
+type EdgeRecord = Record<string, unknown>;
+
+const isEdgeRecord = (value: unknown): value is EdgeRecord =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+/** An edge "carries" an id when the key holds a value; the match then needs both to carry it. */
+const carriesId = (edge: EdgeRecord): boolean => edge.id !== undefined && edge.id !== null;
+
+/** `from` + `to`, and `id` when BOTH carry one. */
+function sameEdgeKey(a: EdgeRecord, b: EdgeRecord): boolean {
+  if (a.from !== b.from || a.to !== b.to) return false;
+  return !(carriesId(a) && carriesId(b)) || a.id === b.id;
+}
+
+/** Exact numeric equality; both absent also counts as equal. A non-number never matches. */
+const sameNumber = (a: unknown, b: unknown): boolean =>
+  a === b && (a === undefined || typeof a === "number");
+
+/**
+ * The edge's analysis-affecting numbers, compared exactly: `strength.mean`, `strength.std`, `exists_probability`
+ * and `effect_direction`. Unequal means the caller asserted new values, so none of the stored stamps describe them.
+ */
+function sameAnalysisNumbers(a: EdgeRecord, b: EdgeRecord): boolean {
+  const sa = isEdgeRecord(a.strength) ? a.strength : {};
+  const sb = isEdgeRecord(b.strength) ? b.strength : {};
+  return (
+    sameNumber(sa.mean, sb.mean) &&
+    sameNumber(sa.std, sb.std) &&
+    sameNumber(a.exists_probability, b.exists_probability) &&
+    a.effect_direction === b.effect_direction
+  );
+}
+
+/**
+ * ⭐ AN OMITTED CEE-OWNED EDGE FIELD IS "NO STATEMENT", NOT "ERASE IT" — the edge half of the rule above.
+ *
+ * SERVED on CEE `dd456fe` (scratch scenario `01500753`, 28 Sep): register → the user's `edge_strength_edit` → a
+ * UI-shaped re-register. The UI rebuilds every edge from a fixed key list (`buildRegistrationGraph`: `from, to,
+ * strength, exists_probability, effect_direction, edge_type` + `origin`), and this route stores the caller's graph,
+ * so the edited edge lost `exists_defaulted`, `std_defaulted`, `provenance` and `provenance_display` and the untouched
+ * Olumi edge lost `defaulted` and `provenance`. The analysis hash did not move (its edge projection excludes all of
+ * them), so nothing noticed. The UI registers on import, snapshot restore, file import, opening a saved example and a
+ * reload re-arm of a saved example.
+ *
+ * THE RULE. A submitted edge that matches EXACTLY ONE stored edge (`from` + `to`, and `id` when both carry one), with
+ * no other submitted edge claiming that stored edge, AND whose analysis-affecting numbers are EXACTLY equal, gets the
+ * stored value of each CEE-owned edge field (`CEE_OWNED_EDGE_FIELDS`, derived in `field-safety.ts`) it OMITS:
+ *   · a field the caller SENT is its statement and is never overwritten;
+ *   · changed numbers mean the caller asserted new values (an import of a different model): nothing is carried and
+ *     the edge stands as sent;
+ *   · an ambiguous match (duplicate endpoint pairs on either side) carries nothing.
+ * Nodes are not touched here: the witness measured them byte-identical across a UI re-register.
+ *
+ * Bound to the SAME server read as the CAS base, and applied BEFORE the persistence projection, the invariant checks
+ * and the hash, so what is stored is what is hashed. The carried fields are outside the analysis projection, so an
+ * unchanged edge's carry cannot move `graph_hash`; it returns the identity hash to the stored one.
+ */
+function withStoredEdgeFactsWhenUnstated<T extends { edges: ReadonlyArray<EdgeRecord> }>(
+  graph: T,
+  stored: unknown,
+): T {
+  if (!isEdgeRecord(stored) || !Array.isArray(stored.edges)) return graph;
+  const storedEdges = stored.edges.filter(isEdgeRecord);
+  if (storedEdges.length === 0) return graph;
+
+  let changed = false;
+  const edges = graph.edges.map((edge) => {
+    const candidates = storedEdges.filter((s) => sameEdgeKey(edge, s));
+    if (candidates.length !== 1) return edge;
+    const match = candidates[0]!;
+    if (graph.edges.filter((e) => sameEdgeKey(e, match)).length !== 1) return edge;
+    if (!sameAnalysisNumbers(edge, match)) return edge;
+
+    const carried: EdgeRecord = {};
+    for (const field of CEE_OWNED_EDGE_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(edge, field)) continue;
+      if (match[field] === undefined) continue;
+      carried[field] = structuredClone(match[field]);
+    }
+    if (Object.keys(carried).length === 0) return edge;
+    changed = true;
+    return { ...edge, ...carried };
+  });
+  return changed ? { ...graph, edges } : graph;
 }
 
 export const SCENARIO_GRAPH_REGISTRATION_SCHEMA =
@@ -635,9 +722,13 @@ export default async function route(app: FastifyInstance) {
         expectedGraphAnalysisHash = undefined;
       }
 
-      // An absent `goal_constraints` keeps the stored limits (see the helper).
-      // Bound to the SAME server read as the CAS base above.
-      const graphToRegister = withStoredLimitsWhenUnstated(parsed.data, submittedRecord, baseGraphForInvariants);
+      // An absent `goal_constraints` keeps the stored limits, and an unchanged edge keeps the
+      // stored CEE-owned facts the caller omitted (see the helpers). Both are bound to the SAME
+      // server read as the CAS base above.
+      const graphToRegister = withStoredEdgeFactsWhenUnstated(
+        withStoredLimitsWhenUnstated(parsed.data, submittedRecord, baseGraphForInvariants),
+        baseGraphForInvariants,
+      );
 
       /**
        * ⛔ A CALLER'S EXPECTATION IS CHECKED BEFORE ANY WRITE, AGAINST THE
