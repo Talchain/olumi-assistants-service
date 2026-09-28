@@ -943,14 +943,14 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // A level limit on a node the options move is checked against that node's CURRENT level: carried on this wire
     // copy only, never persisted, so a later edit of the level can never leave a stale copy behind
     // (`level-limit-baseline.ts`).
-    const baselineGraph = carryLevelLimitBaselines(graphForAnalysis, snapshot.goal_constraints, snapshot.goal_node_id);
+    const baselineGraph = carryLevelLimitBaselines(graphForAnalysis, snapshot.goal_constraints, snapshot.goal_node_id, finalWireOptions);
     if (baselineGraph !== graphForAnalysis) {
       log.info(
         {
           event: 'run_analysis.level_limit_baseline_carried',
           request_id: invocation.requestId,
           scenario_id: args.scenario_id,
-          node_ids: [...levelLimitBaselineNodeIds(graphForAnalysis, snapshot.goal_constraints, snapshot.goal_node_id)],
+          node_ids: [...levelLimitBaselineNodeIds(graphForAnalysis, snapshot.goal_constraints, snapshot.goal_node_id, finalWireOptions)],
         },
         'run_analysis carried the current level of a level-limited node as its baseline (wire copy only; no magnitudes)',
       );
