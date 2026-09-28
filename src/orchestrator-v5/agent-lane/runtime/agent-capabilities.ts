@@ -147,6 +147,8 @@ import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysi
 import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
 import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysisInput, type FirstAnalysisOutcome } from '../first-analysis.js';
+import { limitChecksForAgent, LIMIT_CHECKS_NOTE } from '../limit-checks.js';
+import { readLimitVerdicts, type StoredLimitVerdicts } from '../../../orchestrator/context/constraint-feasibility.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { howStronglyWords } from '../strength-authorship-words.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
@@ -686,6 +688,8 @@ interface GraphRead {
   readonly not_modelled?: NotModelledManifest;
   /** C46 × R3-4: the read's `analysis_identity_evaluated_node_ids` (same fact and gates as its result); absent = not attested. */
   readonly identity_evaluated?: ReadonlySet<string>;
+  /** The selected run's per-limit rows (`analysis_limit_verdicts`), read off the SAME graph read (`limit-checks.ts`). */
+  readonly limit_verdicts?: StoredLimitVerdicts;
 }
 
 const norm = (s: unknown): string => String(s ?? '').toLowerCase().replace(/…$/, '').trim();
@@ -1237,6 +1241,7 @@ export function createAgentCapabilities(
     const g = (r.json.graph ?? {}) as Record<string, unknown>;
     const notModelled = notModelledOfRead(r.json.not_modelled);
     const identityEvaluated = readEvaluatedIdentityNodeIds(r.json.analysis_identity_evaluated_node_ids);
+    const limitVerdicts = readLimitVerdicts(r.json.analysis_limit_verdicts);
     return {
       graph_hash: String(r.json.graph_hash ?? ''),
       // ⛔⛔ IT IS AN ENVELOPE OBJECT, NOT A STRING. The read route emits the
@@ -1257,6 +1262,7 @@ export function createAgentCapabilities(
       raw: g,
       ...(notModelled !== undefined ? { not_modelled: notModelled } : {}),
       ...(identityEvaluated !== undefined ? { identity_evaluated: identityEvaluated } : {}),
+      ...(limitVerdicts !== null ? { limit_verdicts: limitVerdicts } : {}),
     };
   };
 
@@ -5422,12 +5428,15 @@ export function createAgentCapabilities(
       let graphForProduct: unknown;
       // C46 × R3-4: the carriers the run's engine evaluated, from the SAME graph read as the model.
       let evaluatedForProduct: ReadonlySet<string> | undefined;
+      // ⛔ How each of the user's limits was checked, from the run's own per-limit rows on the same read (`limit-checks.ts`).
+      let limitChecks: ReturnType<typeof limitChecksForAgent>;
       if (result !== undefined && permissions.leader_may_be_named !== true) {
         try {
           const read = await readGraph(ctx.scenario_id);
           graphForProduct = read?.raw;
           evaluatedForProduct = read?.identity_evaluated;
-        } catch { graphForProduct = undefined; evaluatedForProduct = undefined; }
+          limitChecks = limitChecksForAgent(read?.raw, read?.limit_verdicts);
+        } catch { graphForProduct = undefined; evaluatedForProduct = undefined; limitChecks = undefined; }
       }
       return {
         ok: r.status === 200,
@@ -5445,6 +5454,7 @@ export function createAgentCapabilities(
         // run_analysis dispatch is one the user asked for (the Agent's own call, or the Run chip's fast path);
         // the automatic first analysis reads its permission in `describeFirstAnalysisForAgent`, not here.
         claim_permissions: graphForProduct === undefined ? permissions : withNonlinearIdentity(permissions, graphForProduct, evaluatedForProduct),
+        ...(limitChecks !== undefined ? { limit_checks: { limits: limitChecks, note: LIMIT_CHECKS_NOTE } } : {}),
       };
     },
   };
