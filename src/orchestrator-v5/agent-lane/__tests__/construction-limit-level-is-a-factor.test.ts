@@ -30,8 +30,13 @@ const served = (name: string): Graph =>
   (JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8')) as { draft_graph: Graph }).draft_graph;
 const SERVED_OUTCOME = served('served-paul-churn-outcome-20260926T032916Z.json');
 const SERVED_FACTOR = served('served-paul-churn-factor-20260926T032913Z.json');
-/** The served limit row was captured before #1919, which stamps the drafter's stated frame; nothing else differs. */
-const SERVED_FACTOR_GC_FRAMED = (SERVED_FACTOR.goal_constraints as Record<string, unknown>[]).map((c) => ({ ...c, value_frame: 'level' }));
+/**
+ * The served limit row was captured before #1919, which stamps the drafter's stated frame, and before A2 (DL #72
+ * 5861407189), which keeps the drafter's typed strict "<" ("under 10 percent per month") as `operator_as_stated`
+ * beside the held "<="; nothing else differs.
+ */
+const SERVED_FACTOR_GC_FRAMED = (SERVED_FACTOR.goal_constraints as Record<string, unknown>[])
+  .map((c) => ({ ...c, value_frame: 'level', ...(c.constraint_id === 'agent-lane:monthly_churn:<=' ? { operator_as_stated: '<' } : {}) }));
 /**
  * G1 (27 Sep): this brief states the £20k target and "12 months", so construction now HOLDS the goal's direction,
  * deadline and target source on the goal node (`holdStatedGoalAttributes`). The served drafts predate that, so a served
@@ -186,7 +191,7 @@ describe('a limit the user states on a level is admitted on a factor that can ho
     const { graph } = await register(outcomeDraft());
     expect(graph.goal_constraints).toStrictEqual(SERVED_FACTOR_GC_FRAMED);
     expect(graph.goal_constraints).toStrictEqual([{
-      constraint_id: 'agent-lane:monthly_churn:<=', node_id: 'monthly_churn', operator: '<=', value: 10, label: 'Monthly churn', unit: '%',
+      constraint_id: 'agent-lane:monthly_churn:<=', node_id: 'monthly_churn', operator: '<=', operator_as_stated: '<', value: 10, label: 'Monthly churn', unit: '%',
       provenance: 'explicit',
       provenance_unit_relabelled: { rule: 'agent_lane_limit_unit_v1', pre_normalisation_value: 10, pre_normalisation_unit: 'percent per month' },
       value_frame: 'level',
