@@ -501,6 +501,49 @@ describe('PJ-A1 £49 — propose_new_option carries a new graded factor\'s today
     expect(carried).toEqual([[]]);
   });
 
+  /**
+   * ⭐ A1 £59 (DL 5861782245; served CEE 0db4f43, DL run pj-20260928T013016Z A05): with an accepted today level the frame is
+   * known in the proposal, so the option's own level on the new graded factor rides the SAME change, on the frame today's
+   * level uses (built over the largest figure this change carries), the user's when they wrote it and Olumi's estimate
+   * otherwise. Bound on the wire by the new factor's batch key.
+   */
+  // `today: null` = no today level given.
+  const withLevel = (level: unknown, today: unknown = { value: 5, unit: 'GBP/month' }) => ({
+    ...call(today === null ? undefined : today),
+    // A name with no figure of its own: "Keep £49 …" would contradict any estimate for the add-on (`contradictsItsName`).
+    label: 'Add a paid AI add-on',
+    acts_on: [{ factor_label: 'AI add-on price', direction: 'positive', ...(level !== undefined ? { level } : {}) }],
+  });
+  const ivsOf = (sent: { body: unknown }[]) => paramsOf(sent)?.['interventions'];
+  const TODAY_5_ON_100 = { value: 0.05, raw_value: 5, cap: 100, declared_scale: 'unit_interval', unit: 'GBP/month', source: 'brief_extraction' };
+
+  it('[A1-59] RED: the user wrote today £5 and the option\'s £12 → ONE sent change carries the option\'s 12 on today\'s frame (0–100), the user\'s', async () => {
+    const { caps, sent, carried } = setup();
+    await caps.proposeNewOption({ ...ctx, user_text: `${SAID} The add-on would be £12 a month under this option.` }, withLevel({ value: 12, unit: 'GBP/month' }) as never);
+    expect(carried).toEqual([[{ label: 'AI add-on price', observed_state: TODAY_5_ON_100 }]]);
+    expect(ivsOf(sent)).toEqual([{ factor_key: 'ai_add_on_price', value: 0.12, raw_value: 12, unit: 'GBP/month' }]);
+  });
+
+  it('[A1-59] RED: Olumi\'s own figure (estimate, with a basis) → the same change and frame, stamped as Olumi\'s estimate', async () => {
+    const { caps, sent, carried } = setup();
+    await caps.proposeNewOption({ ...ctx, user_text: SAID }, withLevel({ value: 12, unit: 'GBP/month', estimate: true, basis: 'Olumi’s suggested launch price' }) as never);
+    expect(carried).toEqual([[{ label: 'AI add-on price', observed_state: TODAY_5_ON_100 }]]);
+    expect(ivsOf(sent)).toEqual([{ factor_key: 'ai_add_on_price', value: 0.12, raw_value: 12, unit: 'GBP/month', source: 'cee_hypothesis' }]);
+  });
+
+  it.each([
+    ['no today level (unchanged: no range yet)', { value: 12, unit: 'GBP/month' }, null, []],
+    ['a figure the user never wrote, with no estimate', { value: 12, unit: 'GBP/month' }, undefined, [{ label: 'AI add-on price', observed_state: TODAY_5_ON_100 }]],
+    ['a non-number', { value: '12', unit: 'GBP/month' }, undefined, [{ label: 'AI add-on price', observed_state: { ...TODAY_5_ON_100, value: 0.5, cap: 10 } }]],
+    ['a figure in another kind of unit', { value: 12, unit: '%' }, undefined, [{ label: 'AI add-on price', observed_state: TODAY_5_ON_100 }]],
+  ])('[A1-59] CONTRAST: %s → the option\'s level is not set (a link with no level); the change is still sent', async (_name, level, today, carriedToday) => {
+    const { caps, sent, carried } = setup();
+    await caps.proposeNewOption({ ...ctx, user_text: SAID }, withLevel(level, today) as never);
+    expect(sent).toHaveLength(1);
+    expect(carried).toEqual([carriedToday]);
+    expect(ivsOf(sent)).toEqual([{ factor_key: 'ai_add_on_price', value: null, source: 'cee_hypothesis' }]);
+  });
+
   it('the tool tells the model: today\'s level for a factor it adds ONLY if the user stated it — never an estimate, never 0', () => {
     const p = (AGENT_TOOLS.find((t) => t.name === 'propose_new_option')!.parameters as { properties: Record<string, any> }).properties;
     const today = p['new_factors'].items.properties['today'];

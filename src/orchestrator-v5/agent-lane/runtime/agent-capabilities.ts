@@ -4354,7 +4354,8 @@ export function createAgentCapabilities(
       const norm = (v: unknown): string => String(v ?? '').trim().toLowerCase();
       const outOfRange: { option: string; factor: string; value: number; range: number }[] = [];
       const unitMismatch: { option: string; factor: string; value: number; unit: string; factor_unit: string }[] = [];
-      const levelsNotSet: { option: string; factor: string; value: number; reason: string }[] = [];
+      // `value` is the figure as given: a non-number the Agent sent for a new graded factor's level is said as it came (A1 £59).
+      const levelsNotSet: { option: string; factor: string; value: unknown; reason: string }[] = [];
       /** A level the Agent gave for a new SWITCH that does not mean on (`newSwitchLevelConflict`): refused, nothing sent. */
       const switchLevelConflicts: { option: string; factor: string; value: unknown; unit?: unknown; estimate?: unknown }[] = [];
       /** Every field that fired across them, in first-seen order (names only): carried to `_agent.tool_calls`. */
@@ -4370,6 +4371,57 @@ export function createAgentCapabilities(
       const linkAuthor = (factorLabel: string): { source?: 'cee_hypothesis' } => (
         factorTheUserNamed(factorLabel, ctx.user_turn_text, { options: optionNames, others: quantityNames.filter((l) => l !== factorLabel) })
           ? {} : { source: 'cee_hypothesis' });
+      /**
+       * ⭐ A NEW GRADED FACTOR'S TODAY LEVEL, ONLY WHEN THE USER STATED IT (PJ-A1 £49: DL #70 5860365834; AIQ 5860384275,
+       * 5860839793). Journey A's "£59 for new Pro customers" minted "New Pro customer price" with no today level: ISL
+       * defaulted it to 0 (`GOAL_ANCESTOR_DATA_GAP`), so the status quo was measured from £0. Paul's brief says "from £49".
+       *
+       * The Agent's `new_factors[].today` is taken ONLY when the user's own typed words in this conversation
+       * (`ctx.user_text`, bound by the route — the brief typed as the first message included) write that figure in that
+       * kind of unit (`figureTheUserWrote`, the lane's one matcher). Not `brief_text` from the store: on this lane it is the
+       * Agent's own `build_model_from_brief` argument, never bound to what the user typed. Then it is framed exactly as
+       * admission frames a baseline the brief states (`framedObservedState`, `brief_extraction`), on admission's own
+       * defaulted range (`defaultFrameFor` over the largest figure this change carries for the factor — its today level and
+       * any level an option here names for it), so the option's own level is read on the SAME range — in this same change
+       * (A1 £59, `newGradedLevels` below). Computed here, before the options, because that level needs this frame.
+       *
+       * Anything else is dropped and SAID (`today_not_set`), and the factor stays valueless and asked — never 0: a figure
+       * the user did not write (Olumi's, or a guess), a non-number, a negative level (a 0-to-range frame cannot hold it),
+       * or a today level for a SWITCH (its today is Olumi's off, `stampNewSwitchFactors`). It rides the in-process
+       * authorship context to the hold, never the wire; the confirm writes it in the same apply as the option.
+       */
+      const requestedNew = Array.isArray(args?.new_factors) ? args.new_factors as readonly unknown[] : [];
+      const statedToday: (StatedTodayLevel & { key: string; value: number; unit?: string })[] = [];
+      const todayNotSet: { factor: string; value: unknown; reason: string }[] = [];
+      for (const f of newFactors) {
+        const req = requestedNew.find((r) => norm((r as { label?: unknown } | null)?.label) === norm(f.label)) as { today?: unknown } | undefined;
+        const today = req?.today;
+        if (today === undefined || today === null) continue;
+        const t = (typeof today === 'object' && !Array.isArray(today) ? today : {}) as { value?: unknown; unit?: unknown };
+        const unit = typeof t.unit === 'string' && t.unit.trim() !== '' ? t.unit.trim() : undefined;
+        const shown = `${typeof t.value === 'number' ? t.value : JSON.stringify(t.value ?? null)}${unit !== undefined ? ` ${unit}` : ''}`;
+        if (f.kind === 'switch') {
+          todayNotSet.push({ factor: f.label, value: t.value ?? null,
+            reason: `"${f.label}" is a switch: it is off today (Olumi's reading, for the user to correct), so a today level of ${shown} was not taken.` });
+          continue;
+        }
+        if (typeof t.value !== 'number' || !Number.isFinite(t.value) || t.value < 0) {
+          todayNotSet.push({ factor: f.label, value: t.value ?? null,
+            reason: `${shown} is not a level "${f.label}" can hold today, so its value today is not set. Ask the user what it is today.` });
+          continue;
+        }
+        if (!figureTheUserWrote(t.value, unit, ctx.user_text)) {
+          todayNotSet.push({ factor: f.label, value: t.value,
+            reason: `The user's own words do not state ${shown}, so today's value for "${f.label}" is not set: it is never taken from Olumi's words or a guess. Ask the user what it is today.` });
+          continue;
+        }
+        const named = plans.flatMap(({ spec }) => spec.acts_on.filter((x) => norm(x.factor_label) === norm(f.label))
+          .map((x) => x.level?.value).filter((v): v is number => typeof v === 'number' && Number.isFinite(v)));
+        const largest = Math.max(Math.abs(t.value), ...named.map((v) => Math.abs(v)));
+        const os = framedObservedState({ baseline_value: t.value, unit: unit ?? null, provenance: 'explicit',
+          plausible_max: largest > 1 ? defaultFrameFor(largest) : null });
+        statedToday.push({ key: f.key, label: f.label, value: t.value, ...(unit !== undefined ? { unit } : {}), observed_state: os });
+      }
       const entries = plans.map(({ spec, plan }) => {
         type Lvl = { value: number; unit?: string; estimate?: string; by?: 'user' | 'olumi' };
         const levelById = new Map<string, Lvl>();
@@ -4459,14 +4511,31 @@ export function createAgentCapabilities(
           return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
         });
         /**
-         * A GRADED new factor starts with no level on this option: it has no range yet to read a figure against, and its
-         * current value is set after it exists (Canonical's OPEN ruling). A level the user gave for it is said, not lost.
+         * A GRADED new factor with NO accepted today level starts with no level on this option: it has no range yet to read
+         * a figure against, and its current value is asked for after it exists (Canonical's OPEN ruling; #2164 asks for
+         * today). A level the user gave for it is said, not lost. That case is UNCHANGED by A1 £59 below.
+         *
+         * ⭐ A1 £59 (DL 5861782245; served CEE 0db4f43, DL run pj-20260928T013016Z A05). With an ACCEPTED today level
+         * (`statedToday`) the frame is known in this proposal — `defaultFrameFor` over the largest figure this change
+         * carries for the factor, computed ONCE above — so the option's own level on it is written HERE, as its
+         * intervention in the SAME held change, on THAT frame (figure ÷ frame, figure kept). One apply, one commit: it
+         * rides the option's own `add_node` beside today's level on the hold, and the confirm binds the two to one frame
+         * (`stampNewGradedTodayLevels`). Before, "£59 for new Pro customers" landed with no level on the new price, and the
+         * final Run was refused MISSING_OPTION_VALUE, asking the user for the £59 they had typed. WHOSE: the user's
+         * (`user_specified`, no stamp) only when their own words write it for this factor or option
+         * (`figureTheUserWroteFor`, the same matcher an existing factor's level uses); else Olumi's estimate
+         * (`cee_hypothesis`, said) only when the Agent says so, with a basis; else not set, and said. A non-number, a unit
+         * of another kind than today's, a figure contradicting the option's name, or one outside the frame: not set, said.
+         * The frame is built over the largest figure, so a non-negative level cannot fall outside it (no clamp).
          *
          * ⭐ A new SWITCH (`kind: 'switch'`, Canonical #70 5854919806 item 1) is the exception: the option turns it ON, so
          * its level here is exactly 1, in this same change, and its today-0 is Olumi's, written by the same commit. A
          * level the Agent gave for it that does not mean on (`newSwitchLevelConflict`) contradicts
          * "switch" and is refused below, never rounded to on.
          */
+        /** A1 £59: this option's level on each new GRADED factor with an accepted today level, by the factor's batch key. */
+        const newGradedLevels = new Map<string, { value: number; unit?: string; by: 'user' | 'olumi'; basis?: string;
+          iv: { value: number; raw_value?: number; unit?: string; source?: 'cee_hypothesis' } }>();
         for (const a of plan.newActsOn) {
           // ⛔ EVERY entry that names this factor (VERIFIER-S1 on A1 r2): reading only the first let a bare entry followed
           // by `{1, '%'}` through — held, approved, committed with the user's figure dropped — while the reverse was refused.
@@ -4483,10 +4552,49 @@ export function createAgentCapabilities(
             }
             continue;
           }
-          if (typeof asked === 'number' && Number.isFinite(asked)) {
-            levelsNotSet.push({ option: plan.label, factor: a.label, value: asked,
-              reason: `"${a.label}" is new in this change and has no range yet, so its level is not set here. Once it is added, propose that level with propose_option_interventions.` });
+          const today = statedToday.find((t) => t.key === a.key);
+          if (today === undefined) {
+            // UNCHANGED: no accepted today level, so no frame yet (out of A1 £59's scope; #2164 asks for today).
+            if (typeof asked === 'number' && Number.isFinite(asked)) {
+              levelsNotSet.push({ option: plan.label, factor: a.label, value: asked,
+                reason: `"${a.label}" is new in this change and has no range yet, so its level is not set here. Once it is added, propose that level with propose_option_interventions.` });
+            }
+            continue;
           }
+          const lv = named[0]?.level;
+          if (lv === undefined || lv === null) continue;
+          const unit = typeof lv.unit === 'string' && lv.unit.trim() !== '' ? lv.unit.trim() : undefined;
+          const shown = `${typeof asked === 'number' ? asked : JSON.stringify(asked ?? null)}${unit !== undefined ? ` ${unit}` : ''}`;
+          const notSet = (reason: string): void => { levelsNotSet.push({ option: plan.label, factor: a.label, value: asked ?? null, reason }); };
+          if (typeof asked !== 'number' || !Number.isFinite(asked)) {
+            notSet(`${shown} is not a figure "${a.label}" can hold, so this option's level for it is not set. Say so, and ask the user for that figure only if they want to set it.`);
+            continue;
+          }
+          if (unitsConflict(unit, today.unit) !== null) {
+            notSet(`${shown} is not a level for "${a.label}", which is measured in ${today.unit} (its value today), so this option's level for it is not set. `
+              + `A figure in another kind of unit is never its level; never convert it. Ask the user for it in ${today.unit} only if they want to set it.`);
+            continue;
+          }
+          const levelUnit = unit ?? today.unit;
+          const wrote = figureTheUserWroteFor(asked, levelUnit, ctx.user_text, scopeIn(g, a.label, plan.label));
+          const basis = lv.estimate === true && typeof lv.basis === 'string' && lv.basis.trim() !== '' ? lv.basis.trim() : undefined;
+          if (!wrote && basis === undefined) { notSet(notWrittenReason(asked, a.label)); continue; }
+          if (!wrote && contradictsItsName(asked, levelUnit, plan.label)) {
+            notSet(`Olumi's estimate of ${asked} for ${a.label} does not match the figure in the option's own name ("${plan.label}"), so that level is left unset. Use the figure in the name, or name the option for the figure you mean.`);
+            continue;
+          }
+          // The SAME frame as today's level — read off it, never recomputed.
+          const cap = (today.observed_state as { cap?: unknown }).cap;
+          const framed = typeof cap === 'number' ? asked / cap : asked;
+          if (!(framed >= 0 && framed <= 1)) {
+            notSet(`${shown} is outside the range "${a.label}" is read on in this change (0 to ${typeof cap === 'number' ? cap : 1}), so this option's level for it is not set. Ask the user for a figure within it.`);
+            continue;
+          }
+          newGradedLevels.set(a.key, {
+            value: asked, ...(levelUnit !== undefined ? { unit: levelUnit } : {}), by: wrote ? 'user' : 'olumi', ...(!wrote ? { basis } : {}),
+            iv: { value: framed, ...(typeof cap === 'number' ? { raw_value: asked } : {}), ...(levelUnit !== undefined ? { unit: levelUnit } : {}),
+              ...(wrote ? {} : { source: 'cee_hypothesis' as const }) },
+          });
         }
         /**
          * ⛔ A NEW SWITCH'S ON-LEVEL IS STRUCTURAL, NEVER OLUMI'S ESTIMATE (AIQ condition (c), #70 5859422189; DL on #2132
@@ -4494,13 +4602,16 @@ export function createAgentCapabilities(
          * level, or `{ 1, estimate: true }` alike — so it carries no `source` and is stored as every non-estimate level is
          * (the builder's `user_specified`), exactly as a 1 the user's own words name. `cee_hypothesis` there marked the
          * option as resting on Olumi's figure, which can make results provisional and withhold a leader over a structural
-         * 1. Only its today-0 is Olumi's (`cee_inference`, `stampNewSwitchFactors`). A GRADED new factor carries no level,
-         * so its link keeps the link-author rule (`linkAuthor`, U3).
+         * 1. Only its today-0 is Olumi's (`cee_inference`, `stampNewSwitchFactors`). A GRADED new factor carries its level
+         * only when it was set above (A1 £59, whose link then says whose level it carries, as an existing factor's does);
+         * otherwise no level, and its link keeps the link-author rule (`linkAuthor`, U3).
          */
-        const added = plan.newActsOn.map((a) => (isNewSwitch(a.key)
-          ? { factor_key: a.key, value: 1 }
-          : { factor_key: a.key, value: null, ...linkAuthor(a.label) }));
-        return { plan, set, entry: { label: plan.label, option_id: plan.optionId, interventions: [...interventions, ...added] } };
+        const added = plan.newActsOn.map((a) => {
+          if (isNewSwitch(a.key)) return { factor_key: a.key, value: 1 };
+          const l = newGradedLevels.get(a.key);
+          return l !== undefined ? { factor_key: a.key, ...l.iv } : { factor_key: a.key, value: null, ...linkAuthor(a.label) };
+        });
+        return { plan, set, newGradedLevels, entry: { label: plan.label, option_id: plan.optionId, interventions: [...interventions, ...added] } };
       });
       if (switchLevelConflicts.length > 0) {
         const entriesNaming = (option: string, factor: string): number =>
@@ -4562,56 +4673,6 @@ export function createAgentCapabilities(
           detail: `${o.value} is outside the model's range for ${o.factor} (0 to ${o.range}). Nothing was prepared. `
             + 'Ask the user for a figure within that range, in the same units, or whether that range itself is wrong.',
         };
-      }
-      /**
-       * ⭐ A NEW GRADED FACTOR'S TODAY LEVEL, ONLY WHEN THE USER STATED IT (PJ-A1 £49: DL #70 5860365834; AIQ 5860384275,
-       * 5860839793). Journey A's "£59 for new Pro customers" minted "New Pro customer price" with no today level: ISL
-       * defaulted it to 0 (`GOAL_ANCESTOR_DATA_GAP`), so the status quo was measured from £0. Paul's brief says "from £49".
-       *
-       * The Agent's `new_factors[].today` is taken ONLY when the user's own typed words in this conversation
-       * (`ctx.user_text`, bound by the route — the brief typed as the first message included) write that figure in that
-       * kind of unit (`figureTheUserWrote`, the lane's one matcher). Not `brief_text` from the store: on this lane it is the
-       * Agent's own `build_model_from_brief` argument, never bound to what the user typed. Then it is framed exactly as
-       * admission frames a baseline the brief states (`framedObservedState`, `brief_extraction`), on admission's own
-       * defaulted range (`defaultFrameFor` over the largest figure this change carries for the factor — its today level and
-       * any level an option here names for it), so the option's own level is later read on the SAME range.
-       *
-       * Anything else is dropped and SAID (`today_not_set`), and the factor stays valueless and asked — never 0: a figure
-       * the user did not write (Olumi's, or a guess), a non-number, a negative level (a 0-to-range frame cannot hold it),
-       * or a today level for a SWITCH (its today is Olumi's off, `stampNewSwitchFactors`). It rides the in-process
-       * authorship context to the hold, never the wire; the confirm writes it in the same apply as the option.
-       */
-      const requestedNew = Array.isArray(args?.new_factors) ? args.new_factors as readonly unknown[] : [];
-      const statedToday: (StatedTodayLevel & { key: string; value: number; unit?: string })[] = [];
-      const todayNotSet: { factor: string; value: unknown; reason: string }[] = [];
-      for (const f of newFactors) {
-        const req = requestedNew.find((r) => norm((r as { label?: unknown } | null)?.label) === norm(f.label)) as { today?: unknown } | undefined;
-        const today = req?.today;
-        if (today === undefined || today === null) continue;
-        const t = (typeof today === 'object' && !Array.isArray(today) ? today : {}) as { value?: unknown; unit?: unknown };
-        const unit = typeof t.unit === 'string' && t.unit.trim() !== '' ? t.unit.trim() : undefined;
-        const shown = `${typeof t.value === 'number' ? t.value : JSON.stringify(t.value ?? null)}${unit !== undefined ? ` ${unit}` : ''}`;
-        if (f.kind === 'switch') {
-          todayNotSet.push({ factor: f.label, value: t.value ?? null,
-            reason: `"${f.label}" is a switch: it is off today (Olumi's reading, for the user to correct), so a today level of ${shown} was not taken.` });
-          continue;
-        }
-        if (typeof t.value !== 'number' || !Number.isFinite(t.value) || t.value < 0) {
-          todayNotSet.push({ factor: f.label, value: t.value ?? null,
-            reason: `${shown} is not a level "${f.label}" can hold today, so its value today is not set. Ask the user what it is today.` });
-          continue;
-        }
-        if (!figureTheUserWrote(t.value, unit, ctx.user_text)) {
-          todayNotSet.push({ factor: f.label, value: t.value,
-            reason: `The user's own words do not state ${shown}, so today's value for "${f.label}" is not set: it is never taken from Olumi's words or a guess. Ask the user what it is today.` });
-          continue;
-        }
-        const named = plans.flatMap(({ spec }) => spec.acts_on.filter((x) => norm(x.factor_label) === norm(f.label))
-          .map((x) => x.level?.value).filter((v): v is number => typeof v === 'number' && Number.isFinite(v)));
-        const largest = Math.max(Math.abs(t.value), ...named.map((v) => Math.abs(v)));
-        const os = framedObservedState({ baseline_value: t.value, unit: unit ?? null, provenance: 'explicit',
-          plausible_max: largest > 1 ? defaultFrameFor(largest) : null });
-        statedToday.push({ key: f.key, label: f.label, value: t.value, ...(unit !== undefined ? { unit } : {}), observed_state: os });
       }
       /** The new factors a set of options uses: a factor only a left-out option acted on is left out with it. */
       const factorsOf = (es: typeof entries) => newFactors.filter((f) => es.some((e) => e.plan.newActsOn.some((a) => a.key === f.key)));
@@ -4722,7 +4783,19 @@ export function createAgentCapabilities(
               return id !== undefined && Array.isArray(member)
                 && member.some((m) => (m as { factor_id?: unknown } | null)?.factor_id === id
                   && sameLevel((m as { observed_state?: unknown }).observed_state));
-            });
+            })
+            // ⭐ A1 £59: every option level set on a new graded factor is on the hold, in THAT option's add_node, for the factor
+            // of that label, exactly as planned — or it is not said as set.
+            && kept.every(({ plan, newGradedLevels }) => plan.newActsOn.every((a) => {
+              const l = newGradedLevels.get(a.key);
+              if (l === undefined) return true;
+              const id = ops.find((o) => o.op === 'add_node' && (o.value as { kind?: unknown } | undefined)?.kind === 'factor'
+                && norm((o.value as { label?: unknown } | undefined)?.label) === norm(a.label))?.path;
+              const option = ops.find((o) => o.op === 'add_node' && o.path === plan.optionId)?.value as { interventions?: Record<string, unknown> } | undefined;
+              const iv = (id !== undefined ? option?.interventions?.[id] : undefined) as Record<string, unknown> | undefined;
+              return iv !== undefined && iv['value'] === l.iv.value && iv['raw_value'] === l.iv.raw_value && iv['unit'] === l.iv.unit
+                && iv['source'] === (l.iv.source ?? 'user_specified');
+            }));
         } catch {
           heldBatchOk = false;
         }
@@ -4736,17 +4809,23 @@ export function createAgentCapabilities(
             : 'Olumi could not prepare that as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };
       }
       heldOptionThisRequest = labels.map((l) => `"${l}"`).join(' and ');
-      const described = kept.map(({ plan, set }) => ({
+      const described = kept.map(({ plan, set, newGradedLevels }) => ({
         label: plan.label,
         linked_from: String(decision.label ?? ''),
         acts_on: [...plan.actsOn.map((a) => a.label), ...plan.newActsOn.map((a) => a.label)],
-        levels: plan.actsOn.map((f) => {
+        levels: [...plan.actsOn.map((f) => {
           const lvl = set.get(f.id);
           return lvl !== undefined
             ? { factor: f.label, value: lvl.value, ...(lvl.unit !== undefined ? { unit: lvl.unit } : {}),
               ...(lvl.by === 'olumi' ? { stated_by: 'olumi_estimate', basis: lvl.estimate } : { stated_by: 'user' }) }
             : { factor: f.label, value: null, still_needed: true };
         }),
+        // A1 £59: a new graded factor's level set in this same change, said exactly as an existing factor's is.
+        ...plan.newActsOn.flatMap((a) => {
+          const l = newGradedLevels.get(a.key);
+          return l === undefined ? [] : [{ factor: a.label, value: l.value, ...(l.unit !== undefined ? { unit: l.unit } : {}),
+            ...(l.by === 'olumi' ? { stated_by: 'olumi_estimate', basis: l.basis } : { stated_by: 'user' }) }];
+        })],
       }));
       return {
         ok: true, mutated: false,
