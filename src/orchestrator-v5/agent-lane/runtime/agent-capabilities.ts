@@ -135,7 +135,7 @@ import { unitFamilyOf } from '../../routing/value-unit-resolution.js';
 import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
 import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, factorTheUserNamed, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { figureInUserUnits } from '../approval-chips.js';
 import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -1977,13 +1977,16 @@ export function createAgentCapabilities(
        */
       const reverses = wanted !== current;
       const directionWords = typeof args.direction_from_words === 'string' ? args.direction_from_words.trim() : '';
-      if (reverses && !wordsTheUserWrote(directionWords, ctx.user_turn_text)) {
+      // …and those words must themselves SAY which way (DL #2203 residual): A16's own "update it to very strong" is
+      // written and said, yet says no direction. A movement must agree with `wanted`; "the other way" agrees with any.
+      const says = reverses ? directionTheWordsSay(directionWords) : null;
+      if (reverses && (!wordsTheUserWrote(directionWords, ctx.user_turn_text) || says === null || (says !== 'reverse' && says !== wanted))) {
         const way = (d: 'positive' | 'negative'): string => (d === 'positive' ? 'raises' : 'lowers');
         return { ok: false, mutated: false, refusal: 'direction_not_stated',
           detail: `"${from.label}" \u2192 "${to.label}" ${way(current)} "${to.label}" in the model; this call would reverse it so that it ${way(wanted)} it, `
             + 'and the user has not said in this message, in their own words, that it runs the other way. Nothing was prepared. '
             + `NEXT CALL: call propose_link_strength again with exactly the same arguments, except leave out "direction": the link keeps its direction and only its strength is recorded. `
-            + 'Give "direction" only when the user said it runs the other way, with their exact words in "direction_from_words".' };
+            + 'Give "direction" only when the user said it runs the other way, with their exact words in "direction_from_words": words that themselves say which way it runs.' };
       }
       const currentBand = edgeBandFromMagnitude(Math.abs(mean));
       // Already in the band the user named, pushing the same way: KEEP the figure, record it as theirs.

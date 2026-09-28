@@ -445,6 +445,30 @@ export function wordsTheUserWrote(words: unknown, turnText: string | null | unde
 }
 
 /**
+ * ⛔ WHICH WAY A PHRASE SAYS A LINK RUNS (DL #2203 verdict, named residual). `wordsTheUserWrote` proves the user wrote
+ * a phrase; it does not prove the phrase is about DIRECTION. On served A16, "update it to very strong" is written and
+ * said, yet says nothing about which way. So a reversal's quoted words must also say a direction:
+ * - a movement: "raises / increases / boosts / pushes … up" → positive; "lowers / reduces / decreases / pushes … down"
+ *   → negative. VERBS only, so "the churn increase" or "a lower price" says nothing;
+ * - or that the link runs the other way ("the other way", "opposite", "backwards", "reversed") → reverse.
+ * Denied words ("does not raise", "never lowers") and a phrase naming BOTH movements say nothing: null, never a guess.
+ * A closed list cannot bound open language (#1971); here a miss only makes the Agent ask, and a hit still shows the
+ * user their words under a plain "REVERSE its direction" preview before any approval.
+ */
+const REVERSE_WORDS = /\b(?:(?:the\s+)?other\s+(?:way|direction)|opposite|backwards?|reversed?|wrong\s+way)\b/i;
+const UP_WORDS = /\b(?:raises|raised|raising|increases|increased|increasing|boosts|boosted|lifts|lifted|push(?:es|ed|ing)?\s+(?:\S+\s+){0,2}up|goes\s+up)\b/i;
+const DOWN_WORDS = /\b(?:lowers|lowered|lowering|reduces|reduced|reducing|decreases|decreased|decreasing|push(?:es|ed|ing)?\s+(?:\S+\s+){0,2}down|goes\s+down)\b/i;
+export function directionTheWordsSay(words: unknown): 'positive' | 'negative' | 'reverse' | null {
+  if (typeof words !== 'string' || NEGATOR.test(words)) return null;
+  const up = UP_WORDS.test(words);
+  const down = DOWN_WORDS.test(words);
+  if (up && down) return null;
+  if (up) return 'positive';
+  if (down) return 'negative';
+  return REVERSE_WORDS.test(words) ? 'reverse' : null;
+}
+
+/**
  * Whether `words` hold any band word at all ("strong", "very strong", "barely", …), said, asked or denied. Such a
  * phrase is the literal matcher's alone (`bandTheUserWrote`): read as a band it could re-read a band the user named
  * ("strong" out of "very strong") or one they denied ("not strong" as strong), so it grounds no reading.
