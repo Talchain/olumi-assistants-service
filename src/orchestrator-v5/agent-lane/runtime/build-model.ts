@@ -49,6 +49,7 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { LIMIT_OPERATOR_WORDS } from '../admit-constraint.js';
 import { holdStatedGoalAttributes, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
+import { attestLimitStrictness } from '../limit-strictness.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
 
@@ -1291,6 +1292,9 @@ export async function buildModelFromBrief(
   // ⭐ MG's HORIZON ATTESTATION (`attestHorizon`, PJ-A2 rows 25–27) decides the deadline G1 holds, and its verdict is
   // `statedGoal.horizon` whatever it is. ⚠ HAND-OFF: an `unresolved` deadline's own words ("by Q3") have no stored field
   // yet; they stay on this typed result until the joint work frame (Codex rows 2–3, 27) gives them one.
+  // ⭐ A LIMIT IS AS STRICT AS THE USER'S OWN WORD FOR IT (`limit-strictness.ts`; served journey E "under £400k" registered
+  // "<=" with no `operator_as_stated`, 3/3 runs of the DL's pj-x3 final). Before anything reads or says the limits.
+  admitted = { ...admitted, goal_constraints: attestLimitStrictness(admitted.goal_constraints, brief) };
   const statedGoal = holdStatedGoalAttributes(withdrawUnstatedBaselineStamps(admitted.nodes, brief), candidate.goal, brief);
   if (statedGoal.held.horizon || statedGoal.held.direction) {
     admitted = {
