@@ -65,7 +65,7 @@ import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-b
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
-import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, typedApprovalOf } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
 import { CarriedProposals, carrierForAnswerRow, offeredApproveChipOnRow, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compose/derive-pending-actions.js';
@@ -620,9 +620,10 @@ export function offersApproval(body: { suggested_actions?: unknown }): boolean {
 export function leavesProposalAwaitingApproval(
   calls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string }[],
 ): boolean {
-  return calls.some((c, j) => c.name !== 'authorise_change' && typeof c.proposal_id === 'string'
+  // A withdrawal keeps its id too: hiding it would make the change it withdrew look offered.
+  return calls.some((c, j) => c.name !== 'authorise_change' && c.name !== WITHDRAW_PROPOSAL && typeof c.proposal_id === 'string'
     && approvalChipsFor(calls.map((d, i) => {
-      if (i === j || d.name === 'authorise_change') return d;
+      if (i === j || d.name === 'authorise_change' || d.name === WITHDRAW_PROPOSAL) return d;
       const { proposal_id: _hidden, ...rest } = d;
       return rest;
     })).length > 0);
@@ -2334,7 +2335,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * so it is not carried to be offered as a dead button; the turn count runs down once per answer row; the
          * wall clock bounds it. Same function, same order, as every route-v2 commit (`commit.ts`).
          */
-        liveHolds = computeSurvivingPriorPendingsDetailed(held, [], [], graphHash, Date.now()).survivors;
+        /*
+         * ⛔ A HOLD THE AGENT WITHDREW THIS TURN IS NOT CARRIED (`WITHDRAW_PROPOSAL`): this row is the latest, so
+         * leaving it off retires the hold, and the next turn finds nothing to confirm.
+         */
+        const withdrawn = withdrawnThisTurn(result.tool_calls);
+        liveHolds = computeSurvivingPriorPendingsDetailed(held, [], [], graphHash, Date.now()).survivors
+          .filter((pa) => typeof pa.chip_id !== 'string' || !withdrawn.has(pa.chip_id));
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: live held proposals could not be read — this answer row carries none');
       }

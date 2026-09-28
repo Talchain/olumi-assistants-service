@@ -18,7 +18,7 @@
  */
 
 import { toolsFor, dispatchTool, type AgentCapabilities, type AgentToolContext, type AgentLaneMode, type ToolResult } from './agent-tools.js';
-import { isProposingTool, proposalsAwaitingApproval, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL } from '../approval-chips.js';
+import { isProposingTool, proposalsAwaitingApproval, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL, WITHDRAW_PROPOSAL, NOT_PROPOSED_THIS_TURN } from '../approval-chips.js';
 import { config } from '../../../config/index.js';
 import { log } from '../../../utils/telemetry.js';
 import {
@@ -55,6 +55,16 @@ export function answerIsIncomplete(resp: ModelCallResponse): boolean {
 }
 
 export type CallModel = (req: ModelCallRequest) => Promise<ModelCallResponse>;
+
+/** A call's `proposal_id` argument, or undefined when its arguments do not parse or carry none. Never throws. */
+const proposalIdArg = (raw: unknown): string | undefined => {
+  try {
+    const id = (JSON.parse(String(raw ?? '{}')) as { proposal_id?: unknown } | null)?.proposal_id;
+    return typeof id === 'string' ? id : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 export interface AgentTurnInput {
   readonly ctx: AgentToolContext;
@@ -414,7 +424,15 @@ export async function runAgentTurn(
         // refused before it is stored, so the turn always ends with its one control (`ONE_CHANGE_PER_APPROVAL`).
         : isProposingTool(String(call.name)) && proposalsAwaitingApproval(toolCalls).size > 0
           ? { ok: false, mutated: false, refusal: ONE_CHANGE_PER_APPROVAL, detail: ONE_CHANGE_PER_APPROVAL_DETAIL }
-          : await dispatchTool(String(call.name), String(call.arguments ?? '{}'), input.ctx, caps, mode);
+          // ⛔ Only a change THIS turn proposed and still offers can be withdrawn: one an earlier turn showed the user
+          // stays theirs to approve or decline (`WITHDRAW_PROPOSAL`).
+          : String(call.name) === WITHDRAW_PROPOSAL && !proposalsAwaitingApproval(toolCalls).has(proposalIdArg(call.arguments) ?? '')
+            ? {
+                ok: false, mutated: false, refusal: NOT_PROPOSED_THIS_TURN,
+                detail: 'Only a change you proposed in this turn, and have not had approved, can be withdrawn. Nothing was withdrawn: '
+                  + 'a change the user has already seen stays theirs to approve or decline.',
+              }
+            : await dispatchTool(String(call.name), String(call.arguments ?? '{}'), input.ctx, caps, mode);
       // ⛔ A TOOL'S OWN PROVIDER CALL IS NOT OVERHEAD.
       //
       // `build_model_from_brief` is dispatched as a tool and makes its own

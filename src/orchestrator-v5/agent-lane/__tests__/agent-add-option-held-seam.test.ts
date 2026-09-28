@@ -386,6 +386,31 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(graphNow().edges.some((e) => e.from === 'dec_x' && e.to === newOption()!.id)).toBe(true);
   }, 120_000);
 
+  it('[w] RED (P2 of the A16 defect): the Agent WITHDRAWS its held option before replying → no button, the answer row carries no hold, and a later "yes" adds nothing', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    /** The id the model was given back by its last proposing call (the `gmh_` handle), read from its own request. */
+    const heldIdIn = (body: Record<string, unknown>): string | undefined => {
+      const outs = (body['input'] as { type?: string; output?: string }[]).filter((i) => i.type === 'function_call_output');
+      const id = (JSON.parse(String(outs[outs.length - 1]?.output ?? '{}')) as { proposal_id?: unknown }).proposal_id;
+      return typeof id === 'string' ? id : undefined;
+    };
+    script = [
+      () => fnCall('propose_new_option', { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }], rationale: 'The user asked for it.' }),
+      (body) => fnCall('withdraw_proposal', { proposal_id: heldIdIn(body) }),
+      () => say('I have withdrawn that option: it was not what you asked for.'),
+    ];
+    const t1 = await turn({ message: 'Add an option: test £54 at release.' });
+    const ref = t1._agent.tool_calls.find((c) => c.name === 'propose_new_option')?.proposal_id;
+    expect(ref).toMatch(/^gmh_[0-9a-f]{12}$/);
+    expect(t1._agent.tool_calls.map((c) => [c.name, c.ok]), JSON.stringify(t1._agent.tool_calls)).toEqual([['propose_new_option', true], ['withdraw_proposal', true]]);
+    expect(approveChipOf(t1), 'a withdrawn change has no approve button').toBeUndefined();
+    expect(await heldOnLatestRow(), 'the answer row leaves the withdrawn hold off, so nothing can confirm it').toEqual([]);
+    script = [() => fnCall('authorise_change', { proposal_id: ref }), () => say('Done.')];
+    const t2 = await turn({ message: 'Yes, add it.' });
+    expect(t2._agent.tool_calls.find((c) => c.name === 'authorise_change'), JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, mutated: false }));
+    expect(newOption(), 'nothing was added').toBeUndefined();
+  }, 120_000);
+
   it('[s] the model moves between the offer and the click → the product answers 200 but applies nothing, and the Agent does NOT report it as added', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const approve = approveChipOf(await proposeOptionC(54))!;
