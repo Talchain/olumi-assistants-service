@@ -151,7 +151,9 @@ export const AUTHORITY_ALLOWLIST: Readonly<
     //     which CEE built from the saved model at run time (the UI never sends a
     //     graph). Read because the held graph may carry no option interventions.
     // No request-first browser copy on either leg.
-    count: 2,
+    // #2169 (B5 consumer, per-limit verdicts): `estimatedLimitFromVerdicts` reads the SAME two carriers — its one
+    // caller passes `boundGraph` and the bound run's `runOptions` — so the file holds 4 sites, all persisted-first.
+    count: 4,
     allowedArgs: ['boundGraph', '{ options: runOptions }'],
   },
 };
