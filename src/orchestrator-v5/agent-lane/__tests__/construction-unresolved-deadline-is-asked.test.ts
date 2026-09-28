@@ -8,8 +8,9 @@
  * sat 8th of 10 and the reply shows two. Had the drafter typed a month count for it, the reply would have asked that
  * count ("within 9 months") as if it were the user's deadline.
  *
- * The fix asks the brief's wording in the deadline slot. It does NOT hold the wording on the goal node: no stored field
- * can carry "by Q3" without converting it (Canonical's shape, PJ-A2 row 27 second half), so that stays out of scope.
+ * The fix asks the brief's wording in the deadline slot. PART 2 (Canonical #2231's `NodeV3.goal_deadline_as_stated`,
+ * MG fills it): construction HOLDS the brief's words on the goal — verbatim, at most 60 characters, never converted to
+ * a month count — and the question then says the model keeps the words but no date.
  * Every row drives the REAL `buildModelFromBrief` (model call faked, nothing live).
  */
 import { readFileSync } from 'node:fs';
@@ -40,8 +41,8 @@ const BRIEF = SERVED.brief;
 const BRIEF_6_MONTHS = BRIEF.replace('by Q3', 'within 6 months');
 const BRIEF_NO_DEADLINE = BRIEF.replace(' by Q3', '');
 
-const ASK_BY_Q3 = 'Which date does "by Q3" mean? It is the deadline your brief sets for "ship the new platform", '
-  + 'but the model does not hold it yet, so no result answers whether it is met by then.';
+const ASK_BY_Q3 = 'Which date does "by Q3" mean? It is the deadline your brief sets for "ship the new platform"; '
+  + 'the model keeps your words but no date, so no result answers whether it is met by then.';
 
 function candidate(horizon: number | null): CandidateModel {
   const c = structuredClone(SERVED.candidate) as CandidateModel;
@@ -106,11 +107,19 @@ describe('T2: journey E\'s "by Q3" reaches the user in their own words', () => {
     expect(questions.some((q) => /within 9 months/.test(q)), JSON.stringify(questions)).toBe(false);
   });
 
-  it('INVARIANT: "by Q3" is never converted onto the goal — no month count, no Q3 on the registered node', async () => {
+  it('⭐ RED (part 2): the registered goal HOLDS "by Q3" verbatim in goal_deadline_as_stated', async () => {
+    for (const h of [null, 9]) {
+      const { goal } = await build(BRIEF, candidate(h));
+      expect(goal.goal_deadline_as_stated, String(h)).toBe('by Q3');
+    }
+  });
+
+  it('INVARIANT: "by Q3" is never converted — no month count, and Q3 appears on the goal ONLY as the stated words', async () => {
     for (const h of [null, 9]) {
       const { goal } = await build(BRIEF, candidate(h));
       expect(Object.hasOwn(goal, 'goal_horizon_months'), String(h)).toBe(false);
-      expect(JSON.stringify(goal), String(h)).not.toContain('Q3');
+      const { goal_deadline_as_stated: _held, ...rest } = goal;
+      expect(JSON.stringify(rest), String(h)).not.toContain('Q3');
     }
   });
 });
@@ -119,12 +128,14 @@ describe('CONTRAST: every other deadline shape reads exactly as before', () => {
   it('a written "within 6 months" the drafter typed as 6 is HELD, and its question is unchanged', async () => {
     const { goal, questions } = await build(BRIEF_6_MONTHS, candidate(6));
     expect(goal.goal_horizon_months).toBe(6);
+    expect(Object.hasOwn(goal, 'goal_deadline_as_stated'), 'a month count holds it; no stated words').toBe(false);
     expect(questions[0]).toBe('Does "ship the new platform" get there within 6 months? The model holds the deadline; no result answers that yet.');
     expect(questions.some((q) => q.startsWith('Which date does'))).toBe(false);
   });
 
-  it('no deadline in the brief and none typed: no deadline question at all', async () => {
-    const { questions } = await build(BRIEF_NO_DEADLINE, candidate(null));
+  it('no deadline in the brief and none typed: no deadline question at all, and nothing held', async () => {
+    const { goal, questions } = await build(BRIEF_NO_DEADLINE, candidate(null));
+    expect(Object.hasOwn(goal, 'goal_deadline_as_stated')).toBe(false);
     expect(questions.some((q) => /Which date does|get there within/.test(q)), JSON.stringify(questions)).toBe(false);
   });
 
