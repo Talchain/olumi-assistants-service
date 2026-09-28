@@ -287,7 +287,14 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
     // no declared unit read "month" as "Monthly churn rate". A "per X", "/X", "a X", "each X" or "every X" written right
     // after the figure is its denominator, so it is passed over whatever unit the factor declares.
     const rate = /^\s*(?:(?:per|an?|each|every)\s+|\/\s*)[\p{L}\p{N}]+/iu.exec(after);
-    const afterRate = right.slice(rate === null ? 0 : [...rate[0].matchAll(/[\p{L}\p{N}]+/gu)].length);
+    // ⭐ The figure's PURPOSE names no entity either (DL #2195 CR 5863720934; Paul's C export: "we have £30,000 to
+    // spend"): "to <verb>" right after it that ends the clause, or meets a preposition ("to spend on ads"), is what the
+    // money is FOR, never whose it is. "to Advertising spend" (a noun follows) is not a purpose and is read as before.
+    const purpose = rate === null
+      ? /^\s*to\s+\p{L}+(?=\s*$|\s+(?:on|in|for|across|over|with|into|at|by)(?![\p{L}\p{N}]))/iu.exec(userText.slice(amountEnd, clauseEnd))
+      : null;
+    const skipped = rate ?? purpose;
+    const afterRate = right.slice(skipped === null ? 0 : [...skipped[0].matchAll(/[\p{L}\p{N}]+/gu)].length);
     if (a.kind === 'words') {
       // ⭐ A count in WORDS is an idiom far more often than a digit is ("That's one option we could try", "One more
       // thing"; AIQ #70 5859477600). It is the user's only when a label word of THIS entity sits within two words of it:

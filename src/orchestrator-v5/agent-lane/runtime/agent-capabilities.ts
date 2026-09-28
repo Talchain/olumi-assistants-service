@@ -169,6 +169,18 @@ function scopeIn(g: { readonly nodes: readonly { readonly label?: unknown; reado
 }
 
 /**
+ * The LIMIT door's scope (DL #2195 CHANGES_REQUIRED 5863720934, served journey-C budget limits): the user calls a limit
+ * a "limit" ("change the budget limit to £30,000"), so that word is the limit's own; and a RISK is no quantity a limit's
+ * figure measures, so its label ("Budget overrun risk") makes no claim on the figure. Every other quantity still does:
+ * "300 Pro paying subscribers" is never a £300 limit on the price.
+ */
+export function limitScopeIn(g: { readonly nodes: readonly { readonly label?: unknown; readonly kind?: unknown }[] }, limitLabel: string): EntityScope {
+  const risks = new Set(g.nodes.filter((n) => n.kind === 'risk').map((n) => (typeof n.label === 'string' ? n.label : '')));
+  const { target, others } = scopeIn(g, limitLabel);
+  return { target: [...target, 'limit'], others: others.filter((l) => !risks.has(l)) };
+}
+
+/**
  * ⛔ C46 (d) — THE AGENT IS TOLD WHEN THE LEADER RESTS ON A PRODUCT THE ANALYSIS ONLY ADDS UP.
  *
  * `claim_permissions` is the Agent's only view of the leader permission. A C46 reason the wire carries
@@ -5153,7 +5165,7 @@ export function createAgentCapabilities(
       }
       // ⛔ Recorded as the user's own figure, so it must be one the user wrote, ABOUT this limit's quantity (DL #72
       // 5862394804): "300 Pro paying subscribers" is never a £300 limit on the price.
-      if (!figureTheUserWrote(value, unit, ctx.user_text) || !figureTheUserWroteFor(value, unit, ctx.user_text, scopeIn(g, node.label))) {
+      if (!figureTheUserWrote(value, unit, ctx.user_text) || !figureTheUserWroteFor(value, unit, ctx.user_text, limitScopeIn(g, node.label))) {
         return { ok: false, mutated: false, refusal: 'figure_not_stated',
           detail: `${figureOf(value)} is not a figure the user wrote, so nothing was prepared: it would be recorded as their limit. `
             + 'Ask them what the new limit is, in their own words, and never offer a figure of your own as theirs.' };

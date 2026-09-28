@@ -1,0 +1,361 @@
+{
+ "_provenance": "DL #2195 CR 5863720934: served journey-C budget-limit scopes (node labels + kinds only), from output/rc-delivery-lead-20260925/scratchpad/evidence-2195/graphs.json",
+ "scopes": [
+  {
+   "source": "pj-20260927T111302Z/C07-budget-msg1.json",
+   "case": "composed",
+   "limit": "Total initiative spend",
+   "unit": "GBP over 6 months",
+   "nodes": [
+    {
+     "label": "Decision: MRR",
+     "kind": "decision"
+    },
+    {
+     "label": "MRR",
+     "kind": "goal"
+    },
+    {
+     "label": "Features + Pro price rise",
+     "kind": "option"
+    },
+    {
+     "label": "Additional advertising",
+     "kind": "option"
+    },
+    {
+     "label": "Carry on as now",
+     "kind": "option"
+    },
+    {
+     "label": "Pro plan monthly price",
+     "kind": "factor"
+    },
+    {
+     "label": "New-feature rollout share",
+     "kind": "factor"
+    },
+    {
+     "label": "Advertising campaign spend",
+     "kind": "factor"
+    },
+    {
+     "label": "Total initiative spend",
+     "kind": "factor"
+    },
+    {
+     "label": "Monthly churn rate",
+     "kind": "factor"
+    },
+    {
+     "label": "Pro paying subscribers",
+     "kind": "factor"
+    },
+    {
+     "label": "Price sensitivity",
+     "kind": "risk"
+    },
+    {
+     "label": "Budget overrun risk",
+     "kind": "risk"
+    }
+   ]
+  },
+  {
+   "source": "pj-20260927T150204Z/C07-budget-msg1.json",
+   "case": "paul",
+   "limit": "Release investment",
+   "unit": "GBP",
+   "nodes": [
+    {
+     "label": "Decision: MRR",
+     "kind": "decision"
+    },
+    {
+     "label": "MRR",
+     "kind": "goal"
+    },
+    {
+     "label": "Feature and price release",
+     "kind": "option"
+    },
+    {
+     "label": "Advertising push",
+     "kind": "option"
+    },
+    {
+     "label": "Split release and campaign",
+     "kind": "option"
+    },
+    {
+     "label": "Carry on as now",
+     "kind": "option"
+    },
+    {
+     "label": "Pro plan price",
+     "kind": "factor"
+    },
+    {
+     "label": "New-feature development spend",
+     "kind": "factor"
+    },
+    {
+     "label": "Additional advertising spend",
+     "kind": "factor"
+    },
+    {
+     "label": "Release investment",
+     "kind": "factor"
+    },
+    {
+     "label": "Pro plan feature value",
+     "kind": "factor"
+    },
+    {
+     "label": "Price resistance",
+     "kind": "risk"
+    },
+    {
+     "label": "Monthly Pro subscriber\u2026",
+     "kind": "outcome"
+    },
+    {
+     "label": "Monthly churn",
+     "kind": "factor"
+    }
+   ]
+  },
+  {
+   "source": "pj-20260927T162916Z/C05-budget-msg1.json",
+   "case": "composed",
+   "limit": "Total investment spend",
+   "unit": "GBP over 6 months",
+   "nodes": [
+    {
+     "label": "Decision: MRR",
+     "kind": "decision"
+    },
+    {
+     "label": "MRR",
+     "kind": "goal"
+    },
+    {
+     "label": "Feature Release + \u00a359 Price",
+     "kind": "option"
+    },
+    {
+     "label": "Additional Advertising",
+     "kind": "option"
+    },
+    {
+     "label": "Carry On As Now",
+     "kind": "option"
+    },
+    {
+     "label": "Pro plan price",
+     "kind": "factor"
+    },
+    {
+     "label": "Feature value score",
+     "kind": "factor"
+    },
+    {
+     "label": "Advertising spend",
+     "kind": "factor"
+    },
+    {
+     "label": "Feature development spend",
+     "kind": "factor"
+    },
+    {
+     "label": "Monthly churn",
+     "kind": "factor"
+    },
+    {
+     "label": "Churn limit breach",
+     "kind": "risk"
+    },
+    {
+     "label": "Pro paying subscribers",
+     "kind": "outcome"
+    },
+    {
+     "label": "Total investment spend",
+     "kind": "outcome"
+    }
+   ]
+  },
+  {
+   "source": "pj-20260927T182848Z/C06-budget-msg1.json",
+   "case": "paul",
+   "limit": "Incremental launch budget",
+   "unit": "GBP",
+   "nodes": [
+    {
+     "label": "Decision: MRR",
+     "kind": "decision"
+    },
+    {
+     "label": "MRR",
+     "kind": "goal"
+    },
+    {
+     "label": "Features + \u00a359 price",
+     "kind": "option"
+    },
+    {
+     "label": "Advertising investment",
+     "kind": "option"
+    },
+    {
+     "label": "Continue as now",
+     "kind": "option"
+    },
+    {
+     "label": "Incremental launch budget",
+     "kind": "factor"
+    },
+    {
+     "label": "Feature development spend",
+     "kind": "factor"
+    },
+    {
+     "label": "Pro advertising spend",
+     "kind": "factor"
+    },
+    {
+     "label": "Pro plan price",
+     "kind": "factor"
+    },
+    {
+     "label": "Pro paying subscribers",
+     "kind": "factor"
+    },
+    {
+     "label": "Monthly churn",
+     "kind": "factor"
+    },
+    {
+     "label": "Price-driven churn",
+     "kind": "risk"
+    }
+   ]
+  },
+  {
+   "source": "pj-20260927T192916Z/C05-budget-msg1.json",
+   "case": "composed",
+   "limit": "Total incremental growth spend",
+   "unit": "GBP over 6 months",
+   "nodes": [
+    {
+     "label": "Decision: MRR",
+     "kind": "decision"
+    },
+    {
+     "label": "MRR",
+     "kind": "goal"
+    },
+    {
+     "label": "Features + Pro price rise",
+     "kind": "option"
+    },
+    {
+     "label": "Additional advertising",
+     "kind": "option"
+    },
+    {
+     "label": "Continue as now",
+     "kind": "option"
+    },
+    {
+     "label": "Pro plan price",
+     "kind": "factor"
+    },
+    {
+     "label": "Incremental feature development\u2026",
+     "kind": "factor"
+    },
+    {
+     "label": "Incremental advertising spend",
+     "kind": "factor"
+    },
+    {
+     "label": "Qualified leads per month",
+     "kind": "factor"
+    },
+    {
+     "label": "Pro conversion rate",
+     "kind": "factor"
+    },
+    {
+     "label": "Monthly churn",
+     "kind": "factor"
+    },
+    {
+     "label": "Total incremental growth spend",
+     "kind": "factor"
+    },
+    {
+     "label": "Budget pressure",
+     "kind": "risk"
+    }
+   ]
+  },
+  {
+   "source": "pj-20260927T213009Z/C06-budget-msg1.json",
+   "case": "paul",
+   "limit": "Six-month growth budget used",
+   "unit": "GBP over 6 months",
+   "nodes": [
+    {
+     "label": "Decision: MRR",
+     "kind": "decision"
+    },
+    {
+     "label": "MRR",
+     "kind": "goal"
+    },
+    {
+     "label": "Current approach",
+     "kind": "option"
+    },
+    {
+     "label": "Features and price rise",
+     "kind": "option"
+    },
+    {
+     "label": "Additional advertising",
+     "kind": "option"
+    },
+    {
+     "label": "Pro plan price",
+     "kind": "factor"
+    },
+    {
+     "label": "Feature release level",
+     "kind": "factor"
+    },
+    {
+     "label": "Additional advertising spend",
+     "kind": "factor"
+    },
+    {
+     "label": "Six-month growth budget used",
+     "kind": "factor"
+    },
+    {
+     "label": "Monthly churn rate",
+     "kind": "factor"
+    },
+    {
+     "label": "Pro paying subscribers",
+     "kind": "factor"
+    },
+    {
+     "label": "Churn deterioration",
+     "kind": "risk"
+    }
+   ]
+  }
+ ]
+}
