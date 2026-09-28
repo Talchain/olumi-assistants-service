@@ -272,6 +272,17 @@ describe('§3 — the precondition, the user\'s direction, and the one exemption
     expect([...withEdge].filter((id) => !without.has(id))).toEqual([TALLY]);
     for (const lever of G_SUM.factor_ids) expect(without.has(lever), lever).toBe(true);
   });
+  it('⭐ the lock keeps §3\'s precondition: a withdrawn exemption whose lever reaches MRR only through the tally is KEPT and ASKED, never dropped', async () => {
+    const { graph, out } = await build(G.brief, candidate(G, (c) => { loopCutsPrice(c); onlyThrough(c); }));
+    expect(graph.nodes.find((n) => n.id === GOAL)?.nonlinear_identity).toBeUndefined();
+    expect(pairs(graph.edges)).toContain(`${TALLY}::${GOAL}`);
+    expect(reachersOfGoal(graph.edges).has('advertising_spend')).toBe(true);
+    expect(out.pure_limits).toBeUndefined();
+    expect(out.pure_limit_asks).toEqual([{
+      node_id: TALLY, label: 'Total investment spend', goal_id: GOAL, effect_direction: 'positive', levers_only_through: ['advertising_spend'], question: ASK,
+    }]);
+    expect(said(out).filter((s) => s === ASK)).toHaveLength(1);
+  });
   it('the lock\'s contrast: the same loop with the price\'s direct MRR link kept — the declaration holds at both verdicts, the edge is kept', async () => {
     const { graph, out } = await build(G.brief, candidate(G, (c) => {
       loopCutsPrice(c);
