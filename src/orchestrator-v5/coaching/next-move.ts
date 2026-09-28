@@ -48,6 +48,7 @@ import {
   type RunTurnCoachingEligibility,
 } from './fragile-link-challenge.js';
 import { buildNoFlaggedLinkCard } from './no-flagged-link-card.js';
+import { definitionalLinks as declaredDefinitionalLinks } from '../compose/definitional-links.js';
 import { composeEdgeIdentity } from '../compose/edge-address.js';
 import { buildLimitUncheckedCard, everyOptionBreaksALimit, leaderWithheldForALimit } from './limit-unchecked-card.js';
 import { buildUntestedOptionCard, untestedOptions } from './untested-option-card.js';
@@ -120,18 +121,12 @@ export interface NextMoveSelection {
 
 /**
  * The edge identities (`${fromId}→${toId}`, the card's own composite) the bound graph declares as DEFINITIONS: each
- * operand of a node's `nonlinear_identity.factor_ids`, into that node. No graph → empty (today's selection).
+ * operand and addend of a node's `nonlinear_identity`, into that node. No graph → empty (today's selection).
+ * R3-9: the ONE predicate every edge writer refuses on (`compose/definitional-links.ts`), so the card never offers a
+ * link the writers would refuse.
  */
 export function definitionalLinks(boundGraph: Record<string, unknown> | null): ReadonlySet<string> {
-  const out = new Set<string>();
-  const nodes = boundGraph?.nodes;
-  if (!Array.isArray(nodes)) return out;
-  for (const node of nodes.map(readRecord)) {
-    const operands = readRecord(node?.nonlinear_identity)?.factor_ids;
-    if (typeof node?.id !== 'string' || !Array.isArray(operands)) continue;
-    for (const from of operands) if (typeof from === 'string' && from.length > 0) out.add(composeEdgeIdentity(from, node.id));
-  }
-  return out;
+  return declaredDefinitionalLinks(boundGraph);
 }
 
 /**

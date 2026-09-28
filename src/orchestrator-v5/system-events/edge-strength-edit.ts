@@ -19,6 +19,7 @@ import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { log } from '../../utils/telemetry.js';
 import { statedLinkBandFor } from '../agent-lane/stated-link-band-context.js';
 import { composeToolCallResponse } from '../compose.js';
+import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../compose/definitional-links.js';
 import { composeRecoverableHandlerResponse } from '../compose/recoverable-handler-response.js';
 import { composeRecoverableValidationResponse } from '../compose/recoverable-validation-response.js';
 import {
@@ -108,6 +109,11 @@ export interface ApplyEdgeStrengthEditParams {
   readonly requestId: string;
   /** Raw graph from the strict server-side persisted-graph read. */
   readonly persistedGraph: unknown;
+  /**
+   * R3-9 (AIQ 5867435409 (1)): what the scenario's last Run did with its declared identities, from the dispatcher's
+   * durable fact read (`identityRunUseFromFacts`). `null`/absent = no Run yet: a definitional link is refused.
+   */
+  readonly lastRunIdentityUse?: IdentityRunUse | null;
 }
 
 function refuse(
@@ -458,6 +464,25 @@ export async function applyEdgeStrengthEdit(
   }
   const targetEdge = matches[0]!;
 
+  // R3-9 (AIQ #72 5866734772, DL 5866746362): a link a declared identity DEFINES (MRR = price × subscribers) is not a
+  // belief the analysis reads, so an edit to it would be stored and then silently ignored. Refused before the stale
+  // check and for every intent: a definition is never editable, and never stamped as the user's judgement. Read off
+  // the RAW persisted graph, which keeps an identity `NodeV3` drops (`definitional-links.ts`).
+  // Only while the identity is IN USE (AIQ 5867435409 (1)): a Run that withdrew it used this strength, additively.
+  const definition = definitionalLinkInUse(persistedGraph, event.from, event.to, params.lastRunIdentityUse ?? null);
+  if (definition !== null) {
+    log.info(
+      {
+        event: 'v5.system_event.edge_strength_edit.definitional_link',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        carrier_id: definition.carrier_id,
+      },
+      'edge_strength_edit — the link is defined by a declared identity; refusing without a graph write',
+    );
+    return refuse(payload, 'definitional_link', definitionalLinkRefusalText(persistedGraph, definition));
+  }
+
   // Optimistic expected-before guard. This is exact by contract: the event is
   // a readback assertion, not a tolerance-based scientific comparison. The
   // commit layer additionally threads the trusted full-graph base into the
@@ -613,6 +638,8 @@ export async function applyEdgeStrengthEdit(
     // canonical handler's legacy NL composite parser trims endpoint halves;
     // reparsing here would weaken the event contract's byte-exact match.
     edgeStrengthEndpointAuthority: { from: event.from, to: event.to },
+    // The same last-Run reading the refusal above used, so the handler's R3-9 check agrees with it.
+    identityRunUseAuthority: params.lastRunIdentityUse ?? null,
     ...(statedBand !== undefined ? { edgeStrengthBandAuthority: statedBand } : {}),
     // Give the canonical handler the strict raw persisted shape. It performs
     // its own GraphV3 narrowing for mutation while its existing merge helper

@@ -315,6 +315,13 @@ export interface HandlerInvocation {
     readonly to: string;
   };
   /**
+   * R3-9 (AIQ #72 5867435409 (1)): what the scenario's LAST Run did with its declared identities, as the strict
+   * `edge_strength_edit` adapter read it from the durable fact set (`compose/definitional-links.ts`). Present → the
+   * handler's definitional-link refusal reads THIS (so the adapter and the handler agree); absent → the handler reads
+   * its own `context.prior_facts`. `null` = no Run yet. Trusted side band, never a model-authored parameter.
+   */
+  readonly identityRunUseAuthority?: import('../compose/definitional-links.js').IdentityRunUse | null;
+  /**
    * Structural readiness payload for the current scenario. Carries the
    * authoritative `options[]` and `goal_node_id` per
    * `computeStructuralReadiness`. Used by the V5 no-op explanation handlers

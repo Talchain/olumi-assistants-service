@@ -606,3 +606,67 @@ describe('isExactCommittedEdgeReadback', () => {
     }
   });
 });
+
+describe('R3-9 — the canvas edit of a DEFINITIONAL link is refused, in words (AIQ 5866734772, DL 5866746362)', () => {
+  const withProduct = (): GraphV3T => {
+    const graph = buildD1Fixture();
+    const goal = graph.nodes.find((n) => n.id === 'g-revenue')!;
+    (goal as Record<string, unknown>).nonlinear_identity = { operation: 'product', factor_ids: ['f-budget', 'f-quality'], stated_in_brief: true };
+    return graph;
+  };
+
+  it('RED at base: refused as definitional_link, nothing written, and the reply names the definition and what to change', async () => {
+    const graph = withProduct();
+    const before = JSON.stringify(graph);
+    const result = await apply(graph, eventFor());
+    expect(result.kind).toBe('refused');
+    if (result.kind !== 'refused') return;
+    expect(result.reason).toBe('definitional_link');
+    expect(result.response.assistant_text).toMatch(/is defined by .* = .* × .*/);
+    expect(result.response.assistant_text).toMatch(/instead/);
+    expect(JSON.stringify(graph)).toBe(before);
+  });
+
+  it('refused even when the edit is also stale — a definition is never editable, whatever the expected tuple', async () => {
+    const result = await apply(withProduct(), eventFor({ expected: { mean: 0.123, effect_direction: 'positive' } }));
+    expect(result.kind === 'refused' && result.reason).toBe('definitional_link');
+  });
+
+  it('a confirm_current on a definitional link is refused too (no provenance-only stamp on a definition)', async () => {
+    const result = await apply(withProduct(), eventFor({ intent: 'confirm_current', magnitude: 0.4 }));
+    expect(result.kind === 'refused' && result.reason).toBe('definitional_link');
+  });
+
+  it('control: with no declared identity the same event mutates exactly as before', async () => {
+    const result = await apply(buildD1Fixture(), eventFor());
+    expect(result.kind).toBe('mutated');
+  });
+});
+
+describe('R3-9 × AIQ 5867435409 (1): the canvas edit is refused only while the last Run kept the identity in use', () => {
+  const withProduct = (): GraphV3T => {
+    const graph = buildD1Fixture();
+    const goal = graph.nodes.find((n) => n.id === 'g-revenue')!;
+    (goal as Record<string, unknown>).nonlinear_identity = { operation: 'product', factor_ids: ['f-budget', 'f-quality'], stated_in_brief: true };
+    return graph;
+  };
+  const applyWith = async (lastRunIdentityUse: { withdrawn: ReadonlySet<string> } | null) => {
+    const event = eventFor();
+    return await applyEdgeStrengthEdit({ payload: payloadFor(event), event, requestId: 'req-r39-use', persistedGraph: withProduct(), lastRunIdentityUse });
+  };
+
+  it('⭐ RED: the last Run WITHDREW the identity → the edit is an ordinary belief: stored (the adapter AND the handler agree)', async () => {
+    const result = await applyWith({ withdrawn: new Set(['g-revenue']) });
+    expect(result.kind, JSON.stringify((result as { reason?: unknown }).reason ?? null)).toBe('mutated');
+  });
+
+  it('the last Run kept it in use → refused', async () => {
+    const result = await applyWith({ withdrawn: new Set() });
+    expect(result.kind === 'refused' && result.reason).toBe('definitional_link');
+  });
+
+  it('no Run yet (null) → refused; the next Run decides', async () => {
+    const result = await applyWith(null);
+    expect(result.kind === 'refused' && result.reason).toBe('definitional_link');
+  });
+});

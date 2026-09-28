@@ -16,6 +16,7 @@ import {
   OlumiResponseSchema,
 } from '@talchain/schemas/boundary';
 
+import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { DEFAULT_STRENGTH_STD } from '../../../src/cee/constants.js';
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 import { computeGraphIdentityHash } from '../../../src/orchestrator-v5/context/graph-identity.js';
@@ -1638,5 +1639,76 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
     expect(readMostRecentPendingActionsMock).not.toHaveBeenCalled();
     expect(appendMock).not.toHaveBeenCalled();
     expect(llmChatMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('R3-9 × AIQ 5867435409 (1) at the ROUTE: the canvas edit reads the DURABLE last Run (DL verdict on #2229)', () => {
+  let app: FastifyInstance;
+  beforeAll(async () => { app = Fastify(); await ceeOrchestratorRouteV2(app); await app.ready(); });
+  afterAll(async () => { await app.close(); });
+
+  // Growth = Demand × Price, declared by the brief: the edited link f-demand → g-growth is an operand of it.
+  const productGraph = () => {
+    const g = buildPersistedGraph() as { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
+    g.nodes = g.nodes.map((n) => (n.id === 'g-growth'
+      ? { ...n, nonlinear_identity: { operation: 'product', factor_ids: ['f-demand', 'f-price'], stated_in_brief: true } } : n));
+    g.nodes.push({ id: 'f-price', kind: 'factor', label: 'Price' });
+    g.edges.push({ from: 'f-price', to: 'g-growth', strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive',
+      provenance: { source: 'cee_hypothesis', reasoning: 'Initial hypothesis' }, provenance_display: 'ai_inferred' });
+    return g;
+  };
+  const RUN_AT = '2026-09-28T09:00:00.000Z';
+  const durableRun = (withdrawn: boolean) => RunAnalysisHandlerFactSchema.parse({
+    fact_type: 'run_analysis', fact_version: 1, noop: false,
+    result: {
+      scenario_id: SCENARIO_ID, computed_at: RUN_AT, graph_hash_at_run: computeAnalysisAffectingGraphHash(productGraph() as never),
+      leading_option_id: 'option-a', summary: 'Option A leads on the current model.', win_probabilities: { 'option-a': 0.6, 'option-b': 0.4 },
+      enrichment: {
+        analysis_status: 'completed',
+        identity_evaluations: [{ node_id: 'g-growth', evaluated: !withdrawn }],
+        ...(withdrawn ? { _meta: { identities_not_forwarded: [{ node_id: 'g-growth', reason: 'inferred_identity_frame_unresolved', frameless_node_ids: ['f-price'] }] } } : {}),
+      },
+    },
+  });
+
+  beforeEach(() => {
+    persisted = productGraph();
+    graphCasRpcEnforce = true;
+    commitReceiptState.mode = 'normal';
+    appendMock.mockReset();
+    appendMock.mockResolvedValue({ id: 'mock-row-id' });
+    loadGraphMock.mockReset();
+    loadGraphMock.mockImplementation(async () => persisted);
+    readMostRecentPendingActionsMock.mockReset();
+    readMostRecentPendingActionsMock.mockResolvedValue([]);
+    readRecentMock.mockReset();
+    readRecentMock.mockResolvedValue([]);
+    readFactsForMock.mockReset();
+    readFactsForMock.mockResolvedValue([]);
+    readScenarioRunAnalysisFactsForMock.mockReset();
+  });
+
+  const seedDurable = (withdrawn: boolean) => readScenarioRunAnalysisFactsForMock.mockResolvedValue({
+    facts: [{ fact: durableRun(withdrawn), fact_row_id: 'run-fact-row', fact_created_at: RUN_AT }], total_count: 1,
+  });
+
+  it('⭐ RED: the durable last Run WITHDREW the identity → the canvas edit is an ordinary belief: STORED through the handler', async () => {
+    seedDurable(true);
+    const response = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: payloadFor(validEvent(), '91') });
+    expect(response.statusCode).toBe(200);
+    expect(appendMock).toHaveBeenCalledTimes(1);
+    expect(lastAppend().handler_id).toBe('adjust_edge_strength');
+    expect(committedEdge()).toMatchObject({ strength: { mean: -0.7 } });
+  });
+
+  it('CONTROL: the same durable Run WITHOUT the withdrawal (evaluated) → refused as definitional_link, the edge unchanged', async () => {
+    seedDurable(false);
+    const before = JSON.stringify(persisted);
+    const response = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: payloadFor(validEvent(), '92') });
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body) as { assistant_text?: string };
+    expect(String(body.assistant_text)).toMatch(/This link is defined by Growth = Demand × Price/);
+    expect(appendMock.mock.calls.every((c) => (c[0] as { handler_id?: unknown }).handler_id !== 'adjust_edge_strength')).toBe(true);
+    expect(JSON.stringify(persisted)).toBe(before);
   });
 });

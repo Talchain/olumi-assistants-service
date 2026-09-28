@@ -539,8 +539,10 @@ describe("H1a′: every CEE writer a saved model passes through keeps the C46 ca
       const r = applyStructuralDelete({ payload: payloadFor(event), event: event as never, requestId: 'req-c46-w5', persistedGraph: g });
       return { kind: r.kind, graph: r.kind === 'mutated' ? r.mutatedGraph : null };
     }],
-    ['edge_strength_edit on a link into the carrier\'s node', async (g) => {
-      const e = g.edges.find((x) => x.from === 'pro_subscribers' && x.to === 'mrr')!;
+    // R3-9 (DL 5866746362): a link INTO the carrier from an operand is a definition and is refused (row below), so the
+    // writer is exercised on a belief link of the same model: it must write and keep the carrier.
+    ['edge_strength_edit on a belief link of the product\'s model (churn → subscribers)', async (g) => {
+      const e = g.edges.find((x) => x.from === 'monthly_churn' && x.to === 'pro_subscribers')!;
       const event = { kind: 'edge_strength_edit', from: e.from, to: e.to, magnitude: 0.7, direction_intent: 'preserve',
         expected: { mean: (e.strength as { mean: number }).mean, effect_direction: e.effect_direction }, intent: 'set' };
       const r = await applyEdgeStrengthEdit({ payload: payloadFor(event), event: event as never, requestId: 'req-c46-w6', persistedGraph: g });
@@ -565,6 +567,19 @@ describe("H1a′: every CEE writer a saved model passes through keeps the C46 ca
     const lost = structuredClone(graph);
     for (const n of lost.nodes) delete n.nonlinear_identity;
     expect(carriersOf(projectGraphForPersistence(lost)), 'the check is not vacuous: a graph without it reads empty').toEqual({});
+  });
+
+  it('R3-9 on the constructed shape: an edit to the operand link subscribers → MRR is refused as definitional_link, graph byte-identical', async () => {
+    const graph = await build(PRODUCT);
+    const before = JSON.stringify(graph);
+    const e = graph.edges.find((x) => x.from === 'pro_subscribers' && x.to === 'mrr')!;
+    const event = { kind: 'edge_strength_edit', from: e.from, to: e.to, magnitude: 0.7, direction_intent: 'preserve',
+      expected: { mean: (e.strength as { mean: number }).mean, effect_direction: e.effect_direction }, intent: 'set' };
+    const r = await applyEdgeStrengthEdit({ payload: payloadFor(event), event: event as never, requestId: 'req-c46-r39', persistedGraph: graph });
+    expect(r.kind === 'refused' && r.reason).toBe('definitional_link');
+    // The constructed carrier is Olumi's reading (stated_in_brief false): said as such (AIQ 5867435409 (2)).
+    expect(r.response.assistant_text).toMatch(/^Olumi reads MRR as /);
+    expect(JSON.stringify(graph)).toBe(before);
   });
 
   it.each(WRITERS.map(([name, write]) => [name, write] as const))('%s: writes, and the persisted form keeps the carrier by id', async (_name, write) => {
