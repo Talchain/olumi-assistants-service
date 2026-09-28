@@ -168,11 +168,16 @@ describe('condition 2 — the user is asked, typed and non-blocking, for today\'
     expect(asksOf(result)).toEqual([]);
   });
 
-  it('CONTRAST: a limit on a factor an option SETS is checked at the option\'s level — no ask', async () => {
+  it('CONTRAST: a limit on a factor an option SETS gets no TODAY-level ask — the option-set ask names Olumi\'s figure instead (DL 5865003207)', async () => {
     const d = journeyC(3);
     const capped = { ...d, constraints: [...d.constraints, { metric: 'Advertising spend', operator: '<=', value: 20000, unit: 'GBP', provenance: 'explicit', frame: 'level' as const }] };
     const { result } = await construct(BRIEF.replace('?', ', with no more than £20,000 on advertising?'), capped as unknown as ReturnType<typeof journeyC>);
-    expect(asksOf(result).map((a) => a.quantity)).toEqual(['Monthly churn rate']);
+    expect(asksOf(result).filter((a) => a.kind === 'limited_quantity_level').map((a) => a.quantity)).toEqual(['Monthly churn rate']);
+    // "Additional advertising" sets it at Olumi's £10,000 (`ai_proposed`): the one ask on that limit names it, and is said.
+    const set = asksOf(result).filter((a) => a.kind === 'option_set_limit_level');
+    expect(set.map((a) => a.quantity)).toEqual(['Advertising spend']);
+    expect(set[0]!.question).toContain('£10,000 under "Additional advertising"');
+    expect(questionsOf(result)).toContain(set[0]!.question);
   });
 });
 
