@@ -1111,6 +1111,53 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(keyed(graphNow())).toBe(before);
   }, 120_000);
 
+  /**
+   * ⛔ [A1] SERVED (DL run pj-20260927T233309Z on CEE e09b8c2, journey A step A05): "Let's add the grandfathering of
+   * existing customers: …". SIX `propose_new_option` calls, every one refused `switch_level_not_on`, then hop_limit
+   * (~20 s, "I was not able to finish that"). A06 re-modelled the switch as a graded factor "at 100%", so the refused
+   * level was almost certainly `{ value: 100, unit: '%…' }` — fully on (UNVERIFIED: the served record kept no
+   * arguments). Exactly 100 in a percent-class unit MEANS on: ONE call, a held proposal, the option switches it on.
+   */
+  it('[A1] R6 RED (A05 shape): the switch at { 100, "% of existing Pro customers" } → ONE propose_new_option call, no refusal, held → one click → on (1), structural', async () => {
+    graphOf.set(SCENARIO, structuredClone(PAUL));
+    const t1 = await proposeSwitchEntries([{ level: { value: 100, unit: '% of existing Pro customers' } }]);
+    const calls = t1._agent.tool_calls;
+    expect(calls.filter((c) => c.name === 'propose_new_option'), JSON.stringify(calls)).toEqual([expect.objectContaining({ ok: true })]);
+    expect(calls.filter((c) => c.refusal !== undefined), JSON.stringify(calls)).toEqual([]);
+    // R5 CONTRAST: a call that was not refused carries no conflict_fields.
+    expect(calls.find((c) => c.name === 'propose_new_option')).not.toHaveProperty('conflict_fields');
+    const approve = approveChipOf(t1);
+    expect(approve?.id, JSON.stringify(calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    expect((((await heldOnLatestRow())[0]!.action.inline_patch) as Record<string, unknown>)['switch_factors']).toEqual([SWITCH_FAC]);
+    const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const g = graphNow() as unknown as { nodes: Record<string, any>[] };
+    expect(g.nodes.find((x) => x.id === SWITCH_FAC)!.observed_state).toEqual({ value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' });
+    // The 100% is not written as a figure: the option's level on the switch is the structural ON, as a bare 1's is.
+    expect(g.nodes.find((x) => x.kind === 'option' && x.label === GRANDFATHER)!.interventions[SWITCH_FAC]).toEqual(ON_LEVEL(SWITCH_FAC));
+    expect(routerCalls).toEqual([]);
+  }, 120_000);
+
+  /**
+   * [A1] R5: a refused call's served `_agent.tool_calls` entry names WHICH fields fired — names only, never the figure.
+   * (Already GREEN at this branch's base: the plumbing landed with A1 round 4 and was not in served e09b8c2. Pinned by the
+   * drop-conflict_fields mutant.)
+   */
+  it.each([
+    ["{ 50, '%' }", { value: 50, unit: '%' }, ['unit', 'not_one']],
+    ["{ 59, 'GBP' }", { value: 59, unit: 'GBP' }, ['unit', 'not_one']],
+    ["{ 1, '%' }", { value: 1, unit: '%' }, ['unit']],
+  ])('[A1] R5: a refused switch level %s → its _agent.tool_calls entry carries conflict_fields (names only), nothing sent', async (_name, level, fields) => {
+    graphOf.set(SCENARIO, structuredClone(PAUL));
+    const t1 = await proposeSwitchEntries([{ level }]);
+    const refused = t1._agent.tool_calls.find((c) => c.name === 'propose_new_option');
+    expect(refused, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, refusal: 'switch_level_not_on', conflict_fields: fields }));
+    // Identity only: the figure itself is never in the record.
+    expect(JSON.stringify(refused)).not.toMatch(/"value"|"unit"\s*:|GBP|%/);
+    expect(inner).toEqual([]);
+    expect(await heldOnLatestRow()).toEqual([]);
+  }, 120_000);
+
   it('[A1] CONTRAST: the same two options with GRADED new factors → committed with no level and no today value — never 0', async () => {
     graphOf.set(SCENARIO, structuredClone(PAUL));
     const t1 = await proposeTwoSwitchOptions({ value: 1, estimate: true, basis: 'a guess' }, true);
