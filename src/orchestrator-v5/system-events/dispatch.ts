@@ -77,6 +77,7 @@ import {
   applyEdgeStrengthEdit,
   isExactCommittedEdgeReadback,
   isProvenanceOnlyEdgeConfirmation,
+  reviewIntentOf,
   type EdgeStrengthEditAuthorityConflict,
 } from './edge-strength-edit.js';
 import { applyFactorValueEdit } from './factor-value-edit.js';
@@ -1686,9 +1687,10 @@ async function dispatchEdgeStrengthEdit(
       persistedAnalysisGraphHash,
       analysisInputs: factsRead,
       // The edit is in the model iff the unique (from, to) edge carries what the
-      // adapter projected for it: the signed mean, the direction, and the
-      // user-set provenance stamp — the stamp is the whole of a `confirm_current`
-      // change. Not the full-edge deep equality of the readback below: that also
+      // adapter projected for it: the signed mean, the direction, the provenance
+      // source, and — for a `confirm_current`, whose whole change it is (R11) — a
+      // confirm review record (its instant is per-attempt, so its intent is
+      // compared). Not the full-edge deep equality of the readback below: that also
       // compares fields this request did not set.
       requestedChangeVisibleIn: (snapshot) => {
         const requested = result.graph.edges.filter(
@@ -1702,7 +1704,9 @@ async function dispatchEdgeStrengthEdit(
           stored.length === 1 &&
           stored[0]!.strength.mean === requested[0]!.strength.mean &&
           stored[0]!.effect_direction === requested[0]!.effect_direction &&
-          stored[0]!.provenance?.source === requested[0]!.provenance?.source
+          stored[0]!.provenance?.source === requested[0]!.provenance?.source &&
+          (event.intent !== 'confirm_current' ||
+            reviewIntentOf(stored[0]!.provenance) === reviewIntentOf(requested[0]!.provenance))
         );
       },
       logFields: { intent: event.intent },

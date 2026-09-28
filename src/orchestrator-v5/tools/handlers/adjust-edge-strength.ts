@@ -444,6 +444,8 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         strength: { mean: newMean, std: finalStd },
         effect_direction: newDirection,
       };
+      // R11: the strength the user would author is unchanged (mean and direction as stored), so this write is a review.
+      const reviewOnly = newMean === beforeMean && newDirection === targetEdge.effect_direction;
 
       const result = applyAndValidateMutation(rawGraph, (clone) => {
         const edge = clone.edges.find(
@@ -458,6 +460,32 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         }
         edge.strength = { mean: newMean, std: finalStd };
         edge.effect_direction = newDirection;
+
+        // ⭐ R11 — A CONFIRMATION IS REVIEW, NOT AUTHORSHIP (AIQ #72 5872082179, adopted by the DL; storage by the
+        // Canonical lead, accepted in the #2235 verdict). A write whose result keeps the current strength — the canvas
+        // `confirm_current`, an in-band pick, or a `set` to the value already stored — changed nothing the user
+        // authored, so it earns no credit (`obligation-provenance.ts` `earnsAuthorshipCredit`, 20 Sep ruling). Every
+        // byte of who-authored-what stays exactly as it was: `provenance.source`, `magnitude`, `natural_effect`,
+        // `reasoning`, `provenance_display`, `defaulted` / `exists_defaulted` / `std_defaulted`. The act is RECORDED
+        // (`provenance.reviewed_by_user`, on the `.passthrough()` provenance — no schema change), with the band when the
+        // user named one; a band confirm still stores that band's spread (A6f/A6e, above). An edge with no provenance
+        // has no source to keep, and none may be invented, so nothing is recorded on it.
+        if (reviewOnly) {
+          if (edge.provenance !== undefined) {
+            edge.provenance = {
+              ...edge.provenance,
+              reviewed_by_user: {
+                intent: 'confirm',
+                at: new Date().toISOString(),
+                ...(bandAuthority !== undefined ? { band: bandAuthority } : {}),
+              },
+            } as typeof edge.provenance;
+          }
+          return {
+            before: beforeSnapshot as Record<string, unknown>,
+            after: afterSnapshot as Record<string, unknown>,
+          };
+        }
 
         // V5 D1 golden-path closure (A3.1 Task 3): stamp provenance so
         // downstream consumers know the strength was user-set.

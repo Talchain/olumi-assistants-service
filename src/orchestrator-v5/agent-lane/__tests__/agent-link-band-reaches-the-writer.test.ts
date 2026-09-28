@@ -46,7 +46,12 @@ function world(initial: ReturnType<typeof graphWith>) {
     const ev = b.event;
     bandSeen.push(statedLinkBandFor(b.scenario_id, String(ev['from']), String(ev['to']), ev['magnitude']));
     const mag = Number(ev['magnitude']);
-    g = { ...g, edges: g.edges.map((x) => (x.from === ev['from'] && x.to === ev['to'] ? { ...x, strength: { ...x.strength, mean: mag }, provenance: { source: 'user_specified' } } : x)) };
+    // R11 (AIQ #72 5872082179): a `set` that changes the strength stamps it the user's; a `confirm_current` is REVIEW —
+    // the writer keeps the provenance and records `reviewed_by_user` (before R11 this fake stamped both `user_specified`).
+    const provenanceAfter = (x: Edge) => (ev['intent'] === 'confirm_current'
+      ? { ...x.provenance, reviewed_by_user: { intent: 'confirm', at: '2026-09-28T15:00:00.000Z' } }
+      : { source: 'user_specified' });
+    g = { ...g, edges: g.edges.map((x) => (x.from === ev['from'] && x.to === ev['to'] ? { ...x, strength: { ...x.strength, mean: mag }, provenance: provenanceAfter(x) } : x)) };
     rev += 1;
     return { status: 200, json: { assistant_text: 'Updated.', graph_hash: `h${rev}` } };
   };

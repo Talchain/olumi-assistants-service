@@ -477,11 +477,17 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
 
     expect(response.statusCode).toBe(200);
     const append = lastAppend();
+    // R11 (AIQ #72 5872082179): a confirm is REVIEW, not authorship — source, reasoning and display KEPT, the review
+    // recorded. (Before R11 this row pinned the `user_specified` / `user_set` stamp.)
     expect(committedEdge()).toMatchObject({
       strength: { mean: 0, std: 0.1 },
       effect_direction: 'negative',
-      provenance: { source: 'user_specified' },
-      provenance_display: 'user_set',
+      provenance: {
+        source: 'cee_hypothesis',
+        reasoning: 'Initial hypothesis',
+        reviewed_by_user: { intent: 'confirm' },
+      },
+      provenance_display: 'ai_inferred',
     });
     expect(append.handler_facts?.[0]).toMatchObject({ noop: true });
     expect(computeAnalysisAffectingGraphHash(append.graph as never)).toBe(
@@ -525,11 +531,12 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
     const receiptEdge = (draftGraph.edges as Array<Record<string, unknown>>).find(
       (candidate) => candidate.from === 'f-demand' && candidate.to === 'g-growth',
     );
+    // R11: the receipt carries the same review record the commit does (before R11: the `user_specified` stamp).
     expect(receiptEdge).toMatchObject({
       strength: { mean: 0, std: 0.1 },
       effect_direction: 'negative',
-      provenance: { source: 'user_specified' },
-      provenance_display: 'user_set',
+      provenance: { source: 'cee_hypothesis', reviewed_by_user: { intent: 'confirm' } },
+      provenance_display: 'ai_inferred',
     });
     expect(body.assistant_text).toContain('Confirmed the current strength');
     expect(body.assistant_text).toContain('as your judgement');
@@ -1166,8 +1173,9 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
       expect(String(visible.assistant_text)).toBe(IN_MODEL);
       expect(visible.model_version_receipt).toBeUndefined();
 
-      // (3) confirm_current, tuple unchanged by design, provenance NOT stamped in
-      //     the store — the stamp is the whole change, so it is not visible.
+      // (3) confirm_current, tuple unchanged by design, the review NOT recorded in
+      //     the store — the review record is the whole change (R11: a confirm keeps
+      //     the source and records `reviewed_by_user`), so it is not visible.
       persisted = buildPersistedGraph();
       appendMock.mockResolvedValueOnce({ id: 'prior-row', replayedPriorTurn: true });
       const unstamped = await post(
@@ -1180,12 +1188,13 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
       );
       expect(committedEdge()).toMatchObject({
         strength: { mean: -0.4 },
-        provenance: { source: 'user_specified' },
+        provenance: { source: 'cee_hypothesis', reviewed_by_user: { intent: 'confirm' } },
       });
       expect(storedEdge()).toMatchObject({
         strength: { mean: -0.4 },
         provenance: { source: 'cee_hypothesis' },
       });
+      expect((storedEdge() as { provenance?: Record<string, unknown> }).provenance).not.toHaveProperty('reviewed_by_user');
       expect(String(unstamped.assistant_text)).toBe(NOT_IN_MODEL);
 
       expect(llmChatMock).not.toHaveBeenCalled();
@@ -1249,7 +1258,9 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
       expect(edgeOf(lastAppend().graph, 'f-price', 'g-growth'), 'contrast: an edge the user did not touch').toMatchObject({ defaulted: true });
     });
 
-    it('⭐ confirm_current adopts the strength as the user\'s: the flag clears, the analysis hash does not move', async () => {
+    // R11 (AIQ #72 5872082179, adopted by the DL): a confirm is REVIEW, not authorship — the source and `defaulted`
+    // are KEPT and the review recorded. Before R11 this row pinned "adopts the strength as the user's: the flag clears".
+    it('⭐ R11: confirm_current is review: source and the flag KEPT, review recorded, the analysis hash does not move', async () => {
       persisted = withDefaultedEdges();
       const beforeHash = computeAnalysisAffectingGraphHash(persisted as never);
       const response = await app.inject({
@@ -1264,8 +1275,13 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
       expect(response.statusCode).toBe(200);
       const body = JSON.parse(response.body) as Record<string, unknown>;
       expect(body.assistant_text).toContain('Confirmed the current strength');
-      expect(committedEdge()).toMatchObject({ strength: { mean: -0.4, std: 0.1 }, provenance: { source: 'user_specified' } });
-      expect(committedEdge()).not.toHaveProperty('defaulted');
+      expect(committedEdge()).toMatchObject({
+        strength: { mean: -0.4, std: 0.1 },
+        provenance: { source: 'cee_hypothesis', reasoning: 'Initial hypothesis', reviewed_by_user: { intent: 'confirm' } },
+        provenance_display: 'ai_inferred',
+        defaulted: true,
+      });
+      expect(committedEdge()).not.toHaveProperty('exists_defaulted');
       expect(computeAnalysisAffectingGraphHash(lastAppend().graph as never)).toBe(beforeHash);
       expect(edgeOf(lastAppend().graph, 'f-price', 'g-growth'), 'contrast: an edge the user did not touch').toMatchObject({ defaulted: true });
     });
@@ -1296,7 +1312,9 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
      * the confirmation guard on the COMMITTED bytes, so it must judge them with the same band or it withholds a
      * write that landed (500 `system_event_commit_failed`).
      */
-    it('⭐ A6e: the Agent\'s band confirm keeps the mean, stores the band\'s spread, keeps existence Olumi\'s — and the post-commit receipt guard admits it', async () => {
+    // R11: the band's spread is still stored (A6e) and the band recorded in the review; every authorship byte is KEPT.
+    // Before R11 this row pinned `user_specified`, `defaulted` → `exists_defaulted`, and the reasoning dropped.
+    it('⭐ A6e × R11: the Agent\'s band confirm keeps the mean, stores the band\'s spread, keeps every authorship byte — and the post-commit receipt guard admits it', async () => {
       persisted = withDefaultedEdges();
       const response = await runWithStatedLinkBand(
         { scenarioId: SCENARIO_ID, proposalId: 'p-route-a6e', from: 'f-demand', to: 'g-growth', band: 'strong' },
@@ -1322,35 +1340,41 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
         strength: { mean: -0.4, std: edgeBandStd('strong') },
         effect_direction: 'negative',
         exists_probability: 0.9,
-        exists_defaulted: true,
-        provenance: { source: 'user_specified' },
+        defaulted: true,
+        provenance: {
+          source: 'cee_hypothesis',
+          reasoning: 'Initial hypothesis',
+          reviewed_by_user: { intent: 'confirm', band: 'strong' },
+        },
       });
-      expect(committedEdge()).not.toHaveProperty('defaulted');
-      expect((committedEdge() as { provenance?: Record<string, unknown> }).provenance).not.toHaveProperty('reasoning');
-      expect(edgeOf(body.draft_graph, 'f-demand', 'g-growth')).toMatchObject({ exists_defaulted: true, strength: { std: edgeBandStd('strong') } });
-      // A6f CONTRAST: the band states the spread, so the committed edge carries no `std_defaulted`.
+      expect(committedEdge()).not.toHaveProperty('exists_defaulted');
+      expect(edgeOf(body.draft_graph, 'f-demand', 'g-growth')).toMatchObject({ defaulted: true, strength: { std: edgeBandStd('strong') } });
+      // R11: flags kept exactly — none was present, none is added.
       expect(committedEdge()).not.toHaveProperty('std_defaulted');
     });
 
-    describe('the confirmation allowlist admits exactly `defaulted` → absent on the target edge, nothing wider', () => {
+    // R11: the allowlist now admits the review record and KEEPS `defaulted` — before R11 it admitted exactly
+    // `defaulted` → absent (with `exists_defaulted: true`) alongside the `user_specified` stamp.
+    describe('the confirmation allowlist keeps `defaulted` on the target edge exactly (R11), nothing wider', () => {
       const stamped = (graph: LooseGraph) => {
         const after = structuredClone(graph);
         const target = edgeOf(after, 'f-demand', 'g-growth')!;
-        target.provenance = { ...(target.provenance as Record<string, unknown>), source: 'user_specified' };
-        target.provenance_display = 'user_set';
-        // A6f: a figure confirm leaves Olumi's std and flags it per field.
-        target.std_defaulted = true;
+        target.provenance = {
+          ...(target.provenance as Record<string, unknown>),
+          reviewed_by_user: { intent: 'confirm', at: '2026-09-28T15:00:00.000Z' },
+        };
         return after;
       };
       const confirm = (before: LooseGraph, after: LooseGraph) =>
         isProvenanceOnlyEdgeConfirmation({ before, after, from: 'f-demand', to: 'g-growth' });
 
-      it('⭐ the target\'s flag removed, WITH the per-field `exists_defaulted: true` the writer mints (A6e): admitted', () => {
+      it('⭐ R11: the target\'s flag KEPT: admitted; removed, even WITH the per-field `exists_defaulted: true` (the pre-R11 adoption): refused', () => {
         const before = withDefaultedEdges();
+        expect(confirm(before, stamped(before))).toBe(true);
         const after = stamped(before);
         delete edgeOf(after, 'f-demand', 'g-growth')!.defaulted;
         edgeOf(after, 'f-demand', 'g-growth')!.exists_defaulted = true;
-        expect(confirm(before, after)).toBe(true);
+        expect(confirm(before, after)).toBe(false);
       });
 
       it('A6e: the target\'s flag removed WITHOUT `exists_defaulted`: refused — the pair moves together', () => {
@@ -1430,7 +1454,10 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
     const edgeOf = (graph: unknown, from: string, to: string) =>
       ((graph as LooseGraph | undefined)?.edges ?? []).find((e) => e.from === from && e.to === to);
 
-    it('⭐ the approved confirm lands through the route: strength unchanged, stamped as the user\'s, Olumi\'s sizing gone — in the commit and the receipt', async () => {
+    // R11 (AIQ #72 5872082179): the confirm still LANDS (the Canvas #70 5848798561 defect stays fixed), but as review:
+    // Olumi's sizing, the source and `defaulted` are KEPT and the review recorded. Before R11 this row pinned the
+    // adoption (`user_specified`, `user_set`, sizing and `defaulted` gone).
+    it('⭐ R11: the approved confirm lands through the route: strength unchanged, Olumi\'s sizing and source KEPT, review recorded — in the commit and the receipt', async () => {
       persisted = withOlumiSizedLink();
       const beforeStrength = structuredClone(edgeOf(persisted, FROM, TO)!.strength);
       const beforeHash = computeAnalysisAffectingGraphHash(persisted as never);
@@ -1464,11 +1491,11 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
         expect(edge, where).toBeDefined();
         expect(edge!.strength, where).toStrictEqual(beforeStrength);
         expect(edge!.effect_direction, where).toBe('positive');
-        expect((edge!.provenance as Record<string, unknown>).source, where).toBe('user_specified');
-        expect(edge!.provenance_display, where).toBe('user_set');
-        expect(edge!.provenance, where).not.toHaveProperty('natural_effect');
-        expect(edge!.provenance, where).not.toHaveProperty('magnitude');
-        expect(edge, where).not.toHaveProperty('defaulted');
+        const { reviewed_by_user: review, ...kept } = edge!.provenance as Record<string, unknown>;
+        expect(kept, where).toStrictEqual(servedEdge().provenance);
+        expect(review, where).toMatchObject({ intent: 'confirm' });
+        expect(edge, where).not.toHaveProperty('provenance_display');
+        expect(edge!.defaulted, where).toBe(true);
       }
       expect(computeAnalysisAffectingGraphHash(lastAppend().graph as never)).toBe(beforeHash);
       expect(edgeOf(lastAppend().graph, 'f-demand', 'g-growth'), 'contrast: an edge the user did not touch')
@@ -1477,19 +1504,16 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
 
     describe('the pure guard', () => {
       /**
-       * The writer's projection for a confirm on the served edge: stamped, Olumi's sizing and reasoning dropped (A6c),
-       * and the whole-edge flag cleared WITH the per-field existence flag it leaves behind (A6e).
+       * The writer's projection for a confirm on the served edge — R11: everything KEPT, the review recorded. (Before
+       * R11: stamped, Olumi's sizing and reasoning dropped (A6c), `defaulted` → `exists_defaulted` (A6e), A6f flag.)
        */
       const projected = (graph: LooseGraph) => {
         const after = structuredClone(graph);
         const target = edgeOf(after, FROM, TO)!;
-        const { natural_effect: _naturalEffect, magnitude: _magnitude, reasoning: _reasoning, ...rest } = target.provenance as Record<string, unknown>;
-        target.provenance = { ...rest, source: 'user_specified' };
-        target.provenance_display = 'user_set';
-        if (target.defaulted === true) target.exists_defaulted = true;
-        delete target.defaulted;
-        // A6f: a figure confirm leaves Olumi's std and flags it per field.
-        target.std_defaulted = true;
+        target.provenance = {
+          ...(target.provenance as Record<string, unknown>),
+          reviewed_by_user: { intent: 'confirm', at: '2026-09-28T15:00:00.000Z' },
+        };
         return after;
       };
       const confirm = (before: LooseGraph, after: LooseGraph) =>
@@ -1497,9 +1521,13 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
       const provenanceOf = (graph: LooseGraph, from = FROM, to = TO) =>
         edgeOf(graph, from, to)!.provenance as Record<string, unknown>;
 
-      it('⭐ natural_effect and magnitude PRESENT → ABSENT on the target: admitted', () => {
+      it('⭐ R11: natural_effect and magnitude KEPT on the target: admitted; PRESENT → ABSENT (the pre-R11 adoption): refused', () => {
         const before = withOlumiSizedLink();
         expect(confirm(before, projected(before))).toBe(true);
+        const dropped = projected(before);
+        delete provenanceOf(dropped).natural_effect;
+        delete provenanceOf(dropped).magnitude;
+        expect(confirm(before, dropped)).toBe(false);
       });
 
       it('natural_effect ADDED to an unsized target: refused', () => {
