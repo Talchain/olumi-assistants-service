@@ -248,6 +248,28 @@ export const RUN_ANALYSIS_ASSISTANT_TEMPLATES = {
  */
 export const PLOT_BRIEF_MAX_CHARS = 10_000;
 
+/**
+ * ⭐ A2 (DL #72 5861407189): THE ENGINE GETS THE HELD OPERATOR ONLY. A stored limit may carry
+ * `operator_as_stated` ("<" beside "<=", `GoalConstraintSchema`) so CEE can SAY "less than 4%"; PLoT and ISL are
+ * unchanged and receive `operator` alone, so the field is withheld from this wire copy. The stored row is never
+ * touched: a row that carries it is copied without it, and an array with none is returned as the SAME reference.
+ *
+ * ⚠ DISCLOSED, NOT MODELLED: over continuous draws P(X < 4) = P(X <= 4). A level PINNED exactly at the threshold is
+ * the one case the engine scores differently from the words ("exactly 4%" meets "<= 4"); pinned by
+ * `limit-operator-as-stated.test.ts` (R4).
+ */
+function withholdStatedOperator<C>(goalConstraints: C): C {
+  if (!Array.isArray(goalConstraints)) return goalConstraints;
+  const carries = (c: unknown): c is Record<string, unknown> =>
+    c !== null && typeof c === 'object' && Object.prototype.hasOwnProperty.call(c, 'operator_as_stated');
+  if (!goalConstraints.some(carries)) return goalConstraints;
+  return goalConstraints.map((c: unknown) => {
+    if (!carries(c)) return c;
+    const { operator_as_stated: _stated, ...engine } = c;
+    return engine;
+  }) as C;
+}
+
 // ============================================================================
 // ScenarioReader — dependency injection seam for reading scenario state
 // ============================================================================
@@ -985,7 +1007,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     if (snapshot.goal_constraints !== undefined) {
       // A framed percent limit on a level PLoT would read on another scale is sent UNFRAMED on this wire copy, so it
       // fails closed instead of being scored against the wrong number (`level-limit-baseline.ts`). The record is untouched.
-      plotPayload.goal_constraints = withholdUnprovablePercentFrames(graphForAnalysis, snapshot.goal_constraints);
+      plotPayload.goal_constraints = withholdStatedOperator(withholdUnprovablePercentFrames(graphForAnalysis, snapshot.goal_constraints));
       const frameWithheld = unprovablePercentFrameIds(graphForAnalysis, snapshot.goal_constraints);
       if (frameWithheld.length > 0) {
         log.info(

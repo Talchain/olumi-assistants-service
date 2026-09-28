@@ -21,17 +21,23 @@
  * ⛔ THE FORBIDDEN "FIX" is an epsilon — mapping `< 4` to `<= 3.999`. That
  * invents a threshold the user never stated and writes a fabricated figure into
  * a field the contract says holds the user's units. The value is preserved
- * verbatim; it is the OPERATOR that cannot be expressed, and the ledger is
- * where that survives.
+ * verbatim; it is the OPERATOR that the engine's vocabulary cannot express.
  *
- * So: preserve the number, widen the operator, and record the widening as a
- * loss that names the admitted boundary value explicitly.
+ * ⭐ A2 (DL #72 5861407189): PRESERVE THE NUMBER, HOLD THE ENGINE'S OPERATOR, AND KEEP THE STATED ONE BESIDE IT. The
+ * drafter emits the TYPED operator (`buildCandidateSchema`: `>= <= > <`, no word is read), and admission keeps it as
+ * `operator` whenever the canonical store can hold it: {@link CANONICAL_CONSTRAINT_OPERATORS} is
+ * `GoalConstraintSchema`'s own list, never a second one. Today that list is `>= <=`, so "under 4%" is held as
+ * `operator: "<="` WITH `operator_as_stated: "<"`: every surface that states the limit says "less than 4%"
+ * (`statedOperatorOf`, `LIMIT_OPERATOR_WORDS`), and the strictness is no longer recorded as a loss.
  *
- * ⭐ THE WIDENING IS THE STORE'S LIMIT, NOT ADMISSION'S CHOICE (G1 drafting half; Codex PJ-A2 row 14). The drafter
- * emits the TYPED operator (`buildCandidateSchema`: `>= <= > <`, no word is read), and admission keeps it whenever the
- * canonical store can hold it: {@link CANONICAL_CONSTRAINT_OPERATORS} is `GoalConstraintSchema`'s own list, never a
- * second one. Today that list is `>= <=`, so "under 4%" is still held as "at most 4%", recorded here and said to the
- * user (`build-model.ts`, `widenedLimitLines`). ⚠ WIDENING THE SCHEMA ALONE IS NOT ENOUGH: PLoT's preflight refuses
+ * ⚠ WHAT IS DISCLOSED, NOT MODELLED. PLoT and ISL still receive `<=` (the run wire withholds `operator_as_stated`).
+ * Over continuous draws P(X < 4) = P(X <= 4), so that is the same limit. The ONE case where they differ is a level
+ * PINNED exactly at the threshold (an option that sets churn to exactly 4%, or a deterministic path that resolves to
+ * it — `context/cqe/__tests__/strictness-is-destroyed-at-extraction.test.ts`): the engine counts it as meeting the
+ * limit. Pinned by `limit-operator-as-stated.test.ts` (R4, "disclosed, not modelled").
+ *
+ * ⚠ WIDENING THE SCHEMA'S `operator` ENUM IS NOT THE FIX: `GraphV3.safeParse` fails the whole graph on an unknown
+ * operator (Canonical 5860723311), and PLoT's preflight refuses
  * any other operator (`CONSTRAINT_INVALID_OPERATOR`, plot-lite-service `src/validation/preflight-v2.ts`
  * `VALID_OPERATORS`), so the store and PLoT move together, and `admit-constraint-typed-operator.test.ts` pins today's
  * list so that move cannot happen unseen.
@@ -46,6 +52,26 @@ export type CandidateOperator = '>=' | '<=' | '>' | '<';
 /** The comparators the canonical store holds: `GoalConstraintSchema.operator`, derived, never restated. */
 export type CanonicalOperator = GoalConstraintT['operator'];
 export const CANONICAL_CONSTRAINT_OPERATORS: readonly CanonicalOperator[] = GoalConstraintSchema.shape.operator.options;
+/** `GoalConstraintSchema.operator_as_stated`: a strict comparator as the user stated it, held beside `operator`. */
+export type StatedOperator = NonNullable<GoalConstraintT['operator_as_stated']>;
+
+/** The words a limit's comparator is said in, to the user and to the Agent's model. One vocabulary, never restated. */
+export const LIMIT_OPERATOR_WORDS: Readonly<Record<CandidateOperator, string>> = {
+  '>=': 'at least', '<=': 'at most', '>': 'more than', '<': 'less than',
+};
+
+/**
+ * The comparator a STORED row states: its `operator_as_stated` when that is the strict twin of its held `operator`
+ * (`<` beside `<=`, `>` beside `>=`), otherwise the held `operator`. A stamp that contradicts the held comparator is
+ * never said. `undefined` for a row with no readable operator.
+ */
+export function statedOperatorOf(row: { readonly operator?: unknown; readonly operator_as_stated?: unknown }): CandidateOperator | undefined {
+  const held = row.operator;
+  if (held !== '<=' && held !== '>=') return undefined;
+  if (held === '<=' && row.operator_as_stated === '<') return '<';
+  if (held === '>=' && row.operator_as_stated === '>') return '>';
+  return held;
+}
 
 export interface CandidateConstraint {
   readonly metric: string;
@@ -61,6 +87,8 @@ export interface AdmittedConstraint {
   constraint_id: string;
   node_id: string;
   operator: CanonicalOperator;
+  /** `GoalConstraintSchema.operator_as_stated`: the TYPED strict operator the store cannot hold as `operator`. */
+  operator_as_stated?: StatedOperator;
   value: number;
   label?: string;
   unit?: string;
@@ -460,6 +488,9 @@ export function admitCandidateConstraints(
       constraint_id: `agent-lane:${nodeId}:${operator}`,
       node_id: nodeId,
       operator,
+      // ⭐ A2: a STRICT typed operator the store cannot hold as `operator` is held beside it, as stated — so the limit
+      // is said "less than 4%", and nothing is lost. The engine still receives `operator` alone (see the header).
+      ...(operator !== c.operator && (c.operator === '<' || c.operator === '>') ? { operator_as_stated: c.operator } : {}),
       value,
       // ⛔ THE LABEL IS THE LIMIT'S NAME, NOT THE LIMIT (`GoalConstraintSchema.label`: "Human-readable label, e.g.
       // 'First-year budget cap'"). The bound lives in `operator`/`value`/`unit`, which every consumer renders itself: a
@@ -471,24 +502,6 @@ export function admitCandidateConstraints(
       ...unitProvenance,
       ...(c.frame === 'level' || c.frame === 'delta' ? { value_frame: c.frame } : {}),
     };
-
-    if (operator !== c.operator) {
-      loss.push({
-        code: REPAIR_CODES.NORMALISE_STRENGTH_RANGE,
-        layer: 'cee',
-        field_path: `goal_constraints[${nodeId}].operator`,
-        before: c.operator,
-        after: operator,
-        reason:
-          `${isUserAuthored(c.provenance) ? 'You stated' : 'This system proposed'} a STRICT bound ` +
-          `("${c.metric} ${c.operator} ${c.value}${c.unit ?? ''}") ` +
-          `but the canonical vocabulary has only ">=" and "<=". The admitted constraint therefore ` +
-          `treats exactly ${c.value}${c.unit ?? ''} as satisfying a bound the user excluded. ` +
-          `The value is preserved verbatim — no epsilon was invented — so this widening is the ` +
-          `whole of the difference, and it is decision-relevant at the boundary.`,
-        severity: 'warn',
-      });
-    }
 
     constraints.push(admitted);
   }
