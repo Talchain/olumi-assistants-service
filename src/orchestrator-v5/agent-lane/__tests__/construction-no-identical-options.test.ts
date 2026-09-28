@@ -777,16 +777,18 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
   const ONLY_TEST_WITHHELD = [{ option: 'Test £59 with AI release', like: '£59 with AI release', reason: 'option_indistinct' }];
   /** Readiness on the registered graph. A kept £54 whose AI availability stays open is one honest value question, never a withheld option. */
   const blocking = (g: SGraph) => assessCanonicalAnalysisReadiness(g).blockingIssues.map((i) => [i.code, i.message]);
-  const ASK_54_AI = [['MISSING_OPTION_VALUE', 'Factor "AI feature availability" needs a numeric value for option "£54 with AI release"']];
+  // Olumi takes AI availability as off today (its 0 on the 0..1 frame is kept since DL #72 5864452374), and says so as
+  // Olumi's, never as the user's current state.
+  const ASK_54_AI = [['MISSING_OPTION_VALUE', 'Factor "AI feature availability" is currently off (Olumi\'s estimate). What should option "£54 with AI release" set it to?']];
   /**
    * placeholder-zero (48f2e12f): a row whose registered AI availability is levelled at 0.5 (not a 0/1 switch) needs a
    * status-quo level for it, or readiness also asks what it is today — a question that row is not about. `padded`'s
-   * baseline (0, not known) never registers on the factor's frame of 1, so these rows' drafts state it KNOWN: 0 today,
+   * baseline (0, not known) registered nothing on a frame of 1 until DL #72 5864452374, so these rows' drafts state it KNOWN: 0 today,
    * the AI release not yet shipped. With a level held, an open £54 is asked against it ("is currently 0").
    */
   const knownAi = <D extends CandidateModel>(d: D): D =>
     ({ ...d, factors: d.factors.map((f) => (f.label === 'AI feature availability' ? { ...f, baseline_known: true, baseline_value: 0 } : f)) }) as D;
-  const ASK_54_AI_AT_0 = [['MISSING_OPTION_VALUE', 'Factor "AI feature availability" is currently 0. What should option "£54 with AI release" set it to?']];
+  const ASK_54_AI_AT_0 = [['MISSING_OPTION_VALUE', 'Factor "AI feature availability" is currently 0 (Olumi\'s estimate). What should option "£54 with AI release" set it to?']];
 
   it('PRECONDITION (row 2e): within the limit, "£54 with AI release" is registered and distinct, and the one gap asked is £54\'s', async () => {
     for (const withTest of [true, false]) {
@@ -876,7 +878,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
     return { ...base, options: [...base.options, opt] } as typeof base;
   };
   const GAP_64 = GAP_54.replace('£54 with AI release', '£64 with AI release');
-  const ASK_54_64_AI = [...ASK_54_AI, ['MISSING_OPTION_VALUE', 'Factor "AI feature availability" needs a numeric value for option "£64 with AI release"']];
+  const ASK_54_64_AI = [...ASK_54_AI, ['MISSING_OPTION_VALUE', 'Factor "AI feature availability" is currently off (Olumi\'s estimate). What should option "£64 with AI release" set it to?']];
   const FOUR = ['keep_current_pricing', '59_with_ai_release', '54_with_ai_release', '64_with_ai_release'];
   /** A draft's level gaps on the options the first draft registers ("Test £59 with AI release" is withheld by every draft here). */
   const gapsOnRegistered = (d: CandidateModel) => prepareProvisionalCandidate(d).level_gaps.filter((g) => g.option !== 'Test £59 with AI release');
