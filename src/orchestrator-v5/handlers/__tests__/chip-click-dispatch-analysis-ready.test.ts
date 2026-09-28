@@ -133,7 +133,9 @@ const READY_GRAPH: GraphV3T = {
   nodes: [
     { id: 'dec_launch', kind: 'decision', label: 'Launch?' },
     { id: 'goal_revenue', kind: 'goal', label: 'Revenue', goal_threshold: 0.8 },
-    { id: 'fac_marketing', kind: 'factor', label: 'Marketing spend' },
+    // A status-quo level (inside the options' 0.3–0.7 scale): since #2164 an unvalued goal root is a factor-scoped
+    // `MISSING_FACTOR_LEVEL` that refuses the Run, so without it this READY graph reads `needs_user_input`.
+    { id: 'fac_marketing', kind: 'factor', label: 'Marketing spend', observed_state: { value: 0.5 } },
     {
       id: 'opt_launch',
       kind: 'option',
