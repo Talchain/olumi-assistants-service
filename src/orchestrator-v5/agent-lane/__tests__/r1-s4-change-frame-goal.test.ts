@@ -130,7 +130,8 @@ describe('S4G — WIRE: a change goal reaches /graph/register in the contract\'s
     expect(g['goal_threshold_raw']).toBeCloseTo(-0.15, 12);
     expect(Object.keys(g)).not.toContain('goal_threshold');
     expect(Object.keys(g)).not.toContain('observed_state');
-    expect(JSON.stringify(r)).toMatch(/current level of \\"Monthly cloud bill\\"/);
+    expect(JSON.stringify(r)).toMatch(/its current level was not stated, so no chance of reaching it can be shown/);
+    expect(JSON.stringify(r), 'no promise of a chat path that does not exist yet').not.toMatch(/Tell me the current level/);
   });
 
   it('S4G-6: Olumi\'s estimate of the current level is never the base (the level path\'s own rule)', async () => {

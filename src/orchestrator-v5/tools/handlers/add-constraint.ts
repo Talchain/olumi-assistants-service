@@ -39,6 +39,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { isChangeFrame } from '../../agent-lane/limit-frame.js';
 
 import { z } from 'zod';
 
@@ -959,6 +960,18 @@ export function createAddConstraintHandler(): HandlerFn {
       const isSuccessTargetTurn = targetNode.kind === 'goal' && operator === '>=';
       /** Co-extensive with (1) today; a separate name so it can stop being. */
       const ownsGoalThresholdChannel = isSuccessTargetTurn;
+
+      // ⛔ R1 S4-core: a goal whose target is stated as a CHANGE from today ("cut the bill by 15%": `change_rel`, a
+      // fraction). This write sets a LEVEL target and stamps the level frame, so it would silently turn the user's change
+      // into a level. Refused by name until a change can be edited as a change (the Agent's proposer and the canvas door
+      // refuse it too). The sentence is the user's, within `sanitiseForUser`'s 100-character budget.
+      if (isSuccessTargetTurn && isChangeFrame((targetNode as { goal_threshold_frame?: unknown }).goal_threshold_frame)) {
+        throw new D1HandlerError(
+          'PARAMETER_INVALID',
+          'add_constraint: the goal target is stated as a change from today; a level target cannot replace it.',
+          { details: { reason: 'goal_is_a_change' }, userGuidance: 'This goal is a change from today, so it cannot be set as a level here.' },
+        );
+      }
 
       // Review hardening (2026-07-07): a success target must be a positive
       // number — the shared value schema is a plain z.number(), so without

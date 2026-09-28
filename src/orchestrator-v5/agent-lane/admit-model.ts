@@ -2493,13 +2493,12 @@ export function admitStatedGoalChange(goal: CandidateModel['goal'], raw: number)
   if (typeof today !== 'number' || !Number.isFinite(today)) {
     return { node, withheld:
       `"${goal.metric}" is a goal to change by ${change} from today, and its current level was not stated, so no chance of ` +
-      `reaching it can be shown yet. Tell me the current level of "${goal.metric}" and it can be.` };
+      `reaching it can be shown: a change is measured from today's level of "${goal.metric}".` };
   }
   if (goalLevelIsEstimated(goal)) {
     return { node, withheld:
       `Olumi's own estimate of the current level of "${goal.metric}" (${today}) was not used, so no chance of a change of ` +
-      `${change} is shown: that figure would rest on a guess, not on anything you said. Tell me the current level of ` +
-      `"${goal.metric}" and the chance can be shown.` };
+      `${change} is shown: that figure would rest on a guess, not on anything you said.` };
   }
   const target = frame === 'change_rel' ? today * (1 + stored) : today + stored;
   const resolved = today > 0 && target >= 0 ? resolveGoalThresholdCapWithProvenance(undefined, Math.max(today, target), goal.unit, undefined) : null;

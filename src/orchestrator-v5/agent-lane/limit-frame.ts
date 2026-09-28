@@ -66,3 +66,21 @@ export function sayLimitInFrame(args: {
   }
   return `${words[operator]} ${figure(value, unit)}`;
 }
+
+/**
+ * ⭐ A GOAL TARGET STATED AS A CHANGE FROM TODAY, IN WORDS (R1 S4-core; goal consumer map 28 Sep). The stored figure is
+ * the contract's (`change_rel` r, `change_abs` c), so a display that prints "<raw> <unit>" would say "-0.15 GBP per month".
+ * Said instead as the change: `change_rel` −0.15 → "down 15% from today"; `change_abs` 5000 GBP → "up 5000 GBP from
+ * today" (`figure` is the caller's own formatter). `undefined` for a level (or no frame): the caller says it as before.
+ */
+export function sayGoalChange(
+  frame: unknown,
+  stored: number,
+  unit: string | undefined,
+  figure: (value: number, unit: string | undefined) => string,
+): string | undefined {
+  if (frame !== 'change_rel' && frame !== 'change_abs') return undefined;
+  const dir = stored < 0 ? 'down' : 'up';
+  if (frame === 'change_rel') return `${dir} ${Math.round(Math.abs(stored) * 100 * 1e6) / 1e6}% from today`;
+  return `${dir} ${figure(Math.abs(stored), unit)} from today`;
+}

@@ -20,6 +20,7 @@ import { deriveEmittedGoalDirection, heldComparatorSense, readHeldGoalComparator
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
 import { totalUnitOfPerUnitPrice } from '../../cee/provenance/stated-amounts.js';
+import { sayGoalChange } from './limit-frame.js';
 
 type Node = {
   id: string; kind?: string; label?: string;
@@ -262,7 +263,10 @@ export function goalNotCheckedLine(graph: unknown, analysisResult: unknown): str
   const os = goal.observed_state;
   const hasCurrent = [os?.value, os?.raw_value, (os as { baseline?: unknown } | null | undefined)?.baseline]
     .some((v) => typeof v === 'number' && Number.isFinite(v));
+  // R1 S4-core: a target stated as a change from today is said as the change, never "-0.15 GBP per month".
+  const change = sayGoalChange(goal.goal_threshold_frame, raw, unit, (v, u) => money(v, u ?? ''));
+  const target = change === undefined ? `target of ${money(raw, unit)}` : `target (${change})`;
   return hasCurrent
-    ? `Your ${label} target of ${money(raw, unit)} was not checked in this analysis.`
-    : `Your ${label} target of ${money(raw, unit)} is not checked yet: the model has no current ${label} figure to measure it against.`;
+    ? `Your ${label} ${target} was not checked in this analysis.`
+    : `Your ${label} ${target} is not checked yet: the model has no current ${label} figure to measure it against.`;
 }
