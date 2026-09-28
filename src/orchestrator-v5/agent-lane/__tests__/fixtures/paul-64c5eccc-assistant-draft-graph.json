@@ -1,0 +1,585 @@
+{
+  "nodes": [
+    {
+      "id": "help_me_decide_whether_to_hire_a_personal_assistant_or_use_an_ai_assistant_to_save_money",
+      "kind": "decision",
+      "label": "Help me decide whether to hire…",
+      "provenance": "from_brief",
+      "description": "Help me decide whether to hire a personal assistant or use an AI assistant to save money."
+    },
+    {
+      "id": "ability_to_focus_on_high_value_tasks",
+      "kind": "goal",
+      "label": "ability to focus on high-value…",
+      "provenance": "from_brief",
+      "description": "ability to focus on high-value tasks",
+      "goal_threshold_unit": "% of working time focused on high-value tasks",
+      "goal_threshold_frame": "level"
+    },
+    {
+      "id": "current_approach",
+      "kind": "option",
+      "label": "Current approach",
+      "provenance": "ai_inferred",
+      "is_baseline": true
+    },
+    {
+      "id": "personal_assistant",
+      "kind": "option",
+      "label": "Personal assistant",
+      "provenance": "from_brief",
+      "interventions": {
+        "ai_assistant_use": {
+          "value": 0,
+          "source": "cee_hypothesis",
+          "target_match": {
+            "node_id": "ai_assistant_use",
+            "confidence": "high",
+            "match_type": "exact_id"
+          }
+        },
+        "human_assistant_capacity": {
+          "unit": "hours/week",
+          "value": 0.5,
+          "source": "cee_hypothesis",
+          "raw_value": 20,
+          "target_match": {
+            "node_id": "human_assistant_capacity",
+            "confidence": "high",
+            "match_type": "exact_id"
+          }
+        },
+        "annual_assistant_tool_cost": {
+          "unit": "USD/year",
+          "value": 0.45,
+          "source": "cee_hypothesis",
+          "raw_value": 45000,
+          "target_match": {
+            "node_id": "annual_assistant_tool_cost",
+            "confidence": "high",
+            "match_type": "exact_id"
+          }
+        }
+      }
+    },
+    {
+      "id": "ai_assistant",
+      "kind": "option",
+      "label": "AI assistant",
+      "provenance": "from_brief",
+      "interventions": {
+        "ai_assistant_use": {
+          "value": 1,
+          "source": "cee_hypothesis",
+          "target_match": {
+            "node_id": "ai_assistant_use",
+            "confidence": "high",
+            "match_type": "exact_id"
+          }
+        },
+        "human_assistant_capacity": {
+          "unit": "hours/week",
+          "value": 0,
+          "source": "cee_hypothesis",
+          "raw_value": 0,
+          "target_match": {
+            "node_id": "human_assistant_capacity",
+            "confidence": "high",
+            "match_type": "exact_id"
+          }
+        },
+        "annual_assistant_tool_cost": {
+          "unit": "USD/year",
+          "value": 0.1,
+          "source": "cee_hypothesis",
+          "raw_value": 10000,
+          "target_match": {
+            "node_id": "annual_assistant_tool_cost",
+            "confidence": "high",
+            "match_type": "exact_id"
+          }
+        }
+      }
+    },
+    {
+      "id": "personal_assistant_plus_ai",
+      "kind": "option",
+      "label": "Personal assistant plus AI",
+      "provenance": "from_brief",
+      "interventions": {
+        "ai_assistant_use": {
+          "value": 1,
+          "source": "cee_hypothesis",
+          "target_match": {
+            "node_id": "ai_assistant_use",
+            "confidence": "high",
+            "match_type": "exact_id"
+          }
+        },
+        "human_assistant_capacity": {
+          "unit": "hours/week",
+          "value": 0.5,
+          "source": "cee_hypothesis",
+          "raw_value": 20,
+          "target_match": {
+            "node_id": "human_assistant_capacity",
+            "confidence": "high",
+            "match_type": "exact_id"
+          }
+        },
+        "annual_assistant_tool_cost": {
+          "unit": "USD/year",
+          "value": 0.55,
+          "source": "cee_hypothesis",
+          "raw_value": 55000,
+          "target_match": {
+            "node_id": "annual_assistant_tool_cost",
+            "confidence": "high",
+            "match_type": "exact_id"
+          }
+        }
+      }
+    },
+    {
+      "id": "human_assistant_capacity",
+      "kind": "factor",
+      "label": "Human assistant capacity",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "scale_frame": 40,
+      "observed_state": {
+        "unit": "hours/week",
+        "value": 0,
+        "source": "cee_inference",
+        "raw_value": 0,
+        "extractionType": "inferred"
+      }
+    },
+    {
+      "id": "ai_assistant_use",
+      "kind": "factor",
+      "label": "AI assistant use",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "observed_state": {
+        "unit": "binary adoption",
+        "value": 0,
+        "source": "cee_inference",
+        "extractionType": "inferred"
+      }
+    },
+    {
+      "id": "annual_assistant_tool_cost",
+      "kind": "factor",
+      "label": "Annual assistant-tool cost",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "scale_frame": 100000,
+      "observed_state": {
+        "unit": "USD/year",
+        "value": 0,
+        "source": "cee_inference",
+        "raw_value": 0,
+        "extractionType": "inferred"
+      }
+    },
+    {
+      "id": "delegable_routine_workload",
+      "kind": "factor",
+      "label": "Delegable routine workload",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 100,
+      "observed_state": {
+        "unit": "% of working time",
+        "value": 0.3,
+        "source": "cee_inference",
+        "raw_value": 30,
+        "extractionType": "inferred"
+      }
+    },
+    {
+      "id": "ai_output_error_risk",
+      "kind": "risk",
+      "label": "AI output error risk",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "assistant_coordination_overhead",
+      "kind": "risk",
+      "label": "Assistant coordination overhead",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "delegation_quality",
+      "kind": "outcome",
+      "label": "Delegation quality",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "routine_work_hours_delegated",
+      "kind": "outcome",
+      "label": "Routine-work hours delegated",
+      "provenance": "ai_inferred"
+    }
+  ],
+  "edges": [
+    {
+      "to": "current_approach",
+      "from": "help_me_decide_whether_to_hire_a_personal_assistant_or_use_an_ai_assistant_to_save_money",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "personal_assistant",
+      "from": "help_me_decide_whether_to_hire_a_personal_assistant_or_use_an_ai_assistant_to_save_money",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "ai_assistant",
+      "from": "help_me_decide_whether_to_hire_a_personal_assistant_or_use_an_ai_assistant_to_save_money",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "personal_assistant_plus_ai",
+      "from": "help_me_decide_whether_to_hire_a_personal_assistant_or_use_an_ai_assistant_to_save_money",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "human_assistant_capacity",
+      "from": "personal_assistant",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "ai_assistant_use",
+      "from": "personal_assistant",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "annual_assistant_tool_cost",
+      "from": "personal_assistant",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "human_assistant_capacity",
+      "from": "ai_assistant",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "ai_assistant_use",
+      "from": "ai_assistant",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "annual_assistant_tool_cost",
+      "from": "ai_assistant",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "human_assistant_capacity",
+      "from": "personal_assistant_plus_ai",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "ai_assistant_use",
+      "from": "personal_assistant_plus_ai",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "annual_assistant_tool_cost",
+      "from": "personal_assistant_plus_ai",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "human_assistant_capacity",
+      "from": "current_approach",
+      "origin": "repair",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis",
+        "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "ai_assistant_use",
+      "from": "current_approach",
+      "origin": "repair",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis",
+        "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "annual_assistant_tool_cost",
+      "from": "current_approach",
+      "origin": "repair",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis",
+        "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "delegation_quality",
+      "from": "human_assistant_capacity",
+      "strength": {
+        "std": 0.08660254037844385,
+        "mean": 0.5
+      },
+      "provenance": {
+        "source": "user_specified"
+      },
+      "effect_direction": "positive",
+      "exists_defaulted": true,
+      "exists_probability": 0.8,
+      "provenance_display": "user_set"
+    },
+    {
+      "to": "assistant_coordination_overhead",
+      "from": "human_assistant_capacity",
+      "strength": {
+        "std": 0.125,
+        "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "delegation_quality",
+      "from": "ai_assistant_use",
+      "strength": {
+        "std": 0.125,
+        "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "ai_output_error_risk",
+      "from": "ai_assistant_use",
+      "strength": {
+        "std": 0.125,
+        "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "ability_to_focus_on_high_value_tasks",
+      "from": "annual_assistant_tool_cost",
+      "strength": {
+        "std": 0.125,
+        "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "routine_work_hours_delegated",
+      "from": "delegable_routine_workload",
+      "strength": {
+        "std": 0.125,
+        "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "routine_work_hours_delegated",
+      "from": "delegation_quality",
+      "strength": {
+        "std": 0.125,
+        "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "delegation_quality",
+      "from": "ai_output_error_risk",
+      "strength": {
+        "std": 0.125,
+        "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "delegation_quality",
+      "from": "assistant_coordination_overhead",
+      "strength": {
+        "std": 0.125,
+        "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "ability_to_focus_on_high_value_tasks",
+      "from": "routine_work_hours_delegated",
+      "strength": {
+        "std": 0.125,
+        "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+    }
+  ],
+  "node_count": 14,
+  "edge_count": 26
+}
