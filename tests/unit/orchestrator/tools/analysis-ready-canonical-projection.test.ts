@@ -114,7 +114,17 @@ function unreachableFactorFixture(): {
         label: 'Phase carefully',
         interventions: options[1]!.interventions,
       },
-      { id: 'fac_reach', kind: 'factor' as const, label: 'Customer reach', category: 'controllable' as const },
+      // A status-quo level (between the options' 0.4 and 0.8): since #2164 an unvalued goal root is a factor-scoped
+      // `MISSING_FACTOR_LEVEL` that turns the status to `needs_user_input`, so without it the ONLY gap is no longer
+      // the unreachable factor below. `fac_capacity` stays unvalued on purpose: the unreachable-controllable ask
+      // already owns it, and the level rule skips a factor that is already factor-blocked.
+      {
+        id: 'fac_reach',
+        kind: 'factor' as const,
+        label: 'Customer reach',
+        category: 'controllable' as const,
+        observed_state: { value: 0.6 },
+      },
       {
         id: 'fac_capacity',
         kind: 'factor' as const,
@@ -204,9 +214,12 @@ describe('canonical persisted-graph readiness projection', () => {
           label: 'Phase carefully',
           interventions: { fac_primary: 0.4, fac_slash: 0.5, fac_top_only: 0.6 },
         },
-        { id: 'fac_primary', kind: 'factor', label: 'Primary reach', category: 'controllable' },
-        { id: 'fac_slash', kind: 'factor', label: 'Slash reach', category: 'controllable' },
-        { id: 'fac_top_only', kind: 'factor', label: 'Top-only reach', category: 'controllable' },
+        // Status-quo levels (inside the options' unit scale, distinct from every carrier): since #2164 an unvalued
+        // goal root is a factor-scoped `MISSING_FACTOR_LEVEL` that refuses the Run, so without them this graph is
+        // not `ready` and the precedence assertion below is never reached.
+        { id: 'fac_primary', kind: 'factor', label: 'Primary reach', category: 'controllable', observed_state: { value: 0.3 } },
+        { id: 'fac_slash', kind: 'factor', label: 'Slash reach', category: 'controllable', observed_state: { value: 0.3 } },
+        { id: 'fac_top_only', kind: 'factor', label: 'Top-only reach', category: 'controllable', observed_state: { value: 0.3 } },
       ],
       edges: [
         edge('dec_route', 'opt_fast'),

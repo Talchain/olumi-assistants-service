@@ -120,12 +120,20 @@ const PERSISTED_1OPT: GraphStateIngress = {
 // A distinct but still canonical-ready persisted graph. Used for the stale
 // analysis control so freshness divergence is tested independently of the
 // one-option structural block above.
+//
+// ⚠ `f1` also gets a status-quo level here. In REQUEST_2OPT the options set it to
+// 1 and 0, so it reads as a 0/1 switch, which #2164's level rule exempts; opt_b's
+// 0.2 ends that, and an unvalued goal root is then a factor-scoped
+// `MISSING_FACTOR_LEVEL` that refuses the Run — so without a level this graph is
+// no longer "still canonical-ready" and no rerun can be required of it.
 const PERSISTED_2OPT_CHANGED: GraphStateIngress = {
   ...REQUEST_2OPT,
   nodes: REQUEST_2OPT.nodes.map((node) =>
     node.id === 'opt_b'
       ? { ...node, interventions: { f1: { value: 0.2 } } }
-      : node,
+      : node.id === 'f1'
+        ? { ...node, observed_state: { value: 0.5 } }
+        : node,
   ),
   options: Array.isArray(REQUEST_2OPT.options)
     ? REQUEST_2OPT.options.map((option) => {
