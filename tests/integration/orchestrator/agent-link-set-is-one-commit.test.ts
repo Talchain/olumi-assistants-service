@@ -377,7 +377,7 @@ describe('the link writer never stamps an adopted estimate as the user\'s', () =
     const event = { kind: 'edge_strength_edit', from: 'delegation_quality', to: 'routine_work_hours_delegated', intent: 'confirm_current',
       direction_intent: 'preserve', magnitude: 0.5, expected: { mean: 0.5, effect_direction: 'positive' } };
     const res = await runWithApprovedLinkAdoptions(
-      [{ scenarioId: SCENARIO_ID, proposalId: 'p', from: 'delegation_quality', to: 'routine_work_hours_delegated', magnitude: 0.5 }],
+      [{ scenarioId: SCENARIO_ID, proposalId: 'p', from: 'delegation_quality', to: 'routine_work_hours_delegated', magnitude: 0.5, band: 'strong' }],
       () => applyEdgeStrengthEdit({ payload: { kind: 'system_event', turn_id: 't', scenario_id: SCENARIO_ID, stage: 'frame', event } as never,
         event: event as never, requestId: 'r', persistedGraph: g, lastRunIdentityUse: null }),
     );

@@ -510,10 +510,11 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
           // confirm writes above, with Olumi's band): the user's settled view, so the magnitude contract never re-sizes
           // the band they just agreed to (`sizedByOlumi`; Canonical seam check 5874263009, DL 5874274221).
           const { natural_effect: _oldNaturalEffect, ...keptProvenance } = (edge.provenance ?? {}) as Record<string, unknown>;
-          edge.provenance = {
+          const reviewed: Record<string, unknown> = {
             ...keptProvenance,
             reviewed_by_user: { intent: 'confirm', at: new Date().toISOString(), band: adopted.band },
-          } as typeof edge.provenance;
+          };
+          edge.provenance = reviewed as typeof edge.provenance;
         } else {
           const {
             natural_effect: _naturalEffect,
