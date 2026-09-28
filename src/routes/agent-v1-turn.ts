@@ -1829,6 +1829,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     /** A Run with no result: its typed outcome's own chips (the identity ask's "Check the figures", a retry), `run-outcome.ts`. */
     let runOutcomeChips: OfferedAction[] = [];
     let runOutcomeSaid = false;
+    /** Which typed outcome this turn's Run was said as (`run-outcome.ts`), on either path; `undefined` when none. */
+    let runOutcomeKind: RunOutcome['kind'] | undefined;
     let result: AgentTurnResult | undefined;
     if (approvedProposal !== undefined) {
       const fastStartedAt = Date.now();
@@ -1962,7 +1964,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * CEE's composed identity ask became the model's prose, and its "Check the figures" chip was dropped.
        */
       const outcome = (ran as { run_outcome?: RunOutcome }).run_outcome;
-      if (outcome !== undefined) { runOutcomeChips = outcome.chips.map((c) => ({ ...c })); runOutcomeSaid = true; }
+      if (outcome !== undefined) { runOutcomeChips = outcome.chips.map((c) => ({ ...c })); runOutcomeSaid = true; runOutcomeKind = outcome.kind; }
       runInterpreted = ran.refusal !== 'run_failed' && outcome === undefined;
       if (runInterpreted) try {
         const resp = await callModel({
@@ -2301,6 +2303,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const approvalLeftBlocked = result.tool_calls.some((c) => c.name === 'authorise_change' && c.mutated === true)
       && knownNotRunnable(analysisReady)
       && approvals.length === 0 && carriedApproval.length === 0;
+    /**
+     * ⛔ THE AGENT'S OWN RUN OFFERS ITS OUTCOME'S CHIPS TOO (DL #2233 follow-up 2). Only the Run button's path offered
+     * them, so an identity ask the Agent reached by calling `run_analysis` itself lost its "Check the figures".
+     */
+    if (fastPath !== 'run') {
+      const loopOutcomes = result.tool_results
+        .map((r) => (r as { run_outcome?: RunOutcome } | undefined)?.run_outcome)
+        .filter((o): o is RunOutcome => o !== undefined);
+      if (loopOutcomes.length > 0) {
+        runOutcomeChips = [...new Map(loopOutcomes.flatMap((o) => o.chips).map((c) => [c.id, { ...c }] as const)).values()];
+        runOutcomeKind = loopOutcomes[loopOutcomes.length - 1]!.kind;
+      }
+    }
     const offeredNow: OfferedAction[] = [
       ...approvals,
       ...carriedApproval,
@@ -2525,7 +2540,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       && (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
       ? breakEvenFor(readbackGraph, identityEvaluated) : null;
     if (breakEven !== null && typeof wireBody.assistant_text === 'string') {
-      wireBody = { ...wireBody, assistant_text: withBreakEvenAnswer(wireBody.assistant_text, breakEven) };
+      // After "The figures don't add up … Which is right?", the arithmetic is one side of the conflict: it opens on its
+      // condition, "If MRR is …", with no lead-in that reads as an answer (AIQ #72 5868909577).
+      wireBody = { ...wireBody, assistant_text: withBreakEvenAnswer(wireBody.assistant_text, breakEven, { afterIdentityAsk: runOutcomeKind === 'identity_ask' }) };
     }
     /**
      * ⭐ C5 — THE AGENT'S PROVISIONAL VIEW (Paul, DL #70 5855324470: "Yes, labelled provisional"). AFTER the leader gate
