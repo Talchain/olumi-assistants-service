@@ -70,7 +70,15 @@ import {
   type EditGmGoverningVerdict,
 } from './edit-graph-referee-gate.js';
 import { detectOptionOwnValueSubstitution } from '../routing/option-observed-state-substitution.js';
-import { GM_HELD_SWITCH_FACTORS_KEY, GM_HELD_USER_STATED_NODES_KEY, stampNewSwitchFactors } from '../routing/add-option-transaction.js';
+import {
+  GM_HELD_GRADED_TODAY_KEY,
+  GM_HELD_SWITCH_FACTORS_KEY,
+  GM_HELD_USER_STATED_NODES_KEY,
+  readGradedTodayMember,
+  stampNewGradedTodayLevels,
+  stampNewSwitchFactors,
+  type GradedTodayLevel,
+} from '../routing/add-option-transaction.js';
 import { elideCascadeRedundantRemoveEdges } from '../graph-management/cascade-removes.js';
 import { propagateConfirmedInterventionRemovals } from '../graph-management/confirmed-intervention-removals.js';
 import type { FrameFreshness } from '../graph-management/types.js';
@@ -480,6 +488,11 @@ export type GmHeldResumeRead =
        * stamps `user_set`. Absent on every hold with no typed authorship signal.
        */
       readonly userStatedNodeIds?: readonly string[];
+      /**
+       * ⭐ PJ-A1 £49 — the NEW graded factors' stated today levels the hold records (`GM_HELD_GRADED_TODAY_KEY`), which the
+       * confirm writes in the same apply (`stampNewGradedTodayLevels`). Absent on every other hold.
+       */
+      readonly gradedToday?: readonly GradedTodayLevel[];
     };
 
 /**
@@ -510,12 +523,16 @@ export function readGmHeldResume(pending: PendingAction): GmHeldResumeRead {
   const userStatedNodeIds = Array.isArray(rawStated) && rawStated.length > 0
     && rawStated.every((id) => typeof id === 'string' && id.length > 0)
     ? [...(rawStated as string[])] : undefined;
+  // ⭐ PJ-A1 £49 — a new graded factor's stated today level. A malformed member is read as NO signal (nothing stamped): the
+  // batch is whole without it, and the factor is then asked for — under-claiming, never a guessed value.
+  const gradedToday = readGradedTodayMember(patch[GM_HELD_GRADED_TODAY_KEY]);
   return {
     kind: 'ok',
     operations: parsed.data,
     ...(envelopeCap !== undefined ? { envelopeCap } : {}),
     ...(rawSwitches !== undefined ? { switchFactorIds: [...(rawSwitches as string[])] } : {}),
     ...(userStatedNodeIds !== undefined ? { userStatedNodeIds } : {}),
+    ...(gradedToday !== undefined ? { gradedToday } : {}),
   };
 }
 
@@ -534,6 +551,8 @@ export interface GmHeldExecuteInput {
    * none: an approved add keeps the provenance it was proposed with.
    */
   readonly userStatedNodeIds?: readonly string[];
+  /** ⭐ PJ-A1 £49 — the hold's new graded factors' stated today levels (`readGmHeldResume`); they land in this apply. */
+  readonly gradedToday?: readonly GradedTodayLevel[];
   /** The CURRENT graph (persisted authority; hash-verified by the caller). */
   readonly currentGraph: unknown;
   /** Like-for-like hash of `currentGraph` (already matched the pin). */
@@ -710,7 +729,22 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
     );
     return { status: 'apply_failed', reason: 'apply_error' };
   }
-  const stampedOperations: PatchOperation[] = switchStamp.operations;
+  // ⭐ PJ-A1 £49 (DL #70 5860365834) — a new GRADED factor's today level the user stated, framed as admission frames a
+  // stated baseline (`brief_extraction`): the same carrier, the same place, the same fail-closed identity rule as the
+  // switch's today-0 above. So the factor, its status-quo level and the option land in ONE apply and ONE commit.
+  const todayStamp = stampNewGradedTodayLevels(switchStamp.operations, input.gradedToday ?? []);
+  if (!todayStamp.ok) {
+    log.warn(
+      {
+        request_id: input.requestId,
+        scenario_id: input.scenarioId,
+        operations_count: operations.length,
+      },
+      'GM held-execute — the hold names a stated today level for a factor its batch does not add as a new graded factor; declining whole batch (nothing persisted)',
+    );
+    return { status: 'apply_failed', reason: 'apply_error' };
+  }
+  const stampedOperations: PatchOperation[] = todayStamp.operations;
 
   // ── 2b. Canonicalise value-op field spellings (R1 residual) ────────────
   // The confirm re-applies LOCALLY (no PLoT round-trip), so a tunable value op

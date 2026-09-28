@@ -18,12 +18,14 @@ import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-rece
 import { createHash, randomUUID } from 'node:crypto';
 import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
 import { AGENT_ADD_OPTION_CHIP_ID, AGENT_RUN_ANALYSIS_CHIP_ID } from '../../handlers/agent-chip-ids.js';
-import { runWithUserNamedOptions } from '../../handlers/add-option-authorship-context.js';
+import { runWithUserNamedOptions, type StatedTodayLevel } from '../../handlers/add-option-authorship-context.js';
 import {
   buildAddOptionsTransaction,
+  GM_HELD_GRADED_TODAY_KEY,
   GM_HELD_SWITCH_FACTORS_KEY,
   MAX_OPTIONS_PER_TRANSACTION,
   NEW_SWITCH_TODAY,
+  readGradedTodayMember,
 } from '../../routing/add-option-transaction.js';
 import { GM_HELD_HANDLER_ID, GM_HELD_OPERATIONS_MAX_JSON_CHARS, gmHeldProposalRef } from '../../handlers/edit-graph-referee-gate.js';
 import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../../graph-management/types.js';
@@ -135,7 +137,7 @@ import { figureInUserUnits } from '../approval-chips.js';
 import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
 
-import { defaultFrameFor, nonlinearIdentityForAgent } from '../admit-model.js';
+import { defaultFrameFor, framedObservedState, nonlinearIdentityForAgent } from '../admit-model.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
@@ -1184,6 +1186,9 @@ export function createAgentCapabilities(
     // The new switches the hold named (`GM_HELD_SWITCH_FACTORS_KEY`): their today-0 was committed with them, as Olumi's.
     const heldSwitches = (hold.action as { inline_patch?: Record<string, unknown> }).inline_patch?.[GM_HELD_SWITCH_FACTORS_KEY];
     const switchIds = new Set(Array.isArray(heldSwitches) ? heldSwitches.filter((x): x is string => typeof x === 'string') : []);
+    // ⭐ PJ-A1 £49: the new graded factors whose stated today level the hold named (`GM_HELD_GRADED_TODAY_KEY`).
+    const todayIds = new Set((readGradedTodayMember((hold.action as { inline_patch?: Record<string, unknown> }).inline_patch?.[GM_HELD_GRADED_TODAY_KEY]) ?? [])
+      .map((l) => l.factor_id));
     // SLICE C2: a new risk, said from what was COMMITTED — what it threatens, what drives it, and who sized each link.
     for (const rid of addedRiskIds) {
       const risk = after!.nodes.find((x) => x.id === rid);
@@ -1212,6 +1217,14 @@ export function createAgentCapabilities(
       if (committedOff) {
         sentences.push(`Also added the factor "${String(f.label ?? fid)}", which changes ${changes.join(', ')}; ${howStronglyWords(outgoing)} `
           + 'Olumi takes it as off today and the option switches it on; that it is off today is Olumi\'s estimate, for you to correct.');
+        continue;
+      }
+      // ⭐ PJ-A1 £49: a new graded factor committed WITH the today level the user stated is said as that, never asked again.
+      const statedRaw = (os as { raw_value?: unknown } | undefined)?.raw_value ?? os?.value;
+      if (todayIds.has(fid) && os?.source === 'brief_extraction' && typeof statedRaw === 'number') {
+        const u = (os as { unit?: unknown }).unit;
+        sentences.push(`Also added the factor "${String(f.label ?? fid)}", which changes ${changes.join(', ')}; ${howStronglyWords(outgoing)} `
+          + `Its value today is ${statedRaw}${typeof u === 'string' && u !== '' ? ` ${u}` : ''}, as you said.`);
         continue;
       }
       factorParts.push({ label: String(f.label ?? fid), changes, strength: howStronglyWords(outgoing) });
@@ -4401,6 +4414,56 @@ export function createAgentCapabilities(
             + 'Ask the user for a figure within that range, in the same units, or whether that range itself is wrong.',
         };
       }
+      /**
+       * ⭐ A NEW GRADED FACTOR'S TODAY LEVEL, ONLY WHEN THE USER STATED IT (PJ-A1 £49: DL #70 5860365834; AIQ 5860384275,
+       * 5860839793). Journey A's "£59 for new Pro customers" minted "New Pro customer price" with no today level: ISL
+       * defaulted it to 0 (`GOAL_ANCESTOR_DATA_GAP`), so the status quo was measured from £0. Paul's brief says "from £49".
+       *
+       * The Agent's `new_factors[].today` is taken ONLY when the user's own typed words in this conversation
+       * (`ctx.user_text`, bound by the route — the brief typed as the first message included) write that figure in that
+       * kind of unit (`figureTheUserWrote`, the lane's one matcher). Not `brief_text` from the store: on this lane it is the
+       * Agent's own `build_model_from_brief` argument, never bound to what the user typed. Then it is framed exactly as
+       * admission frames a baseline the brief states (`framedObservedState`, `brief_extraction`), on admission's own
+       * defaulted range (`defaultFrameFor` over the largest figure this change carries for the factor — its today level and
+       * any level an option here names for it), so the option's own level is later read on the SAME range.
+       *
+       * Anything else is dropped and SAID (`today_not_set`), and the factor stays valueless and asked — never 0: a figure
+       * the user did not write (Olumi's, or a guess), a non-number, a negative level (a 0-to-range frame cannot hold it),
+       * or a today level for a SWITCH (its today is Olumi's off, `stampNewSwitchFactors`). It rides the in-process
+       * authorship context to the hold, never the wire; the confirm writes it in the same apply as the option.
+       */
+      const requestedNew = Array.isArray(args?.new_factors) ? args.new_factors as readonly unknown[] : [];
+      const statedToday: (StatedTodayLevel & { key: string; value: number; unit?: string })[] = [];
+      const todayNotSet: { factor: string; value: unknown; reason: string }[] = [];
+      for (const f of newFactors) {
+        const req = requestedNew.find((r) => norm((r as { label?: unknown } | null)?.label) === norm(f.label)) as { today?: unknown } | undefined;
+        const today = req?.today;
+        if (today === undefined || today === null) continue;
+        const t = (typeof today === 'object' && !Array.isArray(today) ? today : {}) as { value?: unknown; unit?: unknown };
+        const unit = typeof t.unit === 'string' && t.unit.trim() !== '' ? t.unit.trim() : undefined;
+        const shown = `${typeof t.value === 'number' ? t.value : JSON.stringify(t.value ?? null)}${unit !== undefined ? ` ${unit}` : ''}`;
+        if (f.kind === 'switch') {
+          todayNotSet.push({ factor: f.label, value: t.value ?? null,
+            reason: `"${f.label}" is a switch: it is off today (Olumi's reading, for the user to correct), so a today level of ${shown} was not taken.` });
+          continue;
+        }
+        if (typeof t.value !== 'number' || !Number.isFinite(t.value) || t.value < 0) {
+          todayNotSet.push({ factor: f.label, value: t.value ?? null,
+            reason: `${shown} is not a level "${f.label}" can hold today, so its value today is not set. Ask the user what it is today.` });
+          continue;
+        }
+        if (!figureTheUserWrote(t.value, unit, ctx.user_text)) {
+          todayNotSet.push({ factor: f.label, value: t.value,
+            reason: `The user's own words do not state ${shown}, so today's value for "${f.label}" is not set: it is never taken from Olumi's words or a guess. Ask the user what it is today.` });
+          continue;
+        }
+        const named = plans.flatMap(({ spec }) => spec.acts_on.filter((x) => norm(x.factor_label) === norm(f.label))
+          .map((x) => x.level?.value).filter((v): v is number => typeof v === 'number' && Number.isFinite(v)));
+        const largest = Math.max(Math.abs(t.value), ...named.map((v) => Math.abs(v)));
+        const os = framedObservedState({ baseline_value: t.value, unit: unit ?? null, provenance: 'explicit',
+          plausible_max: largest > 1 ? defaultFrameFor(largest) : null });
+        statedToday.push({ key: f.key, label: f.label, value: t.value, ...(unit !== undefined ? { unit } : {}), observed_state: os });
+      }
       /** The new factors a set of options uses: a factor only a left-out option acted on is left out with it. */
       const factorsOf = (es: typeof entries) => newFactors.filter((f) => es.some((e) => e.plan.newActsOn.some((a) => a.key === f.key)));
       const parametersOf = (es: typeof entries) => {
@@ -4471,9 +4534,12 @@ export function createAgentCapabilities(
        * here: Olumi mints it. The ids ride IN-PROCESS to the hold (`add-option-authorship-context.ts`), never on the wire.
        */
       const userNamedIds = kept.filter((x) => wordsTheUserWrote(x.plan.label, ctx.user_turn_text)).map((x) => x.plan.optionId);
-      const r = userNamedIds.length === 0
+      // ⭐ PJ-A1 £49: a stated today level rides the SAME in-process context — only for a factor this change still adds.
+      const keptToday = statedToday.filter((t) => keptFactors.some((f) => f.key === t.key));
+      const r = userNamedIds.length === 0 && keptToday.length === 0
         ? await sendAdd()
-        : await runWithUserNamedOptions({ scenarioId: ctx.scenario_id, turnId: addTurnId, optionIds: userNamedIds }, sendAdd);
+        : await runWithUserNamedOptions({ scenarioId: ctx.scenario_id, turnId: addTurnId, optionIds: userNamedIds,
+          ...(keptToday.length > 0 ? { statedToday: keptToday.map((t) => ({ label: t.label, observed_state: t.observed_state })) } : {}) }, sendAdd);
       /**
        * ⛔ HELD, OR NOT PROPOSED. The only proof is the product's own handle for THIS batch (`gmh_` over the
        * scenario and the FIRST option's id), and, where the store can be read, the held batch itself adding
@@ -4492,7 +4558,22 @@ export function createAgentCapabilities(
             // Every factor this change adds is in the held batch too, as a factor.
             && keptFactors.every((f) => ops.some((o) => o.op === 'add_node'
               && (o.value as { kind?: unknown } | undefined)?.kind === 'factor'
-              && norm((o.value as { label?: unknown } | undefined)?.label) === norm(f.label)));
+              && norm((o.value as { label?: unknown } | undefined)?.label) === norm(f.label)))
+            // ⭐ PJ-A1 £49: every stated today level is on the hold, for the factor of that label — or it is not said as set.
+            && keptToday.every((t) => {
+              const id = ops.find((o) => o.op === 'add_node' && (o.value as { kind?: unknown } | undefined)?.kind === 'factor'
+                && norm((o.value as { label?: unknown } | undefined)?.label) === norm(t.label))?.path;
+              const member = ((hold as { action?: { inline_patch?: Record<string, unknown> } } | undefined)?.action?.inline_patch ?? {})[GM_HELD_GRADED_TODAY_KEY];
+              // Key order is not identity: the store gives JSONB back in its own key order.
+              const sameLevel = (os: unknown): boolean => {
+                const o = (os ?? {}) as Record<string, unknown>;
+                const want = t.observed_state as Record<string, unknown>;
+                return Object.keys(o).length === Object.keys(want).length && Object.keys(want).every((k) => o[k] === want[k]);
+              };
+              return id !== undefined && Array.isArray(member)
+                && member.some((m) => (m as { factor_id?: unknown } | null)?.factor_id === id
+                  && sameLevel((m as { observed_state?: unknown }).observed_state));
+            });
         } catch {
           heldBatchOk = false;
         }
@@ -4543,14 +4624,24 @@ export function createAgentCapabilities(
             how_strongly: 'Olumi\u2019s estimate, for the user to correct',
             ...(f.kind === 'switch'
               ? { kind: 'switch', today: 'off \u2014 Olumi\u2019s reading of the option, for the user to correct', under_the_option: 'on' }
-              : { current_value: null }),
+              : ((): { current_value: null | { value: number; unit?: string; stated_by: 'user' } } => {
+                const t = keptToday.find((x) => x.key === f.key);
+                return { current_value: t === undefined ? null : { value: t.value, ...(t.unit !== undefined ? { unit: t.unit } : {}), stated_by: 'user' } };
+              })()),
           })),
           new_factors_note: keptFactors.every((f) => f.kind === 'switch')
             ? NEW_SWITCH_NOTE
             : 'This change also ADDS these factors. Say so: what each changes and which way, that how strongly is Olumi\u2019s '
               + 'estimate, and that its current value is not set yet. Ask the user what it is today (for example, whether it is '
               + 'offered at all yet) \u2014 nothing else will ask, and the comparison needs it; never say the analysis will ask for it.'
+              + (keptToday.length > 0 ? ' Except a factor whose current_value is set: that is its value today as the user stated it '
+                + '(stated_by user), recorded with this change \u2014 say it, and do not ask for it.' : '')
               + (keptFactors.some((f) => f.kind === 'switch') ? ` Except the switches (kind switch): ${NEW_SWITCH_NOTE}` : ''),
+        } : {}),
+        ...(todayNotSet.some((x) => keptFactors.some((f) => f.label === x.factor)) ? {
+          today_not_set: todayNotSet.filter((x) => keptFactors.some((f) => f.label === x.factor)),
+          today_not_set_note: 'A today value you gave for a factor this change adds was NOT taken (each with why). Never say it '
+            + 'was recorded. Where it says to, ask the user what it is today.',
         } : {}),
         note:
           `Nothing has changed yet. Show the user ${described.length === 1 ? 'the option' : `all ${described.length} options, as ONE change they approve once`}, `

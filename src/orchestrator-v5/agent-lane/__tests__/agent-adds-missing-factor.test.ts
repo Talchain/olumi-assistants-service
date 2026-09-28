@@ -15,6 +15,7 @@ import { planNewFactors, planNewOption } from '../propose-new-option.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { AGENT_TOOLS } from '../runtime/agent-tools.js';
+import { statedTodayLevelsFor } from '../../handlers/add-option-authorship-context.js';
 
 type Node = { id: string; kind: string; label: string; category?: string };
 const served = JSON.parse(readFileSync(new URL('./fixtures/served-f4-before-addon-fbb12b8.json', import.meta.url), 'utf8')) as { nodes: Node[]; edges: unknown[] };
@@ -435,5 +436,71 @@ describe('the acts_on level the model writes says a new switch takes no level', 
   };
   it.each(['single', 'several'] as const)('RED: the %s-option acts_on level description carries the rule', (path) => {
     expect(levelDoc(path).toLowerCase()).toContain(RULE);
+  });
+});
+
+/**
+ * ⭐ PJ-A1 £49 (DL #70 5860365834; AIQ 5860384275 / 5860839793) — A NEW GRADED FACTOR'S TODAY LEVEL IS TAKEN ONLY FROM THE
+ * USER'S OWN WORDS, AND NEVER RIDES THE WIRE. The Agent may give `new_factors[].today`; the capability keeps it only when
+ * `figureTheUserWrote` finds that figure in the user's typed words, frames it as admission frames a stated baseline, and
+ * hands it to the hold through the in-process authorship context — read here INSIDE the dispatch, exactly where route-v2
+ * reads it. The chip's `parameters` are byte-identical with or without it.
+ */
+describe('PJ-A1 £49 — propose_new_option carries a new graded factor\'s today level only when the user wrote it', () => {
+  const SAID = `${F4} We already sell the add-on at £5 a month to a pilot group.`;
+  const setup = () => {
+    const sent: { path: string; body: unknown }[] = [];
+    const carried: unknown[] = [];
+    const d: InternalDispatch = async (path, body) => {
+      if (path.endsWith('/graph')) return { status: 200, json: { graph: served, graph_hash: 'h0' } };
+      sent.push({ path, body });
+      const b = body as { scenario_id?: string; turn_id?: string };
+      carried.push(statedTodayLevelsFor(String(b.scenario_id), String(b.turn_id)));
+      return { status: 500, json: {} };
+    };
+    return { caps: createAgentCapabilities(d, new ProposalStore()), sent, carried };
+  };
+  const call = (today?: unknown, kind?: 'switch') => ({
+    label: 'Keep £49 and add a paid AI add-on',
+    acts_on: [{ factor_label: 'AI add-on price', direction: 'positive', ...(kind === 'switch' ? { level: { value: 1 } } : {}) }],
+    new_factors: [{ ...ADDON, ...(kind !== undefined ? { kind } : {}), ...(today !== undefined ? { today } : {}) }],
+    rationale: 'the user asked for it',
+  });
+  const paramsOf = (sent: { body: unknown }[]) =>
+    (sent[0]?.body as { chip?: { parameters?: Record<string, unknown> } } | undefined)?.chip?.parameters;
+
+  it('RED: the user wrote £5 → the context names the add-on price\'s today level, framed as a stated baseline; the wire carries nothing new', async () => {
+    const withToday = setup();
+    await withToday.caps.proposeNewOption({ ...ctx, user_text: SAID }, call({ value: 5, unit: 'GBP/month' }) as never);
+    expect(withToday.carried).toEqual([[{ label: 'AI add-on price',
+      observed_state: { value: 0.5, raw_value: 5, cap: 10, declared_scale: 'unit_interval', unit: 'GBP/month', source: 'brief_extraction' } }]]);
+    const without = setup();
+    await without.caps.proposeNewOption({ ...ctx, user_text: SAID }, call() as never);
+    expect(without.carried).toEqual([[]]);
+    // The option id is minted per call; everything else on the wire is byte-identical.
+    const wire = (x: { body: unknown }[]) => JSON.stringify({ ...paramsOf(x), option_id: '<minted>' });
+    expect(wire(withToday.sent)).toBe(wire(without.sent));
+    expect(JSON.stringify(paramsOf(withToday.sent))).not.toMatch(/today|observed_state|brief_extraction/);
+  });
+
+  it.each([
+    ['a figure the user never wrote (7)', { value: 7, unit: 'GBP/month' }, undefined],
+    ['a money figure the user wrote only as a percentage', { value: 4, unit: 'GBP' }, undefined],
+    ['a non-number', { value: '5', unit: 'GBP/month' }, undefined],
+    ['a negative level', { value: -5, unit: 'GBP/month' }, undefined],
+    ['a today level for a SWITCH (its today is Olumi\'s off)', { value: 5, unit: 'GBP/month' }, 'switch' as const],
+  ])('CONTRAST: %s → nothing is carried; the change is still sent', async (_name, today, kind) => {
+    const { caps, sent, carried } = setup();
+    await caps.proposeNewOption({ ...ctx, user_text: `${SAID} Keep churn under 4%.` }, call(today, kind) as never);
+    expect(sent).toHaveLength(1);
+    expect(carried).toEqual([[]]);
+  });
+
+  it('the tool tells the model: today\'s level for a factor it adds ONLY if the user stated it — never an estimate, never 0', () => {
+    const p = (AGENT_TOOLS.find((t) => t.name === 'propose_new_option')!.parameters as { properties: Record<string, any> }).properties;
+    const today = p['new_factors'].items.properties['today'];
+    expect(today.properties.value.type).toBe('number');
+    expect(String(today.description)).toContain('ONLY if the user stated it');
+    expect(String(today.description)).toMatch(/never your own estimate, never a placeholder or 0/i);
   });
 });

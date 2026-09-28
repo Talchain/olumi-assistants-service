@@ -1212,4 +1212,199 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(held[0]!.action.inline_patch!.operations!.some((o) => o.op === 'add_node' && o.path === 'frg0001'), 'the hold is for this option').toBe(true);
     expect(await statedOnHold(), 'a wire claim is never recorded').toBeUndefined();
   }, 120_000);
+
+  // ---------------------------------------------------------------------------
+  // ⭐ PJ-A1 £49 — A NEW GRADED FACTOR ENTERS THE ANALYSIS WITH ITS STATUS-QUO LEVEL (DL #70 5860365834; AIQ 5860384275,
+  // 5860839793). Journey A's served add: "£59 for new Pro customers; grandfather existing customers" minted the NEW graded
+  // factor "New Pro customer price" with no today level, so ISL named it in GOAL_ANCESTOR_DATA_GAP and the status quo was
+  // measured from £0. Its today level is the user's own "from £49" — stamped at the confirm, in the same apply and commit
+  // as the option, framed as admission frames a stated baseline (`brief_extraction`). A figure the user's own words do not
+  // state is never stamped, and no today level is never a 0.
+  //
+  // FIXTURE: journey A's served model at that moment (DL run pj-20260927T223136Z, turn A05 `draft_graph`, verbatim; see its
+  // `_provenance`). The brief is Paul's, verbatim, typed as the session's first message.
+  // ---------------------------------------------------------------------------
+  const JOURNEY_A_FX = JSON.parse(readFileSync(new URL('./fixtures/journey-a-16359f29-before-new-pro-price.json', import.meta.url), 'utf8')) as Record<string, unknown>;
+  const JOURNEY_A = (() => { const { _provenance: _p, ...graph } = JOURNEY_A_FX; return graph; })();
+  const BRIEF_A = (JOURNEY_A_FX['_provenance'] as { brief_verbatim: string }).brief_verbatim;
+  const OPT_A = '£59 for new Pro customers; grandfather existing customers';
+  const NEW_PRICE = 'New Pro customer price';
+  const NEW_PRICE_FAC = 'fac_new_pro_customer_price';
+  const GF = 'Existing Pro customers grandfathered';
+  const GF_FAC = 'fac_existing_pro_customers_grandfathered';
+  /** Today's £49, exactly as admission frames a baseline the brief states (`framedObservedState`): raw kept, on 0–100. */
+  const STATED_49 = { value: 0.49, raw_value: 49, cap: 100, declared_scale: 'unit_interval', unit: 'GBP/month', source: 'brief_extraction' };
+  /**
+   * Journey A's add, as served: the option acts on a NEW graded price (Olumi's £59 for the option — left for its own
+   * level write, as today) and a NEW switch. `today` is what the Agent gives for the price, if anything.
+   */
+  const proposeJourneyA = async (today: Record<string, unknown> | undefined, firstMessage: string = BRIEF_A, olumiSaid = 'Noted. Shall I build on the model you have?') => {
+    script = [() => say(olumiSaid)];
+    await turn({ message: firstMessage });
+    script = [
+      () => fnCall('propose_new_option', {
+        label: OPT_A,
+        acts_on: [
+          { factor_label: NEW_PRICE, direction: 'positive', level: { value: 59, unit: 'GBP/month', estimate: true, basis: 'the option is named for £59' } },
+          { factor_label: GF, direction: 'positive' },
+        ],
+        new_factors: [
+          { label: NEW_PRICE, affects: [{ label: 'Pro plan MRR', direction: 'positive' }], ...(today !== undefined ? { today } : {}) },
+          { label: GF, kind: 'switch', affects: [{ label: 'Monthly churn rate', direction: 'negative' }] },
+        ],
+        rationale: 'The user asked for it, with Olumi’s assumptions.',
+      }),
+      (body) => { toolOutputSeen = JSON.stringify(body['input'] ?? []); return say('I would add it. Shall I?'); },
+    ];
+    return turn({ message: `Let's add the grandfathering of existing customers: "${OPT_A}". Just add it with your assumptions, and I'll review it.` });
+  };
+  /** What the Agent's model was given back from its propose_new_option call (the second model call's input). */
+  let toolOutputSeen = '';
+  const heldPatch = async () => (await heldOnLatestRow())[0]!.action.inline_patch as Record<string, unknown> & { operations: { op: string; path: string; value?: Record<string, unknown> }[] };
+  type WireNode = { id: string; kind: string; label?: string; observed_state?: { value?: unknown; raw_value?: unknown }; interventions?: Record<string, unknown> };
+  type PlotBound = { graph: { nodes: WireNode[]; edges: { from: string; to: string }[] }; goal_node_id?: string; parameter_uncertainties?: { node_id?: string }[] };
+  /** The REAL run loader and the REAL run_analysis handler over the stored graph, PLoT faked: what CEE sends PLoT. */
+  const plotBoundRequest = async (): Promise<PlotBound> => {
+    const { loadScenarioSnapshotForRunAnalysis } = await import('../../build-turn-context.js');
+    const { createRunAnalysisHandler } = await import('../../tools/handlers/run-analysis.js');
+    const { makeMessagePayload } = await import('../../__tests__/fixtures.js');
+    const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'req-load', store as never);
+    const run = vi.fn(async (_request: unknown) => ({
+      meta: { seed_used: 1, n_samples: 1, response_hash: 'sha256:s' }, results: [], response_hash: 'sha256:t', analysis_status: 'completed',
+    }));
+    const handler = createRunAnalysisHandler({ plotClient: { run, validatePatch: vi.fn().mockResolvedValue({}) } as never, scenarioReader: vi.fn(async () => snapshot) });
+    await handler({
+      context: {
+        stage: 'analyse', entity_registry: { option_ids: [], goal_id: null }, capabilities: {}, messages: [],
+        session_id: SCENARIO, request_id: 'req-run', budgets: { turn_ms: 180_000, llm_narrate_ms: 60_000 },
+        prior_turns: [], prior_facts: [], scenarioBriefText: null, persistedGraph: null,
+      },
+      payload: makeMessagePayload({ turn_id: 't-run', scenario_id: SCENARIO, message: 'run analysis', turn_class: 'decide', stage: 'analyse' }),
+      requestId: 'req-run', signal: new AbortController().signal, orientationText: '',
+    } as never);
+    expect(run, 'PLoT was called exactly once').toHaveBeenCalledTimes(1);
+    return run.mock.calls[0]![0] as PlotBound;
+  };
+  /**
+   * The roots ISL names in GOAL_ANCESTOR_DATA_GAP for a request — ISL's own rule (Inference-Service-Layer d1cef9a1,
+   * `robustness_analyzer_v2.py` :2185–2198 and `_defaulted_roots_reaching` :3829): a ROOT with no `observed_state.value`,
+   * no ParameterUncertainty and not intervened by EVERY option, with a directed path to the goal through nodes not
+   * intervened by every option. Options and the decision are not causal nodes there (an option reaches ISL as its
+   * interventions). Read off the PLoT-bound request; PLoT's own hop is not exercised here.
+   */
+  const islDefaultedRootsReachingGoal = (req: PlotBound): string[] => {
+    const nodes = req.graph.nodes;
+    const goal = req.goal_node_id ?? nodes.find((n) => n.kind === 'goal')?.id;
+    const causal = new Set(nodes.filter((n) => n.kind !== 'option' && n.kind !== 'decision').map((n) => n.id));
+    const edges = req.graph.edges.filter((e) => causal.has(e.from) && causal.has(e.to));
+    const options = nodes.filter((n) => n.kind === 'option');
+    const everyOption = new Set([...causal].filter((id) => options.length > 0
+      && options.every((o) => o.interventions !== undefined && Object.prototype.hasOwnProperty.call(o.interventions, id))));
+    const withPu = new Set((req.parameter_uncertainties ?? []).map((p) => p.node_id));
+    const defaulted = [...causal].filter((id) => !edges.some((e) => e.to === id)).filter((id) => {
+      const os = nodes.find((n) => n.id === id)!.observed_state;
+      return !(os !== undefined && typeof os.value === 'number') && !withPu.has(id) && !everyOption.has(id);
+    });
+    return defaulted.filter((root) => {
+      const stack = [root];
+      const seen = new Set([root]);
+      while (stack.length > 0) {
+        const at = stack.pop()!;
+        for (const e of edges) {
+          if (e.from !== at || seen.has(e.to)) continue;
+          seen.add(e.to);
+          if (everyOption.has(e.to)) continue;
+          if (e.to === goal) return true;
+          stack.push(e.to);
+        }
+      }
+      return false;
+    }).sort();
+  };
+
+  it('[PJ-A1 £49] RED (journey A, served shape): the new graded price given today\'s £49 from Paul\'s brief → the hold names it → one click → framed £49 as brief_extraction, in the SAME commit as the option; the switch exactly as A1', async () => {
+    graphOf.set(SCENARIO, structuredClone(JOURNEY_A));
+    const t1 = await proposeJourneyA({ value: 49, unit: 'GBP/month' });
+    const approve = approveChipOf(t1);
+    expect(approve?.id, JSON.stringify(t1._agent.tool_calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    const ip = await heldPatch();
+    // The hold records the stated level, by the factor's id, as CEE's own member — the held add_node carries no value (R4).
+    expect(ip['graded_today'], JSON.stringify(ip)).toEqual([{ factor_id: NEW_PRICE_FAC, observed_state: STATED_49 }]);
+    expect(ip['switch_factors']).toEqual([GF_FAC]);
+    expect(ip.operations.find((o) => o.op === 'add_node' && o.path === NEW_PRICE_FAC)!.value).not.toHaveProperty('observed_state');
+    expect(graphNow().nodes.some((x) => x.id === NEW_PRICE_FAC), 'nothing is written before the approval').toBe(false);
+
+    const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const g = graphNow() as unknown as { nodes: Record<string, any>[] };
+    expect(g.nodes.find((x) => x.id === NEW_PRICE_FAC)!.observed_state).toEqual(STATED_49);
+    // CONTRAST, same commit: the switch is exactly A1's — today-0 as Olumi's, ON structural (no estimate stamp).
+    expect(g.nodes.find((x) => x.id === GF_FAC)!.observed_state).toEqual({ value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' });
+    const option = g.nodes.find((x) => x.kind === 'option' && x.label === OPT_A)!;
+    expect(option.interventions[GF_FAC]).toEqual(ON_LEVEL(GF_FAC));
+    // The option's own level on the new price is unchanged by this: set by its own write (next row), never here.
+    expect(option.interventions[NEW_PRICE_FAC]).toBeUndefined();
+    // The approval says what was committed: today's £49 is the user's, and it is not asked for again.
+    expect(t2.assistant_text).toContain(`"${NEW_PRICE}"`);
+    expect(t2.assistant_text).toMatch(/today is 49 GBP\/month, as you said/);
+    expect(t2.assistant_text).not.toMatch(/Tell me (its value today|today's value for "New Pro customer price")/);
+    expect(routerCalls).toEqual([]);
+  }, 120_000);
+
+  it('[PJ-A1 £49] RED: through run_analysis — PLoT receives the new price at its status-quo £49 (and the option at its £59), and ISL\'s GOAL_ANCESTOR_DATA_GAP rule names nothing new', async () => {
+    graphOf.set(SCENARIO, structuredClone(JOURNEY_A));
+    const t1 = await proposeJourneyA({ value: 49, unit: 'GBP/month' });
+    const approve = approveChipOf(t1)!;
+    await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    // The option's £59 on the new price: its own level write, as the approval asked — read against the SAME frame.
+    script = [
+      () => fnCall('propose_option_interventions', { interventions: [{ option_label: OPT_A, factor_label: NEW_PRICE, value: 59, unit: 'GBP/month', basis: 'the user said £59 for new Pro customers', user_stated: true }] }),
+      () => say('I would set it. Shall I?'),
+    ];
+    const t3 = await turn({ message: `Set "${NEW_PRICE}" to £59 under "${OPT_A}".` });
+    const approveLevel = approveChipOf(t3);
+    expect(approveLevel?.id, JSON.stringify(t3._agent.tool_calls)).toBeDefined();
+    const t4 = await turn({ message: approveLevel!.message, source: 'chip', chip: { id: approveLevel!.id } });
+    expect(t4._agent.tool_calls, JSON.stringify(t4._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+
+    const req = await plotBoundRequest();
+    // ⛔ THE DL's MUTANT BINDS HERE FIRST: without the stamp, ISL's own rule names the new price (GOAL_ANCESTOR_DATA_GAP).
+    expect(islDefaultedRootsReachingGoal(req), 'ISL GOAL_ANCESTOR_DATA_GAP roots').toEqual([]);
+    const factor = req.graph.nodes.find((n) => n.id === NEW_PRICE_FAC)!;
+    expect(factor.observed_state, JSON.stringify(factor)).toEqual(expect.objectContaining({ value: 0.49, raw_value: 49, source: 'brief_extraction' }));
+    const option = req.graph.nodes.find((n) => n.kind === 'option' && n.label === OPT_A)!;
+    expect(option.interventions?.[NEW_PRICE_FAC], JSON.stringify(option)).toEqual(expect.objectContaining({ value: 0.59, raw_value: 59 }));
+  }, 120_000);
+
+  it('[PJ-A1 £49] CONTRAST (the probe\'s positive control): no today level given → committed with NO observed_state (never 0), and ISL\'s rule names the new price in the PLoT-bound request', async () => {
+    graphOf.set(SCENARIO, structuredClone(JOURNEY_A));
+    const t1 = await proposeJourneyA(undefined);
+    const approve = approveChipOf(t1)!;
+    expect((await heldPatch())['graded_today']).toBeUndefined();
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    const g = graphNow() as unknown as { nodes: Record<string, any>[] };
+    expect(g.nodes.find((x) => x.id === NEW_PRICE_FAC)).toBeDefined();
+    expect(g.nodes.find((x) => x.id === NEW_PRICE_FAC)!.observed_state).toBeUndefined();
+    expect(t2.assistant_text).toMatch(/Tell me its value today|Tell me today's value for "New Pro customer price"/);
+    expect(islDefaultedRootsReachingGoal(await plotBoundRequest())).toEqual([NEW_PRICE_FAC]);
+  }, 120_000);
+
+  it('[PJ-A1 £49] CONTRAST: a today figure only OLUMI wrote (never the user) → not stamped: no graded_today on the hold, no observed_state, and the Agent is told why', async () => {
+    graphOf.set(SCENARIO, structuredClone(JOURNEY_A));
+    // The user never writes 45; Olumi's own reply does.
+    const t1 = await proposeJourneyA({ value: 45, unit: 'GBP/month' }, 'Let\'s look at pricing for new Pro customers.', 'New Pro customers pay £45 today, I would guess.');
+    const call = t1._agent.tool_calls.find((c) => c.name === 'propose_new_option');
+    expect(call, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true }));
+    const approve = approveChipOf(t1)!;
+    expect((await heldPatch())['graded_today']).toBeUndefined();
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(t2._agent.tool_calls[0]).toEqual(expect.objectContaining({ ok: true, mutated: true }));
+    const g = graphNow() as unknown as { nodes: Record<string, any>[] };
+    expect(g.nodes.find((x) => x.id === NEW_PRICE_FAC)!.observed_state).toBeUndefined();
+    // The Agent was told, in the tool result, that today's value was not taken and why — to ask for it.
+    expect(toolOutputSeen).toMatch(/today_not_set/);
+    expect(toolOutputSeen).toMatch(/do not state 45/);
+    // The switch is untouched by the dropped figure.
+    expect(g.nodes.find((x) => x.id === GF_FAC)!.observed_state).toEqual({ value: 0, raw_value: 0, source: 'cee_inference', extractionType: 'inferred' });
+  }, 120_000);
 });

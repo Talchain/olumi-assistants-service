@@ -276,7 +276,18 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
             description: '"switch" when the option simply turns this ON \u2014 something not in place today that the option puts in place '
               + '(grandfathering existing customers, launching a feature). It is then added as off today, Olumi\u2019s reading for the user '
               + 'to correct, and on under every option that acts on it: give it no level. Leave kind out for an amount or a rate '
-              + '(a price, a share of customers): its current value and the option\u2019s level are asked for.',
+              + '(a price, a share of customers): its current value is `today` when the user stated it, otherwise asked for, '
+              + 'and the option\u2019s level is asked for.',
+          },
+          // ⭐ PJ-A1 £49 (DL #70 5860365834): the status quo of a factor the Agent adds is its level today — the user's, or none.
+          today: {
+            ...obj({
+              value: { type: 'number', description: 'The figure the user stated for this factor TODAY, in their own units (e.g. 49 for \u201cfrom \u00a349 to \u00a359\u201d on a price).' },
+              unit: { type: 'string', description: 'The unit the user stated it in.' },
+            }, ['value']),
+            description: 'For a factor you add, give today\u2019s level ONLY if the user stated it in their own words (e.g. a price '
+              + 'they said moves "from \u00a349" is \u00a349 today). Never your own estimate, never a placeholder or 0: with no figure '
+              + 'from the user, leave today out and ask for it. Never for a switch.',
           },
         }, ['label', 'affects']),
       },
@@ -609,7 +620,11 @@ export interface AgentCapabilities {
     /** Several options as ONE change (F4): each `{label, acts_on}`, up to 4. */
     options?: { label: string; acts_on: NewOptionActsOn[] }[];
     /** Factors the model lacks, added in the SAME change (`planNewFactors`): each named in an option's acts_on. */
-    new_factors?: readonly { label: string; affects: readonly { label: string; direction?: 'positive' | 'negative' }[] }[];
+    new_factors?: readonly {
+      label: string; affects: readonly { label: string; direction?: 'positive' | 'negative' }[];
+      /** Today's level, ONLY as the user stated it (PJ-A1 £49); taken only when their own words write it. */
+      today?: { value: number; unit?: string };
+    }[];
   }): Promise<ToolResult>;
   proposeOptionInterventions(ctx: AgentToolContext, args: {
     interventions: readonly { option_label: string; factor_label: string; value: number; basis: string; unit?: string; user_stated?: boolean }[];
