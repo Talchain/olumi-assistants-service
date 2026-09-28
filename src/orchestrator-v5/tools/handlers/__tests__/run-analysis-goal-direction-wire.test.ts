@@ -37,10 +37,18 @@ const happyFixture = JSON.parse(
 const TEST_SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TEST_REQUEST_ID = 'req-goal-direction-wire';
 
-function graphWithGoalLabel(label: string): GraphV3T {
+/** A current level on the goal as admission writes it (`admitStatedGoalLevel`), in `unit`, stamped `source`. */
+type GoalLevel = { readonly unit: string; readonly targetUnit: string; readonly source: string };
+function graphWithGoalLabel(label: string, held?: string, level?: GoalLevel): GraphV3T {
   return GraphV3.parse({
     nodes: [
-      { id: 'goal_metric', kind: 'goal', label },
+      {
+        id: 'goal_metric', kind: 'goal', label, ...(held !== undefined ? { goal_direction: held } : {}),
+        ...(level !== undefined ? {
+          goal_threshold: 0.8, goal_threshold_raw: 36, goal_threshold_cap: 45, goal_threshold_unit: level.targetUnit,
+          observed_state: { value: 1, baseline: 1, raw_value: 45, cap: 45, unit: level.unit, source: level.source },
+        } : {}),
+      },
       { id: 'opt_a', kind: 'option', label: 'Option A', interventions: { fac_lever: 0.8 } },
       { id: 'opt_b', kind: 'option', label: 'Option B', interventions: { fac_lever: 0.2 } },
       { id: 'fac_lever', kind: 'factor', label: 'Lever' },
@@ -85,8 +93,8 @@ function makeInvocation(): HandlerInvocation {
 }
 
 /** Drive the real handler and return the payload PLoT received. */
-async function payloadForGoalLabel(label: string): Promise<Record<string, unknown>> {
-  const graph = graphWithGoalLabel(label);
+async function payloadForGoalLabel(label: string, held?: string, level?: GoalLevel): Promise<Record<string, unknown>> {
+  const graph = graphWithGoalLabel(label, held, level);
   const snapshot: RunAnalysisScenarioSnapshot = {
     graph,
     options: [
@@ -165,4 +173,68 @@ describe('goal_direction reaches the PLoT payload', () => {
       expect('goal_direction' in payload).toBe(false);
     });
   }
+});
+
+/**
+ * ⭐ THE USER'S HELD COMPARATOR COMES FIRST (MG #72 5870097103). Construction holds `goal_direction` on the goal node
+ * only beside a target the user wrote (G1). A held ceiling sends `minimise` whatever the label says (the label
+ * classifier reads nothing for "Monthly spend") — ONLY beside the level the user stated in the target's unit (R1 S1,
+ * AIQ 5871459631); a held floor sends nothing, whatever the label says.
+ */
+describe('a held comparator on the goal node decides goal_direction before the label', () => {
+  const STATED: GoalLevel = { unit: '£k/month', targetUnit: '£k/month', source: 'brief_extraction' };
+  for (const held of ['<=', '<']) {
+    it(`RED: held "${held}" beside the level the user stated in the target's unit ("Monthly spend") → minimise`, async () => {
+      const payload = await payloadForGoalLabel('Monthly spend', held, STATED);
+      expect(payload.goal_direction).toBe('minimise');
+    });
+  }
+
+  // AIQ R1 ruling 5871459631: a ceiling sends `minimise` ONLY when its target is a LEVEL of the node — proven, before
+  // R1 types the frame, by the user's stated level in the target's own unit. Otherwise silence (UNATTESTED stays).
+  it('R1 S1: held "<=" with NO stated level → no key (no proof the target is a level of the node)', async () => {
+    const payload = await payloadForGoalLabel('Monthly spend', '<=');
+    expect('goal_direction' in payload).toBe(false);
+  });
+
+  it('R1 S1: held "<=" on a CHANGE target ("% reduction") beside a £ level → no key ("reduce costs by at most 10%" is a floor on cost)', async () => {
+    const payload = await payloadForGoalLabel('costs', '<=', { ...STATED, targetUnit: '% reduction' });
+    expect('goal_direction' in payload).toBe(false);
+  });
+
+  // AIQ 5872082179: on the brief route level and target share one unit, so a PERCENT or POINTS ceiling passes the unit
+  // check by construction ("gross margin 30%, reduce by at most 2%" is a floor). Until S4 types the frame: nothing sent.
+  for (const u of ['%', 'percentage points', 'pp', 'bps', 'points', 'NPS points']) {
+    it(`R1 S1 (AIQ 5872082179): held "<=" in "${u}" beside the user's level in the same unit → no key`, async () => {
+      const payload = await payloadForGoalLabel('Gross margin', '<=', { unit: u, targetUnit: u, source: 'brief_extraction' });
+      expect('goal_direction' in payload).toBe(false);
+    });
+  }
+
+  it('R1 S1: held "<=" beside a level the user GAVE IN CHAT (user_override, approved) → minimise', async () => {
+    const payload = await payloadForGoalLabel('Monthly spend', '<=', { ...STATED, source: 'user_override' });
+    expect(payload.goal_direction).toBe('minimise');
+  });
+
+  it('R1 S1: held "<=" beside a level that is Olumi\'s estimate (cee_inference), not the user\'s → no key', async () => {
+    const payload = await payloadForGoalLabel('Monthly spend', '<=', { ...STATED, source: 'cee_inference' });
+    expect('goal_direction' in payload).toBe(false);
+  });
+
+  // DL E13 (5872375159): a held floor reads exactly as base — the label decides (its own sense is S4's).
+  for (const held of ['>=', '>']) {
+    it(`held "${held}" + a label that reads reduce ("Minimise monthly churn") → minimise from the LABEL, exactly as base`, async () => {
+      const payload = await payloadForGoalLabel('Minimise monthly churn', held);
+      expect(payload.goal_direction).toBe('minimise');
+    });
+  }
+  it('an UNPROVEN held "<=" + a label that reads reduce → minimise from the LABEL, exactly as base', async () => {
+    const payload = await payloadForGoalLabel('Minimise monthly churn', '<=');
+    expect(payload.goal_direction).toBe('minimise');
+  });
+
+  it('CONTROL: no held comparator ("Monthly spend") → no key, exactly as before', async () => {
+    const payload = await payloadForGoalLabel('Monthly spend');
+    expect('goal_direction' in payload).toBe(false);
+  });
 });

@@ -265,7 +265,8 @@ export const NodeV3 = z.object({
    * `goal_direction` is the comparator of the stated target (`>=` "reach £100k"; `<` "under 4%"), the candidate
    * contract's own four values (`buildCandidateSchema`, goal.operator; pinned equal by `goal-stated-attrs-held.test.ts`).
    * ⚠ NOT the `goal_direction` on the PLoT request (`run-analysis.ts`, `'minimise'`): that is the objective's SENSE,
-   * derived from the label, a top-level wire key. Same word, a different concept at a different level.
+   * a top-level wire key. Same word, a different concept at a different level — but READ by it: a held `<=` / `<`
+   * sends `'minimise'` (`resolveGoalDirection`, `goal-target/goal-direction.ts`); with none held, the label decides.
    *
    * `goal_horizon_months` is the deadline the brief states ("within 12 months"). The analysis has no time axis: it
    * compares levels, so no result answers the deadline yet.
@@ -528,14 +529,28 @@ export const NodeV3 = z.object({
    *
    * NOT VALUE-BEARING: it names which nodes multiply, never a magnitude. Not mirrored in
    * `openapi.yaml`; a consumer on a stale pin simply drops it.
+   *
+   * `operation: 'sum'` (R3-2, AIQ #72 5867700610): a limited spend tally that IS the sum of its
+   * levers (`admit-model.ts` `findSumTallies`), ONLY with `stated_in_brief: false` (a stated sum is
+   * malformed and dropped). Every C46 reader above reads `product` only (`readCarrier`), so a sum
+   * never withholds a leader.
    */
   nonlinear_identity: z
-    .object({
-      operation: z.literal('product'),
-      factor_ids: z.array(z.string().min(1)).min(2),
-      stated_in_brief: z.boolean(),
-    })
-    .strict()
+    .union([
+      z.object({
+        operation: z.literal('product'),
+        factor_ids: z.array(z.string().min(1)).min(2),
+        stated_in_brief: z.boolean(),
+      }).strict(),
+      // `sum` (R3-2, AIQ #72 5867700610): a limited spend tally held as the sum of its levers (`findSumTallies`).
+      // ONLY as Olumi's reading — construction never mints a stated sum, so one is malformed and dropped. PLoT
+      // (`readNonlinearIdentity`) and ISL (`NonlinearIdentityV2`) accept both operations.
+      z.object({
+        operation: z.literal('sum'),
+        factor_ids: z.array(z.string().min(1)).min(2),
+        stated_in_brief: z.literal(false),
+      }).strict(),
+    ])
     .optional()
     .catch(undefined),
 }); // CIL Phase 1: declared fields only — unknown fields stripped with warning

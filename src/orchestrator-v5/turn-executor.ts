@@ -4579,6 +4579,8 @@ export async function runTurnExecutor(
           ...(read.userStatedNodeIds !== undefined ? { userStatedNodeIds: read.userStatedNodeIds } : {}),
           // ⭐ PJ-A1 £49 — a new graded factor's stated today level lands in this same apply (DL #70 5860365834).
           ...(read.gradedToday !== undefined ? { gradedToday: read.gradedToday } : {}),
+          // ⭐ PJ-E-FIG — the add-factor door's figures, the user's, land in this same apply (DL #72 5866036457).
+          ...(read.userToday !== undefined ? { userToday: read.userToday } : {}),
           currentGraph: gmBaseGraph,
           currentGraphHash: gmBaseHash,
           freshness: freshness?.freshness ?? 'unknown',
@@ -4831,12 +4833,14 @@ export async function runTurnExecutor(
           const stepSwitches = reads[i]!.switchFactorIds;
           const stepStated = reads[i]!.userStatedNodeIds;
           const stepToday = reads[i]!.gradedToday;
+          const stepUserToday = reads[i]!.userToday;
           const outcome = executeGmHeldResume({
             operations: reads[i]!.operations,
             ...(stepCap !== undefined ? { envelopeCap: stepCap } : {}),
             ...(stepSwitches !== undefined ? { switchFactorIds: stepSwitches } : {}),
             ...(stepStated !== undefined ? { userStatedNodeIds: stepStated } : {}),
             ...(stepToday !== undefined ? { gradedToday: stepToday } : {}),
+            ...(stepUserToday !== undefined ? { userToday: stepUserToday } : {}),
             currentGraph: preStepGraph,
             currentGraphHash: workingHash,
             freshness: freshness?.freshness ?? 'unknown',

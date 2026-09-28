@@ -35,7 +35,7 @@
 
 import { createHash } from 'node:crypto';
 import { FRESH_READ } from '../turn-read-cache.js';
-import { admitCandidateModel, canonicalLabel, carryWithheldOptions, findMechanismPath, productIdentityOpenQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
+import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, productIdentityOpenQuestions, sumIdentityOpenQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -47,7 +47,7 @@ import {
 } from '../construction-size-gate.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { LIMIT_OPERATOR_WORDS } from '../admit-constraint.js';
-import { holdStatedGoalAttributes, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
+import { figureTheUserWrote, holdStatedGoalAttributes, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
@@ -691,7 +691,16 @@ export interface LevelGap { readonly option: string; readonly factor: string }
  * (served journey C run 2, CEE 651a7fd: "MRR = Pro price × Pro subscribers" with no subscriber level — every Run said
  * "the current number of Pro paying subscribers is missing"). The same retry, the same labelled estimate, never the user's.
  */
-export interface BaselineGap { readonly factor: string; readonly because?: 'limit' | 'identity' }
+export interface BaselineGap {
+  readonly factor: string;
+  readonly because?: 'limit' | 'identity';
+  /**
+   * The limited quantity was drafted as an OUTCOME, which admission registers as a level-less observable factor
+   * (`limitedOutcomeFrame`). Served journey C run 2 (CEE c35f1c7): "Monthly churn" drafted so, the gap was never
+   * counted, no retry ran, and the Run scored churn with no level (PJ-B3 rank 2 unvalued, PJ-A3 limit unscored).
+   */
+  readonly outcome?: true;
+}
 export function findCoverageGaps(
   model: CandidateModel,
   additionsWithoutTotal: readonly AdditionWithoutTotal[],
@@ -721,10 +730,28 @@ export function findCoverageGaps(
     .filter((f) => actedOn.has(f.label) && !userOwnedBaseline.has(f.label))
     .filter(noBaseline)
     .map((f) => ({ factor: f.label }));
-  // A LEVEL limit's own quantity (a DELTA limit is a change from today: it needs no level of its own).
-  const limited = new Set((model.constraints ?? []).filter((c) => c.frame !== 'delta').map((c) => c.metric));
+  // A LEVEL limit's own quantity (a DELTA limit is a change from today: it needs no level of its own), named as
+  // admission names a limit's node (`metricNamesLabel`), so "Monthly Churn" is the factor "Monthly churn" (verifier LOW).
+  const limited = (model.constraints ?? []).filter((c) => c.frame !== 'delta').map((c) => c.metric);
   for (const f of model.factors) {
-    if (limited.has(f.label) && !actedOn.has(f.label) && !userOwnedBaseline.has(f.label) && noBaseline(f)) baseline_gaps.push({ factor: f.label, because: 'limit' });
+    if (limited.some((m) => metricNamesLabel(m, f.label)) && !actedOn.has(f.label) && !userOwnedBaseline.has(f.label) && noBaseline(f)) {
+      baseline_gaps.push({ factor: f.label, because: 'limit' });
+    }
+  }
+  // The same quantity drafted as an OUTCOME: admission registers it as a factor with no level (`limitedOutcomeFrame`),
+  // naming it as admission names a limit's node (`metricNamesLabel`: case and surrounding space ignored). Only when the
+  // outcome IS what registers: admission keeps ONE node per identity (`assignIds`, `canonicalLabel`), the first declared
+  // (goal, options, factors, risks, then outcomes), so an outcome sharing its identity with any of those registers as
+  // that entity — a factor is judged by the rules above, once (verifier FIX_FIRST (3) on f773a217: factor AND outcome
+  // drew two gaps and two retry lines).
+  const rekinded = (model.constraints ?? []).filter((c) => c.frame !== 'delta' && limitedOutcomeFrame(c) !== undefined).map((c) => c.metric);
+  const registeredFirst = new Set([
+    ...(typeof model.goal?.metric === 'string' ? [model.goal.metric] : []),
+    ...model.options.map((o) => o.label), ...model.factors.map((f) => f.label), ...(model.risks ?? []).map((r) => r.label),
+  ].map(canonicalLabel));
+  for (const o of model.outcomes ?? []) {
+    if (registeredFirst.has(canonicalLabel(o.label)) || baseline_gaps.some((g) => canonicalLabel(g.factor) === canonicalLabel(o.label))) continue;
+    if (rekinded.some((m) => metricNamesLabel(m, o.label))) baseline_gaps.push({ factor: o.label, because: 'limit', outcome: true });
   }
   // A quantity a declared product multiplies (and no earlier rule already names).
   const multiplied = new Set((model.identities ?? []).filter((i) => i.operation === 'product').flatMap((i) => i.factors ?? []));
@@ -814,11 +841,76 @@ function keepsTheHeldStatusQuo(first: Pick<AdmittedModel, 'nodes' | 'loss'>, ret
   return held(first).every((h) => now.some((r) => nodeIdentity(r) === nodeIdentity(h) && (h.is_baseline !== true || r.is_baseline === true)));
 }
 
+/**
+ * ⛔ THE LIMIT'S OWN FIGURE IS NEVER THE USER'S LEVEL (verifier FIX_FIRST (1) on f773a217, HIGH).
+ * A limit gap asks the retry for today's level of the quantity the user limits. A retry that answers with the LIMIT's
+ * figure — "under 4%" returned as churn `explicit`, `baseline_known:true`, 4 — passed every author check downstream:
+ * admission stamps a known `explicit` baseline `brief_extraction`, and `withdrawUnstatedBaselineStamps` finds "4%" in the
+ * brief (as the limit), so the user's limit registered as their stated level today, and nobody was asked. So, for a
+ * quantity a first-draft limit gap asked about, a retry baseline the retry calls the user's (`explicit`, known) that
+ * equals a figure of a limit on that quantity is taken as Olumi's estimate (`baseline_known:false` → `cee_inference`,
+ * and the user is asked for theirs). A level the brief states apart from the limit ("churn is 3% today, keep it under
+ * 4%") is a different figure and is untouched: its authorship is judged by the same checks as before. Every miss
+ * under-claims: a brief whose today-level equals its own limit ("4% today, keep it under 4%") reads as Olumi's, and asks.
+ */
+function neverTheLimitAsTodaysLevel(retryRaw: CandidateModel, firstRaw: CandidateModel, gaps: readonly BaselineGap[]): CandidateModel {
+  const asked = new Set(gaps.filter((g) => g.because === 'limit').map((g) => canonicalLabel(g.factor)));
+  if (asked.size === 0) return retryRaw;
+  const limitFigures = (label: string): { value: number; unit?: string | null }[] => [...(firstRaw.constraints ?? []), ...(retryRaw.constraints ?? [])]
+    .filter((c) => canonicalLabel(c.metric) === label && typeof c.value === 'number' && Number.isFinite(c.value))
+    .map((c) => ({ value: c.value, unit: c.unit }));
+  const eq = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+  // The limit's figure, or the same PERCENT in the other spelling (DL CHANGES_REQUIRED on 0ebcad51, P06/P20/P21):
+  //  · a limit spelt in percent ("under 4%") given back as the share 0.04 — admission's own figureTheUserWrote reads "4%"
+  //    as 0.04 on a share (stated-by-user.ts), so that spelling would register the limit as the user's level;
+  //  · a limit spelt as a share (|value| < 1: "under 0.04") given back as the percent 4.
+  // ÷100 only for a percent unit: "£10,000" is never "£100 today" (P21 — a stated £100 stays the user's).
+  const pct = (u: unknown): boolean => typeof u === 'string' && /%|percent/i.test(u);
+  const sameFigure = (v: number, l: { value: number; unit?: string | null }): boolean =>
+    eq(v, l.value) || (pct(l.unit) && eq(v, l.value / 100)) || (Math.abs(l.value) < 1 && eq(v, l.value * 100));
+  return {
+    ...retryRaw,
+    factors: retryRaw.factors.map((f) => {
+      const label = canonicalLabel(f.label);
+      const v = f.baseline_value;
+      const theLimits = asked.has(label) && f.baseline_known === true && f.provenance === 'explicit'
+        && typeof v === 'number' && limitFigures(label).some((x) => sameFigure(v, x));
+      return theLimits ? { ...f, baseline_known: false } : f;
+    }),
+  };
+}
+
+/**
+ * ⛔ A QUANTITY THE USER NAMED STAYS THEIRS WHEN OLUMI GIVES IT A LEVEL (served journey C run 2, CEE c35f1c7).
+ * A limit gap asks the retry for Olumi's estimate "with baseline_known:false, provenance ai_proposed", and a drafted
+ * factor carries ONE provenance. Obeyed, the retry re-authors the quantity the user named (their "monthly churn",
+ * `explicit` in the first draft) as Olumi's: the node leaves the user's stated material and
+ * `keepsEveryUserStatedIdentity` refuses the very retry that was asked for, so the limit still reaches the Run with no
+ * level. The quantity keeps the first draft's authorship; its LEVEL stays Olumi's (`baseline_known:false` →
+ * `cee_inference`, `estimatedObservedState`). Only for a quantity a first-draft limit gap asked about, and never when
+ * the retry claims to know today's level (that figure would read as the user's).
+ */
+function keepLimitedQuantityAuthor(retryRaw: CandidateModel, firstRaw: CandidateModel, gaps: readonly BaselineGap[]): CandidateModel {
+  const stated = new Set([...firstRaw.factors, ...(firstRaw.outcomes ?? [])].filter((e) => e.provenance === 'explicit').map((e) => canonicalLabel(e.label)));
+  // A product's part (`because: 'identity'`, #2220) is asked in the same words, so it is refused the same way (measured
+  // on f773a217: a user-named part levelled as asked → `kept_first`); it keeps the first draft's authorship too.
+  const keep = new Set(gaps.filter((g) => g.because === 'limit' || g.because === 'identity').map((g) => canonicalLabel(g.factor)).filter((l) => stated.has(l)));
+  if (keep.size === 0) return retryRaw;
+  return {
+    ...retryRaw,
+    factors: retryRaw.factors.map((f) => (keep.has(canonicalLabel(f.label)) && f.baseline_known !== true ? { ...f, provenance: 'explicit' } : f)),
+  };
+}
+
 /** The retry's wording for each gap, naming the option and factor exactly. */
 function sayCoverageGaps(p: { level_gaps: readonly LevelGap[]; baseline_gaps: readonly BaselineGap[] }): string[] {
   return [
     ...p.level_gaps.map((g) => `${g.option} -> ${g.factor}: give the level this option sets in interventions (the user's number if stated, otherwise an ai_proposed estimate in the factor's unit and plausible_max frame); keep it only in changes if no defensible level exists`),
-    ...p.baseline_gaps.map((g) => (g.because === 'limit'
+    ...p.baseline_gaps.map((g) => (g.outcome === true
+      // An outcome has no level of its own to carry, so a today-level the BRIEF states was dropped with it: the retry may
+      // give THAT figure as the user's (verifier FIX_FIRST (2) on f773a217), never the limit's (`neverTheLimitAsTodaysLevel`).
+      ? `${g.factor}: declare it in factors, not outcomes (role observable, with its plausible_max), and give it a baseline_value (a provisional estimate with baseline_known:false, provenance ai_proposed \u2014 never the user's) \u2014 the user limits its level, and the limit cannot be checked without today's level. If the brief itself states today's level of ${g.factor} (never the limit's own figure), give that figure instead, with baseline_known:true, provenance explicit`
+      : g.because === 'limit'
       ? `${g.factor}: give a baseline_value (a provisional estimate with baseline_known:false, provenance ai_proposed \u2014 never the user's) \u2014 the user limits it, and the limit cannot be checked without today's level`
       : g.because === 'identity'
         ? `${g.factor}: give a baseline_value (a provisional estimate with baseline_known:false, provenance ai_proposed \u2014 never the user's) \u2014 a product in identities multiplies it, and the product cannot be computed without today's level of every part; when the product's own level is stated, give the level that makes the product hold`
@@ -1209,7 +1301,10 @@ export async function buildModelFromBrief(
         schema: retrySchemaPinningGoal(candidate.goal, candidate.decision_question),
       });
       if (retry.text.length > 0) {
-        const retryRaw = JSON.parse(retry.text) as CandidateModel;
+        const retryRaw = keepLimitedQuantityAuthor(
+          neverTheLimitAsTodaysLevel(JSON.parse(retry.text) as CandidateModel, firstCandidate, preparation.baseline_gaps),
+          firstCandidate, preparation.baseline_gaps,
+        );
         const retryPrepared = prepareProvisionalCandidate(retryRaw);
         const retryCandidate = retryPrepared.candidate;
         const retryAdmitted = admitCandidateModel(retryCandidate, {}, brief);
@@ -1321,7 +1416,21 @@ export async function buildModelFromBrief(
   // ⭐ MG's HORIZON ATTESTATION (`attestHorizon`, PJ-A2 rows 25–27) decides the deadline G1 holds, and its verdict is
   // `statedGoal.horizon` whatever it is. ⚠ HAND-OFF: an `unresolved` deadline's own words ("by Q3") have no stored field
   // yet; they stay on this typed result until the joint work frame (Codex rows 2–3, 27) gives them one.
-  const statedGoal = holdStatedGoalAttributes(withdrawUnstatedBaselineStamps(admitted.nodes, brief), candidate.goal, brief);
+  const heldGoal = holdStatedGoalAttributes(withdrawUnstatedBaselineStamps(admitted.nodes, brief), candidate.goal, brief);
+  if (heldGoal.held.horizon || heldGoal.held.direction) {
+    admitted = {
+      ...admitted,
+      loss: admitted.loss.filter((l) => !(heldGoal.held.horizon && /\.horizon_months$/.test(l.field_path))
+        && !(heldGoal.held.direction && /\.goal_operator$/.test(l.field_path))),
+    };
+  }
+  // ⭐ A HELD CEILING's stated current level (MG #72 5870097103): admission withheld every `<=` level before the brief
+  // attested the comparator; with `'<='` now held, the run minimises that goal, so the same rule is asked again
+  // (`admitGoalLevelBesideHeldCeiling`). Any other goal: untouched, byte for byte.
+  const ceilingLevel = admitGoalLevelBesideHeldCeiling(heldGoal.nodes, candidate.goal, admitted.loss,
+    (value, unit) => figureTheUserWrote(value, unit, brief));
+  if (ceilingLevel.loss !== admitted.loss) admitted = { ...admitted, loss: ceilingLevel.loss };
+  const statedGoal = { ...heldGoal, nodes: [...ceilingLevel.nodes] };
   /**
    * ⭐ T2 PART 2 (PJ-E-A2; Canonical #2231 `NodeV3.goal_deadline_as_stated`, G1 contract): an `unresolved` deadline's
    * own words ("by Q3") are HELD on the goal — verbatim, never converted to a month count (that needs a year and a
@@ -1333,13 +1442,6 @@ export async function buildModelFromBrief(
   const goalNodes = deadlineHeld
     ? statedGoal.nodes.map((n) => (n.kind === 'goal' ? { ...n, goal_deadline_as_stated: deadlineWords } : n))
     : statedGoal.nodes;
-  if (statedGoal.held.horizon || statedGoal.held.direction) {
-    admitted = {
-      ...admitted,
-      loss: admitted.loss.filter((l) => !(statedGoal.held.horizon && /\.horizon_months$/.test(l.field_path))
-        && !(statedGoal.held.direction && /\.goal_operator$/.test(l.field_path))),
-    };
-  }
 
   const parked = (candidate as { unknowns?: unknown }).unknowns;
   const openQuestions = userFacingDrafterQuestions(parked);
@@ -1358,6 +1460,10 @@ export async function buildModelFromBrief(
     ...optionSetLimitAsks({ nodes: statedGoal.nodes, goal_constraints: admitted.goal_constraints }),
   ];
   openQuestions.unshift(...levelAsks.map((a) => a.question));
+  // ⭐ R3-2 (AIQ #72 5867700610): a limited spend tally held as the SUM of its levers is said ONCE, as Olumi's reading,
+  // and §3's precondition failing (a lever reaches the goal only through a user-limited cost roll-up) ASKS Olumi's
+  // assumption instead of dropping the edge (AIQ 5867283878). Behind the C46 product questions, ahead of the level asks.
+  openQuestions.unshift(...(admitted.pure_limit_asks ?? []).map((a) => a.question), ...sumIdentityOpenQuestions(admitted));
   // ⛔ C46: a declared product whose sign this model cannot prove is ASKED where the user always sees it,
   // not only said in `not_represented` (which only the Agent's model reads). After the scope and deadline
   // questions, ahead of the drafter's own; nothing for a stable product or a linear model.
@@ -1569,6 +1675,12 @@ export async function buildModelFromBrief(
     // leader permission is stamped by `run_analysis` from the node's persisted declaration
     // (`nonlinearIdentityLeaderWithhold`), re-judged on the graph each Run analyses.
     ...(admitted.nonlinear_identities !== undefined ? { nonlinear_identities: admitted.nonlinear_identities } : {}),
+    // A user-limited cost roll-up whose Olumi-signed edge into the goal was not drawn (`findPureLimits`), beside its
+    // `pure_limit` line below; where a lever reaches the goal only through it, the kept edge asked (`open_questions`).
+    ...(admitted.pure_limits !== undefined ? { pure_limits: admitted.pure_limits } : {}),
+    ...(admitted.pure_limit_asks !== undefined ? { pure_limit_asks: admitted.pure_limit_asks } : {}),
+    // R3-2: limited spend tallies held as the sum of their levers, beside the sentence in `open_questions`.
+    ...(admitted.sum_identities !== undefined ? { sum_identities: admitted.sum_identities } : {}),
     not_represented: [
       // ⛔ C46: the goal's unstated scope, as Olumi's assumption (the `goal_scope` entry's `after`), FIRST.
       // Said here and never written on the goal node: `get_canonical_state` shows a node's description as
@@ -1615,7 +1727,8 @@ export async function buildModelFromBrief(
         // `breakLoops`) — which link was left out, or that the user's own loop was kept.
         // `magnitude_unconvertible`: a stated size that could not be read on the two ends' frames, so the standard
         // placeholder stands in (magnitude contract, D2/D6) — never dropped unseen.
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|loop_withheld|loop_kept|magnitude_unconvertible)$|\.observed_state\.baseline$/.test(l.field_path))
+        // `pure_limit`: a user-limited cost roll-up's Olumi-signed edge into the goal that was not drawn (`findPureLimits`).
+        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|loop_withheld|loop_kept|magnitude_unconvertible|pure_limit)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };
