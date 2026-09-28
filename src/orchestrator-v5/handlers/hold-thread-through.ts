@@ -67,6 +67,8 @@ import {
   type PendingAction,
 } from '../session/pending-action.js';
 import { readGmHeldResume } from './gm-held-execute.js';
+import { toGraphView } from './add-option-dispatch.js';
+import { recheckAddFactorBatch } from '../routing/add-factor-transaction.js';
 import {
   assessHeldBatchAgainstGraph,
   type EditGmGoverningVerdict,
@@ -322,7 +324,14 @@ export function threadHoldsThroughMutatingCommit(
           turnId: input.turnId,
           requestId: input.requestId,
         });
-        if (assessment.valid) {
+        // ⭐ PJ-E-FIG: an add-factor hold (it carries the user's figures) must also still meet its door's own rules on
+        // the new graph — the referee has no name rule, so a node added under a new factor's name would otherwise be
+        // re-pinned and the approval would commit a second node by that name. It lapses, with the notice.
+        const stillValid =
+          assessment.valid &&
+          (read.userToday === undefined ||
+            recheckAddFactorBatch(read.operations, toGraphView(input.graphAfterCommit)) === null);
+        if (stillValid) {
           threaded.push({
             ...pa,
             preconditions: { ...pa.preconditions, graph_hash: newHash },

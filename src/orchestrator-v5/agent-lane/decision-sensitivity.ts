@@ -20,8 +20,23 @@ import { selectFactorEvppiPriority } from '../coaching/select-factor-evppi.js';
 
 export const NO_SINGLE_ASSUMPTION = 'No single assumption measurably changes which option leads.';
 
+/**
+ * WHOSE RANGE (AIQ ruling #72 5867782904, words ACK 5870069785; Core Stabilisation Plan §7). ISL echoes each
+ * `factor_evppi` row's `spread_source`: `template` = Olumi's own assumed range, `user` = the user's. Read from the
+ * SELECTED factor's own row only, and only once it is measured to change the leader (`resolved`). Anything else, or no
+ * field, makes no claim.
+ */
+export type RangeSource = 'olumi_assumed' | 'yours';
+const RANGE_OF: Readonly<Record<string, RangeSource>> = { template: 'olumi_assumed', user: 'yours' };
+export const olumiAssumedRangeSay = (label: string): string =>
+  `Within the range Olumi assumed for ${label}, ${label} could change which option leads. Do you know ${label} more precisely?`;
+
 export type DecisionSensitivity =
-  | { readonly status: 'measured'; readonly most_sensitive: { readonly factor_id: string; readonly label: string } }
+  | {
+    readonly status: 'measured';
+    readonly most_sensitive: { readonly factor_id: string; readonly label: string; readonly range?: RangeSource };
+    readonly say?: string;
+  }
   | { readonly status: 'none_measurable'; readonly say: typeof NO_SINGLE_ASSUMPTION }
   | { readonly status: 'not_measured' };
 
@@ -42,7 +57,18 @@ export function decisionSensitivityOf(enrichment: unknown): DecisionSensitivity 
     const labelled = Array.isArray(rows)
       ? (rows.map(recordOf).find((r) => r?.factor_id === d.factorId)?.factor_label)
       : undefined;
-    return { status: 'measured', most_sensitive: { factor_id: d.factorId, label: typeof labelled === 'string' && labelled !== '' ? labelled : d.factorId } };
+    const label = typeof labelled === 'string' && labelled !== '' ? labelled : d.factorId;
+    const evppi = recordOf(enrichment)?.factor_evppi;
+    const own = Array.isArray(evppi) ? evppi.map(recordOf).find((r) => r?.factor_id === d.factorId) : undefined;
+    // Own keys only (DL nit on #2246): a plain-object lookup would hand back `constructor` / `toString` as a "range".
+    const source = own?.spread_source;
+    const range = typeof source === 'string' && Object.hasOwn(RANGE_OF, source) ? RANGE_OF[source] : undefined;
+    if (range === undefined) return { status: 'measured', most_sensitive: { factor_id: d.factorId, label } };
+    return {
+      status: 'measured',
+      most_sensitive: { factor_id: d.factorId, label, range },
+      ...(range === 'olumi_assumed' ? { say: olumiAssumedRangeSay(label) } : {}),
+    };
   }
   if (d.reason === 'all_below_resolution') return { status: 'none_measurable', say: NO_SINGLE_ASSUMPTION };
   return { status: 'not_measured' };
