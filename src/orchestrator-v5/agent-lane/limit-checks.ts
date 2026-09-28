@@ -31,9 +31,22 @@ export interface LimitCheck {
 
 const q = (label: string): string => `‘${label}’`;
 
+/**
+ * ⛔ AN OFF-SCALE LIMIT IS NOT A MISSING LEVEL (AIQ #72 5868296245; DL 5868320182). Served `pj-20260928T101026Z` A14:
+ * churn HAD a level (Olumi's 3%, frame 100), and PLoT refused the ≤ 4% limit on its frame (`threshold_clamped`,
+ * `CONSTRAINT_REFUSED_FRAME_FIDELITY`). The reply asked "What is Monthly churn today? … can only be checked against
+ * Olumi's estimate of 3%", a today-level ask for a level that exists and a cause that was not the cause. A limit the
+ * engine could not place on the scale the model holds says exactly that, and carries no today-level ask. These are the
+ * scale preconditions of the per-limit reason vocabulary (`PER_LIMIT_REASON_RANK` (a), (c), (d)).
+ */
+export const OFF_SCALE_LIMIT_REASONS: ReadonlySet<string> = new Set(['threshold_unframed', 'threshold_clamped', 'CONSTRAINT_OUT_OF_DOMAIN']);
+
 /** One sentence per state (and, for `estimate_only`, per whose figure it was checked against). */
 function sentenceFor(label: string, state: LimitCheck['state'], reason: string | undefined): string {
   if (state === 'scored') return `${q(label)} was checked against the figures in your model.`;
+  if (state === 'unscored' && reason !== undefined && OFF_SCALE_LIMIT_REASONS.has(reason)) {
+    return `${q(label)} couldn’t be checked: the limit doesn’t sit on the scale the model holds for it.`;
+  }
   if (state === 'unscored') return `${q(label)} cannot be checked in this model yet.`;
   if (reason === 'level_user_assumption') return `${q(label)} was checked, against a figure you accepted as an assumption.`;
   // Only how it was checked. What the user can give instead is MG's ask (DL ruling 5865003207: one wording, one producer).
@@ -81,7 +94,9 @@ export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdict
     const limit = limits.find((c) => c.constraint_id === row.constraint_id);
     const label = (limit?.label ?? '').trim() !== '' ? limit!.label!.trim() : nodeLabel(limit?.node_id ?? null);
     if (label === null) continue;
-    const ask = row.state === 'scored' ? undefined : asks.get(row.constraint_id);
+    // A today-level ask only where a level could make the limit checkable: never on a scored or an off-scale limit.
+    const offScale = row.state === 'unscored' && typeof row.reason === 'string' && OFF_SCALE_LIMIT_REASONS.has(row.reason);
+    const ask = row.state === 'scored' || offScale ? undefined : asks.get(row.constraint_id);
     out.push({ constraint_id: row.constraint_id, limit: label, state: row.state, say: sentenceFor(label, row.state, row.reason), ...(ask !== undefined ? { ask } : {}) });
   }
   return out.length > 0 ? out : undefined;

@@ -4,6 +4,7 @@
  * 6 months" reached a consent subject after #2221).
  */
 import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
+import { pluraliseUnit } from '../tools/handlers/d1-shared/format-confirmation.js';
 
 /**
  * A prefix symbol by itself or by its code, DERIVED from the one currency vocabulary (never a list of our own: the
@@ -35,5 +36,31 @@ export function sayFigure(value: number, unit: string): string {
  */
 export function sayFigureExactly(value: number, unit: string): string | null {
   if (!Number.isFinite(value) || Math.round(value * 100) / 100 !== value) return null;
-  return sayFigure(value, unit.trim());
+  return sayFigure(value, spoken(value, unit.trim()));
+}
+
+/** Percent spelled as a word is said as the sign; a machine unit's underscores are spaces. */
+const PERCENT_WORD = /^(?:percent|percentage|pct)\b/i;
+
+/**
+ * The unit as a person says it with THIS figure (DL #2227 follow-up B, 5867621499): "percent" → "%" (it read "5 percent"
+ * where it had read "5%"), `story_points` → "story points", and one of a plain count or period is singular ("1 month",
+ * never "1 months"; `pluraliseUnit`'s own conservative rule). A currency unit keeps its words: the symbol says it.
+ */
+function spoken(value: number, unit: string): string {
+  const u = unit.replace(PERCENT_WORD, '%').replace(/_/g, ' ');
+  const head = /^[^\s/]+/.exec(u)?.[0] ?? '';
+  if (u === '' || u.startsWith('%') || PREFIX_SYMBOL.has(head) || PREFIX_SYMBOL.has(head.toUpperCase())) return u;
+  return pluraliseUnit(u, value);
+}
+
+/**
+ * A figure the approval does NOT write (a value it replaces), said so a person can read it: exact when it can be,
+ * otherwise "about" and rounded, as a count is (DL #2227 follow-up A: "1469.3877551020407 subscribers → 1,500").
+ */
+export function sayFigureRead(value: number, unit: string): string {
+  const exact = sayFigureExactly(value, unit);
+  if (exact !== null || !Number.isFinite(value)) return exact ?? String(value);
+  const r = Math.abs(value) >= 100 ? Math.round(value) : Math.round(value * 100) / 100;
+  return `about ${sayFigure(r, spoken(r, unit.trim()))}`;
 }

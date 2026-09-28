@@ -18,7 +18,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { sayFigureExactly } from '../say-figure.js';
+import { sayFigureExactly, sayFigureRead } from '../say-figure.js';
 import { composeProposalReply } from '../proposal-reply.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
@@ -123,6 +123,28 @@ describe('⭐ a consent subject says a figure as the user writes it', () => {
     const reply = composeProposalReply('propose_option_interventions', { interventions: [], whole_request: true }, estimated, msg);
     expect(reply).toContain('‘Advertising spend’ under ‘Additional advertising’ is set to £15,000 over 6 months, Olumi’s estimate');
     expect(reply).not.toMatch(RAW);
+  });
+
+  it('RED (DL #2227 follow-up B): a unit is said as a person says it with THIS figure', () => {
+    expect(sayFigureExactly(1, 'months')).toBe('1 month');
+    expect(sayFigureExactly(1, 'subscribers')).toBe('1 subscriber');
+    expect(sayFigureExactly(12, 'months')).toBe('12 months');
+    expect(sayFigureExactly(5, 'percent')).toBe('5%');
+    expect(sayFigureExactly(5, 'percent per month')).toBe('5% per month');
+    expect(sayFigureExactly(20, 'story_points')).toBe('20 story points');
+    expect(sayFigureExactly(1, 'GBP per month')).toBe('£1 per month');
+  });
+
+  it('RED (DL #2227 follow-up A, served C05): a replaced figure the approval does not write is said "about", rounded', async () => {
+    const msg = 'We actually have 1,500 Pro subscribers.';
+    const r = await produce(C05, 'propose_assumptions', {
+      assumptions: [{ factor_label: 'Pro paying subscribers', value: 1500, unit: 'subscribers', basis: msg, revise: true }],
+    }, msg);
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true }));
+    expect(String(r.public_label)).toContain('Pro paying subscribers: about 1,469 subscribers → 1,500 subscribers');
+    expect(String(r.public_label)).not.toMatch(/\d\.\d{3}/);
+    expect(sayFigureRead(72_000 / 49, 'subscribers')).toBe('about 1,469 subscribers');
+    expect(sayFigureRead(1300, 'subscribers'), 'an exact figure is said exactly').toBe('1,300 subscribers');
   });
 
   it('RED (a revised starting value): both figures said as written', async () => {
