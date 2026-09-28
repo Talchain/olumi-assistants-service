@@ -101,7 +101,8 @@ describe('RED — served journey C: the user gives MRR, and Olumi\'s subscriber 
     expect(proposed.rederived).toEqual({ factor: 'Pro paying subscribers', from: 1000, to: DERIVED, unit: 'subscribers', whose: "Olumi's estimate" });
     expect(proposed.public_label).toContain(
       `Olumi's estimate of "Pro paying subscribers" becomes about 1,469 subscribers (was 1,000 subscribers), so that ` +
-      `"Pro plan price" × "Pro paying subscribers" gives your "MRR"; it stays Olumi's estimate, not your figure.`,
+      `"Pro plan price" × "Pro paying subscribers" gives your "MRR"; it stays Olumi's estimate, not your figure — this ` +
+      `assumes all of your "MRR" comes from "Pro plan price" × "Pro paying subscribers"; tell me if some comes from elsewhere.`,
     );
     expect(proposed.note).toContain(`Olumi's estimate of "Pro paying subscribers" becomes about 1,469 subscribers`);
     expect(proposed.note).toContain("never the user's");
@@ -182,5 +183,32 @@ describe('never — the goal\'s level is recorded alone, every other node as it 
 
   it('the estimate carries a display_value that would go on saying the old figure', async () => {
     await recordedAlone(served_with('pro_paying_subscribers', (n) => ({ ...n, display_value: '1,000 subscribers' })));
+  });
+});
+
+// AIQ meaning call #72 5867317386 (no veto, two amendments): (1) the approval says the derivation's assumption — ALL of
+// the user's goal is the product; (2) a declared addend is taken off first, and must be the user's own figure — an
+// addend that is Olumi's would be two Olumi figures, so nothing is re-derived (#385's withdrawal applies). Addends are
+// latent today (CEE's carrier holds none), so (2) is a guard on the raw persisted read.
+describe('AIQ amendments — the assumption is said, and an addend is the user\'s or nothing is re-derived', () => {
+  const withAddend = (source: string): Graph => {
+    const g = served_with('mrr', (n) => ({ ...n, nonlinear_identity: { ...(n.nonlinear_identity as object), addends: ['other_mrr_growth'] } }));
+    g.nodes.push({ id: 'other_mrr_growth', kind: 'factor', label: 'Other MRR growth',
+      observed_state: { raw_value: 1000, value: 0.1, cap: 10000, unit: 'GBP/month', source } } as Node);
+    return g;
+  };
+  it('RED (1): the approval says the derivation assumes ALL of "MRR" is price × subscribers', async () => {
+    const { proposed } = await recordMrr(served);
+    expect(proposed.public_label).toContain('this assumes all of your "MRR" comes from "Pro plan price" × "Pro paying subscribers"; tell me if some comes from elsewhere.');
+  });
+  it('RED (2): a user\'s addend of £1,000 is taken off first — (72,000 − 1,000) / 49 ≈ 1,449, not 1,469', async () => {
+    const { s, proposed } = await recordMrr(withAddend('brief_extraction'));
+    expect(proposed.rederived?.to).toBeCloseTo((72000 - 1000) / 49, 9);
+    expect(proposed.public_label).toContain('becomes about 1,449 subscribers');
+    expect(nodeOf(s.graph(), 'pro_paying_subscribers').observed_state!.raw_value).toBeCloseTo(1448.9795918, 6);
+    expect(nodeOf(s.graph(), 'pro_paying_subscribers').observed_state!.source).toBe('cee_inference');
+  });
+  it('RED (2): the same addend as OLUMI\'s estimate → two Olumi figures → nothing is re-derived', async () => {
+    await recordedAlone(withAddend('cee_inference'));
   });
 });
