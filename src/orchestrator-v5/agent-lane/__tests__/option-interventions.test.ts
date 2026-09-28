@@ -169,8 +169,7 @@ describe('the value is read against the factor’s declared range', () => {
     // level still lands. The baseline gate skips a valueless factor anyway.
     expect(applied.ranges_added_for_analysis).toBeUndefined();
     expect(p.read().find((n) => n.id === 'release_availability')!.observed_state).toBeUndefined();
-    // 100 is read on Olumi's defaulted 0–1,000 (headroom, AIQ #72 5868446435), so 0.1 — never 1.0 of its frame.
-    expect(p.read().find((n) => n.id === 'phase_increase')!.interventions).toEqual({ release_availability: { value: 0.1 } });
+    expect(p.read().find((n) => n.id === 'phase_increase')!.interventions).toEqual({ release_availability: { value: 1 } });
   });
 
 

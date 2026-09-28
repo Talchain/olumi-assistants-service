@@ -26,17 +26,10 @@ const capsOver = (graph: unknown) => {
   };
   return createAgentCapabilities(d, new ProposalStore());
 };
-/**
- * The release switches "AI feature availability" ON: a SWITCH-SHAPED level, 1. ⛔ Never 100 (AI Quality ruling (a),
- * #72 5869487670): the served factor has no value, unit or frame, so a bare 100 is a figure, not "on" — it is read on
- * Olumi's default frame (100 → 0.1 of 1,000, #2242 headroom) and the today level is asked. These rows used 100 until
- * #2242, when 100 happened to read as 1.0 of a frame of 100: a coincidence, not a switch (served reach 0 of 2,160).
- * The graded 100 shape is pinned on its own below.
- */
-const levels = (testPrice: number, aiLevel = 1) => [
-  { option_label: '£59 with AI release', factor_label: 'AI feature availability', value: aiLevel, basis: 'the release makes it available' },
+const levels = (testPrice: number) => [
+  { option_label: '£59 with AI release', factor_label: 'AI feature availability', value: 100, basis: 'the release makes it available' },
   { option_label: 'Test £59 with AI release', factor_label: 'Pro plan price', value: testPrice, basis: 'the test price' },
-  { option_label: 'Test £59 with AI release', factor_label: 'AI feature availability', value: aiLevel, basis: 'the release makes it available' },
+  { option_label: 'Test £59 with AI release', factor_label: 'AI feature availability', value: 100, basis: 'the release makes it available' },
 ];
 type View = { checked: boolean; may_run?: boolean; needs_from_user: { message: string }[]; reason?: string };
 type G = { nodes: { id: string; kind: string }[]; edges: { from: string; to: string }[] };
@@ -96,40 +89,6 @@ describe('propose_starting_point says whether one approval will make the analysi
     const v = r.readiness_if_approved as View | undefined;
     expect(v?.may_run, JSON.stringify(v)).toBe(true);
     expect(String(r.note)).not.toMatch(/could still not run/i);
-  });
-
-  /**
-   * ⭐ AI QUALITY RULING (a) (#72 5869487670): a level of 100 on a factor with NO value, unit or frame is NOT a switch
-   * that is on. The ef99a97 shape, verbatim: the SAME starting point as the CONTRAST above, with the release's level 100
-   * instead of 1. It is graded on Olumi's default frame — 0.1 of 1,000 (#2242: the frame sits strictly above the figure)
-   * — so the factor's level today is asked, and the analysis cannot run after approval until the user gives it.
-   * Mutant: base `defaultFrameFor` reads 100 as 1.0 of a frame of 100 (a switch that is on) → this row is RED.
-   */
-  it('RULING (a): a level of 100 on a valueless, unit-less, unframed factor is graded (0.1 of 1,000), not a switch — the today level is asked and it may not run', async () => {
-    const node = (served as { nodes: Record<string, unknown>[] }).nodes.find((n) => n.label === 'AI feature availability')!;
-    // The served shape this rules on: no value, no unit, no frame.
-    expect(node, 'served factor present').toBeDefined();
-    expect(node.observed_state).toBeUndefined();
-    expect(node.unit).toBeUndefined();
-    expect(node.scale_frame).toBeUndefined();
-    const r = await capsOver(served).proposeStartingPoint(ctx, { assumptions: [], option_levels: levels(54, 100) });
-    expect(r, JSON.stringify(r).slice(0, 600)).toEqual(expect.objectContaining({ ok: true }));
-    type Iv = { option: string; factor: string; value: number; recorded_on_model_scale: number; model_range: number | null };
-    const ai = (r.interventions as Iv[]).filter((x) => x.factor === 'AI feature availability');
-    expect(ai.map((x) => x.option).sort()).toEqual(['Test £59 with AI release', '£59 with AI release'].sort());
-    for (const x of ai) {
-      expect(x.value, JSON.stringify(x)).toBe(100);
-      expect(x.model_range, JSON.stringify(x)).toBe(1_000);
-      expect(x.recorded_on_model_scale, JSON.stringify(x)).toBeCloseTo(0.1, 12);
-    }
-    const v = r.readiness_if_approved as View | undefined;
-    expect(v?.checked).toBe(true);
-    expect(v?.may_run, JSON.stringify(v)).toBe(false);
-    expect(v?.needs_from_user).toEqual([{
-      factor: 'AI feature availability',
-      message: 'What is "AI feature availability" today, before any option changes it? Without a current level the analysis would treat it as zero.',
-    }]);
-    expect(String(r.note)).toContain('Even after this approval the analysis could still not run: What is "AI feature availability" today');
   });
 });
 

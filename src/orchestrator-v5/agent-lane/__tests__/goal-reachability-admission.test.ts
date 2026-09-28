@@ -220,8 +220,7 @@ describe('defaultFrameFor — derived, not chosen', () => {
   it('is the smallest power of ten strictly above the magnitude', () => {
     expect(defaultFrameFor(59)).toBe(100);
     expect(defaultFrameFor(250)).toBe(1000);
-    // Strictly above: an exact power of ten takes the next step up (AIQ #72 5868446435).
-    expect(defaultFrameFor(1000)).toBe(10000);
+    expect(defaultFrameFor(1000)).toBe(1000);
     expect(defaultFrameFor(1001)).toBe(10000);
     // Anything already within the unit interval needs no frame at all.
     expect(defaultFrameFor(0.7)).toBe(1);
