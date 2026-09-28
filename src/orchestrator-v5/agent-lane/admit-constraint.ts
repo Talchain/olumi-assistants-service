@@ -161,6 +161,8 @@ const MAGNITUDE_SUFFIX = /^(.*?)\s*([km])$/i;
  */
 export interface LimitTargetScale {
   readonly unit?: string;
+  /** The node's own name — only a real node carries one; `percentLevelFrame`'s self-target never does. */
+  readonly label?: string;
   readonly cap?: number;
   readonly value?: number;
   readonly raw_value?: number;
@@ -178,6 +180,28 @@ function norm(unit: string): string {
  * Exported as the one "is this a percentage LEVEL?" test: the magnitude contract reads a target's domain with it
  * (`cee/magnitude/link-effect.ts`), so a "% change" is never read as a level bounded by 0 and 100.
  */
+/**
+ * Does the unit, after its percent head and an optional period, NAME ITS NODE — every remaining word is a word of the
+ * node's own label ("% monthly churn" on "Monthly churn")? Then the tail says WHICH quantity, not a relation ("% change",
+ * "% growth", "% vs …" name a change or a reference, and stay verbatim). Grammar and the node's own words — no word list.
+ * A target with no label (not a real node: `percentLevelFrame`'s self-target) names nothing.
+ */
+function tailNamesTheNode(unit: string, label: string | undefined): boolean {
+  if (label === undefined || label.trim() === '') return false;
+  const t = norm(unit);
+  const head = PERCENT_HEADS.find((h) => t.startsWith(h));
+  if (head === undefined) return false;
+  const words = t.slice(head.length).trim().split(/[\s/]+/u).filter((w) => w !== '');
+  // An optional period first: "monthly", or "per month" / "a month".
+  let i = 0;
+  if (words[0] !== undefined && PERIOD_NAME[words[0]] !== undefined) i = 1;
+  else if (words[1] !== undefined && /^(?:per|a|an|each)$/.test(words[0] ?? '') && PERIOD_NAME[words[1]] !== undefined) i = 2;
+  const rest = words.slice(i);
+  if (rest.length === 0) return false;
+  const named = new Set(norm(label).split(/[^\p{L}\p{N}]+/u).filter((w) => w !== ''));
+  return rest.every((w) => named.has(w.replace(/[^\p{L}\p{N}]+/gu, '')));
+}
+
 export function isPercentWithPeriod(unit: string): boolean {
   if (classifyUnitScaleClass(unit) !== 'percent') return false;
   const t = norm(unit);
@@ -338,7 +362,8 @@ export function canonicaliseLimitUnit(
    * is on that node's scale by construction — the "of" rule's own guard — so it is that percent, under the same gates.
    */
   const ownSpellingLevel = frame === 'level' && !pointsLevel && !ofLevel && !isPercentWithPeriod(unit)
-    && target?.unit !== undefined && norm(target.unit) === norm(unit) && classifyUnitScaleClass(unit) === 'percent';
+    && target?.unit !== undefined && norm(target.unit) === norm(unit) && classifyUnitScaleClass(unit) === 'percent'
+    && tailNamesTheNode(unit, target.label);
 
   if ((isPercentWithPeriod(unit) || pointsLevel || ofLevel || ownSpellingLevel) && Math.abs(value) >= 1 && Math.abs(value) <= 100) {
     // A rewrite onto the spelling the limit already has is no rewrite: nothing to stamp.

@@ -25,7 +25,7 @@ const RUN = JSON.parse(
 
 const UNIT = '% monthly churn';
 const os = RUN.node.observed_state as Rec;
-const SCALE: LimitTargetScale = { unit: os.unit as string, value: os.value as number, raw_value: os.raw_value as number, scale_frame: RUN.node.scale_frame as number };
+const SCALE: LimitTargetScale = { unit: os.unit as string, value: os.value as number, raw_value: os.raw_value as number, scale_frame: RUN.node.scale_frame as number, label: RUN.node.label as string };
 
 const admit = (unit = UNIT, frame: 'level' | 'delta' | undefined = 'level', scale = SCALE, value = 4) =>
   admitCandidateConstraints([{ metric: 'Monthly churn', operator: '<=', value, unit, provenance: 'explicit', frame }],
@@ -34,7 +34,7 @@ const admit = (unit = UNIT, frame: 'level' | 'delta' | undefined = 'level', scal
 describe('a LEVEL limit in its node\'s own percent spelling is that percent', () => {
   it('[served A14] PRECONDITION: the served limit and node are both "% monthly churn", node framed on 100 at 3%', () => {
     expect(RUN.limit).toMatchObject({ unit: UNIT, value: 4, operator: '<=', value_frame: 'level', node_id: 'monthly_churn' });
-    expect(SCALE).toEqual({ unit: UNIT, value: 0.03, raw_value: 3, scale_frame: 100 });
+    expect(SCALE).toEqual({ unit: UNIT, value: 0.03, raw_value: 3, scale_frame: 100, label: 'Monthly churn' });
   });
 
   it('⭐ RED [served A14]: admission relabels it to "%", value unchanged, provenance stamped', () => {
@@ -46,7 +46,18 @@ describe('a LEVEL limit in its node\'s own percent spelling is that percent', ()
 
   it('⭐ RED: another label word in the same shape ("% weekly trial conversion" on its own node) is the same class', () => {
     const u = '% weekly trial conversion';
-    expect(canonicaliseLimitUnit(20, u, { ...SCALE, unit: u, value: 0.2, raw_value: 20 }, 'level').unit).toBe('%');
+    expect(canonicaliseLimitUnit(20, u, { ...SCALE, unit: u, value: 0.2, raw_value: 20, label: 'Trial conversion' }, 'level').unit).toBe('%');
+  });
+
+  it('CONTRAST (CI red on the first head): the same spelling whose words name a RELATION, not the node, stays verbatim', () => {
+    // "% change" / "% growth" on a node spelled the same: the tail is not the node's name, so it is a change, not a level.
+    expect(admit('% change', 'level', { ...SCALE, unit: '% change' }, 10).unit).toBe('% change');
+    expect(admit('% monthly growth', 'level', { ...SCALE, unit: '% monthly growth' }, 10).unit).toBe('% monthly growth');
+  });
+
+  it('CONTRAST: a target that is no real node (no label — percentLevelFrame\'s self-target) never matches', () => {
+    const { label: _l, ...unlabelled } = SCALE;
+    expect(admit(UNIT, 'level', unlabelled).unit).toBe(UNIT);
   });
 
   it('CONTROL (run 1\'s shape): "% per month" still relabels under its own rule, unchanged', () => {
