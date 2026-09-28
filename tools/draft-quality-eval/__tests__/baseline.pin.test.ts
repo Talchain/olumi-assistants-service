@@ -131,7 +131,7 @@ describe("BASELINE — the POST-REPAIR stage, which is closer to what the user g
   const baseline = loadGovernedBaseline();
   const briefs = new Map(loadBriefs().map((b) => [b.id, b]));
 
-  it("scores 164 of 246 applicable checks — and the delta from PROJECTED is the finding", async () => {
+  it("scores 165 of 246 applicable checks — and the delta from PROJECTED is the finding", async () => {
     const scores = [];
     for (const c of baseline.cases) {
       scores.push(
@@ -146,7 +146,10 @@ describe("BASELINE — the POST-REPAIR stage, which is closer to what the user g
     const passed = scores.reduce((a, s) => a + s.checksPassed, 0);
     const applicable = scores.reduce((a, s) => a + s.checksApplicable, 0);
     expect(applicable).toBe(246);
-    expect(passed).toBe(164);
+    // R10 (CEE #2254, AIQ #72 5872082179): 164 → 165. Exactly ONE check moved, measured per check at base vs head:
+    // 08-channel-strategy · D5.2-no-connectivity-errors false → true. That draft carries an outcome→outcome
+    // mediation link (794d0013→19f7787d); the old repair DELETED it and stranded the outcome. It is now legal and kept.
+    expect(passed).toBe(165);
 
     // ⭐ THE PAIR THAT MATTERS. Pre-repair, three briefs have NO goal. Post-
     // repair, all three have one — labelled with the machine placeholder. The

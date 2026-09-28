@@ -436,6 +436,36 @@ export function classifyValueSource(stamp: unknown): StructureProvenance {
 }
 
 /**
+ * ⭐ R11 — WHO AUTHORED A CAUSAL LINK'S STRENGTH (AI Quality #72 5872082179, adopted by the Delivery Lead).
+ *
+ * `provenance.source` says who put the LINK in the model; `defaulted: true` says Olumi supplied its NUMBERS. A
+ * defaulted strength never earns authorship credit, whatever the link's source: a `brief_extraction` link the brief
+ * named, carrying Olumi's default strength, is a link the user stated and a size nobody did. It classifies as
+ * `ai_drafted` here — the size is Olumi's — so the census cannot license a leader on it.
+ *
+ * A confirmation keeps `source` and `defaulted` exactly (`adjust-edge-strength.ts`; it only ADDS
+ * `provenance.reviewed_by_user`), so it reads through this function unchanged: review, not authorship. Only a `set`
+ * that changed the value stamps `user_specified` and removes `defaulted`.
+ */
+export function edgeStrengthProvenance(edge: unknown): StructureProvenance {
+  const record = asRecord(edge);
+  const provenance = classifyValueSource(asRecord(record?.provenance)?.source);
+  if (record?.defaulted === true && earnsAuthorshipCredit(provenance)) return 'ai_drafted';
+  return provenance;
+}
+
+/**
+ * ⭐ R11 — WHETHER THE USER HAS REVIEWED A LINK'S STRENGTH (a confirm: `provenance.reviewed_by_user`, written by
+ * `adjust-edge-strength.ts`). Review is not authorship (`edgeStrengthProvenance` still gives no credit), but it IS the
+ * user's settled view of that figure: a consumer that would re-derive the size, ask about it again, or flag it as an
+ * unseen default treats a reviewed link as settled. One predicate, so those consumers cannot disagree.
+ */
+export function edgeReviewedByUser(edge: unknown): boolean {
+  const review = asRecord(asRecord(asRecord(edge)?.provenance)?.reviewed_by_user);
+  return review !== null && review !== undefined && review.intent === 'confirm';
+}
+
+/**
  * The declared vocabularies, exported so a test can assert the tables cover them
  * and a probe can report which stamps a corpus actually carries. Derived from the
  * contract constant, never re-typed.

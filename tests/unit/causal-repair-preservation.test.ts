@@ -103,7 +103,10 @@ describe("captured causal repair boundary", () => {
   });
   it("keeps the existing cycle and unsupported-direction refusals", () => {
     const graph = simpleRepair(fixture());
+    // R10: outcome→risk is LEGAL now; here it closes a cycle with the fixture's risk→outcome. The unsupported
+    // direction is goal→outcome (still outside the one table).
     graph.edges.push({ from: ids.outcome, to: ids.risk, strength_mean: 0.1, strength_std: 0.1, belief_exists: 0.9 });
+    graph.edges.push({ from: ids.goal, to: ids.outcome, strength_mean: 0.1, strength_std: 0.1, belief_exists: 0.9 });
     const codes = validateGraph({ graph, requestId: "offline", phase: "post_enforcement" }).errors.map((issue) => issue.code);
     expect(codes).toContain("CYCLE_DETECTED");
     expect(codes).toContain("INVALID_EDGE_TYPE");

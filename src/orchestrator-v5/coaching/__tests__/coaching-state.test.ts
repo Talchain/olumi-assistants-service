@@ -358,4 +358,22 @@ describe('deriveCoachingState — projection not inference', () => {
     });
     expect(signalOf(noDefault, 'defaulted_or_unknown_value')).toBeUndefined();
   });
+
+  it('R11: a defaulted strength the user CONFIRMED is not an unseen default — no signal (it keeps `defaulted` for credit only)', () => {
+    const confirmed = base({
+      freshness: FRESH,
+      persistedGraph: { nodes: [], edges: [{ from: 'a', to: 'b', defaulted: true,
+        provenance: { source: 'cee_hypothesis', reviewed_by_user: { intent: 'confirm', at: '2026-09-28T15:00:00.000Z' } } }] },
+    });
+    expect(signalOf(confirmed, 'defaulted_or_unknown_value')).toBeUndefined();
+    // CONTROL: one unconfirmed default beside it still fires.
+    const mixed = base({
+      freshness: FRESH,
+      persistedGraph: { nodes: [], edges: [
+        { from: 'a', to: 'b', defaulted: true, provenance: { source: 'cee_hypothesis', reviewed_by_user: { intent: 'confirm', at: '2026-09-28T15:00:00.000Z' } } },
+        { from: 'c', to: 'b', defaulted: true, provenance: { source: 'cee_hypothesis' } },
+      ] },
+    });
+    expect(signalOf(mixed, 'defaulted_or_unknown_value')?.reason_code).toBe('edge_strength_defaulted');
+  });
 });
