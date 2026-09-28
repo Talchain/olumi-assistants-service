@@ -521,18 +521,26 @@ export const NodeV3 = z.object({
    * `openapi.yaml`; a consumer on a stale pin simply drops it.
    *
    * `operation: 'sum'` (R3-2, AIQ #72 5867700610): a limited spend tally that IS the sum of its
-   * levers (`admit-model.ts` `findSumTallies`), always `stated_in_brief: false`. Every C46 reader
-   * above reads `product` only (`readCarrier`), so a sum never withholds a leader.
+   * levers (`admit-model.ts` `findSumTallies`), ONLY with `stated_in_brief: false` (a stated sum is
+   * malformed and dropped). Every C46 reader above reads `product` only (`readCarrier`), so a sum
+   * never withholds a leader.
    */
   nonlinear_identity: z
-    .object({
-      // `sum` (R3-2, AIQ #72 5867700610): a limited spend tally held as the sum of its levers (`findSumTallies`),
-      // always Olumi's reading. PLoT (`readNonlinearIdentity`) and ISL (`NonlinearIdentityV2`) accept both.
-      operation: z.enum(['product', 'sum']),
-      factor_ids: z.array(z.string().min(1)).min(2),
-      stated_in_brief: z.boolean(),
-    })
-    .strict()
+    .union([
+      z.object({
+        operation: z.literal('product'),
+        factor_ids: z.array(z.string().min(1)).min(2),
+        stated_in_brief: z.boolean(),
+      }).strict(),
+      // `sum` (R3-2, AIQ #72 5867700610): a limited spend tally held as the sum of its levers (`findSumTallies`).
+      // ONLY as Olumi's reading — construction never mints a stated sum, so one is malformed and dropped. PLoT
+      // (`readNonlinearIdentity`) and ISL (`NonlinearIdentityV2`) accept both operations.
+      z.object({
+        operation: z.literal('sum'),
+        factor_ids: z.array(z.string().min(1)).min(2),
+        stated_in_brief: z.literal(false),
+      }).strict(),
+    ])
     .optional()
     .catch(undefined),
 }); // CIL Phase 1: declared fields only — unknown fields stripped with warning
