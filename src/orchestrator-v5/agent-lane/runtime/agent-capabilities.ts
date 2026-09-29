@@ -5089,7 +5089,9 @@ export function createAgentCapabilities(
         // validation, create-only registration and canonical readback below.
         built = config.proxy.constructorArm === 'source_first'
           ? await buildSourceFirstFromBrief(ctx.scenario_id, brief, dispatch, callStructured)
-          : await buildModelFromBrief(ctx.scenario_id, brief, dispatch, callStructured, opts.onConstructionTrace);
+          : await buildModelFromBrief(ctx.scenario_id, brief, dispatch, callStructured, opts.onConstructionTrace,
+            // Branch-only, server-controlled opt-in; current and frozen comparison behavior remains the default.
+            config.proxy.constructorM1Partition ? 'm1' : 'current');
         if (built.ok !== true) return built;
       }
 

@@ -36,6 +36,8 @@
 import { keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine } from '../keep-options-apart.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
 import { quoteListedOptions } from '../option-lineage.js';
+import { admittedOptionKeys } from '../admitted-option-identity.js';
+import { partitionM1Candidate, type M1Proposal } from '../m1-candidate-partition.js';
 import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, productIdentityOpenQuestions, sumIdentityOpenQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
 import {
   COMPACT_LIMITS,
@@ -514,7 +516,7 @@ export function carryFindingsAcrossRetry<P extends ReturnType<typeof prepareProv
   };
 }
 
-export function prepareProvisionalCandidate(model: CandidateModel): {
+export function prepareProvisionalCandidate(model: CandidateModel, preserveAbsoluteAuthorship = false): {
   candidate: CandidateModel;
   mechanism_issues: string[];
   additions_without_total: AdditionWithoutTotal[];
@@ -536,7 +538,7 @@ export function prepareProvisionalCandidate(model: CandidateModel): {
       if (kind === undefined) { interventions.push(intervention); continue; } // Stored before the field: as on staging.
       if (kind === 'absolute') {
         const unknownBaseline = factors.length === 1 && factors[0]!.baseline_known !== true;
-        if (intervention.provenance === 'explicit' && unknownBaseline) {
+        if (intervention.provenance === 'explicit' && unknownBaseline && !preserveAbsoluteAuthorship) {
           provenance_demoted.push({ option: option.label, factor: intervention.factor_label, value: intervention.value });
           interventions.push({ ...intervention, provenance: 'ai_proposed' });
         } else {
@@ -1104,6 +1106,7 @@ export async function buildModelFromBrief(
   dispatch: InternalDispatch,
   callStructured: CallStructuredModel,
   observeConstruction?: (t: ConstructionTrace) => void,
+  constructionPolicy: 'current' | 'm1' = 'current',
 ): Promise<ToolResult> {
   const budget = budgetFor('gpt-5.6-terra', 'whole');
   let candidate: CandidateModel;
@@ -1137,6 +1140,19 @@ export async function buildModelFromBrief(
     return { ok: false, mutated: false, refusal: 'construction_failed', detail: String(err).slice(0, 200) };
   }
 
+  const faithfulM1 = constructionPolicy === 'm1';
+  const modelForAdmission = (draft: CandidateModel): { model: CandidateModel; folded: FoldedCarrier | null } => {
+    const minted = withReconcilingProductIdentity(draft, brief);
+    return minted !== draft ? { model: minted, folded: null } : foldProductCarrierIntoGoal(draft, brief);
+  };
+  // Reuse MG's existing identity proof before deciding which intermediate additions can be left out.
+  const firstProof = faithfulM1 ? modelForAdmission(candidate) : { model: candidate, folded: null };
+  const firstPartition = faithfulM1 ? partitionM1Candidate(firstProof.model, brief) : null;
+  let m1Proposals: readonly M1Proposal[] = firstPartition?.proposals ?? [];
+  let m1Placeholders = firstPartition?.placeholders ?? [];
+  let m1OptionQuotes = firstPartition?.option_quotes ?? new Map<string, string>();
+  candidate = firstPartition?.candidate ?? candidate;
+
   // The drafter's own words, kept for a repair retry: re-preparing a PREPARED
   // candidate finds nothing (review 5822933692, B3), so the retry sees the original.
   // ⛔ AN OPTION AND A QUANTITY NEVER SHARE A NAME (`keepOptionsAndQuantitiesApart`, Canvas #72 5884644099): admission
@@ -1146,18 +1162,14 @@ export async function buildModelFromBrief(
   let keptApart = apart.renamed;
   let notToldApart = apart.ambiguous;
   const firstCandidate = candidate;
-  let preparation = prepareProvisionalCandidate(candidate);
+  let preparation = prepareProvisionalCandidate(candidate, faithfulM1);
   candidate = preparation.candidate;
   // ⛔ A figure written only as the goal's TARGET is not also its current level (R3 #72 5885498117; DL 5885526452 (3)).
   const writtenAgain = (value: number, unit: unknown): boolean => timesTheUserWrote(value, unit, brief) >= 2;
   // First retain an identity already justified on the goal. Only when that proof
   // cannot mint one may MG's carrier guard fold an eligible intermediate into it.
-  const modelForAdmission = (draft: CandidateModel): { model: CandidateModel; folded: FoldedCarrier | null } => {
-    const minted = withReconcilingProductIdentity(draft, brief);
-    return minted !== draft ? { model: minted, folded: null } : foldProductCarrierIntoGoal(draft, brief);
-  };
   const admissionInput = modelForAdmission(candidate);
-  let foldedCarrier = admissionInput.folded;
+  let foldedCarrier = admissionInput.folded ?? firstProof.folded;
   let admitted = admitCandidateModel(admissionInput.model, {}, brief, goalLevelTheUserWrote(candidate, brief), writtenAgain);
   preparation = gapsOnRegisteredOptions(preparation, firstCandidate, admitted);
 
@@ -1193,7 +1205,8 @@ export async function buildModelFromBrief(
   // A missing risk mechanism, and an option × factor (or acted-on baseline) with no
   // level (c22, `findCoverageGaps`), ask the retry to repair. An addition with no total
   // DEGRADES instead (see `prepareProvisionalCandidate`): the figure is the user's to give.
-  const repairIssues = (p: typeof preparation): string[] => [...p.mechanism_issues, ...sayCoverageGaps(p)];
+  // Missing user inputs need clarification, not a second request for the estimates M1 just excluded.
+  const repairIssues = (p: typeof preparation): string[] => [...p.mechanism_issues, ...(faithfulM1 ? [] : sayCoverageGaps(p))];
   // ⚠ Counted WITHOUT the first pass's own degraded additions (#1841 B1): a retry that
   // echoes the prepared candidate carries each such pair in `changes`, and that figure
   // is the user's to give — it is never a new gap, so it can never refuse the retry.
@@ -1269,12 +1282,15 @@ export async function buildModelFromBrief(
         schema: retrySchemaPinningGoal(candidate.goal, candidate.decision_question),
       });
       if (retry.text.length > 0) {
-        const retryApart = keepOptionsAndQuantitiesApart(JSON.parse(retry.text) as CandidateModel);
+        const retryParsed = JSON.parse(retry.text) as CandidateModel;
+        const retryProof = faithfulM1 ? modelForAdmission(retryParsed) : { model: retryParsed, folded: null };
+        const retryPartition = faithfulM1 ? partitionM1Candidate(retryProof.model, brief) : null;
+        const retryApart = keepOptionsAndQuantitiesApart(retryPartition?.candidate ?? retryParsed);
         const retryRaw = keepLimitedQuantityAuthor(
           neverTheLimitAsTodaysLevel(retryApart.model, firstCandidate, preparation.baseline_gaps),
           firstCandidate, preparation.baseline_gaps,
         );
-        const retryPrepared = prepareProvisionalCandidate(retryRaw);
+        const retryPrepared = prepareProvisionalCandidate(retryRaw, faithfulM1);
         const retryCandidate = retryPrepared.candidate;
         const retryAdmissionInput = modelForAdmission(retryCandidate);
         const retryAdmitted = admitCandidateModel(retryAdmissionInput.model, {}, brief, goalLevelTheUserWrote(retryCandidate, brief), writtenAgain);
@@ -1327,7 +1343,12 @@ export async function buildModelFromBrief(
             .map((n) => ({ kind: String(n.kind), label: String((n as { description?: unknown }).description ?? n.label) }));
           candidate = retryCandidate;
           admitted = retryAdmitted;
-          foldedCarrier = retryAdmissionInput.folded;
+          foldedCarrier = retryAdmissionInput.folded ?? retryProof.folded;
+          if (retryPartition !== null) {
+            m1Proposals = [...new Map([...m1Proposals, ...retryPartition.proposals].map((p) => [p.id, p])).values()];
+            m1Placeholders = retryPartition.placeholders;
+            m1OptionQuotes = retryPartition.option_quotes;
+          }
           keptApart = retryApart.renamed;
           notToldApart = retryApart.ambiguous;
           size = retrySize;
@@ -1483,7 +1504,12 @@ export async function buildModelFromBrief(
   const withheldOptions = [...(admitted.options_withheld ?? []), ...carriedWithheld];
   openQuestions.unshift(
     ...withheldOptions.map((w) => w.sentence),
-    ...(admitted.indistinct_stated_options ?? []).map((g) => g.question),
+    ...(admitted.indistinct_stated_options ?? []).flatMap((g) => {
+      const pending = preparation.additions_without_total.filter((a) => a.reason === 'baseline_unknown' && g.options.some((o) => canonicalLabel(o) === canonicalLabel(a.option)));
+      if (!faithfulM1 || !g.options.every((o) => pending.some((a) => canonicalLabel(a.option) === canonicalLabel(o)))) return [g.question];
+      // The user already told these actions apart. Ask for the missing starting levels, not their difference again.
+      return pending.map((a) => `What is "${a.factor}" today? Your addition of ${a.value}${a.unit ? ` ${a.unit}` : ''} for "${a.option}" is kept pending until its starting level is known.`);
+    }),
   );
   /**
    * ⛔ A DEADLINE NO RESULT ANSWERS IS ASKED WHERE THE USER ALWAYS SEES IT. Unattested, the goal holds no deadline and
@@ -1517,11 +1543,17 @@ export async function buildModelFromBrief(
   // the five-question cap.
   openQuestions.unshift(...admitted.loss.filter((l) => /\.goal_scope$/.test(l.field_path)).map((l) => l.reason));
 
+  const markedNodes = markOlumiOptions(quoteListedOptions(goalNodes, candidate, brief), candidate, brief);
+  const optionKeys = faithfulM1 ? admittedOptionKeys(markedNodes, candidate.options) : new Map();
   const graph = {
     // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
     // An option the brief lists carries the brief's words for it (`source_quote`, the Run's intake binding), and an option
     // Olumi added carries `proposed_by: 'olumi'` (the Run's filter and the analysis hash read it; never the brief).
-    nodes: markOlumiOptions(quoteListedOptions(goalNodes, candidate, brief), candidate, brief),
+    nodes: faithfulM1 ? markedNodes.map((n) => {
+      const key = optionKeys.get(n);
+      const quote = key === undefined ? undefined : m1OptionQuotes.get(key);
+      return quote === undefined ? n : { ...n, source_quote: quote };
+    }) : markedNodes,
     edges: admitted.edges,
     ...(admitted.goal_constraints.length > 0
       ? { goal_constraints: admitted.goal_constraints }
@@ -1547,6 +1579,7 @@ export async function buildModelFromBrief(
     within_compact_limits: size.within,
     size_retried: sizeRetried,
     construction_retried: constructionRetried,
+    ...(faithfulM1 ? { construction_policy: 'm1', constructor_proposals: m1Proposals, constructor_placeholders: m1Placeholders, deferred_suggestions: m1Proposals.length } : {}),
     ...(size.user_material_exceeds_limit
       ? { admitted_over_limit_because: 'your own stated options and facts exceed the compact limit' }
       : {}),
