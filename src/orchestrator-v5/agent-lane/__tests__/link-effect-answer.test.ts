@@ -17,9 +17,9 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
-import { linkEffectEdgeToken } from '../../system-events/link-effect-edit.js';
+import { linkEffectEdgeToken, linkEffectReadingToken } from '../../system-events/link-effect-edit.js';
 import { approvalChipsFor, approvalChipIdFor, readingOfLinkEffectApproval } from '../approval-chips.js';
-import type { CommitOptionLevelsResult } from '../../system-events/dispatch.js';
+import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 
 type Json = Record<string, any>;
 const served = (f: string): Json => (JSON.parse(readFileSync(new URL(`./fixtures/${f}`, import.meta.url), 'utf8')) as { graph: Json }).graph;
@@ -239,8 +239,10 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
       throw new Error(`unexpected dispatch ${path}`);
     };
     let doorCalls = 0;
-    const commitOptionLevels = async (): Promise<CommitOptionLevelsResult> => {
+    let sent: CommitOptionLevelsInput | undefined;
+    const commitOptionLevels = async (input: CommitOptionLevelsInput): Promise<CommitOptionLevelsResult> => {
       doorCalls += 1;
+      sent = input;
       const e = (graph.edges as Json[]).find((x) => x.from === 'pro_plan_price' && x.to === 'pro_plan_paying_subscribers')!;
       e.provenance = { ...(e.provenance ?? {}), ...THEIRS };
       return { status: 'committed', graph_hash: 'h-after', receipt: null, already_applied: false, committed_levels: [], links_resized: [] };
@@ -265,6 +267,9 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     expect(doorCalls, 'nothing written from words, another proposal\'s card, or a card without this reading').toBe(0);
     expect(await caps.authoriseChange(ctxPressing(id, card.message), { proposal_id: id })).toEqual(expect.objectContaining({ ok: true, applied: true }));
     expect(doorCalls).toBe(1);
+    // Canonical #2283: the door gets the token of exactly the reading the card showed (the writer recomputes it).
+    expect(sent?.link_effect?.reading_token).toBe(linkEffectReadingToken({ from: 'pro_plan_price', to: 'pro_plan_paying_subscribers',
+      effect: { amount: -50, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: 'GBP per month' }, quote: SUBS_ARGS.quote }));
   });
 
   it('the tool is registered: dispatchTool routes propose_link_effect to the capability', async () => {

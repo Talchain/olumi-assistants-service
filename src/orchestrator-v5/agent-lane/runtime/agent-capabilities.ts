@@ -31,7 +31,7 @@ import { GM_HELD_HANDLER_ID, GM_HELD_OPERATIONS_MAX_JSON_CHARS, gmHeldProposalRe
 import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../../graph-management/types.js';
 import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../../compose/definitional-links.js';
-import { applyLinkEffectEdit, linkEffectEdgeToken, type LinkEffectRefusal } from '../../system-events/link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken, type LinkEffectRefusal } from '../../system-events/link-effect-edit.js';
 import { unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
 
@@ -2077,7 +2077,9 @@ export function createAgentCapabilities(
       turn_id: authorisationTurnId(`${parent.proposal_id}#effect`),
       links: [],
       levels: [],
-      link_effect: { from: v.from, to: v.to, effect, edge_token: v.edge_token, quote: v.quote },
+      // Canonical #2283: the token of the reading the pressed card SHOWED (checked above), recomputed from the stored proposal.
+      link_effect: { from: v.from, to: v.to, effect, edge_token: v.edge_token, quote: v.quote,
+        reading_token: linkEffectReadingToken({ from: v.from, to: v.to, effect, quote: v.quote }) },
     });
     if (res.status === 'unconfirmed') {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed', receipts: [],
@@ -2543,7 +2545,9 @@ export function createAgentCapabilities(
       }
       const effect = { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit };
       const dry = applyLinkEffectEdit({ persistedGraph: g.raw, from: from.id, to: to.id, effect,
-        expected: { graph_hash: g.graph_hash, edge_token: edgeToken }, quote: said, lastRunIdentityUse: g.identity_run_use ?? null });
+        expected: { graph_hash: g.graph_hash, edge_token: edgeToken }, quote: said,
+        // A dry run of the reading the card will show: its own token, so every refusal it returns is about the write.
+        reading_token: linkEffectReadingToken({ from: from.id, to: to.id, effect, quote: said }), lastRunIdentityUse: g.identity_run_use ?? null });
       if (dry.kind === 'refused') {
         const definition = dry.reason === 'definitional_link' ? definitionalLinkInUse(g.raw, from.id, to.id, g.identity_run_use ?? null) : null;
         return { ok: false, mutated: false, refusal: dry.reason,
