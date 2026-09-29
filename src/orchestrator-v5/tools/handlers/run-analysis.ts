@@ -147,6 +147,7 @@ import {
 // OWN return value — see the module docblock for why neither this handler nor
 // the UI may re-derive either count from graph shape.
 import { buildAnalysisParticipationDisclosure } from '../../coaching/analysis-participation-disclosure.js';
+import { buildGoalReadingDisclosure } from '../../coaching/goal-reading-disclosure.js';
 import {
   gateAnalysableOptions,
   PLOT_MIN_COMPARISON_OPTIONS,
@@ -2446,7 +2447,11 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     const inferredValueDisclosure = buildInferredValueDisclosure(
       deriveOlumiAuthoredValues(graphForAnalysis),
     );
-    const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}`;
+    // ⭐ AIQ 5895379601 (1): Olumi's readings of the goal (its direction, its today level) are said once, through the
+    // predicates the Run acts on (`goal-reading-disclosure.ts`), on the graph this Run analysed. The forwarder admits
+    // them only as its own rebuild from `__goal_reading_source` (AIQ 5895590866 (2), exact equality).
+    const goalReadingDisclosure = buildGoalReadingDisclosure(graphForAnalysis, snapshot.goal_node_id);
+    const summary = `${headline ?? template}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}`;
 
     // V5 link-safe response floor: when the deterministic headline builder
     // picks Case-E ("{label} currently leads.") because stronger cases
@@ -2618,6 +2623,11 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // exactly as today (it falls back to `context.persistedGraph`).
       ...(snapshot.rawPersistedGraph !== undefined && snapshot.rawPersistedGraph !== null
         ? { __run_graph_snapshot: snapshot.rawPersistedGraph }
+        : {}),
+      // Internal channel — the graph and goal the goal-reading tail was built from, so the registry forwarder can
+      // rebuild that exact tail and admit nothing else (`goalReadingTailOf`). Only when a reading spoke.
+      ...(goalReadingDisclosure !== ''
+        ? { __goal_reading_source: { graph: graphForAnalysis, goal_node_id: snapshot.goal_node_id } }
         : {}),
       // GO(A) — the cell whose native value would make the withheld limit
       // checkable. Server-only: the turn-executor arms it as an

@@ -59,8 +59,23 @@ describe('briefGoalLevel: AIQ (b) — the sole same-terms figure, in the change\
   ])('NULL (nothing the brief gives in money to account for): %s', (_why, d, brief) => {
     expect(briefGoalLevel(d, brief)).toBeNull();
   });
-  it('NAMED RESIDUAL (an over-claim this cannot see): one sentence, the sole figure, stated for a quantity the model does not hold', () => {
-    const brief = 'Our support team costs £45,000 a month and we want to cut our cloud bill by 15%.';
-    expect(briefGoalLevel(draft({ metric: 'Monthly cloud bill', value: -15, unit: 'GBP per month' }), brief)).toMatchObject({ kind: 'adopt', value: 45000 });
+  // ⛔ PTL 5895711185: this was the NAMED RESIDUAL (adopted as the cloud bill's level). The figure's own phrase must name
+  // nothing but the goal (`phraseNamesOnlyTheGoal`).
+  it.each<[string, string, string, unknown]>([
+    ['RED (was the residual): "Our support team costs £45,000 a month and we want to cut our cloud bill by 15%"', 'Monthly cloud bill',
+      'Our support team costs £45,000 a month and we want to cut our cloud bill by 15%.', refused('£45,000')],
+    ['"We spend £45k a month on support; we want to cut cloud costs by 20%"', 'Monthly cloud costs',
+      'We spend £45k a month on support; we want to cut cloud costs by 20%.', refused('£45k')],
+    ['named under-claim: the goal named by a word its name lacks ("Our AWS bill is £45k a month")', 'Monthly cloud costs',
+      'Our AWS bill is £45k a month; we want to cut cloud costs by 20%.', refused('£45k')],
+  ])('REFUSED (the figure is stated for another quantity): %s', (_why, metric, brief, expected) => {
+    expect(briefGoalLevel(draft({ metric, value: /15%/.test(brief) ? -15 : -20, unit: 'GBP per month' }), brief)).toEqual(expected);
+  });
+  it.each<[string, string, string, string]>([
+    ['the goal\'s own words ("Our cloud bill is £45k a month; cut it by 15%")', 'Monthly cloud bill', 'Our cloud bill is £45k a month; we want to cut it by 15%.', 'Our cloud bill is £45k a month'],
+    ['one phrase for the level and its change ("cut our £45k monthly cloud spend by 20%")', 'Monthly cloud spend', 'We want to cut our £45k monthly cloud spend by 20%.', 'We want to cut our £45k monthly cloud spend by 20%'],
+    ['no quantity named beside the figure ("We spend £45k a month; …cut costs by 20%")', 'costs', 'We spend £45k a month; we want to cut costs by 20%.', 'We spend £45k a month'],
+  ])('ADOPTED (the phrase names the goal or nothing): %s', (_why, metric, brief, quote) => {
+    expect(briefGoalLevel(draft({ metric, value: /15%/.test(brief) ? -15 : -20, unit: 'GBP per month' }), brief)).toMatchObject({ kind: 'adopt', value: 45000, quote });
   });
 });

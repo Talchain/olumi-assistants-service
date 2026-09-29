@@ -152,4 +152,12 @@ describe('goalLevelReadingWords: the reading speaks only for the level it read',
     expect(node(g, { goal_direction: '<' })).toBe(
       'Olumi reads your ‘£45k’ (‘Monthly spend is £45k’) as today\'s level of ‘costs’, so a 20% cut is less than £36,000 / month.');
   });
+  // ⛔ AIQ 5895590866 (3) nit: Olumi's level still feeds the model after the target becomes a LEVEL, or goes: the lead alone.
+  it.each<[string, Record<string, unknown>]>([
+    ['the target edited to a LEVEL frame (£30,000)', { goal_threshold_frame: 'level', goal_threshold_raw: 30000, goal_threshold: 30000 }],
+    ['the target removed', { goal_threshold_frame: undefined, goal_threshold_raw: undefined, goal_threshold: undefined }],
+  ])('%s → the reading still speaks, the lead alone', async (_why, over) => {
+    const g = await saved();
+    expect(node(g, over)).toBe('Olumi reads your ‘£45k’ (‘Monthly spend is £45k’) as today\'s level of ‘costs’.');
+  });
 });

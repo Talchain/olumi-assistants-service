@@ -49,9 +49,12 @@ export function goalLevelReadingWords(graph: unknown, goalNodeId: unknown): stri
   const unit = typeof os.unit === 'string' ? os.unit : '';
   if (unit !== reading.level_unit) return null;
   if (classifyValueSource(os.source) === 'user_stated') return null;
-  if (!num(node!.goal_threshold_raw)) return null;
+  // ⛔ AIQ 5895590866 (3) nit: while Olumi's level still feeds the model, the reading SPEAKS even when the target is no
+  // longer a change (edited to a level frame, or removed): the lead alone, with no target clause to compose.
+  const leadAlone = `${reading.lead}.`;
+  if (!num(node!.goal_threshold_raw)) return leadAlone;
   // The user's held comparator speaks first; else the drafter's, as the reading recorded it.
   const held = node!.goal_direction;
   const bound = (typeof held === 'string' && BOUNDS.includes(held) ? held : BOUNDS.includes(reading.bound as string) ? reading.bound : null) as GoalBound | null;
-  return goalLevelSentence(reading.lead, { level: os.raw_value, frame: node!.goal_threshold_frame, stored: node!.goal_threshold_raw, unit, bound });
+  return goalLevelSentence(reading.lead, { level: os.raw_value, frame: node!.goal_threshold_frame, stored: node!.goal_threshold_raw, unit, bound }) ?? leadAlone;
 }

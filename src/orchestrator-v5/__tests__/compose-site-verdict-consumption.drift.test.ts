@@ -1776,7 +1776,9 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // HOP 2: run_analysis's declared template IS the allowlisting forwarder, and
     // that forwarder gates on the allowlist rather than passing prose through.
     expect(VALIDATION_REGISTRY).toContain('confirmation_template: runAnalysisConfirmationTemplate,');
-    expect(VALIDATION_REGISTRY).toContain('if (isAllowedRunAnalysisAssistantText(candidate)) {');
+    // The goal-reading tail is the forwarder's own REBUILD from the handler's graph (AIQ 5895590866 (2)), passed in.
+    expect(VALIDATION_REGISTRY).toContain('const goalReadingTail = goalReadingTailOf(outcome);');
+    expect(VALIDATION_REGISTRY).toContain('if (isAllowedRunAnalysisAssistantText(candidate, goalReadingTail)) {');
     expect(VALIDATION_REGISTRY).toContain(
       "const RUN_ANALYSIS_FALLBACK_TEXT = 'Ran analysis on your current scenario.';",
     );
@@ -1869,7 +1871,10 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
       // occupies in TAIL_PATTERN and in the egress registry. The `gated` stance
       // is unaffected: the new suffix names no option and asserts no leader.
       // Re-pinned exactly, not loosened, so a future reordering stays visible.
-      'const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}`;',
+      // ⭐ Olumi's GOAL-READING tail (AIQ 5895590866 (2)) sits straight after the headline/template: the egress admits it
+      // only by exact equality with the forwarder's own rebuild (`goalReadingTailOf`), at that position, never a pattern.
+      // It names no option and asserts no leader, so the `gated` stance is unaffected.
+      'const summary = `${headline ?? template}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}`;',
     );
     expect(RUN_ANALYSIS).toContain('assistant_text: summary,');
     // ONE verdict, TWO consumers — the property that makes this `gated` rather

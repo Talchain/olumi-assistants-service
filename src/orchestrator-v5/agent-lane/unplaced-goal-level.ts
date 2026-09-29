@@ -22,9 +22,11 @@
  *  · it is in the SAME SENTENCE as the goal's own change figure ("…is £45k; we want to cut costs by 20%"): AIQ's premise
  *    for (b) is that the figure, the change and the direction are one statement. "Our support team costs £45,000 a
  *    month. Cut our monthly cloud bill by 15%" states the figure for another quantity (S4G-8b) and is never taken;
+ *  · its own phrase names no other quantity (`phraseNamesOnlyTheGoal`, PTL 5895711185): "Our support team costs £45,000 a
+ *    month and we want to cut our cloud bill by 15%" states the figure for the support team, never the cloud bill;
  *  · no factor already holds it: the drafter gave it to another quantity, and that join is not Olumi's to undo.
- * Named residual (an over-claim these cannot see): ONE sentence that states the sole figure for another quantity the
- * model does not hold ("our support team costs £45,000 a month and we want to cut our cloud bill by 15%").
+ * Named under-claim (the fail-safe): a phrase naming the goal by a word its name lacks ("Our AWS bill is £45k" for
+ * "cloud costs") is refused, and no chance is shown, as before.
  * `refused` lists what the brief gives in any currency that was NOT taken (for the honest no-base words: "Your brief
  * gives £45k, but it isn't held as today's level of ‘costs’"); null when the brief gives no money figure at all.
  */
@@ -56,13 +58,42 @@ function spanAround(text: string, start: number, end: number, breaks: RegExp): s
     const at = m.index ?? 0;
     // A decimal point inside a figure ("£4.5k") is not a break.
     if (m[0] === '.' && /\d/.test(text[at - 1] ?? '') && /\d/.test(text[at + 1] ?? '')) continue;
-    if (at < start) from = at + 1;
+    if (at < start) from = at + m[0].length;
     else if (at >= end) { to = at; break; }
   }
   return text.slice(from, to).trim();
 }
 
 const clauseAround = (text: string, start: number, end: number): string => spanAround(text, start, end, /[.;!?\n]/g);
+/** The figure's own phrase: its clause, cut again at a comma or a joining word ("…£45,000 a month and we want…"). */
+const phraseAround = (text: string, start: number, end: number): string =>
+  spanAround(text, start, end, /[.;!?\n,]|\b(?:and|but|while|whereas)\b/gi);
+
+/**
+ * Words that name no quantity: how a level or its change is stated ("Our monthly spend is about £45k a month", "we want
+ * to cut our £45k monthly bill by 20%"). Anything else in the figure's phrase must be a word of the goal's own name.
+ */
+const PLAIN_WORDS: ReadonlySet<string> = new Set([
+  'our', 'the', 'we', 'us', 'it', 'its', 'this', 'that', 'my', 'your', 'their', 'a', 'an', 'is', 'are', 'was', 'were',
+  'currently', 'current', 'today', 'now', 'at', 'of', 'on', 'for', 'in', 'per', 'about', 'around', 'roughly',
+  'approximately', 'total', 'totals', 'run', 'runs', 'come', 'comes', 'to', 'pay', 'spend', 'spending', 'spent', 'cost',
+  'costs', 'bill', 'bills', 'month', 'months', 'monthly', 'year', 'years', 'yearly', 'annual', 'annually', 'annum',
+  'want', 'need', 'aim', 'plan', 'cut', 'reduce', 'lower', 'bring', 'down', 'trim', 'decrease', 'by', 'from',
+]);
+const singular = (w: string): string => (w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w);
+
+/**
+ * ⛔ THE FIGURE IS STATED FOR THE GOAL'S OWN QUANTITY, OR FOR NONE NAMED (PTL #72 5895711185: "Our support team costs
+ * £45,000 a month and we want to cut our cloud bill by 15%" was ADOPTED as the cloud bill's level). The figure's own
+ * phrase may name nothing but the goal: a word that is neither plain (`PLAIN_WORDS`) nor a word of the goal's name
+ * ("support", "team") states the figure for another quantity, and it is never Olumi's to join.
+ */
+function phraseNamesOnlyTheGoal(brief: string, a: { index: number; matchedText: string }, goalName: string): boolean {
+  const phrase = phraseAround(brief, a.index, a.index + a.matchedText.length).replace(a.matchedText, ' ');
+  const own = new Set(goalName.toLowerCase().split(/[^a-z]+/).filter((w) => w !== '').map(singular));
+  return phrase.toLowerCase().split(/[^a-z]+/).filter((w) => w !== '')
+    .every((w) => PLAIN_WORDS.has(w) || own.has(singular(w)));
+}
 const sentenceAround = (text: string, start: number, end: number): string => spanAround(text, start, end, /[.!?\n]/g);
 
 export function briefGoalLevel(candidate: CandidateModel, brief: string | null | undefined): BriefGoalLevel | null {
@@ -90,6 +121,7 @@ export function briefGoalLevel(candidate: CandidateModel, brief: string | null |
     : c.kind === 'currency' && c.currencyCode === unit.currencyCode && same(c.magnitude, Math.abs(goal.value) * scale)));
   const sentence = sentenceAround(brief, a.index, a.index + a.matchedText.length);
   if (change === undefined || sentence !== sentenceAround(brief, change.index, change.index + change.matchedText.length)) return refused;
+  if (!phraseNamesOnlyTheGoal(brief, a, typeof goal.metric === 'string' ? goal.metric : '')) return refused;
   const carried = candidate.factors.some((f) => {
     if (typeof f.baseline_value !== 'number' || !Number.isFinite(f.baseline_value)) return false;
     const fu = readCurrencyUnitWithQualifiers(typeof f.unit === 'string' ? f.unit : '');
