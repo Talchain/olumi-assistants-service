@@ -13,7 +13,8 @@
  *
  * `adopt` only when ALL hold:
  *  · the goal's target is a stated CHANGE (`change_rel` | `change_abs`), and no level of the user's was admitted for it;
- *  · the goal's unit reads as ONE currency and the goal names ONE period (`readMoneyTotal`: its unit, else its name);
+ *  · the goal's unit reads as ONE currency and the goal names ONE period (`readMoneyTotal`: its unit, else its name) —
+ *    or, for a percentage change typed in "%", the brief's ONE money figure supplies both (AIQ 5897443539 run 0);
  *  · exactly ONE amount in the brief is in that currency, other than the change itself (`change_abs`'s own figure) —
  *    two would be a guess (AIQ row (b));
  *  · that amount's own clause names the SAME period ("Monthly spend is £45k", "£45k a month"): "£540k a year" beside a
@@ -24,7 +25,7 @@
  *    month. Cut our monthly cloud bill by 15%" states the figure for another quantity (S4G-8b) and is never taken;
  *  · its own phrase names no other quantity (`phraseNamesOnlyTheGoal`, PTL 5895711185): "Our support team costs £45,000 a
  *    month and we want to cut our cloud bill by 15%" states the figure for the support team, never the cloud bill;
- *  · no factor already holds it: the drafter gave it to another quantity, and that join is not Olumi's to undo.
+ *  · (a factor the drafter ALSO put it on does not decide: the brief's phrase does, AIQ 5897443539 run 1);
  * Named under-claim (the fail-safe): a phrase naming the goal by a word its name lacks ("Our AWS bill is £45k" for
  * "cloud costs") is refused, and no chance is shown, as before.
  * `refused` lists what the brief gives in any currency that was NOT taken (for the honest no-base words: "Your brief
@@ -33,6 +34,7 @@
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import type { CandidateModel } from './admit-model.js';
 import { periodIn, readMoneyTotal } from './reconciling-product.js';
+import { unitPhraseFamily } from './unit-conflict.js';
 
 export type BriefGoalLevel =
   | {
@@ -43,6 +45,11 @@ export type BriefGoalLevel =
       readonly written: string;
       /** The brief's own clause that states it ("Monthly spend is £45k"), at most QUOTE_MAX characters. */
       readonly quote: string;
+      /**
+       * ⛔ AIQ 5897443539 (run 0): the level's unit READ FROM THE BRIEF ("GBP per month"), present only when the goal's
+       * own unit names the change ("%" on a percentage change), never the level. Olumi's reading, like the level.
+       */
+      readonly unit?: string;
     }
   | {
       readonly kind: 'refused';
@@ -108,7 +115,7 @@ const sentenceAround = (text: string, start: number, end: number): string => spa
 export function briefGoalLevel(candidate: CandidateModel, brief: string | null | undefined): BriefGoalLevel | null {
   const goal = candidate.goal;
   if (typeof brief !== 'string' || (goal.frame !== 'change_rel' && goal.frame !== 'change_abs')) return null;
-  const unit = readCurrencyUnitWithQualifiers(typeof goal.unit === 'string' ? goal.unit : '');
+  let unit = readCurrencyUnitWithQualifiers(typeof goal.unit === 'string' ? goal.unit : '');
   const scale = unit.kind === 'currency' ? unit.multiplier ?? 1 : 1;
   const isTheChange = (a: { magnitude: number }): boolean =>
     goal.frame === 'change_abs' && typeof goal.value === 'number' && same(a.magnitude, Math.abs(goal.value) * scale);
@@ -116,12 +123,23 @@ export function briefGoalLevel(candidate: CandidateModel, brief: string | null |
   const distinct = money.filter((a, i) => money.findIndex((b) => same(b.magnitude, a.magnitude) && b.currencyCode === a.currencyCode) === i);
   if (distinct.length === 0) return null;
   const metric = typeof goal.metric === 'string' ? goal.metric : '';
+  // ⛔ AIQ 5897443539 (served run 0): a percentage change typed in "%" names the CHANGE's unit, not the level's. The
+  // level's money terms are then read from the brief's ONE money figure (its currency, its own clause's period).
+  let goalUnit = typeof goal.unit === 'string' ? goal.unit : '';
+  if (goal.frame === 'change_rel' && unitPhraseFamily(goalUnit) === 'percent' && distinct.length === 1) {
+    const only = distinct[0]!;
+    const period = periodIn(clauseAround(brief, only.index, only.index + only.matchedText.length));
+    if (only.currencyCode !== undefined && period !== null) {
+      goalUnit = `${only.currencyCode} per ${period}`;
+      unit = readCurrencyUnitWithQualifiers(goalUnit);
+    }
+  }
   const otherQuantity = unit.kind === 'currency' && unit.currencyCode !== undefined
     ? distinct.filter((a) => a.currencyCode === unit.currencyCode && !phraseNamesOnlyTheGoal(brief, a, metric)).map((a) => a.magnitude / scale)
     : [];
   const refused: BriefGoalLevel = { kind: 'refused', written: distinct.map((a) => a.matchedText), ...(otherQuantity.length > 0 ? { otherQuantity } : {}) };
   if (unit.kind !== 'currency' || unit.currencyCode === undefined) return refused;
-  const goalMoney = readMoneyTotal(goal.unit, goal.metric);
+  const goalMoney = readMoneyTotal(goalUnit, goal.metric);
   if (goalMoney === null || goalMoney.code !== unit.currencyCode) return refused;
   const inCurrency = distinct.filter((a) => a.currencyCode === unit.currencyCode);
   if (inCurrency.length !== 1) return refused;
@@ -134,17 +152,15 @@ export function briefGoalLevel(candidate: CandidateModel, brief: string | null |
     : c.kind === 'currency' && c.currencyCode === unit.currencyCode && same(c.magnitude, Math.abs(goal.value) * scale)));
   const sentence = sentenceAround(brief, a.index, a.index + a.matchedText.length);
   if (change === undefined || sentence !== sentenceAround(brief, change.index, change.index + change.matchedText.length)) return refused;
+  // ⛔ The brief's own phrase decides what the figure is about (AIQ 5895823531), never where the drafter put it: served run 1
+  // (AIQ 5897443539) held "Monthly spend is £45k" on a factor ("AWS-equivalent monthly cloud spend") as well, and the
+  // goal "Monthly spend" had no level. A figure whose phrase names another quantity is refused above, wherever it sits.
   if (!phraseNamesOnlyTheGoal(brief, a, metric)) return refused;
-  const carried = candidate.factors.some((f) => {
-    if (typeof f.baseline_value !== 'number' || !Number.isFinite(f.baseline_value)) return false;
-    const fu = readCurrencyUnitWithQualifiers(typeof f.unit === 'string' ? f.unit : '');
-    return fu.kind === 'currency' && fu.currencyCode === unit.currencyCode && same(f.baseline_value * (fu.multiplier ?? 1), a.magnitude);
-  });
-  if (carried) return refused;
   return {
     kind: 'adopt',
     value: a.magnitude / scale,
     written: a.matchedText,
     quote: clause.length <= QUOTE_MAX ? clause : `${clause.slice(0, QUOTE_MAX - 1)}…`,
+    ...(goalUnit !== goal.unit ? { unit: goalUnit } : {}),
   };
 }

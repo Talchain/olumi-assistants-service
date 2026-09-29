@@ -108,6 +108,23 @@ describe('AIQ (b): the brief\'s £45k as Olumi\'s disclosed reading of today\'s 
     expect(said(r)).toMatch(words);
     expect(said(r)).not.toMatch(/current level was not stated/);
   });
+  // ⛔ AIQ 5897443539 (served a20cfd6 runs 0 and 1, real build): both had no base, so no chance.
+  it('(run 0, real build) a "%"-typed percentage change gets its base in the brief\'s terms, as Olumi\'s reading', async () => {
+    const { registered } = await run(costs({ metric: 'Monthly spend', unit: '%' }), CLOUD);
+    const g = goalOf(registered) as Record<string, any>;
+    expect(g.observed_state).toMatchObject({ raw_value: 45000, source: 'cee_inference', unit: 'GBP per month' });
+    expect(g.goal_threshold_unit).toBe('GBP per month');
+    expect(goalLevelReadingWords(registered, g.id)).toMatch(/^Olumi reads your ‘£45k’ \(‘Monthly spend is £45k’\) as today's level of ‘Monthly spend’, so a 20% cut is £36,000/);
+  });
+  it('(run 1, real build) the £45k ALSO on a factor → the goal still gets its base as Olumi\'s reading', async () => {
+    const c = costs({ metric: 'Monthly spend' }) as Record<string, any>;
+    c.factors = [...c.factors, { label: 'AWS-equivalent monthly cloud spend', role: 'observable', baseline_known: true, baseline_value: 45000, unit: '£/month', provenance: 'explicit', plausible_max: 200000 }];
+    c.links = [...c.links, link('AWS-equivalent monthly cloud spend', 'Monthly spend')];
+    const { registered } = await run(c, CLOUD);
+    const g = goalOf(registered) as Record<string, any>;
+    expect(g.observed_state).toMatchObject({ raw_value: 45000, source: 'cee_inference' });
+    expect(g.goal_level_reading).toBeDefined();
+  });
   it('a brief with NO money figure still says the level was not stated (true there), exactly as before', async () => {
     const { r } = await run(costs(), 'Should we switch our cloud provider from AWS to GCP? We want to cut costs by 20% this year.');
     expect(said(r)).toMatch(/its current level was not stated/);

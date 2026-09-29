@@ -2617,8 +2617,11 @@ export function admitStatedGoalChange(
     return { node, withheld: notTheUsers };
   }
   const level = notTheUsers === null ? today as number : (fromBrief as Extract<BriefGoalLevel, { kind: 'adopt' }>).value;
+  // ⛔ AIQ 5897443539 (run 0): a reading of a "%"-typed percentage change carries the level's unit read from the brief.
+  const readUnit = notTheUsers !== null && fromBrief?.kind === 'adopt' ? fromBrief.unit : undefined;
+  const goalUnit = readUnit ?? goal.unit;
   const target = frame === 'change_rel' ? level * (1 + stored) : level + stored;
-  const resolved = level > 0 && target >= 0 ? resolveGoalThresholdCapWithProvenance(undefined, Math.max(level, target), goal.unit, undefined) : null;
+  const resolved = level > 0 && target >= 0 ? resolveGoalThresholdCapWithProvenance(undefined, Math.max(level, target), goalUnit, undefined) : null;
   if (resolved === null) {
     return { node, withheld:
       `The current level of "${goal.metric}" (${level}) and a change of ${change} from it do not sit on a scale starting at ` +
@@ -2626,6 +2629,7 @@ export function admitStatedGoalChange(
   }
   const withBase = {
     ...node,
+    ...(readUnit !== undefined ? { goal_threshold_unit: readUnit } : {}),
     goal_threshold_cap: resolved.cap,
     goal_threshold_cap_provenance: resolved.provenance,
     goal_threshold: frame === 'change_rel' ? stored : stored / resolved.cap,
@@ -2642,12 +2646,12 @@ export function admitStatedGoalChange(
   // composed from the goal's current target by the one composer (`goalLevelSentence`), here and in the reader.
   const lead = `Olumi reads your ‘${adopt.written}’ (‘${adopt.quote}’) as today's level of ‘${goal.metric}’`;
   const bound = goal.operator === '<=' || goal.operator === '<' || goal.operator === '>=' || goal.operator === '>' ? goal.operator : null;
-  const unitText = typeof goal.unit === 'string' ? goal.unit : '';
+  const unitText = typeof goalUnit === 'string' ? goalUnit : '';
   const words = goalLevelSentence(lead, { level, frame, stored, unit: unitText, bound }) ?? `${lead}.`;
   return {
     node: {
       ...withBase,
-      observed_state: { value: level / resolved.cap, baseline: level / resolved.cap, ...(goal.unit ? { unit: goal.unit } : {}), source: 'cee_inference', raw_value: level, cap: resolved.cap },
+      observed_state: { value: level / resolved.cap, baseline: level / resolved.cap, ...(goalUnit ? { unit: goalUnit } : {}), source: 'cee_inference', raw_value: level, cap: resolved.cap },
       goal_level_reading: { level, level_unit: unitText, quote: adopt.quote, lead, ...(bound !== null ? { bound } : {}) },
     },
     reading: words,
