@@ -209,6 +209,19 @@ type Body = {
 let n = 0;
 let SID = '';
 const nextScenario = () => { n += 1; SID = `6a0d1c2b-3a4f-4e5d-8c6b-7a8f9e0d1c${String(n).padStart(2, '0')}`; };
+/** The build tool's output exactly as the model's next request carries it (a `function_call_output` holding `first_analysis`). */
+const buildOutputSeenByModel = (): Record<string, any> | undefined => {
+  for (const body of modelBodies) {
+    for (const item of (Array.isArray(body.input) ? body.input : []) as Array<{ type?: string; output?: unknown }>) {
+      if (item?.type !== 'function_call_output') continue;
+      try {
+        const out = JSON.parse(String(item.output)) as Record<string, any>;
+        if (out !== null && typeof out === 'object' && out.first_analysis !== undefined) return out;
+      } catch { /* not JSON */ }
+    }
+  }
+  return undefined;
+};
 const turn = async (app: FastifyInstance, payload: Record<string, unknown>) => {
   const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SID, ...payload } });
   expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
@@ -247,6 +260,21 @@ describe('the Agent route runs the first analysis itself, once', () => {
     expect(b.assistant_text).not.toContain('The analysis can run now');
     // The readback's result is the authority, shown once.
     expect((b.blocks ?? []).filter((x) => x.type === 'analysis_result')).toEqual([expect.objectContaining({ summary: 'A provisional first pass.' })]);
+  });
+
+  it('RED (PLoT #416): a first pass that withheld the goal\'s chance hands the Agent `goal_chance` — the sentence and the rule', async () => {
+    knobs.analysisResultExtra = { enrichment: { inference_warnings: [{ code: 'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', severity: 'warning', node_ids: ['mrr'],
+      message: "Not shown. 'MRR' depends on Pro plan price \u00d7 Pro paying subscribers, but this run couldn't calculate it that way, so the figures for each option would be wrong." }] } };
+    await buildTurn(app);
+    // What the MODEL is handed: the build tool's own output, as its next request carries it.
+    expect(buildOutputSeenByModel()?.first_analysis).toMatchObject({ ran: true, goal_chance: expect.objectContaining({ withheld: true, node_ids: ['mrr'] }) });
+  });
+
+  it('CONTROL: a first pass with no such warning carries no `goal_chance`', async () => {
+    await buildTurn(app);
+    const seen = buildOutputSeenByModel();
+    expect(seen?.first_analysis, 'the control: the model was handed a first pass that ran').toMatchObject({ ran: true });
+    expect(seen?.first_analysis).not.toHaveProperty('goal_chance');
   });
 
   it('RED: NOT admissible → 0 PLoT calls, one server sentence naming what is missing, and a repair chip (test 3)', async () => {
