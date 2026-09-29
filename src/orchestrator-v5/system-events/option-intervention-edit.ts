@@ -78,6 +78,7 @@ import { applyFactorValueEdit, type FactorValueEditResult } from './factor-value
 import { applyEdgeStrengthEdit } from './edge-strength-edit.js';
 import { applyLinkEffectEdit, type LinkEffectStatement } from './link-effect-edit.js';
 import { applyIdentityConfirmEdit, identityConfirmPostimageIsScoped } from './identity-confirm-edit.js';
+import { applyOptionAdoptEdit, optionAdoptPostimageIsScoped } from './option-adopt-edit.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
 
 /**
@@ -562,6 +563,19 @@ export interface ApprovedIdentityConfirm {
   readonly reading_token: string;
 }
 
+/**
+ * ⭐ AN APPROVED "ADD TO COMPARISON" (DL #72 5887489508 / 5887510885): the user adopts an option Olumi proposed; the
+ * canonical writer (`applyOptionAdoptEdit`) removes its `proposed_by` mark. The revision it was issued on is the batch's
+ * own base (`expectedGraphHash`).
+ */
+export interface ApprovedOptionAdopt {
+  readonly option_id: string;
+  /** The card's displayed sentence, bound into `reading_token`. */
+  readonly words: string;
+  /** `optionAdoptReadingToken` of the reading the approval card SHOWED; the writer refuses a write it does not match. */
+  readonly reading_token: string;
+}
+
 /** The members of a link the canonical link writer owns: its size, direction and whose size it is. Nothing else. */
 const LINK_WRITER_OWNED_EDGE_MEMBERS = ['strength', 'effect_direction', 'provenance', 'provenance_display', 'defaulted', 'exists_defaulted', 'std_defaulted'] as const;
 
@@ -693,6 +707,8 @@ export type OptionInterventionBatchExecutionInput =
     readonly linkEffect?: ApprovedLinkEffect;
     /** ⭐ One approved product confirmation: ONE append, alone (never with anything else). */
     readonly identityConfirm?: ApprovedIdentityConfirm;
+    /** One approved addition to the comparison, alone. */
+    readonly optionAdopt?: ApprovedOptionAdopt;
     /** The last Run's use of each declared identity (`identityRunUseFromFacts`); null = no Run, a definition refuses. */
     readonly lastRunIdentityUse?: IdentityRunUse | null;
   };
@@ -730,7 +746,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       ...(t.figure !== undefined ? { figure: t.figure } : {}) };
   });
   const { targets: _callerTargets, expectedLinks, values: _callerValues, frames: _callerFrames, linkStrengths: _callerLinks,
-    linkEffect: _callerEffect, identityConfirm: _callerIdentity, lastRunIdentityUse: _callerRunUse, ...common } = input;
+    linkEffect: _callerEffect, identityConfirm: _callerIdentity, optionAdopt: _callerAdopt, lastRunIdentityUse: _callerRunUse, ...common } = input;
   // ⭐ THE VALUES FIRST, ON THE PERSISTED BASE, IN MEMORY — then the links and levels on the graph they produce, and ONE
   // append for all of it. The caller's base is checked against the PERSISTED model before anything is applied: the
   // levels are prepared on the post-value graph, so their own stale check can no longer see the caller's base.
@@ -826,7 +842,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
    */
   const identityConfirm = input.identityConfirm;
   if (identityConfirm !== undefined) {
-    if (targets.length + values.length + frames.length + linkStrengths.length > 0 || linkEffect !== undefined
+    if (targets.length + values.length + frames.length + linkStrengths.length > 0 || linkEffect !== undefined || input.optionAdopt !== undefined
       || (expectedLinks?.length ?? 0) > 0) {
       return { kind: 'refused', reason: 'identity_confirm_not_alone' };
     }
@@ -855,7 +871,39 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       identityConfirm.factor_ids.map(id => `"${labelOfBefore(id)}"`).join(' times ')}, as you confirmed on the card: “${
       identityConfirm.words.trim()}”`];
   }
-  const effectCount = (linkEffect !== undefined ? 1 : 0) + (identityConfirm !== undefined ? 1 : 0);
+  /**
+   * ⭐ ONE "ADD TO COMPARISON", the link effect's own shape: alone, on the persisted base, through the canonical writer in
+   * memory, scoped to that one mark, then the ONE append and read-back below.
+   */
+  const optionAdopt = input.optionAdopt;
+  if (optionAdopt !== undefined) {
+    if (targets.length + values.length + frames.length + linkStrengths.length > 0 || linkEffect !== undefined || input.identityConfirm !== undefined
+      || (expectedLinks?.length ?? 0) > 0) {
+      return { kind: 'refused', reason: 'adopt_option_not_alone' };
+    }
+    if (!isEditableGraph(before)
+      || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
+    const written = applyOptionAdoptEdit({ persistedGraph: before, option_id: optionAdopt.option_id, words: optionAdopt.words,
+      reading_token: optionAdopt.reading_token, expected_graph_hash: input.expectedGraphHash });
+    if (written.kind === 'refused') return { kind: 'refused', reason: `adopt_${written.reason}` };
+    const graph = projectGraphForPersistence(written.mutatedGraph);
+    if (!isEditableGraph(graph) || !optionAdoptPostimageIsScoped(before, graph, optionAdopt.option_id)) {
+      return { kind: 'refused', reason: 'adopt_scope_mismatch' };
+    }
+    const appliedHash = computeAnalysisAffectingGraphHash(graph);
+    if (!appliedHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    const labelOfBefore = (id: string): string => String(before.nodes.find(node => node.id === id)?.label ?? id);
+    levelBase = graph;
+    levelBaseHash = appliedHash;
+    valueFacts = written.handlerFacts;
+    // The committed row keeps the card's words and that they were confirmed on the card (AIQ 5887805333 (a), same rule).
+    valueConfirmations = [`Added "${labelOfBefore(optionAdopt.option_id)}" to your comparison, as you confirmed on the card: “${
+      optionAdopt.words.trim()}”`];
+  }
+  const effectCount = (linkEffect !== undefined ? 1 : 0) + (identityConfirm !== undefined ? 1 : 0) + (optionAdopt !== undefined ? 1 : 0);
   const valuesChanged = values.length + frames.length + linkStrengths.length + effectCount > 0 && !isDeepStrictEqual(levelBase, before);
   // ⭐ A VALUES-ONLY APPROVAL IS ONE COMMIT TOO (Canonical #70 5850018984): Olumi's starting point is usually values
   // with no level, and wrote each value as its own commit. With no level to prepare, the values (and their ranges)

@@ -54,7 +54,7 @@ import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { getSessionStore } from '../session/index.js';
 import { TurnFenceRejectedError } from '../session/turn-fence.js';
 import { createHash } from 'node:crypto';
-import { executeOptionInterventionBatch, executeOptionInterventionEdit, type ApprovedFactorFrame, type ApprovedFactorValue, type ApprovedIdentityConfirm, type ApprovedLinkEffect, type ApprovedLinkStrength } from './option-intervention-edit.js';
+import { executeOptionInterventionBatch, executeOptionInterventionEdit, type ApprovedFactorFrame, type ApprovedFactorValue, type ApprovedIdentityConfirm, type ApprovedLinkEffect, type ApprovedLinkStrength, type ApprovedOptionAdopt } from './option-intervention-edit.js';
 import { runWithApprovedLevelAdoptions } from '../agent-lane/approved-adoption-context.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
@@ -2805,11 +2805,14 @@ export async function dispatchOptionLevelsBatch(
     readonly linkEffect?: ApprovedLinkEffect;
     /** ⭐ One approved product confirmation (DL #72 5887510885; Canonical 5887564539): ONE commit, alone. */
     readonly identityConfirm?: ApprovedIdentityConfirm;
+    /** One approved addition to the comparison, alone. */
+    readonly optionAdopt?: ApprovedOptionAdopt;
   },
   requestId: string,
 ): Promise<DispatchSystemEventResult> {
   const linkStrengths = batch.linkStrengths ?? [];
-  const eventKind = batch.identityConfirm !== undefined ? 'identity_confirm_edit'
+  const eventKind = batch.optionAdopt !== undefined ? 'option_adopt_edit'
+    : batch.identityConfirm !== undefined ? 'identity_confirm_edit'
     : batch.linkEffect !== undefined ? 'link_effect_edit' : linkStrengths.length > 0 ? 'link_strengths_batch'
     : batch.targets.length === 1 ? 'option_intervention_edit' : 'option_levels_batch';
   let priorFactsRead: Awaited<ReturnType<typeof loadPriorFactsWithReadState>>;
@@ -2867,7 +2870,7 @@ export async function dispatchOptionLevelsBatch(
   // level whose approved links are declared — goes through the batch entry.
   const only = batch.targets.length === 1 && batch.expectedLinks === undefined
     && (batch.values ?? []).length + (batch.frames ?? []).length + linkStrengths.length === 0 && batch.linkEffect === undefined
-    && batch.identityConfirm === undefined
+    && batch.identityConfirm === undefined && batch.optionAdopt === undefined
     ? batch.targets[0]! : undefined;
   const outcome: Awaited<ReturnType<typeof executeOptionInterventionBatch>> = only !== undefined
     ? await executeOptionInterventionEdit({ ...common, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue },
@@ -2878,7 +2881,8 @@ export async function dispatchOptionLevelsBatch(
       ...(batch.frames !== undefined && batch.frames.length > 0 ? { frames: batch.frames } : {}),
       ...(linkStrengths.length > 0 ? { linkStrengths, lastRunIdentityUse } : {}),
       ...(batch.linkEffect !== undefined ? { linkEffect: batch.linkEffect, lastRunIdentityUse } : {}),
-      ...(batch.identityConfirm !== undefined ? { identityConfirm: batch.identityConfirm } : {}) }, getSessionStore());
+      ...(batch.identityConfirm !== undefined ? { identityConfirm: batch.identityConfirm } : {}),
+      ...(batch.optionAdopt !== undefined ? { optionAdopt: batch.optionAdopt } : {}) }, getSessionStore());
 
   if (outcome.kind === 'committed') {
     // ⚠ THE GRAPH FIELD IS A VALIDATED VIEW, AND IT IS NOT THE AUTHORITY.
@@ -3178,6 +3182,18 @@ export type CommitOptionLevelsInput = {
     /** `identityConfirmReadingToken({outcome_id, factor_ids, words})` of the reading the approval card SHOWED. */
     readonly reading_token: string;
   };
+  /**
+   * ⭐ ONE "ADD TO COMPARISON" (DL #72 5887489508 / 5887510885): the user adopts an option Olumi proposed; the canonical
+   * writer (`applyOptionAdoptEdit`) removes its `proposed_by` mark in ONE commit, alone. `base_graph_hash` is the revision
+   * the card was issued on. A writer refusal comes back as `refused` with `reason: 'adopt_<reason>'`; nothing is written.
+   */
+  readonly adopt_option?: {
+    readonly option_id: string;
+    /** The card's displayed sentence. */
+    readonly words: string;
+    /** `optionAdoptReadingToken({option_id, words})` of the reading the approval card SHOWED. */
+    readonly reading_token: string;
+  };
 };
 export type CommitOptionLevelsResult =
   | { readonly status: 'committed'; readonly graph_hash: string;
@@ -3224,6 +3240,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(input.link_strengths !== undefined && input.link_strengths.length > 0 ? { link_strengths: input.link_strengths } : {}),
       ...(input.link_effect !== undefined ? { link_effect: input.link_effect } : {}),
       ...(input.identity_confirm !== undefined ? { identity_confirm: input.identity_confirm } : {}),
+      ...(input.adopt_option !== undefined ? { adopt_option: input.adopt_option } : {}),
       base_graph_hash: input.base_graph_hash } }))
     .digest('hex').slice(0, 32)}`;
   const payload = { scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame' as const, requestHash };
@@ -3239,6 +3256,8 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
     ...(input.identity_confirm !== undefined ? { identityConfirm: { outcome_id: input.identity_confirm.outcome_id,
       factor_ids: [...input.identity_confirm.factor_ids], words: input.identity_confirm.words,
       reading_token: input.identity_confirm.reading_token } } : {}),
+    ...(input.adopt_option !== undefined ? { optionAdopt: { option_id: input.adopt_option.option_id, words: input.adopt_option.words,
+      reading_token: input.adopt_option.reading_token } } : {}),
   }, requestId));
   if (r.graphConflict !== undefined) return { status: 'stale' };
   if (r.commitSkippedReason === 'refused_no_write') {
