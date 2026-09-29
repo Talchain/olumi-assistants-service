@@ -113,6 +113,7 @@ import {
 } from '../orchestrator-v5/compose/unrequested-analysis-confinement.js';
 // C46 stage 1: WHY a persisted fact's leader was withheld, when the reason is a product the analysis adds up.
 import { evaluatedIdentityNodeIds, nodesUnderANonlinearIdentity, nonlinearIdentityLeaderClaimCause } from '../orchestrator-v5/agent-lane/admit-model.js';
+import { intakeLeaderClaimCause } from '../orchestrator/context/intake-option-reconciliation.js';
 import { selectCanonicalAnalysisState } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import {
@@ -215,6 +216,8 @@ export interface ReadScenarioAnalysisParams {
   readonly requestId: string;
   /** Atomic restore may supply the DB-returned marker and avoid a second read. */
   readonly analysisInvalidatedAt?: string | null;
+  /** The scenario's stored brief, read with the graph: the intake cause re-derives the Run's answer from it. */
+  readonly briefText?: string | null;
 }
 
 /**
@@ -424,6 +427,13 @@ export async function readScenarioAnalysis(
           return {
             withheldBecauseUnrequested: (fact !== null && leaderWithheldOnlyBecauseUnrequested(fact)) || c46?.withheldBecauseUnrequested === true,
             withheldBecauseNonlinearIdentity: c46?.withheldBecauseNonlinearIdentity === true,
+            // The INTAKE axis (Canvas 5886223069): the same fact, the graph the run analysed, the stored brief.
+            withheldBecauseOptionsNotReconciled: fact !== null && intakeLeaderClaimCause({
+              graph: params.graph,
+              graphHash: currentGraphHash,
+              result: fact.result,
+              briefText: params.briefText,
+            }),
             // F-LIMIT: judged on the SAME fact the permission above was read from (null when out of date), against the
             // limits the user ratified on this graph.
             ...(() => {

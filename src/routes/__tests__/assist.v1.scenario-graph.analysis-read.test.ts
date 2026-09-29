@@ -706,3 +706,33 @@ describe("the reload carries the last Run's identity use (`analysis_identity_run
     expect(body.analysis_identity_run_use).toBeNull();
   });
 });
+
+// ─── The INTAKE cause of a withheld leader (Canvas #72 5886223069; AIQ 5886352788) ───────────────────────────────────
+
+describe("a leader withheld by the INTAKE axis says so — never `constraint_verdict_withheld` beside scored limits", () => {
+  const ENUMERATING_BRIEF = "Revenue growth is the goal. The options are: hire a marketing manager, or hold headcount.";
+  /** The stored verdict permits (state `evaluated_feasible`, limits scored) but the permission is false: the intake stamp. */
+  const intakeWithheld = (state: string) => {
+    const f = runAnalysisFact({ graphHash: GRAPH_HASH, mayName: false });
+    const cv = (f.result as Record<string, any>).constraint_verdict;
+    cv.constraint_verdict_state = state;
+    cv.per_limit = [{ constraint_id: "agent-lane:fac_market:<=", state: "scored" }];
+    cv.joint = { state: "scored" };
+    return f;
+  };
+
+  it("RED: the permission false, the constraint state PERMITS, the brief's options unbound → `options_not_reconciled_with_brief`", async () => {
+    loadGraphAndBriefText.mockResolvedValue({ graph: GRAPH, briefText: ENUMERATING_BRIEF });
+    readFactsFor.mockResolvedValue([intakeWithheld("evaluated_feasible")]);
+    const body = (await read(await buildApp())).json() as Record<string, any>;
+    expect(body.analysis_state.run_state.kind).toBe("complete_current");
+    expect(body.analysis_state.leader_claim).toMatchObject({ permitted: false, withheld_reason: "options_not_reconciled_with_brief" });
+  });
+
+  it("CONTROL: the constraint verdict itself withholds → `constraint_verdict_withheld` stands", async () => {
+    loadGraphAndBriefText.mockResolvedValue({ graph: GRAPH, briefText: ENUMERATING_BRIEF });
+    readFactsFor.mockResolvedValue([intakeWithheld("unevaluated")]);
+    const body = (await read(await buildApp())).json() as Record<string, any>;
+    expect(body.analysis_state.leader_claim).toMatchObject({ permitted: false, withheld_reason: "constraint_verdict_withheld" });
+  });
+});

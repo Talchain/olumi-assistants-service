@@ -232,6 +232,16 @@ export const WITHHELD_UNREQUESTED_ANALYSIS = 'unrequested_analysis_withheld';
 export const WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN = 'nonlinear_identity_sign_unproven';
 
 /**
+ * ⛔ THE INTAKE AXIS (Canvas #72 5886223069; AIQ 5886352788): the run was evaluated, its constraint verdict PERMITTED a
+ * leader, and the leader was withheld because the saved model does not establish that the options it compared are the
+ * options in the user's brief (`applyIntakeToLeaderPermission`, decided by `intakeLeaderClaimCause`). Before this code
+ * it fell to `constraint_verdict_withheld`, so the limit card said the limit check declined beside `per_limit: scored`.
+ * WE LOOKED AND DECLINED — `withheld`. Minted in CEE, no schemas member (`withheld_reason` is a free string).
+ * Precedence: after the unrequested first pass, F-LIMIT and the identity cause; never on an out-of-date run.
+ */
+export const WITHHELD_OPTIONS_NOT_RECONCILED = 'options_not_reconciled_with_brief';
+
+/**
  * ⛔ P1-d (AI Quality #70 5850056041, DL 5850069309) — THE RUN IS OUT OF DATE, and no caller stated why its leader
  * is withheld. The read route presents no fact for an out-of-date run (`selected = fresh ? historical : null`), so
  * `mayNameLeadingOption` is false with no cause, and the claim used to fall through to `constraint_verdict_withheld`
@@ -322,6 +332,7 @@ export const LEADER_CLAIM_REASON_KINDS: Readonly<
   [WITHHELD_CONSTRAINT_VERDICT]: 'withheld',
   [WITHHELD_UNREQUESTED_ANALYSIS]: 'withheld',
   [WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN]: 'withheld',
+  [WITHHELD_OPTIONS_NOT_RECONCILED]: 'withheld',
   [WITHHELD_NO_OPTION_MEETS_LIMIT]: 'withheld',
   [WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT]: 'withheld',
   [WITHHELD_NEAR_TIE]: 'withheld',
@@ -537,6 +548,12 @@ export interface AnalysisStateComposeInput {
    * changes; `withheldBecauseUnrequested` outranks it (see WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN).
    */
   readonly withheldBecauseNonlinearIdentity?: boolean;
+  /**
+   * OPTIONAL CAUSE for a `mayNameLeadingOption: false` verdict: the fact's own constraint verdict PERMITTED a leader and
+   * the INTAKE axis withheld it (`intakeLeaderClaimCause`, intake-option-reconciliation.ts), decided by the caller that
+   * holds the fact, the graph and the brief — this composer never re-derives it. Absent or false keeps today's code.
+   */
+  readonly withheldBecauseOptionsNotReconciled?: boolean;
   /**
    * OPTIONAL CAUSE (F-LIMIT): what EVERY option does against one limit on the BOUND run fact
    * (`deriveEveryOptionLimitVerdict`, constraint-feasibility.ts), decided by the caller that holds that fact — this
@@ -986,6 +1003,8 @@ function composeLeaderClaim(input: AnalysisStateComposeInput, runState: Analysis
           ? WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT
         : input.withheldBecauseNonlinearIdentity === true
           ? WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN
+        : input.withheldBecauseOptionsNotReconciled === true && runState.kind !== 'complete_stale'
+          ? WITHHELD_OPTIONS_NOT_RECONCILED
           // P1-d: an out-of-date run is not "withheld for a limit" (see WITHHELD_RUN_OUT_OF_DATE).
           : runState.kind === 'complete_stale'
             ? WITHHELD_RUN_OUT_OF_DATE

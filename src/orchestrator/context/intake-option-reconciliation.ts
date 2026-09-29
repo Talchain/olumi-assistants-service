@@ -89,7 +89,7 @@ export const INTAKE_MAY_NAME_LEADING_OPTION: Readonly<
  */
 export const INTAKE_IS_NOT_A_CONSTRAINT_VERDICT = true as const;
 
-import type { PersistedClaimSafety } from './constraint-feasibility.js';
+import { MAY_NAME_LEADING_OPTION, type PersistedClaimSafety } from './constraint-feasibility.js';
 
 /** One option the brief spelled out. Tokens aid extraction, never identity. */
 export interface EnumeratedOption {
@@ -505,4 +505,46 @@ export function applyIntakeToLeaderPermission(
   // Spread, so B5's `per_limit` / `joint` survive: they are constraint evidence this axis has nothing to say about.
   // With no rows present this is the same two keys, in the same order, as before.
   return { ...persisted, may_name_leading_option: false };
+}
+
+/**
+ * ⛔ WHY A PERSISTED FACT'S LEADER WAS WITHHELD, when the reason is THIS axis (Canvas #72 5886223069; AIQ 5886352788).
+ *
+ * `applyIntakeToLeaderPermission` removes only `may_name_leading_option` and leaves the constraint state and B5's rows
+ * as they were, on purpose. So with no cause stated, `composeLeaderClaim` published `constraint_verdict_withheld`, and
+ * the limit card told the user their limit check declined while every limit on the SAME payload was `scored`: one
+ * fact, two carriers disagreeing. The mirror of `nonlinearIdentityLeaderClaimCause` (agent-lane/admit-model.ts), for a
+ * caller that holds THE fact its permission was read from, the graph and the stored brief. True only when ALL hold,
+ * each read, never assumed:
+ *  · the graph IS the graph the run analysed — `graphHash` (the caller's own freshness hash of `graph`) equals the
+ *    fact's `graph_hash_at_run`;
+ *  · the fact's persisted permission is `false` while its persisted constraint state PERMITS a leader
+ *    (`MAY_NAME_LEADING_OPTION`) — so the stamp that withheld it was not the constraint's;
+ *  · the Run-time answer, re-derived on THAT graph's options the run compared (`enrichment.option_comparison`) and the
+ *    stored brief, withholds.
+ * Anything missing or unreadable ⇒ `false`, and the fact's own constraint code stands (today's behaviour). Pure.
+ */
+export function intakeLeaderClaimCause(input: {
+  readonly graph: unknown;
+  readonly graphHash: string | null;
+  readonly result: unknown;
+  readonly briefText: string | null | undefined;
+}): boolean {
+  const result = input.result as { constraint_verdict?: unknown; enrichment?: unknown; graph_hash_at_run?: unknown } | null | undefined;
+  const analysedHash = result?.graph_hash_at_run;
+  if (typeof analysedHash !== 'string' || analysedHash === '' || input.graphHash !== analysedHash) return false;
+  const verdict = result?.constraint_verdict as { may_name_leading_option?: unknown; constraint_verdict_state?: unknown } | undefined;
+  if (verdict?.may_name_leading_option !== false) return false;
+  const state = verdict.constraint_verdict_state;
+  if (typeof state !== 'string' || !Object.prototype.hasOwnProperty.call(MAY_NAME_LEADING_OPTION, state)) return false;
+  if (MAY_NAME_LEADING_OPTION[state as keyof typeof MAY_NAME_LEADING_OPTION] !== true) return false;
+  const rows = isRecord(result?.enrichment) && Array.isArray(result.enrichment.option_comparison) ? result.enrichment.option_comparison : [];
+  const compared = new Set(rows.map((r: unknown) => (isRecord(r) ? r.option_id : undefined))
+    .filter((id: unknown): id is string => typeof id === 'string' && id !== ''));
+  if (compared.size === 0) return false;
+  // The graph's OWN option nodes (a legacy top-level `options: []` must not hide them), limited to the analysed set.
+  const nodes = isRecord(input.graph) && Array.isArray(input.graph.nodes) ? input.graph.nodes : [];
+  const options = nodes.filter((n: unknown) => isRecord(n) && n.kind === 'option' && typeof n.id === 'string' && compared.has(n.id));
+  if (options.length !== compared.size) return false;
+  return !deriveIntakeOptionReconciliation(input.briefText, options, input.graph).mayNameLeadingOption;
 }
