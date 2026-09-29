@@ -114,19 +114,26 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     expect(approve[0]!.label).toBe('Record your figure');
   });
 
-  it('REFUSED (served 0df78f4 D2, live replay 3/3): a figure beyond what the link can carry is said in the sizer\'s own terms, with its question', async () => {
+  const BEYOND_SAID = 'From our last two price changes: every £1 on the Pro price loses us about 50 paying subscribers.';
+  const BEYOND_ARGS = {
+    from_label: 'Pro plan price', to_label: 'Pro paying subscribers', amount: -50, amount_unit: 'subscribers',
+    per_source_change: 1, per_source_change_unit: 'GBP/month', quote: 'every £1 on the Pro price loses us about 50 paying subscribers',
+  };
+
+  it('REFUSED (served 0df78f4 D2, live replay 3/3; AIQ 5883669977): the model\'s RANGE is what stops it — never the user\'s figure first, no dead-end offer', async () => {
     const { caps, store } = world(BEYOND);
-    const said = 'From our last two price changes: every £1 on the Pro price loses us about 50 paying subscribers.';
-    const r = await caps.proposeLinkEffect!(ctxSaying(said), {
-      from_label: 'Pro plan price', to_label: 'Pro paying subscribers', amount: -50, amount_unit: 'subscribers',
-      per_source_change: 1, per_source_change_unit: 'GBP/month', quote: 'every £1 on the Pro price loses us about 50 paying subscribers',
-    }) as Json;
+    const r = await caps.proposeLinkEffect!(ctxSaying(BEYOND_SAID), BEYOND_ARGS) as Json;
     expect(r).toEqual(expect.objectContaining({ ok: false, refusal: 'not_representable' }));
-    expect(String(r.detail)).toMatch(/more than the analysis can represent on the ranges/);
-    // Canonical 5883568580: refuse and ASK — the size, or either end's range; the user's figure kept in the reply.
-    expect(String(r.detail)).toMatch(/Is that the size they meant, or should the range of "Pro plan price" or "Pro paying subscribers" change\?/);
-    expect(String(r.detail)).toMatch(/Repeat their figure in their own words/);
-    expect(String(r.detail)).not.toMatch(/not_representable|not representable/); // never the raw code
+    const detail = String(r.detail);
+    expect(detail).toMatch(/the range the model uses for "Pro plan price" \(up to 200 GBP\/month\) and "Pro paying subscribers"/);
+    expect(detail).toMatch(/it is that range, not their figure, that stops it being used/);
+    expect(detail).toMatch(/Never ask them to change their figure first/);
+    expect(detail).toMatch(/Repeat their figure in their own words/);
+    expect(detail).toMatch(/cannot be changed from this conversation yet/); // no dead-end "OK?" before a reframe door exists (Canonical 5883707376)
+    expect(detail).not.toMatch(/Is that the size they meant/); // mutant: asking the user's size first → RED
+    // Canonical 5883707376: no typed field says whose a cap is — the words never claim the range is Olumi's (or theirs).
+    expect(detail).not.toMatch(/Olumi\u2019s own|Olumi's own|their range|range they gave/);
+    expect(detail).not.toMatch(/not_representable|not representable/); // never the raw code
     expect(store.size()).toBe(0);
   });
 

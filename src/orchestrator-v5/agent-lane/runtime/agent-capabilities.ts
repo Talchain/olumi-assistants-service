@@ -1105,10 +1105,19 @@ function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: {
       return 'Nothing was prepared: the model changed while this was being read. Read the state again and propose once more.';
     // The sizer's own terms and questions (`link-effect.ts` D7). At the answer door the writer refuses and asks (Canonical
     // 5883568580): nothing is stored, the user's figure stays in the reply, and never shrunk to fit.
-    case 'not_representable':
-      return `Nothing was prepared: the user's figure is more than the analysis can represent on the ranges "${from.label}" and "${to.label}" `
-        + 'are measured on, so it would be cut short. Repeat their figure in their own words, tell them so plainly and ask: Is that the '
-        + `size they meant, or should the range of "${from.label}" or "${to.label}" change? Never shrink their figure yourself.`;
+    // AIQ 5883669977: the user's stated figure never yields first. No typed field says whose a cap is (Canonical
+    // 5883707376), so the words claim neither owner, and offer no range change until a reframe door exists.
+    case 'not_representable': {
+      const rangeOf = (id: string): string => {
+        const os = (((raw as { nodes?: unknown[] } | null)?.nodes ?? []).find((x) => (x as { id?: unknown })?.id === id) as
+          { observed_state?: { cap?: unknown; unit?: unknown } } | undefined)?.observed_state;
+        return typeof os?.cap === 'number' && Number.isFinite(os.cap) ? ` (up to ${os.cap}${typeof os.unit === 'string' ? ` ${os.unit}` : ''})` : '';
+      };
+      return `Nothing was prepared: the user's figure is more than the analysis can represent on the range the model uses for "${from.label}"`
+        + `${rangeOf(from.id)} and "${to.label}"${rangeOf(to.id)}, so it would be cut short. Repeat their figure in their own words, and say `
+        + 'plainly that it is that range, not their figure, that stops it being used here. Never ask them to change their figure first, '
+        + 'and never shrink it yourself. That range cannot be changed from this conversation yet, so do not offer to change it.';
+    }
     case 'out_of_domain':
       return `Nothing was prepared: across the options, the user's figure would take "${to.label}" outside the range it can hold. Repeat `
         + `their figure in their own words, tell them so plainly and ask whether the size of that effect should change, or today's level `
