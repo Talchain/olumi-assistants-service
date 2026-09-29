@@ -146,6 +146,7 @@ import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } f
 
 import { defaultFrameFor, framedObservedState, nonlinearIdentityForAgent, readEvaluatedIdentityNodeIds } from '../admit-model.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../admit-constraint.js';
+import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
@@ -190,7 +191,7 @@ function scopeIn(g: { readonly nodes: readonly { readonly label?: unknown; reado
  * still marks a figure as not the target's. STRICT (`EntityScope.strict`): journey E's typed "£120,000 per senior engineer
  * and £65,000 per junior engineer" binds each figure to its owner, and a figure nobody's words own, among two or more, is refused.
  */
-function newFactorScopeIn(
+export function newFactorScopeIn(
   g: { readonly raw?: unknown; readonly nodes: readonly { readonly id?: unknown; readonly label?: unknown; readonly kind?: unknown; readonly observed_state?: unknown }[] },
   target: string,
   figureUnit: string,
@@ -983,6 +984,9 @@ function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'ana
   const goals = g.nodes.filter((n) => n.kind === 'goal').map((n) => {
     const trio = pickGoalThresholdTrio(n as never) as { goal_threshold_raw?: number; goal_threshold_unit?: string };
     const frame = (n as { goal_threshold_frame?: unknown }).goal_threshold_frame;
+    // Row 5 (#72 5881225605): the comparator the user stated for the target, as construction held it
+    // (`goal_direction`). Absent ⇒ unattested, so absent here too — never defaulted, never read off the label.
+    const comparator = readHeldGoalComparator(g.raw, n.id);
     return {
       id: n.id,
       label: n.label,
@@ -991,6 +995,7 @@ function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'ana
           value: trio.goal_threshold_raw,
           ...(trio.goal_threshold_unit === undefined ? {} : { unit: trio.goal_threshold_unit }),
           ...(str(frame) ? { frame } : {}),
+          ...(comparator === null ? {} : { comparator, comparator_in_words: LIMIT_OPERATOR_WORDS[comparator] }),
         },
       }),
     };
@@ -1062,6 +1067,44 @@ function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'ana
     readiness: readinessViewOf(g.raw),
     ...(earlierAnalysisOf(g.analysis_state) ?? {}),
   };
+}
+
+/**
+ * What `propose_assumptions` tells the Agent to say, by who wrote the values: a figure the user gave (`your_figure`)
+ * is theirs and is never called an assumption; every other value is an assumption to adopt or correct.
+ */
+function proposalNoteFor(usersCount: number, total: number): string {
+  const ask = 'and call authorise_change with this proposal_id only once they agree.';
+  if (usersCount === 0) {
+    return 'Nothing has changed. Show the user each value and what it rests on, say plainly that these are ' +
+      `assumptions to adopt or correct and NOT measurements, ${ask}`;
+  }
+  if (usersCount === total) {
+    return 'Nothing has changed. Show the user each value as the figure the user gave: it will be saved as the ' +
+      `user's own figure, so never call it an assumption or say it is not a measurement, ${ask}`;
+  }
+  return 'Nothing has changed. Show the user each value and what it rests on. A value marked your_figure is the ' +
+    "user's own figure and will be saved as theirs: never call it an assumption. Say plainly that the other values " +
+    `are assumptions to adopt or correct and NOT measurements, ${ask}`;
+}
+
+/** How many entries of a starting point are the user's own figures, read off the halves' typed markers. */
+function usersFiguresIn(assumptions: unknown, levels: unknown): number {
+  const marked = (xs: unknown, key: string, want: unknown): number =>
+    (Array.isArray(xs) ? xs : []).filter((x) => x !== null && typeof x === 'object' && (x as Record<string, unknown>)[key] === want).length;
+  return marked(assumptions, 'your_figure', true) + marked(levels, 'stated_by', 'user');
+}
+
+/** What `propose_starting_point` tells the Agent to say (the `proposalNoteFor` rule, for values AND levels). */
+function startingPointNoteFor(usersCount: number): string {
+  const tail = 'and that ONE approval applies all of them. Then call authorise_change with this proposal_id once they agree.';
+  if (usersCount === 0) {
+    return 'Nothing has changed. Show the user every value and level and what each rests on, say plainly they are ' +
+      `assumptions to adopt or correct, NOT measurements, ${tail}`;
+  }
+  return 'Nothing has changed. Show the user every value and level and what each rests on. A value marked your_figure ' +
+    "or a level with stated_by 'user' is the user's own figure and will be saved as theirs: never call it an assumption. " +
+    `Say plainly that the others are assumptions to adopt or correct, NOT measurements, ${tail}`;
 }
 
 const pickKeys = (o: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> =>
@@ -2745,8 +2788,10 @@ export function createAgentCapabilities(
           id: node.id, label: node.label,
           value: Number(a.value), unit: String(a?.unit ?? ''), basis: String(a?.basis ?? ''),
           ...(typeof existing === 'number' ? { replaces: existing } : {}),
-          // ⛔ A revision is the user's only when they WROTE the figure (`stated-by-user.ts`); else it is Olumi's.
-          userWrote: figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text, scopeIn(g, node.label)),
+          // ⛔ A revision is the user's only when they WROTE the figure (`stated-by-user.ts`); else it is Olumi's. Its owner is
+          // read the add-factor door's way (`newFactorScopeIn`: rivals + strict): under the plain reading, served journey E's
+          // "Senior engineers cost £120k a year each and juniors £65k a year each" was Olumi's for both salaries (5d73351, 2/2).
+          userWrote: figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text, newFactorScopeIn(g, node.label, String(a?.unit ?? nodeUnit ?? ''), [])),
         });
       }
 
@@ -2766,11 +2811,13 @@ export function createAgentCapabilities(
       // Sorted by node id so an identical set proposed in a different order is
       // the SAME proposal, not a second one.
       const ordered = [...adopted].sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
+      // A revision the user named AND wrote is theirs; anything else is Olumi's (`valueOpAuthor`). ONE predicate for
+      // what is stored and for what the Agent is told to say, so the words cannot drift from the authorship.
+      const usersOwn = (a: { replaces?: number; userWrote: boolean }): boolean => typeof a.replaces === 'number' && a.userWrote;
       const operations: ProposalOperation[] = ordered.map((a) => ({
         op: 'set_factor_value',
         path: a.id,
-        // A revision the user named AND wrote is theirs; anything else is Olumi's (`valueOpAuthor`).
-        value: { value: a.value, unit: a.unit, basis: a.basis, authored_by: typeof a.replaces === 'number' && a.userWrote ? 'user_stated' : 'model_proposed' },
+        value: { value: a.value, unit: a.unit, basis: a.basis, authored_by: usersOwn(a) ? 'user_stated' : 'model_proposed' },
       }));
       /**
        * ⛔ THE APPROVAL MUST SAY WHAT IT REPLACES.
@@ -2826,6 +2873,7 @@ export function createAgentCapabilities(
         assumptions: ordered.map((a) => ({
           factor: a.label, value: a.value, unit: a.unit, basis: a.basis,
           ...(typeof a.replaces === 'number' ? { replaces: a.replaces } : {}),
+          ...(usersOwn(a) ? { your_figure: true } : {}),
         })),
         ...(unresolved.length > 0 ? { unresolved_labels: unresolved } : {}),
         ...(occupied.length > 0 ? { left_alone_already_valued: occupied } : {}),
@@ -2838,10 +2886,9 @@ export function createAgentCapabilities(
           not_the_users_figure: notWritten.map((a) => ({ factor: a.label, value: a.value })),
           not_the_users_figure_note: NOT_THE_USERS_FIGURE_NOTE,
         } : {}),
-        note:
-          'Nothing has changed. Show the user each value and what it rests on, say plainly that these are ' +
-          'assumptions to adopt or correct and NOT measurements, and call authorise_change with this ' +
-          'proposal_id only once they agree.',
+        // ⛔ Served e25d0aa (29 Sep): one note for every value made the Agent call the user's own "3.7%" churn "a model
+        // assumption … not a measurement", though it is stored as theirs. The words follow `usersOwn`, value by value.
+        note: proposalNoteFor(ordered.filter(usersOwn).length, ordered.length),
       };
     },
 
@@ -2966,10 +3013,9 @@ export function createAgentCapabilities(
         ...(a !== null && Array.isArray(a.not_a_factor) ? { not_a_factor: a.not_a_factor, not_a_factor_note: NOT_A_FACTOR_NOTE } : {}),
         ...ambiguity,
         ...refused,
-        note:
-          'Nothing has changed. Show the user every value and level and what each rests on, say plainly they are ' +
-          'assumptions to adopt or correct, NOT measurements, and that ONE approval applies all of them. Then call ' +
-          'authorise_change with this proposal_id once they agree.' + stillBlockedNote(ifApproved),
+        // The same rule as `propose_assumptions`: a level the user gave (`stated_by: 'user'`) or a value marked
+        // `your_figure` is said as theirs; the rest are assumptions. With none of the user's, the note is unchanged.
+        note: startingPointNoteFor(usersFiguresIn(a?.assumptions, b?.interventions)) + stillBlockedNote(ifApproved),
       };
     },
 

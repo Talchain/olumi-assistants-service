@@ -1,0 +1,563 @@
+{
+ "_provenance": {
+  "captured": "2026-09-29T01:37:01.647Z",
+  "served_build": "5d73351",
+  "scenario_id": "dea67b01-f4e3-4071-b053-ab097956f525",
+  "what": "journey E D1: draft_graph returned by the brief turn on served CEE 5d73351 (29 Sep 2026); the salary message followed"
+ },
+ "graph": {
+  "nodes": [
+   {
+    "id": "should_we_hire_two_senior_engineers_or_four_junior_engineers_to_ship_the_new_platform_by_q3_while_ke",
+    "kind": "decision",
+    "label": "Should we hire two senior\u2026",
+    "provenance": "from_brief",
+    "description": "Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under \u00a3400k?"
+   },
+   {
+    "id": "new_platform_shipped_by_q3",
+    "kind": "goal",
+    "label": "new platform shipped by Q3",
+    "provenance": "from_brief",
+    "goal_threshold_unit": "shipped (yes/no)",
+    "goal_threshold_frame": "level",
+    "goal_deadline_as_stated": "by Q3"
+   },
+   {
+    "id": "hire_two_senior_engineers",
+    "kind": "option",
+    "label": "Hire two senior engineers",
+    "provenance": "from_brief",
+    "interventions": {
+     "annual_salary_spend": {
+      "unit": "GBP/year",
+      "value": 0.35,
+      "source": "cee_hypothesis",
+      "raw_value": 350000,
+      "target_match": {
+       "node_id": "annual_salary_spend",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "additional_senior_engineers": {
+      "unit": "engineers",
+      "value": 0.1,
+      "source": "cee_hypothesis",
+      "raw_value": 2,
+      "target_match": {
+       "node_id": "additional_senior_engineers",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "hire_four_junior_engineers",
+    "kind": "option",
+    "label": "Hire four junior engineers",
+    "provenance": "from_brief",
+    "interventions": {
+     "annual_salary_spend": {
+      "unit": "GBP/year",
+      "value": 0.37,
+      "source": "cee_hypothesis",
+      "raw_value": 370000,
+      "target_match": {
+       "node_id": "annual_salary_spend",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "additional_junior_engineers": {
+      "unit": "engineers",
+      "value": 0.13333333333333333,
+      "source": "cee_hypothesis",
+      "raw_value": 4,
+      "target_match": {
+       "node_id": "additional_junior_engineers",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "current_staffing",
+    "kind": "option",
+    "label": "Current staffing",
+    "provenance": "ai_inferred",
+    "is_baseline": true
+   },
+   {
+    "id": "additional_senior_engineers",
+    "kind": "factor",
+    "label": "Additional senior engineers",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "observed_state": {
+     "cap": 20,
+     "unit": "engineers",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "additional_junior_engineers",
+    "kind": "factor",
+    "label": "Additional junior engineers",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "observed_state": {
+     "cap": 30,
+     "unit": "engineers",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "senior_engineer_annual_salary",
+    "kind": "factor",
+    "label": "Senior engineer annual salary",
+    "category": "observable",
+    "provenance": "ai_inferred",
+    "scale_frame": 250000,
+    "observed_state": {
+     "unit": "GBP/year per engineer",
+     "value": 0.4,
+     "source": "cee_inference",
+     "raw_value": 100000,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "junior_engineer_annual_salary",
+    "kind": "factor",
+    "label": "Junior engineer annual salary",
+    "category": "observable",
+    "provenance": "ai_inferred",
+    "scale_frame": 150000,
+    "observed_state": {
+     "unit": "GBP/year per engineer",
+     "value": 0.36666666666666664,
+     "source": "cee_inference",
+     "raw_value": 55000,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "incremental_platform_delivery_capacity",
+    "kind": "factor",
+    "label": "Incremental platform delivery\u2026",
+    "category": "observable",
+    "provenance": "ai_inferred",
+    "description": "Incremental platform delivery capacity",
+    "observed_state": {
+     "cap": 20,
+     "unit": "senior-engineer-equivalent FTE",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "annual_salary_spend",
+    "kind": "factor",
+    "label": "Annual salary spend",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "scale_frame": 1000000,
+    "observed_state": {
+     "unit": "GBP/year",
+     "value": 0.15,
+     "source": "cee_inference",
+     "raw_value": 150000,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "junior_ramp_up_risk",
+    "kind": "risk",
+    "label": "Junior ramp-up risk",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "salary_budget_overrun",
+    "kind": "risk",
+    "label": "Salary-budget overrun",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "platform_delivery_progress",
+    "kind": "outcome",
+    "label": "Platform delivery progress",
+    "provenance": "ai_inferred"
+   }
+  ],
+  "edges": [
+   {
+    "to": "hire_two_senior_engineers",
+    "from": "should_we_hire_two_senior_engineers_or_four_junior_engineers_to_ship_the_new_platform_by_q3_while_ke",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "hire_four_junior_engineers",
+    "from": "should_we_hire_two_senior_engineers_or_four_junior_engineers_to_ship_the_new_platform_by_q3_while_ke",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "current_staffing",
+    "from": "should_we_hire_two_senior_engineers_or_four_junior_engineers_to_ship_the_new_platform_by_q3_while_ke",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "additional_senior_engineers",
+    "from": "hire_two_senior_engineers",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "annual_salary_spend",
+    "from": "hire_two_senior_engineers",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "additional_junior_engineers",
+    "from": "hire_four_junior_engineers",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "annual_salary_spend",
+    "from": "hire_four_junior_engineers",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "additional_senior_engineers",
+    "from": "current_staffing",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "annual_salary_spend",
+    "from": "current_staffing",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "additional_junior_engineers",
+    "from": "current_staffing",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "incremental_platform_delivery_capacity",
+    "from": "additional_senior_engineers",
+    "strength": {
+     "std": 0.39999999999999997,
+     "mean": 0.7999999999999999
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 0.8,
+      "amount_unit": "senior-engineer-equivalent FTE",
+      "strength_mean": 0.7999999999999999,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "engineers"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "incremental_platform_delivery_capacity",
+    "from": "additional_junior_engineers",
+    "strength": {
+     "std": 0.26249999999999996,
+     "mean": 0.5249999999999999
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 0.35,
+      "amount_unit": "senior-engineer-equivalent FTE",
+      "strength_mean": 0.5249999999999999,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "engineers"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "junior_ramp_up_risk",
+    "from": "additional_junior_engineers",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "annual_salary_spend",
+    "from": "senior_engineer_annual_salary",
+    "strength": {
+     "std": 0.01875,
+     "mean": 0.0375
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "annual_salary_spend",
+    "from": "junior_engineer_annual_salary",
+    "strength": {
+     "std": 0.01875,
+     "mean": 0.0375
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "annual_salary_spend",
+    "from": "additional_senior_engineers",
+    "strength": {
+     "std": 0.25,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "natural_effect": {
+      "amount": 50000,
+      "amount_unit": "GBP/year",
+      "strength_mean": 0.5,
+      "per_source_change": 2,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "engineers"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "annual_salary_spend",
+    "from": "additional_junior_engineers",
+    "strength": {
+     "std": 0.25,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "natural_effect": {
+      "amount": 66666.7,
+      "amount_unit": "GBP/year",
+      "strength_mean": 0.5,
+      "per_source_change": 4,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "engineers"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "platform_delivery_progress",
+    "from": "incremental_platform_delivery_capacity",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "platform_delivery_progress",
+    "from": "junior_ramp_up_risk",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "salary_budget_overrun",
+    "from": "annual_salary_spend",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "new_platform_shipped_by_q3",
+    "from": "salary_budget_overrun",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "new_platform_shipped_by_q3",
+    "from": "platform_delivery_progress",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   }
+  ],
+  "node_count": 14,
+  "edge_count": 22,
+  "goal_constraints": [
+   {
+    "unit": "GBP/year",
+    "label": "Annual salary spend",
+    "value": 400000,
+    "node_id": "annual_salary_spend",
+    "operator": "<=",
+    "provenance": "explicit",
+    "value_frame": "level",
+    "constraint_id": "agent-lane:annual_salary_spend:<=",
+    "operator_as_stated": "<"
+   }
+  ]
+ }
+}

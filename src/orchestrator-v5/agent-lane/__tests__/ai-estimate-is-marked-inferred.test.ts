@@ -85,7 +85,8 @@ async function registered(): Promise<{ nodes: unknown[] }> {
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief('88888888-8888-4888-8888-888888888888', 'Should I hire a tech lead or two developers?', d, call) as Record<string, unknown>;
+  // The brief STATES today's 2 tech leads: before AIQ 5881132458 "two developers" alone grounded it (a count of something else).
+  const out = await buildModelFromBrief('88888888-8888-4888-8888-888888888888', 'We have two tech leads today. Should I hire a tech lead or two developers?', d, call) as Record<string, unknown>;
   expect(out.ok, JSON.stringify(out)).toBe(true);
   return GraphV3.parse(graph) as unknown as { nodes: unknown[] };
 }
