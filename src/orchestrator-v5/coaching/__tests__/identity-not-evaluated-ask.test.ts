@@ -85,6 +85,43 @@ describe('the ask, one per typed reason (AIQ 5860888736)', () => {
     expect(a.assistant_text).toBe('I can\'t put “Pro paying subscribers” on the same scale as “MRR”: what unit is it in?');
   });
 
+  // ⛔ R3 (#72 5884883932, DL 5884896233): ISL's rule 1 frames the identity NODE as well as its operands. When every
+  // operand has its unit and the TARGET has none, the ask named the operands again ("what unit is each of them in?")
+  // for units the user already gave (Canvas 5884821547), and never asked about the one missing: the target's.
+  it('RED — identity_frame_missing with every operand in its unit and the TARGET unitless: asks for the target only', () => {
+    const g = clone(F.graph);
+    delete node(g, 'mrr').observed_state;
+    const a = composeIdentityNotEvaluatedAsk(typed({ withheld_reason: 'identity_frame_missing' }), g)!;
+    expect(a).toMatchObject({ reason: 'identity_frame_missing', node_id: 'mrr', chip_label: 'Give its unit' });
+    expect(a.assistant_text).toBe(
+      `I can't work out “MRR” as ${FORMULA} without knowing what “MRR” is measured in: `
+      + 'what unit is it in, and roughly what is it today or what are you aiming for?',
+    );
+    for (const operand of ['Pro plan price', 'Pro paying subscribers', 'Other MRR growth']) {
+      expect(a.chip_message).not.toContain(operand);
+    }
+    expect(a.assistant_text).not.toMatch(NEVER);
+  });
+
+  it('CONTROL: a goal whose unit is on its threshold (goal_threshold_unit) is framed, so the operand fallback stands', () => {
+    const g = clone(F.graph);
+    delete node(g, 'mrr').observed_state;
+    node(g, 'mrr').goal_threshold_unit = '£ per month';
+    const a = composeIdentityNotEvaluatedAsk(typed({ withheld_reason: 'identity_frame_missing' }), g)!;
+    expect(a.assistant_text).toBe(
+      'I can\'t put “Pro plan price”, “Pro paying subscribers” and “Other MRR growth” on the same scale as “MRR”: '
+      + 'what unit is each of them in?',
+    );
+  });
+
+  it('CONTROL: an operand with no unit is still the one named, even when the target has none too', () => {
+    const g = clone(F.graph);
+    delete node(g, 'mrr').observed_state;
+    delete node(g, 'pro_paying_subscribers').observed_state.unit;
+    const a = composeIdentityNotEvaluatedAsk(typed({ withheld_reason: 'identity_frame_missing' }), g)!;
+    expect(a.assistant_text).toBe('I can\'t put “Pro paying subscribers” on the same scale as “MRR”: what unit is it in?');
+  });
+
   it('every reason: never "failed", never a raw code', () => {
     for (const reason of ['identity_inconsistent', 'identity_operand_missing', 'identity_zero_level', 'identity_frame_missing']) {
       const g = clone(F.graph);

@@ -201,10 +201,24 @@ export function composeIdentityNotEvaluatedAsk(critiques: unknown, graph: unknow
       };
     }
     case 'identity_frame_missing': {
-      const unitless = w.participants.filter((p) => {
-        const u = rec(byId.get(p)?.observed_state)?.unit;
-        return typeof u !== 'string' || u.trim() === '';
-      });
+      const hasUnit = (id: string): boolean => {
+        const n = byId.get(id);
+        const u = rec(n?.observed_state)?.unit ?? (id === w.nodeId ? n?.goal_threshold_unit : undefined);
+        return typeof u === 'string' && u.trim() !== '';
+      };
+      const unitless = w.participants.filter((p) => !hasUnit(p));
+      // ISL's rule 1 frames the identity NODE as well as its operands (R3 #72 5884883932, DL 5884896233). Every
+      // operand in its unit and the target in none → ask for the TARGET's, never again for units the user gave.
+      if (unitless.length === 0 && !hasUnit(w.nodeId)) {
+        return {
+          reason: w.reason,
+          node_id: w.nodeId,
+          assistant_text: `I can't work out ${q(T)} ${asFormula} without knowing what ${q(T)} is measured in: `
+            + 'what unit is it in, and roughly what is it today or what are you aiming for?',
+          chip_label: 'Give its unit',
+          chip_message: `Ask me which unit ${q(T)} is in.`,
+        };
+      }
       const named = andList(say(unitless.length > 0 ? unitless : w.participants));
       const one = (unitless.length > 0 ? unitless : w.participants).length === 1;
       return {
