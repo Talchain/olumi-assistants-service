@@ -16,6 +16,7 @@
 import { describe, it, expect } from 'vitest';
 import type { GraphV3T } from '../../../schemas/cee-v3.js';
 import { computeAnalysisAffectingGraphHash } from '../graph-hash.js';
+import { CANONICAL_GRAPH_HASH_NESTED_PROJECTION, CANONICAL_GRAPH_HASH_PROJECTION_VERSION } from '@talchain/schemas/boundary';
 
 function churnGraph(observed: Record<string, unknown>, label = 'Monthly churn'): GraphV3T {
   return {
@@ -115,5 +116,49 @@ describe('analysis revision: the other stored run inputs', () => {
     expect(h(goalGraph({}, { source: 'cee_hypothesis', magnitude: 'olumi_placeholder', natural_effect: { ...effect, amount_unit: '%' } }))).not.toBe(placeholder);
     // CONTRAST: display members stay out.
     expect(h(goalGraph({}, { source: 'cee_hypothesis', magnitude: 'olumi_placeholder', natural_effect: { ...effect, amount: 600 }, reasoning: 'why' }))).toBe(placeholder);
+  });
+});
+
+// ── DERIVED FROM THE PUBLISHED VOCABULARY (schemas 0.62.0), not a hand list: every field it names moves the hash ────
+describe('every field the published hash vocabulary names moves the analysis hash', () => {
+  const V = CANONICAL_GRAPH_HASH_NESTED_PROJECTION;
+  const baseGraph = (): { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> } => ({
+    nodes: [
+      { id: 'goal', kind: 'goal', label: 'MRR' },
+      { id: 'f', kind: 'factor', label: 'F', observed_state: { value: 0.5 } },
+    ],
+    edges: [{ from: 'f', to: 'goal', strength: { mean: 0.4, std: 0.1 }, provenance: { source: 'cee_hypothesis', natural_effect: {} } }],
+  });
+  const hashOf = (g: unknown) => computeAnalysisAffectingGraphHash(g as GraphV3T);
+  const base = hashOf(baseGraph());
+
+  it('POSITIVE CONTROL: the vocabulary is the v3 one this build hashes', () => {
+    expect(CANONICAL_GRAPH_HASH_PROJECTION_VERSION).toBe(3);
+    expect(V.node.fields.length).toBeGreaterThan(10);
+  });
+  it.each(V.node.fields.filter((f) => f !== 'id' && f !== 'kind'))('node.%s', (field) => {
+    const g = baseGraph();
+    g.nodes[1]![field] = 'probe';
+    expect(hashOf(g)).not.toBe(base);
+  });
+  it.each(V.node.observed_state_fields.filter((f) => f !== 'value'))('node.observed_state.%s', (field) => {
+    const g = baseGraph();
+    (g.nodes[1]!.observed_state as Record<string, unknown>)[field] = 'probe';
+    expect(hashOf(g)).not.toBe(base);
+  });
+  it.each(V.edge.fields.filter((f) => f !== 'from' && f !== 'to'))('edge.%s', (field) => {
+    const g = baseGraph();
+    g.edges[0]![field] = 'probe';
+    expect(hashOf(g)).not.toBe(base);
+  });
+  it.each(V.edge.provenance_fields)('edge.provenance.%s', (field) => {
+    const g = baseGraph();
+    (g.edges[0]!.provenance as Record<string, unknown>)[field] = 'probe';
+    expect(hashOf(g)).not.toBe(base);
+  });
+  it.each(V.edge.provenance_natural_effect_fields)('edge.provenance.natural_effect.%s', (field) => {
+    const g = baseGraph();
+    ((g.edges[0]!.provenance as Record<string, unknown>).natural_effect as Record<string, unknown>)[field] = 'probe';
+    expect(hashOf(g)).not.toBe(base);
   });
 });

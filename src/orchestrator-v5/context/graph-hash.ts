@@ -20,7 +20,7 @@ import { createHash } from 'node:crypto';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { CANONICAL_GRAPH_HASH_NESTED_PROJECTION as VOCABULARY } from '@talchain/schemas/boundary';
-import { resolveGoalDirection } from '../goal-target/goal-direction.js';
+import { resolveGoalDirection, resolveGoalThresholdStrict } from '../goal-target/goal-direction.js';
 
 /** Length of the returned hex prefix. 16 gives collision odds ~1 in 2^64. */
 const HASH_HEX_LENGTH = 16;
@@ -101,8 +101,8 @@ export function computeDeterministicGraphHash(
  *   }
  *   goal_node_id
  *   goal_constraints: passed through stableStringify
- *   run_semantics: { goal_direction, goal_direction_provenance } — DERIVED (`resolveGoalDirection`), the direction
- *                  the run sends
+ *   run_semantics: { goal_direction, goal_direction_provenance, goal_threshold_strict } — DERIVED
+ *                  (`resolveGoalDirection`, `resolveGoalThresholdStrict`): the direction and strictness the run sends
  *
  * Excluded (cosmetic / provenance / display):
  *   labels, descriptions, display_value, provenance, provenance_display,
@@ -180,6 +180,8 @@ function runSemantics(graph: unknown, goalNodeId: unknown): Record<string, unkno
   return {
     goal_direction: direction?.direction ?? null,
     goal_direction_provenance: direction?.provenance ?? null,
+    // R3 5881451910 / AIQ 5881600412: whether the run counts reaching the target itself as NOT met (ISL #209, CEE #2260).
+    goal_threshold_strict: typeof goalNodeId === 'string' ? resolveGoalThresholdStrict(graph, goalNodeId) : false,
   };
 }
 
