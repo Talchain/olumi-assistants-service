@@ -93,6 +93,28 @@ describe('controls and the variants R3 and AI Quality added', () => {
     expect(byId(ds, 'raise_to_54')).toBeUndefined();
     expect(byId(ds, 'hold_at_49')).toMatchObject({ probability_of_goal: 0, earned: true });
   });
+  it('EXACTLY 0 or 1 (PR Review on 0d45a267): 0.9999999995 and 5e-10 are interior results and get no decision; exact 1 and 0 do', () => {
+    const near = [
+      { option_id: 'raise_price_to_59', probability_of_goal: 0.9999999995 },
+      { option_id: 'raise_price_to_54', probability_of_goal: 5e-10 },
+      { option_id: 'carry_on_as_now', probability_of_goal: 0 },
+    ];
+    const ds = goalCertaintyDecisions(FX.paul.graph, near, FX.paul.identity_evaluations);
+    expect(ds.map((d) => d.option_id)).toEqual(['carry_on_as_now']);
+    expect(byId(decide(FX.paul), 'raise_price_to_59')?.probability_of_goal).toBe(1);
+  });
+  it('every unearned decision carries EXACTLY ONE of `unsized_path` / `identity_mismatch`, and exactly one of `break_even` / `no_break_even`', () => {
+    const extra = sizedPaul();
+    (extra.graph.nodes as Json[]).push({ id: 'annual_contracts', kind: 'factor', label: 'Annual contracts' });
+    (extra.graph.edges as Json[]).push({ from: 'annual_contracts', to: 'mrr', strength: { mean: 0.2, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' });
+    const all = [FX.paul, extra, { ...FX.paul, identity_evaluations: [] }].flatMap((r) => decide(r)).filter((d) => !d.earned);
+    expect(all.length).toBeGreaterThanOrEqual(3);
+    for (const d of all) {
+      expect([d.unsized_path, d.identity_mismatch].filter((x) => x !== undefined)).toHaveLength(1);
+      expect([d.break_even, d.no_break_even].filter((x) => x !== undefined)).toHaveLength(1);
+      expect(typeof d.say).toBe('string');
+    }
+  });
   it('R3: with the placeholder link SIZED but the magnitude-ABSENT links left, £59 is still unearned', () => {
     const run = structuredClone(FX.paul);
     const e = (run.graph.edges as Json[]).find((x) => x.from === 'price_sensitivity' && x.to === 'monthly_churn')!;
@@ -164,7 +186,8 @@ describe('PR Review 5883209483 + R3 5883225699: the goal\'s parents must be EXAC
   it('RED — `paying_subscribers → mrr` removed: the unsized churn path into subscribers is HIDDEN from the walk, so £59\'s P = 1 is unearned, with no figure', () => {
     const d = byId(decide(without('paying_subscribers')), 'raise_price_to_59')!;
     expect(d).toMatchObject({ probability_of_goal: 1, earned: false, no_break_even: 'operand_not_parent' });
-    expect(d.unsized_path).toEqual({ from: 'monthly_pro_price', enters_goal_through: 'paying_subscribers' });
+    expect(d.identity_mismatch).toEqual({ node_id: 'paying_subscribers', reason: 'operand_not_parent' });
+    expect(d.unsized_path, 'a mismatch is not a path').toBeUndefined();
     expect(d.break_even).toBeUndefined();
     expect(d.say).toBe('Olumi can’t yet say how likely ‘Raise price to £59’ is to meet the goal: ‘MRR’ is worked out from ‘Paying subscribers’, but the model has no link from it to ‘MRR’, so it can’t follow what ‘Monthly Pro price’ does through it.');
   });
@@ -184,7 +207,8 @@ describe('PR Review 5883209483 + R3 5883225699: the goal\'s parents must be EXAC
     (run.graph.edges as Json[]).push({ from: 'annual_contracts', to: 'mrr', strength: { mean: 0.2, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' });
     const d = byId(decide(run), 'raise_price_to_59')!;
     expect(d).toMatchObject({ probability_of_goal: 1, earned: false, no_break_even: 'extra_goal_parent' });
-    expect(d.unsized_path).toEqual({ from: 'monthly_pro_price', enters_goal_through: 'annual_contracts' });
+    expect(d.identity_mismatch).toEqual({ node_id: 'annual_contracts', reason: 'extra_goal_parent' });
+    expect(d.unsized_path, 'no price path reaches annual_contracts: no path is claimed').toBeUndefined();
     expect(d.break_even).toBeUndefined();
     expect(d.say).toBe('Olumi can’t yet say how likely ‘Raise price to £59’ is to meet the goal: the model links ‘Annual contracts’ into ‘MRR’ beside the parts it is worked out from, so it can’t check what ‘Monthly Pro price’ does to it.');
     expect(byId(decide(run), 'carry_on_as_now')).toMatchObject({ probability_of_goal: 0, earned: true });

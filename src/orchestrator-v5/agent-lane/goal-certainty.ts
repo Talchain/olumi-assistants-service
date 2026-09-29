@@ -35,8 +35,16 @@ export interface GoalCertaintyDecision {
   readonly option_id: string;
   readonly probability_of_goal: 0 | 1;
   readonly earned: boolean;
-  /** The first unsized path that could reverse it: the factor the option moves, and the goal's parent it reaches. */
+  /**
+   * The first unsized path that could reverse it: the factor the option moves, and the goal's parent it reaches. A real
+   * path in the graph. Present on an unearned decision exactly when `identity_mismatch` is not.
+   */
   readonly unsized_path?: { readonly from: string; readonly enters_goal_through: string };
+  /**
+   * The goal's parents are not exactly its evaluated identity's operands, so nothing an option moves is earned (PR Review
+   * on 8dd6343b/0d45a267): the node that breaks equality, and how. NOT a path — no link from the moved factor is implied.
+   */
+  readonly identity_mismatch?: { readonly node_id: string; readonly reason: 'operand_not_parent' | 'extra_goal_parent' };
   readonly break_even?: {
     readonly kind: 'product' | 'sum';
     readonly projected_if_held: number;
@@ -64,7 +72,6 @@ export type NoBreakEven =
   | 'not_an_identity' | 'identity_not_evaluated' | 'level_from_inputs' | 'addends' | 'extra_goal_parent'
   | 'operand_not_parent' | 'no_exact_figure';
 
-const CERTAIN = 1e-9;
 const userOwns = (source: unknown): boolean =>
   typeof source === 'string' && (source === 'brief_extraction' || source.startsWith('user'));
 
@@ -147,7 +154,9 @@ export function goalCertaintyDecisions(
     const optionId = text(r.option_id);
     const p = num(r.probability_of_goal);
     if (optionId === undefined || p === undefined) continue;
-    const certainty: 0 | 1 | undefined = p >= 1 - CERTAIN ? 1 : p <= CERTAIN ? 0 : undefined;
+    // EXACTLY 0 or 1 (PR Review on 0d45a267): the engine's P is a share of draws, so all or none is exact; 0.9999999995
+    // is an interior result and gets no decision.
+    const certainty: 0 | 1 | undefined = p === 1 ? 1 : p === 0 ? 0 : undefined;
     if (certainty === undefined) continue;
     const option = byId.get(optionId);
     const iv = option !== undefined ? mergeInterventionSourceObjects(option) : {};
@@ -167,12 +176,11 @@ export function goalCertaintyDecisions(
     // ⛔ The goal's parents are not exactly its operands: an operand with no link into the goal hides what reaches it,
     // and a parent outside them adds what the identity does not say. Nothing an option moves is earned (fail closed).
     if (mismatch !== undefined && moved.length > 0) {
-      found = { from: moved[0]!.factorId, through: mismatch.id, move: moved[0]!.move };
       out.push({
         option_id: optionId, probability_of_goal: certainty, earned: false,
-        unsized_path: { from: found.from, enters_goal_through: found.through },
+        identity_mismatch: { node_id: mismatch.id, reason: mismatch.reason },
         no_break_even: mismatch.reason,
-        say: sayMismatch(certainty, option, goal, byId, found, mismatch.reason),
+        say: sayMismatch(certainty, option, goal, byId, { from: moved[0]!.factorId, through: mismatch.id }, mismatch.reason),
       });
       continue;
     }
