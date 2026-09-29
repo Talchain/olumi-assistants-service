@@ -305,9 +305,11 @@ function sayUnearned(
   const opt = `‘${text(option?.label) ?? String(option?.id ?? '')}’`;
   const moved = `‘${label(found.from)}’`;
   const part = `‘${label(found.through)}’`;
-  const unsized = `Olumi hasn’t sized how ${moved} moves ${part}, so it can’t yet say how likely that is.`;
+  // The unsized link can be the moved factor's own edge into the goal (R3 5887059128): it then moves the goal.
+  const moves = found.from === found.through ? `‘${label(goal.id)}’` : part;
+  const unsized = `Olumi hasn’t sized how ${moved} moves ${moves}, so it can’t yet say how likely that is.`;
   if (be === undefined) {
-    return `Olumi can’t yet say how likely ${opt} is to ${certainty === 1 ? 'meet' : 'miss'} the goal: it depends on how ${moved} moves ${part}, which isn’t sized.`;
+    return `Olumi can’t yet say how likely ${opt} is to ${certainty === 1 ? 'meet' : 'miss'} the goal: it depends on how ${moved} moves ${moves}, which isn’t sized.`;
   }
   const unit = text(goal.goal_threshold_unit) ?? levelOf(goal).unit ?? '';
   const target = sayFigure(be.threshold, unit);
