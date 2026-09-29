@@ -62,6 +62,7 @@ import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { deriveDecisionContextGraphHash, loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../context/graph-hash.js';
+import { legacyAnalysisHashV2, legacyAnalysisHashV2Sha256 } from '../../../../tests/helpers/legacy-analysis-hash-v2.js';
 import type { SessionStore } from '../../session/store.js';
 import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
@@ -468,11 +469,15 @@ describe('H1a: the analysis hash covers the C46 carrier — a graph that lost it
       goal_constraints: [],
     };
     expect(JSON.stringify(graph).includes('nonlinear_identity'), 'premise: no carrier anywhere').toBe(false);
-    expect(computeAnalysisAffectingGraphHash(graph as never)).toBe('680e4200b50c20dc');
-    expect(computeAnalysisAffectingGraphHashSha256(graph as never)).toBe('680e4200b50c20dc7e79cc4c710ee1512c20811b53b96897720334aa659bf1d9');
-    // A present-`undefined` carrier (the key survives in memory, never in JSON) is the same graph.
+    // The #1972 claim ("no stored graph changed hash") is a fact about the projection it shipped under — the pre-0.62.0
+    // one, pinned here through the frozen copy. Projection v3 (Shared Data row 1) moved every stored hash ONCE, by design.
+    expect(legacyAnalysisHashV2(graph as never)).toBe('680e4200b50c20dc');
+    expect(legacyAnalysisHashV2Sha256(graph as never)).toBe('680e4200b50c20dc7e79cc4c710ee1512c20811b53b96897720334aa659bf1d9');
+    // A present-`undefined` carrier (the key survives in memory, never in JSON) is the same graph — under BOTH projections.
     const presentUndefined = { ...graph, nodes: graph.nodes.map((n) => ({ ...n, nonlinear_identity: undefined })) };
-    expect(computeAnalysisAffectingGraphHash(presentUndefined as never)).toBe('680e4200b50c20dc');
+    expect(legacyAnalysisHashV2(presentUndefined as never)).toBe('680e4200b50c20dc');
+    expect(computeAnalysisAffectingGraphHash(presentUndefined as never)).toBe(computeAnalysisAffectingGraphHash(graph as never));
+    expect(computeAnalysisAffectingGraphHashSha256(presentUndefined as never)).toBe(computeAnalysisAffectingGraphHashSha256(graph as never));
   });
 });
 

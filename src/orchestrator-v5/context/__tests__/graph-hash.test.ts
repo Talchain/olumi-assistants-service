@@ -401,7 +401,7 @@ describe('computeAnalysisAffectingGraphHash', () => {
     expect(computeAnalysisAffectingGraphHash(g1)).toBe(computeAnalysisAffectingGraphHash(g2));
   });
 
-  it('observed_state.unit / source / raw_value edits → hash unchanged', () => {
+  it('observed_state.extractionType edit → hash unchanged (source / unit / raw_value are analytical: graph-hash-whose-value.test.ts)', () => {
     const g1 = buildGraph({
       nodes: [
         {
@@ -425,9 +425,9 @@ describe('computeAnalysisAffectingGraphHash', () => {
           kind: 'factor',
           observed_state: {
             value: 100,
-            unit: 'USD',
-            source: 'cee_inference',
-            raw_value: 99,
+            unit: 'GBP',
+            source: 'brief_extraction',
+            raw_value: 100,
             extractionType: 'inferred',
           },
         },
@@ -465,7 +465,7 @@ describe('computeAnalysisAffectingGraphHash', () => {
     expect(computeAnalysisAffectingGraphHash(g1)).toBe(computeAnalysisAffectingGraphHash(g2));
   });
 
-  it('edge provenance / origin / validation edits → hash unchanged', () => {
+  it('edge provenance.reasoning / origin / validation / defaulted edits → hash unchanged (provenance source/magnitude are analytical: graph-hash-whose-value.test.ts)', () => {
     const g1 = buildGraph({
       nodes: [baseFactor('a', 0), baseFactor('b', 0)],
       edges: [
@@ -483,7 +483,7 @@ describe('computeAnalysisAffectingGraphHash', () => {
       edges: [
         {
           ...baseEdge('a', 'b', 0.5),
-          provenance: { source: 'user_specified', reasoning: 'Y' },
+          provenance: { source: 'brief_extraction', reasoning: 'Y' },
           origin: 'user',
           validation: { something: false },
           defaulted: true,

@@ -269,7 +269,7 @@ describe('the two hashes: out of the analysis hash, in the identity hash (both f
     ...base, nodes: (base.nodes as Rec[]).map((n) => (n.kind === 'goal' ? { ...n, ...patch } : n)),
   })) as Rec;
 
-  for (const [field, changed] of [['goal_horizon_months', 6], ['goal_direction', '<=']] as const) {
+  for (const [field, changed] of [['goal_horizon_months', 6]] as const) {
     it(`a ${field}-only change keeps the analysis hash and moves the identity hash`, () => {
       const before = GraphV3.parse(base) as Rec;
       const after = withGoal({ [field]: changed });
@@ -278,6 +278,16 @@ describe('the two hashes: out of the analysis hash, in the identity hash (both f
       expect(computeGraphIdentityHash(after as never)?.value).not.toBe(computeGraphIdentityHash(before as never)?.value);
     });
   }
+
+  // REVERSED by schemas 0.61.0's projection v2 (DL 5871412823 / AIQ 5871459631), adopted by CEE with v3: the held
+  // comparator decides the direction the run sends, so a goal_direction-only change is a new analysis revision.
+  it('a goal_direction-only change moves BOTH the analysis hash and the identity hash', () => {
+    const before = GraphV3.parse(base) as Rec;
+    const after = withGoal({ goal_direction: '<=' });
+    expect(goalOf(after).goal_direction, 'premise: the change survived the persisted form').toBe('<=');
+    expect(computeAnalysisAffectingGraphHash(after as never)).not.toBe(computeAnalysisAffectingGraphHash(before as never));
+    expect(computeGraphIdentityHash(after as never)?.value).not.toBe(computeGraphIdentityHash(before as never)?.value);
+  });
 
   it('CONTROL: a target change moves the analysis hash (the probe can see a goal field)', () => {
     const before = GraphV3.parse(base) as Rec;

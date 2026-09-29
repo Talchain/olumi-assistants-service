@@ -63,6 +63,7 @@ import { SET_FACTOR_VALUE_USER_GUIDANCE } from './d1-shared/user-guidance.js';
 import { isSuccessfulRunAnalysisFact, selectRunAnalysisFact } from '../../context/freshness.js';
 import { deriveEditComparisonReach } from '../../coaching/edit-comparison-reach.js';
 import { log } from '../../../utils/telemetry.js';
+import { userTypedStoredFigure } from '../../agent-lane/figure-scope.js';
 
 /**
  * P0 V5 golden-path repair (Wave 2): staleness narrative appended to a
@@ -620,6 +621,26 @@ export function createSetFactorValueHandler(): HandlerFn {
     let rescaledInterventionCount = 0;
     let linksSized: readonly string[] = [];
 
+    // ⭐ R11 FOR NODES — A SET TO THE VALUE ALREADY STORED IS REVIEW, NOT AUTHORSHIP (AIQ #72 5881277231, extending
+    // 5872082179; the edge writer's `reviewOnly` in `adjust-edge-strength.ts` is the precedent). Since schemas 0.62.0 the
+    // analysis hash reads WHOSE a value is (Shared Data row 1, #72 5881225605), so the old re-stamp of the user's source
+    // on an unchanged value made Olumi's figure the user's and staled the Run while the reply said "already set".
+    // Every byte of who-authored-what stays; the act is recorded as `reviewed_by_user` (not a hash input). A verified
+    // panel apply or an approved adoption carries its own provenance and keeps today's write.
+    // AIQ #72 5882852814: in chat (flag absent) the same number is still AUTHORSHIP when the user's own words this turn
+    // state it for this factor ("set churn to 3.2%"); only a figure they did not type ("yes, keep it") is review.
+    const reviewOnly =
+      invocation.unchangedValueIsReview !== false &&
+      !(invocation.unchangedValueIsReview === undefined
+        && userTypedStoredFigure(graph, targetId, after, (invocation.payload as { message?: unknown } | undefined)?.message as string | undefined)) &&
+      appliedProvenance === undefined &&
+      adoptedSource === undefined &&
+      targetNode.observed_state !== undefined &&
+      before.value === after.value &&
+      before.raw_value === after.raw_value &&
+      unitComparisonKey(before.unit) === unitComparisonKey(after.unit) &&
+      before.cap === after.cap;
+
     // Apply the mutation to a clone and Zod-parse the result.
     const result = applyAndValidateMutation(rawGraph, (clone) => {
       const node = clone.nodes.find((n) => n.id === targetId);
@@ -629,6 +650,17 @@ export function createSetFactorValueHandler(): HandlerFn {
         throw new D1HandlerError('ENTITY_NOT_FOUND', `Node ${targetId} disappeared during clone.`, {
           userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
         });
+      }
+      if (reviewOnly) {
+        // A review is recorded on SOMEONE ELSE's figure (Olumi's, the brief's, a colleague's). The user's own figure
+        // re-sent unchanged is a pure no-op: no bytes move, so no new model version is minted.
+        if ((node.observed_state as { source?: unknown } | undefined)?.source !== USER_EDIT_SOURCE) {
+          node.observed_state = {
+            ...(node.observed_state as NonNullable<typeof node.observed_state>),
+            reviewed_by_user: { intent: 'confirm', at: new Date().toISOString() },
+          } as typeof node.observed_state;
+        }
+        return { before, after: before };
       }
       /**
        * ⛔⛔ A VALUE EDIT MUST NOT LEAVE A DECLARATION IT HAS JUST FALSIFIED.

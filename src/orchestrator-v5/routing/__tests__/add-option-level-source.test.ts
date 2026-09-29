@@ -105,10 +105,18 @@ describe('C2 — an option level says whose it is, through the one approval', ()
     expect(hold(single(source)).kind).not.toBe('held');
   });
 
-  it('PIN — whose a level is never moves the analysis identity (so re-attributing it cannot stale a run)', () => {
-    const olumi = approve(single('cee_hypothesis')).stored;
-    const user = approve(single()).stored;
-    expect(computeAnalysisAffectingGraphHash(olumi as never)).toBe(computeAnalysisAffectingGraphHash(user as never));
+  // REVERSED by schemas 0.62.0 (projection v3; Shared Data row 1, AIQ 5881815357): the option edge's
+  // `provenance.source` is an analysis-hash input (who sized a link decides withhold vs score in the placeholder-parts
+  // predicate, and `source: 'user_specified'` wins over `magnitude` at read time). So re-attributing an option level
+  // stales the Run ONCE — the fail-closed direction. The intervention's own `source` stays out (contrast below).
+  it('PIN — whose an option level is moves the analysis identity through the option edge (v3), and only there', () => {
+    const olumi = approve(single('cee_hypothesis')).stored as { edges: Array<{ provenance?: { source?: unknown } }> };
+    const user = approve(single()).stored as { edges: Array<{ provenance?: { source?: unknown } }> };
+    expect(computeAnalysisAffectingGraphHash(olumi as never)).not.toBe(computeAnalysisAffectingGraphHash(user as never));
+    // CONTRAST: with the option edges' owner equalised, the intervention's own `source` moves nothing.
+    const equalised = structuredClone(olumi);
+    equalised.edges.forEach((e, i) => { if (e.provenance !== undefined) e.provenance = structuredClone(user.edges[i]!.provenance); });
+    expect(computeAnalysisAffectingGraphHash(equalised as never)).toBe(computeAnalysisAffectingGraphHash(user as never));
   });
 
   it('PIN — an Olumi estimate counts as SET for readiness (no missing-value issue names that option)', () => {
