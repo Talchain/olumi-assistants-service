@@ -769,6 +769,11 @@ const SOURCE_REACH = 6;
  * raising it loses 50 paying subscribers" writes £1 as today's LEVEL, beside "price", and sizes no rise.
  */
 const DELTA_BEFORE = /^(?:every|each|per)$/;
+/**
+ * A change NAMED by a noun the figure sizes ("a £10 rise", "a £1 price increase") — never a verb whose object is
+ * the source ("£1 raising it": today's £1, then a rise of no stated size; PR Review on #2275 @ fe509477).
+ */
+const CHANGE_NOUN = /^(?:rise|increase|drop|fall|cut|decrease|reduction|hike|boost|lift|uplift|jump)$/;
 /** Words that may stand between a move and "by £1" ("raise the Pro price by £1", "raising it by £1"). */
 const BY_LINK = /^(?:the|a|an|our|its|it|their|them|we|you|prices?)$/;
 const AMOUNT_REACH = 4;
@@ -870,7 +875,7 @@ function linkEffectInOneSentence(
   const isMove = (w: string): boolean => MOVE_UP.test(w) || MOVE_DOWN.test(w);
   const isLabel = (w: string): boolean => sourceLabel.some((x) => sameWord(x, w));
   const distributive = perAt > 0 && DELTA_BEFORE.test(tokens[perAt - 1]!.w) && unbroken(perAt - 1, perAt);
-  const moveAfter = [1, 2, 3].some((d) => perAt + d < tokens.length && isMove(tokens[perAt + d]!.w) && unbroken(perAt, perAt + d)
+  const moveAfter = [1, 2, 3].some((d) => perAt + d < tokens.length && CHANGE_NOUN.test(tokens[perAt + d]!.w) && unbroken(perAt, perAt + d)
     && tokens.slice(perAt + 1, perAt + d).every((t, k) => inFigure(perAt + 1 + k) || isLabel(t.w)));
   const byAfterMove = perAt > 1 && tokens[perAt - 1]!.w === 'by' && tokens.slice(Math.max(0, perAt - 7), perAt - 1).some((t, k, xs) => {
     const m = Math.max(0, perAt - 7) + k;

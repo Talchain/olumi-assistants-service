@@ -1823,8 +1823,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
     /** Every tool runs as THIS request: its scenario, its user, and the user's own words (`stated-by-user.ts`). */
     const typedNow = typedByUser(body) ? message : null;
-    // The typed approve chip this request pressed, and the words it sent — bound here, never from model output.
-    const pressedApproval = approvedProposal !== undefined ? { typed_approval_of: approvedProposal, typed_approval_words: message } : {};
+    // The typed approve chip this request pressed — bound here, never from model output. ⛔ Its words (as the product
+    // sends them: DGAI `sendChip` → `chip.message`) bind only when a card for THIS proposal is on offer to this subject
+    // (this process's last offer, or the durable carrier after a restart); `applyLinkEffect` then requires them to be
+    // exactly that card's reading. PR Review on #2275 @ fe509477: a right-looking id + reading for a proposal whose card
+    // is not on offer carries no words, so it writes nothing.
+    const offeredCard = approvedProposal === undefined ? undefined : [lastApproveOffer.get(approveKey), carriedProposals.get(approveKey)?.chip]
+      .find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === approvedProposal);
+    const pressedApproval = approvedProposal !== undefined
+      ? { typed_approval_of: approvedProposal, ...(offeredCard !== undefined ? { typed_approval_words: message } : {}) } : {};
     const toolCtx: AgentToolContext = { ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
     if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
 

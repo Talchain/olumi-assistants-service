@@ -171,6 +171,21 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
       'With Pro price £1, raising it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_not_a_change'],
     ['At a Pro price of £1, raising it loses 50 paying subscribers.',
       'At a Pro price of £1, raising it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_not_a_change'],
+    // PR Review @ fe509477, its exact string: no punctuation, and the move straight after £1 is a VERB on the price.
+    ['With Pro price £1 raising it loses 50 paying subscribers.',
+      'With Pro price £1 raising it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_not_a_change'],
+    ['At a Pro price of £1 raising it loses 50 paying subscribers.',
+      'At a Pro price of £1 raising it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_not_a_change'],
+    ['With Pro price £1 increasing it loses 50 paying subscribers.',
+      'With Pro price £1 increasing it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_not_a_change'],
+    // Today's level, then a comma, then a change of NO stated size: the comma ends the figure's phrase (each passes if
+    // punctuation is ignored).
+    ['With the Pro price at £1, price increase loses us about 50 paying subscribers.',
+      'With the Pro price at £1, price increase loses us about 50 paying subscribers', -50, 1, 'not_the_users_statement', 'figure_not_bound'],
+    ['Pro price is £1, price increase loses us about 50 paying subscribers.',
+      'Pro price is £1, price increase loses us about 50 paying subscribers', -50, 1, 'not_the_users_statement', 'figure_not_bound'],
+    ['At £1, Pro price increase loses us about 50 paying subscribers.',
+      'At £1, Pro price increase loses us about 50 paying subscribers', -50, 1, 'not_the_users_statement', 'figure_not_bound'],
     // A NAMED under-claim (unchanged by the fifth CR): the move four words from the source's name reads as the target's —
     // the Agent asks them to say it again, never records it.
     ['If we raise the Pro price by £1 we lose about 50 paying subscribers.',

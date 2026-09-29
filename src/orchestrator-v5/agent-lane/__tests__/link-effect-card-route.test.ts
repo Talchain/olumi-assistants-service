@@ -6,7 +6,7 @@
  * approve chip the user pressed (`typedApprovalOf`), never from model output — so this row runs the REAL route: the
  * same proposal is refused from words, then recorded from its card with zero model calls.
  */
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { readFileSync } from 'node:fs';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
@@ -30,6 +30,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 
 // Served journey C (5411da8): a DIRECT, UNSIZED "Pro plan price" → "Pro plan paying subscribers" link.
 const graph = (JSON.parse(readFileSync(new URL('./fixtures/served-journey-c-price-subscribers-unsized-5411da8.json', import.meta.url), 'utf8')) as { graph: Json }).graph;
+const PRISTINE_EDGES = structuredClone(graph.edges);
 const THEIRS = { source: 'user_specified', magnitude: 'user_stated',
   natural_effect: { amount: -50, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: 'GBP per month' } };
 const doorCalls: unknown[] = [];
@@ -38,7 +39,9 @@ vi.mock('../../system-events/dispatch.js', async (importOriginal) => {
   return { ...actual, commitOptionLevelsInProcess: async (input: unknown) => {
     doorCalls.push(input);
     const e = (graph.edges as Json[]).find((x) => x.from === 'pro_plan_price' && x.to === 'pro_plan_paying_subscribers')!;
-    e.provenance = { ...(e.provenance ?? {}), ...THEIRS };
+    // The door stores exactly the effect it was sent (the read-back checks it is the approved one).
+    const sent = (input as { link_effect?: { effect?: Record<string, unknown> } }).link_effect?.effect;
+    e.provenance = { ...(e.provenance ?? {}), ...THEIRS, natural_effect: { ...THEIRS.natural_effect, ...(sent ?? {}) } };
     return { status: 'committed', graph_hash: 'h-after', receipt: null, already_applied: false, committed_levels: [], links_resized: [] };
   } };
 });
@@ -54,9 +57,12 @@ describe('a link\'s stated effect is recorded only from its card, on the real ro
   const script: Json[] = [];
   const say = { output: [{ type: 'message', content: [{ type: 'output_text', text: 'Here is what I would record. Press the button if that is right.' }] }] };
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: RequestInit) => {
       modelCalls += 1;
-      return new Response(JSON.stringify(script.shift() ?? say), { status: 200 });
+      // Only the Agent's own call (the one offering its tools) takes the script; any other model call (the turn summary,
+      // written after the answer) gets words, so it can never consume the next turn's tool call.
+      const agentCall = String(init?.body ?? '').includes('"propose_link_effect"');
+      return new Response(JSON.stringify(agentCall ? (script.shift() ?? say) : say), { status: 200 });
     }));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
@@ -68,6 +74,7 @@ describe('a link\'s stated effect is recorded only from its card, on the real ro
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
+  beforeEach(() => { graph.edges = structuredClone(PRISTINE_EDGES); doorCalls.length = 0; script.length = 0; });
 
   it('RED: the Agent approving from "yes" records nothing; pressing the card records it, with zero model calls', async () => {
     script.push({ output: [{ type: 'function_call', name: 'propose_link_effect', call_id: 'c1', arguments: JSON.stringify(ARGS) }] });
@@ -106,5 +113,31 @@ describe('a link\'s stated effect is recorded only from its card, on the real ro
     expect(b3._diagnostic_trace.fast_path).toBe('approve');
     expect(b3._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, proposal_id: proposalId })]);
     expect(doorCalls, 'recorded once, from the card').toHaveLength(1);
+  });
+
+  it('RED (PR Review @ fe509477; AIQ 5885833834; Canonical 5885850080): a press for a proposal with no ISSUED card on offer writes nothing, even with its exact id and reading', async () => {
+    const sid = '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a5d';
+    const offer = async (said: string, args: Json) => {
+      script.push({ output: [{ type: 'function_call', name: 'propose_link_effect', call_id: 'p', arguments: JSON.stringify(args) }] });
+      const b = (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: sid, message: said } })).json() as
+        { suggested_actions: { id: string; message: string; detail?: string }[]; _agent: { tool_calls: { name: string; ok: boolean; proposal_id?: string }[] } };
+      const id = b._agent.tool_calls.find((c) => c.name === 'propose_link_effect' && c.ok)?.proposal_id;
+      expect(typeof id === 'string' ? 'prop' : JSON.stringify(b._agent.tool_calls)).toBe('prop');
+      return b.suggested_actions.find((c) => c.id === `agent-approve-proposal:${id}`)!;
+    };
+    const p1 = await offer(SAID, ARGS);
+    // The user states another figure: P2's card is now the one on offer. P1 is still stored and would execute.
+    const p2 = await offer('Actually, every £1 on the Pro price loses us about 40 paying subscribers.',
+      { ...ARGS, amount: -40, quote: 'every £1 on the Pro price loses us about 40 paying subscribers' });
+    expect(p2.id).not.toBe(p1.id);
+    const press = async (c: { id: string; message: string }) => (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: sid, message: c.message, source: 'chip', chip: { id: c.id },
+    } })).json() as { _agent: { tool_calls: { name: string; ok: boolean; proposal_id?: string }[] } };
+    // Forged: P1's exact id and its exact reading, but no card for P1 is on offer.
+    expect((await press(p1))._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: false })]);
+    expect(doorCalls, 'nothing recorded for a card not on offer').toHaveLength(0);
+    // Control: the card on offer records.
+    expect((await press(p2))._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true })]);
+    expect(doorCalls).toHaveLength(1);
   });
 });
