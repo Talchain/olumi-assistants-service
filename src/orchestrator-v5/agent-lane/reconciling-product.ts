@@ -61,6 +61,9 @@ function readMoney(unit: unknown, label: string): { code: string; period: Period
   const denominators = segments.slice(1).filter((s) => !s.every(isPeriod));
   if (denominators.length > 1) return null;
   if (denominators.some((s) => !s.every((w) => /^[a-z]+$/.test(w) && !isPeriod(w) && !isCurrency(w) && !MONEY_WORDS.has(w)))) return null;
+  // ⛔ PR Review on 98be677f: ONE period at most. "GBP per subscriber per month per month" is money per month², and
+  // "GBP monthly per subscriber per month" says the period twice; neither composes to money per month.
+  if (ws.filter(isPeriod).length > 1) return null;
   // The goal's own name can carry its period ("MRR", "Monthly recurring revenue") when its unit does not.
   const own = periodOf(ws);
   const period = own !== null ? own : periodOf(words(label));

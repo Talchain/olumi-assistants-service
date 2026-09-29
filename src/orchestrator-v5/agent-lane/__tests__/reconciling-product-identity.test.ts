@@ -168,6 +168,14 @@ describe('a goal whose stated level reconciles with its two stated parts is decl
     expect(goal.nonlinear_identity ?? null).toBeNull();
   });
 
+  it('NEGATIVE (PR Review on 98be677f): a REPEATED period ("GBP per subscriber per month per month" × "subscribers") → no identity', async () => {
+    // price × subscribers is then GBP per month², not the goal's GBP per month.
+    const d = paulDraft({ priceUnit: 'GBP per subscriber per month per month' });
+    expect(withReconcilingProductIdentity(d, PAUL)).toBe(d);
+    const { goal } = await registeredGoal(d, PAUL);
+    expect(goal.nonlinear_identity ?? null).toBeNull();
+  });
+
   // The CLASS, not the example (one row per unit shape; the price is Paul's £49, the count his 1,500).
   it.each([
     ['GBP per subscriber per month', 'subscribers', 'GBP/month', true],
@@ -185,6 +193,12 @@ describe('a goal whose stated level reconciles with its two stated parts is decl
     ['GBP per subscriber', 'subscribers', 'GBP/month', false],
     ['GBP per subscriber per year', 'subscribers', 'GBP/month', false],
     ['USD per subscriber per month', 'subscribers', 'GBP/month', false],
+    // PR Review on 98be677f: ONE period at most, in the rate and in the goal.
+    ['GBP per subscriber per month per month', 'subscribers', 'GBP/month', false],
+    ['GBP monthly per subscriber per month', 'subscribers', 'GBP/month', false],
+    ['GBP per subscriber per month', 'subscribers', 'GBP/month/month', false],
+    // A period the reader does not know is a second NOUN denominator, never a period: under-claims.
+    ['GBP per subscriber per week', 'subscribers', 'GBP per week', false],
     // AIQ 5887464051: an ARR goal is a YEAR period; a monthly rate × a count is money per month.
     ['GBP per subscriber per month', 'subscribers', 'GBP ARR', false],
     ['£/subscriber/month', 'subscribers', 'GBP/year', false],
