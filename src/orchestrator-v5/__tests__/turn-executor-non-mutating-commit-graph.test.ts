@@ -40,6 +40,7 @@ import type {
   ChatWithToolsResult,
 } from '../../adapters/llm/types.js';
 import type { PendingAction } from '../session/pending-action.js';
+import { legacyAnalysisHashV2, rebindRecordedAnalysisHash } from '../../../tests/helpers/legacy-analysis-hash-v2.js';
 
 // ---------------------------------------------------------------------------
 // Stateful session-store mock — mirrors the RPC's p_graph semantics:
@@ -114,12 +115,15 @@ const ECHO_GRAPH_STATE = JSON.parse(
   ),
 ) as Record<string, unknown>;
 
-/** EXP-01 run_analysis anchor — hash of the rich persisted graph. */
-const RICH_HASH = 'b3ebb23cfb03df1d';
-/** EXP-01 diverged "current" hash — hash of the client echo. */
-const ECHO_HASH = '8fc73501f6fa5c79';
-/** EXP-01 J6 re-anchor — hash of the echo after the J5c set_factor_value. */
-const POST_EDIT_ECHO_HASH = 'ac25c7af3b8417e2';
+// Shared Data row 1 (projection v3): the live EXP-01 hashes were observed under the pre-0.62.0 projection. Each is
+// proven to be that projection of its captured graph, then rebound to the current projection (tests/helpers).
+/** EXP-01 run_analysis anchor — hash of the rich persisted graph (observed live as `b3ebb23cfb03df1d`). */
+const RICH_HASH = rebindRecordedAnalysisHash(RICH_PERSISTED_GRAPH, 'b3ebb23cfb03df1d');
+/** EXP-01 diverged "current" hash — hash of the client echo (observed live as `8fc73501f6fa5c79`). */
+const ECHO_HASH = rebindRecordedAnalysisHash(ECHO_GRAPH_STATE, '8fc73501f6fa5c79');
+/** EXP-01 J6 re-anchor — hash of the echo after the J5c set_factor_value, observed live under the pre-0.62.0
+ * projection (no captured graph to rebind, so it is compared through that projection). */
+const POST_EDIT_ECHO_HASH_V2 = 'ac25c7af3b8417e2';
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
@@ -472,7 +476,7 @@ describe('mutation safety — D1 set_factor_value still persists and staleness s
       currentPersistedGraph as never,
     );
     expect(committedHash).not.toBe(RICH_HASH);
-    expect(committedHash).not.toBe(POST_EDIT_ECHO_HASH);
+    expect(legacyAnalysisHashV2(currentPersistedGraph as never)).not.toBe(POST_EDIT_ECHO_HASH_V2);
 
     // Follow-up turn: staleness is now LEGITIMATE (a real mutation
     // happened) — the prior anchor no longer matches.
