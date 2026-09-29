@@ -27,6 +27,7 @@ const TOL = 1e-9;
 const close = (a: number, b: number): boolean => Math.abs(a - b) <= TOL * Math.max(1, Math.abs(a), Math.abs(b));
 const above1 = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 1;
 const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const STATED_TOL = 1e-4; // a stated natural_effect's amount is stored rounded to ~6 significant figures
 const [MIN_STD, MAX_STD] = [1e-4, 2.0]; // `translator-v3.ts` `buildParameterUncertaintiesV3`: a std outside is clamped, so a carried spread that binds MOVES
 
 /** The node's frame, in CEE's reading order (`resolveMagnitudeFrame`): scale_frame → cap → goal cap → raw/value. */
@@ -91,7 +92,8 @@ export function frameInvariance(before: Rec, after: Rec): string[] {
     const ne = ea.provenance?.natural_effect;
     if (ne && num(ne.amount) && num(ne.per_source_change) && ne.per_source_change !== 0) {
       const size = (m * frameOf(na.get(ea.to))!) / frameOf(na.get(ea.from))!;
-      if (!close(size, ne.amount / ne.per_source_change) || (num(ne.strength_mean) && !close(ne.strength_mean, m))) out.push(`natural_effect_off ${edgeKey(ea)}`);
+      const stated = ne.amount / ne.per_source_change; // stored rounded (66,666.7 per 4): a readback within 1e-4 is exact
+      if (Math.abs(size - stated) > STATED_TOL * Math.max(Math.abs(stated), 1e-12) || (num(ne.strength_mean) && !close(ne.strength_mean, m))) out.push(`natural_effect_off ${edgeKey(ea)}`);
     }
   }
   for (const [id, a] of na) {
@@ -118,7 +120,9 @@ export function frameInvariance(before: Rec, after: Rec): string[] {
     if (num(ra) && num(a.observed_state?.value) && F !== undefined && !close(a.observed_state.value * F, ra)) out.push(`level_moved ${id} (value ≠ raw/F)`);
     if (a.kind === 'goal' && num(b.goal_threshold_raw)) {
       if (!num(a.goal_threshold_raw) || !close(a.goal_threshold_raw, b.goal_threshold_raw)) out.push(`level_moved ${id} (target)`);
-      if (num(a.goal_threshold) && F !== undefined && !close(a.goal_threshold * F, a.goal_threshold_raw)) out.push(`level_moved ${id} (goal_threshold ≠ raw/F)`);
+      if (a.goal_threshold_frame === 'change_rel') { // a relative change (−15%) is scale-free: it must not move at all
+        if (num(b.goal_threshold) && (!num(a.goal_threshold) || !close(a.goal_threshold, b.goal_threshold))) out.push(`level_moved ${id} (relative target)`);
+      } else if (num(a.goal_threshold) && F !== undefined && !close(a.goal_threshold * F, a.goal_threshold_raw)) out.push(`level_moved ${id} (goal_threshold ≠ raw/F)`);
     }
     const [spb, spa] = [naturalSpread(b), naturalSpread(a)];
     if (spb !== undefined && spa !== undefined && !close(spb, spa)) {
@@ -143,7 +147,7 @@ export function reframe(graph: Rec, id: string, F: number): Rec {
   if (above1(node.scale_frame)) node.scale_frame = F; else os.cap = F;
   if (node.kind === 'goal') {
     node.goal_threshold_cap = F;
-    if (num(node.goal_threshold)) node.goal_threshold = node.goal_threshold * k;
+    if (num(node.goal_threshold) && node.goal_threshold_frame !== 'change_rel') node.goal_threshold = node.goal_threshold * k; // a relative change is scale-free
   }
   // AIQ 5895379601 (2) × R3-B 5895208669: rescale an EXISTING std only, and mark it with its ORIGINAL owner (a user's stays
   // `user`; Olumi's → ISL `template`). NEVER mint one: a floor-bound synthesised spread moves, so the oracle refuses it.

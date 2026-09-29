@@ -46,6 +46,24 @@ describe('frame invariance — the oracle on the served c96 graph', () => {
     expect(frameInvariance(c96(), after)).toContain('natural_size_moved pro_plan_price→mrr 265.625 → 1250.00');
   });
 
+  it('a RELATIVE goal (−15%, `change_rel`) is scale-free: re-framing keeps it exactly; scaling it is caught', () => {
+    const g = c96();
+    Object.assign(node(g, 'mrr'), { goal_threshold_frame: 'change_rel', goal_threshold: 0.1333, goal_threshold_raw: 0.1333 });
+    const after = reframe(g, 'mrr', 500_000);
+    expect(node(after, 'mrr').goal_threshold).toBe(0.1333);
+    expect(frameInvariance(g, after)).toEqual([]);
+    node(after, 'mrr').goal_threshold = 0.1333 * (106_250 / 500_000); // MUTANT: scaled like a level
+    expect(frameInvariance(g, after)).toEqual(['level_moved mrr (relative target)']);
+  });
+
+  it('a stated amount stored ROUNDED (£48.9999) still reads back; one 1% off does not', () => {
+    const g = reframe(c96(), 'mrr', 500_000);
+    edge(g, 'paying_subscribers', 'mrr').provenance.natural_effect.amount = 48.9999;
+    expect(frameInvariance(g, g)).toEqual([]);
+    edge(g, 'paying_subscribers', 'mrr').provenance.natural_effect.amount = 49.49;
+    expect(frameInvariance(g, g)).toEqual(['natural_effect_off paying_subscribers→mrr']);
+  });
+
   it('MUTANT: the stated size\'s natural_effect.strength_mean left stale → natural_effect_off', () => {
     const after = reframe(c96(), 'mrr', 500_000);
     edge(after, 'paying_subscribers', 'mrr').provenance.natural_effect.strength_mean = 4.6117647058823525;
