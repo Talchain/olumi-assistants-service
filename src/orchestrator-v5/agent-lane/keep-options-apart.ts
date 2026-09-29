@@ -30,9 +30,10 @@
  * level" already in the draft becomes "<name> level 2" (AI Quality 5885116642's collision row), so the renamed
  * quantity cannot merge into another node one label later.
  */
-import type { CandidateModel } from './admit-model.js';
+import { canonicalLabel, type CandidateModel } from './admit-model.js';
 
-const canon = (s: string): string => s.trim().toLowerCase().replace(/\s+/g, ' ');
+/** Admission's OWN key (`assignIds` merges labels equal under it), so a clash or a collision cannot hide from this rule. */
+const canon = canonicalLabel;
 
 export interface KeptApart {
   readonly option: string;
@@ -41,8 +42,18 @@ export interface KeptApart {
   readonly to: string;
 }
 
-export function keepOptionsAndQuantitiesApart(candidate: CandidateModel): { readonly model: CandidateModel; readonly renamed: readonly KeptApart[] } {
-  const optionNames = new Map(candidate.options.map((o) => [canon(o.label), o.label] as const));
+/** An option's name that more than one other item also owns: nothing is renamed, and this is said. */
+export interface NotToldApart {
+  readonly option: string;
+  /** What else carries the name, e.g. ['factor', 'risk'], ['factor', 'factor'], ['factor', 'goal'], ['factor', 'option']. */
+  readonly owners: readonly string[];
+}
+
+export function keepOptionsAndQuantitiesApart(candidate: CandidateModel): {
+  readonly model: CandidateModel; readonly renamed: readonly KeptApart[]; readonly ambiguous: readonly NotToldApart[];
+} {
+  // The FIRST option spelled this way keeps its words (the order the user's options came in).
+  const optionNames = new Map([...candidate.options].reverse().map((o) => [canon(o.label), o.label] as const));
   const taken = new Set<string>([
     ...candidate.options.map((o) => canon(o.label)),
     ...candidate.factors.map((f) => canon(f.label)),
@@ -61,9 +72,30 @@ export function keepOptionsAndQuantitiesApart(candidate: CandidateModel): { read
   };
   const renamed: KeptApart[] = [];
   const to = new Map<string, string>();
+  // ⛔ ONE OTHER OWNER ONLY (PR Review CHANGES_REQUIRED on #2281 @ 97bff479: option + factor + risk all "Discount" renamed
+  // BOTH quantities to "Discount level", and admission kept one, so the risk vanished). When the option's name is also
+  // carried by more than one quantity (of any kinds), or by a quantity AND the goal, or by a second option, no link,
+  // level or limit naming it can be given to one of them: nothing is renamed, and the ambiguity is SAID.
+  const quantityKinds = (key: string): string[] => [
+    ...candidate.factors.filter((f) => canon(f.label) === key).map(() => 'factor'),
+    ...candidate.risks.filter((r) => canon(r.label) === key).map(() => 'risk'),
+    ...candidate.outcomes.filter((o) => canon(o.label) === key).map(() => 'outcome'),
+  ];
+  const ownersBesideTheOption = (key: string): string[] => [
+    ...quantityKinds(key),
+    ...(canon(candidate.goal.metric) === key ? ['goal'] : []),
+    ...candidate.options.filter((o) => canon(o.label) === key).slice(1).map(() => 'option'),
+  ];
+  const ambiguous: NotToldApart[] = [];
   const plan = (label: string, kind: KeptApart['kind']): void => {
     const option = optionNames.get(canon(label));
-    if (option === undefined || to.has(canon(label)) || !carriesEffect(canon(label))) return;
+    if (option === undefined || to.has(canon(label))) return;
+    const owners = ownersBesideTheOption(canon(label));
+    if (owners.length > 1) {
+      if (!ambiguous.some((a) => canon(a.option) === canon(option))) ambiguous.push({ option, owners });
+      return;
+    }
+    if (!carriesEffect(canon(label))) return;
     const suffix = kind === 'risk' && !/\brisk$/i.test(label.trim()) ? ' risk' : ' level';
     let next = `${label.trim()}${suffix}`;
     for (let n = 2; taken.has(canon(next)); n += 1) next = `${label.trim()}${suffix} ${n}`;
@@ -74,7 +106,7 @@ export function keepOptionsAndQuantitiesApart(candidate: CandidateModel): { read
   candidate.factors.forEach((f) => plan(f.label, 'factor'));
   candidate.risks.forEach((r) => plan(r.label, 'risk'));
   candidate.outcomes.forEach((o) => plan(o.label, 'outcome'));
-  if (renamed.length === 0) return { model: candidate, renamed };
+  if (renamed.length === 0) return { model: candidate, renamed, ambiguous };
   const re = (label: string): string => to.get(canon(label)) ?? label;
   const model: CandidateModel = {
     ...candidate,
@@ -92,10 +124,22 @@ export function keepOptionsAndQuantitiesApart(candidate: CandidateModel): { read
       ? { identities: candidate.identities.map((i) => ({ ...i, outcome: re(i.outcome), factors: i.factors.map(re) })) }
       : {}),
   };
-  return { model, renamed };
+  return { model, renamed, ambiguous };
 }
 
 /** The line said for each rename (`not_represented`, suffix `.label_kept_apart`). */
 export function keptApartLine(k: KeptApart): string {
   return `"${k.option}" names both an option and the ${k.kind} it acts on, so the ${k.kind} is called "${k.to}" to keep the two apart.`;
+}
+
+const OWNER_WORDS: Record<string, string> = { factor: 'factor', risk: 'risk', outcome: 'outcome', goal: 'goal', option: 'option' };
+
+/** The line said when an option's name is carried by more than one other item (`not_represented`, suffix `.label_ambiguous`). */
+export function notToldApartLine(a: NotToldApart): string {
+  const counts = new Map<string, number>();
+  for (const o of a.owners) counts.set(o, (counts.get(o) ?? 0) + 1);
+  const parts = [...counts].map(([k, n]) => (k === 'goal' ? 'the goal' : n === 1 ? `a ${OWNER_WORDS[k]}` : `${n} ${OWNER_WORDS[k]}s`));
+  const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+  return `"${a.option}" names an option and also ${list} in this model, so they could not be told apart and are kept as one item. `
+    + 'Say what each one is and they can be separated.';
 }

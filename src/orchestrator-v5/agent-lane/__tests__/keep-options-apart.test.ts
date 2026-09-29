@@ -4,11 +4,12 @@
  * Row 1: Canvas's own brief, reproduced on the live route (saved draft), through the real build. Rows 2–7: the pure rule.
  * Rows 8–9 (PR Review CHANGES_REQUIRED on #2281 @ bcd8d856; 8c @ e73b6dbd): a link from the shared name that the OPTION could hold
  * (to a factor, a risk, an option, an unnamed label, or itself) is never re-sourced to the quantity; the candidate is left
- * as it came. Row 10 (AI Quality 5885116642): a rename never collides with a label already in the draft.
+ * as it came. Row 10 (AI Quality 5885116642): a rename never collides with a label already in the draft. Rows 11–12 (@ 97bff479):
+ * an option's name carried by more than one other item is never split by guesswork; nothing is renamed and it is said.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { keepOptionsAndQuantitiesApart } from '../keep-options-apart.js';
+import { keepOptionsAndQuantitiesApart, notToldApartLine } from '../keep-options-apart.js';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import type { CandidateModel } from '../admit-model.js';
@@ -43,6 +44,17 @@ describe('Canvas\'s cloud-bill brief (saved live draft): the option and the fact
     expect(edges.some((e) => e.from === factor!.id && e.to === 'monthly_cloud_bill')).toBe(true);
     expect(edges.some((e) => e.from === option.id && e.to === 'monthly_cloud_bill'), 'no option → goal shortcut').toBe(false);
     expect(r.not_represented).toContain('"Enterprise discount" names both an option and the factor it acts on, so the factor is called "Enterprise discount level" to keep the two apart.');
+  });
+  it('12 (real build) — option, factor AND risk all "Enterprise discount": nothing is renamed, no risk is folded into a renamed factor, and the ambiguity is SAID', async () => {
+    const c = structuredClone(FX.candidate) as Rec;
+    c.risks = [...(c.risks ?? []), { label: 'Enterprise discount', provenance: 'inferred' }];
+    const pure = keepOptionsAndQuantitiesApart(c as CandidateModel);
+    expect(pure.renamed).toEqual([]);
+    expect(pure.ambiguous).toEqual([{ option: 'Enterprise discount', owners: ['factor', 'risk'] }]);
+    const { r, g } = await build(c);
+    expect((g.nodes as Rec[]).filter((n) => /enterprise discount level/i.test(String(n.label)))).toEqual([]);
+    expect((g.nodes as Rec[]).filter((n) => n.id === 'enterprise_discount')).toHaveLength(1);
+    expect(r.not_represented).toContain('"Enterprise discount" names an option and also a factor and a risk in this model, so they could not be told apart and are kept as one item. Say what each one is and they can be separated.');
   });
   it('8 (real build) — a link from the shared name to a RISK may be the option\'s: nothing is renamed, and no factor-origin link to that risk is made', async () => {
     const c = structuredClone(FX.candidate) as Rec;
@@ -136,6 +148,27 @@ describe('the pure rule', () => {
     expect(labels).toEqual(['discount level 2', 'discount level']);
     expect(out.model.options[0]!.interventions![0]!.factor_label).toBe('Discount level 2');
     expect(out.model.links[0]).toMatchObject({ from: 'Discount level 2', to: 'Monthly cloud bill' });
+  });
+  it('11 — SEVERAL OWNERS: the option\'s name also carried by two quantities (any kinds), by a quantity and the goal, or by a second option → nothing renamed, the ambiguity named', () => {
+    const f = base().factors[0]!;
+    const cases: [Partial<CandidateModel>, string[]][] = [
+      [{ risks: [{ label: 'Discount', provenance: 'inferred' }] as never }, ['factor', 'risk']],
+      [{ factors: [f, { ...f, label: 'discount' }] as never }, ['factor', 'factor']],
+      [{ outcomes: [{ label: 'DISCOUNT', provenance: 'inferred' }] as never }, ['factor', 'outcome']],
+      [{ goal: { ...base().goal, metric: 'Discount' } as never }, ['factor', 'goal']],
+      [{ options: [...base().options, { label: 'discount', provenance: 'explicit' }] as never }, ['factor', 'option']],
+    ];
+    for (const [over, owners] of cases) {
+      const c = base({ ...over, constraints: [], identities: [] });
+      const out = keepOptionsAndQuantitiesApart(c);
+      expect(out.renamed, owners.join('+')).toEqual([]);
+      expect(out.model).toBe(c);
+      expect(out.ambiguous).toEqual([{ option: 'Discount', owners }]);
+    }
+  });
+  it('11b — the said line names every other owner', () => {
+    expect(notToldApartLine({ option: 'Discount', owners: ['factor', 'risk'] })).toBe('"Discount" names an option and also a factor and a risk in this model, so they could not be told apart and are kept as one item. Say what each one is and they can be separated.');
+    expect(notToldApartLine({ option: 'Discount', owners: ['factor', 'factor', 'goal'] })).toMatch(/also 2 factors and the goal in this model/);
   });
   it('9 — a link from the shared name to an OUTCOME is the quantity\'s (an option never holds one): renamed', () => {
     const c = base({ outcomes: [{ label: 'Savings', provenance: 'inferred' }], links: [{ from: 'Discount', to: 'Savings', direction: 'positive', provenance: 'inferred' } as never] });

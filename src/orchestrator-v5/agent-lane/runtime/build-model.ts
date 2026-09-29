@@ -35,7 +35,7 @@
 
 import { createHash } from 'node:crypto';
 import { FRESH_READ } from '../turn-read-cache.js';
-import { keepOptionsAndQuantitiesApart, keptApartLine } from '../keep-options-apart.js';
+import { keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine } from '../keep-options-apart.js';
 import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, productIdentityOpenQuestions, sumIdentityOpenQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
@@ -1217,6 +1217,7 @@ export async function buildModelFromBrief(
   const apart = keepOptionsAndQuantitiesApart(candidate);
   candidate = apart.model;
   let keptApart = apart.renamed;
+  let notToldApart = apart.ambiguous;
   const firstCandidate = candidate;
   let preparation = prepareProvisionalCandidate(candidate);
   candidate = preparation.candidate;
@@ -1391,6 +1392,7 @@ export async function buildModelFromBrief(
           candidate = retryCandidate;
           admitted = retryAdmitted;
           keptApart = retryApart.renamed;
+          notToldApart = retryApart.ambiguous;
           size = retrySize;
           // ⛔ An adopted retry must not erase what the first pass had to disclose
           // (review 5822933692, B3): a retry that echoes the prepared candidate
@@ -1450,11 +1452,13 @@ export async function buildModelFromBrief(
   // ⭐ MG's HORIZON ATTESTATION (`attestHorizon`, PJ-A2 rows 25–27) decides the deadline G1 holds, and its verdict is
   // `statedGoal.horizon` whatever it is. ⚠ HAND-OFF: an `unresolved` deadline's own words ("by Q3") have no stored field
   // yet; they stay on this typed result until the joint work frame (Codex rows 2–3, 27) gives them one.
-  if (keptApart.length > 0) {
+  if (keptApart.length > 0 || notToldApart.length > 0) {
     admitted = {
       ...admitted,
       loss: [...admitted.loss, ...keptApart.map((k) => ({
         field_path: `nodes[${slugId(k.to)}].label_kept_apart`, before: k.from, after: k.to, reason: keptApartLine(k), severity: 'info',
+      }) as AdmittedModel['loss'][number]), ...notToldApart.map((a) => ({
+        field_path: `nodes[${slugId(a.option)}].label_ambiguous`, before: a.option, after: null, reason: notToldApartLine(a), severity: 'warn',
       }) as AdmittedModel['loss'][number])],
     };
   }
@@ -1772,7 +1776,7 @@ export async function buildModelFromBrief(
         // `pure_limit`: a user-limited cost roll-up's Olumi-signed edge into the goal that was not drawn (`findPureLimits`).
         // `one_route`: a factor → risk link left out because the risk only re-drew the factor's own direct link
         // (`oneRoutePerEffect`, PR Review CR on #2276): the risk stays, and why its link went is said.
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|loop_withheld|loop_kept|magnitude_unconvertible|pure_limit|one_route|label_kept_apart)$|\.observed_state\.baseline$/.test(l.field_path))
+        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|loop_withheld|loop_kept|magnitude_unconvertible|pure_limit|one_route|label_kept_apart|label_ambiguous)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };
