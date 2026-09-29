@@ -51,6 +51,7 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js';
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
 import { droppedGoalProductLine, unconfirmGoalProducts, withReconcilingProductIdentity, type DroppedGoalProduct } from '../reconciling-product.js';
+import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-reading.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
 import { figureTheUserWrote, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
@@ -1525,7 +1526,19 @@ export async function buildModelFromBrief(
   const ceilingLevel = admitGoalLevelBesideHeldCeiling(heldGoal.nodes, candidate.goal, admitted.loss,
     (value, unit) => figureTheUserWrote(value, unit, brief) && levelWrittenApartFromTarget(value, unit, candidate.goal.value, brief));
   if (ceilingLevel.loss !== admitted.loss) admitted = { ...admitted, loss: ceilingLevel.loss };
-  const statedGoal = { ...heldGoal, nodes: [...ceilingLevel.nodes] };
+  // ⛔ R3-B 5893233864 / AIQ 5893340150: a target typed as a DECREASE, the drafter's own comparator a ceiling and none of
+  // the user's held → Olumi's reading of the sense, typed on the goal (`goal-sense-reading.ts`) and said below.
+  const statedGoal = { ...heldGoal, nodes: [...withGoalSenseReading(ceilingLevel.nodes, candidate.goal)] };
+  const senseReading = (statedGoal.nodes.find((n) => n.kind === 'goal') as { goal_sense_reading?: GoalSenseReading; label?: unknown } | undefined);
+  if (senseReading?.goal_sense_reading !== undefined) {
+    admitted = {
+      ...admitted,
+      loss: [...admitted.loss, {
+        field_path: `nodes[${slugId(String(senseReading.label ?? ''))}].goal_sense_reading`, before: null, after: 'minimise',
+        reason: senseReading.goal_sense_reading.words, severity: 'info',
+      } as AdmittedModel['loss'][number]],
+    };
+  }
   /**
    * ⭐ T2 PART 2 (PJ-E-A2; Canonical #2231 `NodeV3.goal_deadline_as_stated`, G1 contract): an `unresolved` deadline's
    * own words ("by Q3") are HELD on the goal — verbatim, never converted to a month count (that needs a year and a
@@ -1828,7 +1841,7 @@ export async function buildModelFromBrief(
         // `pure_limit`: a user-limited cost roll-up's Olumi-signed edge into the goal that was not drawn (`findPureLimits`).
         // `one_route`: a factor → risk link left out because the risk only re-drew the factor's own direct link
         // (`oneRoutePerEffect`, PR Review CR on #2276): the risk stays, and why its link went is said.
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|loop_withheld|loop_kept|magnitude_unconvertible|pure_limit|one_route|label_kept_apart|folded_into_goal)$|\.observed_state\.baseline$/.test(l.field_path))
+        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|loop_withheld|loop_kept|magnitude_unconvertible|pure_limit|one_route|label_kept_apart|folded_into_goal)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };

@@ -296,6 +296,23 @@ export const NodeV3 = z.object({
    */
   goal_deadline_as_stated: z.string().max(60).refine((s) => s.trim() !== '').optional().catch(undefined),
   /**
+   * ⛔ OLUMI'S READING OF THE GOAL'S SENSE (goal nodes only; R3-B #72 5893233864, AIQ 5893340150, MG 5893383773). Written
+   * ONLY by construction (`goal-sense-reading.ts`), and only when the target is typed as a DECREASE from today
+   * ("cut costs by 20%" → `change_rel` −0.2), the drafter's OWN comparator is a ceiling (`<=` | `<`; AIQ's floor guard:
+   * "keep MRR from falling more than 10%" is also −0.10 but a floor), and no user comparator (`goal_direction`) is held.
+   * `resolveGoalDirection` sends `minimise` from it (`typed_change_sign`) while the node's typed sign is still negative.
+   * It is OLUMI'S reading, never the user's: `words` say so wherever the direction is shown (AIQ condition (a)), and a
+   * reader says them only while `goal_threshold_raw === threshold` (the staleness key: an edited target never speaks
+   * old words). The same G1 contract as the fields above: kept by every write, CEE-owned (`field-safety.ts`), and a
+   * malformed value is absence, never a refused graph.
+   */
+  goal_sense_reading: z.object({
+    sense: z.literal('minimise'),
+    basis: z.literal('typed_change_sign'),
+    threshold: z.number().finite(),
+    words: z.string().min(1).max(300),
+  }).optional().catch(undefined),
+  /**
    * ⛔ THE SAVED-EXAMPLE STAMPS (the UI's register writes them on the nodes of a loaded saved example).
    *
    * THIS DECLARATION IS LOAD-BEARING, for the same reason as `threshold_source` above. The UI registers

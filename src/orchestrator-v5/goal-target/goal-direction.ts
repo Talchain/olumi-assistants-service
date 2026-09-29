@@ -62,6 +62,7 @@
  *   | the goal node holds  | sent                          | provenance              |
  *   |----------------------|-------------------------------|-------------------------|
  *   | `'<='` or `'<'`, PROVEN (below) | `'minimise'`       | `stated_comparator`     |
+ *   | no proven ceiling; Olumi's `goal_sense_reading` of a NEGATIVE typed change ("cut by 20%") | `'minimise'` | `typed_change_sign` |
  *   | anything else (a held floor, an unproven ceiling, none) | the label classifier, exactly as base | `derived_from_goal_label` |
  *
  * ⚠ R1 S1 (AIQ 5871459631, DL 5871433038): a held ceiling sends `minimise` only when the goal carries the current
@@ -80,8 +81,11 @@ import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class
 /** The only sense this module will ever put on the wire. */
 export type EmittedGoalDirection = 'minimise';
 
-/** Where a sent direction came from: the comparator the user stated, or a reading of the goal's label. */
-export type GoalDirectionProvenance = 'stated_comparator' | 'derived_from_goal_label';
+/**
+ * Where a sent direction came from: the comparator the user stated, the SIGN of a target typed as a change from today,
+ * or a reading of the goal's label.
+ */
+export type GoalDirectionProvenance = 'stated_comparator' | 'typed_change_sign' | 'derived_from_goal_label';
 
 /** The comparators `NodeV3.goal_direction` stores (the candidate contract's own four). */
 type HeldComparator = '>=' | '<=' | '>' | '<';
@@ -172,6 +176,23 @@ function goalTargetIsATypedChange(graph: unknown, goalNodeId: unknown): boolean 
 }
 
 /**
+ * ⛔ OLUMI'S TYPED READING OF A DECREASE TARGET (R3-B #72 5893233864, DL 5893260041, AIQ 5893340150, MG 5893383773).
+ * Served on "cut costs by 20%": the "20%" beside "costs" was given to another node whose label says "cost", so no
+ * comparator was held and the run MAXIMISED spend ("Stay on AWS" crowned, 100% "reaches the target"). Construction now
+ * types Olumi's reading on the goal (`goal_sense_reading`, written only for a NEGATIVE typed change whose drafter
+ * comparator is a ceiling: AIQ's floor guard) and this honours it while the node's typed sign is still negative. No
+ * reading (an old graph, a floor, an increase, a level) reads exactly as before.
+ */
+function goalHoldsOlumisDecreaseReading(graph: unknown, goalNodeId: unknown): boolean {
+  if (!goalTargetIsATypedChange(graph, goalNodeId)) return false;
+  const node = readNodes(graph).find((n) => n.id === goalNodeId);
+  const reading = node?.goal_sense_reading as { sense?: unknown; basis?: unknown } | undefined;
+  if (reading?.sense !== 'minimise' || reading.basis !== 'typed_change_sign') return false;
+  const signed = typeof node?.goal_threshold_raw === 'number' ? node.goal_threshold_raw : node?.goal_threshold;
+  return typeof signed === 'number' && Number.isFinite(signed) && signed < 0;
+}
+
+/**
  * The sense a HELD comparator attests: `'minimise'` for a ceiling (`'<='`, `'<'`), otherwise `undefined` (a floor
  * is today's maximiser, never sent). ONE reading, shared by the wire (`resolveGoalDirection`) and by admission of a
  * stated current level beside a ceiling (`admitStatedGoalLevel`), so a level is admitted only where the run minimises.
@@ -200,6 +221,7 @@ export function resolveGoalDirection(
   if (heldComparatorSense(readHeldGoalComparator(graph, goalNodeId)) === 'minimise' && goalTargetIsATypedChange(graph, goalNodeId)) {
     return { direction: 'minimise', provenance: 'stated_comparator' };
   }
+  if (goalHoldsOlumisDecreaseReading(graph, goalNodeId)) return { direction: 'minimise', provenance: 'typed_change_sign' };
   const derived = directionFromGoalLabel(graph, goalNodeId);
   return derived === undefined ? undefined : { direction: derived, provenance: 'derived_from_goal_label' };
 }
