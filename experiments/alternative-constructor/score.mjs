@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 export const manifest = JSON.parse(readFileSync(new URL('./four-cases.json', import.meta.url), 'utf8'));
 const USER = new Set(['user', 'user_set', 'from_brief', 'explicit', 'brief_extraction', 'user_specified']);
 const matches = (pattern, text) => new RegExp(pattern, 'i').test(String(text ?? ''));
-const label = (n) => [n?.label, n?.description, n?.id].filter(Boolean).join(' ');
+// Descriptions can contain source quotes naming other entities; they are not entity identity.
+const label = (n) => [n?.label, n?.id].filter(Boolean).join(' ');
 const numberEqual = (a, b) => typeof a === 'number' && Number.isFinite(a) && Math.abs(a - b) <= 1e-7;
 const hash = (text) => createHash('sha256').update(text, 'utf8').digest('hex');
 export function unitMatches(wanted, actual) {
@@ -36,7 +37,7 @@ function sourceResult(objects, fact, brief) {
   const valid = quotes.filter((q) => brief.text.includes(q));
   // A whole-brief quote is not specific enough to prove a claim. This also rejects a number found in another item.
   const bound = valid.some((q) => {
-    if (!(q.length <= fact.quote.length * 2 + 24 && (q.includes(fact.quote) || fact.quote.includes(q)) && q.length >= 5)) return false;
+    if (!(q !== brief.text && (q.includes(fact.quote) || fact.quote.includes(q)) && q.length >= 5)) return false;
     const occurrences = brief.text.split(q).length - 1;
     if (occurrences === 1) return true;
     // Repeated text needs an exact span identifying this occurrence, not just a matching quote.
@@ -79,6 +80,13 @@ export function scoreRecord(record, cases = manifest.briefs) {
     if (retained && !source.some((s) => s.bound)) failures.push({ kind: 'source_unbound', fact: f.id });
     return { id: f.id, retained, source_bound: source.some((s) => s.bound), invalid_quotes: source.flatMap((s) => s.invalid_quotes) };
   });
+  // A supplied addition with no known baseline can survive as a typed pending claim.
+  // It is deliberately not credited as a canonical absolute intervention or a proved recovery journey.
+  const pending = record.constructor_diagnostics?.additions_without_total ?? record.additions_without_total;
+  const pendingFacts = brief.facts.filter((f) => f.role === 'intervention').map((f) => {
+    const found = (Array.isArray(pending) ? pending : []).filter((p) => matches(f.entity, p.factor) && (!f.option || matches(f.option, p.option)) && numberEqual(p.value, f.value) && unitMatches(f.unit, p.unit ?? p.factor_unit) && typeof p.reason === 'string');
+    return { id: f.id, retained_pending: found.length > 0, canonical_retained: facts.find((x) => x.id === f.id)?.retained === true, reasons: found.map((p) => p.reason) };
+  });
   for (const target of brief.facts.filter((f) => ['target', 'relative_change', 'absolute_change'].includes(f.role))) {
     const current = brief.facts.find((f) => f.role === 'current' && f.entity === target.entity);
     if (!current) continue;
@@ -95,9 +103,9 @@ export function scoreRecord(record, cases = manifest.briefs) {
   }
   const options = (graph.nodes ?? []).filter((n) => n.kind === 'option');
   const optionRows = brief.options.map((expected) => {
-    const found = options.filter((o) => matches(expected.pattern, label(o)) && o.proposed_by !== 'olumi' && o.ownership !== 'proposed');
+    const found = options.filter((o) => matches(expected.pattern, label(o)) && USER.has(o.provenance) && o.proposed_by !== 'olumi' && o.ownership !== 'proposed');
     if (!found.length) failures.push({ kind: 'user_option_lost_or_reclassified', option: expected.id });
-    return { id: expected.id, retained: found.length > 0, source_bound: found.some((o) => sourceResult([o], expected, brief).bound) };
+    return { id: expected.id, retained: found.length > 0, label_retained: options.some((o) => matches(expected.pattern, label(o))), source_bound: found.some((o) => sourceResult([o], expected, brief).bound) };
   });
   // An invented numeric claim is a failure even when its number appears elsewhere in the brief.
   for (const o of obs.filter((o) => o.user)) {
@@ -164,6 +172,7 @@ export function scoreRecord(record, cases = manifest.briefs) {
     fidelity: { facts_retained: facts.filter((f) => f.retained).length, facts_total: facts.length, source_bound: facts.filter((f) => f.source_bound).length, user_options_retained: optionRows.filter((o) => o.retained).length, user_options_total: optionRows.length, negative_findings: failures.length, false_user_claims: failures.filter((f) => ['invented_or_misassigned_user_number', 'invented_user_option', 'inferred_identity_stamped_user'].includes(f.kind)).length, unstated_canonical_content: failures.filter((f) => f.kind.startsWith('unstated_canonical_')).length, source_binding_failures: failures.filter((f) => f.kind === 'source_unbound').length, failures },
     scientific_usability: { verified_analysis: record.evidence_level === 'shared_spine_journey' && record.analysis_verified === true, inferred_sized_edges: sizedWithoutUserEvidence.length, identity, unsupported_relationships: record.constructor_diagnostics?.unknown_relationships ?? null },
     complexity: { nodes: graph.nodes?.length ?? 0, edges: graph.edges?.length ?? 0, provider_attempts: record.provider_calls?.length ?? record.structured_raw?.length ?? null, transforms: record.constructor_diagnostics?.transforms ?? null },
+    recovery: { pending_evidence_available: Array.isArray(pending), facts: pendingFacts, retained_pending_only: pendingFacts.filter((f) => f.retained_pending && !f.canonical_retained).length, continuation_verified: record.recovery_verified === true },
     experience: { construction_ms: record.ms ?? null, clarification: record.questions ?? null, recovery_verified: record.recovery_verified === true, user_quality_question: 'Does this model make the decision easier to understand and improve?', user_quality_score: record.user_quality_score ?? null, user_quality_scored_by: record.user_quality_scored_by ?? null },
   };
 }

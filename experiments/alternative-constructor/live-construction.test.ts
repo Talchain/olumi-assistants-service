@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID, createHash } from 'node:crypto';
-import { readFileSync, appendFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, appendFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +18,7 @@ const FIXTURE = process.env.ALT_CONSTRUCTOR_FIXTURE === '1';
 const OFFLINE = OFFLINE_BOOT || FIXTURE;
 const dispatches: { path: string; scenario: string; after_register: boolean }[] = [];
 const fixtureCalls: Record<string, unknown>[] = [];
+const toolPayloads = new Map<string, { name: string; payload: Record<string, unknown> }>();
 const ARM = process.env.OLUMI_CONSTRUCTOR_ARM ?? 'pragmatic';
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const MANIFEST = process.env.ALT_CONSTRUCTOR_MANIFEST ?? fileURLToPath(new URL('./four-cases.json', import.meta.url));
@@ -71,6 +72,12 @@ describe.skipIf(!LIVE && !OFFLINE)('Alternative constructor matched real-provide
       if (address.hostname !== 'api.openai.com') throw new Error(`Non-OpenAI network excluded from this admission-only witness: ${address.origin}`);
       let body: Record<string, any> = {};
       try { body = JSON.parse(String(init?.body ?? '{}')); } catch { /* counted even if malformed */ }
+      // Preserve typed unresolved values from the real tool result. Narration is not proof that a value survived.
+      const items = Array.isArray(body.input) ? body.input : [];
+      const names = new Map(items.filter((i: any) => i.type === 'function_call').map((i: any) => [i.call_id, i.name]));
+      for (const item of items.filter((i: any) => i.type === 'function_call_output')) {
+        try { const payload = JSON.parse(item.output); if (payload && typeof payload === 'object') toolPayloads.set(`${activeCase.scenario}:${item.call_id}`, { name: String(names.get(item.call_id) ?? ''), payload }); } catch { /* no semantic credit for a malformed tool result */ }
+      }
       if (FIXTURE) { fixtureCalls.push({ format: body.text?.format?.type ?? null, model: body.model, effort: body.reasoning?.effort, max_output_tokens: body.max_output_tokens }); return providerFixtureResponse(body, { arm: ARM, brief: activeCase.text, registered: registrationOf.has(String(activeCase.scenario)) }); }
       const sent = { model: body.model ?? null, effort: body.reasoning?.effort ?? null, max_output_tokens: body.max_output_tokens ?? null, instructions_sha256: sha(String(body.instructions ?? '')), schema_sha256: sha(JSON.stringify(body.text?.format?.schema ?? null)), format: body.text?.format?.type ?? null };
       const attempt = reserveAttempt(LEDGER, { arm: ARM, ...activeCase, ...sent }, LIMIT);
@@ -114,14 +121,17 @@ describe.skipIf(!LIVE && !OFFLINE)('Alternative constructor matched real-provide
     const cases = OFFLINE ? selected.slice(0, 1) : selected;
     if (ONLY.some((id) => !cases.some((b: { id: string }) => b.id === id))) throw new Error('Requested unknown case; no silent empty run');
     let commit = 'unavailable'; try { commit = execFileSync('/usr/bin/git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(); } catch { /* output records this gap */ }
+    const sourceManifestPath = resolve(ROOT, 'CONTROL-MANIFEST.json');
+    const sourceManifest = existsSync(sourceManifestPath) ? JSON.parse(readFileSync(sourceManifestPath, 'utf8')) : null;
     for (let rep = 0; rep < REPS; rep += 1) for (const brief of cases) {
       if (sha(brief.text) !== brief.source_sha256) throw new Error(`Frozen source bytes changed: ${brief.id}`);
       const scenario = randomUUID(); const turnId = randomUUID(); const before = calls.length; const started = Date.now();
       activeCase = { brief: brief.id, rep, scenario, source_sha256: brief.source_sha256, ...(FIXTURE ? { text: brief.text } : {}) }; lastError = null;
       let status = 0; let body: Record<string, any> = {};
       try { const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: scenario, turn_id: turnId, message: brief.text, source: 'composer' } }); status = response.statusCode; body = response.json(); } catch (error) { body = { error: String(error) }; }
-      const constructor = body._constructor ?? body.constructor_diagnostics ?? null;
-      const record = { arm: ARM, label: ARM, control_is_independent: ARM !== 'control' || process.env.ALT_CONTROL_INDEPENDENT === '1', brief: brief.id, rep, scenario, turn_id: turnId, source_sha256: brief.source_sha256, manifest_sha256: sha(readFileSync(MANIFEST, 'utf8')), commit, evidence_level: FIXTURE ? 'injected_provider_route_fixture_only' : OFFLINE_BOOT ? 'offline_boot_only' : 'admitted_registration_payload_only', status, ms: Date.now() - started, provider_calls: calls.slice(before), assistant_text: body.assistant_text ?? '', questions: body._build_questions ?? body.open_questions ?? body._agent?.open_questions ?? constructor?.questions ?? [], proposals: constructor?.proposals ?? [], constructor_diagnostics: constructor, fixture_calls: FIXTURE ? fixtureCalls : undefined, canonical_dispatches: dispatches.filter((d)=>d.scenario===scenario), tool_calls: body._agent?.tool_calls ?? [], registered: registrationOf.has(scenario), registration_readback_confirmed: (body._agent?.tool_calls ?? []).some((c: {name?: string;ok?: boolean;mutated?: boolean}) => c.name === 'build_model_from_brief' && c.ok === true && c.mutated === true), graph: registrationOf.get(scenario) ?? null, unregistered_draft: registrationOf.has(scenario) ? null : graphOf.get(scenario) ?? null, reply: body, error_stack: lastError };
+      const capturedTools = [...toolPayloads.entries()].filter(([key]) => key.startsWith(`${scenario}:`)).map(([, value]) => value);
+      const constructor = body._constructor ?? body.constructor_diagnostics ?? capturedTools.find((t) => t.name === 'build_model_from_brief')?.payload ?? null;
+      const record = { arm: ARM, label: ARM, control_is_independent: ARM !== 'control' || process.env.ALT_CONTROL_INDEPENDENT === '1', brief: brief.id, rep, scenario, turn_id: turnId, source_sha256: brief.source_sha256, manifest_sha256: sha(readFileSync(MANIFEST, 'utf8')), commit, source_manifest: sourceManifest, evidence_level: FIXTURE ? 'injected_provider_route_fixture_only' : OFFLINE_BOOT ? 'offline_boot_only' : 'admitted_registration_payload_only', status, ms: Date.now() - started, provider_calls: calls.slice(before), assistant_text: body.assistant_text ?? '', questions: body._build_questions ?? body.open_questions ?? body._agent?.open_questions ?? constructor?.questions ?? [], proposals: constructor?.proposals ?? [], constructor_diagnostics: constructor, fixture_calls: FIXTURE ? fixtureCalls : undefined, canonical_dispatches: dispatches.filter((d)=>d.scenario===scenario), tool_calls: body._agent?.tool_calls ?? [], registered: registrationOf.has(scenario), registration_readback_confirmed: (body._agent?.tool_calls ?? []).some((c: {name?: string;ok?: boolean;mutated?: boolean}) => c.name === 'build_model_from_brief' && c.ok === true && c.mutated === true), graph: registrationOf.get(scenario) ?? null, unregistered_draft: registrationOf.has(scenario) ? null : graphOf.get(scenario) ?? null, reply: body, error_stack: lastError };
       appendFileSync(OUT, `${JSON.stringify(record)}\n`);
       if (FIXTURE) { expect(status).toBe(200); expect(record.registered, JSON.stringify(body)).toBe(true); expect(dispatches.some((d)=>d.scenario===scenario && d.path==='graph/register')).toBe(true); expect(dispatches.some((d)=>d.scenario===scenario && d.path==='graph' && d.after_register)).toBe(true); expect(calls).toHaveLength(0); }
       appendFileSync(`${OUT}.scores.jsonl`, `${JSON.stringify(scoreRecord(record))}\n`);
