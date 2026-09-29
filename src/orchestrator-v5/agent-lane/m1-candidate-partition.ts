@@ -142,9 +142,9 @@ export function partitionM1Candidate(candidate: CandidateModel, brief: string): 
   }
   // The drafter's free text can still describe discarded guesses as active assumptions.
   // M1 keeps the existing structured scope/limit/deadline questions, plus unmapped user options.
-  const sourceUnknowns = (candidate as CandidateModel & { readonly unknowns?: readonly string[] }).unknowns ?? [];
-  const scopeQuestions = candidate.goal.scope?.stated_in_brief === false
-    ? sourceUnknowns.filter((q) => q.includes(candidate.goal.metric) && /scope|plans?|revenue/i.test(q) && !/provision|estimat|assum/i.test(q))
+  const parked = (candidate as { unknowns?: unknown }).unknowns;
+  const scopeQuestions = candidate.goal.scope?.stated_in_brief === false && Array.isArray(parked)
+    ? parked.filter((q: unknown): q is string => typeof q === 'string' && q.includes(candidate.goal.metric) && /scope|plans?|revenue/i.test(q) && !/provision|estimat|assum/i.test(q))
     : [];
   const unknowns = [...scopeQuestions, ...keptOptions
     .filter((o) => (o.interventions ?? []).length === 0 && (o.changes ?? []).length === 0 && o.is_status_quo !== true)
