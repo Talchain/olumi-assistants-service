@@ -36,6 +36,7 @@
 import { createHash } from 'node:crypto';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine } from '../keep-options-apart.js';
+import { holdOlumiOptions, proposedOptionLine } from '../olumi-options-proposed.js';
 import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, productIdentityOpenQuestions, sumIdentityOpenQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
@@ -1215,9 +1216,12 @@ export async function buildModelFromBrief(
   // ⛔ AN OPTION AND A QUANTITY NEVER SHARE A NAME (`keepOptionsAndQuantitiesApart`, Canvas #72 5884644099): admission
   // makes same-named entities one node, so the factor an option sets vanished into the option. Renamed before any read.
   const apart = keepOptionsAndQuantitiesApart(candidate);
-  candidate = apart.model;
+  // ⛔ An option Olumi added is PROPOSED, never compared, until the user accepts it (`holdOlumiOptions`, PTL root 2).
+  const olumiHeld = holdOlumiOptions(apart.model, brief);
+  candidate = olumiHeld.model;
   let keptApart = apart.renamed;
   let notToldApart = apart.ambiguous;
+  let proposedOptions = olumiHeld.proposed;
   const firstCandidate = candidate;
   let preparation = prepareProvisionalCandidate(candidate);
   candidate = preparation.candidate;
@@ -1335,8 +1339,9 @@ export async function buildModelFromBrief(
       });
       if (retry.text.length > 0) {
         const retryApart = keepOptionsAndQuantitiesApart(JSON.parse(retry.text) as CandidateModel);
+        const retryHeld = holdOlumiOptions(retryApart.model, brief);
         const retryRaw = keepLimitedQuantityAuthor(
-          neverTheLimitAsTodaysLevel(retryApart.model, firstCandidate, preparation.baseline_gaps),
+          neverTheLimitAsTodaysLevel(retryHeld.model, firstCandidate, preparation.baseline_gaps),
           firstCandidate, preparation.baseline_gaps,
         );
         const retryPrepared = prepareProvisionalCandidate(retryRaw);
@@ -1393,6 +1398,7 @@ export async function buildModelFromBrief(
           admitted = retryAdmitted;
           keptApart = retryApart.renamed;
           notToldApart = retryApart.ambiguous;
+          proposedOptions = retryHeld.proposed;
           size = retrySize;
           // ⛔ An adopted retry must not erase what the first pass had to disclose
           // (review 5822933692, B3): a retry that echoes the prepared candidate
@@ -1533,6 +1539,8 @@ export async function buildModelFromBrief(
   const withheldOptions = [...(admitted.options_withheld ?? []), ...carriedWithheld];
   openQuestions.unshift(
     ...withheldOptions.map((w) => w.sentence),
+    // ⛔ Olumi's own options, offered, never compared (`holdOlumiOptions`): said where the user always sees it.
+    ...proposedOptions.map(proposedOptionLine),
     ...(admitted.indistinct_stated_options ?? []).map((g) => g.question),
   );
   /**
@@ -1709,6 +1717,9 @@ export async function buildModelFromBrief(
     options_that_change_nothing: admitted.withheld
       .filter((w) => w.reason === 'option_changes_nothing')
       .map((w) => w.from),
+    // Olumi's added options, PROPOSED and not in the model (typed twin of their `open_questions` sentences): the Agent
+    // offers each through `propose_new_option` when the user accepts it; nothing is computed for them until then.
+    ...(proposedOptions.length > 0 ? { options_proposed: proposedOptions.map((p) => ({ label: p.label, levels: [...p.levels] })) } : {}),
     // Olumi's options withheld as identical by construction — the reason, beside the sentence in `open_questions`.
     ...(withheldOptions.length > 0
       ? { options_withheld: withheldOptions.map((w) => ({ option: w.option, like: w.like, reason: w.reason })) }
