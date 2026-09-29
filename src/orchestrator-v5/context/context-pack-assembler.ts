@@ -89,7 +89,6 @@ import {
 } from '../format/format-analysis-for-context.js';
 import type {
   AnalysisResponseSummaryWithSignals,
-  OptionGoalFitSignal,
   OptionOutcomeSignal,
   TippingPointSignal,
 } from './analysis-signals.js';
@@ -173,12 +172,12 @@ export interface ContextPackAnalysisOption {
   readonly probability: number;
   /**
    * Lane 30 — this option's goal-fit value: the modelled probability the
-   * option meets the user's target(s), sourced from the per-option
-   * `enrichment.option_comparison[].probability_of_joint_goal` (PLoT #204)
-   * via the `option_goal_fits` signal. RAW [0,1] float — handler-facing
-   * only; the display formatter renders it as an integer-percent
-   * `target_fit` string, clearly distinguished from `win_probability`.
-   * Absent when the producer scored no goal fit for this option.
+   * option meets the user's target, the option's own `probability_of_goal`
+   * ONLY — never the limits-only `probability_of_joint_goal` (AIQ
+   * 5887531086). RAW [0,1] float — handler-facing only; the display formatter
+   * renders it as an integer-percent `target_fit` string, clearly
+   * distinguished from `win_probability`. Absent when the run gave no
+   * P(goal) for this option (absent stays absent).
    */
   readonly goal_fit_probability?: number;
   /**
@@ -382,6 +381,13 @@ export interface ContextPackAnalysis {
    * or the winner is feasible (byte-identity by key absence).
    */
   readonly constraint_infeasible_note?: string;
+  /**
+   * ⛔ ABSENT STAYS ABSENT (AIQ 5886457733; DL 5886379820). Present when the run WITHHELD its per-option goal figures
+   * (PLoT #416's typed code, `reason_code`) or when any option the run could rank carries no win probability
+   * (`reason_code: null`). Then no option leads, none is ranked, and `note` says why — in place of a winner, never a 0.
+   * The note names no option. ABSENT otherwise (byte-identity by key absence).
+   */
+  readonly figures_withheld?: { readonly reason_code: string | null; readonly note: string };
   // V5 state-trust: `staleness_reason` removed from the prompt-visible
   // analysis section — freshness is now a deterministic verdict on the
   // wire (`analysis_ready.freshness`) and a telemetry signal
@@ -2626,27 +2632,21 @@ function buildOptionSignalLookup<S extends { option_id: string | null; option_la
 }
 
 /**
- * Lane 30 — per-option goal-fit resolver: the option's own
- * `probability_of_goal` wins when a producer path populates it (that field
- * is only ever set from real data, never defaulted), then the
- * `option_goal_fits` signal lookup. Returns undefined when no valid value
- * resolves — the projected option then omits `goal_fit_probability` and the
- * display formatter renders the explicit "target-fit not scored" disclosure
- * instead.
+ * Lane 30 — per-option goal-fit resolver: the option's own `probability_of_goal` ONLY (that field is only ever set from
+ * real data, never defaulted). Returns undefined when it is absent — the projected option then omits
+ * `goal_fit_probability` and the display formatter renders the explicit "target-fit not scored" disclosure instead.
+ *
+ * ⛔ NEVER THE LIMITS-ONLY JOINT (AIQ 5887531086; DL 5887546998). `option_goal_fits[].probability_of_joint_goal` is
+ * PLoT's "probability of jointly satisfying all goal_constraints" — the user's LIMITS, never the goal's target. It used
+ * to refill an absent P(goal) here, and the formatter then called it "the modelled probability it meets your target"
+ * (served w2285 S3: a downtime-only 100% said as savings). Absent stays absent.
  */
-function buildGoalFitResolver(
-  signals: readonly OptionGoalFitSignal[] | undefined,
-): (option: OptionSummary) => number | undefined {
-  const lookup = buildOptionSignalLookup(
-    signals,
-    (s) => s.probability_of_joint_goal,
-    isValidGoalFitProbability,
-  );
+function buildGoalFitResolver(): (option: OptionSummary) => number | undefined {
   return (option: OptionSummary): number | undefined => {
     if (isValidGoalFitProbability(option.probability_of_goal)) {
       return option.probability_of_goal;
     }
-    return lookup(option);
+    return undefined;
   };
 }
 
@@ -2684,8 +2684,12 @@ export function projectAnalysis(
   //    status stays recommendable, so status-less inputs are unaffected.
   //    Then the probability scale guard, then sort desc. F.6 passthrough: we
   //    only filter+sort; we do not transform values.
-  const validOptions: OptionSummary[] = analysis.options
-    .filter(isRecommendableTypedOption)
+  // ⛔ ABSENT STAYS ABSENT (AIQ 5886457733): an option with no win probability is never 0 and never ranked, and one
+  // such option means NO option leads — never a partial leader from the rest. The typed reason travels instead.
+  const recommendable = analysis.options.filter(isRecommendableTypedOption);
+  const figuresWithheld = figuresWithheldOf(analysis, recommendable.some((o) => o.win_probability === null));
+  const validOptions: Array<OptionSummary & { win_probability: number }> = figuresWithheld?.ranks_nothing === true ? [] : recommendable
+    .filter((o): o is OptionSummary & { win_probability: number } => o.win_probability !== null)
     .filter((o) =>
       isProbabilityValid(o.win_probability, {
         call_site: 'projectAnalysis.options',
@@ -2702,7 +2706,7 @@ export function projectAnalysis(
   // Lane 30 — per-option goal-fit + outcome carriage. Resolvers shared by
   // the leading pair and the full option list so the same option can never
   // show a value in one slot and not the other.
-  const goalFitFor = buildGoalFitResolver(analysis.option_goal_fits);
+  const goalFitFor = buildGoalFitResolver();
   const outcomeFor = buildOutcomeResolver(analysis.option_outcomes);
   // Trust-spine board #1 (CEE half, adversarial-review P1): the upstream
   // compactAnalysis winner flag was previously field-picked away here, so the
@@ -2717,7 +2721,7 @@ export function projectAnalysis(
     analysis.winner.constraint_infeasible === true && analysis.winner.option_id.length > 0
       ? analysis.winner.option_id
       : null;
-  const projectOption = (o: OptionSummary): ContextPackAnalysisOption => {
+  const projectOption = (o: OptionSummary & { win_probability: number }): ContextPackAnalysisOption => {
     const goalFit = goalFitFor(o);
     const outcomeMean = outcomeFor(o);
     return {
@@ -2831,7 +2835,10 @@ export function projectAnalysis(
   const evidenceGaps: ContextPackAnalysisEvidenceGap[] = keptEvidenceGaps
     .filter((g) => Number.isFinite(g.voi_score) && g.voi_score >= 0)
     .map((g) => ({ factor_label: g.factor_label, voi_score: g.voi_score }));
-  const goalFit: ContextPackAnalysisGoalFit | null = analysis.goal_fit
+  // ⛔ "Goal fit was scored" only when a goal fit exists: an option carries its own P(goal). PLoT's `goal_fit_basis` rides the
+  // limits-only joint too, and a run that scored only the limits scored no goal fit (AIQ 5887531086 R1: the not-scored line).
+  const anyGoalProbability = analysis.options.some((o) => isValidGoalFitProbability(o.probability_of_goal));
+  const goalFit: ContextPackAnalysisGoalFit | null = analysis.goal_fit && anyGoalProbability
     ? { scored: analysis.goal_fit.scored, basis: analysis.goal_fit.basis }
     : null;
 
@@ -2882,7 +2889,35 @@ export function projectAnalysis(
     analysis.constraint_infeasible_note.length > 0
       ? { constraint_infeasible_note: analysis.constraint_infeasible_note }
       : {}),
+    ...(figuresWithheld !== undefined ? { figures_withheld: { reason_code: figuresWithheld.reason_code, note: figuresWithheld.note } } : {}),
   };
+}
+
+/** PLoT's own UI-slot opening ("Not shown.") is not a sentence for a reply; the reason after it is kept verbatim. */
+const PLOT_UI_OPENING = /^Not shown\.\s*/;
+export const FIGURES_WITHHELD_BY_RUN_NOTE =
+  'This run withheld the chance of reaching the goal for every option, and the estimates for the goal that come from the '
+  + 'same calculation. Never state, estimate, rank or compare a chance of reaching the goal for any option, and never name '
+  + 'an option as leading on it.';
+export const FIGURES_ABSENT_NOTE =
+  'This run gave no win probability for at least one option, so no option leads and none is ranked. Never state a win '
+  + 'probability of 0 for an option the run gave none, and never name a leading option from this run.';
+
+/**
+ * The context pack's `figures_withheld`, or `undefined`. The run's typed withhold (`analysis.figures_withheld`, PLoT
+ * #416's code) gives its reason; any recommendable option with no win probability means nothing is ranked.
+ */
+function figuresWithheldOf(
+  analysis: AnalysisResponseSummaryWithSignals,
+  anyAbsent: boolean,
+): { reason_code: string | null; note: string; ranks_nothing: boolean } | undefined {
+  const typed = analysis.figures_withheld;
+  if (typed !== undefined) {
+    const reason = typed.message.replace(PLOT_UI_OPENING, '').trim();
+    const note = anyAbsent ? `${FIGURES_WITHHELD_BY_RUN_NOTE} ${FIGURES_ABSENT_NOTE}` : FIGURES_WITHHELD_BY_RUN_NOTE;
+    return { reason_code: typed.code, note: reason === '' ? note : `${note} Why: ${reason}`, ranks_nothing: anyAbsent };
+  }
+  return anyAbsent ? { reason_code: null, note: FIGURES_ABSENT_NOTE, ranks_nothing: true } : undefined;
 }
 
 function isFiniteSensitivity(value: unknown): value is number {

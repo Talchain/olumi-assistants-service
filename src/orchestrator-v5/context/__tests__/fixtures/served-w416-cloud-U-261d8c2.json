@@ -1,0 +1,214 @@
+{
+ "source": "AI Quality's served witness of PLoT #416 on 261d8c2 (ISL f7f19e3): w416-20260929T091049Z.json case U (the cloud graph; PLoT does not forward the savings identity). Kept as served; only fields compactAnalysis reads are kept.",
+ "U": {
+  "request_id": "aiq-contractF-w416-U-20260929T091049Z",
+  "analysis_status": "computed",
+  "option_comparison": [
+   {
+    "option_id": "remain_on_aws",
+    "option_label": "Remain on AWS",
+    "id": "remain_on_aws",
+    "label": "Remain on AWS",
+    "outcome": {
+     "mean": 0.8000000000000002,
+     "std": 1.1102230246251565e-16,
+     "p10": 0.8,
+     "p50": 0.8,
+     "p90": 0.8,
+     "n_samples": 10000,
+     "n_valid_samples": 10000,
+     "validity_ratio": 1,
+     "percentiles_source": "samples"
+    },
+    "status": "computed",
+    "win_probability": 0.5033666666666663,
+    "downside": {
+     "cvar_10": 0.8000000000000002,
+     "p05": 0.8,
+     "expected_regret": 0.02402405030682192
+    }
+   },
+   {
+    "option_id": "migrate_fully_to_gcp",
+    "option_label": "Migrate fully to GCP",
+    "id": "migrate_fully_to_gcp",
+    "label": "Migrate fully to GCP",
+    "outcome": {
+     "mean": 0.7871155192209004,
+     "std": 0.07585845832767184,
+     "p10": 0.6822161231676545,
+     "p50": 0.8,
+     "p90": 0.8781889886515581,
+     "n_samples": 10000,
+     "n_valid_samples": 10000,
+     "validity_ratio": 1,
+     "percentiles_source": "samples"
+    },
+    "status": "computed",
+    "win_probability": 0.4498666666666684,
+    "downside": {
+     "cvar_10": 0.6435029222081243,
+     "p05": 0.6538231763910213,
+     "expected_regret": 0.036908531085921535
+    }
+   },
+   {
+    "option_id": "phased_gcp_migration",
+    "option_label": "Phased GCP migration",
+    "id": "phased_gcp_migration",
+    "label": "Phased GCP migration",
+    "outcome": {
+     "mean": 0.7936123759083478,
+     "std": 0.03883153373133393,
+     "p10": 0.7405684945722799,
+     "p50": 0.8,
+     "p90": 0.8402658545295572,
+     "n_samples": 10000,
+     "n_valid_samples": 10000,
+     "validity_ratio": 1,
+     "percentiles_source": "samples"
+    },
+    "status": "computed",
+    "win_probability": 0.04676666666666623,
+    "downside": {
+     "cvar_10": 0.7211303723820977,
+     "p05": 0.7259983796614152,
+     "expected_regret": 0.030411674398474246
+    }
+   }
+  ],
+  "inference_warnings": [
+   {
+    "code": "GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED",
+    "message": "Not shown. 'Monthly cloud cost savings' depends on GCP workload share × GCP unit-cost saving × AWS workload spend, but this run couldn't calculate it that way, so the figures for each option would be wrong.",
+    "severity": "warning",
+    "node_ids": [
+     "monthly_cloud_cost_savings"
+    ]
+   },
+   {
+    "code": "CONSTRAINT_TARGET_UNRELIABLE",
+    "message": "The success target on \"Migration downtime risk\" can't be evaluated reliably: the target for \"Migration downtime risk\" could not be scaled against any known range for that node. Goal-fit probabilities were withheld for this run because they would be meaningless. Set a value or range for \"Migration downtime risk\" to make this target computable.",
+    "severity": "warning",
+    "constraint_ids": [
+     "agent-lane:migration_downtime_risk:<="
+    ]
+   },
+   {
+    "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+    "message": "2 edge E-value entries were omitted from edge_e_values: 2 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+    "severity": "info"
+   },
+   {
+    "code": "GOAL_DIRECTION_UNATTESTED",
+    "message": "No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team's stated aim: if the goal is a quantity to reduce, or the aim is to land near a target rather than as high as possible, this ranking answers a different question. Send goal_direction to rank against the stated objective.",
+    "severity": "warning",
+    "field": "goal_direction"
+   }
+  ],
+  "decision_brief": {
+   "brief_id": "ac7c73d3-b006-4147-8e1a-304ab88d2981",
+   "version": "1",
+   "graph_hash": "0805c3f352ddcf0a",
+   "seed": 586756777,
+   "created_at": "2026-09-29T09:10:55.285Z",
+   "headline": "Too close to call: Remain on AWS and Migrate fully to GCP. However, the outcome is within model uncertainty, so the ranking could shift with new information. Define tie-breaker criteria or gather additional evidence.",
+   "options": [
+    {
+     "option_id": "remain_on_aws",
+     "label": "Remain on AWS",
+     "win_probability": 0.5033666666666663,
+     "rank": 1
+    },
+    {
+     "option_id": "migrate_fully_to_gcp",
+     "label": "Migrate fully to GCP",
+     "win_probability": 0.4498666666666684,
+     "rank": 2
+    },
+    {
+     "option_id": "phased_gcp_migration",
+     "label": "Phased GCP migration",
+     "win_probability": 0.04676666666666623,
+     "rank": 3
+    }
+   ],
+   "top_drivers": [
+    {
+     "factor_label": "GCP unit-cost saving",
+     "sensitivity": 0.2,
+     "direction": "negative"
+    },
+    {
+     "factor_label": "AWS workload spend",
+     "sensitivity": 0.2,
+     "direction": "negative"
+    }
+   ],
+   "key_assumptions": [
+    "GCP unit-cost saving",
+    "AWS workload spend"
+   ],
+   "what_would_change": [
+    "AWS workload spend → Monthly cloud cost savings",
+    "GCP unit-cost saving → Monthly cloud cost savings",
+    "Monthly cloud cost savings → Monthly spend"
+   ],
+   "robustness": "fragile",
+   "warnings": [
+    {
+     "code": "DEGENERATE_OUTCOMES",
+     "message": "All options produce nearly identical outcomes",
+     "severity": "warning"
+    },
+    {
+     "code": "INFLUENTIAL_EXTERNALS",
+     "message": "External factors GCP unit-cost saving significantly affect your outcome but are inherently uncertain. How might you bound these?",
+     "severity": "warning"
+    },
+    {
+     "code": "M2_UNAVAILABLE",
+     "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+     "severity": "warning"
+    }
+   ],
+   "lineage": {
+    "config_version": "aa35b033304d",
+    "response_hash": "0805c3f352ddcf0a",
+    "n_samples": 10000
+   },
+   "headline_banded": {
+    "text": "Too close to call: Remain on AWS and Migrate fully to GCP.",
+    "band": "very_close",
+    "leader_option_id": "remain_on_aws",
+    "leader_label": "Remain on AWS",
+    "runner_up_option_id": "migrate_fully_to_gcp",
+    "runner_up_label": "Migrate fully to GCP",
+    "win_probability_gap": 0.05349999999999788,
+    "robustness_gated": false,
+    "doctrine": "provisional_doctrine_v0"
+   },
+   "defaulted_assumptions": [],
+   "robustness_caveat": {
+    "text": "This run was fragile under the changes we tested. Small changes to your assumptions could change which option is most likely to achieve your goal.",
+    "basis": "is_robust",
+    "flip_evidence": {
+     "status": "partial_no_effect",
+     "text": "Changing at least one tested factor on its own could change which option is most likely to achieve your goal. The other factors we could test could not."
+    },
+    "doctrine": "provisional_doctrine_v0"
+   },
+   "warning_codes": [
+    "CONSTRAINT_TARGET_UNRELIABLE",
+    "GOAL_DIRECTION_UNATTESTED",
+    "GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED"
+   ],
+   "analysis_summary": {
+    "leading_option": "Remain on AWS",
+    "win_probability": 0.5033666666666663,
+    "robustness_band": "fragile"
+   }
+  },
+  "response_hash": "0805c3f352ddcf0a"
+ }
+}
