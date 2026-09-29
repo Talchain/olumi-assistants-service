@@ -1,18 +1,27 @@
 import { createHash } from 'node:crypto';
 import { canonicalLabel, type CandidateModel } from './admit-model.js';
-import { optionQuotes } from './option-lineage.js';
+import { multiFigureItemBinds, optionQuotes } from './option-lineage.js';
 import { figureTheUserWrote, figureTheUserWroteFor, withdrawUnstatedBaselineStamps } from './stated-by-user.js';
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { unitPhraseFamily } from './unit-conflict.js';
+import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 
 /** A located quote is not proof that the candidate performs its action at its stated setting. */
 function quotedOptionAgrees(option: CandidateModel['options'][number], quote: string): boolean {
+  // MG's quantity/action binder is stronger evidence than a paraphrased display label. Consume its verdict once;
+  // never let the looser figure-presence check below override a rejected association (e.g. price vs setup credit).
+  const bindings = (option.interventions ?? []).map((i) => multiFigureItemBinds(i, quote));
+  if (bindings.includes(false)) return false;
+  const boundAction = bindings.length > 0 && bindings.every((bound) => bound === true);
+  const keeping = (text: string): boolean => labelMatchesBaseline(text) || /^\s*keep\b/i.test(text);
+  if (boundAction && (option.is_status_quo === true || keeping(option.label)) && !keeping(quote)) return false;
   const tokens = (s: string): string[] => s.toLowerCase().match(/[a-z0-9]+/g) ?? [];
   const source = tokens(quote);
   const label = tokens(option.label).filter((w) => !['our', 'the', 'a', 'an', 'per', 'it'].includes(w));
-  if (label.length < 2) return false;
+  const exactLabel = canonicalLabel(option.label) === canonicalLabel(quote);
+  if (label.length < 2 && !exactLabel) return false;
   let cursor = 0;
-  for (const word of label) {
+  for (const word of boundAction ? [] : label) {
     const next = source.indexOf(word, cursor);
     if (next < 0) return false;
     cursor = next + 1;

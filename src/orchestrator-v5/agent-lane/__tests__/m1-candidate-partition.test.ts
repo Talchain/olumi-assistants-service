@@ -93,6 +93,51 @@ describe('M1 partition replays the four frozen real drafts', () => {
 });
 
 describe('M1 authority and recovery controls', () => {
+  it.each([false, true])('literal listed Option A/Option B retain distinct authorship; borrowed name=%s', async (borrowed) => {
+    const raw = structuredClone(fixture('paul-mrr').candidates[0]!);
+    const candidate = { ...raw, options: ['A', 'B'].map((letter, i) => ({
+      ...raw.options[0]!, label: `Option ${letter}`, brief_words: `Option ${borrowed ? ['B', 'A'][i] : letter}`, interventions: [],
+    })) };
+    const brief = 'The options are Option A, or Option B. We currently have £75k MRR and want MRR above £85k.';
+    const { result, graph } = await build(candidate, brief);
+    expect(result.ok).toBe(true);
+    const saved = GraphV3.parse(graph);
+    // The existing intake enumeration grammar does not quote bare A/B labels; this guard preserves their ownership,
+    // without pretending that a swapped literal name binds the other source item or adding a new intake grammar.
+    expect(saved.nodes.filter((n) => n.kind === 'option').map((n) => [n.label, n.provenance]))
+      .toEqual(borrowed ? [] : [['Option A', 'from_brief'], ['Option B', 'from_brief']]);
+  });
+
+  it.each([
+    { words: 'increase the Pro plan price from £49 to £59', value: 59, label: 'Raise to £59', valid: true },
+    { words: 'price Pro at £59 with a setup credit to £54', value: 59, label: 'Raise to £59', valid: true },
+    { words: 'price Pro at £59 with a setup credit to £54', value: 54, label: 'Price Pro at £54', valid: false },
+    { words: 'increase the Pro plan price from £49 to £59', value: 49, label: 'Pro plan price', valid: false },
+    { words: 'increase the Pro plan price from £49 to £59', value: 59, label: 'Keep at £59', valid: false },
+    { words: 'raise Pro price to £59 with a £54 setup credit', value: 59, label: 'Raise Pro price to £59', factor: 'Setup credit', valid: false },
+  ])('MG b05 numeric binding: $label / $words keeps the source option=$valid', async ({ words, value, label, factor, valid }) => {
+    const raw = structuredClone(fixture('paul-mrr').candidates[0]!);
+    const setting = raw.options[0]!.interventions![0]!;
+    const candidate = { ...raw, factors: factor === undefined ? raw.factors : [...raw.factors, { ...raw.factors[0]!, label: factor }], options: [
+      { ...raw.options[0]!, label, provenance: 'explicit', brief_words: words, interventions: [{ ...setting, value, factor_label: factor ?? setting.factor_label }] },
+      { ...raw.options[1]!, label: 'Keep at £49', provenance: 'explicit', brief_words: 'keep it at £49', interventions: [{ ...setting, value: 49 }] },
+    ] };
+    const brief = `The options are ${words}, or keep it at £49. We currently have £75k MRR and want MRR above £85k.`;
+    const { graph, result } = await build(candidate, brief);
+    expect(result.ok).toBe(true);
+    const saved = GraphV3.parse(graph);
+    const binding = deriveIntakeOptionReconciliation(brief, saved, saved);
+    const option = saved.nodes.find((n) => n.kind === 'option' && n.label === label);
+    expect(binding.mayNameLeadingOption).toBe(valid);
+    if (valid) {
+      expect(option).toMatchObject({ provenance: 'from_brief', source_quote: words });
+      expect(Object.values(option!.interventions!).some((i) => i.raw_value === 59 && i.source === 'brief_extraction')).toBe(true);
+    } else {
+      expect(option).toBeUndefined();
+      expect(result.constructor_proposals).toContainEqual(expect.objectContaining({ kind: 'option', label }));
+    }
+  });
+
   it('an explicit tag without a source action cannot admit an invented option', async () => {
     const { brief, candidates } = fixture('paul-mrr');
     const raw = structuredClone(candidates[0]!);
