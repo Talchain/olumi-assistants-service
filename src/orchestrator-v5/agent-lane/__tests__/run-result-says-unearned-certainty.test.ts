@@ -122,8 +122,13 @@ describe('never said as certain unless THIS Run\'s own record says so (DL: "neve
   });
 
   it('a record the writer\'s contract refuses reads as not recorded (#2280\'s ONE reader) → unchecked', async () => {
-    const r = await run({ recorded: STORED.map((d) => ({ ...d, earned: 'yes' })) });
+    // An unearned decision with its sentence but neither its unsized path nor its identity mismatch: the writer's
+    // contract refuses it (it would otherwise be followed — the shape alone looks complete).
+    const refused = STORED.map((d) => (d.option_id === 'raise_price_to_59'
+      ? { option_id: d.option_id, probability_of_goal: d.probability_of_goal, earned: false, say: 'UNATTESTED SENTENCE.' } : d));
+    const r = await run({ recorded: refused });
     expect(r.goal_certainty).toEqual(expect.objectContaining({ unchecked: true }));
+    expect(JSON.stringify(r)).not.toContain('UNATTESTED SENTENCE.');
   });
 
   it('a record at another P → unchecked; an unearned one with no sentence is refused by the writer\'s contract → unchecked', async () => {
