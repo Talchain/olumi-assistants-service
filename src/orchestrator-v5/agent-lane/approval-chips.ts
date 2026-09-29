@@ -22,6 +22,7 @@ import type { StructuredProposal } from './proposal.js';
 import { CANVAS_BAND_WORD } from '../format/edge-strength-bands.js';
 import type { InfluenceBand } from '../format/influence-bands.js';
 import type { ToolResult } from './runtime/agent-tools.js';
+import { identityApproveMessage, identityReadingOf } from './identity-card.js';
 
 const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_starting_point: { label: 'Use as starting assumptions', message: 'Yes, use those.' },
@@ -46,6 +47,8 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_new_factor: { label: 'Add these factors', message: 'Yes, add them.' },
   // SLICE C2: a new figure for a limit the model already holds, written through the product's limit door.
   propose_limit_change: { label: 'Change this limit', message: 'Yes, change that limit.' },
+  // The user confirms Olumi's reading of their goal as a product of two of their figures (`identity-card.ts`).
+  propose_identity: { label: 'Yes, calculate it that way', message: 'Yes, calculate it that way.' },
 };
 
 /** The proposers whose change is HELD on the product's own seam (`gmh_`): the button carries the product's own words. */
@@ -158,6 +161,12 @@ export function approvalChipsFor(
   }
   const reading = readingShownFor(tool, labelSourceFor?.(proposalId));
   if (reading !== undefined) return [{ id: approvalChipIdFor(proposalId), ...reading, message: approve.message }, AMEND_CHIP];
+  // ⛔ A reading of the goal is confirmed ONLY on a card showing its exact words (`identity-card.ts`): none, no button.
+  if (tool === 'propose_identity') {
+    const words = identityWordsFor(labelSourceFor?.(proposalId));
+    return words === undefined ? []
+      : [{ id: approvalChipIdFor(proposalId), label: approve.label, message: identityApproveMessage(words), detail: words }, AMEND_CHIP];
+  }
   // ⛔ A link's stated effect is approvable ONLY on a card showing its exact reading (PR Review's fifth CR): none, no button.
   if (tool === 'propose_link_effect') {
     const effectReading = linkEffectReadingFor(tool, labelSourceFor?.(proposalId));
@@ -165,6 +174,19 @@ export function approvalChipsFor(
       : [{ id: approvalChipIdFor(proposalId), label: approve.label, message: linkEffectApproveMessage(effectReading), detail: effectReading }, AMEND_CHIP];
   }
   return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, labelSourceFor?.(proposalId)), message: approve.message }, AMEND_CHIP];
+}
+
+/**
+ * The identity card's words: R3's reading from the STORED proposal (what `authorise_change` will write), shown only when
+ * the proposer's own result for that same id returned the SAME words — never the Agent's prose.
+ */
+function identityWordsFor(source: ApprovalLabelSource | undefined): string | undefined {
+  const proposal = source?.proposal;
+  const result = source?.result;
+  if (proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return undefined;
+  const reading = identityReadingOf(proposal);
+  const shown = (result.card as { words?: unknown } | undefined)?.words;
+  return reading !== undefined && shown === reading.words ? reading.words : undefined;
 }
 
 /**
