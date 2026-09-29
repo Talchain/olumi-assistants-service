@@ -451,7 +451,7 @@ describe('adapters — bound to the real persisted shape, not to a hand-written 
     ]);
     expect('probability_of_goal' in views[0]!).toBe(false);
     expect('status' in views[0]!).toBe(false);
-    // ...and win_probability DOES default to 0, matching analysis-compact.ts.
-    expect(readObjectiveOptionViews([{ option_id: 'opt_a' }])[0]!.win_probability).toBe(0);
+    // ...and an absent win_probability stays ABSENT (null), never 0 — matching analysis-compact.ts (AIQ 5886457733).
+    expect(readObjectiveOptionViews([{ option_id: 'opt_a' }])[0]!.win_probability).toBeNull();
   });
 });
