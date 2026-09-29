@@ -9,10 +9,14 @@
  *   · natural_effect_off: a stated size no longer reads back exactly, or its `strength_mean` is stale;
  *   · level_moved: a node's raw level, or the goal's raw target, changed, or a normalised value no longer equals raw/F;
  *   · spread_moved: a factor's sampled spread in natural units changed (PLoT's default is max(0.1, 0.15·value) on the
- *     FRAME, `translator-v3.ts` `buildParameterUncertaintiesV3`; a user-stated level is sent at 1e-4).
+ *     FRAME, `translator-v3.ts` `buildParameterUncertaintiesV3`; a user-stated level is sent at 1e-4; a std is clamped to
+ *     [1e-4, 2.0], so a carried spread that binds moves and the re-frame must be refused, R3-B 5895208669).
+ *   The oracle forbids the MOVE, not a particular fix: a builder that never mints a std and refuses every re-frame whose
+ *   default spread is floor-bound also passes.
  *
  * `reframe(graph, nodeId, F)` is the REFERENCE re-framer for AIQ's rule. It keeps every touching link's natural size,
- * carries the old natural spread (`std_source: 'frame_carried'`), and rewrites the goal's normalised threshold. MG's
+ * carries the old natural spread only where it would move (a real std; PLoT's 0.1 floor), labelled with its ORIGINAL owner,
+ * and rewrites the goal's normalised threshold. MG's
  * builder must produce a graph the oracle accepts; its exact numbers can be checked against this one.
  */
 type Rec = Record<string, any>;
@@ -21,6 +25,7 @@ const TOL = 1e-9;
 const close = (a: number, b: number): boolean => Math.abs(a - b) <= TOL * Math.max(1, Math.abs(a), Math.abs(b));
 const above1 = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 1;
 const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const [MIN_STD, MAX_STD] = [1e-4, 2.0]; // `translator-v3.ts` `buildParameterUncertaintiesV3`: a std outside is clamped, so a carried spread that binds MOVES
 
 /** The node's frame, in CEE's reading order (`resolveMagnitudeFrame`): scale_frame → cap → goal cap → raw/value. */
 export function frameOf(n: Rec | undefined): number | undefined {
@@ -46,7 +51,7 @@ export function naturalSpread(n: Rec): number | undefined {
   const os = n.observed_state;
   const F = frameOf(n);
   if (n.kind !== 'factor' || os === undefined || F === undefined || !num(os.value)) return undefined;
-  if (num(os.std) && os.std > 0) return os.std * F;
+  if (num(os.std) && os.std > 0) return Math.min(MAX_STD, Math.max(MIN_STD, os.std)) * F; // PLoT clamps any std to [1e-4, 2.0]
   if (usersLevel(n)) return 0; // CEE sends a stated level at 1e-4 on its frame: EXACT as stated, on any frame
   if (os.value === 0) return undefined; // held exact, or scaled by option levels (frame-free)
   return Math.max(0.1, 0.15 * Math.abs(os.value)) * F;
@@ -118,7 +123,13 @@ export function reframe(graph: Rec, id: string, F: number): Rec {
     node.goal_threshold_cap = F;
     if (num(node.goal_threshold)) node.goal_threshold = node.goal_threshold * k;
   }
-  if (spreadBefore !== undefined && !usersLevel(node)) { os.std = spreadBefore / F; os.std_source = 'frame_carried'; }
+  // Carry ONLY what would move (R3-B 5895208669 × AIQ 5895140735): a real std is rescaled and keeps its owner; a synthesised
+  // spread is minted only where PLoT's 0.1 floor makes it frame-relative (0.15·value is already invariant), labelled with
+  // its ORIGINAL owner (Olumi → ISL `template`); never for a stated level, a zero held exact, or a node with no spread.
+  if (spreadBefore !== undefined && !usersLevel(node)) {
+    if (num(os.std) && os.std > 0) os.std = spreadBefore / F;
+    else if (!close(Math.max(0.1, 0.15 * Math.abs(os.value)) * F, spreadBefore)) { os.std = spreadBefore / F; os.std_source = 'olumi'; }
+  }
   const nodes = byId(g);
   for (const e of g.edges as Rec[]) {
     const scale = e.from === id ? F / Fold : e.to === id ? Fold / F : 1; // β·F_to/F_from held

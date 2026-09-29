@@ -56,14 +56,35 @@ describe('frame invariance — the oracle on the served c96 graph', () => {
     const before = reframe(c96(), 'mrr', 500_000); // R9's graph: no cut left, so only the spread is under test
     const carried = reframe(before, 'monthly_gross_additions', 100);
     expect(naturalSpread(node(carried, 'monthly_gross_additions'))).toBeCloseTo(naturalSpread(node(before, 'monthly_gross_additions'))!, 9);
-    expect(node(carried, 'monthly_gross_additions').observed_state.std_source).toBe('frame_carried');
+    expect(node(carried, 'monthly_gross_additions').observed_state.std_source).toBe('olumi'); // its original owner → ISL `template`
     expect(frameInvariance(before, carried)).toEqual([]);
     const dropped = JSON.parse(JSON.stringify(carried));
     delete node(dropped, 'monthly_gross_additions').observed_state.std;
     expect(frameInvariance(before, dropped)).toEqual(['spread_moved monthly_gross_additions 100.0 → 10.00']);
   });
 
-  it('a USER-STATED level keeps the minimum spread and is never labelled frame-carried', () => {
+  it('R7b (R3-B 5895208669): where 0.15·value already keeps the natural spread, NOTHING is minted (PLoT keeps its own default)', () => {
+    const g = c96();
+    const n = node(g, 'monthly_gross_additions');
+    n.observed_state.value = 0.75; n.observed_state.cap = 80; // 60 on a frame of 80: 0.15·0.75 = 0.1125 > the 0.1 floor
+    const after = reframe(g, 'monthly_gross_additions', 70); // 60/70 = 0.857: still above the floor
+    expect(node(after, 'monthly_gross_additions').observed_state.std).toBeUndefined();
+    expect(frameInvariance(g, after).filter((v) => v.startsWith('spread_moved'))).toEqual([]);
+  });
+
+  it('R7c (R3-B 5895208669): a carried spread that BINDS PLoT\'s 2.0 std cap moves, so that re-frame is refused', () => {
+    const before = reframe(c96(), 'mrr', 500_000);
+    const after = reframe(before, 'monthly_gross_additions', 40); // 100 natural / 40 = std 2.5 → PLoT sends 2.0 → 80
+    expect(frameInvariance(before, after)).toEqual(['spread_moved monthly_gross_additions 100.0 → 80.00']);
+  });
+
+  it('a zero held exact is never given a spread (it stays a point mass)', () => {
+    const g = c96();
+    node(g, 'monthly_gross_additions').observed_state.value = 0; node(g, 'monthly_gross_additions').observed_state.raw_value = 0; node(g, 'monthly_gross_additions').observed_state.cap = 1000;
+    expect(node(reframe(g, 'monthly_gross_additions', 100), 'monthly_gross_additions').observed_state.std).toBeUndefined();
+  });
+
+  it('a USER-STATED level keeps the minimum spread and is never given a carried spread or label', () => {
     const after = reframe(c96(), 'paying_subscribers', 20_000);
     expect(node(after, 'paying_subscribers').observed_state.std_source).toBeUndefined();
   });
