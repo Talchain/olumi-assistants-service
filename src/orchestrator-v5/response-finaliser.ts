@@ -105,6 +105,7 @@ import { buildRunDelta, type RunDeltaRefusal } from './coaching/build-run-delta.
 import { selectClaimBearingRunAnalysisFact, selectRunAnalysisFact } from './context/freshness.js';
 import { deriveEveryOptionLimitVerdict, readRatifiedConstraints } from '../orchestrator/context/constraint-feasibility.js';
 import { nodesUnderANonlinearIdentity } from './agent-lane/admit-model.js';
+import { provisionalOptionLeaderClaimCause } from './tools/handlers/run-option-participation.js';
 
 /**
  * Why the run-over-run consequence did or did not ship.
@@ -644,7 +645,12 @@ function attachAnalysisState(
       const distrusted = nodesUnderANonlinearIdentity(ctx.graph ?? null);
       const limit = deriveEveryOptionLimitVerdict(selectedRun.fact.result,
         readRatifiedConstraints(ctx.graph ?? null).filter((c) => c.node_id == null || !distrusted.has(c.node_id)));
-      return limit === null ? {} : { everyOptionLimit: limit.kind };
+      return {
+        ...(limit === null ? {} : { everyOptionLimit: limit.kind }),
+        // This is the same selected, claim-bearing fact as the entitlement above.
+        // A newer partial Run cannot lend this cause to an older result.
+        withheldBecauseProvisionalOption: provisionalOptionLeaderClaimCause(selectedRun.fact.result),
+      };
     })(),
     // Read from the body as it will ship, not from the fact: when the
     // withheld-claim projection has redacted `near_tie`, the separation half

@@ -37,8 +37,10 @@ import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../../compose/definitional-links.js';
 import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken, type LinkEffectRefusal } from '../../system-events/link-effect-edit.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
+import { applyOptionAdoptEdit, optionAdoptReadingToken } from '../../system-events/option-adopt-edit.js';
 import { proposeProductIdentity, type IdentityProposal } from '../identity-proposal.js';
 import { CONFIRM_IDENTITY_OP, identityCardHintFor, identityReadingOf, identityRefusalWords, readingOfIdentityApproval } from '../identity-card.js';
+import { ADOPT_OPTION_OP, optionAdoptionApproveMessage, optionAdoptionReadingOf, optionAdoptionWords } from '../option-adoption-card.js';
 import { unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
 
@@ -2217,6 +2219,16 @@ export function createAgentCapabilities(
       validation: { admitted: true, loss_count: 0, refusals: [] },
       public_label: card.words,
     });
+  const optionAdoptionProposalFor = (ctx: { scenario_id: string; authenticated_user_id: string | null }, graphHash: string,
+    optionId: string, words: string): StructuredProposal => createProposal({
+      scenario_id: ctx.scenario_id,
+      user_id: ctx.authenticated_user_id,
+      base_graph_identity_hash: graphHash,
+      operations: [{ op: ADOPT_OPTION_OP, path: optionId, value: { option_id: optionId, words } }],
+      provenance: { authored_by: 'user_stated', basis: words },
+      validation: { admitted: true, loss_count: 0, refusals: [] },
+      public_label: words,
+    });
   /** The card's hint for a Run on this stored model: once per revision (`identityCardHintFor`). */
   const identityCardFor = (ctx: { scenario_id: string; authenticated_user_id: string | null },
     read: { readonly raw: unknown; readonly graph_hash: unknown } | null | undefined) => {
@@ -2297,6 +2309,56 @@ export function createAgentCapabilities(
       follow_up: `Recorded, as you confirmed: "${goalLabel}" is calculated as "${rate}" \u00d7 "${count}". Any earlier result is now out of date; `
         + 'run the analysis again to see it calculated that way.',
     };
+  };
+
+  const applyOptionAdoption = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0],
+    parent: StructuredProposal,
+    approvedRead: GraphRead,
+  ): Promise<ToolResult> => {
+    const notApplied = (reason: string, detail: string): ToolResult => ({
+      ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id,
+      refusal: 'not_applied', reason, detail, receipts: [],
+    });
+    const reading = optionAdoptionReadingOf(parent);
+    if (reading === undefined) return notApplied('unreadable_proposal', 'Nothing was added: the stored approval card could not be read.');
+    if (ctx.typed_approval_of !== parent.proposal_id) {
+      return notApplied('approve_on_the_card', 'Nothing was added. Press the button showing this option and its adoption reading.');
+    }
+    if (ctx.typed_approval_words !== optionAdoptionApproveMessage(reading.words)) {
+      return notApplied('reading_not_confirmed', 'Nothing was added: the pressed button did not carry the exact reading you were shown.');
+    }
+    if (approvedRead.graph_hash !== parent.base_graph_identity_hash) {
+      return notApplied('model_changed_since_approval', 'Nothing was added: the model changed after this option was offered. Read it again before approving.');
+    }
+    if (opts.commitOptionLevels === undefined) return notApplied('adoption_writer_unavailable', 'Nothing was added: the option writer is unavailable.');
+    const res = await opts.commitOptionLevels({
+      scenario_id: ctx.scenario_id,
+      base_graph_hash: parent.base_graph_identity_hash,
+      turn_id: authorisationTurnId(`${parent.proposal_id}#adopt`),
+      links: [], levels: [],
+      adopt_option: { option_id: reading.option_id, words: reading.words,
+        reading_token: optionAdoptReadingToken(reading) },
+    });
+    if (res.status === 'stale') return notApplied('model_changed_since_approval', 'Nothing was added: the model moved after this card was offered. Read it again before approving.');
+    if (res.status === 'refused') return notApplied(res.reason, 'Nothing was added: this option could not be adopted on the model now stored. Read it again before offering the card.');
+    if (res.status === 'unconfirmed') {
+      return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id,
+        refusal: 'not_confirmed', receipts: [],
+        detail: 'The adoption was sent, but Olumi could not read the model back to confirm it. Do not say whether it was saved.' };
+    }
+    const receipts: ReceiptSummary[] = res.receipt !== null ? [{ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' }] : [];
+    const check = await readGraph(ctx.scenario_id);
+    const option = check?.nodes.find((n) => n.id === reading.option_id && n.kind === 'option');
+    if (option === undefined || option.proposed_by === 'olumi' || check?.graph_hash === approvedRead.graph_hash) {
+      return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id,
+        refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
+        detail: 'The adoption was sent, but the saved model did not confirm that this option was added. Check the model before saying it was saved.' };
+    }
+    proposals.markApplied(parent.proposal_id, receipts);
+    return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: parent.proposal_id,
+      receipts, revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
+      follow_up: `Added "${option.label}" to the comparison as you approved. This does not fill missing values. Earlier analysis is out of date; you can run it again after any missing values are set.` };
   };
 
   const applyLinkStrengthSet = async (
@@ -2792,6 +2854,28 @@ export function createAgentCapabilities(
         note: 'Nothing has changed yet. Ask the user `card.words` exactly as written, and tell them to confirm on the button. '
           + 'If they say no, nothing is recorded: carry on without it. Never run the analysis again yourself.',
       };
+    },
+
+    async proposeOptionAdoption(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'unreadable_model', detail: 'The model could not be read. Nothing was offered.' };
+      const option = typeof args?.option_id === 'string'
+        ? g.nodes.find((n) => n.id === args.option_id && n.kind === 'option') : undefined;
+      if (option === undefined || option.proposed_by !== 'olumi') {
+        return { ok: false, mutated: false, refusal: 'not_proposed',
+          detail: 'That option is not currently marked as Olumi\u2019s suggestion, so there is nothing to adopt. Nothing was offered.' };
+      }
+      const words = optionAdoptionWords(option.label);
+      if (words === undefined) return { ok: false, mutated: false, refusal: 'words_invalid', detail: 'This option could not be shown on an approval card. Nothing was offered.' };
+      const dry = applyOptionAdoptEdit({ persistedGraph: g.raw, option_id: option.id, words,
+        expected_graph_hash: g.graph_hash, reading_token: optionAdoptReadingToken({ option_id: option.id, words }) });
+      if (dry.kind === 'refused') return { ok: false, mutated: false, refusal: `adopt_${dry.reason}`,
+        detail: 'This option cannot be added to the current model. Nothing was offered or changed.' };
+      const proposal = proposals.put(optionAdoptionProposalFor(ctx, g.graph_hash, option.id, words));
+      return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label,
+        base_revision: g.graph_hash, card: { words },
+        note: 'Nothing has changed yet. Show card.words exactly, and ask the user to press Add to comparison. Only that button adopts this suggestion; do not run analysis yourself.' };
     },
 
     /**
@@ -4024,6 +4108,7 @@ export function createAgentCapabilities(
       // door is wired here, nothing is written and the Agent says so — never a strength-only or register fallback.
       if (ops.some((o) => o.op === 'set_link_effect')) return applyLinkEffect(ctx, decision.proposal, before);
       if (ops.some((o) => o.op === CONFIRM_IDENTITY_OP)) return applyIdentityConfirm(ctx, decision.proposal, before);
+      if (ops.some((o) => o.op === ADOPT_OPTION_OP)) return applyOptionAdoption(ctx, decision.proposal, before);
       if (ops.length > 0 && ops.every((o) => o.op === 'set_link_strength')) return applyLinkStrengthSet(ctx, decision.proposal, before);
 
       // A starting point mixes kinds; each single-kind path below handles one.

@@ -11,6 +11,18 @@ export function readStoredOptionParticipation(raw: unknown): StoredOptionPartici
   return parsed.success ? parsed.data : undefined;
 }
 
+/** The selected fact itself proves why a provisional Olumi option removed leader permission.
+ * A real failed/unchecked constraint retains its own cause; absence is never inferred as no limit. */
+export function provisionalOptionLeaderClaimCause(result: unknown): boolean {
+  const record = result !== null && typeof result === 'object' && !Array.isArray(result)
+    ? result as Record<string, unknown> : null;
+  const verdict = record?.constraint_verdict;
+  const state = verdict !== null && typeof verdict === 'object'
+    ? (verdict as { constraint_verdict_state?: unknown }).constraint_verdict_state : undefined;
+  return (state === 'not_applicable' || state === 'evaluated_feasible')
+    && readStoredOptionParticipation(record?.option_participation)?.some((p) => p.state === 'kept_olumi_provisional') === true;
+}
+
 /** A post-Run read may select a newer Run of the same graph. Carry only this executed Run's verdict. */
 export function optionParticipationForExecutedRun(
   scenarioId: string,

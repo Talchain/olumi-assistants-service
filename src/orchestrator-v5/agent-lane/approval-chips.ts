@@ -23,6 +23,7 @@ import { CANVAS_BAND_WORD } from '../format/edge-strength-bands.js';
 import type { InfluenceBand } from '../format/influence-bands.js';
 import type { ToolResult } from './runtime/agent-tools.js';
 import { identityApproveMessage, identityReadingOf } from './identity-card.js';
+import { optionAdoptionApproveMessage, optionAdoptionReadingOf } from './option-adoption-card.js';
 
 const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_starting_point: { label: 'Use as starting assumptions', message: 'Yes, use those.' },
@@ -49,6 +50,7 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_limit_change: { label: 'Change this limit', message: 'Yes, change that limit.' },
   // The user confirms Olumi's reading of their goal as a product of two of their figures (`identity-card.ts`).
   propose_identity: { label: 'Yes, calculate it that way', message: 'Yes, calculate it that way.' },
+  propose_option_adoption: { label: 'Add to comparison', message: 'Yes, add it to the comparison.' },
 };
 
 /** The proposers whose change is HELD on the product's own seam (`gmh_`): the button carries the product's own words. */
@@ -166,6 +168,14 @@ export function approvalChipsFor(
     const words = identityWordsFor(labelSourceFor?.(proposalId));
     return words === undefined ? []
       : [{ id: approvalChipIdFor(proposalId), label: approve.label, message: identityApproveMessage(words), detail: words }, AMEND_CHIP];
+  }
+  if (tool === 'propose_option_adoption') {
+    const source = labelSourceFor?.(proposalId);
+    const reading = source?.proposal === undefined ? undefined : optionAdoptionReadingOf(source.proposal);
+    const shown = (source?.result?.card as { words?: unknown } | undefined)?.words;
+    return reading === undefined || source?.result?.ok !== true || source.result.proposal_id !== proposalId || shown !== reading.words
+      ? [] : [{ id: approvalChipIdFor(proposalId), label: approve.label,
+        message: optionAdoptionApproveMessage(reading.words), detail: reading.words }, AMEND_CHIP];
   }
   // ⛔ A link's stated effect is approvable ONLY on a card showing its exact reading (PR Review's fifth CR): none, no button.
   if (tool === 'propose_link_effect') {

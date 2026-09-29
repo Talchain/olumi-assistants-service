@@ -608,6 +608,15 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   },
   {
     type: 'function',
+    name: 'propose_option_adoption',
+    description:
+      'Offer to add one persisted option marked `proposed_by: "olumi"` to the comparison when the user wants to include it. '
+      + 'Use its exact id from get_canonical_state. This changes nothing yet: show the returned card words exactly and ask '
+      + 'the user to press Add to comparison. Do not treat the suggestion as user-authored or run analysis yourself.',
+    parameters: obj({ option_id: { type: 'string', description: 'The exact id of the marked option from get_canonical_state.' } }, ['option_id']),
+  },
+  {
+    type: 'function',
     name: 'offer_public_research',
     description:
       'Offer to search the public web when the user wants outside evidence the model does not hold (a benchmark, a ' +
@@ -663,7 +672,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'propose_identity', 'propose_option_adoption', 'authorise_change', 'withdraw_proposal'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -785,6 +794,8 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   /** The user confirms Olumi's reading of their goal as a product (`../identity-card.ts`). Optional: absent ⇒ refused plainly. */
   proposeIdentity?(ctx: AgentToolContext): Promise<ToolResult>;
+  /** Explicitly adopt one saved Olumi option through the approved-card writer. */
+  proposeOptionAdoption?(ctx: AgentToolContext, args: { option_id: string }): Promise<ToolResult>;
   /** C5: the Agent's own provisional view on a withheld turn (`../provisional-view.ts`). Optional: absent ⇒ refused plainly. */
   giveProvisionalView?(ctx: AgentToolContext, args: { view: string; reasoning: string; confirm_step: string }): Promise<ToolResult>;
 }
@@ -874,6 +885,10 @@ export async function dispatchTool(
       return caps.proposeIdentity !== undefined
         ? caps.proposeIdentity(ctx)
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A reading of the goal cannot be offered here. Nothing was changed.' };
+    case 'propose_option_adoption':
+      return caps.proposeOptionAdoption !== undefined
+        ? caps.proposeOptionAdoption(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'This option cannot be offered for adoption here. Nothing was changed.' };
     case 'give_provisional_view':
       return caps.giveProvisionalView !== undefined
         ? caps.giveProvisionalView(ctx, args as never)

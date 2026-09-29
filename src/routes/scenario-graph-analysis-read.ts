@@ -95,6 +95,7 @@
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import type { AnalysisStateV1 } from '@talchain/schemas/boundary';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
+import { provisionalOptionLeaderClaimCause } from '../orchestrator-v5/tools/handlers/run-option-participation.js';
 
 import {
   deriveDecisionContextGraphHash,
@@ -446,6 +447,7 @@ export async function readScenarioAnalysis(
               result: fact.result,
               briefText: params.briefText,
             }),
+            withheldBecauseProvisionalOption: fact !== null && provisionalOptionLeaderClaimCause(fact.result),
             // F-LIMIT: judged on the SAME fact the permission above was read from (null when out of date), against the
             // limits the user ratified on this graph.
             ...(() => {

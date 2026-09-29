@@ -45,6 +45,7 @@ import {
   WITHHELD_NO_OPTION_MEETS_LIMIT,
   WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN,
   WITHHELD_RUN_OUT_OF_DATE,
+  WITHHELD_PROVISIONAL_OPTION,
   WITHHELD_UNREQUESTED_ANALYSIS,
 } from '../compose/analysis-state-v1.js';
 
@@ -167,6 +168,17 @@ function finalise(graph: Graph, window: readonly RunAnalysisHandlerFact[], shown
 const SCOPE = { newestAnalysisFact: null, readOk: true, windowTruncated: false } as const;
 
 describe('H2 — the finaliser names the product cause only when the caller that refused states it', () => {
+  it('a claim-bearing Run with one kept Olumi option names that cause, not a limit', async () => {
+    const graph = await build(PRODUCT);
+    graph.nodes.find((n) => n.id === 'raise_pro_to_59')!.proposed_by = 'olumi';
+    const fact = await runOn(graph);
+    expect(fact.result.option_participation).toEqual([{ option_id: 'raise_pro_to_59', state: 'kept_olumi_provisional' }]);
+    expect(fact.result.constraint_verdict).toMatchObject({ may_name_leading_option: false, constraint_verdict_state: 'not_applicable' });
+    const out = finalise(graph, [fact], fact, false);
+    expect(out.analysis_state?.leader_claim).toMatchObject({ permitted: false, withheld_reason: WITHHELD_PROVISIONAL_OPTION });
+    expect(leaderWithheldForALimit(out.analysis_state)).toBe(false);
+  });
+
   it('PREMISE: the real handler stamped the product run — no leader may be named, its constraint state PERMITS', async () => {
     const graph = await build(PRODUCT);
     const fact = await runOn(graph);

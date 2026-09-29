@@ -97,6 +97,7 @@ import { RunAnalysisResultSchema } from "@talchain/schemas/orchestrator";
 import { readStoredGoalCertainty } from "../../orchestrator-v5/tools/handlers/run-goal-certainty.js";
 import { readStoredOptionParticipation } from "../../orchestrator-v5/tools/handlers/run-option-participation.js";
 import { leaderWithheldForALimit } from "../../orchestrator-v5/coaching/limit-unchecked-card.js";
+import { WITHHELD_PROVISIONAL_OPTION } from "../../orchestrator-v5/compose/analysis-state-v1.js";
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -821,6 +822,36 @@ describe("0.65.0 — cold read carries the selected Run's stored option particip
       const body = (await read(await buildApp())).json() as Record<string, unknown>;
       expect(body).not.toHaveProperty("analysis_option_participation");
     }
+  });
+});
+
+describe("a provisional Olumi option withholds a leader without inventing a failed limit", () => {
+  const graph = { ...GRAPH, nodes: GRAPH.nodes.map((n) => n.id === "opt_hold" ? { ...n, proposed_by: "olumi" } : n) };
+  const hash = computeAnalysisAffectingGraphHash(graph as never)!;
+  const fact = (state: string) => {
+    const f = runAnalysisFact({ graphHash: hash, mayName: false });
+    const result = f.result as Record<string, any>;
+    result.constraint_verdict.constraint_verdict_state = state;
+    result.option_participation = [{ option_id: "opt_hold", state: "kept_olumi_provisional" }];
+    return f;
+  };
+
+  it("no-limit current Run: the reload says provisional option and never mounts a limit card", async () => {
+    loadGraphAndBriefText.mockResolvedValue({ graph, briefText: "Should we hire a marketing manager?" });
+    readFactsFor.mockResolvedValue([fact("not_applicable")]);
+    const body = (await read(await buildApp())).json() as Record<string, any>;
+    expect(body.analysis_state.run_state.kind).toBe("complete_current");
+    expect(body.analysis_state.leader_claim).toMatchObject({ permitted: false, withheld_reason: WITHHELD_PROVISIONAL_OPTION });
+    expect(body.analysis_option_participation).toEqual([{ option_id: "opt_hold", state: "kept_olumi_provisional" }]);
+    expect(leaderWithheldForALimit(body.analysis_state)).toBe(false);
+  });
+
+  it("an actually unchecked constraint keeps its limit cause", async () => {
+    loadGraphAndBriefText.mockResolvedValue({ graph, briefText: "Should we hire a marketing manager?" });
+    readFactsFor.mockResolvedValue([fact("unevaluated")]);
+    const body = (await read(await buildApp())).json() as Record<string, any>;
+    expect(body.analysis_state.leader_claim.withheld_reason).toBe("constraint_verdict_withheld");
+    expect(leaderWithheldForALimit(body.analysis_state)).toBe(true);
   });
 });
 

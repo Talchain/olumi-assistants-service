@@ -97,7 +97,9 @@ export interface ProposalOperation {
      * id, `value` is R3's `{outcome_id, operation: 'product', factor_ids, words}` verbatim. Written only through the
      * approved-card door (`commitOptionLevels` → `identity_confirm`, Canonical #2292), one append, alone.
      */
-    | 'confirm_identity';
+    | 'confirm_identity'
+    /** Adopt one saved Olumi-suggested option through the canonical approved-card writer. */
+    | 'adopt_option';
   /** Node id, or `from::to` for an edge. */
   readonly path: string;
   readonly value?: unknown;

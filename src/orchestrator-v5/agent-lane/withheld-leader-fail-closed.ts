@@ -78,6 +78,7 @@ import {
   WITHHELD_NEAR_TIE,
   WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN,
   WITHHELD_OPTIONS_NOT_RECONCILED,
+  WITHHELD_PROVISIONAL_OPTION,
   WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT,
   WITHHELD_NO_OPTION_MEETS_LIMIT,
   WITHHELD_RUN_OUT_OF_DATE,
@@ -993,6 +994,8 @@ const BY_WITHHELD_REASON: Readonly<Record<string, string>> = {
   [WITHHELD_OPTIONS_NOT_RECONCILED]:
     'because the saved model does not establish which of its options correspond to the options in your brief, so no ' +
     'option can be put forward until that correspondence is confirmed',
+  [WITHHELD_PROVISIONAL_OPTION]:
+    'because this run included an option Olumi suggested that you have not chosen to add to the comparison; tell me if you want to include it, then confirm the Add to comparison card',
 };
 
 /**
