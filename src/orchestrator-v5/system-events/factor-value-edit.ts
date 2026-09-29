@@ -709,6 +709,11 @@ export async function applyFactorValueEdit(
     // it rather than applied here — this file deliberately contains no
     // `node.observed_state = …` (see the module header).
     ...(appliedProvenance !== undefined ? { appliedProvenance } : {}),
+    // ⭐ THE INTENT RULE (schemas 0.62.0 `factor_value_edit.intent`; AIQ #72 5881405845, DL 5881485082). `confirm_current`
+    // or an ABSENT intent (today's canvas confirm-as-is sends none) is review: when the resolved value equals the
+    // PERSISTED one, the single writer keeps whose it is and records `reviewed_by_user`. An explicit `set` is
+    // authorship even for the same number. A confirm that would MOVE the value is refused below.
+    unchangedValueIsReview: (event as { readonly intent?: unknown }).intent !== 'set',
   };
 
   let outcome;
@@ -824,64 +829,25 @@ export async function applyFactorValueEdit(
     );
   }
 
-  // ⭐ A CONFIRM IS REVIEW, NOT AUTHORSHIP (Shared Data row 1 — Canonical #72 5881225605; meaning AIQ 5881277231: R11
-  // extends to nodes; schemas 0.62.0 `factor_value_edit.intent`). The value was resolved above EXACTLY as a set would
-  // resolve it, so capped, capless and percent confirms read one rule, compared against the PERSISTED node (`graph`,
-  // never a client copy — DL 5881485082). The intent rule (AIQ 5881405845):
-  //   · `confirm_current`  — keeps the value: review; would MOVE it: refused, never turned into a set;
-  //   · ABSENT             — keeps the value: review (today's UI sends a confirm-as-is with no intent); moves it: a set;
-  //   · `set`              — authorship, even for the same number (in-process writers restating a figure send it).
-  // A review discards the authoring candidate (which would re-stamp whose the value is) and records only
-  // `reviewed_by_user`: `source` is untouched, so the analysis hash and every verdict are byte-identical.
-  // "The same value" is NEAR-EXACT (float noise only), never the scale-consistency tolerance above: a collaborator's
-  // £1 move on £1,234,565,000 is a real edit and must land as one. And a review is recorded only when the write would
-  // CHANGE whose the value is; the same value with the same owner falls through to the ordinary no-op.
-  const intent = (event as { readonly intent?: unknown }).intent;
-  if (intent === 'confirm_current' || intent === undefined) {
-    const before = targetNode.observed_state as { value?: unknown; raw_value?: unknown; source?: unknown } | undefined;
+  // ⭐ A CONFIRM NEVER BECOMES A SET (Shared Data row 1 — Canonical #72 5881225605; AIQ 5881277231 / 5881405845). The
+  // value was resolved above EXACTLY as a set would resolve it, so capped, capless and percent confirms read one rule,
+  // against the PERSISTED node (`targetNode`, never a client copy — DL 5881485082). "The same" is near-exact (float noise
+  // only), never the scale-consistency tolerance: £1 on £1,234,565,000 is a move. A kept value was already written as
+  // review by the single writer (`unchangedValueIsReview`, above).
+  if ((event as { readonly intent?: unknown }).intent === 'confirm_current') {
+    const before = targetNode.observed_state as { value?: unknown; raw_value?: unknown } | undefined;
     const after = mergedParse.data.nodes.find((n) => n.id === event.target_id)?.observed_state as
-      | { value?: unknown; raw_value?: unknown; source?: unknown }
+      | { value?: unknown; raw_value?: unknown }
       | undefined;
     const sameValue = typeof before?.value === 'number' && sameStoredNumber(after?.value, before.value)
       && (typeof before.raw_value !== 'number' || sameStoredNumber(after?.raw_value, before.raw_value));
-    const keepsValue = appliedProvenance === undefined && sameValue;
-    const ownerWouldMove = after?.source !== before?.source;
-    if (!keepsValue && intent === 'confirm_current') {
+    if (appliedProvenance !== undefined || !sameValue) {
       return refuse(
         payload,
         'confirm_value_moved',
         `That confirmation doesn't match the value in the model, so I haven't changed anything. ` +
           `To change the figure, type the new value instead.`,
       );
-    }
-    if (keepsValue && ownerWouldMove) {
-      const reviewed = structuredClone(persistedGraph) as { nodes: Array<Record<string, unknown>> };
-      const node = reviewed.nodes.find((n) => n.id === event.target_id)!;
-      node.observed_state = {
-        ...(node.observed_state as Record<string, unknown>),
-        reviewed_by_user: { intent: 'confirm', at: new Date().toISOString() },
-      };
-      const reviewedParse = GraphV3.safeParse(reviewed);
-      if (!reviewedParse.success) {
-        return refuse(payload, 'merged_graph_invalid', `I couldn't save that confirmation. I haven't changed anything.`);
-      }
-      const label = typeof targetNode.label === 'string' && targetNode.label.length > 0 ? targetNode.label : 'that value';
-      const whose = before?.source === 'cee_inference' ? `as Olumi's estimate` : 'at its current value';
-      return {
-        kind: 'mutated',
-        response: composeToolCallResponse({
-          answerKind: 'functional',
-          orientation: '',
-          confirmation: `Kept ${label} ${whose} and noted that you reviewed it. The analysis is unchanged.`,
-          coaching: null,
-          stage: payload.stage,
-          handlerFacts: [],
-        }),
-        mutatedGraph: reviewed,
-        handlerFacts: [],
-        graph: reviewedParse.data,
-        baseGraph: persistedGraph,
-      };
     }
   }
 

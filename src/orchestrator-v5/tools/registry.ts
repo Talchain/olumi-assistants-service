@@ -217,6 +217,14 @@ export interface HandlerInvocation {
    */
   readonly proposal?: ProposalAction;
   /**
+   * ⭐ R11 FOR NODES — is a `set_factor_value` that leaves the stored value unchanged REVIEW (the owner is kept and
+   * `reviewed_by_user` recorded) or an authoring write? Absent ⇒ review: the chat D1 tool (AIQ #72 5881277231; the edge
+   * writer's `reviewOnly` precedent). `factor_value_edit` passes `false`: it applies its own intent rule (schemas 0.62.0
+   * `factor_value_edit.intent`, AIQ 5881405845) to the authoring candidate this handler returns, so an explicit `set`
+   * of the same number stays authorship there.
+   */
+  readonly unchangedValueIsReview?: boolean;
+  /**
    * 0.40.0 — the VERIFIED panel attribution for this write, threaded from
    * `system-events/factor-value-edit.ts` and read by `set_factor_value` alone.
    *

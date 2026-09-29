@@ -7,7 +7,35 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.61.0.tgz` ← **THE CURRENT PIN**
+### `talchain-schemas-0.62.0.tgz` ← **THE CURRENT PIN**
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**
+>
+> The tarball `npm publish` produced from `olumi-schemas` `main`
+> **`c9aee4354026423e195e79cabc5a2736dce55783`** (the schemas #70 merge, Shared Data row 1; the
+> registry's own `gitHead` binds that commit), 2026-09-29. Registry download:
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.62.0/da4eee3a6d742db8dcf8ccfbebe80b1725b8f426`.
+>
+> **676,159 bytes.** Verified against the registry's published metadata on 29 Sep:
+>
+> ```
+> npm shasum (sha1)  da4eee3a6d742db8dcf8ccfbebe80b1725b8f426   ← matches
+> integrity (sha512) sha512-lVMjnLbmUANLIjsMWsrCl2Iavtq0C6cqIMOELM8sA7fPoFvoVkHq367hK9KOfynPqWARG5AmgtKO3NoWFrH+3g==   ← matches
+> sha256             adf2a98cd8736a696561ddff6f5991e5374e619491839cb5f12e9c744deb58fd
+> ```
+>
+> `pnpm install` wrote the same sha512 into `pnpm-lock.yaml`.
+>
+> **What 0.62.0 adds:** the canonical graph-hash projection **v3** (`observed_state`
+> source / unit / raw_value / std; node scale_frame / nonlinear_identity / analysis_participation;
+> edge `provenance_fields` source / magnitude + `provenance_natural_effect_fields` amount_unit);
+> `factor_value_edit.intent` (`set | confirm_current`, optional; ABSENT is conditional on the
+> persisted value); `ObservedStateSchema.reviewed_by_user` (a strict discriminated union).
+> Regenerated `contracts/orchestrator-turn-payload.schema.json` adds `intent` and `reviewed_by_user`.
+> **This pin DOES move every analysis hash once:** `graph-hash.ts` now imports the vocabulary
+> (no hand list), so every stored Run reads stale once and a rerun re-binds.
+
+### `talchain-schemas-0.61.0.tgz` (historical — no longer vendored as of 0.62.0)
 
 > **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**
 >

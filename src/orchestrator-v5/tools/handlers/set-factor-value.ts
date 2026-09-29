@@ -627,6 +627,7 @@ export function createSetFactorValueHandler(): HandlerFn {
     // Every byte of who-authored-what stays; the act is recorded as `reviewed_by_user` (not a hash input). A verified
     // panel apply or an approved adoption carries its own provenance and keeps today's write.
     const reviewOnly =
+      invocation.unchangedValueIsReview !== false &&
       appliedProvenance === undefined &&
       adoptedSource === undefined &&
       targetNode.observed_state !== undefined &&
