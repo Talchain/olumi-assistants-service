@@ -129,8 +129,9 @@ export function foldedCarrierLines(f: FoldedCarrier): string[] {
   const [a, b] = money(f.parts[1]) && !money(f.parts[0]) ? [f.parts[1], f.parts[0]] : f.parts;
   const sum = `${figure(a.value, a.unit)} × ${figure(b.value, b.unit)} = ${figure(a.value * b.value, f.unit)}, close to your ${figure(f.stated, f.unit)}`;
   return [
-    // FORK (iii): the reading is Olumi's until the user confirms it (the #2296 card); never "is worked out as".
-    `‘${f.carrier}’ accounts for your ${f.goal} (${sum}). Olumi reads ${f.goal} as ${a.label} × ${b.label}; it is used once you confirm it.`,
+    // FORK (iii), AIQ 5891608873: the reading is Olumi's until the user confirms it; never "is worked out as". No confirm
+    // clause here: construction cannot know the card is offered, and an ask with no way to answer it over-claims.
+    `‘${f.carrier}’ accounts for your ${f.goal} (${sum}). Olumi reads ${f.goal} as ${a.label} × ${b.label}, but that hasn't been confirmed.`,
     ...f.dropped.map((d) => `‘${d}’ was Olumi's addition, and your figures don't need it (${sum}), so it is left out.`),
   ];
 }

@@ -17,6 +17,7 @@ import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } f
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { withGoalProductUnconfirmed, withReconcilingProductIdentity } from '../reconciling-product.js';
+import { proposeProductIdentity } from '../identity-proposal.js';
 
 const GOAL = 'monthly_recurring_revenue';
 
@@ -252,6 +253,25 @@ describe('a goal whose stated level reconciles with its two stated parts is decl
       vi.doUnmock('../reconciling-product.js');
       vi.resetModules();
     }
+  });
+
+  // ⛔ AIQ 5891608873 (FORK (iii)): NO SILENT PATH. Whatever the brief's wording, even one that binds the price to the item,
+  // the goal's product is Olumi's reading (stated_in_brief: false) and the #2296 card is offered on the REGISTERED graph.
+  it.each([
+    ['N — Paul\'s plain brief + the drafter\'s "GBP per subscriber per month"', PAUL],
+    ['synonym — "£49 per user" beside "1,500 subscribers"', 'Should we raise our Pro plan price from £49 to £59 per user a month? We have 1,500 paying subscribers and £75k MRR. We want MRR above £85k within a year.'],
+    ['far binding — "each pay that" in another sentence', 'Should we raise our Pro plan price from £49 to £59 a month? Subscribers each pay that. We have 1,500 paying subscribers and £75k MRR. We want MRR above £85k within a year.'],
+    ['P — the brief binds the price to the item ("£49 per subscriber a month")', 'Should we raise our Pro plan price from £49 to £59 per subscriber a month? We have 1,500 paying subscribers and £75k MRR. We want MRR above £85k within a year.'],
+  ])('%s → Olumi\'s reading on the goal, and the card', async (_why, brief) => {
+    const { goal, graph } = await registeredGoal(paulDraft(), brief);
+    expect(goal.nonlinear_identity).toStrictEqual(PRODUCT);
+    expect(proposeProductIdentity(graph)?.factor_ids).toStrictEqual(['pro_plan_price', 'paying_subscribers']);
+  });
+  it('drafter-declared (explicit) on the plain brief → demoted, and the card on the registered graph', async () => {
+    const declared = [{ outcome: 'Monthly recurring revenue', operation: 'product', factors: ['Pro plan price', 'Paying subscribers'], provenance: 'explicit' }];
+    const { goal, graph } = await registeredGoal(paulDraft({ identities: declared }), PAUL);
+    expect(goal.nonlinear_identity).toStrictEqual(PRODUCT);
+    expect(proposeProductIdentity(graph)).not.toBeNull();
   });
 
   it('CONTROL: a third parent into the goal → no identity (the product would not be the whole goal)', async () => {
