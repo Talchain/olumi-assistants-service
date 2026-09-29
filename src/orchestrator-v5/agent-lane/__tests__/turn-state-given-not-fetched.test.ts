@@ -365,7 +365,7 @@ describe('the kept run is compacted by its own permission, and marked stale once
   /** R&C's pinned KEY set, verbatim; `decision_sensitivity` is the one matching key AIQ keeps. */
   const RC_KEYS = /confidence|near_tie|goal_fit|separation|alternative_winner|win_probabilit|sensitivity|evpi|enrichment/i;
   /** AIQ's named withheld drops the pinned set does not match: outcome means, goal probabilities, conditional winners, flips. */
-  const AIQ_KEYS = ['mean', 'gap', 'probability_of_goal', 'probability_of_joint_goal', 'conditional_winners', 'flip_thresholds', 'run_delta'];
+  const AIQ_KEYS = ['mean', 'gap', 'probability_of_goal', 'probability_of_joint_goal', 'all_limits_hold_probability', 'conditional_winners', 'flip_thresholds', 'run_delta'];
   const reRankingKeys = (v: unknown) => keysOf(v).filter((k) => (RC_KEYS.test(k) && k !== 'decision_sensitivity') || AIQ_KEYS.includes(k));
   const namesConstraintProbability = (k: string) => /constraint/i.test(k) && /probabilit/i.test(k);
   const RAW = RUN_RESULT.result as Record<string, any>;
@@ -385,8 +385,11 @@ describe('the kept run is compacted by its own permission, and marked stale once
     expect(RUN_RESULT.claim_permissions.leader_may_be_named, 'control: the served A02 run withheld its leader').toBe(false);
     // CONTRAST: the probe sees each family in the run as served, so an empty list below is not a blind probe.
     const raw = reRankingKeys(RUN_RESULT);
-    for (const k of ['enrichment', 'win_probabilities', 'win_probability', 'confidence', 'near_tie', 'gap', 'goal_fit', 'alternative_winner_label',
-      'mean', 'probability_of_goal', 'probability_of_joint_goal', 'conditional_winners', 'flip_thresholds']) expect(raw, `control: the served run carries ${k}`).toContain(k);
+    // The run AS THE AGENT GETS IT (`analysisResultForAgent`): the limits-only joint is `all_limits_hold_probability`, and the
+    // brief's `goal_fit` (the leader's joint) is already gone (DL 5888327580) — so those two are not families to probe for.
+    for (const k of ['enrichment', 'win_probabilities', 'win_probability', 'confidence', 'near_tie', 'gap', 'alternative_winner_label',
+      'mean', 'probability_of_goal', 'all_limits_hold_probability', 'conditional_winners', 'flip_thresholds']) expect(raw, `control: the served run carries ${k}`).toContain(k);
+    for (const k of ['goal_fit', 'probability_of_joint_goal']) expect(raw, `the Agent never gets ${k}`).not.toContain(k);
     expect(reRankingKeys(viaRunChip(RUN_RESULT)), 'control: the fast path’s readback carries the leader claim’s separation').toContain('separation');
     for (const [label, run] of [['the Agent’s own call', RUN_RESULT], ['the Run chip’s fast path', viaRunChip(RUN_RESULT)]] as const) {
       const kept = keptRun(prune(afterRun(run), SERVED_READBACK));
