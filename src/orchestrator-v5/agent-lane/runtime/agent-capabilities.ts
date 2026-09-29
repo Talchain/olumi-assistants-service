@@ -146,6 +146,7 @@ import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } f
 
 import { defaultFrameFor, framedObservedState, nonlinearIdentityForAgent, readEvaluatedIdentityNodeIds } from '../admit-model.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../admit-constraint.js';
+import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
@@ -982,6 +983,9 @@ function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'ana
   const goals = g.nodes.filter((n) => n.kind === 'goal').map((n) => {
     const trio = pickGoalThresholdTrio(n as never) as { goal_threshold_raw?: number; goal_threshold_unit?: string };
     const frame = (n as { goal_threshold_frame?: unknown }).goal_threshold_frame;
+    // Row 5 (#72 5881225605): the comparator the user stated for the target, as construction held it
+    // (`goal_direction`). Absent ⇒ unattested, so absent here too — never defaulted, never read off the label.
+    const comparator = readHeldGoalComparator(g.raw, n.id);
     return {
       id: n.id,
       label: n.label,
@@ -990,6 +994,7 @@ function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'ana
           value: trio.goal_threshold_raw,
           ...(trio.goal_threshold_unit === undefined ? {} : { unit: trio.goal_threshold_unit }),
           ...(str(frame) ? { frame } : {}),
+          ...(comparator === null ? {} : { comparator, comparator_in_words: LIMIT_OPERATOR_WORDS[comparator] }),
         },
       }),
     };
