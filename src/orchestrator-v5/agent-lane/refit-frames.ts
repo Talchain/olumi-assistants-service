@@ -37,7 +37,7 @@ export interface FrameRefit {
 }
 export interface FrameRefusal {
   readonly link: string;
-  readonly reason: 'no_frame' | 'levels_set_on_node' | 'new_cut' | 'spread_would_move' | 'bounded_scale';
+  readonly reason: 'no_frame' | 'not_the_goal' | 'levels_set_on_node' | 'new_cut' | 'spread_would_move' | 'bounded_scale';
   /** For `new_cut`: the link that would be cut instead. */
   readonly detail?: string;
 }
@@ -151,6 +151,10 @@ export function refitFramesForStatedEffects(graph: Rec): { readonly graph: Rec; 
     const target = (g.nodes as Rec[]).find((n) => n.id === e.to);
     const Fold = frameOf(target);
     if (target === undefined || Fold === undefined) { refused.push({ link: key(e), reason: 'no_frame' }); continue; }
+    // ⛔ PR Review CR on #2314 @ 72b9daed: only the GOAL's frame is widened. A factor's level with no `std` is sampled by
+    // PLoT with a normal spread (`max(0.1, 0.15·|value|)` of its frame), so widening a factor would move its natural
+    // uncertainty while holding its link size. Paul's journeys need the goal only (MRR); a factor target stays clamped.
+    if (target.kind !== 'goal') { refused.push({ link: key(e), reason: 'not_the_goal' }); continue; }
     const setByOption = (g.nodes as Rec[]).some((n) => n.kind === 'option' && n.interventions !== null && typeof n.interventions === 'object'
       && Object.prototype.hasOwnProperty.call(n.interventions, target.id));
     const namedByLimit = Array.isArray(g.goal_constraints) && g.goal_constraints.some((c: Rec) => c?.node_id === target.id);

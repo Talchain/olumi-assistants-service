@@ -54,12 +54,13 @@ describe('R9 — the served c96 graph: widen MRR\'s frame; nothing else moves', 
   });
 });
 
-// A small graph: a user-stated link X → Y with β 3 on Y's frame 100, Y a factor.
-function small(over: { y?: Rec; extraEdges?: Rec[]; extraNodes?: Rec[]; constraints?: Rec[] } = {}): Rec {
+// A small graph: a user-stated link X → Y with β 3 on Y's frame 100. Y is the GOAL (#2314: only a goal's frame is widened);
+// `yKind: 'factor'` is PR Review's factor-target case (CR @ 72b9daed).
+function small(over: { y?: Rec; yKind?: 'goal' | 'factor'; extraEdges?: Rec[]; extraNodes?: Rec[]; constraints?: Rec[] } = {}): Rec {
   return {
     nodes: [
       { id: 'x', kind: 'factor', label: 'X', observed_state: { value: 0.5, raw_value: 50, cap: 100, source: 'brief_extraction' } },
-      { id: 'y', kind: 'factor', label: 'Y', observed_state: { value: 0.4, raw_value: 40, cap: 100, source: 'brief_extraction' }, ...(over.y ?? {}) },
+      { id: 'y', kind: over.yKind ?? 'goal', label: 'Y', observed_state: { value: 0.4, raw_value: 40, cap: 100, source: 'brief_extraction' }, ...(over.y ?? {}) },
       ...(over.extraNodes ?? []),
     ],
     edges: [
@@ -76,8 +77,11 @@ describe('refusals: the clamp and #422\'s withhold stay, and the graph is return
     ['a limit NAMES the target', small({ constraints: [{ node_id: 'y', operator: '<=', value: 60 }] }), 'levels_set_on_node'],
     ['widening the target would cut its OUT-link (Y → Z 0.3 × 5 = 1.5)', small({ extraNodes: [{ id: 'z', kind: 'factor', label: 'Z', observed_state: { value: 0.5, raw_value: 5, cap: 10, source: 'brief_extraction' } }],
       extraEdges: [{ from: 'y', to: 'z', strength: { mean: 0.3, std: 0.1 }, provenance: { source: 'cee_hypothesis' } }] }), 'new_cut'],
-    ['an Olumi-estimated target whose sampled spread is floor-bound (0.15 × 0.4 < 0.1) would move', small({ y: { observed_state: { value: 0.4, raw_value: 40, cap: 100, source: 'cee_inference' } } }), 'spread_would_move'],
-    ['a real std that the move would carry below PLoT\'s 1e-4 floor', small({ y: { observed_state: { value: 0.4, raw_value: 40, cap: 100, source: 'cee_inference', std: 3e-4 } } }), 'spread_would_move'],
+    // ⛔ PR Review CR @ 72b9daed: a FACTOR target is never widened. PLoT samples a no-std factor with a normal spread
+    // (max(0.1, 0.15·|value|) of its frame), so its natural uncertainty would move (10 → 50) while its link size is held.
+    ['⭐ PR Review\'s factor target: Y a factor at 40 (brief_extraction, no std), β 3', small({ yKind: 'factor' }), 'not_the_goal'],
+    ['a factor target with an Olumi estimate', small({ yKind: 'factor', y: { observed_state: { value: 0.4, raw_value: 40, cap: 100, source: 'cee_inference' } } }), 'not_the_goal'],
+    ['a factor target with a real std', small({ yKind: 'factor', y: { observed_state: { value: 0.4, raw_value: 40, cap: 100, source: 'cee_inference', std: 3e-4 } } }), 'not_the_goal'],
   ])('%s', (_why, g, reason) => {
     const r = refitFramesForStatedEffects(g);
     expect(r.refits).toEqual([]);
@@ -91,8 +95,8 @@ describe('refusals: the clamp and #422\'s withhold stay, and the graph is return
   });
 });
 
-describe('accepted on a factor target, and the no-op', () => {
-  it('a user-stated target (sent exact on any frame) widens 100 → 500; the oracle is empty; a real std is carried', () => {
+describe('accepted on the goal, and the no-op', () => {
+  it('the goal target widens 100 → 500; the oracle is empty; a real std is carried', () => {
     const before = small({ y: { observed_state: { value: 0.4, raw_value: 40, cap: 100, source: 'brief_extraction', std: 0.2 } } });
     const r = refitFramesForStatedEffects(before);
     expect(r.refits).toEqual([{ node: 'y', from: 100, to: 500, for_link: 'x→y' }]);
