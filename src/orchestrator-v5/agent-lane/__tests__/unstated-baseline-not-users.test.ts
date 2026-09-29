@@ -111,3 +111,80 @@ describe('a baseline is the user\'s only when the brief states it', () => {
     f.nodes.forEach((n, i) => expect(out[i], n.id).toBe(n));
   });
 });
+
+/**
+ * ⛔ AIQ 5881132458 (Row 7 over-claim): the words / "zero" fallback grounded ANY cardinal phrase of the same value and ANY
+ * "zero", with no unit and no noun check. So an unstated Olumi estimate became the user's figure whenever the brief
+ * wrote the same number about something else. A number in words now grounds a PLAIN count only ("two" is never 2% or
+ * £2), and the words or "zero" ground a factor only when the words right after them name it.
+ */
+describe('a number in words, or "zero", grounds only the factor it counts', () => {
+  const factor = (label: string, raw: number, unit: string) => ({
+    id: label.toLowerCase().replace(/\W+/g, '_'), kind: 'factor', label,
+    observed_state: { value: raw, raw_value: raw, unit, source: 'brief_extraction' },
+  });
+  const sourceOf = (brief: string, node: ReturnType<typeof factor>): unknown =>
+    (withdrawUnstatedBaselineStamps([node], brief)[0]!.observed_state as Record<string, unknown>).source;
+
+  it('RED (AIQ row 1): "hire three engineers" does not state an unstated 3% monthly churn', () => {
+    expect(sourceOf('Should we hire three engineers to fix onboarding?', factor('Monthly churn', 3, '%'))).toBe('cee_inference');
+  });
+
+  it('RED (AIQ row 2): "zero downtime" does not state an unstated 0 enterprise customers', () => {
+    expect(sourceOf('We want to switch providers with zero downtime.', factor('Enterprise customers', 0, 'customers'))).toBe('cee_inference');
+  });
+
+  it('RED: "three engineers" does not state 3 enterprise customers either: a count of something else', () => {
+    expect(sourceOf('Should we hire three engineers to win more deals?', factor('Enterprise customers', 3, 'customers'))).toBe('cee_inference');
+  });
+
+  // PR Review 5881529306: the window must stop at the counted noun phrase — "for enterprise customers" is another quantity.
+  it('RED: "three engineers for enterprise customers" does not state 3 enterprise customers', () => {
+    expect(sourceOf('We hire three engineers for enterprise customers.', factor('Enterprise customers', 3, 'customers'))).toBe('cee_inference');
+  });
+
+  it('RED: "zero downtime for enterprise customers" does not state 0 enterprise customers', () => {
+    expect(sourceOf('We promise zero downtime for enterprise customers.', factor('Enterprise customers', 0, 'customers'))).toBe('cee_inference');
+  });
+
+  // PR Review 5881612484 / AIQ 5881608887: nor across a VERB into another quantity.
+  it('RED: "zero downtime affects enterprise customers" does not state 0 enterprise customers', () => {
+    expect(sourceOf('Zero downtime affects enterprise customers most.', factor('Enterprise customers', 0, 'customers'))).toBe('cee_inference');
+  });
+
+  it('RED: "three engineers support enterprise customers" does not state 3 enterprise customers', () => {
+    expect(sourceOf('Three engineers support enterprise customers.', factor('Enterprise customers', 3, 'customers'))).toBe('cee_inference');
+  });
+
+  // PR Review 5881730098: nor inside a COMPOUND noun, where the counted thing is the head, not the first word.
+  it('RED: "zero customer complaints" does not state 0 enterprise customers', () => {
+    expect(sourceOf('We logged zero customer complaints last quarter.', factor('Enterprise customers', 0, 'customers'))).toBe('cee_inference');
+  });
+
+  it('RED: "three customer support engineers" does not state 3 enterprise customers', () => {
+    expect(sourceOf('We have three customer support engineers.', factor('Enterprise customers', 3, 'customers'))).toBe('cee_inference');
+  });
+
+  it('KNOWN UNDER-CLAIM (safe direction): a word inside the window that names something else withholds, even a verb', () => {
+    expect(sourceOf('Three developers joined us.', factor('Developers hired', 3, 'hires'))).toBe('cee_inference');
+  });
+
+  it('CONTROL: "three enterprise customers" and "zero enterprise customers" state them', () => {
+    expect(sourceOf('We have three enterprise customers today.', factor('Enterprise customers', 3, 'customers'))).toBe('brief_extraction');
+    expect(sourceOf('We have zero enterprise customers today.', factor('Enterprise customers', 0, 'customers'))).toBe('brief_extraction');
+    // AIQ 5881553849: an adjective inside the phrase does not end it.
+    expect(sourceOf('We have three new enterprise customers.', factor('Enterprise customers', 3, 'customers'))).toBe('brief_extraction');
+  });
+
+  it('CONTROL: "zero churn" states a 0% monthly churn (zero is zero in any unit, and it names the factor)', () => {
+    expect(sourceOf('We have zero churn today and want to keep it that way.', factor('Monthly churn', 0, '%'))).toBe('brief_extraction');
+  });
+
+  it('CONTROL: the UNIT can name the factor: "four account executives" states 4 on "Sales headcount" in account executives', () => {
+    expect(sourceOf('We have four account executives today.', factor('Sales headcount', 4, 'account executives'))).toBe('brief_extraction');
+  });
+
+  it('KNOWN UNDER-CLAIM (safe direction): an abbreviation is not read — "four account executives" does not name "AEs"', () => {
+    expect(sourceOf('We have four account executives today.', factor('Sales headcount', 4, 'AEs'))).toBe('cee_inference');
+  });
+});
