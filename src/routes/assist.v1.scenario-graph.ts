@@ -523,6 +523,7 @@ export default async function route(app: FastifyInstance) {
         scenarioId,
         graph: graphPresent ? graph : null,
         requestId,
+        briefText,
       });
 
       return reply.code(200).send({

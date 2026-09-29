@@ -33,6 +33,15 @@ const IDENTITY_UNVERIFIED_DISCLOSURE =
   ' The saved model does not establish which options correspond to every option in your brief.' +
   ' No option can be put forward from this result until that correspondence is confirmed.';
 
+/**
+ * AIQ 5887822471: a listed phrase no option binds is either a parser fragment or an option the drafter dropped, and the
+ * saved model cannot tell which — so it is ASKED about by name, never claimed missing. The one clearable question.
+ */
+const UNBOUND_LEAD_IN = ' Your brief also mentions ';
+const UNBOUND_QUESTION_SINGULAR = '. Is that one of the options you want compared?';
+const UNBOUND_QUESTION_PLURAL = '. Are those among the options you want compared?';
+const UNBOUND_CONSEQUENCE = ' No option can be put forward from this result until that is confirmed.';
+
 const LEAD_IN = ' Your brief lists an option that is not included in this comparison';
 const LEAD_IN_PLURAL = ' Your brief lists options that are not included in this comparison';
 
@@ -51,6 +60,20 @@ function joinLabels(labels: readonly string[]): string {
   if (labels.length === 1) return labels[0] as string;
   const head = labels.slice(0, -1).join(', ');
   return `${head} and ${labels[labels.length - 1] as string}`;
+}
+
+function composeUnboundQuestion(named: readonly string[]): string {
+  return UNBOUND_LEAD_IN + joinLabels(named.map((l) => `“${l}”`))
+    + (named.length === 1 ? UNBOUND_QUESTION_SINGULAR : UNBOUND_QUESTION_PLURAL) + UNBOUND_CONSEQUENCE;
+}
+
+/** The brief's own words, through the shared label sanitiser and the length cap; unnameable ones are dropped. */
+function nameableLabels(options: readonly EnumeratedOption[]): string[] {
+  return options
+    .map((option: EnumeratedOption) => sanitiseLabel(option.text, ''))
+    .filter((label): label is string => label !== null && label.length > 0)
+    .map((label) => label.trim())
+    .filter((label) => label.length > 0 && label.length <= INTAKE_OPTION_LABEL_MAX_CHARS);
 }
 
 function composeDisclosure(count: number, named: readonly string[]): string {
@@ -85,7 +108,18 @@ function composeDisclosure(count: number, named: readonly string[]): string {
 export function buildIntakeOptionDisclosure(
   reconciliation: IntakeOptionReconciliation,
 ): string {
-  if (reconciliation.state === 'identity_unverified') return IDENTITY_UNVERIFIED_DISCLOSURE;
+  if (reconciliation.state === 'identity_unverified') {
+    // Named only when the unbound listed phrases are the WHOLE cause (no untyped analysed option is unbound too), every
+    // one of them can be named, and there are few enough to read; anything else keeps the general sentence.
+    const unbound = reconciliation.unbound ?? [];
+    const named = nameableLabels(unbound);
+    if ((reconciliation.unbound_option_ids ?? []).length > 0 || unbound.length === 0
+      || unbound.length > MAX_NAMED_OPTIONS || named.length !== unbound.length) {
+      return IDENTITY_UNVERIFIED_DISCLOSURE;
+    }
+    const question = composeUnboundQuestion(named);
+    return survivesEgress(question) ? question : IDENTITY_UNVERIFIED_DISCLOSURE;
+  }
   if (reconciliation.state !== 'options_missing') return '';
   const missing = reconciliation.missing;
   // Defensive, not decorative: the producer guarantees this is non-empty on
@@ -93,12 +127,7 @@ export function buildIntakeOptionDisclosure(
   // be exactly the generic hedge the ruling forbids. Silence beats a hedge.
   if (missing.length === 0) return '';
 
-  const named = missing
-    .slice(0, MAX_NAMED_OPTIONS)
-    .map((option: EnumeratedOption) => sanitiseLabel(option.text, ''))
-    .filter((label): label is string => label !== null && label.length > 0)
-    .map((label) => label.trim())
-    .filter((label) => label.length > 0 && label.length <= INTAKE_OPTION_LABEL_MAX_CHARS);
+  const named = nameableLabels(missing.slice(0, MAX_NAMED_OPTIONS));
 
   const labelled = composeDisclosure(missing.length, named);
   if (named.length > 0 && !survivesEgress(labelled)) {
@@ -153,6 +182,9 @@ const JOINED_LABELS = `${LABEL_SLOT}(?:(?:, ${LABEL_SLOT})* and ${LABEL_SLOT})?`
 export const INTAKE_OPTION_DISCLOSURE_RE_SRC =
   '(?:' +
   escapeForRegex(IDENTITY_UNVERIFIED_DISCLOSURE) + '|' +
+  // AIQ 5887822471: the unbound listed phrase(s), asked about by name.
+  `${escapeForRegex(UNBOUND_LEAD_IN)}${JOINED_LABELS}(?:${escapeForRegex(UNBOUND_QUESTION_SINGULAR)}|${escapeForRegex(UNBOUND_QUESTION_PLURAL)})` +
+  escapeForRegex(UNBOUND_CONSEQUENCE) + '|' +
   // Singular: count-only, or naming exactly one label.
   `${escapeForRegex(LEAD_IN)}(?::\\u0020${LABEL_SLOT})?\\.` +
   escapeForRegex(CONSEQUENCE_SINGULAR) +
@@ -175,6 +207,7 @@ export const INTAKE_OPTION_DISCLOSURE_RE_SRC =
  */
 export const INTAKE_OPTION_DISCLOSURE_MAX_CHARS = Math.max(
   IDENTITY_UNVERIFIED_DISCLOSURE.length,
+  composeUnboundQuestion(Array.from({ length: MAX_NAMED_OPTIONS }, () => 'x'.repeat(INTAKE_OPTION_LABEL_MAX_CHARS))).length,
   composeDisclosure(
     999,
     Array.from({ length: MAX_NAMED_OPTIONS }, () => 'x'.repeat(INTAKE_OPTION_LABEL_MAX_CHARS)),
@@ -197,6 +230,8 @@ export const INTAKE_OPTION_DISCLOSURE_MAX_CHARS = Math.max(
 export const INTAKE_DISCLOSURE_SURVIVES_LEADER_VOCABULARY: true = (() => {
   const shapes: readonly string[] = [
     IDENTITY_UNVERIFIED_DISCLOSURE,
+    composeUnboundQuestion(['a new retail concession']),
+    composeUnboundQuestion(Array.from({ length: MAX_NAMED_OPTIONS }, () => 'x'.repeat(INTAKE_OPTION_LABEL_MAX_CHARS))),
     composeDisclosure(1, []),
     composeDisclosure(1, ['a new retail concession']),
     composeDisclosure(2, []),
