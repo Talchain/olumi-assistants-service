@@ -132,7 +132,10 @@ function scoreLayer1(c: Case, a: ArmInput) {
 }
 
 // ── Layer 2 ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-async function realModel(): Promise<{ callModel: CallModel; instructions: string; model: string } | undefined> {
+/** Token usage per model call, keyed by the job that made it (Layer 2 cost accounting). */
+const usageLedger: { input: number; cached: number; output: number; calls: number } = { input: 0, cached: 0, output: 0, calls: 0 };
+
+async function realModel(): Promise<{ callModel: CallModel; instructions: string; model: string; maxOutputTokens: number; effort?: string } | undefined> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) return undefined;
   const [{ AGENT_INSTRUCTIONS }, { budgetFor }] = await Promise.all([
@@ -148,10 +151,14 @@ async function realModel(): Promise<{ callModel: CallModel; instructions: string
     };
     const r = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
     if (!r.ok) throw new Error(`openai_${r.status}: ${(await r.text()).slice(0, 200)}`);
-    const j = (await r.json()) as { output: Record<string, unknown>[]; status?: string };
+    const j = (await r.json()) as { output: Record<string, unknown>[]; status?: string; usage?: { input_tokens?: number; output_tokens?: number; input_tokens_details?: { cached_tokens?: number } } };
+    usageLedger.calls += 1;
+    usageLedger.input += j.usage?.input_tokens ?? 0;
+    usageLedger.cached += j.usage?.input_tokens_details?.cached_tokens ?? 0;
+    usageLedger.output += j.usage?.output_tokens ?? 0;
     return { output: j.output, ...(typeof j.status === 'string' ? { status: j.status } : {}) };
   };
-  return { callModel, instructions: String(AGENT_INSTRUCTIONS), model: budget.model };
+  return { callModel, instructions: String(AGENT_INSTRUCTIONS), model: budget.model, maxOutputTokens: budget.max_output_tokens, ...(budget.reasoning_effort !== undefined ? { effort: budget.reasoning_effort } : {}) };
 }
 
 async function main(): Promise<void> {
@@ -179,6 +186,7 @@ async function main(): Promise<void> {
     }
   }));
 
+  const jobs: (() => Promise<void>)[] = [];
   for (const c of CASES) {
     const scenarioId = `${RUN_TAG}-${c.id}`;
     const g = paulGraph();
@@ -193,34 +201,46 @@ async function main(): Promise<void> {
       const l2: unknown[] = [];
       if (model !== undefined) {
         for (let k = 0; k < N; k += 1) {
-          const caps2 = createAgentCapabilities(dispatchFor(g, c.rev, c.analysisState), new ProposalStore());
-          const history = historyAt(c, arm !== 'A_CONTROL', scenarioId);
-          const packet = issueContextPacket({ scenario_id: scenarioId, authenticated_user_id: USER, graph_revision: c.rev, captured_at_turn: 0, state: st as never }, SECRET);
-          const t0 = performance.now();
-          try {
-            const res = await runAgentTurn({
-              ctx: { scenario_id: scenarioId, authenticated_user_id: USER, request_id: randomUUID(), user_turn_text: c.probe, user_text: [c.probe] } as never,
-              history, message: c.probe, instructions: model.instructions, maxOutputTokens: 4_000,
-              canonicalContext: { packet, expectation: { scenario_id: scenarioId, authenticated_user_id: USER, graph_revision: c.rev, current_turn: 0, binding_secret: SECRET } },
-              ...(a.recall !== undefined ? { supplementaryRecall: a.recall } : {}),
-            }, caps2, model.callModel);
-            const text = res.assistant_text;
-            l2.push({
-              ms: Math.round(performance.now() - t0), text,
-              must_not_hits: (c.expect.replyMustNot ?? []).filter((x) => x.re.test(text)).map((x) => x.id),
-              should_hits: (c.expect.replyShould ?? []).filter((x) => x.re.test(text)).map((x) => x.id),
-              should_total: (c.expect.replyShould ?? []).length,
-              mutated_calls: res.tool_calls.filter((x) => x.mutated).map((x) => x.name),
-              tool_calls: res.tool_calls.map((x) => `${x.name}:${x.ok ? 'ok' : x.refusal ?? 'refused'}`),
-            });
-          } catch (err) {
-            l2.push({ error: String(err).slice(0, 200) });
-          }
+          jobs.push(async () => {
+            const caps2 = createAgentCapabilities(dispatchFor(g, c.rev, c.analysisState), new ProposalStore());
+            const history = historyAt(c, arm !== 'A_CONTROL', scenarioId);
+            const packet = issueContextPacket({ scenario_id: scenarioId, authenticated_user_id: USER, graph_revision: c.rev, captured_at_turn: 0, state: st as never }, SECRET);
+            const t0 = performance.now();
+            try {
+              const res = await runAgentTurn({
+                ctx: { scenario_id: scenarioId, authenticated_user_id: USER, request_id: randomUUID(), user_turn_text: c.probe, user_text: [c.probe] } as never,
+                history, message: c.probe, instructions: model.instructions, maxOutputTokens: model.maxOutputTokens,
+                canonicalContext: { packet, expectation: { scenario_id: scenarioId, authenticated_user_id: USER, graph_revision: c.rev, current_turn: 0, binding_secret: SECRET } },
+                ...(a.recall !== undefined ? { supplementaryRecall: a.recall } : {}),
+              }, caps2, model.callModel);
+              const text = res.assistant_text;
+              l2.push({
+                k, ms: Math.round(performance.now() - t0), text, stopped: res.stopped_reason,
+                must_not_hits: (c.expect.replyMustNot ?? []).filter((x) => x.re.test(text)).map((x) => x.id),
+                should_hits: (c.expect.replyShould ?? []).filter((x) => x.re.test(text)).map((x) => x.id),
+                should_total: (c.expect.replyShould ?? []).length,
+                mutated_calls: res.tool_calls.filter((x) => x.mutated).map((x) => x.name),
+                tool_calls: res.tool_calls.map((x) => `${x.name}:${x.ok ? 'ok' : x.refusal ?? 'refused'}`),
+              });
+            } catch (err) {
+              l2.push({ k, error: String(err).slice(0, 200) });
+            }
+          });
         }
       }
       perArm[arm] = { layer1: l1, ...(a.recallStats ? { recall: a.recallStats } : {}), ...(l2.length > 0 ? { layer2: l2 } : {}) };
     }
     (out.cases as Record<string, unknown>)[c.id] = { title: c.title, klass: c.klass, arms: perArm };
+  }
+
+  // Layer 2: the model runs, AFTER Layer 1 (so recall latencies are measured without contention), 6 at a time.
+  if (jobs.length > 0) {
+    const started = Date.now();
+    let next = 0;
+    await Promise.all(Array.from({ length: 6 }, async () => { while (next < jobs.length) { const j = jobs[next++]!; await j(); } }));
+    out.layer2_wall_ms = Date.now() - started;
+    out.layer2_usage = { ...usageLedger };
+    out.layer2_model = { model: model!.model, effort: model!.effort, max_output_tokens: model!.maxOutputTokens };
   }
 
   // Mem0's own extraction (infer=true) on B, D, E — so a verdict is not reached with its core feature switched off.
