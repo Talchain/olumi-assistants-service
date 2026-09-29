@@ -7,7 +7,7 @@
  * drafter added an "Other-plan MRR" of its own. Rows 2–8, 11: every shape that must NOT fold, each returning the candidate itself.
  */
 import { describe, expect, it, vi } from 'vitest';
-import Ajv from 'ajv';
+import { Ajv } from 'ajv';
 import { foldProductCarrierIntoGoal, foldedCarrierLines } from '../goal-product-carrier.js';
 import { readFileSync } from 'node:fs';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
