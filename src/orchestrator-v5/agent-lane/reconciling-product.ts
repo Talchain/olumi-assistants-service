@@ -47,7 +47,7 @@ const MONEY_WORDS = new Set(['revenue', 'recurring', 'a']);
  * denominator. A second denominator ("GBP per subscriber per seat per month") makes price × subscribers money per seat
  * per month, not the goal's money per month. So it is refused, as is a segment that mixes a period into a denominator.
  */
-function readMoney(unit: unknown, label: string): { code: string; period: Period; per: string[] | null } | null {
+function readMoney(unit: unknown, label: string): { code: string; period: Period; per: string[] | null; mixed?: true } | null {
   if (typeof unit !== 'string') return null;
   const r = readCurrencyUnitWithQualifiers(unit);
   if (r.kind !== 'currency' || r.currencyCode === undefined || (r.multiplier ?? 1) !== 1) return null;
@@ -58,6 +58,23 @@ function readMoney(unit: unknown, label: string): { code: string; period: Period
     else segments[segments.length - 1]!.push(w);
   }
   if (segments.some((s) => s.length === 0) || !segments[0]!.every((w) => isCurrency(w) || isPeriod(w) || MONEY_WORDS.has(w))) return null;
+  // ⛔ AIQ 5891385320 (3): "per subscriber-month" names the count's noun with the period joined on. It composes (£ per
+  // subscriber-month × subscribers IS £/month); the parser just never finished it, so it read as "don't compose" and got
+  // neither a card nor the withhold. Read as the denominator plus its period, marked `mixed`: never a silent mint, the card.
+  let mixed = false;
+  for (const seg of segments.slice(1)) {
+    if (seg.length >= 2 && isPeriod(seg[seg.length - 1]!) && !seg.slice(0, -1).some(isPeriod)) { mixed = true; }
+  }
+  if (mixed) {
+    const parts = segments.slice(1);
+    if (parts.length !== 1 || ws.filter(isPeriod).length !== 1) return null;
+    const seg = parts[0]!;
+    const nouns = seg.slice(0, -1);
+    if (!nouns.every((w) => /^[a-z]+$/.test(w) && !isCurrency(w) && !MONEY_WORDS.has(w))) return null;
+    const period = periodOf([seg[seg.length - 1]!]);
+    if (period === 'both' || period === null) return null;
+    return { code: r.currencyCode, period, per: nouns.map(singular), mixed: true };
+  }
   const denominators = segments.slice(1).filter((s) => !s.every(isPeriod));
   if (denominators.length > 1) return null;
   if (denominators.some((s) => !s.every((w) => /^[a-z]+$/.test(w) && !isPeriod(w) && !isCurrency(w) && !MONEY_WORDS.has(w)))) return null;
@@ -101,6 +118,8 @@ export function unitsCompose(goalUnit: unknown, goalLabel: string, a: { unit: un
     const per = money.per;
     if (per === null) { confirm = { kind: 'confirm', rate: m.label, count: c.label, code: goal.code }; continue; }
     if (per[per.length - 1] !== count[count.length - 1] || !per.every((w) => count.includes(w))) continue;
+    // A per-N-month rate composes but is never the parser's proof (AIQ 5891385320 (3)): the card.
+    if (money.mixed === true) { confirm = { kind: 'confirm', rate: m.label, count: c.label, code: goal.code }; continue; }
     return { kind: 'proof', rate: m.label, count: c.label, code: goal.code };
   }
   return confirm;
@@ -136,13 +155,41 @@ function reconcilingParts(candidate: CandidateModel, brief: string) {
   return { metric, o, parts: parts as [NonNullable<(typeof parts)[number]>, NonNullable<(typeof parts)[number]>], levels };
 }
 
+/**
+ * ⛔ FORK (iii) (R3 5891486222; AIQ 5891286280; DL hold 5891050797): EVERY goal product Olumi derives waits for the user's
+ * Yes. Where the goal's three stated figures reconcile and the units compose (with or without the per-item denominator),
+ * the reading is kept on the goal as Olumi's (`provenance: 'inferred'` → `stated_in_brief: false`). PLoT does not forward
+ * an inferred goal product (its variant (d)), so #416 withholds the goal's chance under its existing reason until the
+ * user presses the #2296 card, whose approval (#2292) makes it `stated_in_brief: true`. The drafter's typed unit never
+ * licenses anything: it only decides whether the units compose.
+ */
 export function withReconcilingProductIdentity(candidate: CandidateModel, brief: string): CandidateModel {
   const r = reconcilingParts(candidate, brief);
   if (r === null) return candidate;
   const c = unitsCompose(candidate.goal.unit, r.metric, r.parts[0], r.parts[1]);
-  if (c.kind !== 'proof') return candidate;
+  if (c.kind === 'no') return candidate;
   return {
     ...candidate,
     identities: [...(candidate.identities ?? []), { outcome: r.metric, operation: 'product', factors: [r.parts[0].label, r.parts[1].label], provenance: 'inferred' }],
   };
+}
+
+/**
+ * ⛔ A PRODUCT THE DRAFTER DECLARES ON THE GOAL IS THE DRAFTER'S READING, NEVER THE USER'S STATEMENT (FORK (iii); R3
+ * served `b5a673a`: a drafter-declared MRR = price × subscribers on Paul's plain brief). Inside the card's own domain (the
+ * goal's two stated parts reconcile within 5% and the units compose), a declared goal product is kept but DEMOTED to
+ * `inferred`, whatever provenance the drafter tagged it with (its tag is its own word), so it waits for the user's Yes
+ * like the mint's. Outside that domain, or already `inferred`, the candidate is returned as it came (the same object).
+ */
+export function withGoalProductUnconfirmed(candidate: CandidateModel, brief: string): CandidateModel {
+  const metric = candidate.goal?.metric;
+  const declared = (candidate.identities ?? []).filter((i) => i.outcome === metric && i.operation === 'product');
+  if (declared.length !== 1 || declared[0]!.provenance === 'inferred') return candidate;
+  const bare: CandidateModel = { ...candidate, identities: (candidate.identities ?? []).filter((i) => i !== declared[0]) };
+  const r = reconcilingParts(bare, brief);
+  if (r === null) return candidate;
+  const factors = new Set(declared[0]!.factors);
+  if (factors.size !== 2 || !r.parts.every((p) => factors.has(p.label))) return candidate;
+  if (unitsCompose(candidate.goal.unit, r.metric, r.parts[0], r.parts[1]).kind === 'no') return candidate;
+  return { ...candidate, identities: (candidate.identities ?? []).map((i) => (i === declared[0] ? { ...i, provenance: 'inferred' } : i)) };
 }

@@ -16,7 +16,7 @@ import { Ajv } from 'ajv';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
-import { withReconcilingProductIdentity } from '../reconciling-product.js';
+import { withGoalProductUnconfirmed, withReconcilingProductIdentity } from '../reconciling-product.js';
 
 const GOAL = 'monthly_recurring_revenue';
 
@@ -136,11 +136,28 @@ describe('a goal whose stated level reconciles with its two stated parts is decl
     expect(withReconcilingProductIdentity(minted, PAUL)).not.toBe(minted);
   });
 
-  it('NO SILENT MINT (AIQ 5886967509): served drafts 3/4 wrote the price as "GBP/month" — no denominator, so a confirmation, not a mint', async () => {
+  it('NO DENOMINATOR ("GBP/month", served 3/4): the reading is still kept, as Olumi\'s, awaiting the user\'s Yes (FORK (iii), R3 5891486222)', async () => {
     const d = paulDraft({ priceUnit: 'GBP/month' });
-    expect(withReconcilingProductIdentity(d, PAUL)).toBe(d);
+    expect(withReconcilingProductIdentity(d, PAUL)).not.toBe(d);
     const { goal } = await registeredGoal(d, PAUL);
-    expect(goal.nonlinear_identity ?? null).toBeNull();
+    expect(goal.nonlinear_identity).toStrictEqual(PRODUCT);
+  });
+
+  // ⛔ FORK (iii): a product the DRAFTER declares on the goal is the drafter's reading, never the user's statement: inside
+  // the card's domain it is kept but demoted to Olumi's (stated_in_brief: false), whatever the drafter tagged it.
+  it('DEMOTED: a drafter-declared EXPLICIT goal product on Paul\'s plain brief → Olumi\'s reading (stated_in_brief: false)', async () => {
+    const declared = [{ outcome: 'Monthly recurring revenue', operation: 'product', factors: ['Pro plan price', 'Paying subscribers'], provenance: 'explicit' }];
+    const { goal } = await registeredGoal(paulDraft({ identities: declared }), PAUL);
+    expect(goal.nonlinear_identity).toStrictEqual(PRODUCT);
+  });
+  it('CONTROL: a drafter-declared explicit product OUTSIDE the domain (18% off) is left as the drafter tagged it', async () => {
+    const declared = [{ outcome: 'Monthly recurring revenue', operation: 'product', factors: ['Pro plan price', 'Paying subscribers'], provenance: 'explicit' }];
+    const d = paulDraft({ identities: declared, goalLevel: 60000 });
+    expect(withGoalProductUnconfirmed(d, PAUL.replace('£75k MRR', '£60k MRR'))).toBe(d);
+  });
+  it('CONTROL: an already-inferred declaration comes back as the very same object', () => {
+    const d = paulDraft({ identities: [{ outcome: 'Monthly recurring revenue', operation: 'product', factors: ['Pro plan price', 'Paying subscribers'], provenance: 'inferred' }] });
+    expect(withGoalProductUnconfirmed(d, PAUL)).toBe(d);
   });
 
   it('SERVED shape (draft 2 at 30ee11b): "£/subscriber/month" × "subscribers" composes → minted', async () => {
@@ -184,7 +201,9 @@ describe('a goal whose stated level reconciles with its two stated parts is decl
     ['GBP per subscriber per month', 'subscribers', 'GBP recurring revenue per month', true],
     ['GBP per subscriber per seat per month', 'subscribers', 'GBP/month', false],
     ['GBP/seat/subscriber/month', 'subscribers', 'GBP/month', false],
-    ['GBP per subscriber-month', 'subscribers', 'GBP/month', false],
+    // AIQ 5891385320 (3): per-N-month composes (£ per subscriber-month × subscribers IS £/month): the card's domain, so the
+    // reading is kept as Olumi's; it was "don't compose" and got neither the card nor the withhold.
+    ['GBP per subscriber-month', 'subscribers', 'GBP/month', true],
     ['GBP per subscriber per month', 'subscriber seats', 'GBP/month', false],
     ['GBP per subscriber per month', 'subscribers', 'GBP per subscriber per month', false],
     ['GBP per subscriber per month per year', 'subscribers', 'GBP/month', false],
@@ -222,7 +241,7 @@ describe('a goal whose stated level reconciles with its two stated parts is decl
     const ENG = 'We have 3 engineers and a £25,000 budget per engineer. MRR is £75,000 and we want MRR above £85k.';
     const on = { declared: (await registeredGoal(declared, PAUL)).graph, engineers: (await registeredGoal(engineers, ENG)).graph, mint: (await registeredGoal(paulDraft(), PAUL)).graph };
     vi.resetModules();
-    vi.doMock('../reconciling-product.js', () => ({ withReconcilingProductIdentity: (c: unknown) => c }));
+    vi.doMock('../reconciling-product.js', () => ({ withReconcilingProductIdentity: (c: unknown) => c, withGoalProductUnconfirmed: (c: unknown) => c }));
     try {
       const off = (await import('../runtime/build-model.js')).buildModelFromBrief;
       expect((await registeredGoal(declared, PAUL, off)).graph).toStrictEqual(on.declared);

@@ -50,7 +50,7 @@ import {
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js';
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
-import { withReconcilingProductIdentity } from '../reconciling-product.js';
+import { withGoalProductUnconfirmed, withReconcilingProductIdentity } from '../reconciling-product.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
 import { figureTheUserWrote, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
@@ -1229,7 +1229,10 @@ export async function buildModelFromBrief(
   // ⛔ A goal whose stated level is the product of its two stated parts is declared one (R3 #72 5886596030).
   // #2286's mint on the goal's two parts, or (when the drafter put the product on a carrier that is the goal's only parent)
   // the carrier folded into the goal under the SAME proof (`goal-product-carrier.ts`, MG #72 5888469185 class 1).
-  const mintOrFold = (c: CandidateModel): { model: CandidateModel; folded: FoldedCarrier | null } => {
+  const mintOrFold = (c0: CandidateModel): { model: CandidateModel; folded: FoldedCarrier | null } => {
+    // FORK (iii): a drafter-declared goal product is the drafter's reading, so it is demoted to Olumi's first and waits
+    // for the user's Yes like the mint's (the same domain the mint and the #2296 card read).
+    const c = withGoalProductUnconfirmed(c0, brief);
     const minted = withReconcilingProductIdentity(c, brief);
     return minted !== c ? { model: minted, folded: null } : foldProductCarrierIntoGoal(c, brief);
   };

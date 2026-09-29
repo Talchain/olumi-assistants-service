@@ -79,7 +79,7 @@ describe('R3\'s served run 2 (Paul\'s brief): "Pro plan MRR" is the goal\'s only
     const into = (g.edges as Rec[]).filter((e) => e.to === goal.id).map((e) => e.from).sort();
     expect(into).toEqual(['pro_paying_subscribers', 'pro_plan_price']);
     // Said where the USER sees it (AIQ 5888943993 (1)(c)): the build's open questions, not only the Agent's ledger.
-    expect(r.open_questions).toContain('‘Pro plan MRR’ accounts for your MRR (£49 × 1,500 = £73,500, close to your £75,000), so MRR is worked out as Pro plan price × Pro paying subscribers.');
+    expect(r.open_questions).toContain('‘Pro plan MRR’ accounts for your MRR (£49 × 1,500 = £73,500, close to your £75,000). Olumi reads MRR as Pro plan price × Pro paying subscribers; it is used once you confirm it.');
   });
 });
 
@@ -90,7 +90,7 @@ describe('PR Review on 5b980ff7: the drafter lists the operands the other way ro
     const { r, g } = await build(c);
     expect(r.ok, JSON.stringify(r).slice(0, 300)).toBe(true);
     expect((g.nodes as Rec[]).find((n) => n.kind === 'goal')!.nonlinear_identity).toMatchObject({ operation: 'product' });
-    expect(r.open_questions).toContain('‘Pro plan MRR’ accounts for your MRR (£49 × 1,500 = £73,500, close to your £75,000), so MRR is worked out as Pro plan price × Pro paying subscribers.');
+    expect(r.open_questions).toContain('‘Pro plan MRR’ accounts for your MRR (£49 × 1,500 = £73,500, close to your £75,000). Olumi reads MRR as Pro plan price × Pro paying subscribers; it is used once you confirm it.');
     expect((r.open_questions as string[]).join(' ')).not.toMatch(/£1,500 × 49/);
   });
   it('1r (class 2, a REAL live draft with its factors reversed) — the dropped-parent line reads "£49 × 1,500" too', async () => {
@@ -160,7 +160,7 @@ describe('what must NOT fold — each returns the very same candidate', () => {
   it('the said lines name the user\'s own arithmetic, in AI Quality\'s words', () => {
     expect(foldedCarrierLines({ carrier: 'Pro plan MRR', goal: 'MRR', dropped: ['Other-plan MRR'], parts: [{ label: 'price', value: 49, unit: '£/subscriber/month' }, { label: 'subscribers', value: 1500, unit: 'subscribers' }], stated: 75000, unit: '£/month' }))
       .toEqual([
-        '‘Pro plan MRR’ accounts for your MRR (£49 × 1,500 = £73,500, close to your £75,000), so MRR is worked out as price × subscribers.',
+        '‘Pro plan MRR’ accounts for your MRR (£49 × 1,500 = £73,500, close to your £75,000). Olumi reads MRR as price × subscribers; it is used once you confirm it.',
         '‘Other-plan MRR’ was Olumi\'s addition, and your figures don\'t need it (£49 × 1,500 = £73,500, close to your £75,000), so it is left out.',
       ]);
   });
