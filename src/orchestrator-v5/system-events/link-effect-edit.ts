@@ -150,7 +150,9 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   // the link runs the other way is correcting Olumi's direction — that is the reversal door (`propose_link_strength`
   // with the user's direction words), never a side effect of sizing. `sizeLink`'s own check compares the figure with
   // itself, so this one is the guard.
-  const direction = effect.amount < 0 ? 'negative' : 'positive';
+  // The link's direction is the SIGNED SLOPE (amount ÷ per_source_change; PR Review 5883720887): "lowering price by £1
+  // gains 50" (+50 per −1) runs the same way as "raising it by £1 loses 50" (−50 per +1).
+  const direction = Math.sign(effect.amount) * Math.sign(effect.per_source_change) < 0 ? 'negative' : 'positive';
   const storedMean = isRec(edge.strength) && finite(edge.strength.mean) ? edge.strength.mean : 0;
   const storedDirection = edge.effect_direction === 'positive' || edge.effect_direction === 'negative' ? edge.effect_direction
     : storedMean < 0 ? 'negative' : storedMean > 0 ? 'positive' : null;

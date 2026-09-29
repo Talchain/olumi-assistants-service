@@ -198,6 +198,24 @@ describe('link effect writer — refuses what it cannot do exactly (fail closed,
     refused(params({ effect: { ...STATED, amount: 50 } }, g), 'sign_conflict');
   });
 
+  // PR Review 5883720887: the direction is the SIGNED SLOPE (amount ÷ per_source_change), never the amount's sign alone.
+  it('a NEGATIVE source change in the same direction is sized, not refused ("lowering price by £1 gains 50 subscribers")', () => {
+    const r = applyLinkEffectEdit(params({ effect: { ...STATED, amount: 50, per_source_change: -1 } }));
+    expect(r.kind, JSON.stringify(r)).toBe('mutated');
+    if (r.kind !== 'mutated') return;
+    const e = edgeOf(r.mutatedGraph);
+    expect(e.strength.mean).toBeCloseTo(convertLinkEffect(50, -1, 10000, 100)!, 12);
+    expect(e.strength.mean).toBeLessThan(0);
+    expect(e.effect_direction).toBe('negative');
+    // The user's own words are kept: +50 per −£1.
+    expect(e.provenance.natural_effect.per_source_change).toBe(-1);
+    expect(e.provenance.natural_effect.amount).toBe(50);
+  });
+
+  it('a TRUE reversal with a negative source change is still refused ("lowering price by £1 loses 50")', () => {
+    refused(params({ effect: { ...STATED, amount: -50, per_source_change: -1 } }), 'sign_conflict');
+  });
+
   it('quote_invalid: the approval must carry the user\'s own words (1..400 chars)', () => {
     refused(params({ quote: '' }), 'quote_invalid');
     refused(params({ quote: 'x'.repeat(401) }), 'quote_invalid');
