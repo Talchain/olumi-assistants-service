@@ -24,6 +24,12 @@ import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../sy
 type Json = Record<string, any>;
 const FX = JSON.parse(readFileSync(new URL('./fixtures/served-paul-mrr-ed49d44.json', import.meta.url), 'utf8')) as { runs: { run: number; graph: Json }[] };
 const served = (run: number): Json => structuredClone(FX.runs.find((r) => r.run === run)!.graph);
+/** Run 1's model with Olumi's product CONFIRMED by the user (what #2292's Yes writes): nothing left to confirm. */
+const confirmed = (i: number): Json => {
+  const g = served(i);
+  (g.nodes as Json[]).find((n) => n.id === 'mrr')!.nonlinear_identity.stated_in_brief = true;
+  return g;
+};
 const hashOf = (g: Json): string => computeAnalysisAffectingGraphHash(g as never) ?? '';
 const ctxSaying = (user_text: string) => ({ scenario_id: '550e8400-e29b-41d4-a716-4466554400c9', authenticated_user_id: null, request_id: 'r', user_text });
 const ctxPressing = (proposalId: string, words: string) => ({ ...ctxSaying(words), typed_approval_of: proposalId, typed_approval_words: words });
@@ -67,18 +73,19 @@ function world(start: Json, scriptedRefusal?: string) {
 }
 
 describe('PRECONDITIONS — the served bytes and R3\'s card', () => {
-  it('run 0 has a card; run 1 (already minted) has none', () => {
+  it('run 0 has a card; run 1 (Olumi\'s inferred product) has the SAME card (fork (iii)); once confirmed, none', () => {
     expect(proposeProductIdentity(served(0))?.words).toMatch(/^Is “.+” your “.+” × “.+”\? £49 × 1,500 = £73,500, close to your £75,000\. If yes, .+and you can run the analysis again\.$/);
-    expect(proposeProductIdentity(served(1))).toBeNull();
+    expect(proposeProductIdentity(served(1))?.words).toBe(proposeProductIdentity(served(0))?.words);
+    expect(proposeProductIdentity(confirmed(1))).toBeNull();
   });
 });
 
 describe('the issue point: a Run offers the card once per revision', () => {
-  it('a Run on run 0\'s model tells the Agent a reading is waiting; on run 1\'s model it says nothing', async () => {
+  it('a Run on run 0\'s model tells the Agent a reading is waiting; on a CONFIRMED model it says nothing', async () => {
     const r0 = await world(served(0)).caps.runAnalysis(ctxSaying('Run it'), { reason: 'Run it.' }) as Json;
     expect(r0.identity_card).toEqual(expect.objectContaining({ available: true }));
     expect(String(r0.identity_card.note)).toMatch(/propose_identity/);
-    const r1 = await world(served(1)).caps.runAnalysis(ctxSaying('Run it'), { reason: 'Run it.' }) as Json;
+    const r1 = await world(confirmed(1)).caps.runAnalysis(ctxSaying('Run it'), { reason: 'Run it.' }) as Json;
     expect(r1).not.toHaveProperty('identity_card');
   });
 
@@ -109,7 +116,7 @@ describe('propose_identity: R3\'s words verbatim, on a button that shows them', 
   });
 
   it('a model with no reading to confirm offers nothing', async () => {
-    const r = await world(served(1)).caps.proposeIdentity!(ctxSaying('x')) as Json;
+    const r = await world(confirmed(1)).caps.proposeIdentity!(ctxSaying('x')) as Json;
     expect(r).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'no_reading_to_confirm' }));
   });
 
@@ -139,6 +146,16 @@ describe('"Yes" on the card: one write through the real door, then nothing runs'
     expect(w.s.graph.nodes.find((n: Json) => n.id === 'mrr').nonlinear_identity)
       .toEqual({ operation: 'product', factor_ids: ['pro_plan_price', 'paying_subscribers'], stated_in_brief: true });
     expect(String(out.follow_up)).toMatch(/run the analysis again/);
+  });
+
+  it('a second press of the same card writes nothing more (one commit)', async () => {
+    const w = world(served(0));
+    const r = await w.caps.proposeIdentity!(ctxSaying('x')) as Json;
+    const chip = cardFor(w.store, r)[0]!;
+    await w.caps.authoriseChange(ctxPressing(String(r.proposal_id), chip.message!), { proposal_id: String(r.proposal_id) });
+    const again = await w.caps.authoriseChange(ctxPressing(String(r.proposal_id), chip.message!), { proposal_id: String(r.proposal_id) }) as Json;
+    expect(again.mutated).not.toBe(true);
+    expect(w.s.writes).toBe(1);
   });
 
   it('an approval runs nothing: a Run in the same request after the Yes is not executed', async () => {
