@@ -22,6 +22,7 @@
  */
 import { RECONCILIATION_TOLERANCE, readMoneyTotal, unitsCompose } from './reconciling-product.js';
 import { sayFigure } from './say-figure.js';
+import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 
 export interface IdentityProposal {
@@ -54,16 +55,19 @@ function usersLevel(node: Rec): { value: number; unit: string } | null {
 }
 
 /**
- * A node's stored figure and whose it is, or null when it holds none. `value` is the figure only where it reads as money
- * in the GOAL'S OWN currency AND period (`readMoneyTotal`); otherwise null, and the card neither says it nor sums it.
- * ⛔ PR Review 5894085840: "£1,500 per year" beside a monthly MRR is the same £ and a different quantity.
+ * A node's stored figure and whose it is, or null when it holds none. `money`: its unit is money (any currency, scale or
+ * period). `value` is the figure only where it reads as a money total in the GOAL'S OWN currency AND period
+ * (`readMoneyTotal`); otherwise null.
+ * ⛔ PR Review 5894085840 / AIQ 5894306110 (B): "£1,500 per year" beside a monthly MRR is the same £ and a different
+ * quantity. Money NOT in the goal's terms refuses the card (`proposeOnCarrier`); a non-money figure is named by whose it is.
  */
-function goalTermsLevel(node: Rec | undefined, goal: { code: string; period: 'month' | 'year' } | null): { value: number | null; users: boolean } | null {
+function goalTermsLevel(node: Rec | undefined, goal: { code: string; period: 'month' | 'year' } | null): { value: number | null; money: boolean; users: boolean } | null {
   const os = node?.observed_state;
   if (!isRec(os) || typeof os.raw_value !== 'number' || !Number.isFinite(os.raw_value)) return null;
+  const money = readCurrencyUnitWithQualifiers(text(os.unit) ?? '').kind === 'currency';
   const m = goal === null ? null : readMoneyTotal(os.unit, text(node?.label) ?? '');
   const inGoalTerms = m !== null && m.code === goal!.code && m.period === goal!.period;
-  return { value: inGoalTerms ? os.raw_value : null, users: classifyValueSource(os.source) === 'user_stated' };
+  return { value: inGoalTerms ? os.raw_value : null, money, users: classifyValueSource(os.source) === 'user_stated' };
 }
 
 const carriesIdentity = (node: Rec): boolean => node.nonlinear_identity !== undefined && node.nonlinear_identity !== null;
@@ -149,9 +153,9 @@ function proposeOnGoal(graph: unknown): IdentityProposal | null {
  * ⛔ AIQ 5892754930 (3): a Yes makes the goal this carrier PLUS the goal's other parents, so the card names the first of
  * them (and how many more) and whose figure it is, from the graph. "That gives your £75,000" only where the figures add
  * up to the goal within ISL's 5%; otherwise the card says the goal also adds them, and claims no sum.
- * ⛔ PR Review 5894085840: a figure is said, and summed, only as money in the goal's own currency AND period. Any other
- * figure (another period, a per-item price, £k, another currency, a count or a %) is named by whose it is alone, and
- * no sum is claimed.
+ * ⛔ PR Review 5894085840: a figure is said, and summed, only as money in the goal's own currency AND period. Money in
+ * any other terms never reaches here (the card is refused, AIQ 5894306110 (B)); a non-money figure (a count, a %) is
+ * named by whose it is alone, and no sum is claimed.
  */
 function besideTheCarrier(others: readonly string[], byId: Map<string, Rec>, goalMoney: { code: string; period: 'month' | 'year' } | null, code: string, product: number, goal: number, goalLabel: string): string {
   const money = (v: number): string => sayFigure(v, code);
@@ -200,11 +204,16 @@ function proposeOnCarrier(graph: unknown): IdentityProposal | null {
     if (parts === null) continue;
     const r = reading(goal, goalLabel, o, parts[0], parts[1]);
     if (r === null) continue;
+    // ⛔ AIQ 5894306110 (B): REFUSE, not reword. A Yes makes the goal this carrier plus its other parents; money in another
+    // period, an unreadable period, a per-item price, a scale or another currency would make that sum dimensionally
+    // wrong, so the card would endorse a wrong structure. The carrier stays withheld (PLoT #420's no-card words).
+    const others = parentIds.filter((p) => p !== id);
+    if (others.some((pid) => { const l = goalTermsLevel(byId.get(pid), goalMoney); return l !== null && l.money && l.value === null; })) continue;
     const carrierLabel = text(carrier.label) ?? id;
     const money = (v: number): string => sayFigure(v, r.code);
     const made = r.rate.value * r.count.value;
     const words = `Is “${carrierLabel}” your “${r.rate.label}” × “${r.count.label}”? `
-      + `${money(r.rate.value)} × ${sayFigure(r.count.value, '')} = ${money(made)}${besideTheCarrier(parentIds.filter((p) => p !== id), byId, goalMoney, r.code, made, o.value, goalLabel)} `
+      + `${money(r.rate.value)} × ${sayFigure(r.count.value, '')} = ${money(made)}${besideTheCarrier(others, byId, goalMoney, r.code, made, o.value, goalLabel)} `
       + `If yes, Olumi will calculate “${carrierLabel}” that way, and you can run the analysis again.`;
     if (words.length > CARD_WORDS_MAX) continue;
     found.push({ outcome_id: id, operation: 'product', factor_ids: [r.rate.id, r.count.id], words });

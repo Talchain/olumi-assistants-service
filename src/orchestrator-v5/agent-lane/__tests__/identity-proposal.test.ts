@@ -148,27 +148,25 @@ describe('a card-domain carrier BESIDE another goal parent (the 1/19 served dead
     expect(node(g, 'other_plan_mrr').label).toBe('Other-plan MRR');
     expect(proposeProductIdentity(g)?.words).toContain(`£49 × 1,500 = £73,500${clause} If yes,`);
   });
-  // ⛔ PR Review 5894085840: a figure is said and added only as money in the goal's own currency AND period. Each row
-  // changes ONE field of the other parent on the served graph; the card still offers the carrier, names whose figure the
-  // other parent is, and neither says the figure nor claims the sum.
-  const WHOSE_ONLY = ', close to your £75,000 “MRR”, which also adds “Other-plan MRR” (Olumi\'s estimate).';
-  it.each<[string, (os: Json) => void]>([
-    ['RED (PR Review\'s row): £1,500 per YEAR beside a monthly MRR', (os) => { os.unit = '£/year'; }],
-    ['the same, spelled "GBP per annum"', (os) => { os.unit = 'GBP per annum'; }],
-    ['a per-item price ("£ per seat per month"), not a total', (os) => { os.unit = '£ per seat per month'; }],
-    ['a scaled figure ("£k/month")', (os) => { os.unit = '£k/month'; os.raw_value = 1.5; }],
-    ['another currency ("$/month")', (os) => { os.unit = '$/month'; }],
-    ['a count', (os) => { os.unit = 'subscribers'; }],
-  ])('NO SUM, NO FIGURE: %s', (_why, change) => {
+  // ⛔ PR Review 5894085840 + AIQ 5894306110 (B): money in the goal's own currency AND period, or NO CARD. Each row
+  // changes ONE field of the other parent on the served graph. A Yes would make MRR a period-mismatched sum, so the card is
+  // refused (not reworded): the carrier stays withheld with PLoT #420's no-card words.
+  it.each<[string, (n: Json) => void]>([
+    ['RED (PR Review\'s row): £1,500 per YEAR beside a monthly MRR', (n) => { n.observed_state.unit = '£/year'; }],
+    ['the same, spelled "GBP per annum"', (n) => { n.observed_state.unit = 'GBP per annum'; }],
+    ['an unreadable period: a period-less £ on a node whose name carries none ("Other-plan revenue")', (n) => { n.label = 'Other-plan revenue'; n.observed_state.unit = '£'; }],
+    ['a per-item price ("£ per seat per month"), not a total', (n) => { n.observed_state.unit = '£ per seat per month'; }],
+    ['a scaled figure ("£k/month")', (n) => { n.observed_state.unit = '£k/month'; n.observed_state.raw_value = 1.5; }],
+    ['another currency ("$/month")', (n) => { n.observed_state.unit = '$/month'; }],
+  ])('NO CARD: other-parent money not in the goal\'s terms — %s', (_why, change) => {
     const g = beside();
-    change(node(g, 'other_plan_mrr').observed_state);
-    expect(proposeProductIdentity(g)?.words).toContain(`£49 × 1,500 = £73,500${WHOSE_ONLY} If yes,`);
+    change(node(g, 'other_plan_mrr'));
+    expect(proposeProductIdentity(g)).toBeNull();
   });
-  it('NO SUM, NO FIGURE: a period-less £ on a node whose name carries no period either ("Other-plan revenue")', () => {
+  it('a NON-money figure beside the carrier (a count) is named by whose it is; neither said nor summed', () => {
     const g = beside();
-    node(g, 'other_plan_mrr').label = 'Other-plan revenue';
-    node(g, 'other_plan_mrr').observed_state.unit = '£';
-    expect(proposeProductIdentity(g)?.words).toContain('£49 × 1,500 = £73,500, close to your £75,000 “MRR”, which also adds “Other-plan revenue” (Olumi\'s estimate). If yes,');
+    node(g, 'other_plan_mrr').observed_state.unit = 'subscribers';
+    expect(proposeProductIdentity(g)?.words).toContain('£49 × 1,500 = £73,500, close to your £75,000 “MRR”, which also adds “Other-plan MRR” (Olumi\'s estimate). If yes,');
   });
   it.each<[string, string]>([
     ['"GBP per month"', 'GBP per month'],
