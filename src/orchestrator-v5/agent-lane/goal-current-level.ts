@@ -38,7 +38,8 @@
  */
 import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import { sameUnit } from '../../utils/currency-alphabet.js';
-import { admitStatedGoalLevel } from './admit-model.js';
+import { admitStatedGoalLevel, changeGoalScale } from './admit-model.js';
+import { isChangeFrame, sayGoalChange } from './limit-frame.js';
 import { figureTheUserWrote } from './stated-by-user.js';
 import { isAmountStatedInBrief } from '../../cee/provenance/stated-amounts.js';
 import { canonicaliseLimitUnit } from './admit-constraint.js';
@@ -113,6 +114,13 @@ interface GoalTarget {
   readonly goal_threshold_raw: unknown;
   readonly goal_threshold_cap: unknown;
 }
+
+/**
+ * R1 S4-core: the scale a CHANGE goal is measured on once today's level is known (`changeGoalScale`, construction's own
+ * rule). Carried on the proposal beside the level and written with it in the same registration: the cap and, for an
+ * absolute change, the threshold (c ÷ cap) only exist once there is a level to put them on.
+ */
+type GoalScale = NonNullable<ReturnType<typeof changeGoalScale>>;
 
 function targetOf(node: Record<string, unknown>): GoalTarget {
   const unit = node.goal_threshold_unit;
@@ -383,17 +391,11 @@ export async function proposeGoalCurrentLevel(
   const node = goal as typeof goal & { goal_threshold_raw?: unknown; goal_threshold_cap?: unknown; goal_threshold_frame?: unknown; goal_threshold_unit?: unknown };
   const target = node.goal_threshold_raw;
   const cap = node.goal_threshold_cap;
-  // ⛔ R1 S4-core: a target stated as a CHANGE from today ("cut by 15%") HAS a target — the old sentence below said it
-  // had none. Recording its current level here would also need the change's scale written beside it; until that slice,
-  // this says the true reason and prepares nothing. (A brief that states today's level gets its base at construction.)
-  if (node.goal_threshold_frame === 'change_rel' || node.goal_threshold_frame === 'change_abs') {
-    return refuse(
-      'goal_is_a_change',
-      `"${goal.label}" is a goal to change by a stated amount from today, and a current level for a goal stated that way ` +
-      'cannot be recorded here yet. Nothing was prepared. Tell the user plainly; never offer a level target instead.',
-    );
-  }
-  if (!num(target) || !num(cap) || cap <= 0 || node.goal_threshold_frame !== 'level') {
+  // ⭐ R1 S4-core: a target stated as a CHANGE from today ("cut by 15%": `change_rel` −0.15) is measured FROM today's level,
+  // so the level the user states here is what makes it checkable. It is recorded on construction's own scale
+  // (`changeGoalScale`), written in the same registration: the goal has no cap until it has a level.
+  const changeFrame = node.goal_threshold_frame === 'change_rel' || node.goal_threshold_frame === 'change_abs' ? node.goal_threshold_frame : null;
+  if (changeFrame !== null ? !num(target) : (!num(target) || !num(cap) || cap <= 0 || node.goal_threshold_frame !== 'level')) {
     return refuse(
       'no_target',
       `"${goal.label}" has no stated target to measure its current level against, so there is no chance of reaching ` +
@@ -439,24 +441,49 @@ export async function proposeGoalCurrentLevel(
     );
   }
 
-  // ── HOW THE USER PUT THE TARGET (not persisted: stated by the Agent from the user's words, never defaulted).
-  const operator = typeof args?.goal_is === 'string' ? OPERATOR_OF[args.goal_is] : undefined;
-  if (operator === undefined) {
-    return refuse(
-      'goal_is_unstated',
-      `Say how the user put the target for "${goal.label}" (at least, above, at most or below ${target}). If they have not ` +
-      'said, ask them. Nothing was prepared.',
-    );
-  }
+  // As the user writes a figure ("£72,000 per month"), from the lane's one formatter (DL #72 5866282787: "72000 £ MRR").
+  const withUnit = (x: number) => sayFigureExactly(x, goalUnit ?? '') ?? `${x}${goalUnit !== undefined ? ` ${goalUnit}` : ''}`;
 
-  // ── THE BRIEF PATH'S OWN RULE: operator tail, then scale and direction. The comparator the goal HOLDS (G1) is passed
-  // too: beside a held `<=` the run minimises, so a `<=` level is admitted on the mirrored rule, and a `>=` reading
-  // contradicts the user's own comparator (`admitStatedGoalLevel`, MG #72 5870097103). None held ⇒ exactly as before.
-  const verdict = admitStatedGoalLevel({
-    metric: goal.label, operator, rawTarget: target, rawBaseline: raw, cap, heldComparator: (goal as { goal_direction?: unknown }).goal_direction,
-    targetUnit: goalUnit,
-  });
-  if (!verdict.admitted) return refuse('not_admitted', verdict.reason);
+  let normalised: number;
+  let levelCap: number;
+  let scale: GoalScale | undefined;
+  if (changeFrame !== null) {
+    // ── A CHANGE carries its own sign and comparator (`goal-direction.ts`), so there is no "at least / at most" to ask
+    // and the level rule's direction checks do not apply. The scale is construction's own; off it, nothing is prepared.
+    const s = changeGoalScale(changeFrame, target as number, raw, goalUnit);
+    if (s === null) {
+      return refuse(
+        'not_admitted',
+        `${withUnit(raw)} as today's level of "${goal.label}" and a change of ` +
+        `${sayGoalChange(changeFrame, target as number, goalUnit, (v) => withUnit(v), (goal as { goal_direction?: unknown }).goal_direction)} do not sit on a scale starting at zero, ` +
+        'so nothing was prepared. Ask the user which figure is wrong.',
+      );
+    }
+    scale = s;
+    levelCap = s.goal_threshold_cap;
+    normalised = raw / levelCap;
+  } else {
+    // ── HOW THE USER PUT THE TARGET (not persisted: stated by the Agent from the user's words, never defaulted).
+    const operator = typeof args?.goal_is === 'string' ? OPERATOR_OF[args.goal_is] : undefined;
+    if (operator === undefined) {
+      return refuse(
+        'goal_is_unstated',
+        `Say how the user put the target for "${goal.label}" (at least, above, at most or below ${target}). If they have not ` +
+        'said, ask them. Nothing was prepared.',
+      );
+    }
+
+    // ── THE BRIEF PATH'S OWN RULE: operator tail, then scale and direction. The comparator the goal HOLDS (G1) is passed
+    // too: beside a held `<=` the run minimises, so a `<=` level is admitted on the mirrored rule, and a `>=` reading
+    // contradicts the user's own comparator (`admitStatedGoalLevel`, MG #72 5870097103). None held ⇒ exactly as before.
+    const verdict = admitStatedGoalLevel({
+      metric: goal.label, operator, rawTarget: target as number, rawBaseline: raw, cap: cap as number, heldComparator: (goal as { goal_direction?: unknown }).goal_direction,
+      targetUnit: goalUnit,
+    });
+    if (!verdict.admitted) return refuse('not_admitted', verdict.reason);
+    normalised = verdict.normalised;
+    levelCap = cap as number;
+  }
 
   const existing = goal.observed_state;
   const existingRaw = num(existing?.raw_value) ? existing!.raw_value as number : undefined;
@@ -464,16 +491,18 @@ export async function proposeGoalCurrentLevel(
     return refuse('already_recorded', `${sayFigureExactly(raw, goalUnit ?? '') ?? `${raw}${goalUnit !== undefined ? ` ${goalUnit}` : ''}`} is already recorded as the user’s current level of "${goal.label}". Nothing to change.`);
   }
   const observed: GoalObservedState = {
-    value: verdict.normalised,
-    baseline: verdict.normalised,
+    value: normalised,
+    baseline: normalised,
     ...(goalUnit !== undefined ? { unit: goalUnit } : {}),
     source: USER_EDIT_SOURCE,
     raw_value: raw,
-    cap,
+    cap: levelCap,
     ...(stated.normalised !== undefined ? { provenance_unit_normalised: stated.normalised } : {}),
   };
-  // As the user writes a figure ("£72,000 per month"), from the lane's one formatter (DL #72 5866282787: "72000 £ MRR").
-  const withUnit = (x: number) => sayFigureExactly(x, goalUnit ?? '') ?? `${x}${goalUnit !== undefined ? ` ${goalUnit}` : ''}`;
+  // The target as the user reads it: a level in its unit, or the change from today ("down 15% from today").
+  const targetSaid = changeFrame !== null
+    ? sayGoalChange(changeFrame, target as number, goalUnit, (v) => withUnit(v), (goal as { goal_direction?: unknown }).goal_direction)!
+    : withUnit(target as number);
   // ⛔ THE USER'S OWN FIGURE AND UNIT, as they gave it — never relabelled in the goal's unit — plus, when a stated
   // suffix was scaled, what it is recorded as. The target and a replaced record are the goal's own, in its unit.
   const asStated = sayFigureExactly(value, statedUnit) ?? `${value}${statedUnit !== '' ? ` ${statedUnit}` : ''}`;
@@ -487,14 +516,14 @@ export async function proposeGoalCurrentLevel(
     base_graph_identity_hash: g.graph_hash,
     operations: [{
       op: GOAL_CURRENT_LEVEL_OP, path: goal.id,
-      value: { goal_current_level: observed, against: targetOf(node), ...(rederived !== null ? { rederived_part: rederived } : {}) },
+      value: { goal_current_level: observed, against: targetOf(node), ...(scale !== undefined ? { goal_scale: scale } : {}), ...(rederived !== null ? { rederived_part: rederived } : {}) },
     }],
     provenance: { authored_by: 'user_stated', basis: 'the current level of the goal, as the user stated it' },
     validation: { admitted: true, loss_count: 0, refusals: [] },
     public_label:
       `Record the current level of "${goal.label}" as your figure: ` +
       (replaces !== undefined ? `${sayFigureRead(replaces, goalUnit ?? '')} → ${figure}` : figure) +
-      ` (target ${withUnit(target)})` +
+      ` (target ${targetSaid})` +
       (rederived !== null ? `. ${sayRederived(goal.label, rederived)}` : ''),
   });
   deps.proposals.put(proposal);
@@ -506,7 +535,7 @@ export async function proposeGoalCurrentLevel(
     goal: goal.label,
     current_level: { value: raw, ...(goalUnit !== undefined ? { unit: goalUnit } : {}) },
     as_stated: { value, ...(statedUnit !== '' ? { unit: statedUnit } : {}) },
-    target: { value: target, ...(goalUnit !== undefined ? { unit: goalUnit } : {}) },
+    target: { value: target, ...(goalUnit !== undefined ? { unit: goalUnit } : {}), ...(changeFrame !== null ? { frame: changeFrame, in_words: targetSaid } : {}) },
     ...(replaces !== undefined ? { replaces } : {}),
     ...(rederived !== null
       ? { rederived: { factor: rederived.label, from: rederived.was, to: rederived.now, ...(rederived.unit !== undefined ? { unit: rederived.unit } : {}), whose: "Olumi's estimate" } }
@@ -547,10 +576,18 @@ export async function applyGoalCurrentLevel(
   const notApplied = (detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: proposal.proposal_id, refusal: 'not_applied', detail });
   const goal = approved.nodes.find((n) => n.id === op.path);
   if (goal === undefined || goal.kind !== 'goal') return notApplied('The goal is no longer in the model, so nothing was written.');
-  // ⛔ RE-VALIDATED AT APPLY TIME: the level frame, and the same unit, figure and cap the proposal was prepared against.
+  // ⛔ RE-VALIDATED AT APPLY TIME: the same frame, unit, figure and cap the proposal was prepared against. A level goal
+  // needs the level frame; a change goal (R1 S4-core) needs its scale to come out exactly as the user approved it.
   const against = (op.value as { against?: GoalTarget } | undefined)?.against;
+  const carriedScale = (op.value as { goal_scale?: GoalScale } | undefined)?.goal_scale;
   const now = targetOf(goal);
-  if (against === undefined || now.goal_threshold_frame !== 'level' || !sameTarget(against, now)) {
+  const scaleNow = carriedScale !== undefined && isChangeFrame(now.goal_threshold_frame) && now.goal_threshold_frame !== 'delta' && num(now.goal_threshold_raw)
+    ? changeGoalScale(now.goal_threshold_frame, now.goal_threshold_raw, os.raw_value, now.goal_threshold_unit ?? undefined)
+    : null;
+  const frameHolds = carriedScale === undefined
+    ? now.goal_threshold_frame === 'level'
+    : scaleNow !== null && JSON.stringify(scaleNow) === JSON.stringify(carriedScale);
+  if (against === undefined || !frameHolds || !sameTarget(against, now)) {
     return {
       ok: false, mutated: false, applied: false, proposal_id: proposal.proposal_id, refusal: 'superseded',
       detail: `The target of "${goal.label}" changed after this was prepared, so nothing was written. Read the model again and propose afresh.`,
@@ -573,7 +610,7 @@ export async function applyGoalCurrentLevel(
   // A rescale stamp describes the figure it came with: a new figure without one never inherits the previous one's.
   const { provenance_unit_normalised: _previousStamp, ...kept } = (goal.observed_state ?? {}) as Record<string, unknown>;
   const nodes = approved.nodes.map((n) => (n.id === op.path
-    ? { ...n, observed_state: { ...kept, ...os } }
+    ? { ...n, observed_state: { ...kept, ...os }, ...(carriedScale !== undefined ? carriedScale : {}) }
     : part !== null && n.id === part.node_id ? { ...n, observed_state: part.observed_state } : n));
   const reg = await deps.dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
     graph: { ...approved.raw, nodes },
@@ -599,9 +636,11 @@ export async function applyGoalCurrentLevel(
   }
   // ⛔ CONFIRMED FROM STATE: the goal as stored now holds exactly the level this write carried.
   const after = await deps.readGraph(ctx.scenario_id);
-  const held = after?.nodes.find((n) => n.id === op.path)?.observed_state;
+  const heldNode = after?.nodes.find((n) => n.id === op.path) as (GoalLevelRead['nodes'][number] & Record<string, unknown>) | undefined;
+  const held = heldNode?.observed_state;
+  const scaleHeld = carriedScale === undefined || (heldNode?.goal_threshold_cap === carriedScale.goal_threshold_cap && heldNode?.goal_threshold === carriedScale.goal_threshold);
   const partHeld = part === null ? undefined : after?.nodes.find((n) => n.id === part.node_id)?.observed_state;
-  const landed = held !== undefined && held.raw_value === os.raw_value && held.baseline === os.baseline && held.source === os.source &&
+  const landed = held !== undefined && held.raw_value === os.raw_value && held.baseline === os.baseline && held.source === os.source && scaleHeld &&
     (part === null || (partHeld !== undefined && partHeld.raw_value === part.now && partHeld.source === part.observed_state.source));
   if (!landed) {
     return {

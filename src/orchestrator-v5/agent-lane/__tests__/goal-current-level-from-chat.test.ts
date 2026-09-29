@@ -22,7 +22,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { dispatchTool, toolsFor, type AgentCapabilities, type ToolResult } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
 import { approvalChipIdFor, approvalChipsFor } from '../approval-chips.js';
-import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
+import { admitCandidateModel, admitStatedGoalChange, changeGoalScale, type CandidateModel } from '../admit-model.js';
 import { USER_EDIT_SOURCE } from '../../../orchestrator/canonicalise-value-ops.js';
 import { userWordsOf } from '../stated-by-user.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
@@ -196,6 +196,104 @@ describe('T2 — "Our current MRR is £12,000." is recorded on the goal, held fo
   });
 });
 
+/**
+ * R1 S4-core: Paul's goal stated as a CHANGE from today ("grow MRR by 10%": `change_rel` 0.1), from a brief that never
+ * stated today's level — construction writes the frame and the figure but no cap, no threshold and no base, because a
+ * change is measured from today. Before this, the chat door refused (`goal_is_a_change`), so such a goal could NEVER be
+ * checked. Now the user's "Our current MRR is £12,000." is recorded with construction's own scale (`changeGoalScale`).
+ */
+function changeGoal(frame: 'change_rel' | 'change_abs', stored: number): Graph {
+  const g = clone(paulGraph);
+  const goal = goalOf(g);
+  for (const k of ['goal_threshold', 'goal_threshold_cap', 'goal_threshold_cap_provenance', 'observed_state']) delete goal[k];
+  goal.goal_threshold_frame = frame;
+  goal.goal_threshold_raw = stored;
+  return g;
+}
+
+describe('R1 S4-core — today\'s level of a goal stated as a CHANGE is recorded on construction\'s own scale', () => {
+  it('S4CL-1 RED: "grow MRR by 10%" + "Our current MRR is £12,000." → propose names the change → approve writes the level AND the scale in ONE registration → the Run carries both', async () => {
+    const s = setup(changeGoal('change_rel', 0.1));
+    const proposed = await s.call(TOOL, T2) as ToolResult & { proposal_id?: string; public_label?: string; target?: Record<string, unknown> };
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    expect(proposed.public_label).toContain('£12,000');
+    expect(proposed.public_label).toContain('(target up 10% from today)');
+    expect(proposed.target).toMatchObject({ value: 0.1, frame: 'change_rel', in_words: 'up 10% from today' });
+    expect(s.registers, 'nothing is written before the user approves').toEqual([]);
+
+    const applied = await s.call('authorise_change', { proposal_id: proposed.proposal_id }) as ToolResult;
+    expect(applied.ok, JSON.stringify(applied)).toBe(true);
+    expect(s.registers).toHaveLength(1);
+    const scale = changeGoalScale('change_rel', 0.1, 12000, 'GBP MRR')!;
+    expect(scale.goal_threshold_cap, 'PRECONDITION: the cap sits above the target level 13,200').toBeGreaterThan(13200);
+    const goal = goalOf(s.graph());
+    expect(goal).toMatchObject({ goal_threshold_frame: 'change_rel', goal_threshold_raw: 0.1, goal_threshold: 0.1,
+      goal_threshold_cap: scale.goal_threshold_cap, goal_threshold_cap_provenance: scale.goal_threshold_cap_provenance });
+    expect(goal.observed_state).toStrictEqual({
+      value: 12000 / scale.goal_threshold_cap, baseline: 12000 / scale.goal_threshold_cap, unit: 'GBP MRR', source: USER_EDIT_SOURCE,
+      raw_value: 12000, cap: scale.goal_threshold_cap,
+    });
+    expect(GraphV3.parse(s.graph()).nodes.find((n) => n.id === GOAL)).toMatchObject({ goal_threshold_frame: 'change_rel', goal_threshold_cap: scale.goal_threshold_cap });
+
+    const req = await plotRequestFor(s.graph());
+    const sent = req.graph.nodes.find((n) => n.id === GOAL)!;
+    expect(sent).toMatchObject({ goal_threshold_frame: 'change_rel', goal_threshold: 0.1, goal_threshold_cap: scale.goal_threshold_cap });
+    expect(sent.observed_state).toMatchObject({ baseline: 12000 / scale.goal_threshold_cap, raw_value: 12000 });
+  });
+
+  it('S4CL-1b: with the goal\'s held ">=" the label says the bound — "(target up at least 10% from today)" (AIQ 5880974047)', async () => {
+    const g = changeGoal('change_rel', 0.1);
+    goalOf(g).goal_direction = '>=';
+    const proposed = await setup(g).call(TOOL, T2) as ToolResult & { public_label?: string };
+    expect(proposed.public_label).toContain('(target up at least 10% from today)');
+  });
+
+  it('S4CL-2 RED: "grow MRR by £5,000" (change_abs) → goal_threshold = c ÷ cap, written with the level', async () => {
+    const s = setup(changeGoal('change_abs', 5000));
+    const proposed = await s.call(TOOL, T2) as ToolResult & { proposal_id?: string };
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    expect(await s.call('authorise_change', { proposal_id: proposed.proposal_id })).toMatchObject({ ok: true });
+    const scale = changeGoalScale('change_abs', 5000, 12000, 'GBP MRR')!;
+    expect(goalOf(s.graph())).toMatchObject({ goal_threshold: 5000 / scale.goal_threshold_cap, goal_threshold_cap: scale.goal_threshold_cap });
+  });
+
+  it('S4CL-3 IDENTITY: chat writes EXACTLY construction\'s scale for the same figures — only the stamp differs', async () => {
+    const s = setup(changeGoal('change_rel', 0.1));
+    const proposed = await s.call(TOOL, T2) as ToolResult & { proposal_id?: string };
+    await s.call('authorise_change', { proposal_id: proposed.proposal_id });
+    const built = admitStatedGoalChange({ metric: 'MRR', operator: '>=', target_stated: true, frame: 'change_rel', value: 10, unit: 'GBP MRR',
+      horizon_months: null, provenance: 'explicit', baseline_known: true, baseline_value: 12000, baseline_provenance: 'explicit', scope: null } as never, 10).node;
+    const goal = goalOf(s.graph());
+    for (const k of ['goal_threshold_frame', 'goal_threshold_raw', 'goal_threshold', 'goal_threshold_cap', 'goal_threshold_cap_provenance'] as const) {
+      expect(goal[k], k).toStrictEqual((built as Record<string, unknown>)[k]);
+    }
+    const { source: chatSource, ...chatLevel } = goal.observed_state as Record<string, unknown>;
+    const { source: builtSource, ...builtLevel } = built.observed_state as Record<string, unknown>;
+    expect(chatLevel).toStrictEqual(builtLevel);
+    expect([chatSource, builtSource]).toStrictEqual([USER_EDIT_SOURCE, 'brief_extraction']);
+  });
+
+  // The store's integrity seal refuses a tampered carrier before apply runs; the apply-time re-derivation behind it covers
+  // a deploy landing between propose and apply (a changed cap rule), which no in-process row can stage.
+  it('S4CL-6: a tampered goal_scale never lands — the proposal store refuses it (integrity_failed), nothing written', async () => {
+    const s = setup(changeGoal('change_rel', 0.1));
+    const proposed = await s.call(TOOL, T2) as ToolResult & { proposal_id: string };
+    const stored = s.proposals.get(proposed.proposal_id)!;
+    const op = stored.operations[0]! as { value: { goal_scale: Record<string, unknown> } };
+    op.value.goal_scale = { ...op.value.goal_scale, goal_threshold_cap: 999999 };
+    const r = await s.call('authorise_change', { proposal_id: proposed.proposal_id });
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: false, refusal: 'integrity_failed' });
+    expect(s.registers).toEqual([]);
+  });
+
+  it('CONTROL: a LEVEL goal still needs "how the user put the target" — the change branch took nothing from it', async () => {
+    const s = setup();
+    const { goal_is: _dropped, ...noGoalIs } = T2;
+    const r = await s.call(TOOL, noGoalIs) as ToolResult;
+    expect(r.refusal).toBe('goal_is_unstated');
+  });
+});
+
 describe('CONTROLS — refused with a plain reason, nothing proposed, nothing written', () => {
   const refusedAndInert = async (args: Record<string, unknown>, initial: Graph = paulGraph) => {
     const s = setup(initial);
@@ -256,15 +354,15 @@ describe('CONTROLS — refused with a plain reason, nothing proposed, nothing wr
     expect(r.refusal).toBe('no_target');
   });
 
-  it('R1 S4-core: a goal stated as a CHANGE from today is refused with the TRUE reason — it has a target — never "no stated target"', async () => {
-    const g = clone(paulGraph);
-    const goal = goalOf(g);
-    goal.goal_threshold_frame = 'change_rel';
-    goal.goal_threshold_raw = -0.15;
-    const r = await refusedAndInert(T2, g);
-    expect(r.refusal).toBe('goal_is_a_change');
-    expect(String(r.detail)).toContain('a goal to change by a stated amount from today');
-    expect(String(r.detail)).not.toMatch(/no stated target/);
+  it('S4CL-4: a change goal whose target level would fall below zero ("down £20,000" from £12,000) → not_admitted, nothing written', async () => {
+    const r = await refusedAndInert(T2, changeGoal('change_abs', -20000));
+    expect(r.refusal).toBe('not_admitted');
+    expect(String(r.detail)).toContain('down £20,000 MRR from today');
+  });
+
+  it('S4CL-5: a change goal keeps the grounding rule — a figure the user never wrote is refused (CONTROL: the branch is not a bypass)', async () => {
+    const r = await refusedAndInert({ ...T2, value: 15000 }, changeGoal('change_rel', 0.1));
+    expect(r.refusal).toBe('figure_not_in_users_words');
   });
 
   it('a goal with no stated target on the level frame has nothing to measure against', async () => {
