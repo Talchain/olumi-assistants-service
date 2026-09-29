@@ -16,7 +16,7 @@ import { Ajv } from 'ajv';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
-import { withGoalProductUnconfirmed, withReconcilingProductIdentity } from '../reconciling-product.js';
+import { unconfirmGoalProducts, withReconcilingProductIdentity } from '../reconciling-product.js';
 import { proposeProductIdentity } from '../identity-proposal.js';
 
 const GOAL = 'monthly_recurring_revenue';
@@ -157,20 +157,49 @@ describe('a goal whose stated level reconciles with its two stated parts is decl
     const { goal } = await registeredGoal(paulDraft({ identities: declared, goalLevel: 60000 }), PAUL.replace('£75k MRR', '£60k MRR'));
     expect(goal.nonlinear_identity).toStrictEqual(PRODUCT);
   });
-  it('NEGATIVE (PR Review CR): matching numbers, NON-COMPOSING units ("£75k MRR = 3 engineers × £25k budget per engineer"), declared explicit → never the user\'s: Olumi\'s reading, and no card', async () => {
+  // ⛔ AIQ 5892219245 (3): units that DON'T COMPOSE are not a reading at all — dropped, and the draft's proposal is said.
+  it('DROPPED: matching numbers, units that provably DON\'T COMPOSE ("£75k MRR = 3 engineers × £25k a year each"), declared explicit → no product, the loss line, no card', async () => {
+    const parts = [{ label: 'Budget per engineer', unit: 'GBP per year', level: 25000 }, { label: 'Engineers', unit: 'engineers', level: 3 }] as const;
+    const declared = [{ outcome: 'Monthly recurring revenue', operation: 'product', factors: ['Budget per engineer', 'Engineers'], provenance: 'explicit' }];
+    const { goal, graph, out } = await registeredGoal(paulDraft({ parts, identities: declared }), 'We have 3 engineers and a £25,000 budget per engineer a year. MRR is £75,000 and we want MRR above £85k.');
+    expect(goal.nonlinear_identity ?? null).toBeNull();
+    expect(graph.nodes.filter((n) => (n as { nonlinear_identity?: unknown }).nonlinear_identity !== undefined)).toStrictEqual([]);
+    expect(out.not_represented).toContain('The draft proposed ‘Monthly recurring revenue’ = ‘Budget per engineer’ × ‘Engineers’, but those units don\'t combine into £ per month, so it is not used.');
+    expect(proposeProductIdentity(graph)).toBeNull();
+  });
+  // PR Review CR on 9af5ffb4, its exact units: a bare "GBP" × a count. A period-less £ is also how the drafter types Paul's
+  // real monthly price (C46's rows), so the units cannot prove the clash: never the user's — Olumi's reading, withheld by
+  // PLoT (d) with the no-card words, and no card.
+  it('DEMOTED (PR Review CR on 9af5ffb4): bare "GBP" budget × engineers, declared explicit → Olumi\'s reading, no card, nothing said as dropped', async () => {
     const parts = [{ label: 'Budget per engineer', unit: 'GBP', level: 25000 }, { label: 'Engineers', unit: 'engineers', level: 3 }] as const;
     const declared = [{ outcome: 'Monthly recurring revenue', operation: 'product', factors: ['Budget per engineer', 'Engineers'], provenance: 'explicit' }];
-    const { goal, graph } = await registeredGoal(paulDraft({ parts, identities: declared }), 'We have 3 engineers and a £25,000 budget per engineer. MRR is £75,000 and we want MRR above £85k.');
+    const { goal, graph, out } = await registeredGoal(paulDraft({ parts, identities: declared }), 'We have 3 engineers and a £25,000 budget per engineer. MRR is £75,000 and we want MRR above £85k.');
     expect(goal.nonlinear_identity).toStrictEqual({ operation: 'product', factor_ids: ['budget_per_engineer', 'engineers'], stated_in_brief: false });
+    expect(JSON.stringify(out.not_represented)).not.toContain('The draft proposed');
+    expect(proposeProductIdentity(graph)).toBeNull();
+  });
+  it('CONTROL (units unread): a factor unit Olumi cannot read ("£k") proves nothing about dimensions → demoted, not dropped', () => {
+    const parts = [{ label: 'Budget per engineer', unit: '£k', level: 25 }, { label: 'Engineers', unit: 'engineers', level: 3 }] as const;
+    const declared = [{ outcome: 'Monthly recurring revenue', operation: 'product', factors: ['Budget per engineer', 'Engineers'], provenance: 'explicit' }];
+    const { model, dropped } = unconfirmGoalProducts(paulDraft({ parts, identities: declared }), PAUL);
+    expect(dropped).toStrictEqual([]);
+    expect(model.identities).toStrictEqual([{ ...declared[0], provenance: 'inferred' }]);
+  });
+  // AIQ 5892219245 (4): the levels are not all the user's (ARPU is Olumi's figure) → Olumi's reading, withheld, and no card.
+  it('DEMOTED (ARPU × subscribers, declared explicit; the 3/19 shape): Olumi\'s reading, and no card', async () => {
+    const parts = [{ label: 'ARPU', unit: 'GBP per subscriber per month', level: 50 }, { label: 'Paying subscribers', unit: 'subscribers', level: 1500 }] as const;
+    const declared = [{ outcome: 'Monthly recurring revenue', operation: 'product', factors: ['ARPU', 'Paying subscribers'], provenance: 'explicit' }];
+    const { goal, graph } = await registeredGoal(paulDraft({ parts, identities: declared }), 'We have 1,500 paying subscribers and £75k MRR. We want MRR above £85k within a year.');
+    expect(goal.nonlinear_identity).toStrictEqual({ operation: 'product', factor_ids: ['arpu', 'paying_subscribers'], stated_in_brief: false });
     expect(proposeProductIdentity(graph)).toBeNull();
   });
   it('CONTROL: a candidate with nothing to demote comes back as the very same object', () => {
     const d = paulDraft();
-    expect(withGoalProductUnconfirmed(d, PAUL)).toBe(d);
+    expect(unconfirmGoalProducts(d, PAUL).model).toBe(d);
   });
   it('CONTROL: an already-inferred declaration comes back as the very same object', () => {
     const d = paulDraft({ identities: [{ outcome: 'Monthly recurring revenue', operation: 'product', factors: ['Pro plan price', 'Paying subscribers'], provenance: 'inferred' }] });
-    expect(withGoalProductUnconfirmed(d, PAUL)).toBe(d);
+    expect(unconfirmGoalProducts(d, PAUL).model).toBe(d);
   });
 
   it('SERVED shape (draft 2 at 30ee11b): "£/subscriber/month" × "subscribers" composes → minted', async () => {
@@ -254,7 +283,7 @@ describe('a goal whose stated level reconciles with its two stated parts is decl
     const ENG = 'We have 3 engineers and a £25,000 budget per engineer. MRR is £75,000 and we want MRR above £85k.';
     const on = { declared: (await registeredGoal(declared, PAUL)).graph, engineers: (await registeredGoal(engineers, ENG)).graph, mint: (await registeredGoal(paulDraft(), PAUL)).graph };
     vi.resetModules();
-    vi.doMock('../reconciling-product.js', () => ({ withReconcilingProductIdentity: (c: unknown) => c, withGoalProductUnconfirmed: (c: unknown) => c }));
+    vi.doMock('../reconciling-product.js', () => ({ withReconcilingProductIdentity: (c: unknown) => c, unconfirmGoalProducts: (c: unknown) => ({ model: c, dropped: [] }), droppedGoalProductLine: () => '' }));
     try {
       const off = (await import('../runtime/build-model.js')).buildModelFromBrief;
       expect((await registeredGoal(declared, PAUL, off)).graph).toStrictEqual(on.declared);

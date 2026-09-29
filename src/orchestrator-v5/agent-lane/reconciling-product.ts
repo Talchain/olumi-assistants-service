@@ -174,23 +174,91 @@ export function withReconcilingProductIdentity(candidate: CandidateModel, brief:
   };
 }
 
+/** A goal product the draft declared whose units provably don't combine into the goal's: dropped, and said. */
+export interface DroppedGoalProduct { readonly goal: string; readonly factors: readonly string[]; readonly into: string }
+
+const SYMBOL: Readonly<Record<string, string>> = { GBP: '£', USD: '$', EUR: '€' };
+type Identity = NonNullable<CandidateModel['identities']>[number];
+
 /**
- * ⛔ A PRODUCT THE DRAFTER DECLARES ON THE GOAL IS THE DRAFTER'S READING, NEVER THE USER'S STATEMENT (FORK (iii); R3
- * served `b5a673a`: a drafter-declared MRR = price × subscribers on Paul's plain brief). Every declared goal product is
- * kept but DEMOTED to `inferred`, whatever provenance the drafter tagged it with (its tag is its own word), so it waits
- * for the user's Yes like the mint's.
- *
- * ⛔ PR Review CHANGES_REQUIRED on 9af5ffb4: NOT only inside the card's domain. A declaration whose numbers happen to
- * match but whose units do not compose ("£75k MRR = 3 engineers × £25k budget per engineer") left as the drafter's
- * `explicit` became `stated_in_brief: true` at admission, the user's product, and PLoT (d) withholds only inferred ones.
- * Fail closed: outside the domain it is withheld with no card (the no-card words), never computed as the user's. Only the
- * card's Yes makes a goal product the user's. A candidate with nothing to demote comes back as the very same object.
+ * ⛔ AIQ 5892219245 (3): units that DON'T COMPOSE are not a reading at all ("Olumi reads MRR as ‘Engineers’ × ‘Budget per
+ * engineer’" would present nonsense as Olumi's view). Said only when every unit reads — the goal as money per period,
+ * each factor as money or a count — and still fails `unitsCompose`, even reading a period-less £ at the goal's period.
+ * A unit Olumi cannot read proves nothing about dimensions, so that declaration is demoted and withheld instead.
+ * Returns the goal's unit in words ("£ per month").
  */
-export function withGoalProductUnconfirmed(candidate: CandidateModel, brief: string): CandidateModel {
+function clashInto(candidate: CandidateModel, i: Identity): string | null {
+  const goal = candidate.goal;
+  const g = readMoney(goal.unit, goal.metric);
+  if (g === null || g.per !== null || g.period === null || i.factors.length !== 2) return null;
+  const parts = i.factors.map((s) => candidate.factors.find((f) => f.label === s));
+  if (parts.some((f) => f === undefined || (readMoney(f.unit, '') === null && readCount(f.unit) === null))) return null;
+  const [a, b] = parts as [NonNullable<(typeof parts)[number]>, NonNullable<(typeof parts)[number]>];
+  if (unitsCompose(goal.unit, goal.metric, a, b).kind !== 'no') return null;
+  // ⛔ A money unit with NO period (a bare "GBP") proves nothing about the period: it is how the drafter types Paul's
+  // real monthly price (C46's rows carry exactly that product). Read at the goal's period first; only a clash that
+  // survives it (a stated other period, a count × a count, another count's denominator) is not a reading at all.
+  const atGoalPeriod = (f: typeof a): typeof a => {
+    const m = readMoney(f.unit, '');
+    return m !== null && m.period === null && typeof f.unit === 'string' ? { ...f, unit: `${f.unit} per ${g.period}` } : f;
+  };
+  if (unitsCompose(goal.unit, goal.metric, atGoalPeriod(a), atGoalPeriod(b)).kind !== 'no') return null;
+  return `${SYMBOL[g.code] ?? g.code} per ${g.period}`;
+}
+
+/**
+ * AIQ 5892219245 (scope) + PR Review 5892269272: a GOAL CARRIER in the card's domain — a non-option parent of the goal
+ * whose declared product is the goal's own reading: its two levels and the goal's are the user's (explicit), within 5%.
+ * Read on the NUMBERS only, a superset of PLoT #420's `goalCarrierIds`: CEE's and PLoT's unit readers differ (PLoT lets
+ * a period-less rate compose), so a CEE units test here could leave a carrier PLoT withholds as inferred arriving as the
+ * user's. Whatever other parents the goal has.
+ */
+function goalCarrierReading(candidate: CandidateModel, i: Identity): boolean {
+  const goal = candidate.goal;
+  const o = goal.baseline_value;
+  if (i.operation !== 'product' || i.outcome === goal.metric || i.factors.length !== 2) return false;
+  if (candidate.options.some((opt) => opt.label === i.outcome)) return false;
+  if (!candidate.links.some((l) => l.from === i.outcome && l.to === goal.metric)) return false;
+  if (goal.baseline_known !== true || goal.baseline_provenance !== 'explicit' || !stated(o)) return false;
+  const levels: number[] = [];
+  for (const label of i.factors) {
+    const f = candidate.factors.find((x) => x.label === label);
+    if (f === undefined || f.baseline_known !== true || f.provenance !== 'explicit' || !stated(f.baseline_value)) return false;
+    levels.push(f.baseline_value);
+  }
+  return Math.abs(o - levels[0]! * levels[1]!) <= RECONCILIATION_TOLERANCE * Math.abs(o);
+}
+
+/**
+ * ⛔ NO CONSTRUCTION PATH WRITES A GOAL PRODUCT AS THE USER'S (AIQ 5892219245 (1); FORK (iii), R3 served `b5a673a`: a
+ * drafter-declared MRR = price × subscribers on Paul's plain brief). A product the drafter declares on the goal, or on a
+ * goal carrier in the card's domain, is the drafter's reading whatever it tagged (`admit-model.ts` turns `explicit`
+ * into `stated_in_brief: true`). Only the card's Yes (#2292) or a user-authored edit makes it the user's.
+ *  · Units that don't compose into the goal's (PR Review CHANGES_REQUIRED on 9af5ffb4: "£75k MRR = 3 engineers × £25k
+ *    budget per engineer", numbers matching) → DROPPED, and said in `dropped` for the `loss` line (AIQ (3)).
+ *  · Anything else (inside the card domain; the levels not all the user's; more than 5% off) → DEMOTED to `inferred`,
+ *    so PLoT (d) withholds the goal chance until the user's Yes (AIQ (2), (4)).
+ * A candidate with nothing to change comes back as the very same object.
+ */
+export function unconfirmGoalProducts(candidate: CandidateModel, brief: string): { model: CandidateModel; dropped: DroppedGoalProduct[] } {
   void brief;
   const metric = candidate.goal?.metric;
-  const demote = (i: NonNullable<CandidateModel['identities']>[number]): boolean =>
-    i.outcome === metric && i.operation === 'product' && i.provenance !== 'inferred';
-  if (!(candidate.identities ?? []).some(demote)) return candidate;
-  return { ...candidate, identities: (candidate.identities ?? []).map((i) => (demote(i) ? { ...i, provenance: 'inferred' } : i)) };
+  const dropped: DroppedGoalProduct[] = [];
+  let changed = false;
+  const kept: Identity[] = [];
+  for (const i of candidate.identities ?? []) {
+    const onGoal = i.outcome === metric && i.operation === 'product';
+    if (!onGoal && !goalCarrierReading(candidate, i)) { kept.push(i); continue; }
+    const into = onGoal ? clashInto(candidate, i) : null;
+    if (into !== null) { dropped.push({ goal: metric, factors: [...i.factors], into }); changed = true; continue; }
+    if (i.provenance === 'inferred') { kept.push(i); continue; }
+    kept.push({ ...i, provenance: 'inferred' });
+    changed = true;
+  }
+  return changed ? { model: { ...candidate, identities: kept }, dropped } : { model: candidate, dropped };
+}
+
+/** AIQ 5892219245 (3)'s disclosed line for a dropped goal product. */
+export function droppedGoalProductLine(d: DroppedGoalProduct): string {
+  return `The draft proposed ‘${d.goal}’ = ${d.factors.map((f) => `‘${f}’`).join(' × ')}, but those units don't combine into ${d.into}, so it is not used.`;
 }

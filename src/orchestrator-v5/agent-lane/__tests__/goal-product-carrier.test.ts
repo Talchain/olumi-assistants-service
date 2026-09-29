@@ -9,6 +9,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Ajv } from 'ajv';
 import { foldProductCarrierIntoGoal, foldedCarrierLines } from '../goal-product-carrier.js';
+import { unconfirmGoalProducts } from '../reconciling-product.js';
 import { readFileSync } from 'node:fs';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
@@ -197,5 +198,32 @@ describe('class 2 (AIQ 5888943993 (1)): REAL live drafts that add Olumi\'s own "
     const cand = structuredClone(LIVE.drafts[0]!.candidate);
     const brief = `${LIVE.brief} Other plans bring in £1,500 a month.`;
     expect(foldProductCarrierIntoGoal(cand as unknown as CandidateModel, brief).model).toBe(cand);
+  });
+});
+
+// ⛔ AIQ 5892219245 (scope) + PR Review 5892269272: a card-domain CARRIER beside another goal parent is the goal's reading
+// too, so the drafter's `explicit` on its product licenses nothing: it registers as Olumi's (PLoT #420 (d) withholds the
+// goal's chance through it until the user's Yes). The other parent's `explicit` link keeps the fold from firing.
+describe('a card-domain carrier beside another goal parent, its product declared explicit', () => {
+  const beside = (goalLevel = 75000): Rec => {
+    const c = run2();
+    c.goal.baseline_value = goalLevel;
+    c.identities[0].provenance = 'explicit';
+    c.outcomes.push({ label: 'Other-plan MRR', provenance: 'inferred' });
+    c.links.push({ ...link('Other-plan MRR', 'MRR'), provenance: 'explicit' });
+    return c;
+  };
+  it('DEMOTED (real build): the carrier registers Olumi\'s reading (stated_in_brief: false), and nothing folds', async () => {
+    const c = beside();
+    expect(strict(c), JSON.stringify(strict.errors?.slice(0, 2))).toBe(true);
+    const { r, g } = await build(c);
+    expect(r.ok, JSON.stringify(r).slice(0, 300)).toBe(true);
+    const carrier = (g.nodes as Rec[]).find((n) => n.label === 'Pro plan MRR');
+    expect(carrier?.nonlinear_identity).toStrictEqual({ operation: 'product', factor_ids: ['pro_plan_price', 'pro_paying_subscribers'], stated_in_brief: false });
+    expect((g.nodes as Rec[]).find((n) => n.kind === 'goal')?.nonlinear_identity ?? null).toBeNull();
+  });
+  it('CONTROL (scope): a carrier whose product is not the goal\'s reading (18% off) is left as tagged — AIQ: other identities unchanged', () => {
+    const c = beside(60000) as unknown as CandidateModel;
+    expect(unconfirmGoalProducts(c, PAUL.replace('£75k MRR', '£60k MRR')).model).toBe(c);
   });
 });

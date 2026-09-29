@@ -50,7 +50,7 @@ import {
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js';
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
-import { withGoalProductUnconfirmed, withReconcilingProductIdentity } from '../reconciling-product.js';
+import { droppedGoalProductLine, unconfirmGoalProducts, withReconcilingProductIdentity, type DroppedGoalProduct } from '../reconciling-product.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
 import { figureTheUserWrote, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
@@ -1229,15 +1229,16 @@ export async function buildModelFromBrief(
   // ⛔ A goal whose stated level is the product of its two stated parts is declared one (R3 #72 5886596030).
   // #2286's mint on the goal's two parts, or (when the drafter put the product on a carrier that is the goal's only parent)
   // the carrier folded into the goal under the SAME proof (`goal-product-carrier.ts`, MG #72 5888469185 class 1).
-  const mintOrFold = (c0: CandidateModel): { model: CandidateModel; folded: FoldedCarrier | null } => {
-    // FORK (iii): a drafter-declared goal product is the drafter's reading, so it is demoted to Olumi's first and waits
-    // for the user's Yes like the mint's (the same domain the mint and the #2296 card read).
-    const c = withGoalProductUnconfirmed(c0, brief);
+  const mintOrFold = (c0: CandidateModel): { model: CandidateModel; folded: FoldedCarrier | null; dropped: DroppedGoalProduct[] } => {
+    // FORK (iii) + AIQ 5892219245: a drafter-declared goal product is the drafter's reading, so it is demoted to Olumi's
+    // first and waits for the user's Yes like the mint's, or dropped (and said) when its units don't compose.
+    const { model: c, dropped } = unconfirmGoalProducts(c0, brief);
     const minted = withReconcilingProductIdentity(c, brief);
-    return minted !== c ? { model: minted, folded: null } : foldProductCarrierIntoGoal(c, brief);
+    return minted !== c ? { model: minted, folded: null, dropped } : { ...foldProductCarrierIntoGoal(c, brief), dropped };
   };
   const firstIdentity = mintOrFold(candidate);
   let foldedCarrier = firstIdentity.folded;
+  let droppedProducts = firstIdentity.dropped;
   let admitted = admitCandidateModel(firstIdentity.model, {}, brief, goalLevelTheUserWrote(candidate, brief), writtenAgain);
   preparation = gapsOnRegisteredOptions(preparation, firstCandidate, admitted);
 
@@ -1408,6 +1409,7 @@ export async function buildModelFromBrief(
           candidate = retryCandidate;
           admitted = retryAdmitted;
           foldedCarrier = retryIdentity.folded;
+          droppedProducts = retryIdentity.dropped;
           keptApart = retryApart.renamed;
           notToldApart = retryApart.ambiguous;
           size = retrySize;
@@ -1489,6 +1491,16 @@ export async function buildModelFromBrief(
       loss: [...admitted.loss, {
         field_path: `nodes[${slugId(f.carrier)}].folded_into_goal`, before: f.carrier, after: f.goal, reason: foldedCarrierLines(f).join(' '), severity: 'info',
       } as AdmittedModel['loss'][number]],
+    };
+  }
+  // AIQ 5892219245 (3): a goal product whose units don't compose is not a reading at all; the draft's proposal is said.
+  if (droppedProducts.length > 0) {
+    admitted = {
+      ...admitted,
+      loss: [...admitted.loss, ...droppedProducts.map((d) => ({
+        field_path: `nodes[${slugId(d.goal)}].nonlinear_identity_rejected`,
+        before: { outcome: d.goal, operation: 'product', factors: [...d.factors] }, after: null, reason: droppedGoalProductLine(d), severity: 'warn',
+      }) as AdmittedModel['loss'][number])],
     };
   }
   if (keptApart.length > 0) {
