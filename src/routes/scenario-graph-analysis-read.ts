@@ -94,7 +94,7 @@
 
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import type { AnalysisStateV1 } from '@talchain/schemas/boundary';
-import type { RunAnalysisHandlerFact, RunAnalysisResult } from '@talchain/schemas/orchestrator';
+import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
   deriveDecisionContextGraphHash,
@@ -130,6 +130,7 @@ import { deriveAnalysisFreshness, selectClaimBearingRunAnalysisFact, selectRunAn
 import { identityRunUseFromFacts } from '../orchestrator-v5/compose/definitional-links.js';
 import { isScenarioAnalysisReasoningAuthority } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
+import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
 import { log } from '../utils/telemetry.js';
 
 /** The additive half of the scenario-graph read's 200 body. */
@@ -179,7 +180,7 @@ export interface ScenarioAnalysisRead {
    * ABSENT when the fact records none (every Run before 0.63.0) or no fact passes the gates: absent = not recorded, and
    * no surface may then present a raw 0 or 1 as an earned certainty.
    */
-  readonly analysis_goal_certainty?: NonNullable<RunAnalysisResult['goal_certainty']>;
+  readonly analysis_goal_certainty?: StoredGoalCertainty;
   /**
    * C46 × R3-4 (Canonical criterion 1): the carriers the SELECTED fact's engine evaluated (`identity_evaluations`,
    * `evaluated: true`, read by `evaluatedIdentityNodeIds` off the fact's own `enrichment`) under the SAME gates as
@@ -469,7 +470,12 @@ export async function readScenarioAnalysis(
               const limitVerdicts = readLimitVerdictsFromResult(fact.result);
               return limitVerdicts === null ? {} : { analysis_limit_verdicts: limitVerdicts };
             })(),
-            ...(Array.isArray(fact.result.goal_certainty) ? { analysis_goal_certainty: fact.result.goal_certainty } : {}),
+            // The ONE reader both legs use (the Agent turn reads this same key through it too, DL 5887273384): only an
+            // array the published contract accepts is carried, `[]` included; anything else is not recorded.
+            ...(() => {
+              const certainty = readStoredGoalCertainty(fact.result.goal_certainty);
+              return certainty === undefined ? {} : { analysis_goal_certainty: certainty };
+            })(),
             ...(Array.isArray((fact.result.enrichment as { identity_evaluations?: unknown } | undefined)?.identity_evaluations)
               ? { analysis_identity_evaluated_node_ids: [...evaluatedIdentityNodeIds(fact.result.enrichment)] }
               : {}),

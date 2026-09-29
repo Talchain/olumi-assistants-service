@@ -94,6 +94,7 @@ import { computeAnalysisAffectingGraphHash } from "../../orchestrator-v5/context
 import { buildCanonicalAnalysisReadyFromGraph } from "../../orchestrator/tools/analysis-ready-helper.js";
 import { issuesAsWireBlockers } from "../../orchestrator-v5/compose/analysis-state-v1.js";
 import { RunAnalysisResultSchema } from "@talchain/schemas/orchestrator";
+import { readStoredGoalCertainty } from "../../orchestrator-v5/tools/handlers/run-goal-certainty.js";
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -759,5 +760,29 @@ describe("0.63.0 — `analysis_goal_certainty` is the selected Run's stored arra
     const body = (await read(await buildApp())).json() as Record<string, unknown>;
     expect(body.analysis_result).not.toBeNull();
     expect(body).not.toHaveProperty("analysis_goal_certainty");
+  });
+
+  // DL 5887273384 — turn/cold parity: the cold leg validates with the SAME reader the Agent turn applies to this key.
+  const REFUSED = [{ option_id: "opt_hire", probability_of_goal: 1, earned: true, say: "certain" }];
+
+  it("PRECONDITION — the refused array breaks the published contract (earned ⇒ nothing else), and the turn's reader refuses it", () => {
+    expect(RunAnalysisResultSchema.safeParse(withCertainty(GRAPH_HASH, REFUSED).result).success).toBe(false);
+    expect(readStoredGoalCertainty(REFUSED)).toBeUndefined();
+    expect(readStoredGoalCertainty(STORED)).toEqual(STORED);
+  });
+
+  it("CONTRACT REFUSED — a stored array the contract refuses is NOT carried on the cold read, exactly as the turn omits it", async () => {
+    readFactsFor.mockResolvedValue([withCertainty(GRAPH_HASH, REFUSED)]);
+    const body = (await read(await buildApp())).json() as Record<string, unknown>;
+    expect((body.analysis_state as { run_state: { kind: string } }).run_state.kind).toBe("complete_current");
+    expect(body.analysis_result).not.toBeNull();
+    expect(body).not.toHaveProperty("analysis_goal_certainty");
+    expect(readStoredGoalCertainty(body.analysis_goal_certainty)).toBeUndefined();
+  });
+
+  it("PARITY — on a valid stored array, the turn's reader applied to the cold read returns the cold read's own value", async () => {
+    readFactsFor.mockResolvedValue([withCertainty(GRAPH_HASH, STORED)]);
+    const body = (await read(await buildApp())).json() as Record<string, unknown>;
+    expect(readStoredGoalCertainty(body.analysis_goal_certainty)).toEqual(body.analysis_goal_certainty);
   });
 });
