@@ -121,7 +121,7 @@ describe('M1 authority and recovery controls', () => {
     expect(result.ok).toBe(true);
     const saved = GraphV3.parse(graph);
     const binding = deriveIntakeOptionReconciliation(brief, saved, saved);
-    expect(binding.state).toBe(valid ? 'reconciled' : 'identity_unverified');
+    expect(binding.state).toBe(valid ? 'reconciled' : 'options_missing');
     expect(binding.mayNameLeadingOption).toBe(valid);
     const option = saved.nodes.find((n) => n.kind === 'option' && n.label === label);
     if (valid) {
