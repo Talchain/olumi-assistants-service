@@ -1,8 +1,8 @@
 /**
  * ⛔ A TARGET THE OPTIONS MOVE ONLY THROUGH ITS PARTS, ON LINKS OLUMI HAS NOT SIZED, HAS NO CHECKABLE LIMIT (R-c: AI
- * Quality ruling #72 5881541947, accepted by the Codex DL 5881593118). A LEAF module, no imports: the level-limit
- * baseline carrier (T4, `level-limit-baseline.ts`) and the per-limit fold (`constraint-feasibility.ts`) share ONE
- * predicate, for level and change frames alike.
+ * Quality ruling #72 5881541947, accepted by the Codex DL 5881593118). The level-limit baseline carrier (T4,
+ * `level-limit-baseline.ts`) and the per-limit fold (`constraint-feasibility.ts`) share ONE predicate, for level and
+ * change frames alike. Its one import is the sizer's own unit rule (`naturalAmountUnitsOf`), which reaches neither module.
  *
  * An option that sets a PART of a target (a factor upstream of it, a direct parent or further up) and not the target
  * itself moves it only through the model's links. ISL then scores a limit on that target through those links' sizes.
@@ -13,7 +13,8 @@
  * WITHHELD when some option moves a part and not the target, AND either:
  *   · (i)  a link on that option's path to the target is a bare placeholder: its `provenance.magnitude` is not an
  *          estimate (`olumi_estimate`) or the user's own (`user_stated`), or its `provenance.natural_effect.amount_unit`
- *          is not the unit of the node it points at (for a link into the target, the target's unit), or that natural
+ *          is not the unit the sizer says a size in for the node it points at (`naturalAmountUnitOf`: "percentage
+ *          points" only for a percentage level on 100, else the node's unit), or that natural
  *          effect was written for another mean than the edge now holds. A path is sized only if EVERY link is.
  *          `defaulted` is NOT the discriminator: Olumi's sized links carry it too (AIQ 5881541947, 5882087383);
  *   · (ii) the target declares a `nonlinear_identity`: the engine does not combine parts by it yet ("product treated
@@ -21,6 +22,8 @@
  * Otherwise every link on the path is Olumi's model (served cloud: share % → downtime and readiness → downtime,
  * `olumi_estimate` in weeks), and the normal fold applies. Pure.
  */
+
+import { naturalAmountUnitsOf } from '../../cee/magnitude/frame-defaulted-links.js';
 
 type Rec = Record<string, unknown>;
 
@@ -36,22 +39,9 @@ const SIZED_MAGNITUDES: ReadonlySet<unknown> = new Set(['olumi_estimate', 'user_
 const norm = (u: unknown): string | undefined =>
   typeof u === 'string' && u.trim().length > 0 ? u.trim().toLowerCase() : undefined;
 
-/** The node's unit, in the sizer's order (`link-effect.ts` `unitOf`): its level's, then (a goal) its target's, then its own. */
-function unitOfNode(n: Rec): string | undefined {
-  const os = isRec(n.observed_state) ? n.observed_state : undefined;
-  return norm(os?.unit) ?? (n.kind === 'goal' ? norm(n.goal_threshold_unit) : undefined) ?? norm(n.unit);
-}
-
-/**
- * The sizer says a link's size in the unit of the node it points at, and a PERCENTAGE level moves in points
- * (`link-effect.ts` `targetUnitWords`: "percentage points" for a percent level, else the node's unit). Both spellings
- * are that node's unit; nothing else is.
- */
-function inUnitOf(amountUnit: unknown, nodeUnit: string | undefined): boolean {
-  const said = norm(amountUnit);
-  if (said === undefined || nodeUnit === undefined) return false;
-  return said === nodeUnit || (said === 'percentage points' && /%|percent/.test(nodeUnit));
-}
+/** Per node, the unit the sizer says a link's size in ("percentage points" only for a percentage LEVEL on 100). */
+const sizerUnitsOf = (nodes: readonly Rec[]): Map<unknown, string | undefined> =>
+  new Map([...naturalAmountUnitsOf(nodes)].map(([id, u]) => [id, norm(u)] as const));
 
 /**
  * A link Olumi (or the user) sized, in the unit of the node it points at, whose size still describes the link: the
@@ -62,7 +52,7 @@ function linkIsSized(edge: Rec, unitById: ReadonlyMap<unknown, string | undefine
   if (p === undefined || !SIZED_MAGNITUDES.has(p.magnitude)) return false;
   const effect = isRec(p.natural_effect) ? p.natural_effect : undefined;
   const to = unitById.get(edge.to);
-  if (effect === undefined || !inUnitOf(effect.amount_unit, to)) return false;
+  if (effect === undefined || to === undefined || norm(effect.amount_unit) !== to) return false;
   const mean = isRec(edge.strength) ? edge.strength.mean : undefined;
   return typeof mean === 'number' && mean === effect.strength_mean;
 }
@@ -118,7 +108,7 @@ export function placeholderPartsFinding(
   if (movers.length === 0) return null;
   const target = nodes.find((n) => n.id === targetId);
   if (target !== undefined && isRec(target.nonlinear_identity)) return { reason: PARTS_IDENTITY_UNMODELLED_REASON };
-  const unitById = new Map(nodes.map((n) => [n.id, unitOfNode(n)] as const));
+  const unitById = sizerUnitsOf(nodes);
   const onPath = new Set<unknown>([...parts, targetId]);
   for (const iv of movers) {
     // Forward from each part this option sets, through parts only: every link walked lies on a path to the target.
