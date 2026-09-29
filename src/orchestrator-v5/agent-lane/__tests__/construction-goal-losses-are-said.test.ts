@@ -55,6 +55,7 @@ const GTM = (goal: Record<string, unknown>) => ({
   ],
   identities: [],
   unknowns: [],
+  change_created: [],
   decision_question: null,
 });
 

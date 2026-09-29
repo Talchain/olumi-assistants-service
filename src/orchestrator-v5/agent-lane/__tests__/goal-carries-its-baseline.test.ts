@@ -52,7 +52,7 @@ function pricing(goal: Partial<CandidateModel['goal']> = {}): CandidateModel {
 const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
 
 async function registeredGoal(model: CandidateModel) {
-  const wire = { ...model, unknowns: [], decision_question: null };
+  const wire = { ...model, unknowns: [], change_created: [], decision_question: null };
   expect(strict(wire), JSON.stringify(strict.errors)).toBe(true);
   let graph: unknown = null;
   const call = (async () => ({ text: JSON.stringify(wire) })) as unknown as CallStructuredModel;
@@ -126,7 +126,7 @@ describe('the goal carries its current level, in the shape ISL reads', () => {
   it.each(['ai_proposed', 'inferred'])('RED: a "known" current level the model attributes to itself (%s) is withheld from Goal fit and said', async (prov) => {
     const model = pricing({ baseline_known: true, baseline_value: 16000, baseline_provenance: prov });
     // Negative control: the REAL strict schema accepts this shape, so only admission can stop it.
-    expect(strict({ ...model, unknowns: [], decision_question: null }), JSON.stringify(strict.errors)).toBe(true);
+    expect(strict({ ...model, unknowns: [], change_created: [], decision_question: null }), JSON.stringify(strict.errors)).toBe(true);
     const { goal, graph, out } = await registeredGoal(model);
     expect(goal).not.toHaveProperty('observed_state');
     const analysed = (resolveRunAdmission(graph).canonicalGraph as { nodes: { id: string; observed_state?: unknown }[] }).nodes.find((n) => n.id === GOAL);
@@ -228,12 +228,12 @@ describe('the goal carries its current level, in the shape ISL reads', () => {
   it('RED (efficacy): the production schema REQUIRES the goal\u2019s current level, and the retry pins it', () => {
     const goal = (buildCandidateSchema() as { properties: { goal: { required: string[]; properties: Record<string, unknown> } } }).properties.goal;
     expect(goal.required).toEqual(expect.arrayContaining(['baseline_known', 'baseline_value', 'baseline_provenance']));
-    const bad = { ...pricing(), unknowns: [], decision_question: null } as Record<string, unknown>;
+    const bad = { ...pricing(), unknowns: [], change_created: [], decision_question: null } as Record<string, unknown>;
     const { baseline_value: _dropped, ...goalWithout } = (bad.goal as Record<string, unknown>);
     expect(strict({ ...bad, goal: goalWithout }), 'a model that omits the key is refused by the strict contract').toBe(false);
     const pinned = new Ajv({ strict: false }).compile(retrySchemaPinningGoal(pricing({ baseline_known: true, baseline_value: 16000 }).goal));
-    expect(pinned({ ...pricing({ baseline_known: true, baseline_value: 16000 }), unknowns: [], decision_question: null })).toBe(true);
-    expect(pinned({ ...pricing({ baseline_known: true, baseline_value: 17000 }), unknowns: [], decision_question: null }), 'the retry cannot change it').toBe(false);
+    expect(pinned({ ...pricing({ baseline_known: true, baseline_value: 16000 }), unknowns: [], change_created: [], decision_question: null })).toBe(true);
+    expect(pinned({ ...pricing({ baseline_known: true, baseline_value: 17000 }), unknowns: [], change_created: [], decision_question: null }), 'the retry cannot change it').toBe(false);
   });
 
   it('the baseline adds no readiness blocker (round trip through the readiness authority)', async () => {

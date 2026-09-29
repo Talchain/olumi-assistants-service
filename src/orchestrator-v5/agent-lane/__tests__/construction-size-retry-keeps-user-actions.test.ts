@@ -78,6 +78,7 @@ function c22() {
     // C46 (#1972) made identities and the goal's scope required in the strict schema; c22 declared neither.
     identities: [],
     unknowns: [] as string[],
+    change_created: [],
     decision_question: null,
   };
 }

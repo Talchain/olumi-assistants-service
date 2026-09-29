@@ -57,7 +57,7 @@ function journeyC(churnBaseline: number | null, frame: 'level' | 'change_abs' = 
       link('Advertising spend', 'Pro paying subscribers', 'positive'), link('Pro paying subscribers', 'MRR', 'positive'),
       link('Monthly churn rate', 'Pro paying subscribers', 'negative'),
     ],
-    identities: [], unknowns: [] as string[], decision_question: null,
+    identities: [], unknowns: [] as string[], change_created: [] as string[], decision_question: null,
   };
 }
 

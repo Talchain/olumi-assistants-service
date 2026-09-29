@@ -64,6 +64,7 @@ function pricing(question: string | null | undefined, optionLabels: [string, str
     links: [link('Pro plan price', 'Pro subscribers', 'negative'), link('Pro plan price', 'MRR', 'positive'), link('Pro subscribers', 'MRR', 'positive')],
     identities: [],
     unknowns: [],
+    change_created: [],
     ...(question === undefined ? {} : { decision_question: question }),
   };
 }
@@ -90,6 +91,7 @@ function midmarket(question: string | null): Record<string, unknown> {
     links: [link('Engineering capacity', 'Mid-market customers', 'positive')],
     identities: [],
     unknowns: [],
+    change_created: [],
     decision_question: question,
   };
 }

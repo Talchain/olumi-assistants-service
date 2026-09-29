@@ -109,6 +109,7 @@ function paul(opts: { identities?: Identity[]; churnLimit?: boolean } = {}): Rec
     ],
     identities: opts.identities ?? [MRR_IS_PRICE_TIMES_SUBSCRIBERS],
     unknowns: [],
+    change_created: [],
     decision_question: null,
   };
 }
@@ -162,6 +163,7 @@ function sameSign(options?: unknown[]): Record<string, unknown> {
     ],
     identities: [{ outcome: 'Pro MRR', operation: 'product', factors: ['Revenue per Pro user', 'Pro subscribers'], provenance: 'inferred' }],
     unknowns: [],
+    change_created: [],
     decision_question: null,
   };
 }
@@ -439,6 +441,7 @@ describe('(b) rule 7 on the Run: a leader whose routes through and around the pr
       ],
       identities: [MRR_IS_PRICE_TIMES_SUBSCRIBERS],
       unknowns: [],
+      change_created: [],
       decision_question: null,
     };
   }

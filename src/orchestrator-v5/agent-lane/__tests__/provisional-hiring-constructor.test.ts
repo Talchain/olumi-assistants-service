@@ -33,6 +33,7 @@ function hiring() {
     ],
     identities: [],
     unknowns: ['Current headcount is estimated, not confirmed.'],
+    change_created: [],
     decision_question: null,
   };
 }
