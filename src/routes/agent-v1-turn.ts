@@ -507,6 +507,46 @@ const AGENT_INSTRUCTIONS = [
 ].join(' ');
 
 /**
+ * AI Experience PoC spike.
+ *
+ * Deliberately isolated behind env flags so Paul can compare behaviour without
+ * changing the production default. The full safety/tool contract above stays in
+ * place; this suffix changes only the coaching posture.
+ */
+const AI_EXPERIENCE_SPIKE_COACHING_SUFFIX =
+  'POC SPIKE COACHING: On advice, coaching and explanation turns, optimise for reasoning enhancement rather than answer-giving. ' +
+  'State what the current information implies, name the most consequential assumption or uncertainty, surface one genuinely different challenge or alternative when useful, and give one concrete next reasoning move. ' +
+  'Do not name a winner or recommendation unless the deterministic state actually licenses it. Prefer a useful conditional over false certainty. Keep it concise.';
+
+const AI_EXPERIENCE_SPIKE_MODELS = new Set([
+  'gpt-5.6-terra',
+  'gpt-6-luna',
+  'gpt-6-sol',
+]);
+
+function aiExperienceSpikeEnabled(name: string): boolean {
+  const value = process.env[name]?.trim().toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes' || value === 'on';
+}
+
+function activeAgentInstructions(): string {
+  return aiExperienceSpikeEnabled('CEE_AI_EXPERIENCE_SPIKE_COACHING')
+    ? `${AGENT_INSTRUCTIONS} ${AI_EXPERIENCE_SPIKE_COACHING_SUFFIX}`
+    : AGENT_INSTRUCTIONS;
+}
+
+function conversationModelForSpike(): string {
+  const requested = process.env.CEE_AI_EXPERIENCE_SPIKE_MODEL?.trim();
+  if (!requested) return 'gpt-5.6-terra';
+  if (!AI_EXPERIENCE_SPIKE_MODELS.has(requested)) {
+    throw new Error(
+      `CEE_AI_EXPERIENCE_SPIKE_MODEL must be one of ${[...AI_EXPERIENCE_SPIKE_MODELS].join(', ')}; got ${requested}`,
+    );
+  }
+  return requested;
+}
+
+/**
  * Read the persisted state back for the response: `graph_hash`, readiness and
  * the `draft_graph` the canvas draws. Shared by a live turn and a replay, so a
  * replayed answer is shown against the SAME current state a fresh one would be.
@@ -1091,7 +1131,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
 
 
   const callModel: CallModel = async (req) => onceMoreOnTransportFailure('conversation', async () => {
-    const budget = budgetFor('gpt-5.6-terra', 'conversation');
+    const budget = budgetFor(conversationModelForSpike(), 'conversation');
     /**
      * ⭐ THE HANDLE IS KEPT SO CACHING CAN BE MEASURED AT ALL.
      *
@@ -1993,7 +2033,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (runInterpreted) try {
         const resp = await callModel({
           // C5b's line goes BEFORE the interpret-only line, so the banked Interpreter v0.2 text stays last and byte-identical.
-          instructions: `${AGENT_INSTRUCTIONS}\n\n${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
+          instructions: `${activeAgentInstructions()}\n\n${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
           input: priorAndRun,
           // No tools at all: acting is structurally impossible on this call (and no schema tokens
           // are spent on tools it may not use). Measured against the live API: accepted with the
@@ -2141,7 +2181,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ctx: toolCtx,
           history,
           message,
-          instructions: AGENT_INSTRUCTIONS,
+          instructions: activeAgentInstructions(),
           maxOutputTokens: budget.max_output_tokens,
           mode,
           withheldTools: withheldToolsOf(body),
