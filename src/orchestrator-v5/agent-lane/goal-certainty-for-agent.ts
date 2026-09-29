@@ -7,16 +7,21 @@
  * exactly 0 or 1, whether that certainty is earned, and for an unearned one gives the sentence to say.
  *
  * Which decision the Agent follows:
- *   1. RECORDED — the read carries the Run's own `analysis_goal_certainty` (Canonical #2280, once it serves): followed
- *      verbatim, never recomputed. A recorded `[]` is a record, not an absence: it does not cover a certainty, so unchecked.
- *   2. NOT RECORDED — the SAME producer on the SAME Run, bound exactly: the read's own result block must be this Run
- *      (`computed_against_hash` equal, every certain option at the same P) and the read must call it current, so the
- *      read's graph is the graph the Run was computed on. The read attests which identities the Run evaluated but not
- *      their `level_source`, so the producer's stated-level break-even is withheld (fail closed); `earned` is unchanged.
- *      DL 5887061638: a temporary fallback, removed once #2280's stored writer serves and is witnessed.
- *   3. Anything else — no read, a Run that cannot be bound, a decision that does not cover every certainty — is
- *      `unchecked`: never said as 100% or 0%.
+ * ⛔ EVERY decision is bound to the EXACT Run first (PR Review CHANGES_REQUIRED @ d3a7a96b): the read selects a Run of
+ * its own, and a second Run on the same graph can finish between the Run and the read. The read's selected Run must be
+ * this Run by the estate's run-fact identity — `compareAnalysisRunFactIdentity`: scenario, `graph_hash_at_run` (the
+ * block's `computed_against_hash`) AND `computed_at` (the Run's own stamp; served 0497e52: three Runs of one graph share
+ * the hash and differ here) — the read must call it current, and every option it reports must carry the same P(goal)
+ * and win probability. Unbound → `unchecked`, whichever carrier is on the read.
+ *   1. RECORDED — the bound read carries the Run's own `analysis_goal_certainty` (Canonical #2280, once it serves):
+ *      followed verbatim, never recomputed. A recorded `[]` is a record, not an absence: it covers no certainty.
+ *   2. NOT RECORDED — the SAME producer on the bound Run's graph. The read attests which identities the Run evaluated but
+ *      not their `level_source`, so the producer's stated-level break-even is withheld (fail closed); `earned` is
+ *      unchanged. DL 5887061638: a temporary fallback, removed once #2280's stored writer serves and is witnessed.
+ *   3. Anything else — no read, an unbound Run, a decision that does not cover every certainty — is `unchecked`: never
+ *      said as 100% or 0%.
  */
+import { compareAnalysisRunFactIdentity } from '../context/analysis-interpretation-identity.js';
 import { goalCertaintyDecisions } from './goal-certainty.js';
 
 type Rec = Record<string, unknown>;
@@ -57,38 +62,52 @@ export function certainOptionRows(result: unknown): Rec[] {
   return optionRows(result).filter((r) => typeof r.option_id === 'string' && (r.probability_of_goal === 0 || r.probability_of_goal === 1));
 }
 
+/** The Run that produced this result, as the Agent received it: its scenario, its result block and its analysis state. */
+export interface RunOfResult {
+  readonly scenario_id: string;
+  readonly analysis_state: unknown;
+}
+
+const runStateOf = (state: unknown): Rec | undefined =>
+  (isRec(state) && isRec(state.run_state) ? state.run_state : undefined);
+
 /**
- * The read's graph is the graph THIS Run was computed on: the read calls its Run current, that Run is this one (the same
- * `computed_against_hash`), and it reports every certain option at the same P. Anything unproven is unbound.
+ * The read selected THIS Run: the estate's run-fact identity matches (scenario, `graph_hash_at_run`, `computed_at`), the
+ * read calls it current, and every option reports the same P(goal) and win probability. Anything unproven is unbound.
  */
-function boundToThisRun(runResult: unknown, certain: readonly Rec[], read: GoalCertaintyRead): boolean {
-  const runState = isRec(read.analysis_state) && isRec(read.analysis_state.run_state) ? read.analysis_state.run_state : undefined;
-  if (runState?.kind !== 'complete_current') return false;
-  const hashOf = (b: unknown): string | undefined =>
-    (isRec(b) && typeof b.computed_against_hash === 'string' && b.computed_against_hash !== '' ? b.computed_against_hash : undefined);
-  const runHash = hashOf(runResult);
-  if (runHash === undefined || hashOf(read.analysis_result) !== runHash) return false;
-  const readP = new Map(optionRows(read.analysis_result).map((r) => [r.option_id, r.probability_of_goal] as const));
-  return certain.every((o) => readP.get(o.option_id) === o.probability_of_goal);
+function boundToThisRun(runResult: unknown, run: RunOfResult, read: GoalCertaintyRead): boolean {
+  if (runStateOf(read.analysis_state)?.kind !== 'complete_current') return false;
+  const identity = (block: unknown, state: unknown) => ({
+    scenario_id: run.scenario_id,
+    graph_hash_at_run: isRec(block) ? block.computed_against_hash : undefined,
+    computed_at: runStateOf(state)?.computed_at,
+  });
+  if (compareAnalysisRunFactIdentity(identity(runResult, run.analysis_state), identity(read.analysis_result, read.analysis_state)).status !== 'match') {
+    return false;
+  }
+  const runRows = optionRows(runResult);
+  const readRows = new Map(optionRows(read.analysis_result).map((r) => [r.option_id, r] as const));
+  return runRows.length === readRows.size && runRows.every((o) => {
+    const r = readRows.get(o.option_id);
+    return r !== undefined && r.probability_of_goal === o.probability_of_goal && r.win_probability === o.win_probability;
+  });
 }
 
 /**
  * `goal_certainty` for the Agent, for one Run's result. `undefined` when no option claims a certainty; otherwise either
  * the decision per certain option with the rule, or `unchecked` (never said as certain).
  */
-export function goalCertaintyForAgent(runResult: unknown, read: GoalCertaintyRead | null | undefined): Rec | undefined {
+export function goalCertaintyForAgent(runResult: unknown, run: RunOfResult, read: GoalCertaintyRead | null | undefined): Rec | undefined {
   const certain = certainOptionRows(runResult);
   if (certain.length === 0) return undefined;
-  if (read === null || read === undefined) return { ...UNCHECKED };
+  if (read === null || read === undefined || !boundToThisRun(runResult, run, read)) return { ...UNCHECKED };
   let decisions: readonly unknown[];
   if (read.goal_certainty !== undefined) {
     decisions = read.goal_certainty;
-  } else if (boundToThisRun(runResult, certain, read)) {
+  } else {
     const evaluations = read.identity_evaluated === undefined ? undefined
       : [...read.identity_evaluated].map((node_id) => ({ node_id, evaluated: true }));
     decisions = goalCertaintyDecisions(read.raw, certain, evaluations);
-  } else {
-    return { ...UNCHECKED };
   }
   const byId = new Map(decisions.filter(isRec).map((d) => [String(d.option_id), d] as const));
   const options: Rec[] = [];

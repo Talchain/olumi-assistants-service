@@ -243,7 +243,7 @@ describe('goal certainty rides the first analysis too (DL 5887061638; the call-s
 
   it('RECORDED: the first pass follows the Run\'s own recorded decision, its sentence verbatim', async () => {
     const recorded = [{ option_id: optionId, probability_of_goal: 1, earned: false, say: 'The first pass\u2019s RECORDED sentence.' }];
-    const gc = (await firstPass({ optionId, hash: 'c'.repeat(64), recorded })).goal_certainty as { options?: { option_id: string; earned: boolean; say?: string }[] };
+    const gc = (await firstPass({ optionId, hash: 'c'.repeat(16), recorded })).goal_certainty as { options?: { option_id: string; earned: boolean; say?: string }[] };
     expect(gc?.options, JSON.stringify(gc)).toEqual([expect.objectContaining({ option_id: optionId, earned: false, say: 'The first pass\u2019s RECORDED sentence.' })]);
   });
 

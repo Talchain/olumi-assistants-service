@@ -18,9 +18,13 @@ const FX = JSON.parse(
   readFileSync(new URL('../../__tests__/fixtures/served-strict-journey-5411da8-goal-certainty.json', import.meta.url), 'utf8'),
 ) as { paul: { graph: Json; option_comparison: Json[]; analysis_identity_evaluated_node_ids: string[]; identity_evaluations: Json[] } };
 const ctx = { scenario_id: '550e8400-e29b-41d4-a716-4466554400c9', authenticated_user_id: null, request_id: 'r' };
-const RUN_HASH = 'a'.repeat(64);
+// The Run's identity as the estate writes it: `graph_hash_at_run` (16 hex, the block's `computed_against_hash`) and its
+// own `computed_at` stamp (served 0497e52: three Runs of one graph share the hash and differ only here).
+const RUN_HASH = '8d463e248f9ff996';
+const RUN_AT = '2026-09-29T09:28:45.852Z';
+const OTHER_RUN_AT = '2026-09-29T09:28:46.107Z';
 // The leader is PERMITTED on this run, so the certainty read cannot ride on the withheld-leader graph read.
-const STATE = { run_state: { kind: 'complete_current' }, leader_claim: { permitted: true } };
+const STATE = { run_state: { kind: 'complete_current', computed_at: RUN_AT }, leader_claim: { permitted: true } };
 // What the graph read attests: the ids THIS run evaluated — no `level_source`.
 const READ_EVALUATIONS = FX.paul.analysis_identity_evaluated_node_ids.map((node_id) => ({ node_id, evaluated: true }));
 // What #2280's writer RECORDS for this Run: the producer on the stored graph and the whole PLoT body (level_source included).
@@ -106,7 +110,10 @@ describe('route A — a Run that cannot be bound is never said as certain (DL: "
   it.each([
     ['the read selected another Run (another computed_against_hash)', { read: { analysis_result: block(FX.paul.option_comparison, 'b'.repeat(64)) } }],
     ['the read withholds its Run (no analysis_result)', { read: { analysis_result: null } }],
-    ['the read calls its Run stale', { read: { analysis_state: { ...STATE, run_state: { kind: 'complete_stale' } } } }],
+    ['the read calls its Run stale', { read: { analysis_state: { ...STATE, run_state: { kind: 'complete_stale', computed_at: RUN_AT } } } }],
+    ['the read selected ANOTHER Run of the same graph (same hash, same P, another stamp)', { read: { analysis_state: { ...STATE, run_state: { kind: 'complete_current', computed_at: OTHER_RUN_AT } } } }],
+    ['the Run carries no stamp of its own', { read: { analysis_state: { ...STATE, run_state: { kind: 'complete_current' } } } }],
+    ['the read\'s Run reports another win probability for an option', { read: { analysis_result: block(FX.paul.option_comparison.map((o, i) => (i === 2 ? { ...o, win_probability: 0.123 } : o))) } }],
     ['the read\'s Run reports another P for a certain option', { read: { analysis_result: block(FX.paul.option_comparison.map((o) => ({ ...o, probability_of_goal: 0.5 }))) } }],
     ['the Run carries no computed_against_hash', { read: { analysis_result: block(FX.paul.option_comparison, null) } }],
     ['the graph read failed', { readStatus: 500 }],
@@ -139,6 +146,24 @@ describe('route A — RECORDED (#2280\'s `analysis_goal_certainty`) is preferred
     const tampered = STORED.map((d) => (d.option_id === 'raise_price_to_54' ? { ...d, earned: false, say: 'RECORDED SENTENCE.' } : d));
     const p54 = ((await run({ recorded: tampered })).goal_certainty.options as Certainty[]).find((x) => x.option_id === 'raise_price_to_54')!;
     expect(p54).toEqual(expect.objectContaining({ earned: false, say: 'RECORDED SENTENCE.' }));
+  });
+
+  it('⛔ TWO RUNS, ONE GRAPH (PR Review CR): the read carries ANOTHER Run\'s record (same hash, same P, a different verdict) → unchecked, never that Run\'s verdict', async () => {
+    const otherRun = STORED.map((d) => (d.option_id === 'raise_price_to_59' ? { ...d, earned: true, say: undefined } : d));
+    const other = { analysis_state: { ...STATE, run_state: { kind: 'complete_current', computed_at: OTHER_RUN_AT } } };
+    const r = await run({ recorded: otherRun, read: other });
+    expect(r.goal_certainty).toEqual(expect.objectContaining({ unchecked: true }));
+    expect(r.goal_certainty).not.toHaveProperty('options');
+    // Contrast: the SAME record on a read of THIS Run is followed.
+    expect(p59(await run({ recorded: otherRun })).earned).toBe(true);
+  });
+
+  it('⛔ TWO RUNS, ONE GRAPH, nothing recorded: the other Run evaluated the identity (a different verdict) → unchecked, never recomputed on its facts', async () => {
+    const other = { analysis_state: { ...STATE, run_state: { kind: 'complete_current', computed_at: OTHER_RUN_AT } }, analysis_identity_evaluated_node_ids: [] };
+    const r = await run({ read: other });
+    expect(r.goal_certainty).toEqual(expect.objectContaining({ unchecked: true }));
+    // Contrast: the same facts on a read of THIS Run give a decision.
+    expect(p59(await run({ read: { analysis_identity_evaluated_node_ids: [] } })).option_id).toBe('raise_price_to_59');
   });
 
   it('a record at another P, or an unearned one with no sentence → unchecked (fail closed)', async () => {

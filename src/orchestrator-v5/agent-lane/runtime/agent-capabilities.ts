@@ -5132,7 +5132,7 @@ export function createAgentCapabilities(
         // product the run's engine evaluated, read from the SAME post-run read as the permission.
         if (firstAnalysis.ran === true || firstAnalysis.reason === 'already_ran_for_construction') {
           // ⛔ GOAL CERTAINTY (DL 5887061638): the first pass's result IS this read's block, so the SAME read binds it.
-          const certainty = goalCertaintyForAgent(read.analysis_result, certaintyReadOf(read));
+          const certainty = goalCertaintyForAgent(read.analysis_result, { scenario_id: ctx.scenario_id, analysis_state: read.analysis_state }, certaintyReadOf(read));
           firstAnalysis = { ...firstAnalysis, claim_permissions: withNonlinearIdentity(firstAnalysis.claim_permissions, after.raw,
             readEvaluatedIdentityNodeIds(read.analysis_identity_evaluated_node_ids)), ...withGoalChance(read.analysis_result),
           ...(certainty !== undefined ? { goal_certainty: certainty } : {}) };
@@ -6422,7 +6422,8 @@ export function createAgentCapabilities(
         if (postRunRead === undefined) {
           try { postRunRead = await readGraph(ctx.scenario_id); } catch { postRunRead = null; }
         }
-        goalCertainty = goalCertaintyForAgent(result, postRunRead);
+        // The Run is the one THIS turn returned: its own state carries the stamp the read must match.
+        goalCertainty = goalCertaintyForAgent(result, { scenario_id: ctx.scenario_id, analysis_state: r.json.analysis_state }, postRunRead);
       }
       // ⛔ A Run with no result says the ENGINE's typed outcome, never a readiness issue it did not stop on (`run-outcome.ts`).
       const runOutcome = result === undefined ? runOutcomeOf(r.json) : undefined;
