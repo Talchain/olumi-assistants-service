@@ -739,9 +739,10 @@ export function userWordsOf(typedEarlier: readonly string[], typedNow: string | 
  *      fewer / drop … against gain / win / adds / rise … A move word right after the SOURCE's figure ("£1 increase",
  *      "£10 rise", "£1 we add to the price") or beside a word naming the source ("the price falls", "raise the price")
  *      is the SOURCE's move, and must match the sign of `per_source_change`; with none, the source is read as rising.
- * All of it from ONE sentence of the quote, and each figure BOUND to what it sizes: the amount within four words of the
- * target's movement ("loses us about 50", "50 fewer"), the source's figure within four words of the source or its move
- * ("£1 on the Pro price", "falls by £1") — a figure written for anything else (a budget, today's level) is never a size.
+ * All of it from ONE sentence of the quote, and each figure SIZES its change: the amount joined to the target's movement
+ * ("loses us about 50", "50 fewer"), the source's figure joined to a word of the source ("£1 on the Pro price", "the
+ * Pro price falls by £1") — through linking words only, never "and" or another clause: a figure written for anything
+ * else (a budget, today's level) is never a size.
  * Every miss under-claims (the Agent asks the user to say it as one statement): an unlisted verb ("sheds"), a source
  * named only by implication ("a £10 rise adds…"), both movements for one end, a figure far from its movement, or the
  * elements spread over several sentences.
@@ -752,10 +753,19 @@ const TARGET_DOWN = /^(?:lose|loses|losing|lost|cost|costs|costing|fewer)$/;
 const TARGET_UP = /^(?:gain|gains|gaining|gained|win|wins|winning|won|adds|added|adding)$/;
 const MOVE_UP = /^(?:rise|rises|rising|rose|increase|increases|increasing|increased|raise|raises|raising|raised|boost|boosts|boosted|boosting|lift|lifts|lifted|lifting|grow|grows|growing|grew|add)$/;
 const MOVE_DOWN = /^(?:fall|falls|falling|fell|drop|drops|dropping|dropped|decrease|decreases|decreasing|decreased|reduce|reduces|reducing|reduced|lower|lowers|lowering|lowered|cut|cuts|cutting)$/;
-/** A figure is bound to its movement or its end only within this many words of it ("loses us about 50", "£1 on the Pro price"). */
-const BOUND_WITHIN = 4;
-/** The quote's sentences: split at . ! ? ; : or a new line, never inside a figure ("0.5", "£1.50"). */
-const sentencesOf = (q: string): string[] => q.split(/(?<!\d)[.!?;:](?!\d)|\n/).map((x) => x.trim()).filter((x) => x !== '');
+/**
+ * A figure SIZES a change only when words of that change join it, and only such words stand between (PR Review's third
+ * CR, #2275 @ 157b42ae: "Our budget is £1 and Pro price rises, losing 50 paying subscribers" sits £1 beside "price"
+ * without describing a price change). The source's figure joins a word of the source through these, its label words
+ * or its move ("£1 on the Pro price", "£10 rise in the Pro price", "the Pro price falls by £1"); the amount joins the
+ * target's movement through these ("loses us about 50", "50 fewer").
+ */
+const SOURCE_LINK = /^(?:on|in|of|to|the|a|an|our|its|their|we|you|by|extra|more|each|every|per)$/;
+const AMOUNT_LINK = /^(?:us|about|roughly|around|approximately|some|nearly|almost|over|up|to|the|our|of|by|an|a|extra|another)$/;
+const SOURCE_REACH = 6;
+const AMOUNT_REACH = 4;
+/** The quote's sentences: split at ! ? ; : a new line, or a period — except a period BETWEEN digits ("0.5", "£1.50"). */
+const sentencesOf = (q: string): string[] => q.split(/[!?;:\n]|(?<!\d)\.|\.(?!\d)/).map((x) => x.trim()).filter((x) => x !== '');
 export function linkEffectTheUserStated(
   quote: string,
   effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
@@ -797,6 +807,12 @@ function linkEffectInOneSentence(
   const tokenAt = (index: number | undefined): number => tokens.findIndex((t) => t.at >= (index ?? 0));
   const perAt = tokenAt(perFigure.index);
   const amountAt = tokenAt(amountFigure.index);
+  // A figure's own digits ("0.5" → 0, 5) are never words standing between it and what it sizes.
+  const inFigure = (i: number): boolean => [perFigure, amountFigure].some((f) => tokens[i]!.at >= (f.index ?? 0)
+    && tokens[i]!.at < (f.index ?? 0) + f.matchedText.length);
+  const joined = (a: number, b: number, reach: number, link: (w: string) => boolean): boolean => a >= 0 && b >= 0
+    && Math.abs(a - b) <= reach && tokens.slice(Math.min(a, b) + 1, Math.max(a, b)).every((t, k) => inFigure(Math.min(a, b) + 1 + k) || link(t.w));
+  const sourceLabel = wordsOf(ends.source);
   // "£1 increase", "£10 rise", "£1 we add": right after the source's figure. "the price falls", "raise the price": beside
   // a word naming the source. "add … to the Pro price": up to four words before it.
   const isSourceMove = (i: number, w: string): boolean => (perAt >= 0 && i > perAt && i - perAt <= 3)
@@ -813,9 +829,11 @@ function linkEffectInOneSentence(
     else if (MOVE_DOWN.test(t.w)) say(isSourceMove(i, t.w) ? 'source' : 'target', -1, i);
   });
   if (target === 0 || targetBoth || sourceBoth) return 'direction_not_stated';
-  // Each figure is bound to what it sizes: the amount to the target's movement, the source's figure to the source.
-  const near = (a: number, xs: readonly number[]): boolean => a >= 0 && xs.some((x) => Math.abs(x - a) <= BOUND_WITHIN);
-  if (!near(amountAt, targetMoves) || !near(perAt, [...sourceAt, ...sourceMoves])) return 'figure_not_bound';
+  // Each figure SIZES its change: the amount joined to the target's movement, the source's figure to a source word.
+  const sourceLinkWord = (w: string): boolean => SOURCE_LINK.test(w) || MOVE_UP.test(w) || MOVE_DOWN.test(w)
+    || sourceLabel.some((x) => sameWord(x, w));
+  if (!targetMoves.some((m) => joined(amountAt, m, AMOUNT_REACH, (w) => AMOUNT_LINK.test(w)))
+    || !sourceAt.some((s) => joined(perAt, s, SOURCE_REACH, sourceLinkWord))) return 'figure_not_bound';
   if (target !== Math.sign(effect.amount)) return 'direction_contradicts';
   if (source === 0 ? effect.per_source_change < 0 : source !== Math.sign(effect.per_source_change)) {
     return source === 0 ? 'direction_not_stated' : 'direction_contradicts';

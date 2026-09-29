@@ -145,6 +145,16 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     ['Our budget is £1 per month and we currently have 50 paying subscribers, and a Pro price rise loses us paying subscribers.',
       'Our budget is £1 per month and we currently have 50 paying subscribers, and a Pro price rise loses us paying subscribers',
       -50, 1, 'not_the_users_statement', 'figure_not_bound'],
+    // PR Review's third CR (@ 157b42ae), its two exact strings: a sentence-ending period after a digit; and a budget
+    // beside the source's NAME that describes no change of it ("£1 and Pro price rises").
+    ['Our budget is £1. Pro price rises, losing 50 paying subscribers.',
+      'Our budget is £1. Pro price rises, losing 50 paying subscribers', -50, 1, 'not_the_users_statement', 'not_one_statement'],
+    ['Our budget is £1 and Pro price rises, losing 50 paying subscribers.',
+      'Our budget is £1 and Pro price rises, losing 50 paying subscribers', -50, 1, 'not_the_users_statement', 'figure_not_bound'],
+    // The source's figure sizes the price move, but 50 is today's level — it does not size the loss.
+    ['Every £1 on the Pro price loses us paying subscribers, and we have 50 paying subscribers today.',
+      'Every £1 on the Pro price loses us paying subscribers, and we have 50 paying subscribers today', -50, 1,
+      'not_the_users_statement', 'figure_not_bound'],
     // A NAMED under-claim: the source only implied ("a £10 rise") — the Agent asks, never infers the price.
     ['A £10 rise loses us about 500 paying subscribers.', 'A £10 rise loses us about 500 paying subscribers', -500, 10,
       'not_the_users_statement', 'end_not_named'],
