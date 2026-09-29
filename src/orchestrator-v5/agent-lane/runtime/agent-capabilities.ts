@@ -1056,6 +1056,25 @@ function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'ana
   };
 }
 
+/**
+ * What `propose_assumptions` tells the Agent to say, by who wrote the values: a figure the user gave (`your_figure`)
+ * is theirs and is never called an assumption; every other value is an assumption to adopt or correct.
+ */
+function proposalNoteFor(usersCount: number, total: number): string {
+  const ask = 'and call authorise_change with this proposal_id only once they agree.';
+  if (usersCount === 0) {
+    return 'Nothing has changed. Show the user each value and what it rests on, say plainly that these are ' +
+      `assumptions to adopt or correct and NOT measurements, ${ask}`;
+  }
+  if (usersCount === total) {
+    return 'Nothing has changed. Show the user each value as the figure the user gave: it will be saved as the ' +
+      `user's own figure, so never call it an assumption or say it is not a measurement, ${ask}`;
+  }
+  return 'Nothing has changed. Show the user each value and what it rests on. A value marked your_figure is the ' +
+    "user's own figure and will be saved as theirs: never call it an assumption. Say plainly that the other values " +
+    `are assumptions to adopt or correct and NOT measurements, ${ask}`;
+}
+
 const pickKeys = (o: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> =>
   Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]));
 
@@ -2758,11 +2777,13 @@ export function createAgentCapabilities(
       // Sorted by node id so an identical set proposed in a different order is
       // the SAME proposal, not a second one.
       const ordered = [...adopted].sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
+      // A revision the user named AND wrote is theirs; anything else is Olumi's (`valueOpAuthor`). ONE predicate for
+      // what is stored and for what the Agent is told to say, so the words cannot drift from the authorship.
+      const usersOwn = (a: { replaces?: number; userWrote: boolean }): boolean => typeof a.replaces === 'number' && a.userWrote;
       const operations: ProposalOperation[] = ordered.map((a) => ({
         op: 'set_factor_value',
         path: a.id,
-        // A revision the user named AND wrote is theirs; anything else is Olumi's (`valueOpAuthor`).
-        value: { value: a.value, unit: a.unit, basis: a.basis, authored_by: typeof a.replaces === 'number' && a.userWrote ? 'user_stated' : 'model_proposed' },
+        value: { value: a.value, unit: a.unit, basis: a.basis, authored_by: usersOwn(a) ? 'user_stated' : 'model_proposed' },
       }));
       /**
        * ⛔ THE APPROVAL MUST SAY WHAT IT REPLACES.
@@ -2818,6 +2839,7 @@ export function createAgentCapabilities(
         assumptions: ordered.map((a) => ({
           factor: a.label, value: a.value, unit: a.unit, basis: a.basis,
           ...(typeof a.replaces === 'number' ? { replaces: a.replaces } : {}),
+          ...(usersOwn(a) ? { your_figure: true } : {}),
         })),
         ...(unresolved.length > 0 ? { unresolved_labels: unresolved } : {}),
         ...(occupied.length > 0 ? { left_alone_already_valued: occupied } : {}),
@@ -2830,10 +2852,9 @@ export function createAgentCapabilities(
           not_the_users_figure: notWritten.map((a) => ({ factor: a.label, value: a.value })),
           not_the_users_figure_note: NOT_THE_USERS_FIGURE_NOTE,
         } : {}),
-        note:
-          'Nothing has changed. Show the user each value and what it rests on, say plainly that these are ' +
-          'assumptions to adopt or correct and NOT measurements, and call authorise_change with this ' +
-          'proposal_id only once they agree.',
+        // ⛔ Served e25d0aa (29 Sep): one note for every value made the Agent call the user's own "3.7%" churn "a model
+        // assumption … not a measurement", though it is stored as theirs. The words follow `usersOwn`, value by value.
+        note: proposalNoteFor(ordered.filter(usersOwn).length, ordered.length),
       };
     },
 

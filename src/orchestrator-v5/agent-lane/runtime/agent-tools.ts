@@ -225,7 +225,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'Propose starting values for factors that have none, so the model can be reasoned about ' +
       'instead of sitting blank. This does NOT change anything: it records an exact proposal and ' +
       'returns its id, which you keep for authorise_change: show the user the values, never the id, before asking them to approve. Each value is ' +
-      'the user\u2019s assumption to adopt or correct, NEVER a measurement \u2014 say so. Propose only ' +
+      'an assumption for the user to adopt or correct, NEVER a measurement \u2014 say so; a value the result marks ' +
+      '`your_figure` is the user\u2019s own figure, never called an assumption. Propose only ' +
       'factors the model actually has, using the labels get_canonical_state returned. ' +
       'A factor that already holds a value is left alone UNLESS you set `revise: true` on it, which ' +
       'you may do ONLY when the user has just asked for that factor to be changed and named the ' +
