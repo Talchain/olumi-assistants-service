@@ -162,4 +162,44 @@ suite('shared data: saved Run → cold read / AI context → edit → stale → 
       reopened: { read: reopened.result, agentCertainty: reopened.agentCertainty },
     }, null, 2));
   }, 240000);
+
+  it('an approved option adoption writes one version and fact, invalidates the Run, and refuses replay', async () => {
+    const optionId = 'increase_price_to_54';
+    const graph = clone(fixture.graph);
+    graph.nodes.find((node: Json) => node.id === optionId).proposed_by = 'olumi';
+    const seeded = await client.from('scenarios').update({ graph }).eq('id', scenarioId);
+    expect(seeded.error).toBeNull();
+    await runAndSave();
+    const before = await coldRead();
+    expect(before.result.analysis_state?.run_state.kind).toBe('complete_current');
+    const { optionAdoptReadingToken } = await import('../../src/orchestrator-v5/system-events/option-adopt-edit.js');
+    const card = { option_id: optionId, words: 'Add ‘Increase price to £54’ to the comparison.' };
+    const input = { scenario_id: scenarioId, turn_id: randomUUID(), links: [], levels: [],
+      base_graph_hash: hashes.computeAnalysisAffectingGraphHash(before.graph as never)!,
+      adopt_option: { ...card, reading_token: optionAdoptReadingToken(card) } };
+    const rows = async () => {
+      const [versions, facts] = await Promise.all([
+        client.from('model_versions').select('id').eq('scenario_id', scenarioId),
+        client.from('v5_handler_facts').select('id').eq('scenario_id', scenarioId).eq('payload->>fact_type', 'edit_graph'),
+      ]);
+      expect(versions.error).toBeNull(); expect(facts.error).toBeNull();
+      return { versions: versions.data!.length, facts: facts.data!.length };
+    };
+    const counts = await rows();
+    const refused = await writer.commitOptionLevelsInProcess({ ...input,
+      adopt_option: { ...input.adopt_option, reading_token: 'not-the-shown-card' } }, 'local-adoption-invalid');
+    expect(refused.status).toBe('refused');
+    expect(await rows()).toEqual(counts);
+    const result = await writer.commitOptionLevelsInProcess(input, 'local-adoption');
+    expect(result.status, JSON.stringify(result)).toBe('committed');
+    expect(await rows()).toEqual({ versions: counts.versions + 1, facts: counts.facts + 1 });
+    const after = await coldRead();
+    expect(after.graph.nodes.find((node: Json) => node.id === optionId)).not.toHaveProperty('proposed_by');
+    expect(after.result.analysis_state?.run_state.kind).toBe('complete_stale');
+    expect(after.pack.analysis_state?.freshness).toBe('stale');
+    expect((await writer.commitOptionLevelsInProcess(input, 'local-adoption-replay')).status).toBe('stale');
+    expect(await rows()).toEqual({ versions: counts.versions + 1, facts: counts.facts + 1 });
+    await runAndSave();
+    expect((await coldRead()).result.analysis_state?.run_state.kind).toBe('complete_current');
+  }, 240000);
 });
