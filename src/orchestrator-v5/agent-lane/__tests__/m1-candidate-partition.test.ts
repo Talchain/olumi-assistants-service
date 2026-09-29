@@ -5,6 +5,7 @@ import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-
 import type { CandidateModel } from '../admit-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { deriveIntakeOptionReconciliation } from '../../../orchestrator/context/intake-option-reconciliation.js';
 
 type Rec = Record<string, any>;
 const FIXTURE = JSON.parse(readFileSync(new URL('./fixtures/m1-four-captured-candidates-20260929.json', import.meta.url), 'utf8')) as {
@@ -92,6 +93,57 @@ describe('M1 partition replays the four frozen real drafts', () => {
 });
 
 describe('M1 authority and recovery controls', () => {
+  it('an explicit tag without a source action cannot admit an invented option', async () => {
+    const { brief, candidates } = fixture('paul-mrr');
+    const raw = structuredClone(candidates[0]!);
+    const invented = { ...raw.options[2]!, provenance: 'explicit' };
+    const { result, graph } = await build({ ...raw, options: [raw.options[0]!, invented] }, brief);
+    expect(result.ok).toBe(true);
+    expect(graph.nodes.filter((n: Rec) => n.kind === 'option')).toHaveLength(1);
+    expect(result.constructor_proposals).toContainEqual(expect.objectContaining({ kind: 'option', label: invented.label }));
+  });
+
+  it.each([
+    { value: 54, label: 'Raise to £54', provenance: 'ai_proposed', valid: false },
+    { value: 54, label: 'Raise Pro price', provenance: 'ai_proposed', valid: false },
+    { value: 54, label: 'Raise to £59', provenance: 'explicit', valid: false },
+    { value: 59, label: 'Keep at £59', provenance: 'ai_proposed', valid: false },
+    { value: 59, label: 'Raise to £59', provenance: 'ai_proposed', valid: true },
+  ])('borrowed list-item quote: $label / $value / $provenance has valid ownership=$valid', async ({ value, label, provenance, valid }) => {
+    const raw = structuredClone(fixture('paul-mrr').candidates[0]!);
+    const brief = 'The options are raise Pro price to £59, or keep it at £49. We currently have £75k MRR and want MRR above £85k.';
+    const setting = raw.options[0]!.interventions![0]!;
+    const candidate = { ...raw, options: [
+      { ...raw.options[0]!, label, provenance, brief_words: 'raise Pro price to £59', interventions: [{ ...setting, value, provenance: valid ? 'explicit' : provenance }] },
+      { ...raw.options[1]!, label: 'Keep at £49', provenance: 'explicit', brief_words: 'keep it at £49', interventions: [{ ...setting, value: 49, provenance: 'explicit' }] },
+    ] };
+    const { result, graph } = await build(candidate, brief);
+    expect(result.ok).toBe(true);
+    const saved = GraphV3.parse(graph);
+    const binding = deriveIntakeOptionReconciliation(brief, saved, saved);
+    expect(binding.state).toBe(valid ? 'reconciled' : 'identity_unverified');
+    expect(binding.mayNameLeadingOption).toBe(valid);
+    const option = saved.nodes.find((n) => n.kind === 'option' && n.label === label);
+    if (valid) {
+      expect(option).toMatchObject({ provenance: 'from_brief', source_quote: 'raise Pro price to £59' });
+      expect(option?.proposed_by).toBeUndefined();
+      expect(Object.values(option!.interventions!).some((i) => i.raw_value === 59 && i.source === 'brief_extraction')).toBe(true);
+    } else {
+      expect(option).toBeUndefined();
+      expect(result.constructor_proposals).toContainEqual(expect.objectContaining({ kind: 'option', label, payload: expect.objectContaining({ provenance }) }));
+      expect(saved.nodes.some((n) => n.kind === 'option' && n.source_quote === 'raise Pro price to £59')).toBe(false);
+    }
+  });
+
+  it.each([{ value: 49, unit: 'GBP/month' }, { value: 59, unit: 'EUR/month' }])('a quote cannot certify the current amount or a swapped currency: $value $unit', async ({ value, unit }) => {
+    const raw = structuredClone(fixture('paul-mrr').candidates[0]!);
+    const candidate = { ...raw, options: [{ ...raw.options[0]!, label: 'Raise Pro price', interventions: [{ ...raw.options[0]!.interventions![0]!, value, unit }] }] };
+    const { result, graph } = await build(candidate, fixture('paul-mrr').brief);
+    expect(result.ok).toBe(true);
+    expect(graph.nodes.filter((n: Rec) => n.kind === 'option')).toHaveLength(0);
+    expect(result.constructor_proposals).toContainEqual(expect.objectContaining({ kind: 'option', label: 'Raise Pro price' }));
+  });
+
   it('an explicit source action supports an inferred option; repeated action quotes do not claim authorship', () => {
     const { brief, candidates } = fixture('paul-mrr');
     const raw = structuredClone(candidates[0]!);
