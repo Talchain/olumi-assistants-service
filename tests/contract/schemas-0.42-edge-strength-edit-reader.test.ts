@@ -224,7 +224,11 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // changed line that names a strength or band is an IMPORT LIST (`turn-payload.js` appends `FactorValueEditIntent`;
     // `fixtures/index.js` appends `ObservedStateReviewSchema`); `turn-payload.d.ts`'s 2441 changed lines name none
     // (they inline `reviewed_by_user` into every node's observed_state). The member, its intents and `band` are untouched.
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.62.0');
+    //
+    // 0.62.0 → 0.63.0 (schemas #71, main `855a53b4`, goal certainty), RE-DERIVED on 29 Sep against the PUBLISHED
+    // tarball (sha1 `0089b2c3…`): the FILE SET naming `edge_strength_edit` is identical (the same six files), and no
+    // changed line in any changed file names a strength or a band (contrast: `handler-results.js` gains `goal_certainty`).
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.63.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {
