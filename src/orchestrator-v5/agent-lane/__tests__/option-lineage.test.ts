@@ -55,8 +55,10 @@ describe('Canvas\'s cloud-bill brief, real build: each listed option is saved wi
     expect(quotes(snap)).toEqual(quotes(g));
     const userOnly = { ...g, nodes: (g.nodes as Rec[]).filter((n) => n.kind !== 'option' || n.source_quote !== undefined) };
     expect(deriveIntakeOptionReconciliation(FX.brief, userOnly, userOnly).state).toBe('reconciled');
+    // A TRUE omission (AIQ 5887822471; DL 5888280088): Spot is a declared, quoted option on the registered graph (the third
+    // argument, the Run's same-snapshot source) that the analysed set (second argument) left out, e.g. gated out.
     const twoOfThree = { ...userOnly, nodes: (userOnly.nodes as Rec[]).filter((n) => n.label !== 'Spot instances') };
-    expect(deriveIntakeOptionReconciliation(FX.brief, twoOfThree, twoOfThree).state).toBe('options_missing');
+    expect(deriveIntakeOptionReconciliation(FX.brief, twoOfThree, userOnly).state).toBe('options_missing');
   });
   it('1b — CONTROL: the same draft without words saves no quote (today\'s served shape, `identity_unverified`)', async () => {
     const { g } = await build(withWords(FX.candidate, {}), FX.brief);
