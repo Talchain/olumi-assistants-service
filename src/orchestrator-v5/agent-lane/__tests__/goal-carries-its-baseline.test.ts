@@ -224,7 +224,12 @@ describe('the goal carries its current level, in the shape ISL reads', () => {
   });
 
   it('CONTROL (equality on "at least"): £20k now against "at least £20k" reaches the analysis input as a baseline', async () => {
-    const { graph } = await registeredGoal(pricing({ operator: '>=', baseline_known: true, baseline_value: 20000 }));
+    // The brief states the equality it is named for (R3 #72 5885498117): the default brief wrote £20,000 only as the
+    // TARGET ("£16,000 today; we want £20,000"), so this row admitted a target as today's level — the defect itself.
+    const { graph } = await registeredGoal(
+      pricing({ operator: '>=', baseline_known: true, baseline_value: 20000 }),
+      'Should we raise the Pro plan price? MRR is £20,000 today; we want at least £20,000.',
+    );
     const run = resolveRunAdmission(graph);
     const analysed = (run.canonicalGraph as { nodes: { id: string; observed_state?: Record<string, unknown> }[] }).nodes.find((n) => n.id === GOAL);
     expect(analysed?.observed_state).toMatchObject({ baseline: 0.8, raw_value: 20000, source: 'brief_extraction' });

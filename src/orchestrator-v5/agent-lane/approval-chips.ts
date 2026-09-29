@@ -36,6 +36,8 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_link_strength: { label: 'Record this link', message: 'Yes, record that.' },
   // A set of link strengths: ONE button records the whole set, as one commit (DL #72 5871594233).
   propose_link_strengths: { label: 'Record these links', message: 'Yes, record those.' },
+  // The user's own stated effect on one link ("every £1 loses us about 50"), written through the level door's link_effect.
+  propose_link_effect: { label: 'Record this reading', message: 'Yes, record that reading.' },
   // The goal's success target the user stated, written through the product's typed target writer.
   propose_goal_target: { label: 'Set this target', message: 'Yes, set that target.' },
   // SLICE C2: a new risk, held on the product's own seam like the add-option (`gmh_`, the product's words on the button).
@@ -156,7 +158,57 @@ export function approvalChipsFor(
   }
   const reading = readingShownFor(tool, labelSourceFor?.(proposalId));
   if (reading !== undefined) return [{ id: approvalChipIdFor(proposalId), ...reading, message: approve.message }, AMEND_CHIP];
+  // ⛔ A link's stated effect is approvable ONLY on a card showing its exact reading (PR Review's fifth CR): none, no button.
+  if (tool === 'propose_link_effect') {
+    const effectReading = linkEffectReadingFor(tool, labelSourceFor?.(proposalId));
+    return effectReading === undefined ? []
+      : [{ id: approvalChipIdFor(proposalId), label: approve.label, message: linkEffectApproveMessage(effectReading), detail: effectReading }, AMEND_CHIP];
+  }
   return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, labelSourceFor?.(proposalId)), message: approve.message }, AMEND_CHIP];
+}
+
+/**
+ * ⭐ THE LINK-EFFECT CARD SHOWS THE READING IT APPROVES (AIQ 5884881500, "proposer, not stamper"): the figures, units and
+ * sentence from the STORED proposal (what `authorise_change` will write), the two labels from the proposer's own result
+ * for that same id — never the Agent's prose. The user approves THIS reading; a wrong one costs a "no".
+ */
+function linkEffectReadingFor(tool: string, source: ApprovalLabelSource | undefined): string | undefined {
+  const proposal = source?.proposal;
+  const result = source?.result;
+  if (tool !== 'propose_link_effect' || proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return undefined;
+  const op = proposal.operations.length === 1 && proposal.operations[0]!.op === 'set_link_effect' ? proposal.operations[0]!.value as
+    { effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown }; quote?: unknown } : undefined;
+  const link = result.link as { from?: unknown; to?: unknown; your_words?: unknown } | undefined;
+  if (op === undefined || link === undefined || link.your_words !== op.quote) return undefined;
+  return linkEffectReadingOf(proposal, { from: link.from, to: link.to });
+}
+
+/**
+ * The reading a link-effect card shows and its approval records: the STORED change with its signs, both ends by their
+ * labels, and the user's one sentence. The writer recomputes it from the same stored proposal (`applyLinkEffect`).
+ */
+export function linkEffectReadingOf(proposal: StructuredProposal, labels: { readonly from: unknown; readonly to: unknown }): string | undefined {
+  const op = proposal.operations.length === 1 && proposal.operations[0]!.op === 'set_link_effect' ? proposal.operations[0]!.value as
+    { effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown }; quote?: unknown } : undefined;
+  const e = op?.effect;
+  if (e === undefined || typeof op?.quote !== 'string' || typeof labels.from !== 'string' || typeof labels.to !== 'string'
+    || typeof e.amount !== 'number' || typeof e.per_source_change !== 'number' || typeof e.amount_unit !== 'string' || typeof e.per_source_change_unit !== 'string') return undefined;
+  const signed = (v: number, unit: string): string => `${v < 0 ? '\u2212' : '+'}${figureInUserUnits(Math.abs(v), unit) ?? `${Math.abs(v)} ${unit}`}`;
+  return `Record: ${signed(e.per_source_change, e.per_source_change_unit)} on "${labels.from}" \u2192 ${signed(e.amount, e.amount_unit)} in "${labels.to}" `
+    + `\u2014 from your words: "${op.quote}"`;
+}
+
+/**
+ * ⭐ THE PRESSED CARD CARRIES ITS READING (AIQ 5885290014: "a forged approval without a reading token → the writer
+ * refuses"). The card's words ARE its reading, so the approval request carries exactly what the user saw; the durable
+ * carrier keeps those words, so a card put back after a restart shows the same reading ({@link readingOfLinkEffectApproval}).
+ */
+const LINK_EFFECT_APPROVE_PREFIX = 'Yes \u2014 ';
+export const linkEffectApproveMessage = (reading: string): string => `${LINK_EFFECT_APPROVE_PREFIX}${reading}`;
+/** The reading a link-effect card's words carry, or `undefined` for any other words. */
+export function readingOfLinkEffectApproval(message: unknown): string | undefined {
+  return typeof message === 'string' && message.startsWith(`${LINK_EFFECT_APPROVE_PREFIX}Record: `)
+    ? message.slice(LINK_EFFECT_APPROVE_PREFIX.length) : undefined;
 }
 
 /** The tools whose proposal can carry Olumi's reading of the user's own words for a link's band (slice C3). */

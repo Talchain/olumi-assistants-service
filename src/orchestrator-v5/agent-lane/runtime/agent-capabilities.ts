@@ -31,6 +31,8 @@ import { GM_HELD_HANDLER_ID, GM_HELD_OPERATIONS_MAX_JSON_CHARS, gmHeldProposalRe
 import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../../graph-management/types.js';
 import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../../compose/definitional-links.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken, type LinkEffectRefusal } from '../../system-events/link-effect-edit.js';
+import { unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
 
 /**
@@ -139,9 +141,9 @@ import { unitFamilyOf } from '../../routing/value-unit-resolution.js';
 import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
 import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, quoteOfFigure, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, statingSentenceOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
-import { figureInUserUnits } from '../approval-chips.js';
+import { figureInUserUnits, linkEffectReadingOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
 
@@ -1087,6 +1089,45 @@ function startingPointNoteFor(usersCount: number): string {
     `Say plainly that the others are assumptions to adopt or correct, NOT measurements, ${tail}`;
 }
 
+/** Canonical's link-effect refusal, said to the Agent in words it can relay truthfully (never a code). */
+function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: { id: string; label: string }, to: { id: string; label: string }): string {
+  const unitOfNode = (id: string): string => {
+    const n = ((raw as { nodes?: unknown[] } | null)?.nodes ?? []).find((x) => (x as { id?: unknown })?.id === id) as { observed_state?: { unit?: unknown } } | undefined;
+    return typeof n?.observed_state?.unit === 'string' ? n.observed_state.unit : 'its own unit';
+  };
+  switch (reason) {
+    case 'unit_mismatch':
+      return `Nothing was prepared: "${to.label}" is measured in ${unitOfNode(to.id)} and "${from.label}" in ${unitOfNode(from.id)}. `
+        + 'Ask the user for their figure in those units; never convert it yourself.';
+    case 'sign_conflict':
+      return `Nothing was prepared: the user's figure says "${from.label}" moves "${to.label}" the OTHER way from the link Olumi has. `
+        + 'Tell them so plainly, and offer to reverse the link\u2019s direction with propose_link_strength (their words on one link).';
+    case 'superseded':
+      return 'Nothing was prepared: the model changed while this was being read. Read the state again and propose once more.';
+    // The sizer's own terms and questions (`link-effect.ts` D7). At the answer door the writer refuses and asks (Canonical
+    // 5883568580): nothing is stored, the user's figure stays in the reply, and never shrunk to fit.
+    // AIQ 5883669977: the user's stated figure never yields first. No typed field says whose a cap is (Canonical
+    // 5883707376), so the words claim neither owner, and offer no range change until a reframe door exists.
+    case 'not_representable': {
+      const rangeOf = (id: string): string => {
+        const os = (((raw as { nodes?: unknown[] } | null)?.nodes ?? []).find((x) => (x as { id?: unknown })?.id === id) as
+          { observed_state?: { cap?: unknown; unit?: unknown } } | undefined)?.observed_state;
+        return typeof os?.cap === 'number' && Number.isFinite(os.cap) ? ` (up to ${os.cap}${typeof os.unit === 'string' ? ` ${os.unit}` : ''})` : '';
+      };
+      return `Nothing was prepared: the user's figure is more than the analysis can represent on the range the model uses for "${from.label}"`
+        + `${rangeOf(from.id)} and "${to.label}"${rangeOf(to.id)}, so it would be cut short. Repeat their figure in their own words, and say `
+        + 'plainly that it is that range, not their figure, that stops it being used here. Never ask them to change their figure first, '
+        + 'and never shrink it yourself. That range cannot be changed from this conversation yet, so do not offer to change it.';
+    }
+    case 'out_of_domain':
+      return `Nothing was prepared: across the options, the user's figure would take "${to.label}" outside the range it can hold. Repeat `
+        + `their figure in their own words, tell them so plainly and ask whether the size of that effect should change, or today's level `
+        + `of "${to.label}". Never adjust their figure yourself.`;
+    default:
+      return `Nothing was prepared: this effect cannot be recorded with this model yet (${String(reason).replace(/_/g, ' ')}). Tell the user plainly.`;
+  }
+}
+
 const pickKeys = (o: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> =>
   Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]));
 
@@ -1986,6 +2027,95 @@ export function createAgentCapabilities(
    * what the model holds, read back: each link at exactly its approved strength, stamped as the approval said (the
    * user's band as theirs; Olumi's band as `olumi_estimate`, never the user's).
    */
+  /**
+   * ⭐ THE USER'S STATED LINK EFFECT, WRITTEN (DL 5882763151; Canonical #2274's door, 5883082976). ONE effect per approval
+   * through the level door's `link_effect`: the writer re-checks the revision AND the link's bytes (`edge_token`) and the
+   * sign against the STORED link, then ONE append. "Recorded" is said only when a read-back shows the link as the user's.
+   */
+  const applyLinkEffect = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0],
+    parent: StructuredProposal,
+    approvedRead: GraphRead,
+  ): Promise<ToolResult> => {
+    const notApplied = (reason: string, detail: string): ToolResult => ({
+      ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id, refusal: 'not_applied', reason, detail, receipts: [],
+    });
+    const op = parent.operations.length === 1 ? parent.operations[0] : undefined;
+    const v = (op?.value ?? {}) as { from?: unknown; to?: unknown; effect?: Record<string, unknown>; quote?: unknown; edge_token?: unknown };
+    const e = v.effect ?? {};
+    if (op?.op !== 'set_link_effect' || typeof v.from !== 'string' || typeof v.to !== 'string' || typeof v.quote !== 'string'
+      || typeof v.edge_token !== 'string' || typeof e.amount !== 'number' || typeof e.per_source_change !== 'number'
+      || typeof e.amount_unit !== 'string' || typeof e.per_source_change_unit !== 'string') {
+      return notApplied('unreadable_proposal', 'This link\u2019s size could not be read from the stored proposal, so nothing was recorded. Offer to prepare it again.');
+    }
+    // ⛔ ONLY FROM THE CARD (PR Review's fifth CR): the user's figure is recorded only when they press the button that shows
+    // the exact reading it records (`approvalChipsFor`), never from their words to the model.
+    if (ctx.typed_approval_of !== parent.proposal_id) {
+      return notApplied('approve_on_the_card', 'Nothing was recorded: the user\u2019s own figure for a link is recorded only when they press the '
+        + 'button that shows exactly what will be recorded. Point them to that button; never record it from their words.');
+    }
+    // ⛔ …and only when that button carried the EXACT reading this approval records (AIQ 5885290014): recomputed here from
+    // the stored proposal and the labels on the read, never taken from the request.
+    const labelOf = (id: string): unknown => approvedRead.nodes.find((n) => n.id === id)?.label;
+    const reading = linkEffectReadingOf(parent, { from: labelOf(v.from), to: labelOf(v.to) });
+    if (reading === undefined || readingOfLinkEffectApproval(ctx.typed_approval_words) !== reading) {
+      return notApplied('reading_not_confirmed', 'Nothing was recorded: the button pressed did not carry the exact reading that would be '
+        + 'recorded, so the user has not confirmed it. Show them the reading again and let them confirm it on its button; never record it without that.');
+    }
+    if (approvedRead.graph_hash !== parent.base_graph_identity_hash) {
+      return notApplied('model_changed_since_approval', 'The model changed after this was prepared, so nothing was recorded. Read it again and propose afresh.');
+    }
+    if (opts.commitOptionLevels === undefined) {
+      return notApplied('link_effect_writer_unavailable', 'This link\u2019s size could not be recorded here, so nothing was recorded.');
+    }
+    const from = { id: v.from, label: approvedRead.nodes.find((n) => n.id === v.from)?.label ?? v.from };
+    const to = { id: v.to, label: approvedRead.nodes.find((n) => n.id === v.to)?.label ?? v.to };
+    const effect = { amount: e.amount, amount_unit: e.amount_unit, per_source_change: e.per_source_change, per_source_change_unit: e.per_source_change_unit };
+    const res = await opts.commitOptionLevels({
+      scenario_id: ctx.scenario_id,
+      base_graph_hash: parent.base_graph_identity_hash,
+      turn_id: authorisationTurnId(`${parent.proposal_id}#effect`),
+      links: [],
+      levels: [],
+      // Canonical #2283: the token of the reading the pressed card SHOWED (checked above), recomputed from the stored proposal.
+      link_effect: { from: v.from, to: v.to, effect, edge_token: v.edge_token, quote: v.quote,
+        reading_token: linkEffectReadingToken({ from: v.from, to: v.to, effect, quote: v.quote }) },
+    });
+    if (res.status === 'unconfirmed') {
+      return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed', receipts: [],
+        detail: 'This link\u2019s size was sent, but Olumi could not read the model back to confirm it. Say exactly that; never say it was recorded or not recorded.' };
+    }
+    if (res.status === 'stale') {
+      return notApplied('model_changed_since_approval', 'The model changed after this was approved, so nothing was recorded. Read it again and propose afresh.');
+    }
+    if (res.status === 'refused') {
+      const reason = String(res.reason ?? '').replace(/^link_/, '') as LinkEffectRefusal;
+      return notApplied('link_effect_refused', linkEffectRefusalWords(reason, approvedRead.raw, from, to));
+    }
+    const receipts: ReceiptSummary[] = res.receipt !== null ? [{ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' }] : [];
+    const check = await readGraph(ctx.scenario_id);
+    const stored = check?.edges.find((x) => x.from === v.from && x.to === v.to) as { provenance?: unknown } | undefined;
+    const prov = (stored?.provenance ?? {}) as { source?: unknown; magnitude?: unknown;
+      natural_effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown } };
+    // PR Review on #2275: the read-back proves THIS figure — the user's source, both numbers, and both units (by the
+    // writer's own unit key: the sizer stores each end's unit words, which the writer accepted the stated unit as).
+    const unitKey = (u: unknown): string | undefined => (typeof u === 'string' ? unitComparisonKey(u) : undefined);
+    const sameUnit = (stored: unknown, stated: string): boolean => unitKey(stored) !== undefined && unitKey(stored) === unitKey(stated);
+    const holds = prov.source === 'user_specified' && prov.magnitude === 'user_stated'
+      && prov.natural_effect?.amount === effect.amount && prov.natural_effect?.per_source_change === effect.per_source_change
+      && sameUnit(prov.natural_effect?.amount_unit, effect.amount_unit) && sameUnit(prov.natural_effect?.per_source_change_unit, effect.per_source_change_unit);
+    if (!holds) {
+      return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
+        detail: 'This link\u2019s size was sent, but reading the model back did not show it as recorded. Say exactly that; never say it was recorded or not recorded.' };
+    }
+    proposals.markApplied(parent.proposal_id, receipts);
+    return {
+      ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
+      revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
+      follow_up: `Recorded your figure for how "${from.label}" moves "${to.label}", in your words: "${v.quote}". Any earlier result is now out of date.`,
+    };
+  };
+
   const applyLinkStrengthSet = async (
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0],
     parent: StructuredProposal,
@@ -2345,6 +2475,103 @@ export function createAgentCapabilities(
         note: (interpretation === undefined ? '' : readingNote(interpretation)) + (confirm
           ? 'Nothing has changed yet. The link already sits in that band, so its strength is kept and only recorded as the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree.'
           : `Nothing has changed yet. Tell the user it will be recorded as ${linkBandWord(band)}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree.`),
+      };
+    },
+
+    /**
+     * ⭐ THE USER'S STATED EFFECT ON ONE LINK, ONE APPROVAL (DL 5882763151; Canonical's writer, 5882965890 / 5882989451).
+     * Both figures must be ones the user WROTE this turn, and `quote` their words verbatim. The change is DRY-RUN through
+     * Canonical's pure writer (`applyLinkEffectEdit`) on the read it is proposed from, so every refusal is the writer's own
+     * and is said now, never at approval; the proposal carries the analysis revision AND the link's `edge_token`.
+     */
+    async proposeLinkEffect(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const text = typeof ctx.user_text === 'string' ? ctx.user_text : '';
+      const quote = typeof args?.quote === 'string' ? args.quote.trim() : '';
+      if (quote === '' || !text.includes(quote)) {
+        return { ok: false, mutated: false, refusal: 'quote_not_verbatim',
+          detail: 'Nothing was prepared: `quote` must be the user\u2019s own words from THIS message, copied exactly. Quote them and propose again.' };
+      }
+      const amount = Number(args?.amount);
+      const per = Number(args?.per_source_change);
+      const amountUnit = typeof args?.amount_unit === 'string' ? args.amount_unit.trim() : '';
+      const perUnit = typeof args?.per_source_change_unit === 'string' ? args.per_source_change_unit.trim() : '';
+      if (!Number.isFinite(amount) || !Number.isFinite(per) || per === 0 || amountUnit === '' || perUnit === '') {
+        return { ok: false, mutated: false, refusal: 'unreadable_effect',
+          detail: 'Nothing was prepared: the effect needs the change in the target and the change in the source it is per, each with its unit.' };
+      }
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const fromRes = resolveNamed(g, String(args.from_label ?? ''), () => true);
+      const toRes = resolveNamed(g, String(args.to_label ?? ''), () => true);
+      const ambiguousEnds = [
+        ...(fromRes.kind === 'ambiguous' ? [describeAmbiguity(g, String(args.from_label ?? ''), fromRes.candidates)] : []),
+        ...(toRes.kind === 'ambiguous' ? [describeAmbiguity(g, String(args.to_label ?? ''), toRes.candidates)] : []),
+      ];
+      if (ambiguousEnds.length > 0) {
+        return { ok: false, mutated: false, refusal: 'ambiguous_entity', ambiguous_targets: ambiguousEnds, ambiguous_note: AMBIGUOUS_NOTE,
+          detail: 'Nothing was proposed: more than one entity carries that name.' };
+      }
+      const from = fromRes.kind === 'one' ? fromRes.node : undefined;
+      const to = toRes.kind === 'one' ? toRes.node : undefined;
+      if (from === undefined || to === undefined) {
+        return { ok: false, mutated: false, refusal: 'unresolved_entity',
+          detail: `No entity is labelled "${from === undefined ? args.from_label : args.to_label}". Read the state again and use a label exactly as it appears.` };
+      }
+      // ⛔ A size is recorded as THEIRS (`magnitude: user_stated`) only when ONE statement of theirs says it: both figures,
+      // both ends named, and which way (PR Review CHANGES_REQUIRED on #2275; `linkEffectTheUserStated`).
+      const labelsOf = (keep: (kind: unknown) => boolean): string[] => g.nodes.filter((n) => keep((n as { kind?: unknown }).kind))
+        .map((n) => String(n.label ?? '')).filter((l) => l !== '');
+      const statedEffect = { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit };
+      const statedEnds = { source: from.label, target: to.label };
+      const statedScope = { quantities: labelsOf((k) => k !== 'option' && k !== 'decision') };
+      const miss = linkEffectTheUserStated(quote, statedEffect, statedEnds, statedScope);
+      if (miss === 'figures_not_in_statement') {
+        return { ok: false, mutated: false, refusal: 'not_the_users_figure',
+          detail: 'Nothing was prepared: the statement quoted does not write both figures. Ask the user how much the one moves the other, in numbers.' };
+      }
+      if (miss !== null) {
+        return { ok: false, mutated: false, refusal: 'not_the_users_statement', why: miss,
+          detail: `Nothing was prepared: the words quoted do not state, as one statement of the user\u2019s, how much "${from.label}" moves `
+            + `"${to.label}" (${miss.replace(/_/g, ' ')}). A figure is recorded as theirs only when they say it: ask them to say it as one `
+            + 'statement naming both, which way, and both figures. Never fill in a figure or a direction for them.' };
+      }
+      // AIQ 5884881500 ("proposer, not stamper"): the ONE sentence the rule read is what is stored and shown for approval.
+      const said = statingSentenceOf(quote, statedEffect, statedEnds, statedScope) ?? quote;
+      const edgeToken = linkEffectEdgeToken(g.raw, from.id, to.id);
+      if (edgeToken === null) {
+        return { ok: false, mutated: false, refusal: 'no_such_link',
+          detail: `The model has no link from "${from.label}" to "${to.label}", so there is no effect to record. Nothing was prepared.` };
+      }
+      const effect = { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit };
+      const dry = applyLinkEffectEdit({ persistedGraph: g.raw, from: from.id, to: to.id, effect,
+        expected: { graph_hash: g.graph_hash, edge_token: edgeToken }, quote: said,
+        // A dry run of the reading the card will show: its own token, so every refusal it returns is about the write.
+        reading_token: linkEffectReadingToken({ from: from.id, to: to.id, effect, quote: said }), lastRunIdentityUse: g.identity_run_use ?? null });
+      if (dry.kind === 'refused') {
+        const definition = dry.reason === 'definitional_link' ? definitionalLinkInUse(g.raw, from.id, to.id, g.identity_run_use ?? null) : null;
+        return { ok: false, mutated: false, refusal: dry.reason,
+          detail: definition !== null ? `${definitionalLinkRefusalText(g.raw, definition)} Tell the user exactly this.` : linkEffectRefusalWords(dry.reason, g.raw, from, to) };
+      }
+      const proposal = createProposal({
+        scenario_id: ctx.scenario_id,
+        user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash,
+        operations: [{ op: 'set_link_effect', path: `${from.id}::${to.id}`,
+          value: { from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken } }],
+        provenance: { authored_by: 'user_stated', basis: said },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: `Record your figure for how "${from.label}" moves "${to.label}": "${said}"`,
+      });
+      proposals.put(proposal);
+      return {
+        ok: true, mutated: false,
+        proposal_id: proposal.proposal_id,
+        public_label: proposal.public_label,
+        base_revision: g.graph_hash,
+        link: { from: from.label, to: to.label, effect, your_words: said },
+        note: 'Nothing has changed yet. Tell the user it will be recorded as THEIR figure for this link, in their words, never the id, '
+          + 'and call authorise_change with this proposal_id once they agree.',
       };
     },
 
@@ -3574,6 +3801,9 @@ export function createAgentCapabilities(
       }
 
       // ⭐ A set of link strengths: ONE commit through the level door's link half (seam Canonical #72 5871633483).
+      // The user's stated link effect writes ONLY through the level door's `link_effects` (Canonical 5882965890); until that
+      // door is wired here, nothing is written and the Agent says so — never a strength-only or register fallback.
+      if (ops.some((o) => o.op === 'set_link_effect')) return applyLinkEffect(ctx, decision.proposal, before);
       if (ops.length > 0 && ops.every((o) => o.op === 'set_link_strength')) return applyLinkStrengthSet(ctx, decision.proposal, before);
 
       // A starting point mixes kinds; each single-kind path below handles one.

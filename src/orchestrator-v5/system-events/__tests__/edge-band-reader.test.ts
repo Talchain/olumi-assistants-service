@@ -284,8 +284,8 @@ describe('(f) the event is parsed by the real 0.60.0 schema and `band` survives 
     },
   });
 
-  it('the vendored contract is 0.62.0 (band unchanged since 0.60.0; re-derived in schemas-0.42-edge-strength-edit-reader)', () => {
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.62.0');
+  it('the vendored contract is 0.63.0 (band unchanged since 0.60.0; re-derived in schemas-0.42-edge-strength-edit-reader)', () => {
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.63.0');
   });
 
   it('⭐ SystemEventTurnPayloadSchema keeps `band`, and the writer stores that band’s spread', async () => {

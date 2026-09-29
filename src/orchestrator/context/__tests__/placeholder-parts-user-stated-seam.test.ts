@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { computeAnalysisAffectingGraphHash } from '../../../orchestrator-v5/context/graph-hash.js';
-import { applyLinkEffectEdit, linkEffectEdgeToken } from '../../../orchestrator-v5/system-events/link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken } from '../../../orchestrator-v5/system-events/link-effect-edit.js';
 import { PLACEHOLDER_PARTS_REASON, placeholderPartsFinding } from '../placeholder-parts.js';
 
 type Rec = Record<string, any>;
@@ -34,6 +34,7 @@ const write = (g: Rec, to: string, effect: Rec) => applyLinkEffectEdit({
   persistedGraph: g, from: 'price', to, effect: effect as never,
   expected: { graph_hash: computeAnalysisAffectingGraphHash(g as never)!, edge_token: linkEffectEdgeToken(g, 'price', to)! },
   quote: 'stated by the user',
+  reading_token: linkEffectReadingToken({ from: 'price', to, effect: effect as never, quote: 'stated by the user' }),
 });
 
 describe('a link the USER sized ends the R-c withhold on the limit it moves', () => {

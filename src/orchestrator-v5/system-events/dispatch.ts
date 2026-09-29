@@ -3153,6 +3153,11 @@ export type CommitOptionLevelsInput = {
     readonly effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string };
     readonly edge_token: string;
     readonly quote: string;
+    /**
+     * `linkEffectReadingToken({from, to, effect, quote})` of the reading the approval card SHOWED (AIQ 5885290014).
+     * No reading shown ⇒ no token ⇒ the writer refuses (`link_reading_not_confirmed`); `user_stated` is never stamped.
+     */
+    readonly reading_token: string;
   };
 };
 export type CommitOptionLevelsResult =
@@ -3210,7 +3215,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
     ...(input.link_strengths !== undefined && input.link_strengths.length > 0 ? { linkStrengths: input.link_strengths.map(l => ({
       from: l.from, to: l.to, magnitude: l.magnitude, intent: l.intent, expected: l.expected, band: l.band, adopted: l.author === 'model_proposed' })) } : {}),
     ...(input.link_effect !== undefined ? { linkEffect: { from: input.link_effect.from, to: input.link_effect.to, effect: input.link_effect.effect,
-      edge_token: input.link_effect.edge_token, quote: input.link_effect.quote } } : {}),
+      edge_token: input.link_effect.edge_token, quote: input.link_effect.quote, reading_token: input.link_effect.reading_token } } : {}),
   }, requestId));
   if (r.graphConflict !== undefined) return { status: 'stale' };
   if (r.commitSkippedReason === 'refused_no_write') {

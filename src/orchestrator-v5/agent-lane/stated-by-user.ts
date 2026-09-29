@@ -49,6 +49,27 @@ export function figureTheUserWrote(value: number, unit: unknown, userText: strin
 }
 
 /**
+ * How many times `value`, in `unit`, is WRITTEN in `userText`: one per written amount (`findStatedAmounts` reads each
+ * writing once), under the unit rules of `figureTheUserWrote` (which is this count ≥ 1).
+ */
+export function timesTheUserWrote(value: number, unit: unknown, userText: string | null | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+  const family = unitPhraseFamily(unit);
+  return findStatedAmounts(userText).filter((a) => amountIs(a, value, unit, family, userText ?? undefined)).length;
+}
+
+/**
+ * ⛔ A FIGURE WRITTEN ONLY AS THE GOAL'S TARGET IS NOT ALSO ITS CURRENT LEVEL (R3 #72 5885498117; DL 5885526452 (3);
+ * AIQ 5885651301). A current level EQUAL to the goal's own target is the user's only when the brief writes that figure
+ * AGAIN, beyond the target's own writing (≥ 2): "£85k MRR … above £85k" is; "aiming for £20,000" is not. Any other
+ * level is untouched. Interim rule: the typed quote (today / target / change) is the close (AIQ).
+ */
+export function levelWrittenApartFromTarget(value: number, unit: unknown, target: unknown, userText: string | null | undefined): boolean {
+  if (typeof target !== 'number' || !Number.isFinite(target) || !same(value, target)) return true;
+  return timesTheUserWrote(value, unit, userText) >= 2;
+}
+
+/**
  * Whether ONE written amount is `value` in `unit`: the unit rules `figureTheUserWrote` and `figureTheUserWroteFor` share.
  * A money unit's own letter scales the figure (SCALE, above). Under a scaled money unit a PLAIN amount grounds it only
  * when written with its own letter ("75k" is 75 £k): a bare "300" is £300 or 300 £k, so neither (DL #72 5862394804:
@@ -721,4 +742,170 @@ export function typedByUser(body: Record<string, unknown>): boolean {
  */
 export function userWordsOf(typedEarlier: readonly string[], typedNow: string | null): string {
   return [...typedEarlier, ...(typedNow !== null ? [typedNow] : [])].join('\n');
+}
+
+/**
+ * ⛔ A LINK'S SIZE IS THE USER'S ONLY WHEN ONE STATEMENT OF THEIRS SAYS IT (PR Review CHANGES_REQUIRED on #2275 @
+ * `ac0023c7`): a verbatim quote plus the two numerals somewhere in the turn is not authorship. "Our budget is £1 per
+ * month and we currently have 50 subscribers. Does a Pro price rise affect subscribers?" writes 1 and 50, and says no
+ * effect at all. The quote itself must, read with the model's OWN labels:
+ *   1. STATE, not ask: no "?", and not opened by an auxiliary (the same reading as `bandTheUserWrote`);
+ *   2. not DENY it (the shared negator);
+ *   3. write BOTH figures (`figureTheUserWrote`, on the quote only — never the rest of the turn);
+ *   4. NAME BOTH ENDS: each end by a word of its label the OTHER end lacks ("the Pro price" / "paying subscribers" for
+ *      Pro plan price → Pro plan paying subscribers), unless the quote also writes a word of another quantity that
+ *      carries that word and the end lacks ("price sensitivity" claims "price" for Price sensitivity risk) — the same
+ *      label words and stems as `factorTheUserNamed`; the two ends named in one statement disambiguate each other;
+ *   5. SAY WHICH WAY the target moves, the same way as the amount's sign, with ONE closed class of verbs: lose / cost /
+ *      fewer / drop … against gain / win / adds / rise … A move word right after the SOURCE's figure ("£1 increase",
+ *      "£10 rise", "£1 we add to the price") or beside a word naming the source ("the price falls", "raise the price")
+ *      is the SOURCE's move, and must match the sign of `per_source_change`; with none, the source is read as rising.
+ * All of it from ONE sentence of the quote, and each figure SIZES its change: the amount joined to the target's movement
+ * ("loses us about 50", "50 fewer"), the source's figure joined to a word of the source ("£1 on the Pro price", "the
+ * Pro price falls by £1") — through linking words only, never "and" or another clause: a figure written for anything
+ * else (a budget, today's level) is never a size.
+ * Every miss under-claims (the Agent asks the user to say it as one statement): an unlisted verb ("sheds"), a source
+ * named only by implication ("a £10 rise adds…"), both movements for one end, a figure far from its movement, or the
+ * elements spread over several sentences.
+ */
+export type LinkEffectStatementMiss = 'question' | 'denied' | 'figures_not_in_statement' | 'end_not_named'
+  | 'direction_not_stated' | 'direction_contradicts' | 'figure_not_bound' | 'not_one_statement' | 'source_figure_not_a_change';
+const TARGET_DOWN = /^(?:lose|loses|losing|lost|cost|costs|costing|fewer)$/;
+const TARGET_UP = /^(?:gain|gains|gaining|gained|win|wins|winning|won|adds|added|adding)$/;
+const MOVE_UP = /^(?:rise|rises|rising|rose|increase|increases|increasing|increased|raise|raises|raising|raised|boost|boosts|boosted|boosting|lift|lifts|lifted|lifting|grow|grows|growing|grew|add)$/;
+const MOVE_DOWN = /^(?:fall|falls|falling|fell|drop|drops|dropping|dropped|decrease|decreases|decreasing|decreased|reduce|reduces|reducing|reduced|lower|lowers|lowering|lowered|cut|cuts|cutting)$/;
+/**
+ * A figure SIZES a change only when words of that change join it, and only such words stand between (PR Review's third
+ * CR, #2275 @ 157b42ae: "Our budget is £1 and Pro price rises, losing 50 paying subscribers" sits £1 beside "price"
+ * without describing a price change). The source's figure joins a word of the source through these, its label words
+ * or its move ("£1 on the Pro price", "£10 rise in the Pro price", "the Pro price falls by £1"); the amount joins the
+ * target's movement through these ("loses us about 50", "50 fewer").
+ */
+const SOURCE_LINK = /^(?:on|in|of|to|the|a|an|our|its|their|we|you|by|extra|more|each|every|per)$/;
+const AMOUNT_LINK = /^(?:us|about|roughly|around|approximately|some|nearly|almost|over|up|to|the|our|of|by|an|a|extra|another)$/;
+const SOURCE_REACH = 6;
+/**
+ * The source's figure is a CHANGE only when it is distributive ("every / each / per £1") or joined to the source's move
+ * ("£10 rise", "£1 increase", "falls by £1") — PR Review's fourth CR (#2275 @ ce3cd9d0): "With Pro price £1 today,
+ * raising it loses 50 paying subscribers" writes £1 as today's LEVEL, beside "price", and sizes no rise.
+ */
+const DELTA_BEFORE = /^(?:every|each|per)$/;
+/**
+ * A change NAMED by a noun the figure sizes ("a £10 rise", "a £1 price increase") — never a verb whose object is
+ * the source ("£1 raising it": today's £1, then a rise of no stated size; PR Review on #2275 @ fe509477).
+ */
+const CHANGE_NOUN = /^(?:rise|increase|drop|fall|cut|decrease|reduction|hike|boost|lift|uplift|jump)$/;
+/** Words that may stand between a move and "by £1" ("raise the Pro price by £1", "raising it by £1"). */
+const BY_LINK = /^(?:the|a|an|our|its|it|their|them|we|you|prices?)$/;
+const AMOUNT_REACH = 4;
+/** The quote's sentences: split at ! ? ; : a new line, or a period — except a period BETWEEN digits ("0.5", "£1.50"). */
+const sentencesOf = (q: string): string[] => q.split(/[!?;:\n]|(?<!\d)\.|\.(?!\d)/).map((x) => x.trim()).filter((x) => x !== '');
+export function linkEffectTheUserStated(
+  quote: string,
+  effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
+  ends: { readonly source: string; readonly target: string },
+  scope: { readonly quantities: readonly string[] },
+): LinkEffectStatementMiss | null {
+  const q = quote.trim();
+  if (q.includes('?') || (AUXILIARY_FIRST.test(q) && !REQUEST_FORM.test(q))) return 'question';
+  if (NEGATOR.test(q)) return 'denied';
+  // ⛔ PR Review's second CR (#2275 @ f5aaec34): every element must come from ONE sentence — "Pro price rises. Paying
+  // subscribers fall. Our budget is £1 per month. We currently have 50 paying subscribers." states no £1 → 50.
+  const sentences = sentencesOf(q);
+  const misses = sentences.map((sentence) => linkEffectInOneSentence(sentence, effect, ends, scope));
+  if (misses.some((m) => m === null)) return null;
+  return sentences.length === 1 ? misses[0]! : 'not_one_statement';
+}
+
+/**
+ * The ONE sentence of the quote that states the effect (`linkEffectTheUserStated` passes on it), verbatim, or null.
+ * AIQ 5884881500 ("proposer, not stamper"): that sentence is what the proposal stores as the user's words and what the
+ * approval card shows beside the reading — the user approves the READING, so a wrong parse costs a "no", never a false
+ * `user_stated`.
+ */
+export function statingSentenceOf(
+  quote: string,
+  effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
+  ends: { readonly source: string; readonly target: string },
+  scope: { readonly quantities: readonly string[] },
+): string | null {
+  if (linkEffectTheUserStated(quote, effect, ends, scope) !== null) return null;
+  return sentencesOf(quote.trim()).find((sentence) => linkEffectInOneSentence(sentence, effect, ends, scope) === null) ?? null;
+}
+
+function linkEffectInOneSentence(
+  q: string,
+  effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
+  ends: { readonly source: string; readonly target: string },
+  scope: { readonly quantities: readonly string[] },
+): LinkEffectStatementMiss | null {
+  const amountFigure = findStatedAmounts(q).find((a) => amountIs(a, Math.abs(effect.amount), effect.amount_unit, unitPhraseFamily(effect.amount_unit), q));
+  const perFigure = findStatedAmounts(q).find((a) => amountIs(a, Math.abs(effect.per_source_change), effect.per_source_change_unit,
+    unitPhraseFamily(effect.per_source_change_unit), q));
+  if (amountFigure === undefined || perFigure === undefined) return 'figures_not_in_statement';
+  const othersOf = (label: string): string[] => scope.quantities.filter((l) => l !== label);
+  const quoteWords = wordsOf(q);
+  const has = (w: string): boolean => quoteWords.some((t) => sameWord(w, t));
+  const named = (end: string, other: string): boolean => wordsOf(end).some((w) => has(w)
+    && !wordsOf(other).some((o) => sameWord(w, o))
+    && !othersOf(end).filter((l) => l !== other).some((l) => wordsOf(l).some((x) => sameWord(x, w))
+      && wordsOf(l).some((x) => !wordsOf(end).some((e) => sameWord(e, x)) && has(x))));
+  if (!named(ends.source, ends.target) || !named(ends.target, ends.source)) return 'end_not_named';
+  const tokens = [...q.matchAll(/[\p{L}\p{N}]+/gu)].map((m) => ({ w: m[0].toLowerCase(), at: m.index ?? 0 }));
+  const sourceOwn = wordsOf(ends.source).filter((w) => !wordsOf(ends.target).some((s) => sameWord(w, s)));
+  const sourceAt = tokens.flatMap((t, i) => (sourceOwn.some((w) => sameWord(w, t.w)) ? [i] : []));
+  const tokenAt = (index: number | undefined): number => tokens.findIndex((t) => t.at >= (index ?? 0));
+  const perAt = tokenAt(perFigure.index);
+  const amountAt = tokenAt(amountFigure.index);
+  // A figure's own digits ("0.5" → 0, 5) are never words standing between it and what it sizes.
+  const inFigure = (i: number): boolean => [perFigure, amountFigure].some((f) => tokens[i]!.at >= (f.index ?? 0)
+    && tokens[i]!.at < (f.index ?? 0) + f.matchedText.length);
+  // Punctuation ends a phrase (PR Review's fifth CR: "£1, raising it"): a comma, dash or bracket between two words breaks them.
+  const unbroken = (a: number, b: number): boolean => {
+    const [x, y] = a < b ? [a, b] : [b, a];
+    return !/[,;:()\u2013\u2014]/.test(q.slice(tokens[x]!.at + tokens[x]!.w.length, tokens[y]!.at));
+  };
+  const joined = (a: number, b: number, reach: number, link: (w: string) => boolean): boolean => a >= 0 && b >= 0
+    && Math.abs(a - b) <= reach && unbroken(a, b)
+    && tokens.slice(Math.min(a, b) + 1, Math.max(a, b)).every((t, k) => inFigure(Math.min(a, b) + 1 + k) || link(t.w));
+  const sourceLabel = wordsOf(ends.source);
+  // "£1 increase", "£10 rise", "£1 we add": right after the source's figure. "the price falls", "raise the price": beside
+  // a word naming the source. "add … to the Pro price": up to four words before it.
+  const isSourceMove = (i: number, w: string): boolean => (perAt >= 0 && i > perAt && i - perAt <= 3)
+    || sourceAt.some((s) => (w === 'add' ? s > i && s - i <= 4 : Math.abs(s - i) <= 2));
+  let target = 0; let targetBoth = false; let source = 0; let sourceBoth = false;
+  const targetMoves: number[] = []; const sourceMoves: number[] = [];
+  const say = (end: 'target' | 'source', dir: 1 | -1, i: number): void => {
+    if (end === 'target') { if (target !== 0 && target !== dir) targetBoth = true; target = dir; targetMoves.push(i); } else { if (source !== 0 && source !== dir) sourceBoth = true; source = dir; sourceMoves.push(i); }
+  };
+  tokens.forEach((t, i) => {
+    if (TARGET_DOWN.test(t.w)) say('target', -1, i);
+    else if (TARGET_UP.test(t.w)) say('target', 1, i);
+    else if (MOVE_UP.test(t.w)) say(isSourceMove(i, t.w) ? 'source' : 'target', 1, i);
+    else if (MOVE_DOWN.test(t.w)) say(isSourceMove(i, t.w) ? 'source' : 'target', -1, i);
+  });
+  if (target === 0 || targetBoth || sourceBoth) return 'direction_not_stated';
+  // Each figure SIZES its change: the amount joined to the target's movement, the source's figure to a source word.
+  const sourceLinkWord = (w: string): boolean => SOURCE_LINK.test(w) || MOVE_UP.test(w) || MOVE_DOWN.test(w)
+    || sourceLabel.some((x) => sameWord(x, w));
+  if (!targetMoves.some((m) => joined(amountAt, m, AMOUNT_REACH, (w) => AMOUNT_LINK.test(w)))
+    || !sourceAt.some((s) => joined(perAt, s, SOURCE_REACH, sourceLinkWord))) return 'figure_not_bound';
+  // The source's figure is itself IN a change phrase (PR Review's fifth CR: "With Pro price £1, raising it" is today's
+  // price, then a rise of no stated size): distributive ("every £1"), its own move straight after ("£10 rise", "£1 price
+  // increase"), or "by £1" after a move ("falls by £1", "raise the Pro price by £1").
+  const isMove = (w: string): boolean => MOVE_UP.test(w) || MOVE_DOWN.test(w);
+  const isLabel = (w: string): boolean => sourceLabel.some((x) => sameWord(x, w));
+  const distributive = perAt > 0 && DELTA_BEFORE.test(tokens[perAt - 1]!.w) && unbroken(perAt - 1, perAt);
+  const moveAfter = [1, 2, 3].some((d) => perAt + d < tokens.length && CHANGE_NOUN.test(tokens[perAt + d]!.w) && unbroken(perAt, perAt + d)
+    && tokens.slice(perAt + 1, perAt + d).every((t, k) => inFigure(perAt + 1 + k) || isLabel(t.w)));
+  const byAfterMove = perAt > 1 && tokens[perAt - 1]!.w === 'by' && tokens.slice(Math.max(0, perAt - 7), perAt - 1).some((t, k, xs) => {
+    const m = Math.max(0, perAt - 7) + k;
+    return isMove(t.w) && unbroken(m, perAt) && xs.slice(k + 1).every((u) => BY_LINK.test(u.w) || isLabel(u.w));
+  });
+  if (!distributive && !moveAfter && !byAfterMove) return 'source_figure_not_a_change';
+  if (target !== Math.sign(effect.amount)) return 'direction_contradicts';
+  if (source === 0 ? effect.per_source_change < 0 : source !== Math.sign(effect.per_source_change)) {
+    return source === 0 ? 'direction_not_stated' : 'direction_contradicts';
+  }
+  return null;
 }
