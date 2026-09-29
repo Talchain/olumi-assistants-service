@@ -232,7 +232,12 @@ describe('the fixture IS the served model (fidelity, not a self-authored stand-i
   });
 
   it('the reconstructed candidate registers the served nodes byte-for-byte, and the served edges less ONLY the withheld loop link', async () => {
-    const { out, body } = await build(servedCandidate());
+    const { out, body: registered } = await build(servedCandidate());
+    // The construction mark (`olumi-option-marker.ts`, DL #72 5887534233): the served draft's Olumi-added "Phased £54"
+    // option, and only it, now carries `proposed_by: 'olumi'`. The served graph predates the mark; the rest is byte for byte.
+    const marked = (registered.nodes as { id: string; proposed_by?: unknown }[]).filter((n) => n.proposed_by !== undefined).map((n) => [n.id, n.proposed_by]);
+    expect(marked).toEqual([['phased_54_price', 'olumi']]);
+    const body = { ...registered, nodes: (registered.nodes as Record<string, unknown>[]).map(({ proposed_by: _mark, ...n }) => n) } as typeof registered;
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
     expect(asServedBeforeOneForm(body, SERVED.draft_graph).nodes.map(canon)).toEqual(SERVED.draft_graph.nodes.map(asServedNow).map(canon));
     const withheld = new Set(loopWithheld(out));

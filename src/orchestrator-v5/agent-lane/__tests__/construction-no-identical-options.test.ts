@@ -357,7 +357,13 @@ describe('controls — what the rule must never touch', () => {
     ['£49 with AI release (f-20260926T022612Z, CEE cb1778b): its price equals today and its AI level equals £59\'s, yet no option matches it on both', 'f-20260926T022612Z', AT_49, '49_with_ai_release'],
   ])('CONTROL %s — kept; the served graph, and base\'s registration byte for byte', async (_name, key, run, olumiId) => {
     expect(run.brief.may_run).toBe(true);
-    const { graph, out } = await build(candidateFromServed(run.brief.draft_graph, { olumi: 'ai_proposed', horizon: null }));
+    const { graph: registered, out } = await build(candidateFromServed(run.brief.draft_graph, { olumi: 'ai_proposed', horizon: null }));
+    // The construction mark (`olumi-option-marker.ts`, DL #72 5887534233): the Olumi-added £54 option, and only it, carries
+    // `proposed_by: 'olumi'`. "£49 with AI release" sets the user's own £49, so it stays unmarked (the level backstop).
+    // The served graph and base's registration predate the mark; everything else is compared byte for byte, as before.
+    const marked = (registered.nodes as { id: string; proposed_by?: unknown }[]).filter((n) => n.proposed_by !== undefined).map((n) => [n.id, n.proposed_by]);
+    expect(marked).toEqual(key === 'f-20260926T001627Z' ? [[olumiId, 'olumi']] : []);
+    const graph = { ...registered, nodes: (registered.nodes as Record<string, unknown>[]).map(({ proposed_by: _mark, ...n }) => n) } as typeof registered;
     expect(optionIds(graph)).toContain(olumiId);
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
     expect(withoutG1(asServedBeforeOneForm(graph, run.brief.draft_graph), G1_NO_HORIZON_WORDS).nodes).toEqual(olumisKnownLevels(run.brief.draft_graph.nodes));

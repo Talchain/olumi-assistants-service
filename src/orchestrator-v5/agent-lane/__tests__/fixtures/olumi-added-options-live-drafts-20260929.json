@@ -1,0 +1,779 @@
+{
+ "_source": "Real drafter outputs (gpt-5.6-terra, strict json_schema) saved by MG's live 7x3 arms, output/mg-7x3-s4core-20260928/<arm>.jsonl structured_raw; Baseline v1 briefs verbatim. Not edited.",
+ "drafts": [
+  {
+   "arm": "base",
+   "brief_id": "A",
+   "rep": 2,
+   "scenario": "931872a3-649a-4d73-9b33-cd1220caec3e",
+   "brief": "Given our goal of reaching £100k MRR within 12 months [Currently 75k] while keeping monthly churn under 4%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?",
+   "candidate": {
+    "goal": {
+     "metric": "MRR",
+     "operator": ">=",
+     "target_stated": true,
+     "value": 100000,
+     "unit": "GBP per month",
+     "horizon_months": 12,
+     "provenance": "explicit",
+     "baseline_known": true,
+     "baseline_value": 75000,
+     "baseline_provenance": "explicit",
+     "scope": {
+      "modelled": "all company MRR",
+      "alternative": "Pro plan MRR only",
+      "stated_in_brief": false
+     }
+    },
+    "constraints": [
+     {
+      "metric": "Monthly churn",
+      "operator": "<",
+      "value": 4,
+      "unit": "percent",
+      "provenance": "explicit",
+      "frame": "level"
+     }
+    ],
+    "options": [
+     {
+      "label": "£59 Pro release",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Pro plan price",
+        "value": 59,
+        "value_kind": "absolute",
+        "unit": "GBP per month",
+        "provenance": "explicit"
+       },
+       {
+        "factor_label": "Pro feature release availability",
+        "value": 1,
+        "value_kind": "absolute",
+        "unit": "binary",
+        "provenance": "explicit"
+       }
+      ],
+      "is_status_quo": null
+     },
+     {
+      "label": "Release at £49",
+      "provenance": "inferred",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Pro plan price",
+        "value": 49,
+        "value_kind": "absolute",
+        "unit": "GBP per month",
+        "provenance": "explicit"
+       },
+       {
+        "factor_label": "Pro feature release availability",
+        "value": 1,
+        "value_kind": "absolute",
+        "unit": "binary",
+        "provenance": "inferred"
+       }
+      ],
+      "is_status_quo": null
+     },
+     {
+      "label": "£54 Pro release",
+      "provenance": "ai_proposed",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Pro plan price",
+        "value": 54,
+        "value_kind": "absolute",
+        "unit": "GBP per month",
+        "provenance": "ai_proposed"
+       },
+       {
+        "factor_label": "Pro feature release availability",
+        "value": 1,
+        "value_kind": "absolute",
+        "unit": "binary",
+        "provenance": "ai_proposed"
+       }
+      ],
+      "is_status_quo": null
+     },
+     {
+      "label": "Continue as now",
+      "provenance": "ai_proposed",
+      "changes": [],
+      "interventions": [],
+      "is_status_quo": true
+     }
+    ],
+    "factors": [
+     {
+      "label": "Pro plan price",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_value": 49,
+      "unit": "GBP per month",
+      "provenance": "explicit",
+      "plausible_max": 200
+     },
+     {
+      "label": "Pro feature release availability",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": 0,
+      "unit": "binary",
+      "provenance": "inferred",
+      "plausible_max": 1
+     },
+     {
+      "label": "Pro paying subscribers",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_value": 800,
+      "unit": "subscribers",
+      "provenance": "ai_proposed",
+      "plausible_max": 5000
+     },
+     {
+      "label": "Monthly churn",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_value": 3,
+      "unit": "percent",
+      "provenance": "ai_proposed",
+      "plausible_max": 100
+     },
+     {
+      "label": "Non-Pro MRR",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_value": 35800,
+      "unit": "GBP per month",
+      "provenance": "ai_proposed",
+      "plausible_max": 200000
+     }
+    ],
+    "risks": [
+     {
+      "label": "Price sensitivity",
+      "provenance": "inferred"
+     }
+    ],
+    "outcomes": [
+     {
+      "label": "Pro MRR",
+      "provenance": "inferred"
+     }
+    ],
+    "links": [
+     {
+      "from": "Pro plan price",
+      "to": "Pro MRR",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Pro paying subscribers",
+      "to": "Pro MRR",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Pro MRR",
+      "to": "MRR",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "inferred"
+     },
+     {
+      "from": "Non-Pro MRR",
+      "to": "MRR",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "inferred"
+     },
+     {
+      "from": "Pro plan price",
+      "to": "Price sensitivity",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Price sensitivity",
+      "to": "Monthly churn",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Pro feature release availability",
+      "to": "Monthly churn",
+      "direction": "negative",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Monthly churn",
+      "to": "Pro paying subscribers",
+      "direction": "negative",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Pro feature release availability",
+      "to": "Pro paying subscribers",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     }
+    ],
+    "identities": [
+     {
+      "outcome": "Pro MRR",
+      "operation": "product",
+      "factors": [
+       "Pro plan price",
+       "Pro paying subscribers"
+      ],
+      "provenance": "inferred"
+     }
+    ],
+    "unknowns": [
+     "Does “MRR” mean all company MRR or Pro plan MRR only? The model currently measures all company MRR.",
+     "What are the current Pro paying-subscriber count, monthly churn rate, and non-Pro MRR? The provisional values of 800 subscribers, 3% monthly churn, and £35,800 non-Pro MRR are modelling assumptions, not measurements.",
+     "How much would a £10 Pro price increase change monthly churn and Pro subscriber growth or retention after the feature release?",
+     "What incremental retention, acquisition, or conversion effect is expected from the Pro feature release itself?",
+     "What non-Pro MRR growth is expected over the next 12 months?"
+    ],
+    "decision_question": "should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?"
+   }
+  },
+  {
+   "arm": "lsF",
+   "brief_id": "E",
+   "rep": 1,
+   "scenario": "c1c60ef2-0f41-4c66-8505-5ad3af7b7adb",
+   "brief": "Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under £400k?",
+   "candidate": {
+    "goal": {
+     "metric": "ship the new platform",
+     "operator": ">=",
+     "target_stated": false,
+     "value": null,
+     "unit": "delivery status",
+     "horizon_months": null,
+     "provenance": "explicit",
+     "baseline_known": false,
+     "baseline_value": null,
+     "baseline_provenance": "explicit",
+     "scope": null
+    },
+    "constraints": [
+     {
+      "metric": "Annual salary spend",
+      "operator": "<",
+      "value": 400000,
+      "unit": "GBP/year",
+      "provenance": "explicit",
+      "frame": "level"
+     }
+    ],
+    "options": [
+     {
+      "label": "Hire two senior engineers",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Senior engineers hired",
+        "value": 2,
+        "value_kind": "additional",
+        "unit": "engineers",
+        "provenance": "explicit"
+       },
+       {
+        "factor_label": "Junior engineers hired",
+        "value": 0,
+        "value_kind": "absolute",
+        "unit": "engineers",
+        "provenance": "inferred"
+       },
+       {
+        "factor_label": "Annual salary spend",
+        "value": 240000,
+        "value_kind": "absolute",
+        "unit": "GBP/year",
+        "provenance": "ai_proposed"
+       }
+      ],
+      "is_status_quo": null
+     },
+     {
+      "label": "Hire four junior engineers",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Senior engineers hired",
+        "value": 0,
+        "value_kind": "absolute",
+        "unit": "engineers",
+        "provenance": "inferred"
+       },
+       {
+        "factor_label": "Junior engineers hired",
+        "value": 4,
+        "value_kind": "additional",
+        "unit": "engineers",
+        "provenance": "explicit"
+       },
+       {
+        "factor_label": "Annual salary spend",
+        "value": 280000,
+        "value_kind": "absolute",
+        "unit": "GBP/year",
+        "provenance": "ai_proposed"
+       }
+      ],
+      "is_status_quo": null
+     },
+     {
+      "label": "Hire two senior and two junior",
+      "provenance": "ai_proposed",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Senior engineers hired",
+        "value": 2,
+        "value_kind": "additional",
+        "unit": "engineers",
+        "provenance": "ai_proposed"
+       },
+       {
+        "factor_label": "Junior engineers hired",
+        "value": 2,
+        "value_kind": "additional",
+        "unit": "engineers",
+        "provenance": "ai_proposed"
+       },
+       {
+        "factor_label": "Annual salary spend",
+        "value": 380000,
+        "value_kind": "absolute",
+        "unit": "GBP/year",
+        "provenance": "ai_proposed"
+       }
+      ],
+      "is_status_quo": null
+     },
+     {
+      "label": "Continue current staffing",
+      "provenance": "ai_proposed",
+      "changes": [],
+      "interventions": [],
+      "is_status_quo": true
+     }
+    ],
+    "factors": [
+     {
+      "label": "Senior engineers hired",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_value": 0,
+      "unit": "engineers",
+      "provenance": "inferred",
+      "plausible_max": 10
+     },
+     {
+      "label": "Junior engineers hired",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_value": 0,
+      "unit": "engineers",
+      "provenance": "inferred",
+      "plausible_max": 20
+     },
+     {
+      "label": "Annual salary spend",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_value": 0,
+      "unit": "GBP/year",
+      "provenance": "inferred",
+      "plausible_max": 1000000
+     },
+     {
+      "label": "Platform delivery capacity",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_value": null,
+      "unit": "FTE-equivalent",
+      "provenance": "ai_proposed",
+      "plausible_max": 20
+     }
+    ],
+    "risks": [
+     {
+      "label": "Hiring lead-time risk",
+      "provenance": "ai_proposed"
+     }
+    ],
+    "outcomes": [],
+    "links": [
+     {
+      "from": "Senior engineers hired",
+      "to": "Annual salary spend",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": 120000,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Junior engineers hired",
+      "to": "Annual salary spend",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": 70000,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Annual salary spend",
+      "to": "Platform delivery capacity",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Senior engineers hired",
+      "to": "Hiring lead-time risk",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Junior engineers hired",
+      "to": "Hiring lead-time risk",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Hiring lead-time risk",
+      "to": "Platform delivery capacity",
+      "direction": "negative",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Platform delivery capacity",
+      "to": "ship the new platform",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     }
+    ],
+    "identities": [],
+    "unknowns": [
+     "What is the exact Q3 delivery deadline and how many months remain?",
+     "What is the current platform delivery status? It is not stated, so no current goal baseline is assumed.",
+     "What is the current platform delivery capacity or assigned engineering team? No defensible baseline was provided.",
+     "The provisional salary assumptions are £120,000 per senior engineer per year and £70,000 per junior engineer per year; confirm fully loaded annual salary costs.",
+     "How quickly can senior and junior candidates be hired and become productive, and how much platform delivery capacity does each add before the Q3 deadline?"
+    ],
+    "decision_question": "Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under £400k?"
+   }
+  },
+  {
+   "arm": "lsG",
+   "brief_id": "E",
+   "rep": 0,
+   "scenario": "9e56c308-c902-4e9d-8c19-a394ab5a51b4",
+   "brief": "Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under £400k?",
+   "candidate": {
+    "goal": {
+     "metric": "New platform delivery completion by Q3",
+     "operator": ">=",
+     "target_stated": false,
+     "value": null,
+     "unit": "% complete",
+     "horizon_months": null,
+     "provenance": "inferred",
+     "baseline_known": false,
+     "baseline_value": null,
+     "baseline_provenance": "explicit",
+     "scope": null
+    },
+    "constraints": [
+     {
+      "metric": "Annual salary spend",
+      "operator": "<",
+      "value": 400,
+      "unit": "£k/year",
+      "provenance": "explicit",
+      "frame": "level"
+     }
+    ],
+    "options": [
+     {
+      "label": "Hire two senior engineers",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Additional senior engineers",
+        "value": 2,
+        "value_kind": "additional",
+        "unit": "engineers",
+        "provenance": "explicit"
+       }
+      ],
+      "is_status_quo": null
+     },
+     {
+      "label": "Hire four junior engineers",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Additional junior engineers",
+        "value": 4,
+        "value_kind": "additional",
+        "unit": "engineers",
+        "provenance": "explicit"
+       }
+      ],
+      "is_status_quo": null
+     },
+     {
+      "label": "Carry on as now",
+      "provenance": "ai_proposed",
+      "changes": [],
+      "interventions": [],
+      "is_status_quo": true
+     },
+     {
+      "label": "Hire two junior engineers",
+      "provenance": "ai_proposed",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Additional junior engineers",
+        "value": 2,
+        "value_kind": "additional",
+        "unit": "engineers",
+        "provenance": "ai_proposed"
+       }
+      ],
+      "is_status_quo": null
+     }
+    ],
+    "factors": [
+     {
+      "label": "Additional senior engineers",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_value": 0,
+      "unit": "engineers",
+      "provenance": "inferred",
+      "plausible_max": 20
+     },
+     {
+      "label": "Additional junior engineers",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_value": 0,
+      "unit": "engineers",
+      "provenance": "inferred",
+      "plausible_max": 20
+     },
+     {
+      "label": "Annual salary spend",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_value": 0,
+      "unit": "£k/year",
+      "provenance": "ai_proposed",
+      "plausible_max": 1000
+     },
+     {
+      "label": "Engineering delivery capacity",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_value": 30,
+      "unit": "delivery points/month",
+      "provenance": "ai_proposed",
+      "plausible_max": 200
+     }
+    ],
+    "risks": [
+     {
+      "label": "Ramp-up delay",
+      "provenance": "inferred"
+     },
+     {
+      "label": "Coordination overhead",
+      "provenance": "ai_proposed"
+     }
+    ],
+    "outcomes": [],
+    "links": [
+     {
+      "from": "Additional senior engineers",
+      "to": "Annual salary spend",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": 130,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Additional junior engineers",
+      "to": "Annual salary spend",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": 70,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Additional senior engineers",
+      "to": "Engineering delivery capacity",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": 12,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Additional junior engineers",
+      "to": "Engineering delivery capacity",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": 5,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Additional senior engineers",
+      "to": "Ramp-up delay",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Additional junior engineers",
+      "to": "Ramp-up delay",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Additional senior engineers",
+      "to": "Coordination overhead",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Additional junior engineers",
+      "to": "Coordination overhead",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Engineering delivery capacity",
+      "to": "New platform delivery completion by Q3",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Annual salary spend",
+      "to": "New platform delivery completion by Q3",
+      "direction": "negative",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Ramp-up delay",
+      "to": "New platform delivery completion by Q3",
+      "direction": "negative",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Coordination overhead",
+      "to": "New platform delivery completion by Q3",
+      "direction": "negative",
+      "provenance": "ai_proposed",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     }
+    ],
+    "identities": [],
+    "unknowns": [
+     "Which calendar year and how many months remain until the Q3 deadline?",
+     "What percentage of the new platform is complete today? This current goal level is required to estimate whether any option can ship it by Q3.",
+     "Does the £400k annual salary-spend cap cover only these proposed hires, or all existing and new engineering salaries? The provisional £0k baseline models incremental proposed-hire spend only.",
+     "What are the fully loaded annual salary costs for a senior and junior engineer? The provisional estimates are £130k and £70k respectively.",
+     "How much delivery capacity can a senior or junior engineer add before Q3 after recruitment and ramp-up? The provisional estimates are 12 and 5 delivery points per month respectively.",
+     "How much platform completion does one delivery point per month create by Q3, and what ramp-up and coordination delays should be expected?"
+    ],
+    "decision_question": "Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under £400k?"
+   }
+  }
+ ]
+}

@@ -36,6 +36,7 @@
 import { createHash } from 'node:crypto';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine } from '../keep-options-apart.js';
+import { markOlumiOptions } from '../olumi-option-marker.js';
 import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, productIdentityOpenQuestions, sumIdentityOpenQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
@@ -1571,7 +1572,8 @@ export async function buildModelFromBrief(
 
   const graph = {
     // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
-    nodes: goalNodes,
+    // An option Olumi added carries `proposed_by: 'olumi'` (the Run's filter and the analysis hash read it; never the brief).
+    nodes: markOlumiOptions(goalNodes, candidate, brief),
     edges: admitted.edges,
     ...(admitted.goal_constraints.length > 0
       ? { goal_constraints: admitted.goal_constraints }
