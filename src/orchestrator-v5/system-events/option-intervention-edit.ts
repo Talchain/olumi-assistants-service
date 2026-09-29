@@ -77,6 +77,7 @@ import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.j
 import { applyFactorValueEdit, type FactorValueEditResult } from './factor-value-edit.js';
 import { applyEdgeStrengthEdit } from './edge-strength-edit.js';
 import { applyLinkEffectEdit, type LinkEffectStatement } from './link-effect-edit.js';
+import { applyIdentityConfirmEdit, identityConfirmPostimageIsScoped } from './identity-confirm-edit.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
 
 /**
@@ -547,6 +548,20 @@ export interface ApprovedLinkEffect {
   readonly reading_token: string;
 }
 
+/**
+ * ⭐ AN APPROVED PRODUCT CONFIRMATION (DL #72 5887510885; Canonical 5887564539): "MRR = price × subscribers" recorded as
+ * the user's own carrier on the quantity by the canonical writer (`applyIdentityConfirmEdit`). The revision it was issued
+ * on is the batch's own base (`expectedGraphHash`).
+ */
+export interface ApprovedIdentityConfirm {
+  readonly outcome_id: string;
+  readonly factor_ids: readonly string[];
+  /** The card's displayed sentence, bound into `reading_token`. */
+  readonly words: string;
+  /** `identityConfirmReadingToken` of the reading the approval card SHOWED; the writer refuses a write it does not match. */
+  readonly reading_token: string;
+}
+
 /** The members of a link the canonical link writer owns: its size, direction and whose size it is. Nothing else. */
 const LINK_WRITER_OWNED_EDGE_MEMBERS = ['strength', 'effect_direction', 'provenance', 'provenance_display', 'defaulted', 'exists_defaulted', 'std_defaulted'] as const;
 
@@ -676,6 +691,8 @@ export type OptionInterventionBatchExecutionInput =
     readonly linkStrengths?: readonly ApprovedLinkStrength[];
     /** ⭐ One approved user-stated link effect: ONE append, alone (never with a strength set, levels, values or ranges). */
     readonly linkEffect?: ApprovedLinkEffect;
+    /** ⭐ One approved product confirmation: ONE append, alone (never with anything else). */
+    readonly identityConfirm?: ApprovedIdentityConfirm;
     /** The last Run's use of each declared identity (`identityRunUseFromFacts`); null = no Run, a definition refuses. */
     readonly lastRunIdentityUse?: IdentityRunUse | null;
   };
@@ -713,7 +730,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       ...(t.figure !== undefined ? { figure: t.figure } : {}) };
   });
   const { targets: _callerTargets, expectedLinks, values: _callerValues, frames: _callerFrames, linkStrengths: _callerLinks,
-    linkEffect: _callerEffect, lastRunIdentityUse: _callerRunUse, ...common } = input;
+    linkEffect: _callerEffect, identityConfirm: _callerIdentity, lastRunIdentityUse: _callerRunUse, ...common } = input;
   // ⭐ THE VALUES FIRST, ON THE PERSISTED BASE, IN MEMORY — then the links and levels on the graph they produce, and ONE
   // append for all of it. The caller's base is checked against the PERSISTED model before anything is applied: the
   // levels are prepared on the post-value graph, so their own stale check can no longer see the caller's base.
@@ -803,7 +820,42 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     valueConfirmations = [`"${labelOfBefore(linkEffect.from)}" → "${labelOfBefore(linkEffect.to)}" now carries the size you stated${
       written.statement !== undefined ? `: ${written.statement}` : ''}.`];
   }
-  const effectCount = linkEffect !== undefined ? 1 : 0;
+  /**
+   * ⭐ ONE PRODUCT CONFIRMATION, the link effect's own shape: alone, on the persisted base, through the canonical writer
+   * in memory, scoped to that one carrier, then the ONE append and read-back below.
+   */
+  const identityConfirm = input.identityConfirm;
+  if (identityConfirm !== undefined) {
+    if (targets.length + values.length + frames.length + linkStrengths.length > 0 || linkEffect !== undefined
+      || (expectedLinks?.length ?? 0) > 0) {
+      return { kind: 'refused', reason: 'identity_confirm_not_alone' };
+    }
+    if (!isEditableGraph(before)
+      || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
+    const written = applyIdentityConfirmEdit({ persistedGraph: before, outcome_id: identityConfirm.outcome_id,
+      factor_ids: identityConfirm.factor_ids, words: identityConfirm.words, reading_token: identityConfirm.reading_token,
+      expected_graph_hash: input.expectedGraphHash });
+    if (written.kind === 'refused') return { kind: 'refused', reason: `identity_${written.reason}` };
+    const graph = projectGraphForPersistence(written.mutatedGraph);
+    if (!isEditableGraph(graph) || !identityConfirmPostimageIsScoped(before, graph, identityConfirm.outcome_id)) {
+      return { kind: 'refused', reason: 'identity_scope_mismatch' };
+    }
+    const appliedHash = computeAnalysisAffectingGraphHash(graph);
+    if (!appliedHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    const labelOfBefore = (id: string): string => String(before.nodes.find(node => node.id === id)?.label ?? id);
+    levelBase = graph;
+    levelBaseHash = appliedHash;
+    valueFacts = written.handlerFacts;
+    // AIQ 5887805333 (a): the committed row keeps the card's own words and that they were confirmed on the card — the
+    // audit truth that the identity was not in the brief (the `edit_graph` receipt is strict and carries no words).
+    valueConfirmations = [`Recorded as yours: "${labelOfBefore(identityConfirm.outcome_id)}" is ${
+      identityConfirm.factor_ids.map(id => `"${labelOfBefore(id)}"`).join(' times ')}, as you confirmed on the card: “${
+      identityConfirm.words.trim()}”`];
+  }
+  const effectCount = (linkEffect !== undefined ? 1 : 0) + (identityConfirm !== undefined ? 1 : 0);
   const valuesChanged = values.length + frames.length + linkStrengths.length + effectCount > 0 && !isDeepStrictEqual(levelBase, before);
   // ⭐ A VALUES-ONLY APPROVAL IS ONE COMMIT TOO (Canonical #70 5850018984): Olumi's starting point is usually values
   // with no level, and wrote each value as its own commit. With no level to prepare, the values (and their ranges)
