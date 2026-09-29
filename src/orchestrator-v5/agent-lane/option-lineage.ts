@@ -32,7 +32,8 @@ interface Span { readonly text: string; readonly from: number; readonly to: numb
  * Pro price to £59" would otherwise take the user's quote, lose `proposed_by: 'olumi'` and could lead as the user's
  * choice. A figure the item says nothing of the same kind about (Olumi's level on "shift batch jobs to spot instances")
  * is no conflict, nor is a name like "tier-1" beside a £ or % figure. An item writing TWO money or percentage figures
- * binds none (which is the option's cannot be read): no quote. Named residual: two PLAIN numbers with no unit word after
+ * binds only the one written after "to" ("from £49 to £59"); with none or two such, no quote. Named residuals: a change
+ * the option types as a delta ("by £10 to £59" with value 10) is not quoted; two PLAIN numbers with no unit word after
  * either ("hire 2 or 3") still match the one the option sets.
  */
 function figuresAgree(option: CandidateModel['options'][number], item: string): boolean {
@@ -47,10 +48,16 @@ function figuresAgree(option: CandidateModel['options'][number], item: string): 
     const sameKind = new Set(written.filter((a) => a.kind === kind).map((a) => a.magnitude));
     if (sameKind.size === 0) return true;
     // ⛔ PR Review CHANGES_REQUIRED on #2299 @ fcf35a8b: an item that writes TWO money (or percentage) figures ("raise Pro
-    // price to £59 with a £54 setup credit") cannot say which one is the option's: "£54" would match an Olumi "Raise to
-    // £54" through the setup credit. Fail closed: no quote, the Run's honest withhold. A plain number keeps its reading,
-    // which the word after it already binds ("3 months" is never 3 engineers: `figureTheUserWrote`'s unit word).
-    if (kind !== 'plain' && sameKind.size > 1) return false;
+    // price to £59 with a £54 setup credit") would match an Olumi "Raise to £54" through the setup credit. The option's
+    // figure is then the ONE written right after "to" ("from £49 to £59", "to £59 with a £54 setup credit"): no "to"
+    // figure, or two, binds none (no quote, the Run's honest withhold). A plain number keeps its reading, which the word
+    // after it already binds ("3 months" is never 3 engineers: `figureTheUserWrote`'s unit word).
+    if (kind !== 'plain' && sameKind.size > 1) {
+      const toFigures = written.filter((a) => a.kind === kind && /\bto\s*$/i.test(item.slice(0, a.index)));
+      if (new Set(toFigures.map((a) => a.magnitude)).size !== 1) return false;
+      const t = toFigures[0]!;
+      return figureTheUserWrote(i.value, i.unit, item.slice(t.index, t.index + t.matchedText.length));
+    }
     return figureTheUserWrote(i.value, i.unit, item);
   });
 }

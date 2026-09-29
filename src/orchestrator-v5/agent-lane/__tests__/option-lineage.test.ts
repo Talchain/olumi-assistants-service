@@ -154,7 +154,7 @@ describe('a copied quote never covers a different figure (PR Review CR on 9d85b0
     const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
     expect(strict(priceDraft({ label: 'Raise to £54', provenance: 'ai_proposed', value: 54, words: 'raise Pro price to £59' })), JSON.stringify(strict.errors?.slice(0, 2))).toBe(true);
   });
-  it('10 — RED (real build + the Run\'s reader): Olumi\'s £54 copying "raise Pro price to £59" gets no quote, stays Olumi\'s, and the Run withholds', async () => {
+  it('10 — RED (real build + the Run\'s reader): Olumi\'s £54 copying "raise Pro price to £59" gets no quote, and the Run withholds', async () => {
     const { r, g } = await build(priceDraft({ label: 'Raise to £54', provenance: 'ai_proposed', value: 54, words: 'raise Pro price to £59' }), SUB);
     expect(r.ok, JSON.stringify(r).slice(0, 300)).toBe(true);
     expect(optionNode(g, 'Raise to £54').source_quote).toBeUndefined();
@@ -181,7 +181,7 @@ describe('a copied quote never covers a different figure (PR Review CR on 9d85b0
   it('11 — PRECONDITION: the Run\'s own reader lists the two-money item as ONE option item', () => {
     expect(extractEnumeratedOptions(TWO).map((c) => c.text)).toEqual([TWO_WORDS, 'keep it at £49']);
   });
-  it('11 — RED (real build + the Run\'s reader): Olumi\'s £54 price copying the two-money item gets no quote, stays Olumi\'s, and the Run withholds', async () => {
+  it('11 — RED (real build + the Run\'s reader): Olumi\'s £54 price copying the two-money item gets no quote, and the Run withholds', async () => {
     const { r, g } = await build(priceDraft({ label: 'Raise to £54', provenance: 'ai_proposed', value: 54, words: TWO_WORDS }), TWO);
     expect(r.ok, JSON.stringify(r).slice(0, 300)).toBe(true);
     expect(optionNode(g, 'Raise to £54').source_quote).toBeUndefined();
@@ -192,10 +192,24 @@ describe('a copied quote never covers a different figure (PR Review CR on 9d85b0
     const { g } = await build(priceDraft({ label: 'Raise to £54', provenance: 'ai_proposed', value: 54, words: TWO_WORDS }), TWO);
     expect(optionNode(g, 'Raise to £54').proposed_by).toBeUndefined();
   });
-  it('11b — the user\'s own £59 on the two-money item is NOT quoted either (the named under-claim: which £ is the price cannot be read) → the Run withholds, never a wrong leader', async () => {
+  it('11b — CONTROL (matching action on the two-money item): the user\'s £59, the figure after "to", is quoted and the Run reconciles', async () => {
     const { g } = await build(priceDraft({ label: 'Raise to £59', provenance: 'explicit', value: 59, words: TWO_WORDS }), TWO);
-    expect(optionNode(g, 'Raise to £59').source_quote).toBeUndefined();
-    expect(deriveIntakeOptionReconciliation(TWO, g, g).state).not.toBe('reconciled');
+    expect(optionNode(g, 'Raise to £59').source_quote).toBe(TWO_WORDS);
+    expect(deriveIntakeOptionReconciliation(TWO, g, g).state).toBe('reconciled');
+  });
+  // The phrase classes a two-money item takes (enumerated for the first review, PR Review CR on fcf35a8b).
+  it.each<[string, string, number, boolean]>([
+    ['"from £49 to £59": the new price', 'raise Pro price from £49 to £59', 59, true],
+    ['"from £49 to £59": the OLD price is not the option\'s', 'raise Pro price from £49 to £59', 49, false],
+    ['"to £59 with a £54 setup credit": the credit is not the price', TWO_WORDS, 54, false],
+    ['no "to" figure ("a £59 price with a £54 credit")', 'a £59 Pro price with a £54 setup credit', 59, false],
+    ['two "to" figures ("to £59 then to £64 next year")', 'raise Pro price to £59 then to £64 next year', 59, false],
+    ['a delta the option types ("by £10 to £59", value 10): the named under-claim', 'raise Pro price by £10 to £59', 10, false],
+  ])('figure binding on a two-money item: %s', (_why, item, value, quoted) => {
+    const brief = `Should we raise our Pro plan price? The options are ${item}, or keep it at £49.`;
+    expect(extractEnumeratedOptions(brief).map((c) => c.text), 'PRECONDITION: the Run\'s reader lists the item').toEqual([item, 'keep it at £49']);
+    const cand = priceDraft({ label: `Raise to £${value}`, provenance: 'explicit', value, words: item }) as unknown as CandidateModel;
+    expect([...optionQuotes(cand, brief).keys()].includes(canonicalLabel(`Raise to £${value}`))).toBe(quoted);
   });
   it('11c — CONTROL: the single-money item still quotes the user\'s £59 and the Run reconciles (row 10b is unchanged)', async () => {
     const { g } = await build(priceDraft({ label: 'Raise to £59', provenance: 'explicit', value: 59, words: 'raise Pro price to £59' }), SUB);
