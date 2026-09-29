@@ -1349,8 +1349,8 @@ function markProductIdentities(
    * withholds it (`identity_operand_missing` / `identity_zero_level`), PLoT then withholds the goal's chance on every
    * option (#416), and the Run ends with no question — served cut-costs chained "AWS workload spend × GCP workload
    * share" into "× GCP saving rate", the share and the rate with no level. So Olumi's own reading is refused when a part
-   * is a factor with no level (or 0) today, or an outcome with none that no kept product gives one — to a fixpoint, so a
-   * chain is refused whole in either order — and `unlevelledProductQuestions` asks for the root figures once. A
+   * is a factor with no level (or 0) today, or an outcome another product refused here was to give its level — to a
+   * fixpoint, so a chain is refused whole in either order — and `unlevelledProductQuestions` asks for the root figures once. A
    * declaration the brief states is the user's structure and is kept.
    */
   const productOutcome = new Map<string, CandidateIdentity>();
@@ -1368,9 +1368,10 @@ function markProductIdentities(
       const missing = parts.filter((id) => {
         if (levelled(id)) return false;
         if (kindOf.get(id) === 'factor') return true;
-        if (kindOf.get(id) !== 'outcome') return false;
+        // An outcome counts only when a product refused here was to give it its level: one no product declares is left
+        // as before (the served MRR "Pro paying subscribers", journey C's tally), unmeasured against ISL.
         const source = productOutcome.get(id);
-        return source === undefined || levelRefused.has(source);
+        return kindOf.get(id) === 'outcome' && source !== undefined && levelRefused.has(source);
       });
       if (missing.length > 0) { levelRefused.set(d, missing); changed = true; }
     }
