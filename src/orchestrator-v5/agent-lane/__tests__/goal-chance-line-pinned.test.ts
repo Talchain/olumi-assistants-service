@@ -47,6 +47,26 @@ describe('goalChanceLineOwed', () => {
     expect(goalChanceLineOwed([runShown], PARAPHRASE)).toBeNull();
   });
 
+  it('SERVED 2397c7a (2/2): the Agent already said it with restyled quotes (**X**, “X”) → owed NOTHING (it was said twice)', () => {
+    const FX = JSON.parse(readFileSync(new URL('./fixtures/served-2301-pinned-say-twice.json', import.meta.url), 'utf8')) as
+      { warning_message: string; replies: { agent_text: string; served_reply: string }[] };
+    const said = goalChanceWithheldForAgent(block(FX.warning_message))!;
+    const run: Json = { ok: true, ran: true, goal_chance: said };
+    for (const r of FX.replies) {
+      expect(r.agent_text.includes(said.say), 'precondition: not a byte match (the served defect)').toBe(false);
+      expect(r.served_reply.endsWith(said.say), 'precondition: served appended it').toBe(true);
+      expect(goalChanceLineOwed([run], r.agent_text), r.agent_text.slice(0, 60)).toBeNull();
+    }
+  });
+
+  it('only quotes, emphasis and spacing are forgiven: a changed operator or word is not the sentence, so it is still owed', () => {
+    const plus = SAY.replace(' + ', ' × ');
+    expect(plus).not.toBe(SAY);
+    expect(goalChanceLineOwed([runWithheld], plus)).toBe(SAY);
+    expect(goalChanceLineOwed([runWithheld], SAY.replace('would be wrong', 'may be off'))).toBe(SAY);
+    expect(goalChanceLineOwed([runWithheld], `• ${SAY.replace(/'/g, '**').replace(/\s+/g, '  ')}`)).toBeNull();
+  });
+
   it('WIRING: the route appends it with the owed disclosures, checked against the Agent\'s own text', () => {
     const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
     expect(src).toContain('...[goalChanceLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),\n      ];');

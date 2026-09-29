@@ -74,6 +74,18 @@ export function goalChanceLineOwed(toolResults: readonly unknown[], replyText: s
     if (chance?.withheld === true && typeof chance.say === 'string' && chance.say.trim() !== '') say = chance.say;
     else if (rec?.ran === true || firstPass?.ran === true) say = undefined;
   }
-  return say !== undefined && !replyText.includes(say) ? say : null;
+  return say !== undefined && !sameWordsIn(replyText, say) ? say : null;
+}
+
+/**
+ * Whether `text` already says `sentence`, as a reader sees it (served `2397c7a`, 2/2 replies): the Agent restyles the typed
+ * sentence's quotes — bold `**X**` for 'X', or “X” — so a byte match missed it and the line was said twice. Compared with
+ * every quote mark and markdown emphasis mark removed and whitespace collapsed; any other change (a word, a figure, the
+ * operator) is not the sentence, so it is still owed.
+ */
+function sameWordsIn(text: string, sentence: string): boolean {
+  const plain = (t: string): string => t.replace(/[\u0027\u0022\u2018\u2019\u201A\u201B\u201C\u201D\u201E\u201F\u2032\u2033`]|\*\*|__|(?<![\w])[*_]|[*_](?![\w])/g, '')
+    .replace(/\s+/g, ' ').trim();
+  return plain(text).includes(plain(sentence));
 }
 
