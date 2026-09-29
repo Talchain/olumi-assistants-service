@@ -199,7 +199,7 @@ describe('target_fit is P(goal) ONLY — the limits-only joint never refills it'
   });
 
   it('R1b: a run that says it scored a "goal fit" (PLoT\'s `goal_fit_basis` rides the joint) but gives no P(goal) → still NOT scored', () => {
-    const basis = { ...TF.S3, goal_fit_basis: { scored_from: 'modelled_outcome_distribution' } };
+    const basis: Json = { ...TF.S3, goal_fit_basis: { scored_from: 'modelled_outcome_distribution' } };
     expect(deriveGoalFitFromEnrichment(basis), 'precondition: the signal says scored').toEqual(expect.objectContaining({ scored: true }));
     expect(display(basis).goal_fit).toBe(GOAL_FIT_NOT_SCORED_LINE);
     // Contrast: with a real P(goal) on an option, the scored basis is said.
