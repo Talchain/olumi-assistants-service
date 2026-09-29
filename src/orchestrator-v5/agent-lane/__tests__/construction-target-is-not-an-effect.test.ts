@@ -60,7 +60,7 @@ const goalEdge = (g: { nodes: Rec[]; edges: Rec[] }): Rec => {
   return g.edges.find((e) => e.from === 'gcp_workload_share' && e.to === goal.id)!;
 };
 const magnitudeOf = (e: Rec): unknown => (e.provenance as Rec | undefined)?.magnitude;
-const asked = (out: Rec): string[] => ((out.open_questions ?? []) as string[]).filter((q) => q.includes('exactly the gap to your target'));
+const asked = (out: Rec): string[] => ((out.open_questions ?? []) as string[]).filter((q) => q.includes('at the largest change an option makes'));
 
 describe('an Olumi estimate sized FROM the user\'s target is set aside and asked', () => {
   it('PREMISE: the goal holds £45,000 today and a 20% cut (the gap is £9,000)', async () => {
@@ -74,7 +74,10 @@ describe('an Olumi estimate sized FROM the user\'s target is set aside and asked
     const { graph, out } = await build(cut({ amount: -9000, per: 100 }));
     expect(magnitudeOf(goalEdge(graph))).toBe('olumi_placeholder');
     expect(asked(out)).toHaveLength(1);
-    expect(asked(out)[0]).toContain('A target is what you want, not evidence of what an option does');
+    expect(asked(out)).toEqual(['Olumi estimated that raising "GCP workload share" by 100 points lowers "Monthly spend" by 9000 GBP per month; at the '
+      + 'largest change an option makes, that moves "Monthly spend" by exactly the gap to your target. A target is what you want, not evidence of '
+      + 'what an option does, so it was not used: a placeholder sized to keep "Monthly spend" within its range stands in for it. How much does '
+      + '"GCP workload share" change "Monthly spend"?']);
   });
 
   it('ROW 2 (served run 2): "−£90 per 1%" → the same', async () => {

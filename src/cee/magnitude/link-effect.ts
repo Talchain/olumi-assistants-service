@@ -495,8 +495,10 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
       return `Olumi estimated that ${statement}, ${NOT_REPRESENTABLE}, so it was not used: ${standIn} stands in for it. ${HOW_MUCH(source, target)}`;
     }
     if (problem === 'target_sized') {
-      return `Olumi estimated that ${statement}, which moves "${target.label}" by exactly the gap to your target. A target is what `
-        + `you want, not evidence of what an option does, so it was not used: ${standIn} stands in for it. ${HOW_MUCH(source, target)}`;
+      // The per-unit statement is not the gap; the largest option move is (live arm, draft 3: "−£450 per point" × 20 points).
+      return `Olumi estimated that ${statement}; at the largest change an option makes, that moves "${target.label}" by exactly the `
+        + `gap to your target. A target is what you want, not evidence of what an option does, so it was not used: ${standIn} `
+        + `stands in for it. ${HOW_MUCH(source, target)}`;
     }
     if (sizeCheck === null) return undefined;
     if (problem === 'unconvertible') {
