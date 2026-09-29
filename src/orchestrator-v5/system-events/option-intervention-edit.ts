@@ -460,7 +460,8 @@ async function applyApprovedFactorValues(
     const factorCap = typeof os.cap === 'number' && os.cap > 0 ? os.cap : undefined;
     const unit = v.unit !== undefined && v.unit.trim() !== '' ? v.unit.trim() : undefined;
     // The compound's own event, unchanged: on a capped factor the writer is handed the level AND the user's figure.
-    const event = { kind: 'factor_value_edit' as const, target_id: v.factorId,
+    // `intent: 'set'`: a figure the user approved is authorship even when it equals Olumi's (schemas 0.62.0; AIQ 5881494849).
+    const event = { kind: 'factor_value_edit' as const, target_id: v.factorId, intent: 'set' as const,
       ...(factorCap !== undefined ? { value: v.value / factorCap, raw_value: v.value } : { value: v.value }),
       ...(unit !== undefined ? { unit } : {}) };
     const write = () => applyFactorValueEdit({
