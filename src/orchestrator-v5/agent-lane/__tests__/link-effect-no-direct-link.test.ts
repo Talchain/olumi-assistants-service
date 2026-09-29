@@ -102,10 +102,10 @@ describe('propose_link_effect on a pair the model connects only through other fa
 
   it('CONTROL: a pair the model does not connect at all stays `no_such_link` (no paths invented)', async () => {
     const { caps } = world(D3);
-    const said = 'Every 50 paying subscribers we lose costs us £1 on the Pro price.';
+    const said = 'Every 50 paying subscribers we gain adds £1 to the Pro price.';
     const r = await caps.proposeLinkEffect!(ctxSaying(said), {
       from_label: 'Paying Pro subscribers', to_label: 'Pro plan price', amount: 1, amount_unit: 'GBP/month',
-      per_source_change: 50, per_source_change_unit: 'subscribers', quote: 'Every 50 paying subscribers we lose costs us £1 on the Pro price',
+      per_source_change: 50, per_source_change_unit: 'subscribers', quote: 'Every 50 paying subscribers we gain adds £1 to the Pro price',
     }) as Json;
     expect(connectingPaths(D3, 'paying_pro_subscribers', 'pro_plan_price')).toEqual([]);
     expect(r).toEqual(expect.objectContaining({ ok: false, refusal: 'no_such_link' }));
