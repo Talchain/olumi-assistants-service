@@ -75,7 +75,7 @@ export function formatGoalTargetNotSavedText(persistedGraph: unknown): string {
   const surviving = extractPersistedGoalTarget(persistedGraph);
   if (surviving === null) return GOAL_TARGET_NOT_SAVED_TEXT;
   // R1 S4-core: a target stated as a change from today is said as the change ("(down 15% from today)"), never "-0.15%".
-  const change = sayGoalChange(surviving.frame, surviving.value, surviving.unit, (v, u) => (u !== undefined ? `${v}${u}` : `${v}`));
+  const change = sayGoalChange(surviving.frame, surviving.value, surviving.unit, (v, u) => (u !== undefined ? `${v}${u}` : `${v}`), surviving.held);
   const target = change !== undefined ? `target (${change})`
     : `target of ${surviving.unit !== undefined ? `${surviving.value}${surviving.unit}` : `${surviving.value}`}`;
   return (
@@ -119,7 +119,7 @@ export function formatGoalTargetNotSavedText(persistedGraph: unknown): string {
  */
 export function extractPersistedGoalTarget(
   graph: unknown,
-): { readonly value: number; readonly unit?: string; readonly frame?: string } | null {
+): { readonly value: number; readonly unit?: string; readonly frame?: string; readonly held?: string } | null {
   if (graph === null || graph === undefined || typeof graph !== 'object') {
     return null;
   }
@@ -140,6 +140,7 @@ export function extractPersistedGoalTarget(
           : {}),
         // R1 S4-core: the frame rides with the figure, so no reader prints a change from today as a level.
         ...(typeof node.goal_threshold_frame === 'string' ? { frame: node.goal_threshold_frame } : {}),
+        ...(typeof node.goal_direction === 'string' ? { held: node.goal_direction } : {}),
       };
     }
   }

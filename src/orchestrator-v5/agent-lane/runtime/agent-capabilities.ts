@@ -994,7 +994,7 @@ function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'ana
           // R1 S4-core: a target stated as a change from today says so in words ("down 15% from today"), so the Agent never
           // reads the stored fraction as a level of the goal's unit (`sayGoalChange`). A level carries no `in_words`, as before.
           ...((): Record<string, string> => {
-            const said = sayGoalChange(frame, trio.goal_threshold_raw!, trio.goal_threshold_unit, (v, u) => targetFigure(v, u ?? ''));
+            const said = sayGoalChange(frame, trio.goal_threshold_raw!, trio.goal_threshold_unit, (v, u) => targetFigure(v, u ?? ''), (n as { goal_direction?: unknown }).goal_direction);
             return said === undefined ? {} : { in_words: said };
           })(),
         },

@@ -264,7 +264,7 @@ export function goalNotCheckedLine(graph: unknown, analysisResult: unknown): str
   const hasCurrent = [os?.value, os?.raw_value, (os as { baseline?: unknown } | null | undefined)?.baseline]
     .some((v) => typeof v === 'number' && Number.isFinite(v));
   // R1 S4-core: a target stated as a change from today is said as the change, never "-0.15 GBP per month".
-  const change = sayGoalChange(goal.goal_threshold_frame, raw, unit, (v, u) => money(v, u ?? ''));
+  const change = sayGoalChange(goal.goal_threshold_frame, raw, unit, (v, u) => money(v, u ?? ''), (goal as { goal_direction?: unknown }).goal_direction);
   const target = change === undefined ? `target of ${money(raw, unit)}` : `target (${change})`;
   return hasCurrent
     ? `Your ${label} ${target} was not checked in this analysis.`

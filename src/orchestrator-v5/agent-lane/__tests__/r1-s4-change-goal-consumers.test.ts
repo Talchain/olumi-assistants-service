@@ -42,6 +42,19 @@ describe('S4C sayers: a change goal is said as the change, never as the stored f
     for (const frame of ['level', undefined, 'delta', 'nonsense']) expect(sayGoalChange(frame, -0.15, 'GBP', figure)).toBeUndefined();
   });
 
+  it('S4C-1b (AIQ 5880974047): the HELD comparator is said — "down at least 15%", strict "more than" — never read as exactly 15%', () => {
+    expect(sayGoalChange('change_rel', -0.15, '£', figure, '<=')).toBe('down at least 15% from today');
+    expect(sayGoalChange('change_rel', -0.15, '£', figure, '<')).toBe('down more than 15% from today');
+    expect(sayGoalChange('change_rel', 0.1, '£', figure, '>=')).toBe('up at least 10% from today');
+    expect(sayGoalChange('change_rel', 0.1, '£', figure, '>')).toBe('up more than 10% from today');
+    expect(sayGoalChange('change_abs', 5000, 'GBP', figure, '>=')).toBe('up at least 5000 GBP from today');
+    // A ceiling on a rise / a floor on a fall reads the other way round (the limits' one table, `changeWords`).
+    expect(sayGoalChange('change_rel', 0.1, '£', figure, '<=')).toBe('up no more than 10% from today');
+    // CONTROL: no held comparator, or a direction word that is not a comparator, says no bound (as before).
+    expect(sayGoalChange('change_rel', -0.15, '£', figure)).toBe('down 15% from today');
+    expect(sayGoalChange('change_rel', -0.15, '£', figure, 'minimise')).toBe('down 15% from today');
+  });
+
   const graphOf = (frame: Frame) => ({ nodes: [
     { id: 'bill', kind: 'goal', label: 'Cloud bill', ...goalFields(frame) },
   ], edges: [] });
@@ -61,6 +74,12 @@ describe('S4C sayers: a change goal is said as the change, never as the stored f
     const text = formatGoalTargetNotSavedText(graphOf('change_rel'));
     expect(text).toContain('your previous target (down 15% from today) is still registered');
     expect(text).not.toMatch(/-0\.15/);
+  });
+
+  it('S4C-2/3 held: with the goal\'s held "<=" both sentences say "down at least 15% from today"', () => {
+    const held = { nodes: [{ id: 'bill', kind: 'goal', label: 'Cloud bill', ...goalFields('change_rel'), goal_direction: '<=' }], edges: [] };
+    expect(goalNotCheckedLine(held, NOT_CONVERTIBLE)).toContain('Your Cloud bill target (down at least 15% from today) is not checked yet');
+    expect(formatGoalTargetNotSavedText(held)).toContain('your previous target (down at least 15% from today) is still registered');
   });
 
   it('S4C-3 CONTROL: a surviving LEVEL target is said as before', () => {
@@ -113,6 +132,16 @@ describe('S4C doors: nothing writes a LEVEL target over a goal stated as a chang
     const goal = (s as unknown as { goals?: { id: string; target?: Record<string, unknown> }[]; goal?: { target?: Record<string, unknown> } });
     const target = goal.goals?.find((g) => g.id === 'bill')?.target ?? goal.goal?.target;
     expect(target, JSON.stringify(s).slice(0, 600)).toEqual(expect.objectContaining({ value: -0.15, frame: 'change_rel', in_words: 'down 15% from today' }));
+  });
+
+  it('S4C-5 held: the Agent reads the held bound too — "down at least 15% from today"', async () => {
+    const d: InternalDispatch = async (path) => (path.endsWith('/graph')
+      ? { status: 200, json: { graph: { ...agentGraph('change_rel'), nodes: agentGraph('change_rel').nodes.map((n) => (n.kind === 'goal' ? { ...n, goal_direction: '<=' } : n)) }, graph_hash: 'h1' } }
+      : { status: 500, json: {} });
+    const s = await createAgentCapabilities(d, new ProposalStore()).getCanonicalState(ctx);
+    const goal = (s as unknown as { goals?: { id: string; target?: Record<string, unknown> }[]; goal?: { target?: Record<string, unknown> } });
+    const target = goal.goals?.find((g) => g.id === 'bill')?.target ?? goal.goal?.target;
+    expect(target).toEqual(expect.objectContaining({ in_words: 'down at least 15% from today' }));
   });
 
   it('S4C-5 CONTROL: a LEVEL target carries no `in_words` (its value is already the level)', async () => {
