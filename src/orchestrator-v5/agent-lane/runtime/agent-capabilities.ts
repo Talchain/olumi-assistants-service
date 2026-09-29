@@ -1128,10 +1128,13 @@ export function pathCensus(raw: unknown, fromId: string, toId: string): PathCens
     for (const next of out.get(at) ?? []) {
       if (!complete) return;
       steps += 1;
-      if (found.length > PATH_CENSUS_MAX_PATHS || steps > PATH_CENSUS_MAX_STEPS) { complete = false; return; }
+      if (steps > PATH_CENSUS_MAX_STEPS) { complete = false; return; }
       if (path.includes(next)) continue;
-      if (next === toId) found.push([...path, next]);
-      else walk(next, [...path, next]);
+      if (next === toId) {
+        // Decisive AS the route past the limit is found (PR Review CR @ 90668fb7): route 65 is never counted as complete.
+        if (found.length >= PATH_CENSUS_MAX_PATHS) { complete = false; return; }
+        found.push([...path, next]);
+      } else walk(next, [...path, next]);
     }
   };
   walk(fromId, [fromId]);

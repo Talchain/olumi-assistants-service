@@ -195,4 +195,28 @@ describe('the path census: a total only over EVERY route', () => {
     expect(r).not.toHaveProperty('paths_total');
     expect(String(r.detail)).toMatch(/more routes than Olumi can check here, so it cannot compare its own total/);
   });
+
+  // PR Review CR @ 90668fb7: the limit is 64 routes, decided AS a route is found — never after the walk ends.
+  const parallel = (n: number): Route[] => Array.from({ length: n }, (_, k) => [`m${k + 1}`]);
+
+  it('BOUNDARY 64 sized routes (the limit): complete — the exact total over all 64 (−1 … −64 = −2080)', async () => {
+    const g = routes(parallel(64));
+    const census = pathCensus(g, 'pro_plan_price', 'paying_pro_subscribers');
+    expect(census).toEqual(expect.objectContaining({ complete: true, reachable: true }));
+    expect(census.paths).toHaveLength(64);
+    const r = await world(g).caps.proposeLinkEffect!(ctxSaying(SAID), ARGS) as Json;
+    expect(r.paths_total).toBe(64);
+    expect(r.model_total.amount).toBeCloseTo(-2080, 9);
+  });
+
+  it('BOUNDARY 65 sized routes (one past, and NO later edge to visit): INCOMPLETE — no total, no path count', async () => {
+    const g = routes(parallel(65));
+    const census = pathCensus(g, 'pro_plan_price', 'paying_pro_subscribers');
+    expect(census).toEqual(expect.objectContaining({ complete: false, reachable: true }));
+    const r = await world(g).caps.proposeLinkEffect!(ctxSaying(SAID), ARGS) as Json;
+    expect(r.refusal).toBe('no_direct_link');
+    expect(r).not.toHaveProperty('model_total');
+    expect(r).not.toHaveProperty('paths_total');
+    expect(r.paths_complete).toBe(false);
+  });
 });
