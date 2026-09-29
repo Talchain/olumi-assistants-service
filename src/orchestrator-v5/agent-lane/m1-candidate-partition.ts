@@ -4,6 +4,7 @@ import { multiFigureItemBinds, optionQuotes } from './option-lineage.js';
 import { figureTheUserWrote, figureTheUserWroteFor, withdrawUnstatedBaselineStamps } from './stated-by-user.js';
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { unitPhraseFamily } from './unit-conflict.js';
+import { unboundM1CountScope } from './m1-count-scope.js';
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 
 /** A located quote is not proof that the candidate performs its action at its stated setting. */
@@ -136,7 +137,28 @@ export function partitionM1Candidate(candidate: CandidateModel, brief: string): 
     placeholders.push(entity.label);
     return true;
   };
-  const factors = candidate.factors.filter((f) => keepEntity('factor', f)).map((f) => {
+  const countScopeQuestions: string[] = [];
+  const factors = candidate.factors.filter((f) => keepEntity('factor', f)).map((original) => {
+    let f = original;
+    const scope = unboundM1CountScope(f, candidate, brief);
+    if (scope !== null) {
+      const names = (label: string): boolean => canonicalLabel(label) === canonicalLabel(f.label);
+      const dependent = constraints.some((c) => names(c.metric))
+        || options.some((o) => (o.changes ?? []).some(names) || (o.interventions ?? []).some((i) => i.provenance === 'explicit' && names(i.factor_label)))
+        || candidate.links.some((l) => l.provenance === 'explicit' && (names(l.from) || names(l.to)))
+        || (candidate.identities ?? []).some((i) => i.provenance === 'explicit' && (names(i.outcome) || i.factors.some(names)))
+        || candidate.factors.some((other) => other !== f && canonicalLabel(other.label) === canonicalLabel(scope.neutralLabel));
+      countScopeQuestions.push(`Does "${scope.quote}" refer to "${f.label}", or a wider group?`);
+      propose('factor', f.label, `factors[${f.label}]`, f, 'The source states the count without this population scope. Confirm that interpretation before adding it.');
+      if (dependent) {
+        propose('value', scope.neutralLabel, `factors[${f.label}].baseline_value`, { value: f.baseline_value, unit: f.unit, provenance: 'explicit', source_quote: scope.quote, pending_reason: 'scope_unresolved' }, 'The user supplied this count, but its population scope needs confirmation.');
+        placeholders.push(f.label);
+        return { ...f, provenance: 'inferred', baseline_known: false, baseline_value: null };
+      }
+      // No retained assertion depends on the scoped entity: keep the exact neutral count phrase. Do not retarget
+      // its old relationships; the normal partition leaves those proposed interpretations outside canonical state.
+      f = { ...f, label: scope.neutralLabel };
+    }
     // Existing admission only downgrades invented zero's author, then uses 0 + a supplied addition as an absolute
     // setting. M1 leaves that current level unset: prepareProvisionalCandidate preserves the addition in its existing
     // additions_without_total carrier. Reuse MG's baseline attestation (including spelled zero), not a new parser.
@@ -196,7 +218,7 @@ export function partitionM1Candidate(candidate: CandidateModel, brief: string): 
   const scopeQuestions = candidate.goal.scope?.stated_in_brief === false && Array.isArray(parked)
     ? parked.filter((q: unknown): q is string => typeof q === 'string' && q.includes(candidate.goal.metric) && /scope|plans?|revenue/i.test(q) && !/provision|estimat|assum|inferred|treats it as/i.test(q) && !removedClaims.some((label) => label !== '' && canonicalLabel(q).includes(label)))
     : [];
-  const unknowns = [...scopeQuestions, ...keptOptions
+  const unknowns = [...scopeQuestions, ...countScopeQuestions, ...keptOptions
     .filter((o) => (o.interventions ?? []).length === 0 && (o.changes ?? []).length === 0 && o.is_status_quo !== true)
     .map((o) => `What change should "${o.label}" make in the model?`)];
   const model = { ...candidate, goal, constraints, options: keptOptions, factors, risks, outcomes, links, identities, unknowns };
