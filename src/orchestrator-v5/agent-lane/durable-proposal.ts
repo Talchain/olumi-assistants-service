@@ -43,6 +43,7 @@ import {
 import { log } from '../../utils/telemetry.js';
 import { approvalChipIdFor, readingOfLinkEffectApproval } from './approval-chips.js';
 import { readingOfIdentityApproval } from './identity-card.js';
+import { readingOfOptionAdoptionApproval } from './option-adoption-card.js';
 import { computeProposalId, type ProposalStore, type StructuredProposal } from './proposal.js';
 
 /**
@@ -122,15 +123,17 @@ export interface LiveCarrier {
 }
 
 /** The {@link LiveCarrier} a persisted pending action describes, when it is one of ours. */
-function liveCarrierOf(pa: PendingAction, proposalId: string): LiveCarrier | undefined {
+function liveCarrierOf(pa: PendingAction, proposal: StructuredProposal): LiveCarrier | undefined {
   if (pa.action.kind !== 'apply_proposed_change') return undefined;
   const expires = Date.parse(pa.expires_at_iso);
   if (!Number.isFinite(expires)) return undefined;
   const { public_label: label, public_message: message } = pa.action as { public_label?: unknown; public_message?: unknown };
   if (typeof label !== 'string' || typeof message !== 'string') return undefined;
-  // A link-effect or identity card's words carry its reading, so the card put back shows exactly what the offer showed.
-  const detail = readingOfLinkEffectApproval(message) ?? readingOfIdentityApproval(message);
-  return { proposal_id: proposalId, chip: { id: pa.chip_id, label, message, ...(detail !== undefined ? { detail } : {}) }, expires_at_ms: expires };
+  // The durable button itself carries the reading. Adoption also checks it against the hash-bound proposal's words.
+  const detail = readingOfLinkEffectApproval(message) ?? readingOfIdentityApproval(message)
+    ?? (pa.chip_id === approvalChipIdFor(proposal.proposal_id)
+      ? readingOfOptionAdoptionApproval(message, proposal) : undefined);
+  return { proposal_id: proposal.proposal_id, chip: { id: pa.chip_id, label, message, ...(detail !== undefined ? { detail } : {}) }, expires_at_ms: expires };
 }
 
 /**
@@ -164,7 +167,7 @@ export function rehydrateProposals(
     if (store.get(p.proposal_id) !== undefined) continue;
     store.put(p);
     restored += 1;
-    const carrier = liveCarrierOf(raw as PendingAction, p.proposal_id);
+    const carrier = liveCarrierOf(raw as PendingAction, p);
     if (carrier !== undefined) onRestored?.(carrier);
   }
   return restored;
@@ -226,8 +229,8 @@ export function carrierForAnswerRow(input: {
  * the proposal's words with no way to approve them — although the row it replays had persisted the exact
  * chip beside the proposal.
  *
- * This returns only the chip's WORDS — its id, label and message exactly as the original answer offered
- * them — and only when THAT answer offered it (a carried-forward carrier returns nothing). Whether it is
+ * This returns the chip's id, label, message and validated displayed reading exactly as the original answer
+ * offered them — and only when THAT answer offered it (a carried-forward carrier returns nothing). Whether it is
  * still offered is not decided here: the caller applies the same predicate as every replay, which admits
  * it only while its proposal is the one awaiting a yes for this subject and the store would execute it on
  * today's revision. The store is refilled from the latest answer row BEFORE the replay, so a proposal
@@ -246,7 +249,20 @@ export function offeredApproveChipOnRow(
     if (pa.chip_id !== approvalChipIdFor(p.proposal_id)) continue;
     const { public_label: label, public_message: message } = pa.action as { public_label?: unknown; public_message?: unknown };
     if (typeof label !== 'string' || typeof message !== 'string') continue;
-    return { id: pa.chip_id, label, message };
+    const proposal = p as StructuredProposal;
+    const detail = Array.isArray(proposal.operations) && proposal.operations.length === 1
+      && proposal.operations[0]?.op === 'adopt_option'
+      ? (() => {
+          const { proposal_id: _id, ...content } = proposal;
+          try {
+            return computeProposalId(content) === proposal.proposal_id
+              ? readingOfOptionAdoptionApproval(message, proposal) : undefined;
+          } catch {
+            return undefined;
+          }
+        })()
+      : undefined;
+    return { id: pa.chip_id, label, message, ...(detail !== undefined ? { detail } : {}) };
   }
   return undefined;
 }
@@ -269,7 +285,7 @@ export class CarriedProposals {
     this.slots.delete(key);
     if (carrier === undefined) return;
     const proposal = (carrier.action as { inline_patch?: { agent_proposal?: { proposal_id?: unknown } } }).inline_patch?.agent_proposal;
-    const live = typeof proposal?.proposal_id === 'string' ? liveCarrierOf(carrier, proposal.proposal_id) : undefined;
+    const live = typeof proposal?.proposal_id === 'string' ? liveCarrierOf(carrier, proposal as StructuredProposal) : undefined;
     if (live === undefined) return;
     this.remember(key, live);
   }

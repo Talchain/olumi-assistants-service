@@ -5,8 +5,10 @@ import { dispatchTool, MUTATION_TOOLS } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
 import { approvalChipIdFor, approvalChipsFor } from '../approval-chips.js';
 import { optionAdoptionApproveMessage } from '../option-adoption-card.js';
+import { carrierForAnswerRow, offeredApproveChipOnRow, proposalPendingAction, rehydrateProposals, type LiveCarrier } from '../durable-proposal.js';
 import { applyOptionAdoptEdit, optionAdoptReadingToken } from '../../system-events/option-adopt-edit.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { parsePendingAction } from '../../session/pending-action.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 
 type Json = Record<string, any>;
@@ -81,6 +83,38 @@ describe('saved Olumi option adoption through an explicit approval card', () => 
     expect(await w.approve(offered.proposal_id, chip.message!.replace('Olumi suggested', 'The user chose')))
       .toMatchObject({ ok: false, reason: 'reading_not_confirmed' });
     expect(w.state.writes).toBe(0);
+  });
+
+  it('a restarted worker and replay still show the full consent reading before approval', async () => {
+    const w = world();
+    const offered = await w.offer() as Json;
+    const chip = w.chips(offered)[0]!;
+    const proposal = w.store.get(offered.proposal_id)!;
+    const subject = { scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id };
+    const pending = parsePendingAction(JSON.parse(JSON.stringify(proposalPendingAction(proposal, chip,
+      { scenario_id: ctx.scenario_id, emitted_at_iso: new Date().toISOString() }))));
+    expect(pending).not.toBeNull();
+    const freshStore = new ProposalStore();
+    let restored: LiveCarrier | undefined;
+    expect(rehydrateProposals([pending], freshStore, subject, Date.now(), (carrier) => { restored = carrier; })).toBe(1);
+    expect(restored?.chip).toEqual(chip);
+    expect(offeredApproveChipOnRow([pending!], subject)).toEqual(chip);
+    expect(w.state.writes).toBe(0);
+
+    const carried = carrierForAnswerRow({ offered: undefined, carried: restored, store: freshStore,
+      subject, currentGraphHash: hashOf(w.state.graph), emittedAtIso: new Date().toISOString() });
+    expect(carried).toBeDefined();
+    let restoredAfterCarry: LiveCarrier | undefined;
+    expect(rehydrateProposals([carried], new ProposalStore(), subject, Date.now(), (carrier) => { restoredAfterCarry = carrier; })).toBe(1);
+    expect(restoredAfterCarry?.chip.detail).toBe(chip.detail);
+    expect(offeredApproveChipOnRow([carried!], subject)).toBeUndefined();
+
+    const changedMessage = structuredClone(pending!);
+    (changedMessage.action as { public_message: string }).public_message = 'Yes, add it.';
+    let changedCarrier: LiveCarrier | undefined;
+    expect(rehydrateProposals([changedMessage], new ProposalStore(), subject, Date.now(), (carrier) => { changedCarrier = carrier; })).toBe(1);
+    expect(changedCarrier?.chip.detail).toBeUndefined();
+    expect(offeredApproveChipOnRow([changedMessage], subject)?.detail).toBeUndefined();
   });
 
   it('a moved model invalidates the displayed card before the writer is called', async () => {
