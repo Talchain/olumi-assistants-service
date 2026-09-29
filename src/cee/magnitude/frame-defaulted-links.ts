@@ -54,7 +54,8 @@ function sizedByOlumi(edge: Rec): boolean {
  * canonical percent unit (`percentLevelFrame`, the ONE rule admission also asks), is the structured field that says it is one: `MagnitudeNode.percent_level`, the ONE rule
  * `levelDomain` applies for admission and here alike (with its typed guard: no option level below zero).
  */
-function percentLevelIds(graph: Rec): Set<string> {
+/** The node ids a level limit in "%" names (exported for the user-stated link-effect writer, one builder). */
+export function percentLevelIds(graph: Rec): Set<string> {
   const out = new Set<string>();
   const limits = Array.isArray(graph.goal_constraints) ? graph.goal_constraints : [];
   for (const c of limits) {
@@ -64,7 +65,8 @@ function percentLevelIds(graph: Rec): Set<string> {
   return out;
 }
 
-function magnitudeNodes(nodes: readonly Rec[], percentLevel: ReadonlySet<string>): Map<string, MagnitudeNode> {
+/** The stored graph's nodes as the sizing contract reads them (exported: the link-effect writer re-sizes on the same view). */
+export function magnitudeNodes(nodes: readonly Rec[], percentLevel: ReadonlySet<string>): Map<string, MagnitudeNode> {
   const optionLevels = new Map<string, number[]>();
   for (const n of nodes) {
     if (n.kind !== 'option' || !isRec(n.interventions)) continue;

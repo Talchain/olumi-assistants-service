@@ -65,7 +65,7 @@ function pricing(identities: Identity[] | undefined): Record<string, unknown> {
   const link = (from: string, to: string, direction: Link['direction']): Link => ({ from, to, direction, provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
   return {
     goal: {
-      metric: 'MRR', operator: '>=', target_stated: true, value: 20000, unit: 'GBP', horizon_months: 12, provenance: 'explicit',
+      metric: 'MRR', operator: '>=', target_stated: true, frame: 'level', value: 20000, unit: 'GBP', horizon_months: 12, provenance: 'explicit',
       baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null,
     },
     constraints: [{ metric: 'Monthly churn', operator: '<=', value: 10, unit: '%', provenance: 'explicit', frame: 'level' }],
@@ -115,7 +115,7 @@ function sameSign(): Record<string, unknown> {
   const link = (from: string, to: string, direction: Link['direction']): Link => ({ from, to, direction, provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
   return {
     goal: {
-      metric: 'MRR', operator: '>=', target_stated: true, value: 20000, unit: 'GBP', horizon_months: 12, provenance: 'explicit',
+      metric: 'MRR', operator: '>=', target_stated: true, frame: 'level', value: 20000, unit: 'GBP', horizon_months: 12, provenance: 'explicit',
       baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null,
     },
     constraints: [],
@@ -180,7 +180,7 @@ function small(s: {
 }): Record<string, unknown> {
   return {
     goal: {
-      metric: 'MRR', operator: '>=', target_stated: true, value: 20000, unit: 'GBP', horizon_months: 12, provenance: 'explicit',
+      metric: 'MRR', operator: '>=', target_stated: true, frame: 'level', value: 20000, unit: 'GBP', horizon_months: 12, provenance: 'explicit',
       baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null,
     },
     constraints: [],
@@ -736,7 +736,7 @@ function served({ without }: { without?: [string, string] } = {}): Record<string
     ({ label, role, baseline_known: known, baseline_value, unit, provenance, plausible_max });
   return {
     goal: {
-      metric: 'MRR', operator: '>=', target_stated: true, value: 20000, unit: 'GBP/month', horizon_months: 12, provenance: 'explicit',
+      metric: 'MRR', operator: '>=', target_stated: true, frame: 'level', value: 20000, unit: 'GBP/month', horizon_months: 12, provenance: 'explicit',
       baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null,
     },
     constraints: [{ metric: 'Monthly churn', operator: '<=', value: 10, unit: '%', provenance: 'explicit', frame: 'level' }],

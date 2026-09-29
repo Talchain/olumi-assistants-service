@@ -99,6 +99,20 @@ export function formatFactorValueUnchanged(input: {
   return `${input.label} is already set to ${value}.`;
 }
 
+/**
+ * Honest receipt for an OWNER-ONLY write: the number is unchanged, but it is now the user's figure (schemas 0.62.0:
+ * whose a value is enters the analysis revision, so this IS a write and the last Run goes stale — the caller appends
+ * the staleness sentence as for any applied edit). No commit verb that implies a new number ("Updated X from 3% to
+ * 3%" would be self-refuting); the value is still named.
+ */
+export function formatFactorValueNowYours(input: {
+  readonly label: string;
+  readonly after: { readonly raw_value: number; readonly unit?: string };
+}): string {
+  const value = formatValueWithUnit(input.after.raw_value, input.after.unit);
+  return `${input.label} is now recorded as your figure: ${value}.`;
+}
+
 export interface ConstraintAddedInput {
   readonly targetLabel: string;
   readonly operator: '>=' | '<=';

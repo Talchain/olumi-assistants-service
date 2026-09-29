@@ -13,6 +13,7 @@
  * a month count — and the question then says the model keeps the words but no date.
  * Every row drives the REAL `buildModelFromBrief` (model call faked, nothing live).
  */
+import { asCurrentDraft } from './pre-r1-capture.js';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -31,7 +32,8 @@ import { projectGraphForPersistence } from '../../persisted-graph-projection.js'
 type Rec = Record<string, unknown>;
 const SCENARIO = '72727272-7272-4727-8727-727272727272';
 
-const SERVED = JSON.parse(readFileSync(new URL('./fixtures/served-journey-e-by-q3-20260928.json', import.meta.url), 'utf8')) as {
+// Pre-R1 capture, replayed through today's contract (`asCurrentDraft`: goal `frame: 'level'`; bytes untouched).
+const SERVED = asCurrentDraft(JSON.parse(readFileSync(new URL('./fixtures/served-journey-e-by-q3-20260928.json', import.meta.url), 'utf8'))) as {
   brief: string;
   served: { goal_node: Rec; drafter_q3_question: string };
   candidate: CandidateModel;

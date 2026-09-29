@@ -531,6 +531,19 @@ function operationWritesObservedValue(op: PatchOperation | undefined): boolean {
 export function stampUserEditProvenance(
   operations: readonly PatchOperation[],
   valueWriteOperations: readonly PatchOperation[] = operations,
+  /**
+   * ⭐ R11 FOR NODES (Shared Data row 1, #72 5881225605; AIQ 5881277231, the edge writer's `reviewOnly` precedent):
+   * when given, a value write that leaves the STORED value unchanged is review, not authorship — no user stamp, and
+   * the act is recorded as `reviewed_by_user`. Since schemas 0.62.0 the analysis hash reads whose a value is, so the
+   * re-stamp would make Olumi's figure the user's and stale the Run while the reply says it was already that value.
+   * Omitted by the approval path (`gm-held-execute`): an approved proposal is the user's act (AIQ 5881494849).
+   */
+  storedGraph?: { readonly nodes?: readonly unknown[] },
+  /**
+   * AIQ #72 5882852814: a restatement is still AUTHORSHIP when the user's own words this turn state that figure for
+   * that node (`userTypedStoredFigure`, passed in by the chat caller so this module does not import the Agent lane).
+   */
+  userTyped?: (nodeId: string, observed: Record<string, unknown>) => boolean,
 ): PatchOperation[] {
   // A later observed-state leaf on the same target replaces the whole object
   // in the local applier. Once this batch has explicitly authored a value, its
@@ -549,6 +562,15 @@ export function stampUserEditProvenance(
     const writesValue = operationWritesObservedValue(valueWriteOperations[index]);
     if (!writesValue && !userValueTargets.has(op.path)) return op;
     if (!Object.prototype.hasOwnProperty.call(observed, 'value')) return op;
+    if (storedGraph !== undefined && !userValueTargets.has(op.path) && restatesStoredValue(observed, storedGraph, op.path)
+      && userTyped?.(op.path, observed) !== true) {
+      // The user's own figure re-sent unchanged is a pure no-op; a review is recorded only on someone else's figure.
+      if (observed.source === USER_EDIT_SOURCE) return op;
+      return {
+        ...op,
+        value: { ...value, [OBSERVED_ROOT]: { ...observed, reviewed_by_user: { intent: 'confirm', at: new Date().toISOString() } } },
+      };
+    }
     const stampedObserved: Record<string, unknown> = {
       ...observed,
       source: USER_EDIT_SOURCE,
@@ -577,6 +599,22 @@ export function stampUserEditProvenance(
       },
     };
   });
+}
+
+/** The op writes the value (and raw_value, when stored) the node already holds — near-exact, float noise only. */
+function restatesStoredValue(
+  observed: Record<string, unknown>,
+  storedGraph: { readonly nodes?: readonly unknown[] },
+  nodeId: string,
+): boolean {
+  const node = (storedGraph.nodes ?? []).find((n) => asRecord(n)?.id === nodeId);
+  const stored = asRecord(asRecord(node)?.[OBSERVED_ROOT]);
+  if (stored === null) return false;
+  const same = (a: unknown, b: unknown): boolean =>
+    typeof a === 'number' && typeof b === 'number' && Number.isFinite(a) && Number.isFinite(b)
+    && Math.abs(a - b) <= 1e-12 * Math.max(1, Math.abs(a), Math.abs(b));
+  if (!same(observed.value, stored.value)) return false;
+  return typeof stored.raw_value !== 'number' || same(observed.raw_value, stored.raw_value);
 }
 
 // ---------------------------------------------------------------------------

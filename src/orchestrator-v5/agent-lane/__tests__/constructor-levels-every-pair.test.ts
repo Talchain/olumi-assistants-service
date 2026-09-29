@@ -44,7 +44,7 @@ const factor = (label: string, baseline_value: number | null, plausible_max: num
 function c22() {
   return {
     // The goal's current level (#1840) is REQUIRED by the strict schema; c22 stated none.
-    goal: { metric: 'Delivery velocity', operator: '>=', target_stated: false, value: null, unit: 'points per sprint', horizon_months: null, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null },
+    goal: { metric: 'Delivery velocity', operator: '>=', target_stated: false, frame: 'level', value: null, unit: 'points per sprint', horizon_months: null, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null },
     constraints: [],
     options: [
       { label: 'Hire Two Developers', provenance: 'explicit', is_status_quo: null, changes: ['Engineering delivery capacity', 'Hiring cost'], interventions: [] },

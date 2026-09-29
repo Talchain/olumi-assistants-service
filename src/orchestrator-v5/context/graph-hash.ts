@@ -19,6 +19,8 @@ import { createHash } from 'node:crypto';
 
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
+import { CANONICAL_GRAPH_HASH_NESTED_PROJECTION as VOCABULARY } from '@talchain/schemas/boundary';
+import { resolveGoalDirection, resolveGoalThresholdStrict } from '../goal-target/goal-direction.js';
 
 /** Length of the returned hex prefix. 16 gives collision odds ~1 in 2^64. */
 const HASH_HEX_LENGTH = 16;
@@ -76,19 +78,21 @@ export function computeDeterministicGraphHash(
  *
  *   nodes: sorted by id, each → {
  *     id, kind, category, factor_type, is_baseline,
- *     observed_state: { value, baseline, cap },
+ *     observed_state: { value, baseline, cap, source, unit, raw_value, std },
  *     goal_threshold, goal_threshold_raw, goal_threshold_cap,
  *     intercept,
  *     prior: { distribution, range_min, range_max },
  *     encoding_map,
  *     nonlinear_identity (C46 carrier, as stored),
+ *     scale_frame, goal_threshold_frame, goal_direction, quantity_frame, analysis_participation,
  *     interventions: per-factor { value, value_type, encoding_map,
  *                                  target_match: { node_id } }
  *   }
  *   edges: sorted by (from, to), each → {
  *     from, to, edge_type,
  *     strength: { mean, std },
- *     exists_probability, effect_direction
+ *     exists_probability, effect_direction,
+ *     provenance: { source, magnitude, natural_effect: { amount_unit } }
  *   }
  *   options: sorted by id, each → {
  *     id, status, is_baseline,
@@ -97,10 +101,12 @@ export function computeDeterministicGraphHash(
  *   }
  *   goal_node_id
  *   goal_constraints: passed through stableStringify
+ *   run_semantics: { goal_direction, goal_direction_provenance, goal_threshold_strict } — DERIVED
+ *                  (`resolveGoalDirection`, `resolveGoalThresholdStrict`): the direction and strictness the run sends
  *
  * Excluded (cosmetic / provenance / display):
  *   labels, descriptions, display_value, provenance, provenance_display,
- *   origin, observed_state.{unit, source, raw_value, extractionType},
+ *   origin, observed_state.{extractionType, reviewed_by_user, elicited_from},
  *   intervention.{unit, source, reasoning, value_confidence, display_value},
  *   target_match.{match_type, confidence}, edge.validation, edge.defaulted,
  *   option.{description, unresolved_targets, user_questions, brief_quote}.
@@ -160,8 +166,23 @@ export function computeAnalysisAffectingGraphHashSha256(
       : [],
     goal_node_id: typeof goalNodeId === 'string' ? goalNodeId : null,
     goal_constraints: Array.isArray(goalConstraints) ? goalConstraints : [],
+    // ⭐ THE DERIVED RUN SEMANTICS (AIQ #72 5881600412, R3 5881451910): the direction the run SENDS is derived — the
+    // user's held comparator for a proven ceiling, else the goal LABEL's classifier. `label` stays out of the stored
+    // vocabulary, so a growth→reduce rename would flip the objective under an unchanged hash; hashing the derived
+    // answer (not the label) moves the hash exactly when the sent direction moves, and a cosmetic rename does not.
+    run_semantics: runSemantics(graph, goalNodeId),
   });
   return createHash('sha256').update(canonical).digest('hex');
+}
+
+function runSemantics(graph: unknown, goalNodeId: unknown): Record<string, unknown> {
+  const direction = typeof goalNodeId === 'string' ? resolveGoalDirection(graph, goalNodeId) : undefined;
+  return {
+    goal_direction: direction?.direction ?? null,
+    goal_direction_provenance: direction?.provenance ?? null,
+    // R3 5881451910 / AIQ 5881600412: whether the run counts reaching the target itself as NOT met (ISL #209, CEE #2260).
+    goal_threshold_strict: typeof goalNodeId === 'string' ? resolveGoalThresholdStrict(graph, goalNodeId) : false,
+  };
 }
 
 function pickDefined<T extends Record<string, unknown>>(
@@ -178,7 +199,12 @@ function pickDefined<T extends Record<string, unknown>>(
 
 function projectObservedState(raw: unknown): Record<string, unknown> | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
-  return pickDefined(raw as Record<string, unknown>, ['value', 'baseline', 'cap']);
+  // ⭐ THE PUBLISHED VOCABULARY, IMPORTED — never re-spelled here (schemas 0.62.0, projection version 3; Shared Data
+  // row 1, #72 5881225605). `source` (whose a value is: ISL's base owner, CEE's per-limit verdict), `unit` / `raw_value`
+  // (the PLoT wire: `level-limit-baseline.ts`) and `std` (a stated spread) all decide the run. Live on served f79119b the
+  // same 3.2% moving from Olumi's estimate to the user's left the old hand-kept list's hash unchanged, so a Run whose
+  // verdict was `estimate_only` stayed CURRENT while a rerun gave `scored`.
+  return pickDefined(raw as Record<string, unknown>, VOCABULARY.node.observed_state_fields);
 }
 
 function projectPrior(raw: unknown): Record<string, unknown> | undefined {
@@ -277,21 +303,11 @@ function projectNode(raw: unknown): NodeProjection {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const out: NodeProjection = { id: typeof r.id === 'string' ? r.id : '' };
 
-  for (const key of [
-    'kind',
-    'category',
-    'factor_type',
-    'is_baseline',
-    'goal_threshold',
-    'goal_threshold_raw',
-    'goal_threshold_cap',
-    'intercept',
-    'encoding_map',
-    // C46 (#1972): the declaration the leader withhold is judged on. In the identity so `fresh` means the run's own
-    // carrier; absent on every graph before #1972, so no stored graph changes hash.
-    'nonlinear_identity',
-  ] as const) {
-    if (r[key] !== undefined) out[key] = r[key];
+  // The published node vocabulary (schemas 0.62.0): the 0.61.0 frame / direction / quantity fields, `scale_frame`
+  // (read with `unit` / `raw_value` by `percentLimitFrameProvable`), the C46 `nonlinear_identity` carrier and
+  // `analysis_participation` (`retained_excluded` removes the node from the run). `id` is set above.
+  for (const key of VOCABULARY.node.fields) {
+    if (key !== 'id' && r[key] !== undefined) out[key] = r[key];
   }
 
   const observed = projectObservedState(r.observed_state);
@@ -335,6 +351,18 @@ function projectEdge(raw: unknown): EdgeProjection {
     if (s.mean !== undefined) strength.mean = s.mean;
     if (s.std !== undefined) strength.std = s.std;
     if (Object.keys(strength).length > 0) out.strength = strength;
+  }
+
+  // schemas 0.62.0 (AIQ 5881815357): who sized the link and the unit of its natural size decide withhold vs score in
+  // the placeholder-parts predicate (DL 5881593118); `source: 'user_specified'` wins over `magnitude` at read time.
+  if (r.provenance && typeof r.provenance === 'object') {
+    const p = r.provenance as Record<string, unknown>;
+    const provenance: Record<string, unknown> = pickDefined(p, VOCABULARY.edge.provenance_fields);
+    if (p.natural_effect && typeof p.natural_effect === 'object') {
+      const ne = pickDefined((p.natural_effect as Record<string, unknown>), VOCABULARY.edge.provenance_natural_effect_fields);
+      if (Object.keys(ne).length > 0) provenance.natural_effect = ne;
+    }
+    if (Object.keys(provenance).length > 0) out.provenance = provenance;
   }
 
   return out;

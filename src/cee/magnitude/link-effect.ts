@@ -332,7 +332,7 @@ function statementWords(
 const round6 = (x: number): number => Number(x.toPrecision(6));
 
 /** The unit words the natural size is said in: points for a percentage level, "switch" for a yes/no. */
-const targetUnitWords = (t: MagnitudeNode, frame: number | undefined): string =>
+export const targetUnitWords = (t: MagnitudeNode, frame: number | undefined): string =>
   isPercentLevel(t, frame) ? 'percentage points' : (unitOf(t) ?? '');
 
 /**
@@ -342,7 +342,7 @@ const targetUnitWords = (t: MagnitudeNode, frame: number | undefined): string =>
 export function naturalAmountUnitOf(target: MagnitudeNode): string {
   return targetUnitWords(target, resolveMagnitudeFrame(target));
 }
-const sourceUnitWords = (s: MagnitudeNode, frame: number | undefined): string =>
+export const sourceUnitWords = (s: MagnitudeNode, frame: number | undefined): string =>
   isSwitch(s, frame) ? 'switch' : (unitOf(s) ?? '');
 
 /**

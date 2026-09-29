@@ -296,7 +296,10 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     expect(out.ok, JSON.stringify(out)).toBe(false);
     expect(out.mutated).toBe(false);
-    expect(String(out.detail)).toContain('"AI assistant use" \u2192 "Delegation quality" became the user\u2019s own strength');
+    // Since schemas 0.62.0 (projection v3) who sized a link (`provenance.source`) is an analysis-hash input, so this
+    // canvas confirm MOVES THE BASE and the approval is refused whole at the base check — as a moved strength or a new
+    // definition is (rows below) — before the per-link "became the user's own strength" check is reached. The
+    // invariants are the point: nothing is written and the model is byte-identical.
     expect(rows.size).toBe(0);
     expect(JSON.stringify(persisted)).toBe(before);
   });

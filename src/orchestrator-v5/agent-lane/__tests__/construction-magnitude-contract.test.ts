@@ -43,7 +43,7 @@ const BRIEF =
 function t3(aiToChurn: Size, aiToChurnProvenance: Prov = 'inferred') {
   return {
     goal: {
-      metric: 'MRR', operator: '>=', target_stated: true, value: 20000, unit: 'GBP/month', horizon_months: 12, provenance: 'explicit',
+      metric: 'MRR', operator: '>=', target_stated: true, frame: 'level', value: 20000, unit: 'GBP/month', horizon_months: 12, provenance: 'explicit',
       baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null,
     },
     constraints: [{ metric: 'Monthly churn', operator: '<', value: 10, unit: '%', provenance: 'explicit', frame: 'level' }],
@@ -173,7 +173,7 @@ describe('R1–R4: Paul\'s T3 AI -> churn link is sized on churn\'s own frame', 
 function saas(priceToChurn: Size = { amount: 0.5, per: 10, by: 'ai_proposed' }) {
   return {
     goal: {
-      metric: 'MRR', operator: '>=', target_stated: true, value: 20000, unit: 'GBP/month', horizon_months: null, provenance: 'explicit',
+      metric: 'MRR', operator: '>=', target_stated: true, frame: 'level', value: 20000, unit: 'GBP/month', horizon_months: null, provenance: 'explicit',
       baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null,
     },
     constraints: [],
