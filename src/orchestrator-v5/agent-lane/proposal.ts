@@ -74,6 +74,12 @@ export interface ProposalOperation {
      */
     | 'set_goal_target'
     /**
+     * ⭐ THE USER'S STATED EFFECT ON ONE LINK (DL 5882763151; Canonical's `applyLinkEffectEdit`) — `path` is
+     * `from::to`, `value` is `{from, to, effect, quote, edge_token}`: the user's two figures in the ends' units, their
+     * verbatim words, and every byte of the link as prepared. Written only through the level door's `link_effects`.
+     */
+    | 'set_link_effect'
+    /**
      * ⭐ A NEW FIGURE FOR A LIMIT THE MODEL ALREADY HOLDS (SLICE C2) — `path` is the limit's node id, `value` is
      * `{operator, raw_value, unit, constraint_id, before}`. Written only through the product's in-process limit door
      * (`commitLimitEditInProcess` → `add_constraint`), which keeps the row's unit and frame and stamps the figure as the
