@@ -49,6 +49,27 @@ export function figureTheUserWrote(value: number, unit: unknown, userText: strin
 }
 
 /**
+ * How many times `value`, in `unit`, is WRITTEN in `userText`: one per written amount (`findStatedAmounts` reads each
+ * writing once), under the unit rules of `figureTheUserWrote` (which is this count ≥ 1).
+ */
+export function timesTheUserWrote(value: number, unit: unknown, userText: string | null | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+  const family = unitPhraseFamily(unit);
+  return findStatedAmounts(userText).filter((a) => amountIs(a, value, unit, family, userText ?? undefined)).length;
+}
+
+/**
+ * ⛔ A FIGURE WRITTEN ONLY AS THE GOAL'S TARGET IS NOT ALSO ITS CURRENT LEVEL (R3 #72 5885498117; DL 5885526452 (3);
+ * AIQ 5885651301). A current level EQUAL to the goal's own target is the user's only when the brief writes that figure
+ * AGAIN, beyond the target's own writing (≥ 2): "£85k MRR … above £85k" is; "aiming for £20,000" is not. Any other
+ * level is untouched. Interim rule: the typed quote (today / target / change) is the close (AIQ).
+ */
+export function levelWrittenApartFromTarget(value: number, unit: unknown, target: unknown, userText: string | null | undefined): boolean {
+  if (typeof target !== 'number' || !Number.isFinite(target) || !same(value, target)) return true;
+  return timesTheUserWrote(value, unit, userText) >= 2;
+}
+
+/**
  * Whether ONE written amount is `value` in `unit`: the unit rules `figureTheUserWrote` and `figureTheUserWroteFor` share.
  * A money unit's own letter scales the figure (SCALE, above). Under a scaled money unit a PLAIN amount grounds it only
  * when written with its own letter ("75k" is 75 £k): a bare "300" is £300 or 300 £k, so neither (DL #72 5862394804:
