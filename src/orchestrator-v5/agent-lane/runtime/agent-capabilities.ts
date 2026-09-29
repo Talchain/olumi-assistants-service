@@ -190,7 +190,7 @@ function scopeIn(g: { readonly nodes: readonly { readonly label?: unknown; reado
  * still marks a figure as not the target's. STRICT (`EntityScope.strict`): journey E's typed "£120,000 per senior engineer
  * and £65,000 per junior engineer" binds each figure to its owner, and a figure nobody's words own, among two or more, is refused.
  */
-function newFactorScopeIn(
+export function newFactorScopeIn(
   g: { readonly raw?: unknown; readonly nodes: readonly { readonly id?: unknown; readonly label?: unknown; readonly kind?: unknown; readonly observed_state?: unknown }[] },
   target: string,
   figureUnit: string,
@@ -2780,8 +2780,10 @@ export function createAgentCapabilities(
           id: node.id, label: node.label,
           value: Number(a.value), unit: String(a?.unit ?? ''), basis: String(a?.basis ?? ''),
           ...(typeof existing === 'number' ? { replaces: existing } : {}),
-          // ⛔ A revision is the user's only when they WROTE the figure (`stated-by-user.ts`); else it is Olumi's.
-          userWrote: figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text, scopeIn(g, node.label)),
+          // ⛔ A revision is the user's only when they WROTE the figure (`stated-by-user.ts`); else it is Olumi's. Its owner is
+          // read the add-factor door's way (`newFactorScopeIn`: rivals + strict): under the plain reading, served journey E's
+          // "Senior engineers cost £120k a year each and juniors £65k a year each" was Olumi's for both salaries (5d73351, 2/2).
+          userWrote: figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text, newFactorScopeIn(g, node.label, String(a?.unit ?? nodeUnit ?? ''), [])),
         });
       }
 
