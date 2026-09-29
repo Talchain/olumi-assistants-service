@@ -14,6 +14,8 @@ Control loses 400 tickets/week. A loses the £45k/month cloud baseline. Control 
 
 Fresh B preserves all Paul figures and the scope question with exact quotes and no added content. Cloud loses the relative reduction and downtime limit; hiring loses both counts and the salary limit; support loses “about 400” and the no-hiring constraint. Typed extraction exists, but narrow numeric and role handling drops useful meaning. A later code-only B replay is separate evidence, not another live run.
 
+The code-only B replay at `540cefc9fc3c677b8968a7cd2d9769862534292d` independently reproduces **13/16** (Paul6, cloud2, hiring1, support4), with 13 exact source bindings, 5/5 supplied-option ownership and no unstated canonical content. Each extraction was checked for JSON equality against its original live provider output before compilation; no provider was called. Remaining failures are cloud −20%, hiring counts2/4 and Q3 deadline, and the support no-hiring constraint. This proves a compiler improvement on saved inputs, without proving another route registration or live model output.
+
 Only Paul has an explicit lead quality judgement for “Does this model make the decision easier to understand and improve?”: A **1/5**, repaired B **3/5**. These are lead ratings, not deterministic scores or user testing. Other quality ratings remain unscored.
 
 ## Matched identity and settings
