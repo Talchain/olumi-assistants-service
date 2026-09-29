@@ -33,11 +33,12 @@
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_CONTINUATION, parseCardinalAmount } from '../../utils/cardinal-words.js';
-import { TODAY_LEVEL, TODAY_UNIT } from './admit-model.js';
+import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT, type CandidateModel } from './admit-model.js';
 import { attestHorizon, type HorizonAttestation } from './horizon-attestation.js';
 import { unitPhraseFamily } from './unit-conflict.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
 import { countedNoun } from './counted-nouns.js';
+import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 
 const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
 
@@ -215,6 +216,47 @@ export function withdrawUnstatedBaselineStamps<N extends { readonly kind?: unkno
     // level-limit carry (`levelHasAnAuthor`) all read. Source-less, it was nobody's (#2073 review F1, AIQ 5851906910).
     return { ...n, observed_state: { ...os, source: 'cee_inference' } };
   });
+}
+
+/**
+ * ⛔ A LEVEL THE BRIEF STATES FOR A FACTOR IS THE USER'S, WHATEVER THE DRAFTER TAGGED IT (R3 #72 5896630173 (2); DL
+ * 5896669522). Served `03b720e0` on `a20cfd6`: "We have 1,500 paying subscribers" was drafted as an ESTIMATE of "Pro plan
+ * paying subscribers" (`baseline_known: false`, 1,500), so it was saved as Olumi's (`cee_inference`). The MRR goal's
+ * product then had no two user-stated parts, so no card was offered and nothing was withheld, and the Run showed 6 goal
+ * chances on a product-shaped goal.
+ *
+ * The mirror of `withdrawUnstatedBaselineStamps`, applied to the CANDIDATE before admission so every later reader (the
+ * product mint, the card, the disclosure) sees one author. A factor's level is credited to the user (`baseline_known:
+ * true`, `explicit`) only when the brief writes that figure FOR THAT FACTOR (`figureTheUserWroteFor`, the per-entity door
+ * #2284/#2275 and the Olumi option mark trust). A figure the brief gives as a limit, the goal's target or a proposed
+ * (non-status-quo) option's level is never today's level of anything, so it is never credited; the status quo's level
+ * is today's. Anything unclear stays Olumi's.
+ */
+export function creditStatedFactorLevels(candidate: CandidateModel, brief: string): CandidateModel {
+  const labels = [
+    candidate.goal?.metric, ...(candidate.factors ?? []).map((f) => f.label),
+    ...(candidate.outcomes ?? []).map((o) => o.label), ...(candidate.risks ?? []).map((r) => r.label),
+  ].filter((l): l is string => typeof l === 'string' && l.trim() !== '');
+  const notToday = [
+    ...(candidate.constraints ?? []).map((c) => c.value),
+    candidate.goal?.value,
+    // ⛔ PR Review CR on #2311 @ ff5e7480: a STATUS QUO sets today's level by definition ("keep it at £49" beside "from
+    // £49"), so only another option's level is a proposed one, never today's. Recognised as the Olumi mark does.
+    ...(candidate.options ?? [])
+      .filter((o) => o.is_status_quo !== true && !labelMatchesBaseline(o.label ?? ''))
+      .flatMap((o) => (o.interventions ?? []).map((i) => i.value)),
+  ].filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+  let credited = false;
+  const factors = (candidate.factors ?? []).map((f) => {
+    if (f.baseline_known === true && f.provenance === 'explicit') return f;
+    const v = f.baseline_value;
+    if (typeof v !== 'number' || !Number.isFinite(v) || notToday.some((w) => same(w, v))) return f;
+    const others = labels.filter((l) => canonicalLabel(l) !== canonicalLabel(f.label));
+    if (!figureTheUserWroteFor(v, f.unit, brief, { target: [f.label], others })) return f;
+    credited = true;
+    return { ...f, baseline_known: true, provenance: 'explicit' };
+  });
+  return credited ? { ...candidate, factors } : candidate;
 }
 
 /** What `holdStatedGoalAttributes` held on the goal node; each `false` is unattested and left absent. */

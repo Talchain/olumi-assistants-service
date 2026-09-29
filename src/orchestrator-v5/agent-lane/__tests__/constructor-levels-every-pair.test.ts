@@ -165,9 +165,11 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     for (const [option, factors] of Object.entries(LEVERS)) {
       for (const f of factors) expect(node(graph, option).interventions?.[f]?.source, `${option}.${f}`).toBe('cee_hypothesis');
     }
-    for (const f of ['engineering_delivery_capacity', 'technical_leadership_capacity']) {
-      expect(node(graph, f).observed_state).toMatchObject({ source: 'cee_inference' });
-    }
+    // An ESTIMATE stays Olumi's: 0.5 FTE is written nowhere in the brief.
+    expect(node(graph, 'technical_leadership_capacity').observed_state).toMatchObject({ source: 'cee_inference' });
+    // ⛔ #2311 (R3 5896630173 (2)): "Capacity today is 40 story points" STATES the 40 the drafter tagged an estimate, so it is
+    // the user's (`creditStatedFactorLevels`), never Olumi's guess.
+    expect(node(graph, 'engineering_delivery_capacity').observed_state).toMatchObject({ source: 'brief_extraction', raw_value: 40 });
     expect(JSON.stringify(graph.nodes)).not.toMatch(/user_specified|user_override|user_stated/);
   });
 

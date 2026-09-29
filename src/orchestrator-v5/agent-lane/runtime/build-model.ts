@@ -54,7 +54,7 @@ import { droppedGoalProductLine, unconfirmGoalProducts, withReconcilingProductId
 import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-reading.js';
 import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
-import { figureTheUserWrote, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
+import { creditStatedFactorLevels, figureTheUserWrote, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
@@ -1220,7 +1220,8 @@ export async function buildModelFromBrief(
   // ⛔ AN OPTION AND A QUANTITY NEVER SHARE A NAME (`keepOptionsAndQuantitiesApart`, Canvas #72 5884644099): admission
   // makes same-named entities one node, so the factor an option sets vanished into the option. Renamed before any read.
   const apart = keepOptionsAndQuantitiesApart(candidate);
-  candidate = apart.model;
+  // ⛔ A level the brief states for a factor is the user's, whatever the drafter tagged it (R3 5896630173 (2)).
+  candidate = creditStatedFactorLevels(apart.model, brief);
   let keptApart = apart.renamed;
   let notToldApart = apart.ambiguous;
   const firstCandidate = candidate;
@@ -1354,7 +1355,7 @@ export async function buildModelFromBrief(
       if (retry.text.length > 0) {
         const retryApart = keepOptionsAndQuantitiesApart(JSON.parse(retry.text) as CandidateModel);
         const retryRaw = keepLimitedQuantityAuthor(
-          neverTheLimitAsTodaysLevel(retryApart.model, firstCandidate, preparation.baseline_gaps),
+          neverTheLimitAsTodaysLevel(creditStatedFactorLevels(retryApart.model, brief), firstCandidate, preparation.baseline_gaps),
           firstCandidate, preparation.baseline_gaps,
         );
         const retryPrepared = prepareProvisionalCandidate(retryRaw);
