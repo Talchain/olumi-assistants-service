@@ -61,10 +61,10 @@ function outcomeDraft(over: Record<string, unknown> = {}) {
     },
     constraints: [CHURN_LIMIT],
     options: [
-      { label: 'Keep Pro at £49', provenance: 'explicit', changes: [], interventions: [], is_status_quo: true },
-      { label: 'Raise Pro to £59', provenance: 'explicit', changes: [], is_status_quo: null,
+      { label: 'Keep Pro at £49', provenance: 'explicit', changes: [], interventions: [], is_status_quo: true, brief_words: null },
+      { label: 'Raise Pro to £59', provenance: 'explicit', changes: [], is_status_quo: null, brief_words: null,
         interventions: [{ factor_label: 'Pro plan price', value: 59, value_kind: 'absolute', unit: 'GBP per month', provenance: 'explicit' }] },
-      { label: 'Raise Pro to £54', provenance: 'inferred', changes: [], is_status_quo: null,
+      { label: 'Raise Pro to £54', provenance: 'inferred', changes: [], is_status_quo: null, brief_words: null,
         interventions: [{ factor_label: 'Pro plan price', value: 54, value_kind: 'absolute', unit: 'GBP per month', provenance: 'ai_proposed' }] },
     ],
     factors: [
@@ -100,10 +100,10 @@ function factorDraft() {
     },
     constraints: [CHURN_LIMIT],
     options: [
-      { label: 'Keep Pro at £49', provenance: 'inferred', changes: [], interventions: [], is_status_quo: true },
-      { label: 'Raise Pro to £59', provenance: 'explicit', changes: ['AI feature value'], is_status_quo: null,
+      { label: 'Keep Pro at £49', provenance: 'inferred', changes: [], interventions: [], is_status_quo: true, brief_words: null },
+      { label: 'Raise Pro to £59', provenance: 'explicit', changes: ['AI feature value'], is_status_quo: null, brief_words: null,
         interventions: [{ factor_label: 'Pro plan price', value: 59, value_kind: 'absolute', unit: 'GBP per month', provenance: 'explicit' }] },
-      { label: 'Raise Pro to £54', provenance: 'inferred', changes: ['AI feature value'], is_status_quo: null,
+      { label: 'Raise Pro to £54', provenance: 'inferred', changes: ['AI feature value'], is_status_quo: null, brief_words: null,
         interventions: [{ factor_label: 'Pro plan price', value: 54, value_kind: 'absolute', unit: 'GBP per month', provenance: 'ai_proposed' }] },
     ],
     factors: [

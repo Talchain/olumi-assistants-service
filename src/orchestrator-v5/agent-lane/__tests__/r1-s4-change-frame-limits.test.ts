@@ -29,8 +29,8 @@ function candidate(limit: Record<string, unknown>) {
     goal: { metric: 'Cloud savings', operator: '>', target_stated: false, value: null, unit: null, horizon_months: 6, provenance: 'inferred' },
     constraints: [{ metric: 'Total monthly cloud cost', operator: '<=', provenance: 'explicit', ...limit }],
     options: [
-      { label: 'Reserved instances', provenance: 'explicit', changes: ['Reserved share'], interventions: [], is_status_quo: false },
-      { label: 'Renegotiate contract', provenance: 'explicit', changes: ['Contract discount'], interventions: [], is_status_quo: false },
+      { label: 'Reserved instances', provenance: 'explicit', changes: ['Reserved share'], interventions: [], is_status_quo: false, brief_words: null },
+      { label: 'Renegotiate contract', provenance: 'explicit', changes: ['Contract discount'], interventions: [], is_status_quo: false, brief_words: null },
     ],
     factors: [
       { label: 'Reserved share', role: 'controllable', baseline_known: false, baseline_value: null, unit: null, provenance: 'inferred', plausible_max: 100 },

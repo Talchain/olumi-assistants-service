@@ -32,8 +32,8 @@ function candidate(marginAs: 'outcome' | 'risk', constraintProvenance = 'explici
     goal: { metric: 'Revenue growth', operator: '>', target_stated: false, value: null, unit: '%', horizon_months: null, provenance: 'explicit' },
     constraints: bounds ?? [{ metric: 'Net margin', operator: '>=', value: 15, unit: '%', provenance: constraintProvenance }],
     options: [
-      { label: 'Life sciences specialism', provenance: 'explicit', changes: ['Life sciences focus'], interventions: [], is_status_quo: false },
-      { label: 'Contract rate push', provenance: 'explicit', changes: ['Contract bill rate'], interventions: [], is_status_quo: false },
+      { label: 'Life sciences specialism', provenance: 'explicit', changes: ['Life sciences focus'], interventions: [], is_status_quo: false, brief_words: null },
+      { label: 'Contract rate push', provenance: 'explicit', changes: ['Contract bill rate'], interventions: [], is_status_quo: false, brief_words: null },
     ],
     factors: [factor('Life sciences focus'), factor('Contract bill rate')],
     risks: marginAs === 'risk' ? [{ label: margin, provenance: 'explicit' }] : [],

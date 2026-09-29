@@ -20,7 +20,7 @@ const PAUL = 'Should we raise our Pro plan price from £49 to £59 a month? We h
 const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
 
 const opt = (label: string, provenance: string, price: number | null, sq: boolean | null = null) => ({
-  label, provenance, changes: [], is_status_quo: sq,
+  label, provenance, changes: [], is_status_quo: sq, brief_words: null,
   interventions: price === null ? [] : [{ factor_label: 'Pro plan price', value: price, value_kind: 'absolute', unit: '£/subscriber/month', provenance }],
 });
 const link = (from: string, to: string, direction = 'positive') => ({ from, to, direction, provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
@@ -48,9 +48,11 @@ function run2(): Rec {
   };
 }
 
+/** The live drafts were captured before `brief_words` (#2299); today's drafter always sends it (null when unlisted). */
+const withBriefWords = (c: Rec): Rec => ({ ...c, options: (c.options as Rec[]).map((o) => ('brief_words' in o ? o : { ...o, brief_words: null })) });
 function LIVE_REVERSED(): Rec {
   const live = JSON.parse(readFileSync(new URL('./fixtures/paul-mrr-carrier-plus-invented-20260929.json', import.meta.url), 'utf8')) as { drafts: { candidate: Rec }[] };
-  const c = structuredClone(live.drafts[0]!.candidate);
+  const c = withBriefWords(structuredClone(live.drafts[0]!.candidate));
   c.identities[0].factors = [...c.identities[0].factors].reverse();
   return c;
 }
@@ -167,7 +169,8 @@ describe('what must NOT fold — each returns the very same candidate', () => {
   });
 });
 
-const LIVE = JSON.parse(readFileSync(new URL('./fixtures/paul-mrr-carrier-plus-invented-20260929.json', import.meta.url), 'utf8')) as { brief: string; drafts: { rep: number; candidate: Rec }[] };
+const LIVE_RAW = JSON.parse(readFileSync(new URL('./fixtures/paul-mrr-carrier-plus-invented-20260929.json', import.meta.url), 'utf8')) as { brief: string; drafts: { rep: number; candidate: Rec }[] };
+const LIVE = { ...LIVE_RAW, drafts: LIVE_RAW.drafts.map((d) => ({ ...d, candidate: withBriefWords(d.candidate) })) };
 describe('class 2 (AIQ 5888943993 (1)): REAL live drafts that add Olumi\'s own "Other-plan MRR" beside the carrier', () => {
   it.each(LIVE.drafts.map((d) => [d.rep, d.candidate] as const))('%s — PRECONDITION: strict-valid; the carrier and Olumi\'s other-plan MRR are the goal\'s two parents', (_rep, cand) => {
     expect(strict(cand), JSON.stringify(strict.errors?.slice(0, 2))).toBe(true);

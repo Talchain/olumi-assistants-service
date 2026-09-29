@@ -35,8 +35,8 @@ function candidate(limitMetric: string, extra = 0) {
     options: [
       // Each option LEVELS the factor it acts on, on a factor with a baseline: a `changes`-only pair or an unset
       // acted-on baseline is a repair issue since #1891 and would spend a coverage retry this file does not measure.
-      { label: 'Build in-house', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Engineering spend', value: 60, value_kind: 'absolute', unit: '', provenance: 'ai_proposed' }], is_status_quo: false },
-      { label: 'Buy a platform', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Platform fees', value: 40, value_kind: 'absolute', unit: '', provenance: 'ai_proposed' }], is_status_quo: false },
+      { label: 'Build in-house', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Engineering spend', value: 60, value_kind: 'absolute', unit: '', provenance: 'ai_proposed' }], is_status_quo: false, brief_words: null },
+      { label: 'Buy a platform', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Platform fees', value: 40, value_kind: 'absolute', unit: '', provenance: 'ai_proposed' }], is_status_quo: false, brief_words: null },
     ],
     factors: [{ ...factor('Engineering spend'), baseline_value: 50 }, { ...factor('Platform fees'), baseline_value: 50 }, ...names.map((n) => factor(n, 'ai_proposed'))],
     risks: [],

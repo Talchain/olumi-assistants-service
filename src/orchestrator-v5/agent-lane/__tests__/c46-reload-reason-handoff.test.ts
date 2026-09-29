@@ -101,9 +101,9 @@ const link = (from: string, to: string, direction: 'positive' | 'negative') => (
 const GOAL = { metric: 'MRR', operator: '>=', target_stated: true, value: 20000, unit: 'GBP', horizon_months: 12, provenance: 'explicit',
   baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null };
 const OPTIONS = [
-  { label: 'Keep Pro at £49', provenance: 'explicit', is_status_quo: true, changes: [],
+  { label: 'Keep Pro at £49', provenance: 'explicit', is_status_quo: true, brief_words: null, changes: [],
     interventions: [{ factor_label: 'Pro plan price', value: 49, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] },
-  { label: 'Raise Pro to £59', provenance: 'explicit', is_status_quo: null, changes: [],
+  { label: 'Raise Pro to £59', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: [],
     interventions: [{ factor_label: 'Pro plan price', value: 59, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] },
 ];
 const PRICE = { label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit', plausible_max: 200 };
