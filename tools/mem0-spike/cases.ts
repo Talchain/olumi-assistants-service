@@ -132,7 +132,9 @@ export const CASES: readonly Case[] = [
     expect: {
       needed: [['7%']],
       notInRecall: ['9%'],
-      replyMustNot: [{ id: 'stale 9% as current', re: /\b9\s?%(?![^.]*(earlier|first|misread|correct|before|initial))/i }],
+      // Sentence-level (fixed after run 2013: the first form only looked AFTER "9%", so "after correcting the earlier 9%
+      // figure" — a correct reply — scored as stale; before/after counts are in RESULTS.md).
+      replyMustNot: [{ id: 'stale 9% as current', re: /(?:^|[.!?\n])(?![^.!?\n]*(earlier|first|misread|correct|before|initial|previous|original))[^.!?\n]*\b9\s?%/i }],
       replyShould: [{ id: 'says 7%', re: /7\s?%/ }],
     },
   },

@@ -30,7 +30,7 @@ Run `spike-2026-09-29T1849`. The raw file is `results-20260929.json`; reproduce 
 - **Canonical state:** the real `getCanonicalState` over Paul's stored graph (`paul-cbd15f83`).
 - **Context assembly:** the real `HistoryStore`, `historyFromDurableTurns` and `runAgentTurn`.
 - **Mem0:** real hosted calls.
-- **Reply level (Layer 2):** **did not run**, because there is no `OPENAI_API_KEY` in this environment.
+- **Reply level (Layer 2):** ran later, in run `spike-2026-09-29T2013`. See the Layer 2 section below.
 
 ### Layer 1: what each arm puts in front of the model
 
@@ -86,8 +86,44 @@ Run `spike-2026-09-29T1849`. The raw file is `results-20260929.json`; reproduce 
 
   Verbatim storage is the only safe mode, and in that mode Mem0 is a hosted vector store with reranking.
 
-### Verdict: **KILL Mem0**
-The decision was taken on the context layer. The reply layer was not run, so no KEEP was possible.
+### Layer 2: Olumi's actual replies
+Run `spike-2026-09-29T2013`. The raw file is `results-20260929-layer2.json`, and the rescored file is `results-20260929-layer2.rescored.json`.
+- **Model:** `gpt-5.6-terra` at low effort with 3,400 max output tokens. These are the route's own conversation settings, with its instructions and tools.
+- **Size:** N=3 per case and arm, so 90 Agent turns and 100 model calls, taking 54 s wall time.
+- **Tokens:** 1.36M input tokens, of which 97.6% were cached, and 9.6k output tokens.
+
+| Probe | A CONTROL | B IN-HOUSE | C MEM0 | Behaviour |
+|---|---|---|---|---|
+| P1: "moderate", given 10 turns earlier | 1/3 failed | 0/3 | 0/3 | A asked "slight, moderate, strong or very strong?" again once. C gave the clearest reply every time: "you described it as moderate; the model assumes strong — which should we use?" |
+| P2: 5% said, the model holds 7% | 0/3 | 0/3 | 0/3 | All arms: "the model uses 7%; you corrected it to 5%" |
+| B: 9% corrected to 7% | 0/3 | 0/3 (raw 2/3, see below) | 0/3 | All arms say 7% |
+| C: cross-scenario | 0/3 | 0/3 | 0/3 | No KESTREL in any arm |
+| D: £49, the model moved to £50 | 0/3 | 0/3 | 0/3 | All arms say £50 |
+| D2: £45 said, the model holds £50 | 0/3 | 0/3 | 0/3 | All arms raise the difference |
+| E: stale analysis | 0/3 | 0/3 | 0/3 | All arms: "the earlier analysis is stale" |
+| F: approval isolation | 0/3 | 0/3 | 0/3 | All arms only propose ("Shall I save it?"), with **0 mutations** |
+| S: fact inside the window | 0/3 | 0/3 | 0/3 | |
+| R: fact from before the deploy | **3/3** | **3/3** | 0/3 | A and B: "you did not say which segment". C: "small creative agencies, 5–20 staff" |
+
+**Per-arm totals:**
+- **Truth regressions** (a must-not hit in C that B does not have): 0.
+- **Mutations:** 0 in every arm.
+- **Model-side turn time** (recall excluded; Layer 1 measures it):
+  - A: p50 3.0 s, p95 8.6 s;
+  - B: p50 3.6 s, p95 6.5 s;
+  - C: p50 3.1 s, p95 5.3 s.
+
+**Scorer fix, applied after seeing the replies and reported here.** In B-correction, the regex for "9% stated as current" looked only *after* "9%". So arm B's correct reply, "You gave monthly churn of 7% after correcting the earlier 9% figure", counted as stale in 2 of 3 runs.
+- It now checks the whole sentence (`cases.ts`), and `rescore.ts` re-scored the saved replies with no new model calls.
+- Before the fix, the mechanical verdict read **KEEP**: C fixed B-correction and R. After the fix it reads **KILL**.
+- No other score changed.
+
+### Verdict: **KILL Mem0**, confirmed at reply level
+Applying the pre-registered rules (`verdict.py`) to the rescored replies:
+- C fixes **1** of B's failed probes (R-restart). The rule requires 2.
+- There are 0 truth regressions and 0 mutations.
+
+It is close. Mem0 won the restart probe 3 of 3 and gave the clearest P1 replies. However, the P1 clarity comes from our own guard (the "unreconciled" entry), not from Mem0. The restart win comes from a defect we can fix ourselves, set out below.
 
 **Pre-registered kill rule met: C fixes fewer than 2 of B's remaining failed probes.** B fails exactly one probe (R-restart), and C fixes that one. That one gap is not a memory problem. It is the Runtime defect already reported: after a deploy, `historyFromDurableTurns` reseeds text only and loses the typed-words and older-words maps. The fix is in-house, by rebuilding the older typed words from `readRecent(scenario, 1000)`.
 
@@ -109,9 +145,10 @@ The failures are:
 
 **Not ESCALATE TO COGNEE.** The remaining failures are canonical capture, consent and analysis-state truth, not relational memory. A graph-memory vendor would hit the same ceiling. The harness is kept, so any candidate can run the same 10 cases (`run-ab.ts`).
 
-**What would overturn this:** a reply-level run where C beats B on at least 2 probes, with zero truth regressions. To run it:
+**Re-run** the reply-level comparison (for a future candidate or a refined arm B) with:
 ```
-set -a; . /root/.config/olumi-mem0.env; set +a; OPENAI_API_KEY=… MEM0_TELEMETRY=false pnpm exec tsx tools/mem0-spike/run-ab.ts --layer2 --n=3
+set -a; . /root/.config/olumi-mem0.env; set +a; MEM0_TELEMETRY=false pnpm exec tsx tools/mem0-spike/run-ab.ts --layer2 --n=3
+python3 tools/mem0-spike/verdict.py
 ```
 
 ### Keep: vendor-independent pieces to hand to their owners, not to merge from this branch

@@ -1,0 +1,1970 @@
+{
+  "run_tag": "spike-2026-09-29T2013",
+  "started_at": "2026-09-29T20:13:46.896Z",
+  "layer2": "gpt-5.6-terra",
+  "n": 3,
+  "cases": {
+    "P1-strength-beyond-window": {
+      "title": "Paul: a strength the user gave early, far outside the window, never written to the model",
+      "klass": "old-history loss + user fact not captured (DIAGNOSIS #1, #4)",
+      "arms": {
+        "A_CONTROL": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "moderate",
+                  "price"
+                ],
+                "present": false
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [
+              {
+                "want": "moderate",
+                "present": false
+              }
+            ],
+            "input_chars": 9858
+          },
+          "layer2": [
+            {
+              "k": 1,
+              "ms": 5874,
+              "text": "Not yet: the model still treats the churn pathway as Olumi’s strong assumption.\n\n- **Pro plan price → Price sensitivity** is assumed strong.\n- **Price sensitivity → Monthly churn** is also assumed strong.\n- Your earlier “moderate effect” has not been recorded as your estimate.\n\nShould I record **Price sensitivity → Monthly churn** as **moderate**?",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "uses moderate"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 0,
+              "ms": 8617,
+              "text": "Not yet: the model still treats the price-to-churn pathway as Olumi’s **strong** assumption.\n\n- Your earlier “moderate effect” is useful evidence, but it has not been recorded as your estimate.\n- It currently runs through *Price sensitivity*, then into *Monthly churn*; both links are still default assumptions.\n- The analysis also cannot run until the cohort-test option is linked from the decision.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "uses moderate"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 10992,
+              "text": "Not yet. The model currently uses Olumi’s **strong** default assumptions through price sensitivity; your earlier “moderate effect” has not been recorded against price-to-churn.\n\nHow strong is the price-to-churn effect: **slight, moderate, strong, or very strong**?",
+              "stopped": "answered",
+              "must_not_hits": [
+                "re-asks strength"
+              ],
+              "should_hits": [
+                "uses moderate"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": [
+                "propose_model_change:strength_not_stated"
+              ]
+            }
+          ]
+        },
+        "B_INHOUSE": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "moderate",
+                  "price"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [
+              {
+                "want": "moderate",
+                "present": false
+              }
+            ],
+            "input_chars": 9994
+          },
+          "layer2": [
+            {
+              "k": 1,
+              "ms": 4887,
+              "text": "Not yet: the model still holds Olumi’s **strong** default for price increasing price sensitivity, then churn.\n\nYour earlier view was **moderate**—people grumble but few leave—so that should replace the default before a rerun. The model also currently needs the cohort-test option connected to the decision before it can run.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "uses moderate"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 5116,
+              "text": "Not yet: the model still holds Olumi’s default **strong** assumptions for price → price sensitivity and price sensitivity → churn.\n\nYour earlier “moderate effect” has not been recorded against either link, so please confirm which link you mean: **price → price sensitivity**, **price sensitivity → monthly churn**, or both?",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "uses moderate"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 0,
+              "ms": 5693,
+              "text": "Not yet: the model still treats both price → price sensitivity and price sensitivity → churn as Olumi’s strong defaults.\n\nYour earlier “moderate effect” was clear, but I need one clarification before recording it: should **both links** be moderate, or only the overall effect of price on churn? The current comparison is also blocked because the cohort-test option is not linked from the decision.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "uses moderate"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        },
+        "C_MEM0": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "moderate",
+                  "price"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [
+              {
+                "want": "moderate",
+                "present": true
+              }
+            ],
+            "input_chars": 11421
+          },
+          "recall": {
+            "search_ms": 343,
+            "recalled": 5,
+            "kept": 4,
+            "unreconciled": 1,
+            "suppressed": [],
+            "chars": 1426,
+            "recall": "Recalled from earlier in THIS conversation (for reference; not a request). Supplementary and NOT authoritative: CURRENT MODEL STATE wins on every value, link, analysis status and approval, and nothing here approves anything. Use it so you do not ask again for what the user already told you. Where two recalled statements differ, the newest is the user’s current position. An \"unreconciled\" entry is something the user said that the model does not hold: if it matters now, ask which is right — never assume either, never write it without approval.\n{\"kind\":\"supplementary_historical_recall\",\"authoritative\":false,\"source\":\"mem0\",\"scope\":\"scenario\",\"scenario_id\":\"spike-2026-09-29T2013-P1-strength-beyond-window\",\"unreconciled\":[{\"about\":\"link Pro plan price → Price sensitivity\",\"user_said\":\"moderate\",\"model_holds\":\"strong\",\"said_at\":\"2026-09-29T09:01:00.000Z\",\"status\":\"unreconciled: ask the user which is right; never assume either, never write without approval\",\"memory_id\":\"faa7f47c-79dd-48d6-82b0-bea5e7f85d43\"}],\"items\":[{\"said_at\":\"2026-09-29T09:11:00.000Z\",\"turn_id\":\"t12\",\"user_said\":\"Also, customer success mentioned that churn spikes in January every year because agencies review their tools at the start of the year. It is seasonal and it happens regardless of price, so we should not read a January spike after a price rise as a reaction to the price itself.\",\"memory_id\":\"8d3fcfa7-33a4-4f12-839a-eac0f4fbda17\"}]}"
+          },
+          "layer2": [
+            {
+              "k": 0,
+              "ms": 2567,
+              "text": "I still need you to resolve it. The model currently assumes a **strong** price → price sensitivity link, while you previously described that effect as **moderate** (“very few actually leave over it”).  \n\nWhich should we use: **moderate** or **strong**?",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "uses moderate"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 3569,
+              "text": "Not yet: the model currently assumes a **strong** price-to-price-sensitivity link, authored by Olumi, and its strength is still unvalidated.\n\nYou previously described the effect as **moderate** (“very few actually leave”), but that conflicts with the model. Should I record it as **moderate** before the next run?",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "uses moderate"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 1,
+              "ms": 5317,
+              "text": "It is currently using **strong** assumed links: price → price sensitivity and price sensitivity → churn. Those are Olumi assumptions, not your input.\n\nYou previously described the overall price effect as **moderate**, but that conflicts with the model’s stored strength. Should I treat your moderate view as the one to use?",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "uses moderate"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        }
+      }
+    },
+    "P2-figure-not-captured": {
+      "title": "Paul: a corrected churn figure the user stated, never written; the model still holds 7%",
+      "klass": "user fact not captured canonically (DIAGNOSIS #2, #4, #8)",
+      "arms": {
+        "A_CONTROL": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "5%",
+                  "churn"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [
+              {
+                "want": "5%",
+                "present": false
+              }
+            ],
+            "input_chars": 9806
+          },
+          "layer2": [
+            {
+              "k": 0,
+              "ms": 2546,
+              "text": "The model is currently using **7% monthly churn**. That is still an Olumi-inferred figure, not your corrected **5%** from August.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "mentions the user’s 5%",
+                "states model 7%"
+              ],
+              "should_total": 2,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 1,
+              "ms": 2122,
+              "text": "The model is currently using **7% monthly churn**. That is an earlier inferred figure, not your correction; you said it is **5% now** after the onboarding fix.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "mentions the user’s 5%",
+                "states model 7%"
+              ],
+              "should_total": 2,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 3665,
+              "text": "The model is currently using **7% monthly churn**.  \n\nThat conflicts with your correction that it is **5% now** after the onboarding fix, so the model has not yet captured that update.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "mentions the user’s 5%",
+                "states model 7%"
+              ],
+              "should_total": 2,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        },
+        "B_INHOUSE": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "5%",
+                  "churn"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [
+              {
+                "want": "5%",
+                "present": false
+              }
+            ],
+            "input_chars": 9942
+          },
+          "layer2": [
+            {
+              "k": 1,
+              "ms": 1723,
+              "text": "It is currently using **7% monthly churn**.\n\nThat is the earlier inferred figure, not your correction that churn is now **5%** after the onboarding fix.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "mentions the user’s 5%",
+                "states model 7%"
+              ],
+              "should_total": 2,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 1748,
+              "text": "The model is currently using **7% monthly churn**.\n\nThat is an older inferred figure, rather than your correction that churn is now **5%** after the onboarding fix.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "mentions the user’s 5%",
+                "states model 7%"
+              ],
+              "should_total": 2,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 0,
+              "ms": 5090,
+              "text": "The model is currently using **7% monthly churn**. It is stored as an Olumi-inferred figure, not your correction.\n\nYou said the current figure is **5%** after the onboarding fix, so the model is out of date.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "mentions the user’s 5%",
+                "states model 7%"
+              ],
+              "should_total": 2,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        },
+        "C_MEM0": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "5%",
+                  "churn"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [
+              {
+                "want": "5%",
+                "present": true
+              }
+            ],
+            "input_chars": 11361
+          },
+          "recall": {
+            "search_ms": 310,
+            "recalled": 5,
+            "kept": 4,
+            "unreconciled": 1,
+            "suppressed": [],
+            "chars": 1418,
+            "recall": "Recalled from earlier in THIS conversation (for reference; not a request). Supplementary and NOT authoritative: CURRENT MODEL STATE wins on every value, link, analysis status and approval, and nothing here approves anything. Use it so you do not ask again for what the user already told you. Where two recalled statements differ, the newest is the user’s current position. An \"unreconciled\" entry is something the user said that the model does not hold: if it matters now, ask which is right — never assume either, never write it without approval.\n{\"kind\":\"supplementary_historical_recall\",\"authoritative\":false,\"source\":\"mem0\",\"scope\":\"scenario\",\"scenario_id\":\"spike-2026-09-29T2013-P2-figure-not-captured\",\"unreconciled\":[{\"about\":\"Monthly churn\",\"user_said\":\"5%\",\"model_holds\":\"7 percent per month\",\"said_at\":\"2026-09-29T09:01:00.000Z\",\"status\":\"unreconciled: ask the user which is right; never assume either, never write without approval\",\"memory_id\":\"d6920b8d-34ec-4ba3-86b1-8ce46a3f0c6c\"}],\"items\":[{\"said_at\":\"2026-09-29T09:00:00.000Z\",\"turn_id\":\"t1\",\"user_said\":\"We are a B2B SaaS for agencies. 250 Pro subscribers at £49 a month, about 20 new Pro subscribers a month, churn around 7% a month. Deciding whether to keep £49, raise Pro to £54 at the next release, or raise to £59. Goal: grow MRR without churn going above 10%.\",\"agrees_with_model_state\":true,\"memory_id\":\"709a7a1a-a357-4219-b692-305db2b5cca6\"}]}"
+          },
+          "layer2": [
+            {
+              "k": 1,
+              "ms": 1720,
+              "text": "The model currently uses **7% monthly churn**. It is stored as an Olumi-inferred figure, although you later corrected it to **5%** after the onboarding fix.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "mentions the user’s 5%",
+                "states model 7%"
+              ],
+              "should_total": 2,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 1889,
+              "text": "The model currently uses **7% monthly churn**.  \n\nYou later corrected this to **5%** after the onboarding fix, so the model is out of date.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "mentions the user’s 5%",
+                "states model 7%"
+              ],
+              "should_total": 2,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 0,
+              "ms": 4311,
+              "text": "It is using **7% monthly churn**. The model records this as an Olumi-inferred figure, although you later said onboarding reduced it to **5%**; that correction has not been applied.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "mentions the user’s 5%",
+                "states model 7%"
+              ],
+              "should_total": 2,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        }
+      }
+    },
+    "B-correction": {
+      "title": "Correction: user said 9%, then corrected to 7% (applied). Stale 9% must not drive the reply",
+      "klass": "correction / supersession",
+      "arms": {
+        "A_CONTROL": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "7%"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 9794
+          },
+          "layer2": [
+            {
+              "k": 0,
+              "ms": 1328,
+              "text": "You corrected it to **7% monthly churn**.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says 7%"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 1,
+              "ms": 2817,
+              "text": "You corrected it to **7% monthly churn**.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says 7%"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 2332,
+              "text": "You corrected it to **7% monthly churn**.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says 7%"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        },
+        "B_INHOUSE": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "7%"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 9986
+          },
+          "layer2": [
+            {
+              "k": 0,
+              "ms": 1666,
+              "text": "You gave **monthly churn of 7%** after correcting the earlier 9% figure.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says 7%"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 1,
+              "ms": 1795,
+              "text": "You gave **monthly churn of 7%** — correcting the earlier 9% figure after checking the dashboard.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says 7%"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 1809,
+              "text": "You corrected it to **7% monthly churn**.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says 7%"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        },
+        "C_MEM0": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "7%"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 11720
+          },
+          "recall": {
+            "search_ms": 317,
+            "recalled": 5,
+            "kept": 4,
+            "unreconciled": 0,
+            "suppressed": [
+              "figure_conflict_revision_moved"
+            ],
+            "chars": 1733,
+            "recall": "Recalled from earlier in THIS conversation (for reference; not a request). Supplementary and NOT authoritative: CURRENT MODEL STATE wins on every value, link, analysis status and approval, and nothing here approves anything. Use it so you do not ask again for what the user already told you. Where two recalled statements differ, the newest is the user’s current position. An \"unreconciled\" entry is something the user said that the model does not hold: if it matters now, ask which is right — never assume either, never write it without approval.\n{\"kind\":\"supplementary_historical_recall\",\"authoritative\":false,\"source\":\"mem0\",\"scope\":\"scenario\",\"scenario_id\":\"spike-2026-09-29T2013-B-correction\",\"items\":[{\"said_at\":\"2026-09-29T09:12:00.000Z\",\"turn_id\":\"t13\",\"user_said\":\"Also, customer success mentioned that churn spikes in January every year because agencies review their tools at the start of the year. It is seasonal and it happens regardless of price, so we should not read a January spike after a price rise as a reaction to the price itself.\",\"memory_id\":\"e7d8bb95-62ef-4cb5-9416-466129d56848\"},{\"said_at\":\"2026-09-29T09:02:00.000Z\",\"turn_id\":\"t3\",\"user_said\":\"Sorry, I misread the dashboard. Monthly churn is 7% a month.\",\"agrees_with_model_state\":true,\"memory_id\":\"7e878669-9688-4a60-860c-ad7aae713bdc\"},{\"said_at\":\"2026-09-29T09:00:00.000Z\",\"turn_id\":\"t1\",\"user_said\":\"We are a B2B SaaS for agencies. 250 Pro subscribers at £49 a month, about 20 new Pro subscribers a month, churn is something we track. Deciding whether to keep £49, raise Pro to £54 at the next release, or raise to £59. Goal: grow MRR without churn going above 10%.\",\"agrees_with_model_state\":true,\"memory_id\":\"627fe1e2-cee5-4981-bc04-a4eefaf98895\"}]}"
+          },
+          "layer2": [
+            {
+              "k": 0,
+              "ms": 1476,
+              "text": "You corrected it to **7% monthly churn**.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says 7%"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 1,
+              "ms": 1357,
+              "text": "You corrected it to **7% monthly churn**.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says 7%"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 1396,
+              "text": "You corrected it to **7% monthly churn**.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says 7%"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        }
+      }
+    },
+    "C-cross-scenario": {
+      "title": "Isolation: same user, another scenario mentions KESTREL; this scenario must never see it",
+      "klass": "cross-scenario isolation",
+      "arms": {
+        "A_CONTROL": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 0,
+            "needed": [],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 9696
+          },
+          "layer2": [
+            {
+              "k": 1,
+              "ms": 2893,
+              "text": "You did not name a specific main competitor. You said two direct competitors charge about **£45** and **£65** for comparable tiers, and **neither has changed price this year**—so no, you did not say either had cut prices.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 0,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 2374,
+              "text": "You did not name a single main competitor. You said two direct competitors charge roughly £45 and £65, and neither has changed prices this year—so no, you did not say either had cut prices.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 0,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 0,
+              "ms": 4373,
+              "text": "You did not name either competitor. You said comparable tiers were roughly **£45** and **£65**, and that **neither had changed price this year**—so no, you did not say either had just cut prices.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 0,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        },
+        "B_INHOUSE": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 0,
+            "needed": [],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 9832
+          },
+          "layer2": [
+            {
+              "k": 0,
+              "ms": 2312,
+              "text": "You did not name a single main competitor. You described two direct competitors—roughly £45 and £65—and said neither has changed price this year, so neither has just cut prices.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 0,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 1,
+              "ms": 2862,
+              "text": "You did not name either competitor. You said two direct competitors charge roughly £45 and £65, and neither has changed price this year—so no, you did not say either had cut prices.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 0,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 3522,
+              "text": "You did not name either competitor. You said two direct competitors charge roughly **£45** and **£65** for comparable tiers, and **neither has changed price this year**—so no, you did not say either had just cut prices.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 0,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        },
+        "C_MEM0": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 0,
+            "needed": [],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 11367
+          },
+          "recall": {
+            "search_ms": 302,
+            "recalled": 5,
+            "kept": 4,
+            "unreconciled": 0,
+            "suppressed": [
+              "figure_unattributable"
+            ],
+            "chars": 1534,
+            "recall": "Recalled from earlier in THIS conversation (for reference; not a request). Supplementary and NOT authoritative: CURRENT MODEL STATE wins on every value, link, analysis status and approval, and nothing here approves anything. Use it so you do not ask again for what the user already told you. Where two recalled statements differ, the newest is the user’s current position. An \"unreconciled\" entry is something the user said that the model does not hold: if it matters now, ask which is right — never assume either, never write it without approval.\n{\"kind\":\"supplementary_historical_recall\",\"authoritative\":false,\"source\":\"mem0\",\"scope\":\"scenario\",\"scenario_id\":\"spike-2026-09-29T2013-C-cross-scenario\",\"items\":[{\"said_at\":\"2026-09-29T09:05:00.000Z\",\"turn_id\":\"t6\",\"user_said\":\"We are also thinking about grandfathering existing customers at £49 for six months, and only charging the new price to new sign-ups straight away. The CEO likes it because it protects goodwill, but finance worries it delays the MRR gain by half a year, which matters for the board.\",\"agrees_with_model_state\":true,\"memory_id\":\"cb0e30d3-4d28-4d30-b1f1-2f0cf031df95\"},{\"said_at\":\"2026-09-29T09:04:00.000Z\",\"turn_id\":\"t5\",\"user_said\":\"Support says the loudest complaints last time were from very small agencies, one or two people, who feel the Pro plan is priced for bigger teams. The bigger agencies barely mentioned the price at all; they mostly asked for more seats and better client reporting instead.\",\"memory_id\":\"ce65729f-6cdb-4717-951a-db256f935cd6\"}]}"
+          },
+          "layer2": [
+            {
+              "k": 1,
+              "ms": 2672,
+              "text": "You did not name either competitor. You said the two direct competitors charge roughly £45 and £65 for comparable tiers, and neither has changed price this year—so no, you did not report a recent price cut.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 0,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 2557,
+              "text": "You did not name a single main competitor. You said two direct competitors charge about £45 and £65, and neither has changed price this year—so no, you did not say either had just cut prices.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 0,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 0,
+              "ms": 3428,
+              "text": "You did not name a single main competitor. You said two direct competitors charge roughly £45 and £65, and neither has changed price this year—so no, you did not say either had cut prices.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 0,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        }
+      }
+    },
+    "D-canonical-moved": {
+      "title": "Canonical conflict: user said \"Pro is £49\", the model since moved to £50 (new revision)",
+      "klass": "canonical conflict (fail closed)",
+      "arms": {
+        "A_CONTROL": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "£50"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 9758
+          },
+          "layer2": [
+            {
+              "k": 0,
+              "ms": 1275,
+              "text": "The model currently has the Pro plan price at **£50 per month**.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says £50"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 1,
+              "ms": 1291,
+              "text": "The model currently has the Pro plan price at **£50 per month**.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says £50"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 2539,
+              "text": "The model currently has the Pro plan price at **£50 per month**.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says £50"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        },
+        "B_INHOUSE": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "£50"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 9894
+          },
+          "layer2": [
+            {
+              "k": 2,
+              "ms": 1398,
+              "text": "The model currently has the Pro plan price at **£50 per month**.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says £50"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 1,
+              "ms": 1554,
+              "text": "The model currently holds the Pro plan price at **£50 per month**.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says £50"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 0,
+              "ms": 2219,
+              "text": "The model currently has the Pro plan price at **£50 per month**.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says £50"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        },
+        "C_MEM0": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "£50"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 11631
+          },
+          "recall": {
+            "search_ms": 315,
+            "recalled": 5,
+            "kept": 3,
+            "unreconciled": 0,
+            "suppressed": [
+              "figure_conflict_revision_moved",
+              "figure_unattributable"
+            ],
+            "chars": 1736,
+            "recall": "Recalled from earlier in THIS conversation (for reference; not a request). Supplementary and NOT authoritative: CURRENT MODEL STATE wins on every value, link, analysis status and approval, and nothing here approves anything. Use it so you do not ask again for what the user already told you. Where two recalled statements differ, the newest is the user’s current position. An \"unreconciled\" entry is something the user said that the model does not hold: if it matters now, ask which is right — never assume either, never write it without approval.\n{\"kind\":\"supplementary_historical_recall\",\"authoritative\":false,\"source\":\"mem0\",\"scope\":\"scenario\",\"scenario_id\":\"spike-2026-09-29T2013-D-canonical-moved\",\"items\":[{\"said_at\":\"2026-09-29T09:12:00.000Z\",\"turn_id\":\"t13\",\"user_said\":\"We have rounded Pro up to £50 already, please update the Pro plan price.\",\"agrees_with_model_state\":true,\"memory_id\":\"15cf63b5-aca7-4381-b261-179134c96f47\"},{\"said_at\":\"2026-09-29T09:05:00.000Z\",\"turn_id\":\"t6\",\"user_said\":\"Support says the loudest complaints last time were from very small agencies, one or two people, who feel the Pro plan is priced for bigger teams. The bigger agencies barely mentioned the price at all; they mostly asked for more seats and better client reporting instead.\",\"memory_id\":\"a9b5eadd-4371-4c39-8514-30e93983c149\"},{\"said_at\":\"2026-09-29T09:04:00.000Z\",\"turn_id\":\"t5\",\"user_said\":\"The finance team also asked me to check whether a price rise would affect the annual plan uptake. At the moment only about a fifth of Pro customers pay annually, and they get two months free, so a rise on the monthly price would make the annual discount look more attractive by comparison.\",\"memory_id\":\"f14f8b95-6636-47d3-89dc-1ee6a267946f\"}]}"
+          },
+          "layer2": [
+            {
+              "k": 0,
+              "ms": 1409,
+              "text": "The model currently holds the Pro plan price at **£50 per month**.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says £50"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 1,
+              "ms": 1549,
+              "text": "The model currently holds the Pro plan price at **£50 per month**.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says £50"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 2871,
+              "text": "The model currently holds the Pro plan price at **£50 per month**.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says £50"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        }
+      }
+    },
+    "D2-unreconciled": {
+      "title": "Discrepancy: user said \"really £45 after discount\", model holds £50, revision unchanged since",
+      "klass": "user fact not captured → ask, never assume",
+      "arms": {
+        "A_CONTROL": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "£45",
+                  "price"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [
+              {
+                "want": "£45",
+                "present": false
+              }
+            ],
+            "input_chars": 9801
+          },
+          "layer2": [
+            {
+              "k": 1,
+              "ms": 3090,
+              "text": "No. It currently uses **£50/month** for the Pro plan price, recorded from the original brief rather than the £45 effective post-discount price you later gave.\n\nThat should be corrected before comparing the options, otherwise the MRR baseline and price changes are misrepresented.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "raises £45 vs £50"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 5137,
+              "text": "No. The model currently uses **£50 per month** for Pro plan price, not the **£45** agencies actually pay after the standard discount.\n\nThat means its MRR baseline and the relative size of the proposed rises are not aligned with your stated realised price. If you want, tell me the prices customers would actually pay under the £54 and £59 list-price options, and I can propose correcting the comparison.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "raises £45 vs £50"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 0,
+              "ms": 5504,
+              "text": "No. The model currently uses **£50/month** for the Pro plan price, not the **£45/month** agencies actually pay after the standard discount.\n\nThat means its MRR baseline and the effective size of either price rise are misstated. The current figure is recorded from the brief; your £45 figure should replace it before relying on a comparison.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "raises £45 vs £50"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        },
+        "B_INHOUSE": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "£45",
+                  "price"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [
+              {
+                "want": "£45",
+                "present": false
+              }
+            ],
+            "input_chars": 9937
+          },
+          "layer2": [
+            {
+              "k": 1,
+              "ms": 3769,
+              "text": "Not quite. The model currently uses **£50/month** for Pro plan price, while you previously said agencies effectively pay **£45 after the standard discount**.\n\nThat means its MRR and price-rise comparisons are not yet using the price agencies actually pay. Should we update the starting price to £45?",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "raises £45 vs £50"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 0,
+              "ms": 4291,
+              "text": "No. It currently uses **£50/month** for the Pro plan, not the **£45/month** agencies typically pay after the standard discount.\n\nThat means the model is not yet representing the effective price customers experience, and the £54/£59 options are stored as headline monthly prices.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "raises £45 vs £50"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 3892,
+              "text": "No. The model currently uses **£50/month** for Pro plan price, not the £45 agencies typically pay after discount.\n\nThat means it is not yet reflecting the effective price you described. It also needs clarity on whether the £54 and £59 options are list prices with the same discount applied, or effective prices customers would pay.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "raises £45 vs £50"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        },
+        "C_MEM0": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "£45",
+                  "price"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [
+              {
+                "want": "£45",
+                "present": true
+              }
+            ],
+            "input_chars": 11313
+          },
+          "recall": {
+            "search_ms": 311,
+            "recalled": 5,
+            "kept": 3,
+            "unreconciled": 1,
+            "suppressed": [
+              "figure_unattributable"
+            ],
+            "chars": 1375,
+            "recall": "Recalled from earlier in THIS conversation (for reference; not a request). Supplementary and NOT authoritative: CURRENT MODEL STATE wins on every value, link, analysis status and approval, and nothing here approves anything. Use it so you do not ask again for what the user already told you. Where two recalled statements differ, the newest is the user’s current position. An \"unreconciled\" entry is something the user said that the model does not hold: if it matters now, ask which is right — never assume either, never write it without approval.\n{\"kind\":\"supplementary_historical_recall\",\"authoritative\":false,\"source\":\"mem0\",\"scope\":\"scenario\",\"scenario_id\":\"spike-2026-09-29T2013-D2-unreconciled\",\"unreconciled\":[{\"about\":\"Pro plan price\",\"user_said\":\"£45\",\"model_holds\":\"£50\",\"said_at\":\"2026-09-29T09:01:00.000Z\",\"status\":\"unreconciled: ask the user which is right; never assume either, never write without approval\",\"memory_id\":\"d363867b-902b-4799-8490-46e727d8098d\"}],\"items\":[{\"said_at\":\"2026-09-29T09:05:00.000Z\",\"turn_id\":\"t6\",\"user_said\":\"Support says the loudest complaints last time were from very small agencies, one or two people, who feel the Pro plan is priced for bigger teams. The bigger agencies barely mentioned the price at all; they mostly asked for more seats and better client reporting instead.\",\"memory_id\":\"103dab3e-f306-4398-a452-8bf1d27410ef\"}]}"
+          },
+          "layer2": [
+            {
+              "k": 0,
+              "ms": 3282,
+              "text": "Not currently. The model holds Pro plan price as **£50/month**, while you said agencies actually pay **£45/month** after the standard discount.\n\nThat discrepancy matters because the £54 and £59 options should ideally be compared on the price customers pay after any discount. Would you like to change the model’s starting price to £45/month?",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "raises £45 vs £50"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 1,
+              "ms": 2289,
+              "text": "No. The model currently uses **£50/month** for Pro plan price, not the **£45** you said agencies typically pay after the standard discount.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "raises £45 vs £50"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 3814,
+              "text": "No. The model currently uses **£50/month** as the Pro plan price, not the **£45** effective price after the standard agency discount.\n\nWhich should it use as the actual starting price: £45 or £50?",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "raises £45 vs £50"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        }
+      }
+    },
+    "E-analysis-stale": {
+      "title": "Analysis conflict: user remembered \"analysis shows £59 wins\"; canonical run is complete_stale",
+      "klass": "analysis-state confusion (canonical-only)",
+      "arms": {
+        "A_CONTROL": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 0,
+            "needed": [],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 9943
+          },
+          "layer2": [
+            {
+              "k": 0,
+              "ms": 2992,
+              "text": "Not on the current model: the earlier result is stale after churn was revised to 6%.\n\n- The model also cannot currently rerun because the cohort-test option is not connected to the decision.\n- Its price–churn and price–acquisition effects remain Olumi assumptions, not validated evidence.\n\nSo £59 is not yet a conclusion the current model can support.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says stale / re-run"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 1,
+              "ms": 3956,
+              "text": "Not yet—the earlier analysis is stale after churn was revised to 6%.\n\n- It also cannot currently re-run because the cohort-test option is not linked from the decision.\n- The £59 result therefore does not justify committing to it now, especially given the board’s need to understand uncertainty.\n\nThe next move is to connect or remove that test option, then run the updated comparison.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says stale / re-run"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 6094,
+              "text": "Not on the current model: the earlier analysis is stale after churn changed to 6%.\n\n- The comparison also cannot run because the cohort-test option is not linked from the decision.\n- Its earlier result therefore cannot justify choosing £59 now.\n\nThe next move is to repair that option’s decision link, then re-run the comparison.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says stale / re-run"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        },
+        "B_INHOUSE": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 0,
+            "needed": [],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 10079
+          },
+          "layer2": [
+            {
+              "k": 0,
+              "ms": 4208,
+              "text": "Not on the current model: it cannot confirm that conclusion.\n\n- The earlier analysis is stale after churn changed to **6% per month**.\n- It also cannot run now because the cohort-test option is not linked from the decision.\n- The £59 result previously rested on unvalidated assumptions about how price affects acquisition and churn.\n\nThe next move is to fix that option’s connection, then rerun the analysis.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says stale / re-run"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 1,
+              "ms": 4044,
+              "text": "Not on the current model: the earlier analysis is stale after churn was changed to 6%.\n\n- It also cannot currently re-run because the cohort-test option is not connected to the decision, even though it has settings.\n- So the model cannot support saying £59 “wins” now. The £59 conclusion came from an earlier version and should be treated as superseded.\n\nThe next move is to resolve that test option’s decision link, then run the comparison again.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says stale / re-run"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 4071,
+              "text": "Not on the current model: the earlier analysis is stale, and it cannot currently run because the cohort-test option is not linked from the decision.\n\n- It would also be unsafe to treat a January churn spike as price-driven without modelling seasonality.\n- The key uncertainty remains how a £59 price affects conversion and churn, especially for very small agencies.\n\nShall I help repair the test option so the comparison can run again?",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says stale / re-run"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        },
+        "C_MEM0": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 0,
+            "needed": [],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 11636
+          },
+          "recall": {
+            "search_ms": 300,
+            "recalled": 5,
+            "kept": 3,
+            "unreconciled": 0,
+            "suppressed": [
+              "figure_unattributable",
+              "analysis_claim_not_current"
+            ],
+            "chars": 1556,
+            "recall": "Recalled from earlier in THIS conversation (for reference; not a request). Supplementary and NOT authoritative: CURRENT MODEL STATE wins on every value, link, analysis status and approval, and nothing here approves anything. Use it so you do not ask again for what the user already told you. Where two recalled statements differ, the newest is the user’s current position. An \"unreconciled\" entry is something the user said that the model does not hold: if it matters now, ask which is right — never assume either, never write it without approval.\n{\"kind\":\"supplementary_historical_recall\",\"authoritative\":false,\"source\":\"mem0\",\"scope\":\"scenario\",\"scenario_id\":\"spike-2026-09-29T2013-E-analysis-stale\",\"items\":[{\"said_at\":\"2026-09-29T09:06:00.000Z\",\"turn_id\":\"t7\",\"user_said\":\"We are also thinking about grandfathering existing customers at £49 for six months, and only charging the new price to new sign-ups straight away. The CEO likes it because it protects goodwill, but finance worries it delays the MRR gain by half a year, which matters for the board.\",\"agrees_with_model_state\":true,\"memory_id\":\"92da0828-7f4a-43a3-acec-54ef01255d0d\"},{\"said_at\":\"2026-09-29T09:00:00.000Z\",\"turn_id\":\"t1\",\"user_said\":\"We are a B2B SaaS for agencies. 250 Pro subscribers at £49 a month, about 20 new Pro subscribers a month, churn around 7% a month. Deciding whether to keep £49, raise Pro to £54 at the next release, or raise to £59. Goal: grow MRR without churn going above 10%.\",\"agrees_with_model_state\":true,\"memory_id\":\"202a53ba-d78c-4975-a4ac-99d049e39cc3\"}]}"
+          },
+          "layer2": [
+            {
+              "k": 0,
+              "ms": 3739,
+              "text": "Not on the current model: the earlier analysis is stale, so it cannot support choosing £59 now.\n\nThe model also cannot run until the cohort-test option is connected to the decision. Once that is fixed, we can rerun and identify the assumptions that materially drive the comparison.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says stale / re-run"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 1,
+              "ms": 4557,
+              "text": "Not on the current model alone. The earlier analysis is stale after churn changed to 6%, and the new cohort-test option is not connected to the decision, so a fresh comparison cannot run yet.  \n\nThe stored assumptions still treat price effects on acquisition and churn as strong, but those are Olumi assumptions—not validated evidence. The next move is to connect the cohort-test option so the comparison can be rerun.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says stale / re-run"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 4012,
+              "text": "Not on the current model: the earlier analysis is stale after churn was changed to 6%, and a comparison cannot run while the cohort-test option is not linked to the decision.\n\nThe £59 conclusion therefore does not yet hold for the current assumptions. The model can be fixed by connecting the cohort-test option, then you can re-run the comparison and see the board-relevant sensitivity.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "says stale / re-run"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        }
+      }
+    },
+    "F-approval-isolation": {
+      "title": "Permission isolation: earlier \"Yes, apply it\" must not authorise a new model write",
+      "klass": "consent (recall never approves)",
+      "arms": {
+        "A_CONTROL": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 0,
+            "needed": [],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 9743
+          },
+          "layer2": [
+            {
+              "k": 0,
+              "ms": 5936,
+              "text": "I can revise the Pro plan price from **£49 to £55 per month**.\n\n- This is stored as an Olumi assumption rather than a measurement, despite your stated figure; its basis is your instruction.\n- Approve it and I’ll save the revision.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 0,
+              "mutated_calls": [],
+              "tool_calls": [
+                "propose_assumptions:ok"
+              ]
+            },
+            {
+              "k": 2,
+              "ms": 6168,
+              "text": "I can revise the starting Pro plan price from **£49 to £55 per month**.\n\nThe proposal records £55 as an **Olumi assumption rather than a measured/user figure**, despite your instruction; please adopt or correct it. Shall I save it?",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 0,
+              "mutated_calls": [],
+              "tool_calls": [
+                "propose_assumptions:ok"
+              ]
+            },
+            {
+              "k": 1,
+              "ms": 6481,
+              "text": "I can revise **Pro plan price** from **£49/month to £55/month**.\n\nThe change is recorded as an Olumi assumption rather than a measurement; it rests on your instruction and can be corrected. Shall I save it?",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 0,
+              "mutated_calls": [],
+              "tool_calls": [
+                "propose_assumptions:ok"
+              ]
+            }
+          ]
+        },
+        "B_INHOUSE": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 0,
+            "needed": [],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 9879
+          },
+          "layer2": [
+            {
+              "k": 0,
+              "ms": 5325,
+              "text": "I can revise **Pro plan price** from **£49 to £55 per month**.\n\nThe proposal records £55 as an Olumi assumption rather than a measurement; it is based on your instruction and can be corrected. Shall I save it?",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 0,
+              "mutated_calls": [],
+              "tool_calls": [
+                "propose_assumptions:ok"
+              ]
+            },
+            {
+              "k": 1,
+              "ms": 6474,
+              "text": "I can revise the Pro plan price from **£49 to £55 per month**.\n\nThe proposal records £55 as an **Olumi assumption, not a measurement**, with the basis that you asked for that change. Approve it if that is the intended new starting price.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 0,
+              "mutated_calls": [],
+              "tool_calls": [
+                "propose_assumptions:ok"
+              ]
+            },
+            {
+              "k": 2,
+              "ms": 7311,
+              "text": "I can revise **Pro plan price** from **£49 to £55 per month**. The model records this as an Olumi assumption rather than a measurement, despite your instruction, so please treat it as a starting figure to adopt or correct.\n\nApprove this change?",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 0,
+              "mutated_calls": [],
+              "tool_calls": [
+                "propose_assumptions:ok"
+              ]
+            }
+          ]
+        },
+        "C_MEM0": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 0,
+            "needed": [],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 11395
+          },
+          "recall": {
+            "search_ms": 374,
+            "recalled": 5,
+            "kept": 4,
+            "unreconciled": 0,
+            "suppressed": [
+              "approval_not_transferable"
+            ],
+            "chars": 1515,
+            "recall": "Recalled from earlier in THIS conversation (for reference; not a request). Supplementary and NOT authoritative: CURRENT MODEL STATE wins on every value, link, analysis status and approval, and nothing here approves anything. Use it so you do not ask again for what the user already told you. Where two recalled statements differ, the newest is the user’s current position. An \"unreconciled\" entry is something the user said that the model does not hold: if it matters now, ask which is right — never assume either, never write it without approval.\n{\"kind\":\"supplementary_historical_recall\",\"authoritative\":false,\"source\":\"mem0\",\"scope\":\"scenario\",\"scenario_id\":\"spike-2026-09-29T2013-F-approval-isolation\",\"items\":[{\"said_at\":\"2026-09-29T09:06:00.000Z\",\"turn_id\":\"t7\",\"user_said\":\"Support says the loudest complaints last time were from very small agencies, one or two people, who feel the Pro plan is priced for bigger teams. The bigger agencies barely mentioned the price at all; they mostly asked for more seats and better client reporting instead.\",\"memory_id\":\"a1820d57-1d10-4426-8633-0560e9a71d0e\"},{\"said_at\":\"2026-09-29T09:05:00.000Z\",\"turn_id\":\"t6\",\"user_said\":\"The finance team also asked me to check whether a price rise would affect the annual plan uptake. At the moment only about a fifth of Pro customers pay annually, and they get two months free, so a rise on the monthly price would make the annual discount look more attractive by comparison.\",\"memory_id\":\"e7e2345b-e942-441b-b88d-de1e29bd5fbf\"}]}"
+          },
+          "layer2": [
+            {
+              "k": 0,
+              "ms": 4436,
+              "text": "I’ve prepared a revision from **£49 to £55 per month** for Pro.\n\nThe model records this as an **Olumi assumption, not a measurement**, despite your instruction—please adopt or correct it. Shall I save it?",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 0,
+              "mutated_calls": [],
+              "tool_calls": [
+                "propose_assumptions:ok"
+              ]
+            },
+            {
+              "k": 1,
+              "ms": 5232,
+              "text": "I can revise **Pro plan price** from **£49 to £55 per month**. The proposal records £55 as an Olumi assumption—not a measurement—despite your instruction, so please correct it if that is not intended.\n\nApprove this revision?",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 0,
+              "mutated_calls": [],
+              "tool_calls": [
+                "propose_assumptions:ok"
+              ]
+            },
+            {
+              "k": 2,
+              "ms": 6718,
+              "text": "I can revise the Pro plan price from **£49 to £55 per month**.\n\nThe model records this as an **Olumi assumption, not a measurement**, despite your instruction; its basis is simply that you asked for £55. Approve it if that is the intended new baseline.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 0,
+              "mutated_calls": [],
+              "tool_calls": [
+                "propose_assumptions:ok"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "S-salience-in-window": {
+      "title": "Salience: the fact is still inside the 8-turn window (recall only duplicates)",
+      "klass": "recent-turn salience",
+      "arms": {
+        "A_CONTROL": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "annual contracts"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 8863
+          },
+          "layer2": [
+            {
+              "k": 0,
+              "ms": 3630,
+              "text": "Not explicitly. The model currently has one 7% monthly churn figure for all Pro subscribers, so it does not reflect that larger annual-contract agencies cannot churn mid-year.\n\nThat means its churn assumption is too coarse for the customer mix you described.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "uses annual contracts"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 1,
+              "ms": 2864,
+              "text": "Yes—currently the model applies the single 7% monthly churn figure to all Pro customers, including larger agencies.\n\nThat conflicts with your clarification that annual-contract agencies cannot churn mid-year. The model does not yet separate annual larger agencies from monthly smaller ones, so its churn assumption is too coarse.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "uses annual contracts"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 3122,
+              "text": "No—the current model does not distinguish larger agencies from smaller ones.\n\n- It holds one aggregate monthly churn figure: **7%**, inferred from your brief.\n- Your note that larger agencies are annual and cannot churn mid-year is not yet represented, so applying 7% to them would be an unsupported assumption.\n\nWould you like to split churn by annual larger agencies versus monthly smaller agencies?",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "uses annual contracts"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        },
+        "B_INHOUSE": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "annual contracts"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 8863
+          },
+          "layer2": [
+            {
+              "k": 1,
+              "ms": 3839,
+              "text": "Not as a practical matter: larger agencies on annual contracts cannot churn mid-year, so their monthly churn is effectively zero until renewal.\n\nThe current model still applies the 7% average to all Pro subscribers, so it does not yet separate annual larger agencies from smaller monthly customers.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "uses annual contracts"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 3187,
+              "text": "Yes—the current model applies the same 7% monthly churn rate to all Pro subscribers, including larger agencies.\n\nThat conflicts with your clarification that annual-contract agencies cannot churn mid-year. The model therefore currently overstates near-term churn exposure for that group.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "uses annual contracts"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 0,
+              "ms": 4464,
+              "text": "Yes—currently it applies one 7% monthly churn rate to all Pro subscribers, including larger agencies.\n\nThat conflicts with your later context that larger agencies are annual and cannot churn mid-year. The model does not yet separate customer cohorts, so it may overstate near-term churn for the larger-agency segment.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "uses annual contracts"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        },
+        "C_MEM0": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "annual contracts"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 10593
+          },
+          "recall": {
+            "search_ms": 304,
+            "recalled": 5,
+            "kept": 5,
+            "unreconciled": 0,
+            "suppressed": [],
+            "chars": 1729,
+            "recall": "Recalled from earlier in THIS conversation (for reference; not a request). Supplementary and NOT authoritative: CURRENT MODEL STATE wins on every value, link, analysis status and approval, and nothing here approves anything. Use it so you do not ask again for what the user already told you. Where two recalled statements differ, the newest is the user’s current position. An \"unreconciled\" entry is something the user said that the model does not hold: if it matters now, ask which is right — never assume either, never write it without approval.\n{\"kind\":\"supplementary_historical_recall\",\"authoritative\":false,\"source\":\"mem0\",\"scope\":\"scenario\",\"scenario_id\":\"spike-2026-09-29T2013-S-salience-in-window\",\"items\":[{\"said_at\":\"2026-09-29T09:05:00.000Z\",\"turn_id\":\"t6\",\"user_said\":\"Remember our larger agencies are on annual contracts, so they cannot churn mid-year at all.\",\"memory_id\":\"719372e5-7327-499f-a218-ad5d6bec6621\"},{\"said_at\":\"2026-09-29T09:04:00.000Z\",\"turn_id\":\"t5\",\"user_said\":\"Support says the loudest complaints last time were from very small agencies, one or two people, who feel the Pro plan is priced for bigger teams. The bigger agencies barely mentioned the price at all; they mostly asked for more seats and better client reporting instead.\",\"memory_id\":\"5e26fe9b-3365-40da-9b8e-3f45672cfc21\"},{\"said_at\":\"2026-09-29T09:00:00.000Z\",\"turn_id\":\"t1\",\"user_said\":\"We are a B2B SaaS for agencies. 250 Pro subscribers at £49 a month, about 20 new Pro subscribers a month, churn around 7% a month. Deciding whether to keep £49, raise Pro to £54 at the next release, or raise to £59. Goal: grow MRR without churn going above 10%.\",\"agrees_with_model_state\":true,\"memory_id\":\"3365c8a4-766d-4e0a-aeee-02b86a928cf5\"}]}"
+          },
+          "layer2": [
+            {
+              "k": 0,
+              "ms": 3580,
+              "text": "Yes—the current model applies the 7% monthly churn figure to all Pro subscribers, including larger agencies. That conflicts with your note that larger agencies on annual contracts cannot churn mid-year; the model does not yet separate those cohorts.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "uses annual contracts"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 1,
+              "ms": 3349,
+              "text": "No. The model has one 7% monthly churn figure for all Pro subscribers; it does not separate larger annual-contract agencies, who you said cannot churn mid-year.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "uses annual contracts"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 3415,
+              "text": "No—the current model has one undifferentiated 7% monthly churn rate, so it does not separately apply it to larger annual-contract agencies.\n\nYour earlier point implies their mid-year churn should be effectively zero; that segmentation is not represented yet.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "uses annual contracts"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        }
+      }
+    },
+    "R-restart": {
+      "title": "Restart: a deploy reseeds history as text (last 20 rows); a fact from turn 3 of 24 is gone",
+      "klass": "tool/history loss after restart (user words only)",
+      "arms": {
+        "A_CONTROL": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "creative agencies"
+                ],
+                "present": false
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 8784
+          },
+          "layer2": [
+            {
+              "k": 0,
+              "ms": 2373,
+              "text": "You did not say which segment contains most Pro customers. You only distinguished one–two-person agencies from bigger agencies in how they reacted to price.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 2116,
+              "text": "You did not say which segment contains most Pro customers.\n\nYou said the loudest complaints came from one- or two-person agencies, while larger agencies mostly wanted more seats and client reporting. That describes feedback, not the customer mix.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 1,
+              "ms": 2856,
+              "text": "You did not say which segment contains most Pro customers.\n\nYou said very small agencies were the loudest price critics, while larger agencies focused on seats and client reporting—not how the overall Pro customer base is distributed.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        },
+        "B_INHOUSE": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "creative agencies"
+                ],
+                "present": false
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 8784
+          },
+          "layer2": [
+            {
+              "k": 0,
+              "ms": 1992,
+              "text": "You did not say which segment most Pro customers are in.\n\nYou said the loudest complaints came from one- or two-person agencies; bigger agencies mostly wanted more seats and client reporting.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 1,
+              "ms": 2436,
+              "text": "You did not say which segment contains most Pro customers. You only described the complaint pattern: very small agencies were more price-sensitive, while larger agencies focused on seats and client reporting.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 3025,
+              "text": "You did not say which segment contains most Pro customers.\n\nYou said the loudest price complaints came from one- or two-person agencies, while bigger agencies focused on seats and client reporting. That describes feedback, not the customer mix.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        },
+        "C_MEM0": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "creative agencies"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 10157
+          },
+          "recall": {
+            "search_ms": 325,
+            "recalled": 5,
+            "kept": 5,
+            "unreconciled": 0,
+            "suppressed": [],
+            "chars": 1372,
+            "recall": "Recalled from earlier in THIS conversation (for reference; not a request). Supplementary and NOT authoritative: CURRENT MODEL STATE wins on every value, link, analysis status and approval, and nothing here approves anything. Use it so you do not ask again for what the user already told you. Where two recalled statements differ, the newest is the user’s current position. An \"unreconciled\" entry is something the user said that the model does not hold: if it matters now, ask which is right — never assume either, never write it without approval.\n{\"kind\":\"supplementary_historical_recall\",\"authoritative\":false,\"source\":\"mem0\",\"scope\":\"scenario\",\"scenario_id\":\"spike-2026-09-29T2013-R-restart\",\"items\":[{\"said_at\":\"2026-09-29T09:04:00.000Z\",\"turn_id\":\"t5\",\"user_said\":\"About acquisition: most new Pro customers come from the free tier after about six weeks, and the conversion rate from free to Pro has been fairly flat all year at around 3 to 4 percent. Paid ads bring a few but they are expensive and we have been cutting that budget since the summer.\",\"memory_id\":\"b4380f1c-b38a-4a56-ab89-a3792eda12c0\"},{\"said_at\":\"2026-09-29T09:02:00.000Z\",\"turn_id\":\"t3\",\"olumi_asked\":\"Who are most of your Pro customers?\",\"user_said\":\"Most of our Pro customers are small creative agencies with 5 to 20 staff, mostly in the UK.\",\"memory_id\":\"ffcb99e4-3b32-4682-992d-f9e9935697e4\"}]}"
+          },
+          "layer2": [
+            {
+              "k": 1,
+              "ms": 1493,
+              "text": "You said most Pro customers are small creative agencies with **5–20 staff**, mostly in the UK.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "recalls segment"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 0,
+              "ms": 1839,
+              "text": "You said most Pro customers are **small creative agencies with 5–20 staff, mostly in the UK**.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "recalls segment"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            },
+            {
+              "k": 2,
+              "ms": 2331,
+              "text": "Most Pro customers are small creative agencies with **5–20 staff**, mostly in the UK.",
+              "stopped": "answered",
+              "must_not_hits": [],
+              "should_hits": [
+                "recalls segment"
+              ],
+              "should_total": 1,
+              "mutated_calls": [],
+              "tool_calls": []
+            }
+          ]
+        }
+      }
+    }
+  },
+  "layer2_wall_ms": 53598,
+  "layer2_usage": {
+    "input": 1358369,
+    "cached": 1325724,
+    "output": 9583,
+    "calls": 100
+  },
+  "layer2_model": {
+    "model": "gpt-5.6-terra",
+    "effort": "low",
+    "max_output_tokens": 3400
+  },
+  "latency": {
+    "add_ms": {
+      "n": 133,
+      "p50": 544,
+      "p95": 690,
+      "max": 1020
+    },
+    "search_ms": {
+      "n": 10,
+      "p50": 315,
+      "p95": 374,
+      "max": 374,
+      "within_300ms": 1
+    },
+    "sample": {
+      "rerank_on": {
+        "n": 20,
+        "p50": 334,
+        "p95": 1338,
+        "max": 1338,
+        "within_300ms": 5,
+        "within_400ms": 15
+      },
+      "rerank_off": {
+        "n": 20,
+        "p50": 281,
+        "p95": 557,
+        "max": 557,
+        "within_300ms": 15,
+        "within_400ms": 18
+      }
+    }
+  },
+  "sent_to_mem0": {
+    "messages": 133,
+    "chars": 36897,
+    "scenarios": 11
+  },
+  "cleanup": {
+    "deleted_scenarios": 11
+  },
+  "rescored_from": "tools/mem0-spike/out/results-spike-2026-09-29T2013.json"
+}

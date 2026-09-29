@@ -228,7 +228,8 @@ async function main(): Promise<void> {
           });
         }
       }
-      perArm[arm] = { layer1: l1, ...(a.recallStats ? { recall: a.recallStats } : {}), ...(l2.length > 0 ? { layer2: l2 } : {}) };
+      // `l2` is filled LATER by the queued jobs: attach the array itself, never a snapshot of it.
+      perArm[arm] = { layer1: l1, ...(a.recallStats ? { recall: a.recallStats } : {}), ...(model !== undefined ? { layer2: l2 } : {}) };
     }
     (out.cases as Record<string, unknown>)[c.id] = { title: c.title, klass: c.klass, arms: perArm };
   }
