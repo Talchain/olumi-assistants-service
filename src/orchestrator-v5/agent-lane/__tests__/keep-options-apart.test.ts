@@ -1,7 +1,9 @@
 /**
  * ⛔ AN OPTION AND A QUANTITY NEVER SHARE A NAME (Canvas #72 5884644099, the morning-path cloud-bill brief). Admission
  * gives one id per name, so a factor named like its option vanished into the option and the model could not be run.
- * Row 1: Canvas's own brief, reproduced on the live route (saved draft), through the real build. Rows 2–6: the pure rule.
+ * Row 1: Canvas's own brief, reproduced on the live route (saved draft), through the real build. Rows 2–7: the pure rule.
+ * Rows 8–9 (PR Review CHANGES_REQUIRED on #2281 @ bcd8d856): a link from the shared name that the OPTION could hold
+ * (to a factor, a risk, an option or an unnamed label) is never re-sourced to the quantity; the candidate is left as it came.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -40,6 +42,18 @@ describe('Canvas\'s cloud-bill brief (saved live draft): the option and the fact
     expect(edges.some((e) => e.from === factor!.id && e.to === 'monthly_cloud_bill')).toBe(true);
     expect(edges.some((e) => e.from === option.id && e.to === 'monthly_cloud_bill'), 'no option → goal shortcut').toBe(false);
     expect(r.not_represented).toContain('"Enterprise discount" names both an option and the factor it acts on, so the factor is called "Enterprise discount level" to keep the two apart.');
+  });
+  it('8 (real build) — a link from the shared name to a RISK may be the option\'s: nothing is renamed, and no factor-origin link to that risk is made', async () => {
+    const c = structuredClone(FX.candidate) as Rec;
+    c.risks = [...(c.risks ?? []), { label: 'Provider lock-in', provenance: 'inferred' }];
+    c.links = [...c.links, { from: 'Enterprise discount', to: 'Provider lock-in', direction: 'positive', provenance: 'inferred' }];
+    expect(keepOptionsAndQuantitiesApart(c as CandidateModel).renamed).toEqual([]);
+    const { r, g } = await build(c);
+    expect((g.nodes as Rec[]).some((n) => n.label === 'Enterprise discount level')).toBe(false);
+    const factorIds = new Set((g.nodes as Rec[]).filter((n) => n.kind === 'factor').map((n) => n.id));
+    const risk = (g.nodes as Rec[]).find((n) => n.label === 'Provider lock-in');
+    expect((g.edges as Rec[]).some((e) => factorIds.has(e.from) && e.to === risk?.id && /enterprise_discount/.test(String(e.from)))).toBe(false);
+    expect(((r.not_represented ?? []) as string[]).some((l) => /keep the two apart/.test(l))).toBe(false);
   });
 });
 
@@ -86,6 +100,26 @@ describe('the pure rule', () => {
       expect(out.renamed).toEqual([]);
       expect(out.model).toBe(c);
     }
+  });
+  it('8b — FAIL CLOSED: a link from the shared name to a risk, a factor, another option or an unnamed label leaves the candidate exactly as it came, even beside a goal link', () => {
+    const risk = { label: 'Churn risk', provenance: 'inferred' };
+    const usage = { label: 'Usage', role: 'observable', baseline_known: false, baseline_value: null, unit: 'GBP', provenance: 'inferred' };
+    const goalLink = { from: 'Discount', to: 'Monthly cloud bill', direction: 'negative', provenance: 'inferred' };
+    for (const [to, extra] of [['Churn risk', { risks: [risk] }], ['Usage', { factors: [base().factors[0]!, usage] }], ['Switch provider', { options: [...base().options, { label: 'Switch provider', provenance: 'explicit' }] }], ['Something unnamed', {}]] as const) {
+      for (const links of [[{ from: 'Discount', to, direction: 'positive', provenance: 'inferred' }], [goalLink, { from: 'Discount', to, direction: 'positive', provenance: 'inferred' }]]) {
+        const c = base({ ...(extra as Partial<CandidateModel>), links: links as never });
+        const out = keepOptionsAndQuantitiesApart(c);
+        expect(out.renamed, `${to} / ${links.length}`).toEqual([]);
+        expect(out.model).toBe(c);
+        expect(out.model.links.every((l) => l.from === 'Discount')).toBe(true);
+      }
+    }
+  });
+  it('9 — a link from the shared name to an OUTCOME is the quantity\'s (an option never holds one): renamed', () => {
+    const c = base({ outcomes: [{ label: 'Savings', provenance: 'inferred' }], links: [{ from: 'Discount', to: 'Savings', direction: 'positive', provenance: 'inferred' } as never] });
+    const out = keepOptionsAndQuantitiesApart(c);
+    expect(out.renamed.map((k) => k.to)).toEqual(['Discount level']);
+    expect(out.model.links[0]).toMatchObject({ from: 'Discount level', to: 'Savings' });
   });
   it('CONTROL 6 — a goal named like an option is never renamed', () => {
     const c = base({ options: [{ label: 'Monthly cloud bill', provenance: 'explicit' }], factors: [], links: [], constraints: [], identities: [] });

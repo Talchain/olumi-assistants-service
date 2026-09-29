@@ -18,6 +18,15 @@
  * is what the merge loses. A same-named quantity with no effect of its own (served journey C, "Advertising investment",
  * `construction-option-self-loop.test.ts`) is left to the loop handling, which withholds the self-link and says so;
  * renaming it would only keep an orphan that no path joins to the goal, and readiness would refuse Run on it.
+ *
+ * ⛔ A LINK FROM THE SHARED NAME IS AMBIGUOUS UNLESS ONLY THE QUANTITY CAN HOLD IT (PR Review CHANGES_REQUIRED on
+ * #2281 @ bcd8d856). `links[].from` is an untyped label, so "Discount -> Churn risk" may be the option's link:
+ * admission reads option -> factor as what the option sets and option -> risk as a shortcut it folds or asks about.
+ * Rewriting that link to start at "Discount level" would silently change its source. So the rename happens only when
+ * EVERY link from the shared name ends at the goal or an outcome: an option never holds such a link (options act
+ * only through factors; merged, cloud3's became a dead option -> goal edge and the blocker), so it can only be the
+ * quantity's. Any link from the shared name to a factor, a risk, an option or an unnamed label fails closed: the
+ * candidate is left exactly as it came.
  */
 import type { CandidateModel } from './admit-model.js';
 
@@ -39,12 +48,17 @@ export function keepOptionsAndQuantitiesApart(candidate: CandidateModel): { read
     ...candidate.outcomes.map((o) => canon(o.label)),
     canon(candidate.goal.metric),
   ]);
-  const carriesEffect = new Set(candidate.links.filter((l) => canon(l.from) !== canon(l.to)).map((l) => canon(l.from)));
+  const onlyAQuantityHolds = new Set([canon(candidate.goal.metric), ...candidate.outcomes.map((o) => canon(o.label))]);
+  const effectsFrom = (name: string) => candidate.links.filter((l) => canon(l.from) === name && canon(l.to) !== name);
+  const carriesEffect = (name: string): boolean => {
+    const out = effectsFrom(name);
+    return out.length > 0 && out.every((l) => onlyAQuantityHolds.has(canon(l.to)) && !optionNames.has(canon(l.to)));
+  };
   const renamed: KeptApart[] = [];
   const to = new Map<string, string>();
   const plan = (label: string, kind: KeptApart['kind']): void => {
     const option = optionNames.get(canon(label));
-    if (option === undefined || to.has(canon(label)) || !carriesEffect.has(canon(label))) return;
+    if (option === undefined || to.has(canon(label)) || !carriesEffect(canon(label))) return;
     const suffix = kind === 'risk' && !/\brisk$/i.test(label.trim()) ? ' risk' : ' level';
     let next = `${label.trim()}${suffix}`;
     for (let n = 2; taken.has(canon(next)); n += 1) next = `${label.trim()}${suffix} ${n}`;
