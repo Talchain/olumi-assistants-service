@@ -150,6 +150,8 @@ describe('a number in words, or "zero", grounds only the factor it counts', () =
   it('CONTROL: "three enterprise customers" and "zero enterprise customers" state them', () => {
     expect(sourceOf('We have three enterprise customers today.', factor('Enterprise customers', 3, 'customers'))).toBe('brief_extraction');
     expect(sourceOf('We have zero enterprise customers today.', factor('Enterprise customers', 0, 'customers'))).toBe('brief_extraction');
+    // AIQ 5881553849: an adjective inside the phrase does not end it.
+    expect(sourceOf('We have three new enterprise customers.', factor('Enterprise customers', 3, 'customers'))).toBe('brief_extraction');
   });
 
   it('CONTROL: "zero churn" states a 0% monthly churn (zero is zero in any unit, and it names the factor)', () => {
