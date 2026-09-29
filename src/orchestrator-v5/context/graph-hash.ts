@@ -76,12 +76,13 @@ export function computeDeterministicGraphHash(
  *
  *   nodes: sorted by id, each → {
  *     id, kind, category, factor_type, is_baseline,
- *     observed_state: { value, baseline, cap },
+ *     observed_state: { value, baseline, cap, source, unit, raw_value },
  *     goal_threshold, goal_threshold_raw, goal_threshold_cap,
  *     intercept,
  *     prior: { distribution, range_min, range_max },
  *     encoding_map,
  *     nonlinear_identity (C46 carrier, as stored),
+ *     scale_frame,
  *     interventions: per-factor { value, value_type, encoding_map,
  *                                  target_match: { node_id } }
  *   }
@@ -100,7 +101,7 @@ export function computeDeterministicGraphHash(
  *
  * Excluded (cosmetic / provenance / display):
  *   labels, descriptions, display_value, provenance, provenance_display,
- *   origin, observed_state.{unit, source, raw_value, extractionType},
+ *   origin, observed_state.{extractionType, reviewed_by_user, elicited_from},
  *   intervention.{unit, source, reasoning, value_confidence, display_value},
  *   target_match.{match_type, confidence}, edge.validation, edge.defaulted,
  *   option.{description, unresolved_targets, user_questions, brief_quote}.
@@ -178,7 +179,14 @@ function pickDefined<T extends Record<string, unknown>>(
 
 function projectObservedState(raw: unknown): Record<string, unknown> | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
-  return pickDefined(raw as Record<string, unknown>, ['value', 'baseline', 'cap']);
+  // ⭐ `source` IS ANALYTICAL (Shared Data row 1, #72 5881225605): the engines read WHOSE a value is — ISL derives the
+  // base/level owner from this literal and CEE's per-limit verdict reads `level_olumi_estimate` from it. Live on served
+  // f79119b, the same 3.2% moving cee_inference → user_override left this hash unchanged, so a Run whose verdict was
+  // `estimate_only` stayed CURRENT while a rerun gave `scored`. The literal is hashed as stored (fail closed: a change
+  // between two user-class literals over-stales once; it never under-stales). `unit` and `raw_value` are analytical too
+  // (AIQ 5881494849): `level-limit-baseline.ts` reads them — with node `scale_frame` — into the PLoT wire (the relabelled
+  // `%` limit's unit; `percentLimitFrameProvable`, framed vs withheld). Vocabulary: schemas 0.62.0, projection version 3.
+  return pickDefined(raw as Record<string, unknown>, ['value', 'baseline', 'cap', 'source', 'unit', 'raw_value']);
 }
 
 function projectPrior(raw: unknown): Record<string, unknown> | undefined {
@@ -290,6 +298,9 @@ function projectNode(raw: unknown): NodeProjection {
     // C46 (#1972): the declaration the leader withhold is judged on. In the identity so `fresh` means the run's own
     // carrier; absent on every graph before #1972, so no stored graph changes hash.
     'nonlinear_identity',
+    // Shared Data row 1 (schemas 0.62.0, AIQ 5881494849): the frame `percentLimitFrameProvable` reads with `unit` /
+    // `raw_value` to decide whether a percent limit goes out framed or withheld.
+    'scale_frame',
   ] as const) {
     if (r[key] !== undefined) out[key] = r[key];
   }

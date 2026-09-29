@@ -814,6 +814,63 @@ export async function applyFactorValueEdit(
     );
   }
 
+  // ⭐ A CONFIRM IS REVIEW, NOT AUTHORSHIP (Shared Data row 1 — Canonical #72 5881225605; meaning AIQ 5881277231: R11
+  // extends to nodes; schemas 0.62.0 `factor_value_edit.intent`). The value was resolved above EXACTLY as a set would
+  // resolve it, so capped, capless and percent confirms read one rule, compared against the PERSISTED node (`graph`,
+  // never a client copy — DL 5881485082). The intent rule (AIQ 5881405845):
+  //   · `confirm_current`  — keeps the value: review; would MOVE it: refused, never turned into a set;
+  //   · ABSENT             — keeps the value: review (today's UI sends a confirm-as-is with no intent); moves it: a set;
+  //   · `set`              — authorship, even for the same number (in-process writers restating a figure send it).
+  // A review discards the authoring candidate (which stamps `user_override`) and records only `reviewed_by_user`:
+  // `source` is untouched, so the analysis hash and every verdict are byte-identical.
+  const intent = (event as { readonly intent?: unknown }).intent;
+  if (intent === 'confirm_current' || intent === undefined) {
+    const before = targetNode.observed_state as { value?: unknown; raw_value?: unknown; source?: unknown } | undefined;
+    const after = mergedParse.data.nodes.find((n) => n.id === event.target_id)?.observed_state as
+      | { value?: unknown; raw_value?: unknown }
+      | undefined;
+    const sameValue = typeof before?.value === 'number' && scaleValuesAgree(after?.value, before.value)
+      && (typeof before.raw_value !== 'number' || scaleValuesAgree(after?.raw_value, before.raw_value));
+    const keepsValue = appliedProvenance === undefined && sameValue;
+    if (!keepsValue && intent === 'confirm_current') {
+      return refuse(
+        payload,
+        'confirm_value_moved',
+        `That confirmation doesn't match the value in the model, so I haven't changed anything. ` +
+          `To change the figure, type the new value instead.`,
+      );
+    }
+    if (keepsValue) {
+      const reviewed = structuredClone(persistedGraph) as { nodes: Array<Record<string, unknown>> };
+      const node = reviewed.nodes.find((n) => n.id === event.target_id)!;
+      node.observed_state = {
+        ...(node.observed_state as Record<string, unknown>),
+        reviewed_by_user: { intent: 'confirm', at: new Date().toISOString() },
+      };
+      const reviewedParse = GraphV3.safeParse(reviewed);
+      if (!reviewedParse.success) {
+        return refuse(payload, 'merged_graph_invalid', `I couldn't save that confirmation. I haven't changed anything.`);
+      }
+      const label = typeof targetNode.label === 'string' && targetNode.label.length > 0 ? targetNode.label : 'that value';
+      const whose = before?.source === 'cee_inference' ? `as Olumi's estimate` : 'at its current value';
+      return {
+        kind: 'mutated',
+        response: composeToolCallResponse({
+          answerKind: 'functional',
+          orientation: '',
+          confirmation: `Kept ${label} ${whose} and noted that you reviewed it. The analysis is unchanged.`,
+          coaching: null,
+          stage: payload.stage,
+          handlerFacts: [],
+        }),
+        mutatedGraph: reviewed,
+        handlerFacts: [],
+        graph: reviewedParse.data,
+        baseGraph: persistedGraph,
+      };
+    }
+  }
+
   // The SAME composer the NL lane uses — this is what maps the
   // `set_factor_value` fact to the boundary `graph_patch` block.
   const response = composeToolCallResponse({
