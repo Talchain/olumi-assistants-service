@@ -382,6 +382,13 @@ export interface ContextPackAnalysis {
    * or the winner is feasible (byte-identity by key absence).
    */
   readonly constraint_infeasible_note?: string;
+  /**
+   * ⛔ ABSENT STAYS ABSENT (AIQ 5886457733; DL 5886379820). Present when the run WITHHELD its per-option goal figures
+   * (PLoT #416's typed code, `reason_code`) or when any option the run could rank carries no win probability
+   * (`reason_code: null`). Then no option leads, none is ranked, and `note` says why — in place of a winner, never a 0.
+   * The note names no option. ABSENT otherwise (byte-identity by key absence).
+   */
+  readonly figures_withheld?: { readonly reason_code: string | null; readonly note: string };
   // V5 state-trust: `staleness_reason` removed from the prompt-visible
   // analysis section — freshness is now a deterministic verdict on the
   // wire (`analysis_ready.freshness`) and a telemetry signal
@@ -2684,8 +2691,12 @@ export function projectAnalysis(
   //    status stays recommendable, so status-less inputs are unaffected.
   //    Then the probability scale guard, then sort desc. F.6 passthrough: we
   //    only filter+sort; we do not transform values.
-  const validOptions: OptionSummary[] = analysis.options
-    .filter(isRecommendableTypedOption)
+  // ⛔ ABSENT STAYS ABSENT (AIQ 5886457733): an option with no win probability is never 0 and never ranked, and one
+  // such option means NO option leads — never a partial leader from the rest. The typed reason travels instead.
+  const recommendable = analysis.options.filter(isRecommendableTypedOption);
+  const figuresWithheld = figuresWithheldOf(analysis, recommendable.some((o) => o.win_probability === null));
+  const validOptions: Array<OptionSummary & { win_probability: number }> = figuresWithheld?.ranks_nothing === true ? [] : recommendable
+    .filter((o): o is OptionSummary & { win_probability: number } => o.win_probability !== null)
     .filter((o) =>
       isProbabilityValid(o.win_probability, {
         call_site: 'projectAnalysis.options',
@@ -2717,7 +2728,7 @@ export function projectAnalysis(
     analysis.winner.constraint_infeasible === true && analysis.winner.option_id.length > 0
       ? analysis.winner.option_id
       : null;
-  const projectOption = (o: OptionSummary): ContextPackAnalysisOption => {
+  const projectOption = (o: OptionSummary & { win_probability: number }): ContextPackAnalysisOption => {
     const goalFit = goalFitFor(o);
     const outcomeMean = outcomeFor(o);
     return {
@@ -2882,7 +2893,35 @@ export function projectAnalysis(
     analysis.constraint_infeasible_note.length > 0
       ? { constraint_infeasible_note: analysis.constraint_infeasible_note }
       : {}),
+    ...(figuresWithheld !== undefined ? { figures_withheld: { reason_code: figuresWithheld.reason_code, note: figuresWithheld.note } } : {}),
   };
+}
+
+/** PLoT's own UI-slot opening ("Not shown.") is not a sentence for a reply; the reason after it is kept verbatim. */
+const PLOT_UI_OPENING = /^Not shown\.\s*/;
+export const FIGURES_WITHHELD_BY_RUN_NOTE =
+  'This run withheld the chance of reaching the goal for every option, and the estimates for the goal that come from the '
+  + 'same calculation. Never state, estimate, rank or compare a chance of reaching the goal for any option, and never name '
+  + 'an option as leading on it.';
+export const FIGURES_ABSENT_NOTE =
+  'This run gave no win probability for at least one option, so no option leads and none is ranked. Never state a win '
+  + 'probability of 0 for an option the run gave none, and never name a leading option from this run.';
+
+/**
+ * The context pack's `figures_withheld`, or `undefined`. The run's typed withhold (`analysis.figures_withheld`, PLoT
+ * #416's code) gives its reason; any recommendable option with no win probability means nothing is ranked.
+ */
+function figuresWithheldOf(
+  analysis: AnalysisResponseSummaryWithSignals,
+  anyAbsent: boolean,
+): { reason_code: string | null; note: string; ranks_nothing: boolean } | undefined {
+  const typed = analysis.figures_withheld;
+  if (typed !== undefined) {
+    const reason = typed.message.replace(PLOT_UI_OPENING, '').trim();
+    const note = anyAbsent ? `${FIGURES_WITHHELD_BY_RUN_NOTE} ${FIGURES_ABSENT_NOTE}` : FIGURES_WITHHELD_BY_RUN_NOTE;
+    return { reason_code: typed.code, note: reason === '' ? note : `${note} Why: ${reason}`, ranks_nothing: anyAbsent };
+  }
+  return anyAbsent ? { reason_code: null, note: FIGURES_ABSENT_NOTE, ranks_nothing: true } : undefined;
 }
 
 function isFiniteSensitivity(value: unknown): value is number {

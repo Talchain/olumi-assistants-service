@@ -11,7 +11,9 @@
  * AIQ 5886183999: the goal's per-option estimates come from the same wrong walk, so they are the same unsupported class.
  */
 
-export const GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED = 'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED';
+import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED } from '../../orchestrator/context/option-result-source.js';
+
+export { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED };
 
 /** What the Agent is told when the run withheld the goal's chance. */
 export interface GoalChanceWithheld {
