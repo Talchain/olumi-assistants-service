@@ -7,6 +7,7 @@
  * remains exported only for compatibility tests and per-option diagnostics.
  */
 
+import { statedIdentityFrameGaps } from '../../cee/graph-readiness/identity-frames.js';
 import { GraphV3, OptionStatusV3 } from "../../schemas/cee-v3.js";
 import type { GraphV3T, OptionV3T } from "../../schemas/cee-v3.js";
 import type { GraphPatchBlockData } from "../types.js";
@@ -87,6 +88,7 @@ export type CanonicalReadinessIssueCode =
   | 'CONSTRAINT_REVIEW_REQUIRED'
   | 'UNREACHABLE_CONTROLLABLE_FACTOR'
   | 'MISSING_FACTOR_LEVEL'
+  | 'IDENTITY_FRAME_MISSING'
   | 'INTERNAL_ERROR';
 
 export interface CanonicalReadinessIssue {
@@ -1559,6 +1561,22 @@ export function assessCanonicalAnalysisReadiness(
         code: 'MISSING_FACTOR_LEVEL',
         category: 'option_values',
         message: statusQuoLevelAsk(gap.label),
+        repairability: 'human_input_required',
+        factor_id: gap.id,
+        factor_label: gap.label,
+      });
+    });
+
+    // ⭐ A STATED IDENTITY WITH A FRAMELESS PART (`identity-frames.ts`): ISL would refuse the whole Run as
+    // `identity_frame_missing` and the Run would answer with a unit question, so readiness asks it first (Canvas 5898075514).
+    statedIdentityFrameGaps(parsed.data).forEach((gap, index) => {
+      blockingIssues.push({
+        issue_id: `identity_frame_${index + 1}`,
+        code: 'IDENTITY_FRAME_MISSING',
+        category: 'numeric_integrity',
+        message: gap.id === gap.identity_id
+          ? `What unit is "${gap.label}" measured in? Olumi needs it to work out "${gap.label}" from its parts.`
+          : `What unit is "${gap.label}" in? Olumi needs it to work out "${gap.identity_label}" from it.`,
         repairability: 'human_input_required',
         factor_id: gap.id,
         factor_label: gap.label,
