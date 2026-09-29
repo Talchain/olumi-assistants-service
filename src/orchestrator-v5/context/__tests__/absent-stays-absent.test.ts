@@ -160,3 +160,71 @@ describe('objective contradiction: an absent win % is not 0 and names no leader'
     expect(detectGoalAttainmentContradiction(withGoal)).toBeNull();
   });
 });
+
+/**
+ * ⛔ GOAL CHANCE AND THE LIMITS-ONLY JOINT NEVER SHARE `target_fit` (AIQ 5887531086; DL 5887546998). PLoT's
+ * `probability_of_joint_goal` is "jointly satisfying all goal_constraints" — the user's LIMITS, never the goal's target.
+ * It refilled an absent P(goal) as `target_fit` ("the modelled probability it meets your target"), and served w2285 S3
+ * said a downtime-only 100% as savings. Corpus: S3 as served (P(goal) absent, the joint 1 / 0.981 / 1) and AIQ's w416 E
+ * (Paul's P1: P(goal) 0 everywhere, the joint 1).
+ */
+import { deriveGoalFitFromEnrichment, deriveOptionGoalFitsFromEnrichment } from '../analysis-signals.js';
+import { analysisResultForAgent, ALL_LIMITS_HOLD_NOTE } from '../../agent-lane/decision-sensitivity.js';
+import { GOAL_FIT_NOT_SCORED_LINE } from '../../format/format-analysis-for-context.js';
+
+const TF = JSON.parse(readFileSync(new URL('./fixtures/served-target-fit-S3-E-20260929.json', import.meta.url), 'utf8')) as { S3: Json; E: Json };
+const withSignals = (e: Json) => ({ ...compactAnalysis(e as never)!, option_goal_fits: deriveOptionGoalFitsFromEnrichment(e), goal_fit: deriveGoalFitFromEnrichment(e) });
+const display = (e: Json) => formatAnalysisForContext(projectAnalysis(withSignals(e) as never, null), { analysisFreshness: 'fresh' })!;
+
+describe('target_fit is P(goal) ONLY — the limits-only joint never refills it', () => {
+  it('precondition (served S3): P(goal) absent on every option, the joint present', () => {
+    for (const o of TF.S3.option_comparison as Json[]) {
+      expect(o.probability_of_goal).toBeUndefined();
+      expect(typeof o.probability_of_joint_goal).toBe('number');
+    }
+  });
+
+  it('R1 (served S3): no option carries a goal fit, and the "target-fit not scored" line is said', () => {
+    const p = projectAnalysis(withSignals(TF.S3) as never, null)!;
+    for (const o of [p.leading_option, p.runner_up, ...(p.options ?? [])].filter(Boolean)) expect(o).not.toHaveProperty('goal_fit_probability');
+    const d = display(TF.S3);
+    expect(JSON.stringify(d)).not.toContain('target_fit');
+    expect(d.goal_fit).toBe(GOAL_FIT_NOT_SCORED_LINE);
+  });
+
+  it('R2 CONTROL (served E, Paul\'s P1): P(goal) present → target_fit IS P(goal) (0%), never the joint (100%)', () => {
+    const p = projectAnalysis(withSignals(TF.E) as never, null)!;
+    expect(p.options!.every((o) => o.goal_fit_probability === 0)).toBe(true);
+    expect(JSON.stringify(display(TF.E))).toContain('target_fit');
+  });
+
+  it('R3: #416\'s withhold + a limit off the identity path → no target_fit', () => {
+    const withheld = { ...TF.S3, inference_warnings: [...((TF.S3.inference_warnings as Json[]) ?? []), { code: CODE, message: `Not shown. ${REASON}`, node_ids: ['x'] }] };
+    const p = projectAnalysis(withSignals(withheld) as never, null)!;
+    for (const o of p.options ?? []) expect(o).not.toHaveProperty('goal_fit_probability');
+    expect(display(withheld).goal_fit).toBe(GOAL_FIT_NOT_SCORED_LINE);
+  });
+});
+
+describe('the Agent sees the joint only as a LIMITS figure, never as `goal_fit`', () => {
+  const block = (e: Json): Json => ({ type: 'analysis_result', summary: 's', enrichment: structuredClone(e) });
+
+  it('RED (served S3): each option\'s joint is `all_limits_hold_probability`; the brief\'s `goal_fit` (the leader\'s joint) is gone; the note says it excludes the goal', () => {
+    expect(TF.S3.decision_brief.analysis_summary.goal_fit, 'precondition: the served brief labels the leader\'s joint goal_fit').toBe(0.981);
+    const out = analysisResultForAgent(block(TF.S3)) as Json;
+    const rows = out.enrichment.option_comparison as Json[];
+    expect(rows.map((r) => r.all_limits_hold_probability)).toEqual([1, 0.981, 1]);
+    for (const r of rows) expect(r).not.toHaveProperty('probability_of_joint_goal');
+    expect(out.enrichment.decision_brief.analysis_summary).not.toHaveProperty('goal_fit');
+    expect(JSON.stringify(out)).not.toMatch(/"goal_fit"|probability_of_joint_goal/);
+    expect(out.limits_note).toBe(ALL_LIMITS_HOLD_NOTE);
+    expect(out.limits_note).toMatch(/does NOT include the goal’s target/);
+  });
+
+  it('CONTROL: a run with no joint gets no limits note and is otherwise unchanged', () => {
+    const noJoint = structuredClone(TF.S3);
+    for (const o of noJoint.option_comparison as Json[]) delete o.probability_of_joint_goal;
+    delete noJoint.decision_brief.analysis_summary.goal_fit;
+    expect(analysisResultForAgent(block(noJoint))).not.toHaveProperty('limits_note');
+  });
+});

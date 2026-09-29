@@ -1,0 +1,698 @@
+{
+ "source": "S3: Runtime's served w2285 S3 on CEE 0497e52 (scenario 7374d4b9, the cloud brief built by the Agent): the read's analysis_result.enrichment. E: AI Quality's served w416 case E on PLoT 261d8c2 (Paul's P1, MRR evaluated). Only the fields the readers use are kept.",
+ "S3": {
+  "option_comparison": [
+   {
+    "id": "keep_aws",
+    "label": "Keep AWS",
+    "status": "computed",
+    "outcome": {
+     "p10": 0,
+     "p50": 0,
+     "p90": 0,
+     "std": 0,
+     "mean": 0,
+     "n_samples": 10000,
+     "validity_ratio": 1,
+     "n_valid_samples": 10000,
+     "percentiles_source": "samples"
+    },
+    "downside": {
+     "p05": 0,
+     "cvar_10": 0,
+     "expected_regret": 0.0077483074251349406
+    },
+    "option_id": "keep_aws",
+    "option_label": "Keep AWS",
+    "win_probability": 0.14883333333333226,
+    "constraint_margins": [
+     {
+      "constraint_id": "agent-lane:migration_downtime:<="
+     }
+    ],
+    "constraint_probabilities": {
+     "agent-lane:migration_downtime:<=": 1
+    },
+    "probability_of_joint_goal": 1,
+    "constraints_decision_grade": true
+   },
+   {
+    "id": "switch_to_gcp",
+    "label": "Switch to GCP",
+    "status": "computed",
+    "outcome": {
+     "p10": -0.6112042618157426,
+     "p50": -0.4169657791006113,
+     "p90": 0.030708452787385918,
+     "std": 0.23291501796259376,
+     "mean": -0.3587111374297861,
+     "n_samples": 10000,
+     "validity_ratio": 1,
+     "n_valid_samples": 10000,
+     "percentiles_source": "samples"
+    },
+    "downside": {
+     "p05": -0.6589135700651182,
+     "cvar_10": -0.6745637071518211,
+     "expected_regret": 0.3664594448549211
+    },
+    "option_id": "switch_to_gcp",
+    "option_label": "Switch to GCP",
+    "win_probability": 0.8253333333333239,
+    "constraint_margins": [
+     {
+      "constraint_id": "agent-lane:migration_downtime:<=",
+      "near_miss_fraction": 0.6947368421052632,
+      "failure_margin_median": 0.14429452367657536
+     }
+    ],
+    "constraint_probabilities": {
+     "agent-lane:migration_downtime:<=": 0.981
+    },
+    "probability_of_joint_goal": 0.981,
+    "constraints_decision_grade": true
+   },
+   {
+    "id": "phased_gcp_migration",
+    "label": "Phased GCP migration",
+    "status": "computed",
+    "outcome": {
+     "p10": -0.3056021309078713,
+     "p50": -0.20848288955030564,
+     "p90": 0.015354226393692959,
+     "std": 0.11645750898129688,
+     "mean": -0.17935556871489305,
+     "n_samples": 10000,
+     "validity_ratio": 1,
+     "n_valid_samples": 10000,
+     "percentiles_source": "samples"
+    },
+    "downside": {
+     "p05": -0.3294567850325591,
+     "cvar_10": -0.33728185357591056,
+     "expected_regret": 0.18710387614002802
+    },
+    "option_id": "phased_gcp_migration",
+    "option_label": "Phased GCP migration",
+    "win_probability": 0.02583333333333361,
+    "constraint_margins": [
+     {
+      "constraint_id": "agent-lane:migration_downtime:<="
+     }
+    ],
+    "constraint_probabilities": {
+     "agent-lane:migration_downtime:<=": 1
+    },
+    "probability_of_joint_goal": 1,
+    "constraints_decision_grade": true
+   }
+  ],
+  "inference_warnings": [
+   {
+    "code": "ZERO_FACTOR_HELD_EXACT",
+    "message": "Olumi holds the starting level of \"Migration downtime\" at 0 weeks exactly; the options still move it.",
+    "severity": "info",
+    "node_label": "Migration downtime"
+   },
+   {
+    "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+    "message": "2 edge E-value entries were omitted from edge_e_values: 2 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+    "severity": "info"
+   }
+  ],
+  "confidence_tier": "strong",
+  "decision_brief": {
+   "options": [
+    {
+     "rank": 1,
+     "label": "Switch to GCP",
+     "option_id": "switch_to_gcp",
+     "win_probability": 0.8253333333333239
+    },
+    {
+     "rank": 2,
+     "label": "Keep AWS",
+     "option_id": "keep_aws",
+     "win_probability": 0.14883333333333226
+    },
+    {
+     "rank": 3,
+     "label": "Phased GCP migration",
+     "option_id": "phased_gcp_migration",
+     "win_probability": 0.02583333333333361
+    }
+   ],
+   "version": "1",
+   "brief_id": "073bcc74-6401-4e8a-9b92-6e29962fde89",
+   "headline": "Switch to GCP currently leads by 68 points, but the model is not yet strong enough for an unqualified decision. Treat this as a provisional lead until the fragile assumptions are checked. Validate the fragile assumptions before treating this as a decision.",
+   "warnings": [
+    {
+     "code": "DEGENERATE_OPTION_ZERO_VARIANCE",
+     "message": "Option 'Keep AWS' has zero variance — intervention may have no causal path to goal",
+     "severity": "warning"
+    },
+    {
+     "code": "M2_UNAVAILABLE",
+     "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+     "severity": "warning"
+    }
+   ],
+   "created_at": "2026-09-29T09:23:44.764Z",
+   "robustness": "robust",
+   "top_drivers": [
+    {
+     "direction": "positive",
+     "sensitivity": 1,
+     "factor_label": "Migration downtime"
+    }
+   ],
+   "warning_codes": [],
+   "headline_banded": {
+    "band": "clearly_ahead",
+    "text": "Switch to GCP is clearly ahead.",
+    "doctrine": "provisional_doctrine_v0",
+    "leader_label": "Switch to GCP",
+    "runner_up_label": "Keep AWS",
+    "leader_option_id": "switch_to_gcp",
+    "robustness_gated": false,
+    "runner_up_option_id": "keep_aws",
+    "win_probability_gap": 0.6764999999999917
+   },
+   "key_assumptions": [
+    "Migration downtime"
+   ],
+   "analysis_summary": {
+    "goal_fit": 0.981,
+    "leading_option": "Switch to GCP",
+    "robustness_band": "robust",
+    "win_probability": 0.8253333333333239
+   },
+   "robustness_caveat": {
+    "text": "This run held up under the changes we tested. That is not a guarantee. Defaulted or uncertain inputs could still change it.",
+    "basis": "is_robust",
+    "doctrine": "provisional_doctrine_v0",
+    "flip_evidence": {
+     "text": "Changing at least one tested factor on its own could change which option is most likely to achieve your goal.",
+     "status": "computed"
+    }
+   },
+   "what_would_change": [],
+   "defaulted_assumptions": []
+  },
+  "critiques": [
+   {
+    "id": "critique_d78ed66028a9",
+    "code": "DEGENERATE_OPTION_ZERO_VARIANCE",
+    "severity": "warning",
+    "source": "isl",
+    "blocks_analysis": false,
+    "affected_option_ids": [
+     "keep_aws"
+    ],
+    "user_message": "Option 'Keep AWS' produces the same result in every simulation, so nothing in your model makes its outcome uncertain. If you expected it to move, review the factors it changes and the ranges set on them."
+   }
+  ]
+ },
+ "E": {
+  "critiques": [
+   {
+    "id": "82559fb8-239d-4821-96c8-0c3bd7ad09b7",
+    "code": "IDENTICAL_OPTIONS_DEDUPED",
+    "severity": "warning",
+    "message": "Option '£59 for new Pro customers; grandfather existing customers' has identical interventions to 'Increase price to £59' and was removed. Analysis proceeds with deduplicated options.",
+    "source": "validation",
+    "affected_option_ids": [
+     "increase_price_to_59",
+     "146aa89d"
+    ],
+    "blocks_analysis": false,
+    "user_message": "Some options had identical effects and were merged. Analysis proceeds with the unique options."
+   },
+   {
+    "id": "5c74cfd0-dbf4-4434-b97c-9959970d4ca4",
+    "code": "MIXED_RANGE_DERIVATION",
+    "severity": "info",
+    "message": "Factors use 4 different range derivation tiers. Normalisation quality may vary.",
+    "source": "validation",
+    "affected_node_ids": [
+     "fac_existing_customers_grandfathered",
+     "monthly_churn",
+     "monthly_new_pro_subscribers",
+     "mrr",
+     "other_mrr_growth",
+     "pro_paying_subscribers",
+     "pro_plan_price"
+    ],
+    "blocks_analysis": false,
+    "user_message": "Factors use different methods to determine their value ranges. Normalisation quality may vary."
+   },
+   {
+    "id": "58066764-8639-425f-91a3-1b3d5e64ee19",
+    "code": "CONSTRAINT_MISSING_RANGE",
+    "severity": "info",
+    "message": "Constraint \"agent-lane:monthly_churn:<=\" target node \"monthly_churn\" has no derivable range. Constraint value will be compared as-is by ISL.",
+    "source": "validation",
+    "affected_node_ids": [
+     "monthly_churn"
+    ],
+    "blocks_analysis": false,
+    "user_message": "The constraint on Monthly churn cannot be range-checked. The constraint value will be used as-is."
+   },
+   {
+    "id": "3ecb121c-8889-4c96-aa85-8b92fd45679d",
+    "code": "NORMALIZATION_WARNING",
+    "severity": "info",
+    "message": "Node 'keep_current_49_price' has kind='option'. Option nodes are filtered before analysis.",
+    "source": "validation",
+    "blocks_analysis": false,
+    "user_message": "An option was excluded from factor analysis. This is expected."
+   },
+   {
+    "id": "9b33cacb-88f0-4d95-9828-e2eacaaa6588",
+    "code": "NORMALIZATION_WARNING",
+    "severity": "info",
+    "message": "Node 'increase_price_to_59' has kind='option'. Option nodes are filtered before analysis.",
+    "source": "validation",
+    "blocks_analysis": false,
+    "user_message": "An option was excluded from factor analysis. This is expected."
+   },
+   {
+    "id": "aecc1f17-74eb-438a-a3a0-c5129c22954d",
+    "code": "NORMALIZATION_WARNING",
+    "severity": "info",
+    "message": "Node 'increase_price_to_54' has kind='option'. Option nodes are filtered before analysis.",
+    "source": "validation",
+    "blocks_analysis": false,
+    "user_message": "An option was excluded from factor analysis. This is expected."
+   },
+   {
+    "id": "6d87111e-2e38-424e-a232-a66edcc08c3a",
+    "code": "NORMALIZATION_WARNING",
+    "severity": "info",
+    "message": "Node '146aa89d' has kind='option'. Option nodes are filtered before analysis.",
+    "source": "validation",
+    "blocks_analysis": false,
+    "user_message": "An option was excluded from factor analysis. This is expected."
+   },
+   {
+    "id": "e7d3df13-56d9-41e8-9288-401336df37dd",
+    "code": "NORMALIZATION_WARNING",
+    "severity": "info",
+    "message": "Node '6dbac00d' has kind='option'. Option nodes are filtered before analysis.",
+    "source": "validation",
+    "blocks_analysis": false,
+    "user_message": "An option was excluded from factor analysis. This is expected."
+   },
+   {
+    "id": "bb3554cf-ac5f-4fc7-9ff0-449926b65c2a",
+    "code": "NORMALIZATION_WARNING",
+    "severity": "info",
+    "message": "Node 'ca47b368' has kind='option'. Option nodes are filtered before analysis.",
+    "source": "validation",
+    "blocks_analysis": false,
+    "user_message": "An option was excluded from factor analysis. This is expected."
+   },
+   {
+    "id": "critique_8c4bd690c920",
+    "code": "DEGENERATE_OPTION_ZERO_VARIANCE",
+    "severity": "warning",
+    "message": "Option 'Keep current £49 price' has zero variance — intervention may have no causal path to goal",
+    "suggestion": "Check that intervention targets are connected to the goal with non-zero edge strengths",
+    "source": "isl",
+    "affected_option_ids": [
+     "keep_current_49_price"
+    ],
+    "blocks_analysis": false,
+    "user_message": "This option's result has no spread: every figure it depends on is set exactly."
+   },
+   {
+    "id": "critique_c2d09197caa9",
+    "code": "GOAL_ANCESTOR_DATA_GAP",
+    "severity": "warning",
+    "message": "Goal node 'mrr' is scored from its forward-propagated outcome distribution, but root ancestor(s) 'fac_existing_customers_grandfathered' carry no observed value or ParameterUncertainty and defaulted to 0.0 — goal-level probabilities partially rest on placeholder zeros (insufficient data)",
+    "suggestion": "Provide observed values or ParameterUncertainty entries for the listed root ancestors; until then the honest reading of goal-fit is 'insufficient data', not a calibrated probability",
+    "source": "isl",
+    "affected_node_ids": [
+     "mrr"
+    ],
+    "blocks_analysis": false,
+    "user_message": "Some of the factors feeding your goal carry no data, so the analysis substituted zero for them. The honest reading of goal-fit here is \"not enough data\" rather than a firm probability — add values for those factors to get a calibrated answer."
+   },
+   {
+    "id": "critique_f0015abacc37",
+    "code": "FACTOR_STABILITY_ANCHORED",
+    "severity": "info",
+    "message": "Sensitivity stability is withheld for monthly_churn, monthly_new_pro_subscribers, other_mrr_growth, pro_paying_subscribers, pro_plan_price: every path from them to the goal runs through mrr, which is anchored to its stated level, so the one-at-a-time check cannot see them",
+    "suggestion": "Read the structural influence and the options' outcomes for these factors instead",
+    "source": "isl",
+    "affected_node_ids": [
+     "monthly_churn",
+     "monthly_new_pro_subscribers",
+     "other_mrr_growth",
+     "pro_paying_subscribers",
+     "pro_plan_price"
+    ],
+    "blocks_analysis": false,
+    "user_message": "We found something worth checking in your model, but we do not yet have a plain-English explanation for this one. Open the advanced details for the technical note, then re-run the analysis — if it keeps happening, send us that note and we will look into it."
+   }
+  ],
+  "option_comparison": [
+   {
+    "option_id": "keep_current_49_price",
+    "option_label": "Keep current £49 price",
+    "id": "keep_current_49_price",
+    "label": "Keep current £49 price",
+    "outcome": {
+     "mean": 74999.99999999999,
+     "std": 1.3877787807814457e-11,
+     "p10": 75000,
+     "p50": 75000,
+     "p90": 75000,
+     "n_samples": 10000,
+     "n_valid_samples": 10000,
+     "validity_ratio": 1,
+     "percentiles_source": "samples"
+    },
+    "status": "computed",
+    "probability_of_goal": 0,
+    "win_probability": 0,
+    "downside": {
+     "cvar_10": 0.5999999999999998,
+     "p05": 0.6,
+     "expected_regret": 0.11466055926046899
+    },
+    "probability_of_joint_goal": 1,
+    "constraint_probabilities": {
+     "agent-lane:monthly_churn:<=": 1
+    },
+    "constraints_decision_grade": true,
+    "constraint_margins": [
+     {
+      "constraint_id": "agent-lane:monthly_churn:<=",
+      "level_out_of_domain_fraction": 0
+     }
+    ]
+   },
+   {
+    "option_id": "increase_price_to_59",
+    "option_label": "Increase price to £59",
+    "id": "increase_price_to_59",
+    "label": "Increase price to £59",
+    "outcome": {
+     "mean": 89332.56990755862,
+     "std": 910.5517865049682,
+     "p10": 88041.12555503935,
+     "p50": 89610.24497185419,
+     "p90": 90102.04081632654,
+     "n_samples": 10000,
+     "n_valid_samples": 10000,
+     "validity_ratio": 1,
+     "percentiles_source": "samples"
+    },
+    "status": "computed",
+    "probability_of_goal": 0,
+    "win_probability": 1,
+    "downside": {
+     "cvar_10": 0.6990081380351709,
+     "p05": 0.700351388276154,
+     "expected_regret": 0
+    },
+    "probability_of_joint_goal": 1,
+    "constraint_probabilities": {
+     "agent-lane:monthly_churn:<=": 1
+    },
+    "constraints_decision_grade": true,
+    "constraint_margins": [
+     {
+      "constraint_id": "agent-lane:monthly_churn:<=",
+      "level_out_of_domain_fraction": 0
+     }
+    ]
+   },
+   {
+    "option_id": "increase_price_to_54",
+    "option_label": "Increase price to £54",
+    "id": "increase_price_to_54",
+    "label": "Increase price to £54",
+    "outcome": {
+     "mean": 82198.88965330338,
+     "std": 416.69319043447734,
+     "p10": 81607.88969537083,
+     "p50": 82325.96129289626,
+     "p90": 82551.02040816327,
+     "n_samples": 10000,
+     "n_valid_samples": 10000,
+     "validity_ratio": 1,
+     "percentiles_source": "samples"
+    },
+    "status": "computed",
+    "probability_of_goal": 0,
+    "win_probability": 0,
+    "downside": {
+     "cvar_10": 0.6504281448012905,
+     "p05": 0.6510428525386898,
+     "expected_regret": 0.05706944203404198
+    },
+    "probability_of_joint_goal": 1,
+    "constraint_probabilities": {
+     "agent-lane:monthly_churn:<=": 1
+    },
+    "constraints_decision_grade": true,
+    "constraint_margins": [
+     {
+      "constraint_id": "agent-lane:monthly_churn:<=",
+      "level_out_of_domain_fraction": 0
+     }
+    ]
+   },
+   {
+    "option_id": "6dbac00d",
+    "option_label": "Improve trial-to-Pro conversion",
+    "id": "6dbac00d",
+    "label": "Improve trial-to-Pro conversion",
+    "outcome": {
+     "mean": 75592.95687660432,
+     "std": 443.9562165150058,
+     "p10": 75000,
+     "p50": 75625.16435168989,
+     "p90": 76161.03534188619,
+     "n_samples": 10000,
+     "n_valid_samples": 10000,
+     "validity_ratio": 1,
+     "percentiles_source": "samples"
+    },
+    "status": "computed",
+    "probability_of_goal": 0,
+    "win_probability": 0,
+    "downside": {
+     "cvar_10": 0.5997843504696594,
+     "p05": 0.6,
+     "expected_regret": 0.10991690424763435
+    },
+    "probability_of_joint_goal": 1,
+    "constraint_probabilities": {
+     "agent-lane:monthly_churn:<=": 1
+    },
+    "constraints_decision_grade": true,
+    "constraint_margins": [
+     {
+      "constraint_id": "agent-lane:monthly_churn:<=",
+      "level_out_of_domain_fraction": 0
+     }
+    ]
+   },
+   {
+    "option_id": "ca47b368",
+    "option_label": "Retention intervention for at-risk accounts",
+    "id": "ca47b368",
+    "label": "Retention intervention for at-risk accounts",
+    "outcome": {
+     "mean": 75295.54464243303,
+     "std": 221.83992227341776,
+     "p10": 75000,
+     "p50": 75311.82252605642,
+     "p90": 75580.3052852554,
+     "n_samples": 10000,
+     "n_valid_samples": 10000,
+     "validity_ratio": 1,
+     "percentiles_source": "samples"
+    },
+    "status": "computed",
+    "probability_of_goal": 0,
+    "win_probability": 0,
+    "downside": {
+     "cvar_10": 0.5998919831366266,
+     "p05": 0.6,
+     "expected_regret": 0.1122962021210048
+    },
+    "probability_of_joint_goal": 1,
+    "constraint_probabilities": {
+     "agent-lane:monthly_churn:<=": 1
+    },
+    "constraints_decision_grade": true,
+    "constraint_margins": [
+     {
+      "constraint_id": "agent-lane:monthly_churn:<=",
+      "level_out_of_domain_fraction": 0
+     }
+    ]
+   }
+  ],
+  "inference_warnings": [
+   {
+    "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+    "message": "7 edge E-value entries were omitted from edge_e_values: 7 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+    "severity": "info"
+   },
+   {
+    "code": "ROOT_NODE_DEFAULT_VALUE",
+    "message": "No starting value was provided for \"Existing customers grandfathered\", so the analysis used a default of 0.0. Results for downstream nodes may be unreliable until a real value or range is set.",
+    "severity": "info",
+    "field": "nodes[fac_existing_customers_grandfathered].observed_state.value",
+    "node_label": "Existing customers grandfathered"
+   },
+   {
+    "code": "GOAL_DIRECTION_UNATTESTED",
+    "message": "No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team's stated aim: if the goal is a quantity to reduce, or the aim is to land near a target rather than as high as possible, this ranking answers a different question. Send goal_direction to rank against the stated objective.",
+    "severity": "warning",
+    "field": "goal_direction"
+   },
+   {
+    "code": "GOAL_ANCESTOR_DATA_GAP",
+    "message": "Goal node 'mrr' is scored from its forward-propagated outcome distribution, but root ancestor(s) 'fac_existing_customers_grandfathered' carry no observed value or ParameterUncertainty and defaulted to 0.0 — goal-level probabilities partially rest on placeholder zeros (insufficient data).",
+    "severity": "info",
+    "field": "nodes[mrr]"
+   }
+  ],
+  "confidence_tier": "strong",
+  "decision_brief": {
+   "brief_id": "818042e7-46ac-4663-af3a-1914e749ddb9",
+   "version": "1",
+   "graph_hash": "3d51e539835ef07c",
+   "seed": 543524382,
+   "created_at": "2026-09-29T09:11:07.464Z",
+   "headline": "Increase price to £59 currently leads by 100 points on the current model. This option leads on the current model, with important caveats. Before acting, validate the assumptions most likely to change the result.",
+   "options": [
+    {
+     "option_id": "increase_price_to_59",
+     "label": "Increase price to £59",
+     "win_probability": 1,
+     "rank": 1
+    },
+    {
+     "option_id": "6dbac00d",
+     "label": "Improve trial-to-Pro conversion",
+     "win_probability": 0,
+     "rank": 2
+    },
+    {
+     "option_id": "ca47b368",
+     "label": "Retention intervention for at-risk accounts",
+     "win_probability": 0,
+     "rank": 3
+    },
+    {
+     "option_id": "increase_price_to_54",
+     "label": "Increase price to £54",
+     "win_probability": 0,
+     "rank": 4
+    },
+    {
+     "option_id": "keep_current_49_price",
+     "label": "Keep current £49 price",
+     "win_probability": 0,
+     "rank": 5
+    }
+   ],
+   "top_drivers": [
+    {
+     "factor_label": "Pro paying subscribers",
+     "sensitivity": 0.303695595781162,
+     "direction": "positive"
+    },
+    {
+     "factor_label": "Other MRR growth",
+     "sensitivity": 0.8098549220830987,
+     "direction": "positive"
+    },
+    {
+     "factor_label": "Existing customers grandfathered",
+     "sensitivity": 0.9895414829202863,
+     "direction": "negative"
+    }
+   ],
+   "key_assumptions": [
+    "Pro paying subscribers",
+    "Other MRR growth",
+    "Existing customers grandfathered"
+   ],
+   "what_would_change": [],
+   "robustness": "robust",
+   "warnings": [
+    {
+     "code": "DEGENERATE_OPTION_ZERO_VARIANCE",
+     "message": "Option 'Keep current £49 price' has zero variance — intervention may have no causal path to goal",
+     "severity": "warning"
+    },
+    {
+     "code": "GOAL_ANCESTOR_DATA_GAP",
+     "message": "Goal node 'mrr' is scored from its forward-propagated outcome distribution, but root ancestor(s) 'fac_existing_customers_grandfathered' carry no observed value or ParameterUncertainty and defaulted to 0.0 — goal-level probabilities partially rest on placeholder zeros (insufficient data)",
+     "severity": "warning"
+    },
+    {
+     "code": "IDENTICAL_OPTIONS_DEDUPED",
+     "message": "Option '£59 for new Pro customers; grandfather existing customers' has identical interventions to 'Increase price to £59' and was removed. Analysis proceeds with deduplicated options.",
+     "severity": "warning"
+    },
+    {
+     "code": "M2_UNAVAILABLE",
+     "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+     "severity": "warning"
+    }
+   ],
+   "lineage": {
+    "config_version": "aa35b033304d",
+    "response_hash": "3d51e539835ef07c",
+    "n_samples": 10000
+   },
+   "headline_banded": {
+    "text": "Increase price to £59 is clearly ahead.",
+    "band": "clearly_ahead",
+    "leader_option_id": "increase_price_to_59",
+    "leader_label": "Increase price to £59",
+    "runner_up_option_id": "6dbac00d",
+    "runner_up_label": "Improve trial-to-Pro conversion",
+    "win_probability_gap": 1,
+    "robustness_gated": false,
+    "doctrine": "provisional_doctrine_v0"
+   },
+   "defaulted_assumptions": [
+    {
+     "factor_label": "Existing customers grandfathered",
+     "note": "No starting value was provided for \"Existing customers grandfathered\", so the analysis used a default of 0.0. Results for downstream nodes may be unreliable until a real value or range is set.",
+     "source": "default_disclosure",
+     "code": "ROOT_NODE_DEFAULT_VALUE",
+     "doctrine": "provisional_doctrine_v0"
+    }
+   ],
+   "robustness_caveat": {
+    "text": "This run held up under the changes we tested. That is not a guarantee. Defaulted or uncertain inputs could still change it.",
+    "basis": "is_robust",
+    "flip_evidence": {
+     "status": "partial_no_effect",
+     "text": "Changing at least one tested factor on its own could change which option is most likely to achieve your goal. The other factors we could test could not."
+    },
+    "doctrine": "provisional_doctrine_v0"
+   },
+   "warning_codes": [
+    "GOAL_DIRECTION_UNATTESTED"
+   ],
+   "analysis_summary": {
+    "leading_option": "Increase price to £59",
+    "win_probability": 1,
+    "goal_fit": 1,
+    "robustness_band": "robust"
+   }
+  }
+ }
+}

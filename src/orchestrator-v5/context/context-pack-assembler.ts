@@ -89,7 +89,6 @@ import {
 } from '../format/format-analysis-for-context.js';
 import type {
   AnalysisResponseSummaryWithSignals,
-  OptionGoalFitSignal,
   OptionOutcomeSignal,
   TippingPointSignal,
 } from './analysis-signals.js';
@@ -173,12 +172,12 @@ export interface ContextPackAnalysisOption {
   readonly probability: number;
   /**
    * Lane 30 — this option's goal-fit value: the modelled probability the
-   * option meets the user's target(s), sourced from the per-option
-   * `enrichment.option_comparison[].probability_of_joint_goal` (PLoT #204)
-   * via the `option_goal_fits` signal. RAW [0,1] float — handler-facing
-   * only; the display formatter renders it as an integer-percent
-   * `target_fit` string, clearly distinguished from `win_probability`.
-   * Absent when the producer scored no goal fit for this option.
+   * option meets the user's target, the option's own `probability_of_goal`
+   * ONLY — never the limits-only `probability_of_joint_goal` (AIQ
+   * 5887531086). RAW [0,1] float — handler-facing only; the display formatter
+   * renders it as an integer-percent `target_fit` string, clearly
+   * distinguished from `win_probability`. Absent when the run gave no
+   * P(goal) for this option (absent stays absent).
    */
   readonly goal_fit_probability?: number;
   /**
@@ -2633,27 +2632,21 @@ function buildOptionSignalLookup<S extends { option_id: string | null; option_la
 }
 
 /**
- * Lane 30 — per-option goal-fit resolver: the option's own
- * `probability_of_goal` wins when a producer path populates it (that field
- * is only ever set from real data, never defaulted), then the
- * `option_goal_fits` signal lookup. Returns undefined when no valid value
- * resolves — the projected option then omits `goal_fit_probability` and the
- * display formatter renders the explicit "target-fit not scored" disclosure
- * instead.
+ * Lane 30 — per-option goal-fit resolver: the option's own `probability_of_goal` ONLY (that field is only ever set from
+ * real data, never defaulted). Returns undefined when it is absent — the projected option then omits
+ * `goal_fit_probability` and the display formatter renders the explicit "target-fit not scored" disclosure instead.
+ *
+ * ⛔ NEVER THE LIMITS-ONLY JOINT (AIQ 5887531086; DL 5887546998). `option_goal_fits[].probability_of_joint_goal` is
+ * PLoT's "probability of jointly satisfying all goal_constraints" — the user's LIMITS, never the goal's target. It used
+ * to refill an absent P(goal) here, and the formatter then called it "the modelled probability it meets your target"
+ * (served w2285 S3: a downtime-only 100% said as savings). Absent stays absent.
  */
-function buildGoalFitResolver(
-  signals: readonly OptionGoalFitSignal[] | undefined,
-): (option: OptionSummary) => number | undefined {
-  const lookup = buildOptionSignalLookup(
-    signals,
-    (s) => s.probability_of_joint_goal,
-    isValidGoalFitProbability,
-  );
+function buildGoalFitResolver(): (option: OptionSummary) => number | undefined {
   return (option: OptionSummary): number | undefined => {
     if (isValidGoalFitProbability(option.probability_of_goal)) {
       return option.probability_of_goal;
     }
-    return lookup(option);
+    return undefined;
   };
 }
 
@@ -2713,7 +2706,7 @@ export function projectAnalysis(
   // Lane 30 — per-option goal-fit + outcome carriage. Resolvers shared by
   // the leading pair and the full option list so the same option can never
   // show a value in one slot and not the other.
-  const goalFitFor = buildGoalFitResolver(analysis.option_goal_fits);
+  const goalFitFor = buildGoalFitResolver();
   const outcomeFor = buildOutcomeResolver(analysis.option_outcomes);
   // Trust-spine board #1 (CEE half, adversarial-review P1): the upstream
   // compactAnalysis winner flag was previously field-picked away here, so the
@@ -2842,7 +2835,10 @@ export function projectAnalysis(
   const evidenceGaps: ContextPackAnalysisEvidenceGap[] = keptEvidenceGaps
     .filter((g) => Number.isFinite(g.voi_score) && g.voi_score >= 0)
     .map((g) => ({ factor_label: g.factor_label, voi_score: g.voi_score }));
-  const goalFit: ContextPackAnalysisGoalFit | null = analysis.goal_fit
+  // ⛔ "Goal fit was scored" only when a goal fit exists: an option carries its own P(goal). PLoT's `goal_fit_basis` rides the
+  // limits-only joint too, and a run that scored only the limits scored no goal fit (AIQ 5887531086 R1: the not-scored line).
+  const anyGoalProbability = analysis.options.some((o) => isValidGoalFitProbability(o.probability_of_goal));
+  const goalFit: ContextPackAnalysisGoalFit | null = analysis.goal_fit && anyGoalProbability
     ? { scored: analysis.goal_fit.scored, basis: analysis.goal_fit.basis }
     : null;
 
