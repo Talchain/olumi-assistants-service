@@ -1,0 +1,131 @@
+{
+  "synthetic": true,
+  "scope": "Artificial test claims for technical mechanics only; no live extraction or real-brief fidelity credit.",
+  "brief": "SYNTHETIC TECHNICAL TEST ONLY; these are artificial test claims, not customer data. Should we choose Option A or Option B for Pro MRR? Current Pro plan price is £50 per subscriber per month. Current paying subscribers are 1,000. Current Pro MRR is £50,000 per month. Our target is Pro MRR above £55,000 per month at 3 months. Pro MRR = Pro plan price × Paying subscribers. The options are:\n- Raise Pro price to £60 per subscriber per month with expected paying subscribers of 960 at 3 months.\n- Keep Pro price at £50 per subscriber per month with expected paying subscribers of 1,120 at 3 months.",
+  "candidate": {
+    "goal": {
+      "metric": "Pro MRR",
+      "operator": ">",
+      "value": 55000,
+      "unit": "GBP/month",
+      "horizon_months": 3,
+      "provenance": "explicit",
+      "target_stated": true,
+      "frame": "level",
+      "baseline_known": true,
+      "baseline_value": 50000,
+      "baseline_provenance": "explicit",
+      "scope": {
+        "modelled": "the Pro plan only",
+        "alternative": "all plans",
+        "stated_in_brief": true
+      }
+    },
+    "constraints": [],
+    "options": [
+      {
+        "label": "Raise Pro price",
+        "provenance": "explicit",
+        "brief_words": "Raise Pro price to £60 per subscriber per month with expected paying subscribers of 960 at 3 months",
+        "is_status_quo": false,
+        "changes": [],
+        "interventions": [
+          {
+            "factor_label": "Pro plan price",
+            "value": 60,
+            "value_kind": "absolute",
+            "unit": "GBP/subscriber/month",
+            "provenance": "explicit"
+          },
+          {
+            "factor_label": "Paying subscribers",
+            "value": 960,
+            "value_kind": "absolute",
+            "unit": "subscribers",
+            "provenance": "explicit"
+          }
+        ]
+      },
+      {
+        "label": "Keep Pro price",
+        "provenance": "explicit",
+        "brief_words": "Keep Pro price at £50 per subscriber per month with expected paying subscribers of 1,120 at 3 months",
+        "is_status_quo": false,
+        "changes": [],
+        "interventions": [
+          {
+            "factor_label": "Pro plan price",
+            "value": 50,
+            "value_kind": "absolute",
+            "unit": "GBP/subscriber/month",
+            "provenance": "explicit"
+          },
+          {
+            "factor_label": "Paying subscribers",
+            "value": 1120,
+            "value_kind": "absolute",
+            "unit": "subscribers",
+            "provenance": "explicit"
+          }
+        ]
+      }
+    ],
+    "factors": [
+      {
+        "label": "Pro plan price",
+        "role": "controllable",
+        "baseline_known": true,
+        "baseline_value": 50,
+        "unit": "GBP/subscriber/month",
+        "provenance": "explicit",
+        "plausible_max": null
+      },
+      {
+        "label": "Paying subscribers",
+        "role": "controllable",
+        "baseline_known": true,
+        "baseline_value": 1000,
+        "unit": "subscribers",
+        "provenance": "explicit",
+        "plausible_max": null
+      }
+    ],
+    "risks": [],
+    "outcomes": [],
+    "links": [
+      {
+        "from": "Pro plan price",
+        "to": "Pro MRR",
+        "direction": "positive",
+        "provenance": "explicit",
+        "effect_amount": null,
+        "effect_per_source_change": null,
+        "effect_provenance": null
+      },
+      {
+        "from": "Paying subscribers",
+        "to": "Pro MRR",
+        "direction": "positive",
+        "provenance": "explicit",
+        "effect_amount": null,
+        "effect_per_source_change": null,
+        "effect_provenance": null
+      }
+    ],
+    "identities": [
+      {
+        "outcome": "Pro MRR",
+        "operation": "product",
+        "factors": [
+          "Pro plan price",
+          "Paying subscribers"
+        ],
+        "provenance": "explicit"
+      }
+    ],
+    "unknowns": [],
+    "decision_question": "Should we choose Option A or Option B for Pro MRR?"
+  },
+  "brief_sha256": "6e6850873c2330066590588ab851f35c2e1a3d938d39d5678d6822853836225b",
+  "candidate_sha256": "50d7df820067136cccc59d745b2401a6090dfc15a313565f25c50fc714d34ed9"
+}
