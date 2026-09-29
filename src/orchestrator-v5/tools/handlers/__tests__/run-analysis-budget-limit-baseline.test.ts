@@ -34,6 +34,7 @@ import { createNoopSessionStore } from '../../../session/__tests__/fixtures.js';
 import { createRunAnalysisHandler, type ScenarioReader } from '../run-analysis.js';
 import { carryLevelLimitBaselines, levelLimitBaselineNodeIds } from '../level-limit-baseline.js';
 import { limitChecksForAgent } from '../../../agent-lane/limit-checks.js';
+import { collectLimitLevelOwners, readRatifiedConstraints } from '../../../../orchestrator/context/constraint-feasibility.js';
 import type { HandlerInvocation } from '../../registry.js';
 import type { PLoTClient } from '../../../../orchestrator/plot-client.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
@@ -107,11 +108,11 @@ describe('RED — served journey C: the budget limit reaches PLoT with the budge
     });
   }
 
-  it('R-c on the same run: the churn "%" limit carries NOTHING — the options move churn only through unsized links', async () => {
+  it('R-c PER OPTION on the same run (AIQ 5900908629): the churn "%" limit CARRIES its level; the options moving churn through unsized links have their own P withheld after the run', async () => {
     const body = await wireOf(SERVED.c15);
-    // R-c (AI Quality 5882087383): churn moves only through `price → price_sensitivity → churn`, links nobody sized, so
-    // its limit's P would be the placeholder's (it carried 0.03 before the ruling).
-    expect(nodeOf(body.graph, CHURN_LABEL).observed_state.baseline).toBeUndefined();
+    // Churn moves through `price → price_sensitivity → churn`, links nobody sized. #2268 dropped churn's baseline for
+    // EVERY option (lock A PJ-A3); now PLoT scores every option and only those options' P is withheld (`storedRunOf` row below).
+    expect(nodeOf(body.graph, CHURN_LABEL).observed_state.baseline).toBe(nodeOf(SERVED.c15, CHURN_LABEL).observed_state.value);
   });
 
   it('INVARIANT (the spec, not the symptom): a level limit whose threshold goes out on a non-root factor\'s own cap goes out with that factor\'s level', async () => {
@@ -250,11 +251,13 @@ describe('GUARD — a total an option moves only through its parts carries no ba
     expect(Object.keys(iv)).not.toContain(budgetId);
     expect((body.graph.edges as Json[]).some((e) => e.from === 'advertising_spend' && e.to === budgetId)).toBe(true);
     const wire = nodeOf(body.graph, BUDGET_LABEL);
-    expect(wire.observed_state.baseline, 'no baseline: ISL would score £18k through 0.5 placeholder edges').toBeUndefined();
+    // PER OPTION since AIQ 5900908629: the total CARRIES its level, so PLoT scores every option; "Additional Advertising"
+    // (£18k through 0.5 placeholder edges) has ITS P withheld after the run, never the other options'.
+    expect(wire.observed_state.baseline).toBe(nodeOf(graph, BUDGET_LABEL).observed_state.value);
     expect(wire.goal_threshold_cap, 'the threshold is still read on the node\'s own cap, as at base').toBe(100000);
     expect((body.goal_constraints as Json[]).find((c) => c.constraint_id === BUDGET_LIMIT)).toMatchObject({ value: 15000, value_frame: 'level' });
-    // R-c (AI Quality 5882087383): churn on the same run is moved only through unsized links, so it carries nothing too.
-    expect(nodeOf(body.graph, CHURN_LABEL).observed_state.baseline).toBeUndefined();
+    const withheld = collectLimitLevelOwners(graph, readRatifiedConstraints(graph), body.options as Json[]).placeholderMovedOptionIds;
+    expect([...(withheld.get(BUDGET_LIMIT) ?? [])]).toEqual(['additional_advertising']);
   });
 
   it('CONTROL (served C01/C15): every option that sets a part also sets the total — the baseline is still carried', async () => {
@@ -279,18 +282,21 @@ describe('GUARD — a total an option moves only through its parts carries no ba
     const options = optionsOf(graph).map((o) =>
       o.option_id === 'additional_advertising' ? { ...o, interventions: { agency_retainer: 0.15 } } : o,
     );
-    expect(levelLimitBaselineNodeIds(graph, graph.goal_constraints, goalId, options).has(budgetId)).toBe(false);
+    // PER OPTION since AIQ 5900908629: the total carries either way; the option is withheld only while it sets no total.
+    const moved = (os: Json[]) => [...(collectLimitLevelOwners(graph, readRatifiedConstraints(graph), os).placeholderMovedOptionIds.get(BUDGET_LIMIT) ?? [])];
+    expect(levelLimitBaselineNodeIds(graph, graph.goal_constraints, goalId, options).has(budgetId)).toBe(true);
+    expect(moved(options)).toContain('additional_advertising');
     const withTotal = options.map((o) => (o.option_id === 'additional_advertising' ? { ...o, interventions: { agency_retainer: 0.15, [budgetId]: 0.18 } } : o));
     expect(levelLimitBaselineNodeIds(graph, graph.goal_constraints, goalId, withTotal).has(budgetId)).toBe(true);
+    expect(moved(withTotal)).not.toContain('additional_advertising');
   });
 
-  it('FAIL CLOSED: without the options PLoT scores, nothing carries (R-c: neither proof can rule out an unsized path)', () => {
+  it('PER OPTION (AIQ 5900908629): the options no longer decide the carrier — with or without them, the budget AND churn carry', () => {
     const g = SERVED.c15;
     const goalId = (g.nodes as Json[]).find((n) => n.kind === 'goal')!.id as string;
-    expect(levelLimitBaselineNodeIds(g, g.goal_constraints, goalId)).toEqual(new Set());
-    // With them: the budget (every option that moves a part sets the total) carries; churn (moved only through
-    // unsized links, AI Quality 5882087383) does not.
-    expect(levelLimitBaselineNodeIds(g, g.goal_constraints, goalId, optionsOf(g))).toEqual(new Set([idOf(g, BUDGET_LABEL)]));
+    const both = new Set([idOf(g, BUDGET_LABEL), idOf(g, CHURN_LABEL)]);
+    expect(levelLimitBaselineNodeIds(g, g.goal_constraints, goalId)).toEqual(both);
+    expect(levelLimitBaselineNodeIds(g, g.goal_constraints, goalId, optionsOf(g))).toEqual(both);
   });
 });
 
@@ -429,10 +435,31 @@ describe('AIQ REQUIRED row 2 (#72 5869646768, B5) — WHOSE baseline: Olumi\'s �
     expect(budgetRowOf(result)).toEqual({ constraint_id: BUDGET_LIMIT, state: 'scored' });
   });
 
-  it('SCOPE: on both runs the churn limit is WITHHELD for its unsized links (R-c, AI Quality 5882087383) — row 2 is bound to the budget limit by id', async () => {
+  it('SCOPE (per option, AIQ 5900908629): on both runs churn folds over the options no placeholder moves (Olumi\'s level: estimate_only); the placeholder-moved options\' churn P is gone from the stored result — row 2 is bound to the budget limit by id', async () => {
+    const CHURN_LIMIT = 'agent-lane:monthly_churn:<=';
     for (const k of ['c01', 'c15'] as const) {
-      const rows = (await storedRunOf(SERVED[k], CAPTURED[k])).constraint_verdict.per_limit as Json[];
-      expect(rows.find((r) => r.constraint_id === 'agent-lane:monthly_churn:<='), k).toEqual({ constraint_id: 'agent-lane:monthly_churn:<=', state: 'unscored', reason: 'parts_links_placeholder' });
+      const result = await storedRunOf(SERVED[k], CAPTURED[k]);
+      const rows = result.constraint_verdict.per_limit as Json[];
+      expect(rows.find((r) => r.constraint_id === CHURN_LIMIT), k).toEqual({ constraint_id: CHURN_LIMIT, state: 'estimate_only', reason: 'level_olumi_estimate' });
+      const moved = collectLimitLevelOwners(SERVED[k], readRatifiedConstraints(SERVED[k]), optionsOf(SERVED[k])).placeholderMovedOptionIds.get(CHURN_LIMIT);
+      expect(moved?.size ?? 0, k).toBeGreaterThan(0);
+      // Whole-result scan: no entry for a withheld option still carries a churn P; a kept option still does (control).
+      const hits: string[] = [];
+      let kept = 0;
+      const walk = (v: unknown) => {
+        if (Array.isArray(v)) { v.forEach(walk); return; }
+        if (v === null || typeof v !== 'object') return;
+        const o = v as Json;
+        const id = o.option_id ?? o.id;
+        const cp = o.constraint_probabilities;
+        if (typeof id === 'string' && cp !== null && typeof cp === 'object' && !Array.isArray(cp) && CHURN_LIMIT in cp) {
+          if (moved!.has(id)) hits.push(id); else kept += 1;
+        }
+        Object.values(o).forEach(walk);
+      };
+      walk(result);
+      expect(hits, k).toEqual([]);
+      expect(kept, `${k}: control — a kept option's churn P survives`).toBeGreaterThan(0);
     }
   });
 });

@@ -364,9 +364,9 @@ describe('WIRE: run_analysis sends the level the model holds NOW', () => {
     expect(os.baseline).toBeUndefined();
   });
 
-  it('R-c at the wire: the same limit with the price → churn link UNSIZED reaches PLoT with no baseline', async () => {
+  it('R-c PER OPTION at the wire (AIQ 5900908629): the same limit with the price → churn link UNSIZED still carries its baseline — the price option\'s own P is withheld after the run', async () => {
     const os = await payloadFor(7, { value: 10, unit: '%', value_frame: 'level' }, false);
-    expect(os.baseline).toBeUndefined();
+    expect(os.baseline).toBeCloseTo(0.07, 12);
   });
 
   it('⭐ A PJ-A3 at the wire: the same link with the USER\'s own strength (`user_specified`, no natural size) carries the baseline', async () => {

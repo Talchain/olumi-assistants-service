@@ -35,7 +35,8 @@ export interface LimitCheck {
   readonly ask?: string;
   /**
    * R-c per option (AI Quality #72 5900908629): the options whose own check of this limit was withheld because they move
-   * its quantity through a link Olumi has not sized, by label. Said in `say`, with one question per unsized part.
+   * its quantity through a link Olumi has not sized (or through parts the engine cannot combine), by label. Said in
+   * `say`; one question per unsized part joins `ask`.
    */
   readonly withheld_for?: readonly string[];
 }
@@ -73,10 +74,13 @@ const andList = (xs: readonly string[]): string =>
  * disagree. Returns their labels and one question per part: a size the user gives is written as theirs (#2274) and ends
  * the withhold. Nothing when the row is itself withheld for its parts (every option was such an option).
  */
-function withheldOptionsFor(graph: unknown, targetId: string | null): { labels: string[]; asks: string[] } {
+function withheldOptionsFor(
+  graph: unknown,
+  targetId: string | null,
+): { labels: string[]; byReason: Map<string, string[]>; asks: string[] } {
   const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
   const edges = (graph as { edges?: unknown } | null | undefined)?.edges;
-  if (targetId === null || !Array.isArray(nodes)) return { labels: [], asks: [] };
+  if (targetId === null || !Array.isArray(nodes)) return { labels: [], byReason: new Map(), asks: [] };
   const recs = nodes.filter((n): n is Record<string, unknown> => n !== null && typeof n === 'object');
   const links = Array.isArray(edges) ? edges.filter((e): e is Record<string, unknown> => e !== null && typeof e === 'object') : [];
   const labelOf = (id: unknown): string | null => {
@@ -85,18 +89,28 @@ function withheldOptionsFor(graph: unknown, targetId: string | null): { labels: 
   };
   const target = labelOf(targetId);
   const labels: string[] = [];
+  const byReason = new Map<string, string[]>();
   const asks: string[] = [];
   for (const o of recs.filter((n) => n.kind === 'option')) {
     const finding = placeholderPartsFinding(targetId, recs, links, [o]);
     const label = labelOf(optionIdOf(o));
     if (finding === null || label === null) continue;
     labels.push(label);
+    byReason.set(finding.reason, [...(byReason.get(finding.reason) ?? []), label]);
     const part = finding.reason === PLACEHOLDER_PARTS_REASON ? labelOf(finding.partId) : null;
     const ask = part !== null && target !== null ? `How much does ${q(part)} change ${q(target)}?` : null;
     if (ask !== null && !asks.includes(ask)) asks.push(ask);
   }
-  return { labels, asks };
+  return { labels, byReason, asks };
 }
+
+/** Why an option's own check was withheld, by the predicate's reason: an unsized link, or parts the engine cannot combine. */
+const PER_OPTION_WHY: ReadonlyMap<string, readonly [one: string, many: string]> = new Map([
+  [PLACEHOLDER_PARTS_REASON, ['that option moves it through a link Olumi has not sized (a placeholder, not an estimate).',
+    'those options move it through a link Olumi has not sized (a placeholder, not an estimate).']],
+  [PARTS_IDENTITY_UNMODELLED_REASON, ['that option moves it through parts the model cannot yet combine the way they really combine.',
+    'those options move it through parts the model cannot yet combine the way they really combine.']],
+]);
 
 /** One sentence per state (and, for `estimate_only`, per whose figure it was checked against). */
 function sentenceFor(label: string, state: LimitCheck['state'], reason: string | undefined): string {
@@ -115,8 +129,8 @@ function sentenceFor(label: string, state: LimitCheck['state'], reason: string |
 export const LIMIT_CHECKS_NOTE =
   'How each of the user’s limits was checked in this run. Say it only with its sentence here. A limit checked against '
   + 'Olumi’s estimates WAS checked: never call it not checkable or unchecked, and never ask for a way to make it checkable. '
-  + 'Only a limit whose state is unscored cannot be checked yet. Where a limit has an ask, ask it once, in its words, '
-  + 'after its sentence.';
+  + 'Only a limit whose state is unscored cannot be checked yet, and only the options its sentence names could not be '
+  + 'checked on it. Where a limit has an ask, ask it once, in its words, after its sentence.';
 
 /** MG's one question per limit on this graph, by `constraint_id`. A producer failure costs only the asks, never the rows. */
 function asksByLimit(graph: unknown): ReadonlyMap<string, string> {
@@ -157,18 +171,21 @@ export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdict
     const levelCannotHelp = row.state === 'unscored' && typeof row.reason === 'string'
       && (OFF_SCALE_LIMIT_REASONS.has(row.reason) || PARTS_LIMIT_SENTENCES.has(row.reason));
     const ask = row.state === 'scored' || levelCannotHelp ? undefined : asks.get(row.constraint_id);
-    // R-c per option: a row the options checked, with some options' own check withheld — say which, and ask once.
-    const perOption = row.state === 'unscored' && typeof row.reason === 'string' && PARTS_LIMIT_SENTENCES.has(row.reason)
-      ? { labels: [], asks: [] }
+    // R-c per option: a row the options checked, with some options' own check withheld — say which, and ask once. An
+    // unscored row checked no option, so it names none (its own sentence already says it could not be checked).
+    const perOption = row.state === 'unscored'
+      ? { labels: [], byReason: new Map<string, string[]>(), asks: [] }
       : withheldOptionsFor(graph, limit?.node_id ?? null);
-    const say = perOption.labels.length === 0
-      ? sentenceFor(label, row.state, row.reason)
-      : `${sentenceFor(label, row.state, row.reason)} For ${andList(perOption.labels.map(q))} it couldn’t be checked: `
-        + `${perOption.labels.length === 1 ? 'that option moves' : 'those options move'} it through a link Olumi has not sized `
-        + `(a placeholder, not an estimate).${perOption.asks.length > 0 ? ` ${perOption.asks.join(' ')}` : ''}`;
+    const why = [...PER_OPTION_WHY].filter(([reason]) => perOption.byReason.has(reason)).map(([reason, [one, many]]) => {
+      const named = perOption.byReason.get(reason)!;
+      return `For ${andList(named.map(q))} it couldn’t be checked: ${named.length === 1 ? one : many}`;
+    });
+    const say = [sentenceFor(label, row.state, row.reason), ...why].join(' ');
+    // The link-size questions are MG's ask, never the sentence's (one wording, one producer): after the level ask.
+    const allAsks = [...(ask !== undefined ? [ask] : []), ...perOption.asks].join(' ');
     out.push({
       constraint_id: row.constraint_id, limit: label, state: row.state, say,
-      ...(ask !== undefined ? { ask } : {}),
+      ...(allAsks !== '' ? { ask: allAsks } : {}),
       ...(perOption.labels.length > 0 ? { withheld_for: perOption.labels } : {}),
     });
   }

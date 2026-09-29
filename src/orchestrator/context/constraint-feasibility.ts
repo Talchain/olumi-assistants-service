@@ -129,15 +129,32 @@ function readConstraintSatisfactionProbs(
 }
 
 /**
+ * PLoT's own `not_assessed` crown-compliance reason, VERBATIM (`plot-lite-service` `src/routes/v2/crown-eligibility.ts`
+ * `CROWN_COMPLIANCE_REASONS`, @af4cd569): the UI renders the reason as the producer's claim-safe phrase
+ * (`crownCompliance.ts`, "emit verbatim, never re-derive"), so CEE writes the producer's words, never its own.
+ */
+export const CROWN_NOT_ASSESSED_REASON = 'we could not check every limit you set on this run';
+
+/**
  * ⭐ R-c PER OPTION — WITHHELD AT THE SOURCE (AI Quality #72 5900908629). The run's result with, for each (option, limit)
- * in `byLimit`, that option's `constraint_probabilities` entry for that limit removed — both wire shapes, in EVERY
- * option-result carrier the readers use (`readOptionResultSources`) — and its `probability_of_joint_goal`, which
- * includes that P. No surface (verdict, headline, Agent context, UI) can then quote a P that moved with an unsized guess.
- * Keys that are absent stay absent. Returns `envelope` itself when nothing is withheld. Pure.
+ * in `byLimit`, every carrier of that option's result on that limit removed. The class, read off a SERVED PLoT body
+ * (`b5-per-limit/17d1cd3a.plot-response.json`, Paul's journey A churn limit):
+ *   · per option, in EVERY option-result carrier the readers use (`readOptionResultSources`): the
+ *     `constraint_probabilities` entry (both wire shapes), the `constraint_margins` entry, and `probability_of_joint_goal`,
+ *     which includes that P;
+ *   · top level: a `constraint_results[]` entry is the P of ONE option (`option_id`), so its `probability` goes when that
+ *     option's is withheld (the entry's id and scale marker stay: they are the limit's, not the option's);
+ *   · `robustness.recommended_option_compliance` is PLoT's verdict on the crowned option's limits, rendered verbatim by
+ *     the UI: when the crowned option's P is withheld, or PLoT ruled an option out of the crown on a withheld P of 0 (its
+ *     crown eligibility, `isCrownPermittedByConstraints`), it becomes PLoT's own `not_assessed` with PLoT's own reason.
+ * No surface (verdict, headline, Agent context, UI) can then quote a P that moved with an unsized guess. Keys that are
+ * absent stay absent. Returns `envelope` itself when nothing is withheld. Pure.
  */
 export function withholdOptionLimitScores<E>(envelope: E, byLimit: ReadonlyMap<string, ReadonlySet<string>>): E {
   if (byLimit.size === 0 || envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
   const dropFor = (id: string): string[] => [...byLimit].filter(([, ids]) => ids.has(id)).map(([cid]) => cid);
+  // Read BEFORE stripping: did PLoT rule a withheld option out of the crown on a P of 0 it can no longer show?
+  let withheldBreach = false;
   const stripEntry = (entry: unknown): unknown => {
     const r = readRecord(entry);
     if (r === null) return entry;
@@ -148,10 +165,20 @@ export function withholdOptionLimitScores<E>(envelope: E, byLimit: ReadonlyMap<s
     const cp = r.constraint_probabilities;
     if (cp !== null && typeof cp === 'object' && !Array.isArray(cp)) {
       const next = { ...(cp as Record<string, unknown>) };
-      for (const cid of drop) delete next[cid];
+      for (const cid of drop) {
+        if (next[cid] === 0) withheldBreach = true;
+        delete next[cid];
+      }
       out.constraint_probabilities = next;
     } else if (Array.isArray(cp)) {
-      out.constraint_probabilities = cp.filter((x) => !drop.includes(readString(readRecord(x)?.constraint_id) ?? ''));
+      out.constraint_probabilities = cp.filter((x) => {
+        const hit = drop.includes(readString(readRecord(x)?.constraint_id) ?? '');
+        if (hit && readRecord(x)?.probability === 0) withheldBreach = true;
+        return !hit;
+      });
+    }
+    if (Array.isArray(r.constraint_margins)) {
+      out.constraint_margins = r.constraint_margins.filter((x) => !drop.includes(readString(readRecord(x)?.constraint_id) ?? ''));
     }
     if ('probability_of_joint_goal' in out) delete out.probability_of_joint_goal;
     return out;
@@ -171,6 +198,26 @@ export function withholdOptionLimitScores<E>(envelope: E, byLimit: ReadonlyMap<s
   }
   const brief = readRecord(env.decision_brief);
   if (brief !== null && 'options' in brief) out.decision_brief = { ...brief, options: strip(brief.options) };
+  if (Array.isArray(env.constraint_results)) {
+    out.constraint_results = env.constraint_results.map((entry) => {
+      const r = readRecord(entry);
+      const id = r === null ? undefined : readString(r.option_id) ?? undefined;
+      const cid = r === null ? null : readString(r.constraint_id);
+      if (r === null || id === undefined || cid === null || !dropFor(id).includes(cid) || !('probability' in r)) return entry;
+      if (r.probability === 0) withheldBreach = true;
+      const { probability: _withheld, ...rest } = r;
+      return rest;
+    });
+  }
+  const robustness = readRecord(env.robustness);
+  if (robustness !== null) {
+    const crowned = readString(robustness.recommended_option_id);
+    const verdict = readString(robustness.recommended_option_compliance);
+    const crownedWithheld = crowned !== null && dropFor(crowned).length > 0;
+    if ((crownedWithheld || withheldBreach) && verdict !== null && verdict !== 'not_applicable' && verdict !== 'not_assessed') {
+      out.robustness = { ...robustness, recommended_option_compliance: 'not_assessed', recommended_option_compliance_reason: CROWN_NOT_ASSESSED_REASON };
+    }
+  }
   return out as E;
 }
 
@@ -919,9 +966,10 @@ export function collectLimitLevelOwners(
   // that moves the limit's target through its parts on a link nobody has sized (or through an identity the engine does
   // not honour) has no checkable P for that limit, in ANY frame: the P is the placeholder's. Its own P is withheld
   // (`placeholderMovedOptionIds`, stripped from the stored result by `withholdOptionLimitScores`); the limit's row is
-  // withheld (`placeholderPartsReasons`) only when EVERY option PLoT scores is such an option. `estimate_only` says whose base it is, not that the effect size is a
-  // default, and a user-stated base cannot upgrade it. The same predicate withholds a level limit's baseline carrier
-  // (`level-limit-baseline.ts`). A limit on the goal is not read here: P(goal) is its own, disclosed claim.
+  // withheld (`placeholderPartsReasons`) only when EVERY option PLoT scores is such an option. `estimate_only` says whose
+  // base it is, not that the effect size is a default, and a user-stated base cannot upgrade it. A level limit's baseline
+  // carrier no longer reads this (`level-limit-baseline.ts`): it carries, so PLoT scores every option. A limit on the
+  // goal is not read here: P(goal) is its own, disclosed claim.
   const rawEdges = (graph as { edges?: unknown } | null | undefined)?.edges;
   if (options !== undefined) {
     const nodes = rawNodes.map(readRecord).filter((n): n is Record<string, unknown> => n !== null);
@@ -1572,12 +1620,14 @@ export function deriveConstraintVerdict(
     leaderEstimatedTargetIds,
     typeof leadingOptionId === 'string' ? strictThresholdPins?.get(leadingOptionId) : undefined,
     perLimitInput?.placeholderPartsReasons !== undefined
-      ? new Set([
-        ...perLimitInput.placeholderPartsReasons.keys(),
-        // R-c per option: the LEADING option's own P for a limit is withheld when a placeholder moves its target.
-        ...[...(perLimitInput.placeholderMovedOptionIds ?? new Map<string, ReadonlySet<string>>())]
-          .filter(([, ids]) => typeof leadingOptionId === 'string' && ids.has(leadingOptionId)).map(([cid]) => cid),
-      ])
+      ? new Set(
+        perLimitInput.placeholderMovedOptionIds === undefined
+          ? perLimitInput.placeholderPartsReasons.keys()
+          // R-c per option: exactly the limits for which the LEADING option's own P is withheld (a placeholder moves
+          // its target). A leader no placeholder moves is decided on its own P, whatever the other options do.
+          : [...perLimitInput.placeholderMovedOptionIds]
+            .filter(([, ids]) => typeof leadingOptionId === 'string' && ids.has(leadingOptionId)).map(([cid]) => cid),
+      )
       : undefined,
   );
   if (perLimitInput === undefined || ratified.length === 0) return leaderVerdict;
@@ -1771,6 +1821,8 @@ function derivePerLimitVerdicts(
   const results = Array.isArray(envelope.constraint_results) ? envelope.constraint_results : [];
   const jointWithheldIds = readJointWithheldConstraintIds(envelope);
 
+  /** R-c per option: the limits for which every option in the result had its own P withheld. */
+  const noneCounted = new Set<string>();
   /** Reasons from the limit's OWN identity-bound evidence. Empty = the producer certified it by id. */
   const ownReasons = (c: RatifiedConstraint): string[] => {
     const reasons: string[] = [];
@@ -1806,6 +1858,7 @@ function derivePerLimitVerdicts(
     // the row speaks for the options that were checked. None left is the per-limit R-c reason, pushed below.
     const withheldFor = levels.placeholderMovedOptionIds?.get(c.constraint_id);
     const counted = withheldFor === undefined ? options : options.filter((o) => !withheldFor.has(optionIdOf(o) ?? ''));
+    if (withheldFor !== undefined && counted.length === 0) noneCounted.add(c.constraint_id);
     const everyOptionScores =
       counted.length > 0 &&
       counted.every((o) => readConstraintSatisfactionProbs(o).some((p) => p.id === c.constraint_id));
@@ -1842,9 +1895,13 @@ function derivePerLimitVerdicts(
     }
     // Pushed after `certified` is read: it is CEE's reading of the words, never producer evidence about the block.
     if (strictThresholdPinnedIds.has(c.constraint_id)) reasons.push(STRICT_THRESHOLD_PIN_REASON);
-    // R-c: CEE's reading of the model's links, like the pin above — never producer evidence about the block.
+    // R-c: CEE's reading of the model's links, like the pin above — never producer evidence about the block. Per option
+    // (AIQ 5900908629), the row is withheld for its parts only when NO option it would fold over is left: an option in
+    // the result that no placeholder moves (the status quo PLoT scores beside the wire options) is still checked.
     const partsReason = levels.placeholderPartsReasons?.get(c.constraint_id);
-    if (partsReason !== undefined) reasons.push(partsReason);
+    if (partsReason !== undefined && (levels.placeholderMovedOptionIds?.get(c.constraint_id) === undefined || noneCounted.has(c.constraint_id))) {
+      reasons.push(partsReason);
+    }
     // ISL's `estimate_only`: the base it compared on is NOT the user's (Olumi's estimate, or an owner it could not
     // establish). It only ever LOWERS a row. When CEE reads that same level as the user's own, the two hops disagree
     // about whose figure it is, so neither "scored" nor "only Olumi's estimates" would be true: the row fails closed.
