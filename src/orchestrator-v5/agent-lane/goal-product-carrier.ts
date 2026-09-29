@@ -29,12 +29,14 @@ export interface FoldedCarrier {
   /** Olumi-invented same-currency parents of the goal left out (AIQ 5888943993 (1)): their labels, never the user's. */
   readonly dropped: readonly string[];
   readonly goal: string;
-  readonly parts: readonly [{ readonly label: string; readonly value: number }, { readonly label: string; readonly value: number }];
+  /** The two operands, each with its OWN unit (PR Review on 5b980ff7: never the goal's currency on the count). */
+  readonly parts: readonly [Part, Part];
   readonly stated: number;
   readonly unit: string;
 }
 
 type Link = CandidateModel['links'][number];
+interface Part { readonly label: string; readonly value: number; readonly unit: string }
 
 /** The candidate with the carrier folded into the goal and #2286's mint applied, or the candidate unchanged. */
 export function foldProductCarrierIntoGoal(candidate: CandidateModel, brief: string): { readonly model: CandidateModel; readonly folded: FoldedCarrier | null } {
@@ -97,12 +99,15 @@ export function foldProductCarrierIntoGoal(candidate: CandidateModel, brief: str
   const minted = withReconcilingProductIdentity(folded, brief);
   const declared = (minted.identities ?? []).find((i) => i.outcome === goal && i.operation === 'product');
   if (declared === undefined || minted === folded) return unchanged;
-  const level = (label: string) => Number((candidate.factors ?? []).find((f) => f.label === label)?.baseline_value);
+  const part = (label: string): Part => {
+    const f = (candidate.factors ?? []).find((x) => x.label === label);
+    return { label, value: Number(f?.baseline_value), unit: String(f?.unit ?? '') };
+  };
   return {
     model: minted,
     folded: {
       carrier, goal, dropped,
-      parts: [{ label: parts[0]!, value: level(parts[0]!) }, { label: parts[1]!, value: level(parts[1]!) }],
+      parts: [part(parts[0]!), part(parts[1]!)],
       stated: Number(candidate.goal.baseline_value),
       unit: String(candidate.goal.unit ?? ''),
     },
@@ -119,8 +124,10 @@ const figure = (v: number, unit = ''): string => {
  * goal (the gap within 5% is real, so never "is your … itself"), and each Olumi addition left out is named.
  */
 export function foldedCarrierLines(f: FoldedCarrier): string[] {
-  const [a, b] = f.parts;
-  const sum = `${figure(a.value, f.unit)} × ${figure(b.value)} = ${figure(a.value * b.value, f.unit)}, close to your ${figure(f.stated, f.unit)}`;
+  // The money rate first, then the count, whatever order the drafter listed them in; each figure in its OWN unit.
+  const money = (p: Part): boolean => readCurrencyUnitWithQualifiers(p.unit).kind === 'currency';
+  const [a, b] = money(f.parts[1]) && !money(f.parts[0]) ? [f.parts[1], f.parts[0]] : f.parts;
+  const sum = `${figure(a.value, a.unit)} × ${figure(b.value, b.unit)} = ${figure(a.value * b.value, f.unit)}, close to your ${figure(f.stated, f.unit)}`;
   return [
     `‘${f.carrier}’ accounts for your ${f.goal} (${sum}), so ${f.goal} is worked out as ${a.label} × ${b.label}.`,
     ...f.dropped.map((d) => `‘${d}’ was Olumi's addition, and your figures don't need it (${sum}), so it is left out.`),

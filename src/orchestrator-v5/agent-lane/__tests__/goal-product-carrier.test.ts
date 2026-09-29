@@ -47,6 +47,13 @@ function run2(): Rec {
   };
 }
 
+function LIVE_REVERSED(): Rec {
+  const live = JSON.parse(readFileSync(new URL('./fixtures/paul-mrr-carrier-plus-invented-20260929.json', import.meta.url), 'utf8')) as { drafts: { candidate: Rec }[] };
+  const c = structuredClone(live.drafts[0]!.candidate);
+  c.identities[0].factors = [...c.identities[0].factors].reverse();
+  return c;
+}
+
 function build(candidate: unknown, brief = PAUL) {
   let registered: Rec | null = null;
   const fn = vi.fn(async () => ({ text: JSON.stringify(candidate) })) as unknown as CallStructuredModel;
@@ -73,6 +80,24 @@ describe('R3\'s served run 2 (Paul\'s brief): "Pro plan MRR" is the goal\'s only
     expect(into).toEqual(['pro_paying_subscribers', 'pro_plan_price']);
     // Said where the USER sees it (AIQ 5888943993 (1)(c)): the build's open questions, not only the Agent's ledger.
     expect(r.open_questions).toContain('‘Pro plan MRR’ accounts for your MRR (£49 × 1,500 = £73,500, close to your £75,000), so MRR is worked out as Pro plan price × Pro paying subscribers.');
+  });
+});
+
+describe('PR Review on 5b980ff7: the drafter lists the operands the other way round (subscribers × price)', () => {
+  it('1r (real build) — the same fold, and the user reads "£49 × 1,500", never "£1,500 × 49"', async () => {
+    const c = run2();
+    c.identities[0].factors = ['Pro paying subscribers', 'Pro plan price'];
+    const { r, g } = await build(c);
+    expect(r.ok, JSON.stringify(r).slice(0, 300)).toBe(true);
+    expect((g.nodes as Rec[]).find((n) => n.kind === 'goal')!.nonlinear_identity).toMatchObject({ operation: 'product' });
+    expect(r.open_questions).toContain('‘Pro plan MRR’ accounts for your MRR (£49 × 1,500 = £73,500, close to your £75,000), so MRR is worked out as Pro plan price × Pro paying subscribers.');
+    expect((r.open_questions as string[]).join(' ')).not.toMatch(/£1,500 × 49/);
+  });
+  it('1r (class 2, a REAL live draft with its factors reversed) — the dropped-parent line reads "£49 × 1,500" too', async () => {
+    const cand = structuredClone(LIVE_REVERSED()) as Rec;
+    const { r } = await build(cand, PAUL);
+    expect((r.open_questions as string[]).some((q) => q.startsWith('‘Other-plan MRR’ was Olumi\'s addition, and your figures don\'t need it (£49 × 1,500 = £73,500, close to your £75,000)'))).toBe(true);
+    expect((r.open_questions as string[]).join(' ')).not.toMatch(/£1,500 × 49/);
   });
 });
 
@@ -133,7 +158,7 @@ describe('what must NOT fold — each returns the very same candidate', () => {
     expect(foldProductCarrierIntoGoal(c as CandidateModel, brief).model).toBe(c);
   });
   it('the said lines name the user\'s own arithmetic, in AI Quality\'s words', () => {
-    expect(foldedCarrierLines({ carrier: 'Pro plan MRR', goal: 'MRR', dropped: ['Other-plan MRR'], parts: [{ label: 'price', value: 49 }, { label: 'subscribers', value: 1500 }], stated: 75000, unit: '£/month' }))
+    expect(foldedCarrierLines({ carrier: 'Pro plan MRR', goal: 'MRR', dropped: ['Other-plan MRR'], parts: [{ label: 'price', value: 49, unit: '£/subscriber/month' }, { label: 'subscribers', value: 1500, unit: 'subscribers' }], stated: 75000, unit: '£/month' }))
       .toEqual([
         '‘Pro plan MRR’ accounts for your MRR (£49 × 1,500 = £73,500, close to your £75,000), so MRR is worked out as price × subscribers.',
         '‘Other-plan MRR’ was Olumi\'s addition, and your figures don\'t need it (£49 × 1,500 = £73,500, close to your £75,000), so it is left out.',
