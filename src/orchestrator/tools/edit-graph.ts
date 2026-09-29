@@ -87,6 +87,7 @@ import {
 } from "../patch-validation.js";
 import { applyPatchOperations, PatchApplyError } from "../patch-applier.js";
 import { canonicaliseValueOps, firstOperationThatDidNotLand, stampUserEditProvenance, reconcileObservedValuePair, findAmbiguousScaleValueOps } from "../canonicalise-value-ops.js";
+import { userTypedStoredFigure } from "../../orchestrator-v5/agent-lane/figure-scope.js";
 import { stripPipelineOwnedFromAddOperations } from "../../orchestrator-v5/graph-management/field-safety.js";
 import { validateGraphStructure, VIOLATION_MESSAGES, type StructuralViolationCode } from "../graph-structure-validator.js";
 import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patch-rejection-helper.js";
@@ -3191,10 +3192,13 @@ export async function handleEditGraph(
     // predicate and surface a clarification instead of writing either guess;
     // `reconcileObservedValuePair` throws on the same class as the fail-loud
     // backstop, so this prescreen and the backstop cannot disagree.
+    const typedText = [...(context.messages ?? [])].reverse()
+      .find((m) => m.role === 'user' && typeof m.content === 'string' && m.content.trim().length > 0)?.content;
     const canonicalisedOps = stampUserEditProvenance(
       canonicaliseValueOps(operations, context.graph).operations,
       operations,
       context.graph as { readonly nodes?: readonly unknown[] },
+      (nodeId, observed) => userTypedStoredFigure(context.graph, nodeId, observed, typeof typedText === 'string' ? typedText : undefined),
     );
     const ambiguousScaleOps = findAmbiguousScaleValueOps(canonicalisedOps, context.graph);
     if (ambiguousScaleOps.length > 0) {

@@ -539,6 +539,11 @@ export function stampUserEditProvenance(
    * Omitted by the approval path (`gm-held-execute`): an approved proposal is the user's act (AIQ 5881494849).
    */
   storedGraph?: { readonly nodes?: readonly unknown[] },
+  /**
+   * AIQ #72 5882852814: a restatement is still AUTHORSHIP when the user's own words this turn state that figure for
+   * that node (`userTypedStoredFigure`, passed in by the chat caller so this module does not import the Agent lane).
+   */
+  userTyped?: (nodeId: string, observed: Record<string, unknown>) => boolean,
 ): PatchOperation[] {
   // A later observed-state leaf on the same target replaces the whole object
   // in the local applier. Once this batch has explicitly authored a value, its
@@ -557,7 +562,8 @@ export function stampUserEditProvenance(
     const writesValue = operationWritesObservedValue(valueWriteOperations[index]);
     if (!writesValue && !userValueTargets.has(op.path)) return op;
     if (!Object.prototype.hasOwnProperty.call(observed, 'value')) return op;
-    if (storedGraph !== undefined && !userValueTargets.has(op.path) && restatesStoredValue(observed, storedGraph, op.path)) {
+    if (storedGraph !== undefined && !userValueTargets.has(op.path) && restatesStoredValue(observed, storedGraph, op.path)
+      && userTyped?.(op.path, observed) !== true) {
       // The user's own figure re-sent unchanged is a pure no-op; a review is recorded only on someone else's figure.
       if (observed.source === USER_EDIT_SOURCE) return op;
       return {

@@ -132,7 +132,8 @@ import { CANVAS_BAND_WORD, edgeBandFromMagnitude, EDGE_STRENGTH_MIDPOINTS } from
 import { runWithApprovedAdoption } from '../approved-adoption-context.js';
 import { runWithStatedLinkBand } from '../stated-link-band-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
-import { factorUnitOf, unitPhraseFamily, unitsConflict } from '../unit-conflict.js';
+import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
+import { newFactorScopeIn } from '../figure-scope.js';
 import { classifyUnitScaleClass } from '../../../cee/draft/records/unit-scale-class.js';
 import { unitFamilyOf } from '../../routing/value-unit-resolution.js';
 import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
@@ -181,35 +182,8 @@ function scopeIn(g: { readonly nodes: readonly { readonly label?: unknown; reado
   return { target, others };
 }
 
-/**
- * ⛔ THE ADD-FACTOR DOOR'S SCOPE (PJ-E-FIG, DL CHANGES_REQUIRED on #2235): whose figure a NEW factor's value is. Target: the
- * new factor's own label. Others: every quantity in the model (`scopeIn`) PLUS the other new factors in this call — so on
- * "Senior engineers cost £120k a year each and juniors £65k a year each" a swap (senior 65000) or the £400k limit is never
- * this factor's. RIVALS (`EntityScope.rivals`): the others that could HOLD this figure. A factor measured in another kind
- * of unit ("New senior engineers hired", engineers, for a £ figure) and a risk (a likelihood, for any figure not a
- * percentage) cannot, so the words they share with the target ("senior") stay the target's; every word of their own
- * still marks a figure as not the target's. STRICT (`EntityScope.strict`): journey E's typed "£120,000 per senior engineer
- * and £65,000 per junior engineer" binds each figure to its owner, and a figure nobody's words own, among two or more, is refused.
- */
-export function newFactorScopeIn(
-  g: { readonly raw?: unknown; readonly nodes: readonly { readonly id?: unknown; readonly label?: unknown; readonly kind?: unknown; readonly observed_state?: unknown }[] },
-  target: string,
-  figureUnit: string,
-  inCall: readonly { readonly label: string; readonly unit: string }[],
-): EntityScope {
-  const percentOrUnknown = ((f) => f === null || f === 'percent')(unitPhraseFamily(figureUnit));
-  const quantities = g.nodes.filter((n) => n.kind !== 'option' && n.kind !== 'decision' && typeof n.label === 'string' && n.label !== '' && n.label !== target);
-  const siblings = inCall.filter((s) => s.label !== '' && s.label !== target);
-  const couldHold = (n: (typeof quantities)[number]): boolean => (n.kind === 'risk' ? percentOrUnknown
-    : n.kind !== 'factor' || unitsConflict(figureUnit, factorUnitOf(g.raw, n as { id?: unknown; observed_state?: unknown })) === null);
-  return {
-    target: [target],
-    others: [...quantities.map((n) => n.label as string), ...siblings.map((s) => s.label)],
-    rivals: [...quantities.filter(couldHold).map((n) => n.label as string), ...siblings.filter((s) => unitsConflict(figureUnit, s.unit) === null).map((s) => s.label)],
-    // The strict reading (DL ruling on the #2235 re-review): this door alone; every other door reads as before.
-    strict: true,
-  };
-}
+// `newFactorScopeIn` moved to `../figure-scope.ts` (one predicate for the Agent's doors and the chat writers, AIQ 5882852814).
+export { newFactorScopeIn };
 
 /**
  * The LIMIT door's scope (DL #2195 CHANGES_REQUIRED 5863720934, served journey-C budget limits): the user calls a limit
