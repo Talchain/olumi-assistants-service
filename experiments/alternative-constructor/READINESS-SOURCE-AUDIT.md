@@ -70,3 +70,47 @@ Validation: `node experiments/alternative-constructor/offline-checks.mjs` passes
 23/23, and `node experiments/alternative-constructor/option-quote-negative-control.mjs`
 passes 4/4. Detailed scores are saved in local artifact
 `option-quote-negative-control.jsonl`. Previous scored evidence is left intact.
+
+## Integrated ownership fix and local persistence witness
+
+At C source `eacfd99877779e5c9d41257fb2699c5b1d01fd1f`, run
+`node --import tsx experiments/alternative-constructor/replay-option-authority.mts`.
+The exact saved Paul CandidateModel is used with A's frozen quote-replacement
+contrast. Both policies execute the real `buildModelFromBrief` capability, capture
+its registration payload, parse/serialize/parse GraphV3, and call the real intake
+reconciliation reader. Provider replies are injected; registration in this replay
+is in memory. It is not a full Agent HTTP conversation or a Run witness.
+
+| Contrast | Policy | Registered option | Intake state | Permission to name leader |
+| --- | --- | --- | --- | --- |
+| AI £54 borrows £59 quote | Default/current | £54 with the false £59 quote | reconciled | true (reproduced failure) |
+| AI £54 borrows £59 quote | M1 opt-in | Only genuine Keep £49; £54 remains an external proposal | identity_unverified | false |
+| Genuine £59 uses its quote | Default/current | £59 and Keep £49 | reconciled | true |
+| Genuine £59 uses its quote | M1 opt-in | £59 and Keep £49 | reconciled | true |
+
+The independent scorer rejects the numeric replacement and passes its matching
+action control. These assertions concern option/figure identity, not certification
+of an unstated period or a general scientific result. Node-level quote presence
+does not by itself prove field-level numeric authority. The default path's failure
+remains; the product fix is opt-in M1 only.
+
+Separately, only the safe M1 mutant was registered through the real local BFF in
+new isolated scenario `2963b7c0-91bc-4258-8706-403b24350c76` and cold-read in a fresh
+Node process. Both requests returned 200, with canonical hash `a2792bdf0b02bd5d`.
+Readback GraphV3 exactly matches the submitted graph. Keep £49 retains
+`provenance: from_brief` and its own quote; no option stores the borrowed £59 quote.
+The real intake reader on this cold read still gives `identity_unverified` and
+`mayNameLeadingOption: false`. Readiness remains blocked. No Run request, analysis,
+browser interaction or provider call occurred; the rejected proposal is retained
+in the constructor result, not persisted as canonical truth.
+
+All four frozen M1 registration graphs are byte-identical to the pre-fix lineage
+replay; two hiring changes remain pending. Ledger remains 55/60.
+Local evidence:
+
+- `m1-option-authority-independent-replay.jsonl`: four contrast/policy rows,
+  candidates, registered graphs, intake verdicts and independent option scores.
+- `m1-option-authority-four-independent-checks.json`: exact graph hashes/equality.
+- `m1-option-authority-registration-request.json` and
+  `m1-option-authority-registration-receipt.json`: fresh scenario write.
+- `m1-option-authority-persistence-witness.json`: fresh-process readback and verdict.
