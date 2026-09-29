@@ -82,7 +82,7 @@ export function scoreRecord(record, cases = manifest.briefs) {
   });
   // A supplied addition with no known baseline can survive as a typed pending claim.
   // It is deliberately not credited as a canonical absolute intervention or a proved recovery journey.
-  const pending = record.constructor_diagnostics?.additions_without_total ?? record.additions_without_total;
+  const pending = record.constructor_diagnostics?.additions_without_total ?? record.additions_without_total ?? record.pending_user_changes ?? record.result?.additions_without_total;
   const pendingFacts = brief.facts.filter((f) => f.role === 'intervention').map((f) => {
     const found = (Array.isArray(pending) ? pending : []).filter((p) => matches(f.entity, p.factor) && (!f.option || matches(f.option, p.option)) && numberEqual(p.value, f.value) && unitMatches(f.unit, p.unit ?? p.factor_unit) && typeof p.reason === 'string');
     return { id: f.id, retained_pending: found.length > 0, canonical_retained: facts.find((x) => x.id === f.id)?.retained === true, reasons: found.map((p) => p.reason) };
@@ -135,7 +135,7 @@ export function scoreRecord(record, cases = manifest.briefs) {
     if (!known && o.proposed_by !== 'olumi' && (USER.has(o.provenance) || quotesOf(o).length > 0)) failures.push({ kind: 'invented_user_option', option: o.id });
   }
   const proposals = options.filter((o) => o.proposed_by === 'olumi' || o.ownership === 'proposed');
-  const outsideProposals = record.proposals ?? record.constructor_diagnostics?.proposals ?? [];
+  const outsideProposals = record.proposals ?? record.constructor_diagnostics?.constructor_proposals ?? record.constructor_diagnostics?.proposals ?? [];
   // A typed mark is better than false ownership, but remains distinct from keeping proposals out of canonical truth.
   const authority = { canonical_proposals: proposals.map((o) => o.id), external_proposals: outsideProposals.length, proposals_outside_model: proposals.length === 0 };
   for (const o of proposals) failures.push({ kind: 'proposal_in_canonical_model', option: o.id });
