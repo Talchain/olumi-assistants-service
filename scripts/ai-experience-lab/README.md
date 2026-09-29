@@ -14,7 +14,7 @@ Rebuild from a read-only archive of the pinned Science commit:
 
 ```sh
 python3 scripts/ai-experience-lab/prepare-rehearsal.py /path/to/ef10836/research/sci-evidence-v1
-node --test scripts/ai-experience-lab/rehearsal.test.mjs
+pnpm exec vitest run scripts/ai-experience-lab/rehearsal.test.mjs
 ```
 
 The importer verifies adapter/reference/fixture hashes before calling the owner's functions. Four focused tests cover dismiss/no-write, explicit approval, stale-card removal and replacement, and recorded model/receipt parity. `rehearsal.json` records provenance and currentness verdicts. Full live recomputation remains an integration gap, not a completed step.
