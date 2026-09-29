@@ -322,7 +322,7 @@ describe('an applied proposal and an earlier approval are not kept in the histor
       // The run is the latest: kept, as its projection — a withheld run, so without its win shares — and still stamped.
       const keptRun = JSON.parse(outputOf(pruned, 'call_run')) as { result: { computed_against_hash?: unknown }; claim_permissions: unknown };
       expect(keptRun.result.computed_against_hash, label).toBe((RUN_RESULT.result as { computed_against_hash: string }).computed_against_hash);
-      expect(keptRun.claim_permissions, label).toEqual(RUN_RESULT.claim_permissions);
+      expect(keptRun.claim_permissions, `${label}: an unconfirmed earlier Run cannot grant a current leader claim`).toBeUndefined();
       expect(outputOf(pruned, 'call_run'), label).not.toContain('win_probabilit');
     }
     // Pruning a pruned history changes nothing (the store re-prunes what it holds every turn).
@@ -474,6 +474,30 @@ describe('the kept run is compacted by its own permission, and marked stale once
       }
       // Re-derived each turn, never sticky: stale after the edit, current again once the readback selects it again.
       expect(keptRun(prune(prune(afterRun(run), EDITED), SERVED_READBACK)).stale).toBeUndefined();
+    }
+  });
+
+  it('a stale served Run, permitted or withheld, keeps identity and rerun note without old claims', () => {
+    const current = keptRun(prune(afterRun(RUN_RESULT_PERMITTED), SERVED_READBACK));
+    expect(current.claim_permissions.leader_may_be_named).toBe(true);
+    expect(keysOf(current), 'control: the current permitted Run really carries goal figures').toContain('probability_of_goal');
+
+    for (const run of [RUN_RESULT_PERMITTED, RUN_RESULT]) {
+      const once = prune(afterRun(run), EDITED);
+      const stale = keptRun(once);
+      expect(stale.stale).toBe(true);
+      expect(stale.stale_note).toMatch(/Offer to run the analysis again/);
+      expect(stale.run_identity).toEqual(run.run_identity);
+      expect(stale.result).toEqual({ type: RAW.type, computed_against_hash: STAMP });
+      expect(stale.claim_permissions).toBeUndefined();
+      expect(stale.goal_certainty).toBeUndefined();
+      expect(stale.goal_chance).toBeUndefined();
+      expect(stale.canonical_state).toBeUndefined();
+      expect(keysOf(stale)).not.toContain('leading_option_id');
+      expect(keysOf(stale)).not.toContain('probability_of_goal');
+      expect(keysOf(stale)).not.toContain('win_probability');
+      expect(keysOf(stale)).not.toContain('outcome');
+      expect(prune(once, EDITED)).toEqual(once);
     }
   });
 

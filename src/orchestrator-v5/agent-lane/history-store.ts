@@ -241,6 +241,9 @@ function withheldResult(result: Rec, selected: unknown, goalCertainty: unknown, 
   const selectedBlock = recordOf(selected);
   const selectedSource = recordOf(selectedBlock?.enrichment) ?? selectedBlock;
   const selectedCompared = selectedSource?.option_comparison;
+  // A prior stale projection has only the Run stamp. Re-selecting that Run must not refill its ranges without the
+  // per-option certainty caveats the projection deliberately discarded; the current canonical state supplies them.
+  const hadOutcomeOrCertainty = compared?.some((raw) => recordOf(raw)?.outcome !== undefined) === true || goalCertainty !== undefined;
   // A matching Run tuple is necessary for currency, but it does not prove payload equality. For a current Run,
   // the canonical selected result owns both option order and outcomes; an old tool copy cannot refill an omission.
   const displayed = current && Array.isArray(selectedCompared) ? selectedCompared : compared;
@@ -265,7 +268,7 @@ function withheldResult(result: Rec, selected: unknown, goalCertainty: unknown, 
     ...(displayed !== undefined ? { option_comparison: displayed.map((raw) => {
       const labels = optionLabelOf(raw);
       const id = labels.option_id;
-      const outcome = current && typeof id === 'string' ? byId.get(id)?.outcome : undefined;
+      const outcome = current && hadOutcomeOrCertainty && typeof id === 'string' ? byId.get(id)?.outcome : undefined;
       const certainty = typeof id === 'string' ? certaintyById.get(id) : undefined;
       // If this option has an unearned certainty, its range cannot travel without its own caveat.
       const say = certainty?.earned === false ? certainty.say : undefined;
@@ -317,14 +320,15 @@ function staleNoteFor(run: Rec, result: Rec, readback: KeptRunReadback | undefin
  * R&C's pinned key set). The latest run's output is the one C1 keeps, and on the served A02 run its `result` is ~11.9 KB
  * (≈3k tokens), 94% of it `enrichment` — carried in every request for 24 turns after the Run. Only this KEPT copy is
  * projected: the prune runs when the turn is STORED, so the Run turn's own model input is unchanged.
- *   - PERMITTED (`claim_permissions.leader_may_be_named === true`): robustness, p_win_sensitivity, factor_evppi and
- *     edge_e_values leave `result.enrichment`; summary, win_probabilities, option_comparison, decision_brief,
- *     inference_warnings, flip_thresholds, decision_sensitivity and computed_against_hash stay.
- *   - WITHHELD (anything else — fail closed): NOTHING that re-ranks. A whitelist (KEPT_WHEN_WITHHELD; the result keeps
+ *   - STALE or unconfirmed, regardless of the original permission: only Run identity and status stay. Even the old
+ *     summary can name a leader, so neither it nor any old figure or permission travels as current context.
+ *   - PERMITTED and current (`claim_permissions.leader_may_be_named === true`): robustness, p_win_sensitivity,
+ *     factor_evppi and edge_e_values leave `result.enrichment`; the comparison itself stays.
+ *   - WITHHELD and current (anything else — fail closed): NOTHING that re-ranks. A whitelist (KEPT_WHEN_WITHHELD; the result keeps
  *     its summary, stamp, decision_sensitivity, inference_warnings, each option's label and, ONLY while this selected
  *     Run is current, its recorded outcome range; `options` keeps labels and levels. Ranking keys still drop.
- *   - BOTH: no constraint probabilities (until B5 per_limit), and `stale: true` with a one-line note unless the turn's
- *     readback vouches for THIS run (`staleNoteFor`).
+ *   - No constraint probabilities (until B5 per_limit). A stale Run gets `stale: true` and a one-line note unless the
+ *     turn's readback vouches for THIS run (`staleNoteFor`).
  * ⛔ THE RUN CHIP'S `canonical_state` IS NOT KEPT, except a permitted run's `run_delta`. It is the post-run readback the
  * fast path hands its one interpreting call (agent-v1-turn.ts, FAST PATH 3): a model snapshot, superseded by the state
  * given with every turn exactly as `get_canonical_state` is (C1), and its `run_state: complete_current` would contradict
@@ -335,8 +339,15 @@ function keptRunOf(output: unknown, readback: KeptRunReadback | undefined): Rec 
   const run = recordOf(output);
   const result = recordOf(run?.result);
   if (run === undefined || result === undefined) return undefined;
-  const permitted = recordOf(run.claim_permissions)?.leader_may_be_named === true;
   const note = staleNoteFor(run, result, readback);
+  if (note !== undefined) return {
+    ...pick(run, ['ok', 'mutated', 'ran', 'status']),
+    result: pick(result, ['type', 'computed_against_hash']),
+    ...pick(run, ['run_identity']),
+    stale: true,
+    stale_note: note,
+  };
+  const permitted = recordOf(run.claim_permissions)?.leader_may_be_named === true;
   let kept: Rec;
   if (permitted) {
     const { stale: _s, stale_note: _n, canonical_state: canonical, ...rest } = run;
@@ -354,11 +365,8 @@ function keptRunOf(output: unknown, readback: KeptRunReadback | undefined): Rec 
     kept = withoutKeys({ ...pick(run, KEPT_WHEN_WITHHELD), result: withheldResult(result, readback?.analysisResult, run.goal_certainty, note === undefined) },
       (k) => (RE_RANKING_KEY.test(k) || RE_RANKING_NAMED.has(k) || namesConstraintProbability(k))) as Rec;
   }
-  // A stale or unconfirmed Run must not leave an old earned 0/1 available as though it were this model's chance.
-  // Its note still explains the earlier Run, while the current canonical state supplies any new certainty.
-  if (note !== undefined) delete kept.goal_certainty;
-  else if (kept.goal_certainty !== undefined) kept.goal_certainty = keptGoalCertainty(run.goal_certainty);
-  return note === undefined ? kept : { ...kept, stale: true, stale_note: note };
+  if (kept.goal_certainty !== undefined) kept.goal_certainty = keptGoalCertainty(run.goal_certainty);
+  return kept;
 }
 
 /**
