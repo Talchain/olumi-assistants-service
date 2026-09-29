@@ -35,7 +35,7 @@ const STATED = { amount: -50, amount_unit: 'subscribers', per_source_change: 1, 
 
 /** What an Agent proposal carries: the wire `graph_hash` (the analysis hash) and the prepared link's token. */
 const revisionOf = (g: unknown, from = 'price', to = 'subs') =>
-  ({ graph_hash: computeAnalysisAffectingGraphHash(g as never), edge_token: linkEffectEdgeToken(g, from, to)! });
+  ({ graph_hash: computeAnalysisAffectingGraphHash(g as never)!, edge_token: linkEffectEdgeToken(g, from, to)! });
 
 function params(over: Partial<ApplyLinkEffectEditParams> = {}, graph: Rec = storedGraph()): ApplyLinkEffectEditParams {
   return {
