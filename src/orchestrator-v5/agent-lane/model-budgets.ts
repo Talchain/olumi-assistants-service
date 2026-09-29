@@ -110,6 +110,25 @@ export const BANKED_BUDGETS: readonly CallBudget[] = [
     evidence:
       'Banked managed_agent_sol 6 turns: out 3311 total incl. 1026 reasoning, effort omitted.',
   },
+  {
+    model: 'gpt-6-luna',
+    role: 'conversation',
+    max_output_tokens: 3400,
+    reasoning_effort: 'low',
+    evidence:
+      'AI Experience PoC spike only. W2 matched vanilla screen: median 8.2 s and strong blinded quality; ' +
+      'real tool-heavy screen showed weaker tool choice than Terra, so this is intentionally opt-in and ' +
+      'must not become the production default without role-specific evidence.',
+  },
+  {
+    model: 'gpt-6-sol',
+    role: 'conversation',
+    max_output_tokens: 3400,
+    reasoning_effort: 'low',
+    evidence:
+      'AI Experience PoC spike only. W2 matched vanilla screen: median 13.9 s with strong synthesis quality; ' +
+      'opt-in for manual comparison only, never a production default from this entry.',
+  },
 ];
 
 /**
