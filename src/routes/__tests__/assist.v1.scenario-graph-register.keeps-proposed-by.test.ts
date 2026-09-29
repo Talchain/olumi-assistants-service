@@ -5,7 +5,7 @@
  * drops an undeclared key on the same node: the mark survives because it is declared, not because nothing strips.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify from 'fastify';
 
 const SCENARIO = 'b7c1d2e3-f4a5-4b6c-8d7e-9f0a1b2c3d4e';
 
