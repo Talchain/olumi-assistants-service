@@ -6,7 +6,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
-import { frameInvariance, frameOf, naturalSpread, reframe } from '../helpers/frame-invariance.js';
+import { frameInvariance, frameOf, reframe } from '../helpers/frame-invariance.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync(new URL('../fixtures/served/c96fc4bb-saved-graph.json', import.meta.url), 'utf8')) as { graph: Rec };
@@ -52,18 +52,34 @@ describe('frame invariance — the oracle on the served c96 graph', () => {
     expect(frameInvariance(c96(), after)).toEqual(['natural_effect_off paying_subscribers→mrr']);
   });
 
-  it('⭐ R7 (R3 5894964169): re-framing an OLUMI-estimated source carries its natural spread; not carrying it narrows it 10×', () => {
+  it('⭐ R7 (AIQ 5895379601 (2)): a FLOOR-BOUND Olumi estimate is never given a minted std, so its re-frame is REFUSED', () => {
     const before = reframe(c96(), 'mrr', 500_000); // R9's graph: no cut left, so only the spread is under test
-    const carried = reframe(before, 'monthly_gross_additions', 100);
-    expect(naturalSpread(node(carried, 'monthly_gross_additions'))).toBeCloseTo(naturalSpread(node(before, 'monthly_gross_additions'))!, 9);
-    expect(node(carried, 'monthly_gross_additions').observed_state.std_source).toBe('olumi'); // its original owner → ISL `template`
-    expect(frameInvariance(before, carried)).toEqual([]);
-    const dropped = JSON.parse(JSON.stringify(carried));
-    delete node(dropped, 'monthly_gross_additions').observed_state.std;
-    expect(frameInvariance(before, dropped)).toEqual(['spread_moved monthly_gross_additions 100.0 → 10.00']);
+    const after = reframe(before, 'monthly_gross_additions', 100); // 0.15·0.06 < 0.1: PLoT's floor sets the spread (100 → 10)
+    expect(node(after, 'monthly_gross_additions').observed_state.std).toBeUndefined();
+    expect(frameInvariance(before, after)).toEqual(['spread_moved monthly_gross_additions 100.0 → 10.00 (floor-bound)']);
   });
 
-  it('R7b (R3-B 5895208669): where 0.15·value already keeps the natural spread, NOTHING is minted (PLoT keeps its own default)', () => {
+  it('R7a: an EXISTING Olumi std is rescaled, keeps its natural spread and is marked with its owner; dropping it is caught', () => {
+    const before = reframe(c96(), 'mrr', 500_000);
+    node(before, 'monthly_gross_additions').observed_state.std = 0.1; // Olumi's own spread: 100 subscribers/month natural
+    const carried = reframe(before, 'monthly_gross_additions', 100);
+    expect(node(carried, 'monthly_gross_additions').observed_state.std).toBeCloseTo(1, 12);
+    expect(node(carried, 'monthly_gross_additions').observed_state.std_source).toBe('olumi'); // → ISL `template`
+    expect(frameInvariance(before, carried)).toEqual([]);
+    delete node(carried, 'monthly_gross_additions').observed_state.std;
+    expect(frameInvariance(before, carried)).toEqual(['spread_moved monthly_gross_additions 100.0 → 10.00 (floor-bound)']);
+  });
+
+  it('R7u (AIQ 5895379601 (2)): a USER\'s spread rescaled into a new frame is still the user\'s', () => {
+    const before = reframe(c96(), 'mrr', 500_000);
+    node(before, 'paying_subscribers').observed_state.std = 0.05; // the user's range: ±500 subscribers on a frame of 10,000
+    const after = reframe(before, 'paying_subscribers', 20_000);
+    expect(node(after, 'paying_subscribers').observed_state.std).toBeCloseTo(0.025, 12);
+    expect(node(after, 'paying_subscribers').observed_state.std_source).toBe('user');
+    expect(frameInvariance(before, after).filter((v) => v.startsWith('spread_moved'))).toEqual([]);
+  });
+
+  it('R7b (R3-B 5895208669): above the floor on BOTH frames, 0.15·value already keeps the natural spread; nothing is minted', () => {
     const g = c96();
     const n = node(g, 'monthly_gross_additions');
     n.observed_state.value = 0.75; n.observed_state.cap = 80; // 60 on a frame of 80: 0.15·0.75 = 0.1125 > the 0.1 floor
@@ -72,13 +88,26 @@ describe('frame invariance — the oracle on the served c96 graph', () => {
     expect(frameInvariance(g, after).filter((v) => v.startsWith('spread_moved'))).toEqual([]);
   });
 
-  it('R7c (R3-B 5895208669): a carried spread that BINDS PLoT\'s 2.0 std cap moves, so that re-frame is refused', () => {
+  it('R7c (AIQ 5895379601 (2)): a carried std that BINDS PLoT\'s 2.0 std cap moves, so that re-frame is refused', () => {
     const before = reframe(c96(), 'mrr', 500_000);
-    const after = reframe(before, 'monthly_churn', 4); // 3% on a frame of 4: 10 natural / 4 = std 2.5 → PLoT sends 2.0 → 8
+    node(before, 'monthly_churn').observed_state.std = 0.1; // 10 points natural
+    const after = reframe(before, 'monthly_churn', 4); // 3% on a frame of 4: std 2.5 → PLoT sends 2.0 → 8
     expect(frameInvariance(before, after)).toEqual([
       'beta_out_of_contract pro_plan_price→monthly_churn 2.500', // tightening also makes a cut (0.1 × 100/4)
       'spread_moved monthly_churn 10.00 → 8.000',
     ]);
+  });
+
+  it('a zero held exact is never given a spread (it stays a point mass)', () => {
+    const g = c96();
+    node(g, 'monthly_gross_additions').observed_state.value = 0; node(g, 'monthly_gross_additions').observed_state.raw_value = 0; node(g, 'monthly_gross_additions').observed_state.cap = 1000;
+    expect(node(reframe(g, 'monthly_gross_additions', 100), 'monthly_gross_additions').observed_state.std).toBeUndefined();
+  });
+
+  it('a USER-STATED level with no range keeps the minimum spread and gets no std and no marker', () => {
+    const after = reframe(c96(), 'paying_subscribers', 20_000);
+    expect(node(after, 'paying_subscribers').observed_state.std).toBeUndefined();
+    expect(node(after, 'paying_subscribers').observed_state.std_source).toBeUndefined();
   });
 
   it('⭐ R3: no frame below the node\'s own level or an option\'s value for it', () => {
@@ -96,14 +125,5 @@ describe('frame invariance — the oracle on the served c96 graph', () => {
     expect(frameInvariance(before, after)).toEqual(['level_moved raise_price_to_59→pro_plan_price (intervention ≠ raw/F)']);
   });
 
-  it('a zero held exact is never given a spread (it stays a point mass)', () => {
-    const g = c96();
-    node(g, 'monthly_gross_additions').observed_state.value = 0; node(g, 'monthly_gross_additions').observed_state.raw_value = 0; node(g, 'monthly_gross_additions').observed_state.cap = 1000;
-    expect(node(reframe(g, 'monthly_gross_additions', 100), 'monthly_gross_additions').observed_state.std).toBeUndefined();
-  });
 
-  it('a USER-STATED level keeps the minimum spread and is never given a carried spread or label', () => {
-    const after = reframe(c96(), 'paying_subscribers', 20_000);
-    expect(node(after, 'paying_subscribers').observed_state.std_source).toBeUndefined();
-  });
 });

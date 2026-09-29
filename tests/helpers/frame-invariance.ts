@@ -13,12 +13,12 @@
  *     [1e-4, 2.0], so a carried spread that binds moves and the re-frame must be refused, R3-B 5895208669).
  *   · frame_below_level (design R3): a frame below the node's own level or an option's value for it (normalised > 1);
  *   · level_moved <option>→<factor> (intervention): an option's value for a re-framed factor no longer reads back raw.
- *   The oracle forbids the MOVE, not a particular fix: a builder that never mints a std and refuses every re-frame whose
- *   default spread is floor-bound also passes.
+ *   A synthesised spread on PLoT's 0.1 floor (0.15·|value| < 0.1) at either frame is reported `(floor-bound)`: AIQ
+ *   5895379601 (2) refuses those re-frames rather than minting a std.
  *
  * `reframe(graph, nodeId, F)` is the REFERENCE re-framer for AIQ's rule. It keeps every touching link's natural size,
- * carries the old natural spread only where it would move (a real std; PLoT's 0.1 floor), labelled with its ORIGINAL owner,
- * and rewrites the goal's normalised threshold. MG's
+ * rescales an EXISTING std only (marked with its original owner) and never mints one, carries every option's value for
+ * the node, and rewrites the goal's normalised threshold. A floor-bound spread therefore moves and is refused (AIQ 5895379601). MG's
  * builder must produce a graph the oracle accepts; its exact numbers can be checked against this one.
  */
 type Rec = Record<string, any>;
@@ -121,7 +121,10 @@ export function frameInvariance(before: Rec, after: Rec): string[] {
       if (num(a.goal_threshold) && F !== undefined && !close(a.goal_threshold * F, a.goal_threshold_raw)) out.push(`level_moved ${id} (goal_threshold ≠ raw/F)`);
     }
     const [spb, spa] = [naturalSpread(b), naturalSpread(a)];
-    if (spb !== undefined && spa !== undefined && !close(spb, spa)) out.push(`spread_moved ${id} ${spb.toPrecision(4)} → ${spa.toPrecision(4)}`);
+    if (spb !== undefined && spa !== undefined && !close(spb, spa)) {
+      const floor = [b, a].some((n) => !(num(n.observed_state?.std) && n.observed_state.std > 0) && 0.15 * Math.abs(n.observed_state.value) < 0.1);
+      out.push(`spread_moved ${id} ${spb.toPrecision(4)} → ${spa.toPrecision(4)}${floor ? ' (floor-bound)' : ''}`);
+    }
   }
   return out;
 }
@@ -142,12 +145,11 @@ export function reframe(graph: Rec, id: string, F: number): Rec {
     node.goal_threshold_cap = F;
     if (num(node.goal_threshold)) node.goal_threshold = node.goal_threshold * k;
   }
-  // Carry ONLY what would move (R3-B 5895208669 × AIQ 5895140735): a real std is rescaled and keeps its owner; a synthesised
-  // spread is minted only where PLoT's 0.1 floor makes it frame-relative (0.15·value is already invariant), labelled with
-  // its ORIGINAL owner (Olumi → ISL `template`); never for a stated level, a zero held exact, or a node with no spread.
-  if (spreadBefore !== undefined && !usersLevel(node)) {
-    if (num(os.std) && os.std > 0) os.std = spreadBefore / F;
-    else if (!close(Math.max(0.1, 0.15 * Math.abs(os.value)) * F, spreadBefore)) { os.std = spreadBefore / F; os.std_source = 'olumi'; }
+  // AIQ 5895379601 (2) × R3-B 5895208669: rescale an EXISTING std only, and mark it with its ORIGINAL owner (a user's stays
+  // `user`; Olumi's → ISL `template`). NEVER mint one: a floor-bound synthesised spread moves, so the oracle refuses it.
+  if (num(os.std) && os.std > 0 && spreadBefore !== undefined) {
+    os.std = spreadBefore / F;
+    os.std_source ??= usersLevel(node) ? 'user' : 'olumi';
   }
   for (const o of g.nodes as Rec[]) { const iv = o.interventions?.[id]; if (iv && num(iv.value)) iv.value = iv.value * k; } // an option's value for it
   const nodes = byId(g);
