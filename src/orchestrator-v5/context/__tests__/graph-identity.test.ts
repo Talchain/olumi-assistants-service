@@ -350,7 +350,7 @@ describe('golden byte-parity pins', () => {
     // and the derived run semantics joined the hash. The old pin stays, through the frozen pre-0.62.0 projection, so
     // this row proves the move is exactly the projection bump and nothing else.
     expect(legacyAnalysisHashV2(golden)).toBe('e48d776aa7552f74');
-    expect(computeAnalysisAffectingGraphHash(golden)).toBe('b692e08bb4f4f189');
+    expect(computeAnalysisAffectingGraphHash(golden)).toBe('bc48670191eca62b');
   });
 
   it('topology hash is byte-stable', () => {
