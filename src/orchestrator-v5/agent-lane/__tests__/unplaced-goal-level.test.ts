@@ -54,6 +54,13 @@ describe('briefGoalLevel: AIQ (b) — the sole same-terms figure, in the change\
   it('(run 0) a "%"-typed percentage change: the level\'s terms come from the brief\'s ONE figure → adopted, in GBP per month', () => {
     expect(briefGoalLevel(draft({ metric: 'Monthly spend', unit: '%' }), CLOUD)).toEqual({ ...ADOPT_45K, unit: 'GBP per month' });
   });
+  // ⛔ PR Review CR on #2313 @ 729afc91: the figure's period must be the one the goal's own name states.
+  it.each<[string, string, string]>([
+    ['an ANNUAL figure for a MONTHLY goal', 'Monthly spend', 'Annual spend is £45k; we want to cut monthly spend by 20%.'],
+    ['CONTROL (inverse): a MONTHLY figure for an ANNUAL goal', 'Annual spend', 'Monthly spend is £45k; we want to cut annual spend by 20%.'],
+  ])('a "%" goal: %s → refused, no base', (_why, metric, brief) => {
+    expect(briefGoalLevel(draft({ metric, unit: '%' }), brief)).toMatchObject({ kind: 'refused' });
+  });
   it('(run 1) the drafter ALSO put the £45k on a factor ("AWS-equivalent monthly cloud spend"): the brief\'s phrase decides → adopted', () => {
     expect(briefGoalLevel(draft({ metric: 'Monthly spend' }, [{ label: 'AWS-equivalent monthly cloud spend', role: 'observable', baseline_known: true, baseline_value: 45000, unit: '£/month', provenance: 'explicit' }]), CLOUD)).toEqual(ADOPT_45K);
   });

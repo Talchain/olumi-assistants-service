@@ -129,7 +129,10 @@ export function briefGoalLevel(candidate: CandidateModel, brief: string | null |
   if (goal.frame === 'change_rel' && unitPhraseFamily(goalUnit) === 'percent' && distinct.length === 1) {
     const only = distinct[0]!;
     const period = periodIn(clauseAround(brief, only.index, only.index + only.matchedText.length));
-    if (only.currencyCode !== undefined && period !== null) {
+    // ⛔ PR Review CR on #2313 @ 729afc91: a period the goal's own name states must be the figure's ("Annual spend is £45k"
+    // is never the base of "Monthly spend", nor the reverse): nothing converts one into the other.
+    const named = periodIn(metric);
+    if (only.currencyCode !== undefined && period !== null && (named === null || named === period)) {
       goalUnit = `${only.currencyCode} per ${period}`;
       unit = readCurrencyUnitWithQualifiers(goalUnit);
     }

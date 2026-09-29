@@ -116,6 +116,13 @@ describe('AIQ (b): the brief\'s £45k as Olumi\'s disclosed reading of today\'s 
     expect(g.goal_threshold_unit).toBe('GBP per month');
     expect(goalLevelReadingWords(registered, g.id)).toMatch(/^Olumi reads your ‘£45k’ \(‘Monthly spend is £45k’\) as today's level of ‘Monthly spend’, so a 20% cut is £36,000/);
   });
+  it('(PR Review CR @ 729afc91, real build) an ANNUAL £45k for a "%"-typed MONTHLY goal → no base, and the build asks', async () => {
+    const { r, registered } = await run(costs({ metric: 'Monthly spend', unit: '%' }), 'Annual spend is £45k; we want to cut monthly spend by 20%.');
+    const g = goalOf(registered) as Record<string, any>;
+    expect(g.observed_state).toBeUndefined();
+    expect(g.goal_level_reading).toBeUndefined();
+    expect(said(r)).toMatch(/Your brief gives ‘£45k’, but it isn't held as today's level of ‘Monthly spend’/);
+  });
   it('(run 1, real build) the £45k ALSO on a factor → the goal still gets its base as Olumi\'s reading', async () => {
     const c = costs({ metric: 'Monthly spend' }) as Record<string, any>;
     c.factors = [...c.factors, { label: 'AWS-equivalent monthly cloud spend', role: 'observable', baseline_known: true, baseline_value: 45000, unit: '£/month', provenance: 'explicit', plausible_max: 200000 }];
