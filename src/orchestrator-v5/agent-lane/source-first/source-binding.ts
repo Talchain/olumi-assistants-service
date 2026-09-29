@@ -2,6 +2,11 @@ import type { NumberClaim, SourceSpan, SourceQuantity, SourceUnit } from './mean
 
 export type BoundSource = { quote: string; start: number; end: number; offset_corrected?: true };
 export type Binding = { ok: true; source: BoundSource } | { ok: false; reason: string };
+const SMALL_NUMBERS: Record<string, number> = {
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
+  ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
+  seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
+};
 
 export function bindSource(brief: string, claim: SourceSpan): Binding {
   let mismatchedOffset = false;
@@ -30,13 +35,17 @@ export function readNumber(brief: string, claim: NumberClaim): { value: number; 
   if (bound.source.quote.indexOf(claim.literal, at + 1) >= 0
     || /[\d.,+-]/.test(bound.source.quote[at - 1] ?? '')
     || /^[\da-z]|^[.,]\d/i.test(following)) return null;
-  const literal = claim.literal.trim().replace(/[,\s]/g, '').replace(/^(GBP|USD|EUR)/i, '')
+  // These are numeric spellings, not inferred values. Preserve the full quote
+  // (including "about") and require the decoded value to equal the typed one.
+  const spelling = claim.literal.trim().replace(/^(?:about|approximately|roughly|around)\s+/i, '')
+    .replace(/\s+(?:days?|weeks?|months?|years?|hours?|minutes?|seconds?)$/i, '');
+  const literal = spelling.replace(/[,\s]/g, '').replace(/^(GBP|USD|EUR)/i, '')
     .replace(/[£$€]/g, '').replace(/(?:%|percentagepoints|pp)$/i, '');
   const parsed = /^([+-]?\d+(?:\.\d+)?)(k|m|million|thousand)?$/i.exec(literal);
-  if (!parsed) return null;
-  const multiplier = /^(k|thousand)$/i.test(parsed[2] ?? '') ? 1_000
-    : /^(m|million)$/i.test(parsed[2] ?? '') ? 1_000_000 : 1;
-  const value = Number(parsed[1]) * multiplier;
+  if (!parsed && SMALL_NUMBERS[literal.toLowerCase()] === undefined) return null;
+  const multiplier = /^(k|thousand)$/i.test(parsed?.[2] ?? '') ? 1_000
+    : /^(m|million)$/i.test(parsed?.[2] ?? '') ? 1_000_000 : 1;
+  const value = parsed ? Number(parsed[1]) * multiplier : SMALL_NUMBERS[literal.toLowerCase()];
   const claimed = Number(claim.value);
   if (!Number.isFinite(value) || !Number.isFinite(claimed)
     || Math.abs(value - claimed) > Number.EPSILON * Math.max(1, Math.abs(value)) * 4) return null;
@@ -70,7 +79,9 @@ export function quantityProblem(quantity: SourceQuantity, context: string): stri
   const periods = { day: /\b(daily|days?)\b/i, week: /\b(weekly|weeks?)\b/i, month: /\b(monthly|months?|MRR)\b/i,
     quarter: /\b(quarterly|quarters?)\b/i, year: /\b(annual(?:ly)?|yearly|years?|ARR)\b/i };
   if (unit.period !== null && !periods[unit.period].test(context)) return 'period_not_grounded';
-  if (quantity.horizon_months !== null) {
+  // Period and deadline are different. A provider's incidental horizon field
+  // cannot invalidate a sound current value or limit; only targets consume it.
+  if (quantity.role === 'target' && quantity.horizon_months !== null) {
     const months = /\b(\d+)\s+months?\b/i.exec(context);
     const years = /\b(\d+|a|one)\s+years?\b/i.exec(context);
     const stated = months ? Number(months[1]) : years ? (Number(years[1]) || 1) * 12 : null;
@@ -84,6 +95,7 @@ export function unitText(unit: SourceUnit): string {
     : unit.kind === 'count' ? unit.counted_object ?? unit.as_stated
       : unit.kind === 'percent' ? '%' : unit.kind === 'percentage_points' ? 'percentage points' : unit.as_stated;
   const counted = unit.kind === 'currency' && unit.counted_object ? ` per ${unit.counted_object}` : '';
+  if (unit.kind === 'time' && unit.period !== null && new RegExp(`^${unit.period}s?$`, 'i').test(unit.as_stated.trim())) return base;
   return `${base}${counted}${unit.period ? ` per ${unit.period}` : ''}`;
 }
 
