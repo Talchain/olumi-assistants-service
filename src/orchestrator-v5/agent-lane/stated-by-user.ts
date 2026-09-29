@@ -739,15 +739,23 @@ export function userWordsOf(typedEarlier: readonly string[], typedNow: string | 
  *      fewer / drop … against gain / win / adds / rise … A move word right after the SOURCE's figure ("£1 increase",
  *      "£10 rise", "£1 we add to the price") or beside a word naming the source ("the price falls", "raise the price")
  *      is the SOURCE's move, and must match the sign of `per_source_change`; with none, the source is read as rising.
+ * All of it from ONE sentence of the quote, and each figure BOUND to what it sizes: the amount within four words of the
+ * target's movement ("loses us about 50", "50 fewer"), the source's figure within four words of the source or its move
+ * ("£1 on the Pro price", "falls by £1") — a figure written for anything else (a budget, today's level) is never a size.
  * Every miss under-claims (the Agent asks the user to say it as one statement): an unlisted verb ("sheds"), a source
- * named only by implication ("a £10 rise adds…"), both movements for one end, or a quote spanning two statements.
+ * named only by implication ("a £10 rise adds…"), both movements for one end, a figure far from its movement, or the
+ * elements spread over several sentences.
  */
 export type LinkEffectStatementMiss = 'question' | 'denied' | 'figures_not_in_statement' | 'end_not_named'
-  | 'direction_not_stated' | 'direction_contradicts';
+  | 'direction_not_stated' | 'direction_contradicts' | 'figure_not_bound' | 'not_one_statement';
 const TARGET_DOWN = /^(?:lose|loses|losing|lost|cost|costs|costing|fewer)$/;
 const TARGET_UP = /^(?:gain|gains|gaining|gained|win|wins|winning|won|adds|added|adding)$/;
 const MOVE_UP = /^(?:rise|rises|rising|rose|increase|increases|increasing|increased|raise|raises|raising|raised|boost|boosts|boosted|boosting|lift|lifts|lifted|lifting|grow|grows|growing|grew|add)$/;
 const MOVE_DOWN = /^(?:fall|falls|falling|fell|drop|drops|dropping|dropped|decrease|decreases|decreasing|decreased|reduce|reduces|reducing|reduced|lower|lowers|lowering|lowered|cut|cuts|cutting)$/;
+/** A figure is bound to its movement or its end only within this many words of it ("loses us about 50", "£1 on the Pro price"). */
+const BOUND_WITHIN = 4;
+/** The quote's sentences: split at . ! ? ; : or a new line, never inside a figure ("0.5", "£1.50"). */
+const sentencesOf = (q: string): string[] => q.split(/(?<!\d)[.!?;:](?!\d)|\n/).map((x) => x.trim()).filter((x) => x !== '');
 export function linkEffectTheUserStated(
   quote: string,
   effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
@@ -757,8 +765,24 @@ export function linkEffectTheUserStated(
   const q = quote.trim();
   if (q.includes('?') || (AUXILIARY_FIRST.test(q) && !REQUEST_FORM.test(q))) return 'question';
   if (NEGATOR.test(q)) return 'denied';
-  if (!figureTheUserWrote(Math.abs(effect.amount), effect.amount_unit, q)
-    || !figureTheUserWrote(Math.abs(effect.per_source_change), effect.per_source_change_unit, q)) return 'figures_not_in_statement';
+  // ⛔ PR Review's second CR (#2275 @ f5aaec34): every element must come from ONE sentence — "Pro price rises. Paying
+  // subscribers fall. Our budget is £1 per month. We currently have 50 paying subscribers." states no £1 → 50.
+  const sentences = sentencesOf(q);
+  const misses = sentences.map((sentence) => linkEffectInOneSentence(sentence, effect, ends, scope));
+  if (misses.some((m) => m === null)) return null;
+  return sentences.length === 1 ? misses[0]! : 'not_one_statement';
+}
+
+function linkEffectInOneSentence(
+  q: string,
+  effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
+  ends: { readonly source: string; readonly target: string },
+  scope: { readonly quantities: readonly string[] },
+): LinkEffectStatementMiss | null {
+  const amountFigure = findStatedAmounts(q).find((a) => amountIs(a, Math.abs(effect.amount), effect.amount_unit, unitPhraseFamily(effect.amount_unit), q));
+  const perFigure = findStatedAmounts(q).find((a) => amountIs(a, Math.abs(effect.per_source_change), effect.per_source_change_unit,
+    unitPhraseFamily(effect.per_source_change_unit), q));
+  if (amountFigure === undefined || perFigure === undefined) return 'figures_not_in_statement';
   const othersOf = (label: string): string[] => scope.quantities.filter((l) => l !== label);
   const quoteWords = wordsOf(q);
   const has = (w: string): boolean => quoteWords.some((t) => sameWord(w, t));
@@ -770,24 +794,28 @@ export function linkEffectTheUserStated(
   const tokens = [...q.matchAll(/[\p{L}\p{N}]+/gu)].map((m) => ({ w: m[0].toLowerCase(), at: m.index ?? 0 }));
   const sourceOwn = wordsOf(ends.source).filter((w) => !wordsOf(ends.target).some((s) => sameWord(w, s)));
   const sourceAt = tokens.flatMap((t, i) => (sourceOwn.some((w) => sameWord(w, t.w)) ? [i] : []));
-  const perFigure = findStatedAmounts(q).find((a) => amountIs(a, Math.abs(effect.per_source_change), effect.per_source_change_unit,
-    unitPhraseFamily(effect.per_source_change_unit), q));
-  const perAt = perFigure === undefined ? -1 : tokens.findIndex((t) => t.at >= (perFigure.index ?? 0));
+  const tokenAt = (index: number | undefined): number => tokens.findIndex((t) => t.at >= (index ?? 0));
+  const perAt = tokenAt(perFigure.index);
+  const amountAt = tokenAt(amountFigure.index);
   // "£1 increase", "£10 rise", "£1 we add": right after the source's figure. "the price falls", "raise the price": beside
   // a word naming the source. "add … to the Pro price": up to four words before it.
   const isSourceMove = (i: number, w: string): boolean => (perAt >= 0 && i > perAt && i - perAt <= 3)
     || sourceAt.some((s) => (w === 'add' ? s > i && s - i <= 4 : Math.abs(s - i) <= 2));
   let target = 0; let targetBoth = false; let source = 0; let sourceBoth = false;
-  const say = (end: 'target' | 'source', dir: 1 | -1): void => {
-    if (end === 'target') { if (target !== 0 && target !== dir) targetBoth = true; target = dir; } else { if (source !== 0 && source !== dir) sourceBoth = true; source = dir; }
+  const targetMoves: number[] = []; const sourceMoves: number[] = [];
+  const say = (end: 'target' | 'source', dir: 1 | -1, i: number): void => {
+    if (end === 'target') { if (target !== 0 && target !== dir) targetBoth = true; target = dir; targetMoves.push(i); } else { if (source !== 0 && source !== dir) sourceBoth = true; source = dir; sourceMoves.push(i); }
   };
   tokens.forEach((t, i) => {
-    if (TARGET_DOWN.test(t.w)) say('target', -1);
-    else if (TARGET_UP.test(t.w)) say('target', 1);
-    else if (MOVE_UP.test(t.w)) say(isSourceMove(i, t.w) ? 'source' : 'target', 1);
-    else if (MOVE_DOWN.test(t.w)) say(isSourceMove(i, t.w) ? 'source' : 'target', -1);
+    if (TARGET_DOWN.test(t.w)) say('target', -1, i);
+    else if (TARGET_UP.test(t.w)) say('target', 1, i);
+    else if (MOVE_UP.test(t.w)) say(isSourceMove(i, t.w) ? 'source' : 'target', 1, i);
+    else if (MOVE_DOWN.test(t.w)) say(isSourceMove(i, t.w) ? 'source' : 'target', -1, i);
   });
   if (target === 0 || targetBoth || sourceBoth) return 'direction_not_stated';
+  // Each figure is bound to what it sizes: the amount to the target's movement, the source's figure to the source.
+  const near = (a: number, xs: readonly number[]): boolean => a >= 0 && xs.some((x) => Math.abs(x - a) <= BOUND_WITHIN);
+  if (!near(amountAt, targetMoves) || !near(perAt, [...sourceAt, ...sourceMoves])) return 'figure_not_bound';
   if (target !== Math.sign(effect.amount)) return 'direction_contradicts';
   if (source === 0 ? effect.per_source_change < 0 : source !== Math.sign(effect.per_source_change)) {
     return source === 0 ? 'direction_not_stated' : 'direction_contradicts';

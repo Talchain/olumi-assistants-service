@@ -107,6 +107,9 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     ['every £1 increase in the Pro price loses us 50 paying subscribers', -50, 1],
     ['If the Pro price falls by £1 we gain about 50 paying subscribers', 50, -1],
     ['each £1 on the Pro price means 50 fewer paying subscribers', -50, 1],
+    // Several sentences where ONE states it; the model's own colon-prefixed quote (live replay, 29 Sep).
+    ['We checked last quarter. Every £1 on the Pro price loses us about 50 paying subscribers', -50, 1],
+    ['From our last two price changes: every £1 on the Pro price loses us about 50 paying subscribers', -50, 1],
   ])('STATED, prepared: "%s"', async (quote, amount, per) => {
     const r = await stated(`${quote}.`, quote as string, amount as number, per as number);
     expect(r.ok, JSON.stringify(r)).toBe(true);
@@ -131,6 +134,17 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     // The figures only ELSEWHERE in the turn; the quoted statement names both ends and the way, but no size.
     ['Our budget is £1 a month; we have 50 paying subscribers. Raising the Pro price loses us paying subscribers.',
       'Raising the Pro price loses us paying subscribers', -50, 1, 'not_the_users_figure', undefined],
+    // PR Review's second CR (@ f5aaec34): every element present, but in DIFFERENT sentences — £1 a budget, 50 today's level.
+    ['Pro price rises. Paying subscribers fall. Our budget is £1 per month. We currently have 50 paying subscribers.',
+      'Pro price rises. Paying subscribers fall. Our budget is £1 per month. We currently have 50 paying subscribers', -50, 1,
+      'not_the_users_statement', 'not_one_statement'],
+    ['Pro price rises: paying subscribers fall: our budget is £1 per month: we have 50 paying subscribers.',
+      'Pro price rises: paying subscribers fall: our budget is £1 per month: we have 50 paying subscribers', -50, 1,
+      'not_the_users_statement', 'not_one_statement'],
+    // ONE sentence, every element in it, but neither figure sizes the movement.
+    ['Our budget is £1 per month and we currently have 50 paying subscribers, and a Pro price rise loses us paying subscribers.',
+      'Our budget is £1 per month and we currently have 50 paying subscribers, and a Pro price rise loses us paying subscribers',
+      -50, 1, 'not_the_users_statement', 'figure_not_bound'],
     // A NAMED under-claim: the source only implied ("a £10 rise") — the Agent asks, never infers the price.
     ['A £10 rise loses us about 500 paying subscribers.', 'A £10 rise loses us about 500 paying subscribers', -500, 10,
       'not_the_users_statement', 'end_not_named'],
