@@ -95,6 +95,7 @@ import { buildCanonicalAnalysisReadyFromGraph } from "../../orchestrator/tools/a
 import { issuesAsWireBlockers } from "../../orchestrator-v5/compose/analysis-state-v1.js";
 import { RunAnalysisResultSchema } from "@talchain/schemas/orchestrator";
 import { readStoredGoalCertainty } from "../../orchestrator-v5/tools/handlers/run-goal-certainty.js";
+import { leaderWithheldForALimit } from "../../orchestrator-v5/coaching/limit-unchecked-card.js";
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -784,6 +785,8 @@ describe("0.63.0 — `analysis_goal_certainty` is the selected Run's stored arra
     readFactsFor.mockResolvedValue([withCertainty(GRAPH_HASH, STORED)]);
     const body = (await read(await buildApp())).json() as Record<string, unknown>;
     expect(readStoredGoalCertainty(body.analysis_goal_certainty)).toEqual(body.analysis_goal_certainty);
+  });
+});
 
 // ─── The INTAKE cause of a withheld leader (Canvas #72 5886223069; AIQ 5886352788) ───────────────────────────────────
 
@@ -805,6 +808,10 @@ describe("a leader withheld by the INTAKE axis says so — never `constraint_ver
     const body = (await read(await buildApp())).json() as Record<string, any>;
     expect(body.analysis_state.run_state.kind).toBe("complete_current");
     expect(body.analysis_state.leader_claim).toMatchObject({ permitted: false, withheld_reason: "options_not_reconciled_with_brief" });
+    // The limit-declined card's OWN mount predicate, on this exact payload: it does NOT mount (DL 5886466744).
+    expect(leaderWithheldForALimit(body.analysis_state)).toBe(false);
+    // The scored limit evidence is preserved beside it.
+    expect(body.analysis_limit_verdicts).toMatchObject({ per_limit: [{ state: "scored" }], joint: { state: "scored" } });
   });
 
   it("CONTROL: the constraint verdict itself withholds → `constraint_verdict_withheld` stands", async () => {
@@ -812,5 +819,6 @@ describe("a leader withheld by the INTAKE axis says so — never `constraint_ver
     readFactsFor.mockResolvedValue([intakeWithheld("unevaluated")]);
     const body = (await read(await buildApp())).json() as Record<string, any>;
     expect(body.analysis_state.leader_claim).toMatchObject({ permitted: false, withheld_reason: "constraint_verdict_withheld" });
+    expect(leaderWithheldForALimit(body.analysis_state)).toBe(true);
   });
 });
