@@ -151,10 +151,22 @@ describe('a goal whose stated level reconciles with its two stated parts is decl
     const { goal } = await registeredGoal(paulDraft({ identities: declared }), PAUL);
     expect(goal.nonlinear_identity).toStrictEqual(PRODUCT);
   });
-  it('CONTROL: a drafter-declared explicit product OUTSIDE the domain (18% off) is left as the drafter tagged it', async () => {
+  // ⛔ PR Review CR on 9af5ffb4: fail closed OUTSIDE the domain too. Only the card's Yes makes a goal product the user's.
+  it('DEMOTED outside the domain (18% off): a drafter-declared explicit product is still Olumi\'s reading', async () => {
     const declared = [{ outcome: 'Monthly recurring revenue', operation: 'product', factors: ['Pro plan price', 'Paying subscribers'], provenance: 'explicit' }];
-    const d = paulDraft({ identities: declared, goalLevel: 60000 });
-    expect(withGoalProductUnconfirmed(d, PAUL.replace('£75k MRR', '£60k MRR'))).toBe(d);
+    const { goal } = await registeredGoal(paulDraft({ identities: declared, goalLevel: 60000 }), PAUL.replace('£75k MRR', '£60k MRR'));
+    expect(goal.nonlinear_identity).toStrictEqual(PRODUCT);
+  });
+  it('NEGATIVE (PR Review CR): matching numbers, NON-COMPOSING units ("£75k MRR = 3 engineers × £25k budget per engineer"), declared explicit → never the user\'s: Olumi\'s reading, and no card', async () => {
+    const parts = [{ label: 'Budget per engineer', unit: 'GBP', level: 25000 }, { label: 'Engineers', unit: 'engineers', level: 3 }] as const;
+    const declared = [{ outcome: 'Monthly recurring revenue', operation: 'product', factors: ['Budget per engineer', 'Engineers'], provenance: 'explicit' }];
+    const { goal, graph } = await registeredGoal(paulDraft({ parts, identities: declared }), 'We have 3 engineers and a £25,000 budget per engineer. MRR is £75,000 and we want MRR above £85k.');
+    expect(goal.nonlinear_identity).toStrictEqual({ operation: 'product', factor_ids: ['budget_per_engineer', 'engineers'], stated_in_brief: false });
+    expect(proposeProductIdentity(graph)).toBeNull();
+  });
+  it('CONTROL: a candidate with nothing to demote comes back as the very same object', () => {
+    const d = paulDraft();
+    expect(withGoalProductUnconfirmed(d, PAUL)).toBe(d);
   });
   it('CONTROL: an already-inferred declaration comes back as the very same object', () => {
     const d = paulDraft({ identities: [{ outcome: 'Monthly recurring revenue', operation: 'product', factors: ['Pro plan price', 'Paying subscribers'], provenance: 'inferred' }] });

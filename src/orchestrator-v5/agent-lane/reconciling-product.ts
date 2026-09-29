@@ -176,20 +176,21 @@ export function withReconcilingProductIdentity(candidate: CandidateModel, brief:
 
 /**
  * ⛔ A PRODUCT THE DRAFTER DECLARES ON THE GOAL IS THE DRAFTER'S READING, NEVER THE USER'S STATEMENT (FORK (iii); R3
- * served `b5a673a`: a drafter-declared MRR = price × subscribers on Paul's plain brief). Inside the card's own domain (the
- * goal's two stated parts reconcile within 5% and the units compose), a declared goal product is kept but DEMOTED to
- * `inferred`, whatever provenance the drafter tagged it with (its tag is its own word), so it waits for the user's Yes
- * like the mint's. Outside that domain, or already `inferred`, the candidate is returned as it came (the same object).
+ * served `b5a673a`: a drafter-declared MRR = price × subscribers on Paul's plain brief). Every declared goal product is
+ * kept but DEMOTED to `inferred`, whatever provenance the drafter tagged it with (its tag is its own word), so it waits
+ * for the user's Yes like the mint's.
+ *
+ * ⛔ PR Review CHANGES_REQUIRED on 9af5ffb4: NOT only inside the card's domain. A declaration whose numbers happen to
+ * match but whose units do not compose ("£75k MRR = 3 engineers × £25k budget per engineer") left as the drafter's
+ * `explicit` became `stated_in_brief: true` at admission, the user's product, and PLoT (d) withholds only inferred ones.
+ * Fail closed: outside the domain it is withheld with no card (the no-card words), never computed as the user's. Only the
+ * card's Yes makes a goal product the user's. A candidate with nothing to demote comes back as the very same object.
  */
 export function withGoalProductUnconfirmed(candidate: CandidateModel, brief: string): CandidateModel {
+  void brief;
   const metric = candidate.goal?.metric;
-  const declared = (candidate.identities ?? []).filter((i) => i.outcome === metric && i.operation === 'product');
-  if (declared.length !== 1 || declared[0]!.provenance === 'inferred') return candidate;
-  const bare: CandidateModel = { ...candidate, identities: (candidate.identities ?? []).filter((i) => i !== declared[0]) };
-  const r = reconcilingParts(bare, brief);
-  if (r === null) return candidate;
-  const factors = new Set(declared[0]!.factors);
-  if (factors.size !== 2 || !r.parts.every((p) => factors.has(p.label))) return candidate;
-  if (unitsCompose(candidate.goal.unit, r.metric, r.parts[0], r.parts[1]).kind === 'no') return candidate;
-  return { ...candidate, identities: (candidate.identities ?? []).map((i) => (i === declared[0] ? { ...i, provenance: 'inferred' } : i)) };
+  const demote = (i: NonNullable<CandidateModel['identities']>[number]): boolean =>
+    i.outcome === metric && i.operation === 'product' && i.provenance !== 'inferred';
+  if (!(candidate.identities ?? []).some(demote)) return candidate;
+  return { ...candidate, identities: (candidate.identities ?? []).map((i) => (demote(i) ? { ...i, provenance: 'inferred' } : i)) };
 }
