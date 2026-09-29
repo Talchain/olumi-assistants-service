@@ -41,15 +41,32 @@ describe('briefGoalLevel: AIQ (b) — the sole same-terms figure, in the change\
     ['(c) a clause naming no period ("Spend is £45k")', draft(), CLOUD.replace('Monthly spend', 'Spend'), refused('£45k')],
     ['(c) a goal naming no period (unit "£", metric "costs")', draft({ unit: '£' }), CLOUD, refused('£45k')],
     ['(d) a "USD per month" goal beside the brief\'s £45k (the cross-read)', draft({ unit: 'USD per month' }), CLOUD, refused('£45k')],
-    ['the goal unit is not money ("%")', draft({ unit: '%' }), CLOUD, refused('£45k')],
+    ['a "%" goal unit with TWO money figures (no one figure supplies the level\'s terms)', draft({ unit: '%' }), CLOUD.replace('Monthly spend is £45k', 'Monthly spend is £45k, of which £12k is storage'), refused('£45k', '£12k')],
+    ['a "%" goal unit whose figure\'s clause names no period ("Spend is £45k")', draft({ unit: '%' }), CLOUD.replace('Monthly spend', 'Spend'), refused('£45k')],
     ['a SCALED goal unit ("£k/month"): money totals are read unscaled only (the #2305 rule)', draft({ unit: '£k/month' }), CLOUD, refused('£45k')],
     ['S4G-8b: the figure stated in ANOTHER sentence, for another quantity', draft({ metric: 'Monthly cloud bill', value: -15, unit: 'GBP per month' }),
       'Our support team costs £45,000 a month. Cut our monthly cloud bill by 15% within 6 months.', refused('£45,000')],
     ['the change figure is not written in the brief (the drafter\'s −0.2)', draft({ value: -0.2 }), CLOUD, refused('£45k')],
-    ['a factor already holds the £45k (the drafter gave it to another quantity)',
-      draft({}, [{ label: 'Current AWS monthly spend', role: 'observable', baseline_known: true, baseline_value: 45000, unit: '£/month', provenance: 'explicit' }]), CLOUD, refused('£45k')],
   ])('REFUSED: %s', (_why, d, brief, expected) => {
     expect(briefGoalLevel(d, brief)).toEqual(expected);
+  });
+  // ⛔ AIQ 5897443539: served cut-costs runs 0 and 1 (a20cfd6) had no base, so no chance.
+  it('(run 0) a "%"-typed percentage change: the level\'s terms come from the brief\'s ONE figure → adopted, in GBP per month', () => {
+    expect(briefGoalLevel(draft({ metric: 'Monthly spend', unit: '%' }), CLOUD)).toEqual({ ...ADOPT_45K, unit: 'GBP per month' });
+  });
+  // ⛔ PR Review CR on #2313 @ 729afc91: the figure's period must be the one the goal's own name states.
+  it.each<[string, string, string]>([
+    ['an ANNUAL figure for a MONTHLY goal', 'Monthly spend', 'Annual spend is £45k; we want to cut monthly spend by 20%.'],
+    ['CONTROL (inverse): a MONTHLY figure for an ANNUAL goal', 'Annual spend', 'Monthly spend is £45k; we want to cut annual spend by 20%.'],
+  ])('a "%" goal: %s → refused, no base', (_why, metric, brief) => {
+    expect(briefGoalLevel(draft({ metric, unit: '%' }), brief)).toMatchObject({ kind: 'refused' });
+  });
+  it('(run 1) the drafter ALSO put the £45k on a factor ("AWS-equivalent monthly cloud spend"): the brief\'s phrase decides → adopted', () => {
+    expect(briefGoalLevel(draft({ metric: 'Monthly spend' }, [{ label: 'AWS-equivalent monthly cloud spend', role: 'observable', baseline_known: true, baseline_value: 45000, unit: '£/month', provenance: 'explicit' }]), CLOUD)).toEqual(ADOPT_45K);
+  });
+  it('CONTROL (run 1): a factor holding a figure whose phrase names ANOTHER quantity → still refused', () => {
+    const brief = 'Our support team costs £45,000 a month and we want to cut our cloud bill by 15%.';
+    expect(briefGoalLevel(draft({ metric: 'Monthly cloud bill', value: -15, unit: 'GBP per month' }, [{ label: 'Support team cost', role: 'observable', baseline_known: true, baseline_value: 45000, unit: 'GBP per month', provenance: 'explicit' }]), brief)).toMatchObject({ kind: 'refused' });
   });
   it.each<[string, CandidateModel, string]>([
     ['a LEVEL target, not a change', draft({ frame: 'level', value: 36000 }), CLOUD],
