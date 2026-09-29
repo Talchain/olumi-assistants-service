@@ -15,6 +15,8 @@
  */
 
 import { goalChanceWithheldForAgent, type GoalChanceWithheld } from '../goal-chance-withheld.js';
+import { certainOptionRows, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
+import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
@@ -204,6 +206,17 @@ export function limitScopeIn(g: { readonly nodes: readonly { readonly label?: un
 function withGoalChance(result: unknown): { goal_chance?: GoalChanceWithheld } {
   const withheld = goalChanceWithheldForAgent(result);
   return withheld !== undefined ? { goal_chance: withheld } : {};
+}
+
+/** A raw graph-read body as the goal-certainty rule reads it: the same fields `readGraph` keeps. */
+function certaintyReadOf(json: Record<string, unknown>): GoalCertaintyRead {
+  const stored = readStoredGoalCertainty(json.analysis_goal_certainty);
+  return {
+    raw: json.graph,
+    analysis_state: json.analysis_state,
+    analysis_result: json.analysis_result,
+    ...(stored !== undefined ? { goal_certainty: stored } : {}),
+  };
 }
 
 /**
@@ -792,6 +805,10 @@ interface GraphRead {
   readonly identity_run_use?: IdentityRunUse | null;
   /** The selected run's per-limit rows (`analysis_limit_verdicts`), read off the SAME graph read (`limit-checks.ts`). */
   readonly limit_verdicts?: StoredLimitVerdicts;
+  /** The read's `analysis_result` block — the selected Run, present only when the route delivers it (`goal-certainty-for-agent.ts`). */
+  readonly analysis_result?: unknown;
+  /** The read's `analysis_goal_certainty` via #2280's ONE reader (`readStoredGoalCertainty`); absent = not recorded. */
+  readonly goal_certainty?: readonly unknown[];
 }
 
 const norm = (s: unknown): string => String(s ?? '').toLowerCase().replace(/…$/, '').trim();
@@ -1492,6 +1509,8 @@ export function createAgentCapabilities(
       ...(notModelled !== undefined ? { not_modelled: notModelled } : {}),
       ...(identityEvaluated !== undefined ? { identity_evaluated: identityEvaluated } : {}),
       ...(limitVerdicts !== null ? { limit_verdicts: limitVerdicts } : {}),
+      ...(r.json.analysis_result !== undefined && r.json.analysis_result !== null ? { analysis_result: r.json.analysis_result } : {}),
+      ...(() => { const stored = readStoredGoalCertainty(r.json.analysis_goal_certainty); return stored !== undefined ? { goal_certainty: stored } : {}; })(),
     };
   };
 
@@ -5112,8 +5131,15 @@ export function createAgentCapabilities(
         // carried beside that reason, read from the model just built — only where an analysis exists. C46 × R3-4: not of a
         // product the run's engine evaluated, read from the SAME post-run read as the permission.
         if (firstAnalysis.ran === true || firstAnalysis.reason === 'already_ran_for_construction') {
+          // ⛔ GOAL CERTAINTY (PR Review CR @ ed62f91b): bound to the Run THIS request EXECUTED — its own block and the run turn's
+          // own stamp — never the read's Run matched to itself (another Run may finish before the read). No Run executed here
+          // (an earlier request's) → nothing to bind to → unchecked when it claims a certainty.
+          const executed = outcome.ran ? outcome.blocks.find((b) => (b as { type?: unknown } | null)?.type === 'analysis_result') : undefined;
+          const certainty = goalCertaintyForAgent(executed ?? read.analysis_result,
+            { scenario_id: ctx.scenario_id, analysis_state: outcome.ran ? outcome.analysisState : undefined }, certaintyReadOf(read));
           firstAnalysis = { ...firstAnalysis, claim_permissions: withNonlinearIdentity(firstAnalysis.claim_permissions, after.raw,
-            readEvaluatedIdentityNodeIds(read.analysis_identity_evaluated_node_ids)), ...withGoalChance(read.analysis_result) };
+            readEvaluatedIdentityNodeIds(read.analysis_identity_evaluated_node_ids)), ...withGoalChance(read.analysis_result),
+          ...(certainty !== undefined ? { goal_certainty: certainty } : {}) };
         }
         if (outcome.ran) {
           firstAnalysisThisRequest = {
@@ -5123,6 +5149,7 @@ export function createAgentCapabilities(
               ...(firstAnalysis.summary !== undefined ? { summary: firstAnalysis.summary } : {}),
               claim_permissions: firstAnalysis.claim_permissions,
               ...(firstAnalysis.goal_chance !== undefined ? { goal_chance: firstAnalysis.goal_chance } : {}),
+              ...(firstAnalysis.goal_certainty !== undefined ? { goal_certainty: firstAnalysis.goal_certainty } : {}),
               note: 'Olumi already ran the first analysis of this model on this turn, so it was not run again.',
             },
           };
@@ -6380,13 +6407,27 @@ export function createAgentCapabilities(
       let evaluatedForProduct: ReadonlySet<string> | undefined;
       // ⛔ How each of the user's limits was checked, from the run's own per-limit rows on the same read (`limit-checks.ts`).
       let limitChecks: ReturnType<typeof limitChecksForAgent>;
+      // The post-run graph read, when one was made (the goal-certainty rule reuses it).
+      let postRunRead: GraphRead | null | undefined;
       if (result !== undefined && permissions.leader_may_be_named !== true) {
         try {
           const read = await readGraph(ctx.scenario_id);
+          postRunRead = read;
           graphForProduct = read?.raw;
           evaluatedForProduct = read?.identity_evaluated;
           limitChecks = limitChecksForAgent(read?.raw, read?.limit_verdicts);
-        } catch { graphForProduct = undefined; evaluatedForProduct = undefined; limitChecks = undefined; }
+        } catch { postRunRead = null; graphForProduct = undefined; evaluatedForProduct = undefined; limitChecks = undefined; }
+      }
+      // ⛔ GOAL CERTAINTY (DL 5887593253; MG's producer #2270, stored per Run by #2280): an option at P(goal) exactly 0 or 1 is
+      // said as a certainty only when THIS Run's own stored decision earns it — attributed by its run-fact identity.
+      // One graph read (the one above when made); a Run that cannot be bound is said as unchecked (`goal-certainty-for-agent.ts`).
+      let goalCertainty: Record<string, unknown> | undefined;
+      if (certainOptionRows(result).length > 0) {
+        if (postRunRead === undefined) {
+          try { postRunRead = await readGraph(ctx.scenario_id); } catch { postRunRead = null; }
+        }
+        // The Run is the one THIS turn returned: its own state carries the stamp the read must match.
+        goalCertainty = goalCertaintyForAgent(result, { scenario_id: ctx.scenario_id, analysis_state: r.json.analysis_state }, postRunRead);
       }
       // ⛔ A Run with no result says the ENGINE's typed outcome, never a readiness issue it did not stop on (`run-outcome.ts`).
       const runOutcome = result === undefined ? runOutcomeOf(r.json) : undefined;
@@ -6414,6 +6455,7 @@ export function createAgentCapabilities(
         ...(limitChecks !== undefined ? { limit_checks: { limits: limitChecks, note: LIMIT_CHECKS_NOTE } } : {}),
         // ⛔ PLoT #416: the goal's chance withheld on every option — the sentence to say and the rule (`../goal-chance-withheld.ts`).
         ...withGoalChance(result),
+        ...(goalCertainty !== undefined ? { goal_certainty: goalCertainty } : {}),
       };
     },
   };

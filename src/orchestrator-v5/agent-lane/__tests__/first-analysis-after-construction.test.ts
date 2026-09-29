@@ -43,7 +43,10 @@ const candidate = (optionLabel: string) => ({
  * After a construction commits, the persisted model READ BACK is the admissible fixture — the gate
  * under test is the retry gate, so the model must be one the admission would run.
  */
-function product(opts: { reportReplay?: boolean; guest?: boolean } = {}) {
+/** The stamp of the Run the post-run graph read selects. */
+const READ_RUN_AT = '2026-09-24T18:00:00.000Z';
+
+function product(opts: { reportReplay?: boolean; guest?: boolean; certain?: { optionId: string; hash?: string; recorded?: unknown[]; executedAt?: string } } = {}) {
   const reportReplay = opts.reportReplay ?? true;
   let registered = false;
   const versions: { version_id: string; sequence: number; creation: { kind: string; mutation_id: string; source_turn_id: string } }[] = [];
@@ -87,8 +90,14 @@ function product(opts: { reportReplay?: boolean; guest?: boolean } = {}) {
       json: registered
         ? {
           graph: READY_GRAPH, graph_hash: hash(),
-          analysis_state: ran ? { run_state: { kind: 'complete_current', computed_at: '2026-09-24T18:00:00.000Z' }, leader_claim: { permitted: false, withheld_reason: 'auto_initiated' } } : { run_state: { kind: 'never_run' }, leader_claim: { permitted: false } },
-          ...(ran ? { analysis_result: { type: 'analysis_result', summary: 'A provisional first pass.' } } : {}),
+          analysis_state: ran ? { run_state: { kind: 'complete_current', computed_at: READ_RUN_AT }, leader_claim: { permitted: false, withheld_reason: 'auto_initiated' } } : { run_state: { kind: 'never_run' }, leader_claim: { permitted: false } },
+          ...(ran ? { analysis_result: { type: 'analysis_result', summary: 'A provisional first pass.',
+            // Goal certainty (DL 5887061638): the first pass's per-option P(goal) and the Run stamp that binds it.
+            ...(opts.certain !== undefined ? {
+              enrichment: { option_comparison: [{ option_id: opts.certain.optionId, option_label: 'Certain', probability_of_goal: 1 }] },
+              ...(opts.certain.hash !== undefined ? { computed_against_hash: opts.certain.hash } : {}),
+            } : {}) } } : {}),
+          ...(ran && opts.certain?.recorded !== undefined ? { analysis_goal_certainty: opts.certain.recorded } : {}),
           analysis_admission: { admitted: true, permitted_analysis_mode: 'quantified_provisional' },
         }
         : { graph: { nodes: [], edges: [] }, graph_hash: 'empty' },
@@ -105,7 +114,14 @@ function product(opts: { reportReplay?: boolean; guest?: boolean } = {}) {
         enrichment: args.autoRun !== undefined ? { [RUN_PROVENANCE_ENRICHMENT_KEY]: ('constructionTurnId' in args.autoRun ? buildConstructionAutoRunProvenance(args.autoRun.constructionTurnId) : buildAutoRunProvenance(args.autoRun.draftTurnId)) } : {},
       },
     } as unknown as HandlerFact);
-    return { outcome: 'ok', response: { assistant_text: 'Ran.', blocks: [{ type: 'analysis_result', summary: 'x' }] }, commitPerformed: true, analysisReady: { status: 'ready' }, graph: null, mayNameLeadingOption: false } as never;
+    // The executed Run's OWN block and stamp (the run turn's `analysis_state`), as the dispatcher returns them.
+    const c = opts.certain;
+    const block = c === undefined ? { type: 'analysis_result', summary: 'x' } : {
+      type: 'analysis_result', summary: 'x', ...(c.hash !== undefined ? { computed_against_hash: c.hash } : {}),
+      enrichment: { option_comparison: [{ option_id: c.optionId, option_label: 'Certain', probability_of_goal: 1 }] },
+    };
+    const analysisState = c === undefined ? undefined : { run_state: { kind: 'complete_current', computed_at: c.executedAt ?? READ_RUN_AT } };
+    return { outcome: 'ok', response: { assistant_text: 'Ran.', blocks: [block], ...(analysisState !== undefined ? { analysis_state: analysisState } : {}) }, commitPerformed: true, analysisReady: { status: 'ready' }, graph: null, mayNameLeadingOption: false } as never;
   };
   const readPriorFacts = async () => ({ status: 'ok' as const, facts: [...facts] });
   /** Clear the model, keeping its history (a user starting again on the same scenario). */
@@ -222,5 +238,44 @@ describe('the first analysis is not repeated by the model in the same request', 
     await dispatchTool('run_analysis', JSON.stringify({ reason: 'the user pressed Run' }), ctx, capsFor(p, call));
     expect(p.runs).toHaveLength(2);
     expect(p.runs[1]!.autoRun, 'the explicit Run carries no provenance').toBeUndefined();
+  });
+});
+
+describe('goal certainty rides the first analysis too (DL 5887061638; the call-site rows for the first pass)', () => {
+  const optionId = String((READY_GRAPH as { nodes: { id: string; kind: string }[] }).nodes.find((n) => n.kind === 'option')!.id);
+  const firstPass = async (certain?: { optionId: string; hash?: string; recorded?: unknown[]; executedAt?: string }): Promise<Record<string, unknown>> => {
+    const p = product(certain !== undefined ? { certain } : {});
+    const call: CallStructuredModel = async () => ({ text: JSON.stringify(candidate('Hire a tech lead')) });
+    const r = await build(capsFor(p, call));
+    expect(r.ok, JSON.stringify(r).slice(0, 300)).toBe(true);
+    return r.first_analysis as Record<string, unknown>;
+  };
+
+  it('RECORDED: the first pass follows the Run\'s own recorded decision, its sentence verbatim', async () => {
+    // A contract-valid unearned record (#2280's writer schema): its unsized path, its no-break-even reason and its sentence.
+    const recorded = [{ option_id: optionId, probability_of_goal: 1, earned: false, unsized_path: { from: 'f', enters_goal_through: 'g' },
+      no_break_even: 'not_an_identity', say: 'The first pass\u2019s RECORDED sentence.' }];
+    const gc = (await firstPass({ optionId, hash: 'c'.repeat(16), recorded })).goal_certainty as { options?: { option_id: string; earned: boolean; say?: string }[] };
+    expect(gc?.options, JSON.stringify(gc)).toEqual([expect.objectContaining({ option_id: optionId, earned: false, say: 'The first pass\u2019s RECORDED sentence.' })]);
+  });
+
+  it('⛔ A/B (PR Review CR @ ed62f91b): the first pass EXECUTED Run A, but the read selects Run B (same graph hash, same P, another stamp, another verdict) → unchecked, never B\'s verdict', async () => {
+    const bEarned = [{ option_id: optionId, probability_of_goal: 1, earned: true }];
+    const gc = (await firstPass({ optionId, hash: 'c'.repeat(16), recorded: bEarned, executedAt: '2026-09-24T17:59:59.123Z' })).goal_certainty as { unchecked?: boolean; options?: unknown };
+    expect(gc).toEqual(expect.objectContaining({ unchecked: true }));
+    expect(gc).not.toHaveProperty('options');
+    // Contrast: when the read selects the executed Run itself, its record is followed.
+    const same = (await firstPass({ optionId, hash: 'c'.repeat(16), recorded: bEarned })).goal_certainty as { options?: { earned: boolean }[] };
+    expect(same.options?.[0]?.earned).toBe(true);
+  });
+
+  it('NOT RECORDED and no Run stamp to bind it → unchecked, never said as certain', async () => {
+    const gc = (await firstPass({ optionId })).goal_certainty as { unchecked?: boolean; options?: unknown };
+    expect(gc).toEqual(expect.objectContaining({ unchecked: true }));
+    expect(gc).not.toHaveProperty('options');
+  });
+
+  it('CONTROL: no option at exactly 0 or 1 → no certainty field on the first pass', async () => {
+    expect(await firstPass()).not.toHaveProperty('goal_certainty');
   });
 });

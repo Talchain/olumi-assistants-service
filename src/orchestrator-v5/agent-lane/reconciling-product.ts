@@ -19,7 +19,7 @@ import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amou
 import { figureTheUserWrote, levelWrittenApartFromTarget } from './stated-by-user.js';
 
 /** ISL `robustness_analyzer_v2.py` `IDENTITY_RECONCILIATION_TOLERANCE`: the same share, never a looser one. */
-const RECONCILIATION_TOLERANCE = 0.05;
+export const RECONCILIATION_TOLERANCE = 0.05;
 
 const stated = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v !== 0;
 
@@ -85,10 +85,11 @@ function readCount(unit: unknown): string[] | null {
  * "subscribers"): it is what makes a product the only dimensionally valid reading. No denominator ("GBP/month"),
  * another count, anything unknown or scaled (£k) → no mint. "3 engineers × £25k budget ≈ £75k MRR" fails on the period.
  */
-function unitsCompose(goalUnit: unknown, goalLabel: string, a: { unit: unknown; label: string }, b: { unit: unknown; label: string }): boolean {
+export function unitsCompose(goalUnit: unknown, goalLabel: string, a: { unit: unknown; label: string }, b: { unit: unknown; label: string }): Composition {
   const goal = readMoney(goalUnit, goalLabel);
   // The goal is money per period itself: a goal per subscriber (ARPU) is not price × subscribers.
-  if (goal === null || goal.per !== null) return false;
+  if (goal === null || goal.per !== null) return NO;
+  let confirm: Composition = NO;
   for (const [m, c] of [[a, b], [b, a]] as const) {
     const money = readMoney(m.unit, '');
     const count = readCount(c.unit);
@@ -98,33 +99,50 @@ function unitsCompose(goalUnit: unknown, goalLabel: string, a: { unit: unknown; 
     // as multiplied, so it is a CONFIRMATION for the user, never a silent mint. It must be the count's own noun (its last
     // word: "subscriber seats" counts seats), and every word of it must be in the count.
     const per = money.per;
-    if (per === null || per[per.length - 1] !== count[count.length - 1] || !per.every((w) => count.includes(w))) continue;
-    return true;
+    if (per === null) { confirm = { kind: 'confirm', rate: m.label, count: c.label, code: goal.code }; continue; }
+    if (per[per.length - 1] !== count[count.length - 1] || !per.every((w) => count.includes(w))) continue;
+    return { kind: 'proof', rate: m.label, count: c.label, code: goal.code };
   }
-  return false;
+  return confirm;
 }
 
-export function withReconcilingProductIdentity(candidate: CandidateModel, brief: string): CandidateModel {
+export type Composition =
+  | { readonly kind: 'proof' | 'confirm'; readonly rate: string; readonly count: string; readonly code: string }
+  | { readonly kind: 'no' };
+const NO: Composition = { kind: 'no' };
+
+/**
+ * Everything but the units: the goal's stated level o and its EXACTLY TWO drafted non-option parents, both the user's
+ * figures, reconciling within 5%. Shared by the silent mint and the confirmation, so the two can never disagree on it.
+ */
+function reconcilingParts(candidate: CandidateModel, brief: string) {
   const goal = candidate.goal;
   const metric = goal.metric;
   const o = goal.baseline_value;
-  if (goal.baseline_known !== true || goal.baseline_provenance !== 'explicit' || !stated(o)) return candidate;
-  if (!figureTheUserWrote(o, goal.unit, brief) || !levelWrittenApartFromTarget(o, goal.unit, goal.value, brief)) return candidate;
-  if ((candidate.identities ?? []).some((i) => i.outcome === metric)) return candidate;
+  if (goal.baseline_known !== true || goal.baseline_provenance !== 'explicit' || !stated(o)) return null;
+  if (!figureTheUserWrote(o, goal.unit, brief) || !levelWrittenApartFromTarget(o, goal.unit, goal.value, brief)) return null;
+  if ((candidate.identities ?? []).some((i) => i.outcome === metric)) return null;
   const options = new Set(candidate.options.map((opt) => opt.label));
   const sources = [...new Set(candidate.links.filter((l) => l.to === metric).map((l) => l.from))].filter((s) => !options.has(s));
-  if (sources.length !== 2) return candidate;
+  if (sources.length !== 2) return null;
   const parts = sources.map((s) => candidate.factors.find((f) => f.label === s));
   const levels: number[] = [];
   for (const f of parts) {
-    if (f === undefined || f.baseline_known !== true || f.provenance !== 'explicit' || !stated(f.baseline_value)) return candidate;
-    if (!figureTheUserWrote(f.baseline_value, f.unit, brief)) return candidate;
+    if (f === undefined || f.baseline_known !== true || f.provenance !== 'explicit' || !stated(f.baseline_value)) return null;
+    if (!figureTheUserWrote(f.baseline_value, f.unit, brief)) return null;
     levels.push(f.baseline_value);
   }
-  if (Math.abs(o - levels[0]! * levels[1]!) > RECONCILIATION_TOLERANCE * Math.abs(o)) return candidate;
-  if (!unitsCompose(goal.unit, metric, parts[0]!, parts[1]!)) return candidate;
+  if (Math.abs(o - levels[0]! * levels[1]!) > RECONCILIATION_TOLERANCE * Math.abs(o)) return null;
+  return { metric, o, parts: parts as [NonNullable<(typeof parts)[number]>, NonNullable<(typeof parts)[number]>], levels };
+}
+
+export function withReconcilingProductIdentity(candidate: CandidateModel, brief: string): CandidateModel {
+  const r = reconcilingParts(candidate, brief);
+  if (r === null) return candidate;
+  const c = unitsCompose(candidate.goal.unit, r.metric, r.parts[0], r.parts[1]);
+  if (c.kind !== 'proof') return candidate;
   return {
     ...candidate,
-    identities: [...(candidate.identities ?? []), { outcome: metric, operation: 'product', factors: [parts[0]!.label, parts[1]!.label], provenance: 'inferred' }],
+    identities: [...(candidate.identities ?? []), { outcome: r.metric, operation: 'product', factors: [r.parts[0].label, r.parts[1].label], provenance: 'inferred' }],
   };
 }

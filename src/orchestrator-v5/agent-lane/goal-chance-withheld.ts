@@ -11,7 +11,9 @@
  * AIQ 5886183999: the goal's per-option estimates come from the same wrong walk, so they are the same unsupported class.
  */
 
-export const GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED = 'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED';
+import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED } from '../../orchestrator/context/option-result-source.js';
+
+export { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED };
 
 /** What the Agent is told when the run withheld the goal's chance. */
 export interface GoalChanceWithheld {
@@ -21,7 +23,8 @@ export interface GoalChanceWithheld {
   readonly note: string;
 }
 
-const OPENING = 'The chance of reaching the goal isn’t given for this run.';
+// AIQ 5887096626: the one register ("reaches the target in N% of model runs", 5885116642).
+const OPENING = 'This run doesn’t show how often each option reaches the goal’s target.';
 /** PLoT's words open "Not shown." — right beside a missing figure, not in a reply; the reason after it is kept verbatim. */
 const UI_OPENING = /^Not shown\.\s*/;
 
@@ -52,3 +55,37 @@ export function goalChanceWithheldForAgent(result: unknown): GoalChanceWithheld 
   const nodeIds = [...new Set(warnings.flatMap((w) => (Array.isArray(w.node_ids) ? w.node_ids : [])).filter((id): id is string => typeof id === 'string'))];
   return { withheld: true, say: reason === '' ? OPENING : `${OPENING} ${reason}`, node_ids: nodeIds, note: GOAL_CHANCE_WITHHELD_NOTE };
 }
+
+/**
+ * ⛔ THE REASON IS SAID AS WRITTEN — the reply's own line (AIQ 5887805333 (3); Runtime's served #2285 finding).
+ *
+ * Served on `0497e52e`: the Agent paraphrased `say` ("…adds those effects instead of multiplying them"). That is true for
+ * a PRODUCT identity only; #416 fires for ANY unevaluated declared identity, so for a SUM it is false. The typed `say` is
+ * always true, so it is pinned: when a run THIS turn withheld the goal's chance and the reply does not already carry that
+ * sentence verbatim, it is owed as its own line (`withDisclosures`). The latest run decides — an explicit Run, or the first
+ * pass inside a build — and a later run that did not withhold owes nothing.
+ */
+export function goalChanceLineOwed(toolResults: readonly unknown[], replyText: string): string | null {
+  let say: string | undefined;
+  for (const r of toolResults) {
+    const rec = recordOf(r);
+    const firstPass = recordOf(rec?.first_analysis);
+    const chance = recordOf(rec?.goal_chance) ?? recordOf(firstPass?.goal_chance);
+    if (chance?.withheld === true && typeof chance.say === 'string' && chance.say.trim() !== '') say = chance.say;
+    else if (rec?.ran === true || firstPass?.ran === true) say = undefined;
+  }
+  return say !== undefined && !sameWordsIn(replyText, say) ? say : null;
+}
+
+/**
+ * Whether `text` already says `sentence`, as a reader sees it (served `2397c7a`, 2/2 replies): the Agent restyles the typed
+ * sentence's quotes — bold `**X**` for 'X', or “X” — so a byte match missed it and the line was said twice. Compared with
+ * every quote mark and markdown emphasis mark removed and whitespace collapsed; any other change (a word, a figure, the
+ * operator) is not the sentence, so it is still owed.
+ */
+function sameWordsIn(text: string, sentence: string): boolean {
+  const plain = (t: string): string => t.replace(/[\u0027\u0022\u2018\u2019\u201A\u201B\u201C\u201D\u201E\u201F\u2032\u2033`]|\*\*|__|(?<![\w])[*_]|[*_](?![\w])/g, '')
+    .replace(/\s+/g, ' ').trim();
+  return plain(text).includes(plain(sentence));
+}
+

@@ -40,7 +40,7 @@ describe('run_analysis carries the run\'s withheld goal chance, with the sentenc
     const r = await world({ option_comparison: WITHHELD_ROWS, inference_warnings: [WITHHELD_WARNING] }).runAnalysis(ctx, { reason: 'Run it.' }) as Json;
     expect(r.goal_chance, JSON.stringify(Object.keys(r))).toEqual(expect.objectContaining({ withheld: true, node_ids: ['mrr'] }));
     // The reply's opening, then PLoT's reason verbatim (its UI-slot "Not shown." is not a sentence in a reply).
-    expect(r.goal_chance.say).toBe("The chance of reaching the goal isn’t given for this run. 'MRR' depends on Pro plan price × Pro paying "
+    expect(r.goal_chance.say).toBe("This run doesn’t show how often each option reaches the goal’s target. 'MRR' depends on Pro plan price × Pro paying "
       + "subscribers, but this run couldn't calculate it that way, so the figures for each option would be wrong.");
     expect(r.goal_chance.note).toMatch(/Never state, estimate, rank or compare a chance/);
     expect(r.goal_chance.note).toMatch(/estimated value for the goal itself/); // AIQ 5886183999: the means are the same class
@@ -55,7 +55,7 @@ describe('run_analysis carries the run\'s withheld goal chance, with the sentenc
   it('the TYPED code decides, never the words: other warnings → nothing; the code with no words → still withheld (fail closed)', () => {
     expect(goalChanceWithheldForAgent({ enrichment: { inference_warnings: [{ code: 'IDENTITY_NOT_EVALUATED', message: PLOT_WORDS }] } })).toBeUndefined();
     const bare = goalChanceWithheldForAgent({ enrichment: { inference_warnings: [{ code: GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED }] } });
-    expect(bare).toEqual(expect.objectContaining({ withheld: true, say: 'The chance of reaching the goal isn’t given for this run.', node_ids: [] }));
+    expect(bare).toEqual(expect.objectContaining({ withheld: true, say: 'This run doesn’t show how often each option reaches the goal’s target.', node_ids: [] }));
     // A chance beside the code is still withheld: the code is the run's decision.
     expect(goalChanceWithheldForAgent({ enrichment: { option_comparison: SHOWN_ROWS, inference_warnings: [WITHHELD_WARNING] } })?.withheld).toBe(true);
   });
