@@ -241,6 +241,9 @@ function withheldResult(result: Rec, selected: unknown, goalCertainty: unknown, 
   const selectedBlock = recordOf(selected);
   const selectedSource = recordOf(selectedBlock?.enrichment) ?? selectedBlock;
   const selectedCompared = selectedSource?.option_comparison;
+  // A matching Run tuple is necessary for currency, but it does not prove payload equality. For a current Run,
+  // the canonical selected result owns both option order and outcomes; an old tool copy cannot refill an omission.
+  const displayed = current && Array.isArray(selectedCompared) ? selectedCompared : compared;
   const byId = new Map<string, Rec>();
   if (current && Array.isArray(selectedCompared)) {
     for (const raw of selectedCompared) {
@@ -259,11 +262,10 @@ function withheldResult(result: Rec, selected: unknown, goalCertainty: unknown, 
   }
   return {
     ...pick(result, ['type', 'summary', 'computed_against_hash', 'decision_sensitivity']),
-    ...(compared !== undefined ? { option_comparison: compared.map((raw) => {
+    ...(displayed !== undefined ? { option_comparison: displayed.map((raw) => {
       const labels = optionLabelOf(raw);
-      const row = recordOf(raw);
       const id = labels.option_id;
-      const outcome = current ? row?.outcome ?? (typeof id === 'string' ? byId.get(id)?.outcome : undefined) : undefined;
+      const outcome = current && typeof id === 'string' ? byId.get(id)?.outcome : undefined;
       const certainty = typeof id === 'string' ? certaintyById.get(id) : undefined;
       // If this option has an unearned certainty, its range cannot travel without its own caveat.
       const say = certainty?.earned === false ? certainty.say : undefined;
@@ -352,7 +354,10 @@ function keptRunOf(output: unknown, readback: KeptRunReadback | undefined): Rec 
     kept = withoutKeys({ ...pick(run, KEPT_WHEN_WITHHELD), result: withheldResult(result, readback?.analysisResult, run.goal_certainty, note === undefined) },
       (k) => (RE_RANKING_KEY.test(k) || RE_RANKING_NAMED.has(k) || namesConstraintProbability(k))) as Rec;
   }
-  if (kept.goal_certainty !== undefined) kept.goal_certainty = keptGoalCertainty(run.goal_certainty);
+  // A stale or unconfirmed Run must not leave an old earned 0/1 available as though it were this model's chance.
+  // Its note still explains the earlier Run, while the current canonical state supplies any new certainty.
+  if (note !== undefined) delete kept.goal_certainty;
+  else if (kept.goal_certainty !== undefined) kept.goal_certainty = keptGoalCertainty(run.goal_certainty);
   return note === undefined ? kept : { ...kept, stale: true, stale_note: note };
 }
 
