@@ -17,7 +17,12 @@
  *  · EXACTLY TWO non-option parents, both factors whose levels are the user's, neither a product/sum carrier itself;
  *  · the parts reconcile with the goal within ISL's 5% (`RECONCILIATION_TOLERANCE`, one source with the mint);
  *  · the units compose as a money rate × a count into the goal's money per period (`unitsCompose`, one source with the
- *    mint) with ONLY the per-item denominator missing ('confirm'). With it ('proof') the mint applies, not a card.
+ *    mint), with or without the per-item denominator.
+ *
+ * ⛔ AIQ 5891286280 (4): the card is the licence's NEGATION. The mint fires only when the brief's own words bind the price
+ * figure to the count's item (`perItemLicence`), and a licensed goal then CARRIES the identity (null above). So a goal
+ * whose units compose and that carries none was not licensed, whatever unit the drafter typed: it gets the card. The
+ * drafter's "£/subscriber/month" ('proof' by units) no longer suppresses it (DL hold 5891050797).
  */
 import { RECONCILIATION_TOLERANCE, unitsCompose } from './reconciling-product.js';
 import { sayFigure } from './say-figure.js';
@@ -82,8 +87,8 @@ export function proposeProductIdentity(graph: unknown): IdentityProposal | null 
 
   const goalUnit = text(goal.goal_threshold_unit) ?? o.unit;
   const c = unitsCompose(goalUnit, goalLabel, { unit: p.unit, label: p.id }, { unit: q.unit, label: q.id });
-  // AIQ 5888571809 (2): ONLY the missing per-item denominator makes a card. With it ('proof') the mint applies instead.
-  if (c.kind !== 'confirm') return null;
+  // AIQ 5891286280 (4): composing units on a goal the mint left bare → the card (the licence's negation, above).
+  if (c.kind === 'no') return null;
   const rate = c.rate === p.id ? p : q;
   const count = c.rate === p.id ? q : p;
   const money = (v: number): string => sayFigure(v, c.code);

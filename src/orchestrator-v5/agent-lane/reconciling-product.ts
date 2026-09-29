@@ -15,7 +15,7 @@
  * and PLoT/ISL frame-check it (a zero operand is withdrawn; ISL's k-scale absorbs the ≤ 5% gap).
  */
 import type { CandidateModel } from './admit-model.js';
-import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
+import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { figureTheUserWrote, levelWrittenApartFromTarget } from './stated-by-user.js';
 
 /** ISL `robustness_analyzer_v2.py` `IDENTITY_RECONCILIATION_TOLERANCE`: the same share, never a looser one. */
@@ -47,7 +47,7 @@ const MONEY_WORDS = new Set(['revenue', 'recurring', 'a']);
  * denominator. A second denominator ("GBP per subscriber per seat per month") makes price × subscribers money per seat
  * per month, not the goal's money per month. So it is refused, as is a segment that mixes a period into a denominator.
  */
-function readMoney(unit: unknown, label: string): { code: string; period: Period; per: string[] | null } | null {
+function readMoney(unit: unknown, label: string): { code: string; period: Period; per: string[] | null; mixed?: true } | null {
   if (typeof unit !== 'string') return null;
   const r = readCurrencyUnitWithQualifiers(unit);
   if (r.kind !== 'currency' || r.currencyCode === undefined || (r.multiplier ?? 1) !== 1) return null;
@@ -58,6 +58,23 @@ function readMoney(unit: unknown, label: string): { code: string; period: Period
     else segments[segments.length - 1]!.push(w);
   }
   if (segments.some((s) => s.length === 0) || !segments[0]!.every((w) => isCurrency(w) || isPeriod(w) || MONEY_WORDS.has(w))) return null;
+  // ⛔ AIQ 5891385320 (3): "per subscriber-month" names the count's noun with the period joined on. It composes (£ per
+  // subscriber-month × subscribers IS £/month); the parser just never finished it, so it read as "don't compose" and got
+  // neither a card nor the withhold. Read as the denominator plus its period, marked `mixed`: never a silent mint, the card.
+  let mixed = false;
+  for (const seg of segments.slice(1)) {
+    if (seg.length >= 2 && isPeriod(seg[seg.length - 1]!) && !seg.slice(0, -1).some(isPeriod)) { mixed = true; }
+  }
+  if (mixed) {
+    const parts = segments.slice(1);
+    if (parts.length !== 1 || ws.filter(isPeriod).length !== 1) return null;
+    const seg = parts[0]!;
+    const nouns = seg.slice(0, -1);
+    if (!nouns.every((w) => /^[a-z]+$/.test(w) && !isCurrency(w) && !MONEY_WORDS.has(w))) return null;
+    const period = periodOf([seg[seg.length - 1]!]);
+    if (period === 'both' || period === null) return null;
+    return { code: r.currencyCode, period, per: nouns.map(singular), mixed: true };
+  }
   const denominators = segments.slice(1).filter((s) => !s.every(isPeriod));
   if (denominators.length > 1) return null;
   if (denominators.some((s) => !s.every((w) => /^[a-z]+$/.test(w) && !isPeriod(w) && !isCurrency(w) && !MONEY_WORDS.has(w)))) return null;
@@ -101,6 +118,8 @@ export function unitsCompose(goalUnit: unknown, goalLabel: string, a: { unit: un
     const per = money.per;
     if (per === null) { confirm = { kind: 'confirm', rate: m.label, count: c.label, code: goal.code }; continue; }
     if (per[per.length - 1] !== count[count.length - 1] || !per.every((w) => count.includes(w))) continue;
+    // A per-N-month rate composes but is never the parser's proof (AIQ 5891385320 (3)): the card.
+    if (money.mixed === true) { confirm = { kind: 'confirm', rate: m.label, count: c.label, code: goal.code }; continue; }
     return { kind: 'proof', rate: m.label, count: c.label, code: goal.code };
   }
   return confirm;
@@ -136,13 +155,107 @@ function reconcilingParts(candidate: CandidateModel, brief: string) {
   return { metric, o, parts: parts as [NonNullable<(typeof parts)[number]>, NonNullable<(typeof parts)[number]>], levels };
 }
 
-export function withReconcilingProductIdentity(candidate: CandidateModel, brief: string): CandidateModel {
+/**
+ * ⛔ THE LICENCE FOR A SILENT PRODUCT: THE BRIEF'S OWN WORDS BIND THE RATE'S FIGURE TO THE COUNT'S ITEM (AIQ 5891286280;
+ * R3's phrase classes 5891270716; DL hold 5891050797 on #2300).
+ *
+ * The drafter's typed unit ("GBP/subscriber/month") never proves itself: #2291 asks the drafter to write it, so on Paul's
+ * plain brief ("Pro plan price … £49 a month … 1,500 paying subscribers") it licensed a silent MRR = price × subscribers
+ * the user never stated (served `ed49d44`, 1/5: "reaches above £85k in 99.8%"). Nor does the drafter's own declaration,
+ * nor the 5% reconciliation (that corroborates the scale; it is not the user saying it).
+ *
+ * THE RULE, on the RATE's own figure (`rateValue`, written as money) and the count's OWN noun (no synonyms):
+ *  · licensed: "£49 per N", "£49 per N a month", "£49 a month per N", "£49/N", "£49/N/month", "£49 per paying N",
+ *    a range "from £49 to £59 per N" (both figures), "each N pays £49", "every N pays £49";
+ *  · not licensed (the card): "£49 a month" / "per month" / "monthly"; another noun ("per user" against subscribers);
+ *    the phrase on another figure ("£5 per subscriber support cost"); a negated or hypothetical clause ("not per
+ *    subscriber", "if we charged £49 per subscriber"); any phrasing not listed. Every miss offers the card: safe.
+ */
+export function perItemLicence(brief: string, rateValue: number, countNoun: string, countValue?: number): boolean {
+  if (typeof brief !== 'string' || !Number.isFinite(rateValue) || !/^[a-z]+$/.test(countNoun)) return false;
+  const n = `${countNoun}(?:s|es)?(?![\\w-])`;
+  // ⛔ AIQ 5891385320 (1): a modifier on the rate's side ("per ACTIVE subscriber") must be the count's own, as the brief
+  // writes the count ("1,500 PAYING subscribers"): different modifiers name different sets, so the card. A bare count
+  // ("1,500 subscribers") takes any modifier.
+  const countModifiers = new Set<string>();
+  if (typeof countValue === 'number' && Number.isFinite(countValue)) {
+    const near = new RegExp(`^\\s+(?:([a-z]+)\\s+)?${n}`, 'i');
+    for (const a of findStatedAmounts(brief)) {
+      if (a.kind === 'currency' || Math.abs(a.magnitude - countValue) > 1e-9 * Math.max(1, Math.abs(countValue))) continue;
+      const m = near.exec(brief.slice(a.index + a.matchedText.length));
+      if (m !== null && m[1] !== undefined) countModifiers.add(m[1].toLowerCase());
+    }
+  }
+  const agrees = (modifier: string | undefined): boolean =>
+    modifier === undefined || countModifiers.size === 0 || countModifiers.has(modifier.toLowerCase());
+  const period = '(?:(?:a|per|each|every)\\s+(?:month|year|week|quarter)|monthly|annually|yearly|\\/\\s*(?:month|mo|year|yr))';
+  const after = new RegExp(`^\\s*(?:${period}\\s*)?(?:per|\\/)\\s*(?:([a-z]+)\\s+)?${n}`, 'i');
+  const range = /^\s*(?:to|-|\u2013|\u2014)\s*[£$€]?\s*\d[\d,]*(?:\.\d+)?\s*[km]?\b/i;
+  const before = new RegExp(`\\b(?:each|every)\\s+(?:([a-z]+)\\s+)?${n}\\s+pays\\s*$`, 'i');
+  const unsaid = /\b(?:not|never|no|if|unless|would|could|suppose|imagine|were)\b|n['\u2019]t\b/i;
+  return findStatedAmounts(brief).some((a) => {
+    if (a.kind !== 'currency' || Math.abs(a.magnitude - rateValue) > 1e-9 * Math.max(1, Math.abs(rateValue))) return false;
+    const start = a.index;
+    const end = a.index + a.matchedText.length;
+    // The clause the figure sits in, up to it: a negation or a hypothesis there says nothing of the user's.
+    const head = brief.slice(0, start);
+    const clause = head.slice(Math.max(...['.', '!', '?', ';', ',', ':', '\n'].map((c) => head.lastIndexOf(c))) + 1);
+    if (unsaid.test(clause)) return false;
+    let tail = brief.slice(end);
+    const partner = range.exec(tail);
+    if (partner !== null) tail = tail.slice(partner[0].length);
+    const hit = after.exec(tail) ?? before.exec(clause);
+    return hit !== null && agrees(hit[1]);
+  });
+}
+
+/** How a reconciling goal may be worked out: silently (the user's words license it), by the user's confirmation, or not. */
+export type ProductReading = 'licensed' | 'card' | 'none';
+
+/**
+ * ONE reading, three consumers (AIQ 5891286280 (4)): the mint (`withReconcilingProductIdentity`), the admission of a
+ * drafter-declared product (`withoutUnlicensedGoalProduct`) and, through the stored identity, the #2296 card. 'card' is
+ * the licence's negation over composing units, so a silent product and a card can never both, or neither, apply.
+ */
+export function readReconcilingProduct(candidate: CandidateModel, brief: string): ProductReading {
   const r = reconcilingParts(candidate, brief);
-  if (r === null) return candidate;
+  if (r === null) return 'none';
   const c = unitsCompose(candidate.goal.unit, r.metric, r.parts[0], r.parts[1]);
-  if (c.kind !== 'proof') return candidate;
+  if (c.kind === 'no') return 'none';
+  if (c.kind === 'confirm') return 'card';
+  const rate = r.parts.find((p) => p.label === c.rate);
+  const count = r.parts.find((p) => p.label === c.count);
+  const noun = readCount(count?.unit)?.at(-1);
+  return rate !== undefined && typeof rate.baseline_value === 'number' && noun !== undefined
+    && perItemLicence(brief, rate.baseline_value, noun, typeof count?.baseline_value === 'number' ? count.baseline_value : undefined)
+    ? 'licensed' : 'card';
+}
+
+export function withReconcilingProductIdentity(candidate: CandidateModel, brief: string): CandidateModel {
+  if (readReconcilingProduct(candidate, brief) !== 'licensed') return candidate;
+  const r = reconcilingParts(candidate, brief)!;
   return {
     ...candidate,
     identities: [...(candidate.identities ?? []), { outcome: r.metric, operation: 'product', factors: [r.parts[0].label, r.parts[1].label], provenance: 'inferred' }],
   };
+}
+
+/**
+ * ⛔ A PRODUCT THE DRAFTER DECLARES ON THE GOAL IS ADMITTED SILENTLY ONLY UNDER THE SAME LICENCE (AIQ 5891286280, MG's
+ * half; R3 served `b5a673a`: a drafter-declared MRR = price × subscribers on Paul's plain brief, price stored "£/month").
+ * Where the goal's two stated parts reconcile and compose (the card's own domain) and the brief does not license it,
+ * the declaration is taken off, whatever provenance the drafter gave it (its tag is its own word), so the goal is
+ * card-eligible exactly as if the drafter had declared nothing. Outside that domain, and when licensed, the candidate is
+ * returned as it came (the same object).
+ */
+export function withoutUnlicensedGoalProduct(candidate: CandidateModel, brief: string): CandidateModel {
+  const metric = candidate.goal?.metric;
+  const declared = (candidate.identities ?? []).filter((i) => i.outcome === metric && i.operation === 'product');
+  if (declared.length !== 1) return candidate;
+  const bare: CandidateModel = { ...candidate, identities: (candidate.identities ?? []).filter((i) => i !== declared[0]) };
+  const r = reconcilingParts(bare, brief);
+  if (r === null) return candidate;
+  const same = new Set(declared[0]!.factors);
+  if (same.size !== 2 || !r.parts.every((p) => same.has(p.label))) return candidate;
+  return readReconcilingProduct(bare, brief) === 'card' ? bare : candidate;
 }

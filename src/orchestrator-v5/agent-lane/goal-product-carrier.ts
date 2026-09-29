@@ -8,8 +8,9 @@
  * reply said £85k is not reached. #2286's mint cannot fire, because the goal's parent is the carrier, not the two parts.
  *
  * This folds the carrier into the goal (its two parts feed the goal; the carrier and its plain link go) and keeps the
- * fold ONLY IF #2286's own proof then declares the goal's identity: the user's three figures, within ISL's 5%, units that
- * compose, exactly two parents. Anything else returns the candidate as it came. Nothing is estimated and no label is
+ * fold ONLY IF #2286's domain then holds: the user's three figures, within ISL's 5%, units that compose, exactly two
+ * parents. The goal's identity is then declared only when the brief's own words license it (AIQ 5891286280); otherwise
+ * the goal is left for the user to confirm (the #2296 card). Anything else returns the candidate as it came. Nothing is estimated and no label is
  * read: the carrier is found by structure and cleared by the user's own numbers. Pure.
  *
  * CLASS 2 (AIQ 5888943993 (1), "drop, don't ask"): the drafter often adds an "Other-plan MRR" (£1,500 = £75,000 − £73,500)
@@ -20,7 +21,7 @@
  * user-stated addend is the `addends` path CEE cannot carry yet, R3 5888498516).
  */
 import type { CandidateModel } from './admit-model.js';
-import { withReconcilingProductIdentity } from './reconciling-product.js';
+import { readReconcilingProduct, withReconcilingProductIdentity } from './reconciling-product.js';
 import { figureTheUserWroteFor } from './stated-by-user.js';
 import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 
@@ -33,6 +34,8 @@ export interface FoldedCarrier {
   readonly parts: readonly [Part, Part];
   readonly stated: number;
   readonly unit: string;
+  /** True when the brief does not license a silent product (AIQ 5891286280): the goal is left for the user to confirm. */
+  readonly confirm: boolean;
 }
 
 type Link = CandidateModel['links'][number];
@@ -96,9 +99,13 @@ export function foldProductCarrierIntoGoal(candidate: CandidateModel, brief: str
     outcomes: (candidate.outcomes ?? []).filter((o) => !gone.has(o.label)),
     identities: identities.filter((i) => i.outcome !== carrier),
   };
-  const minted = withReconcilingProductIdentity(folded, brief);
-  const declared = (minted.identities ?? []).find((i) => i.outcome === goal && i.operation === 'product');
-  if (declared === undefined || minted === folded) return unchanged;
+  // ⛔ AIQ 5891286280 (DL hold 5891050797): the fold stands on the user's figures reconciling and the units composing
+  // (#2286's domain); whether the goal is then worked out SILENTLY is the licence's call (`perItemLicence`). Without it the
+  // goal is left card-eligible, with no identity, and Olumi's residual is still dropped: no question about it (5888943993 (1)).
+  const reading = readReconcilingProduct(folded, brief);
+  if (reading === 'none') return unchanged;
+  const minted = reading === 'licensed' ? withReconcilingProductIdentity(folded, brief) : folded;
+  if (reading === 'licensed' && !(minted.identities ?? []).some((i) => i.outcome === goal && i.operation === 'product')) return unchanged;
   const part = (label: string): Part => {
     const f = (candidate.factors ?? []).find((x) => x.label === label);
     return { label, value: Number(f?.baseline_value), unit: String(f?.unit ?? '') };
@@ -110,6 +117,7 @@ export function foldProductCarrierIntoGoal(candidate: CandidateModel, brief: str
       parts: [part(parts[0]!), part(parts[1]!)],
       stated: Number(candidate.goal.baseline_value),
       unit: String(candidate.goal.unit ?? ''),
+      confirm: reading === 'card',
     },
   };
 }
@@ -129,7 +137,10 @@ export function foldedCarrierLines(f: FoldedCarrier): string[] {
   const [a, b] = money(f.parts[1]) && !money(f.parts[0]) ? [f.parts[1], f.parts[0]] : f.parts;
   const sum = `${figure(a.value, a.unit)} × ${figure(b.value, b.unit)} = ${figure(a.value * b.value, f.unit)}, close to your ${figure(f.stated, f.unit)}`;
   return [
-    `‘${f.carrier}’ accounts for your ${f.goal} (${sum}), so ${f.goal} is worked out as ${a.label} × ${b.label}.`,
+    f.confirm
+      // Not licensed by the brief's words: the goal is not worked out through the product until the user confirms it.
+      ? `‘${f.carrier}’ accounts for your ${f.goal} (${sum}). Whether ${f.goal} is ${a.label} × ${b.label} is yours to confirm.`
+      : `‘${f.carrier}’ accounts for your ${f.goal} (${sum}), so ${f.goal} is worked out as ${a.label} × ${b.label}.`,
     ...f.dropped.map((d) => `‘${d}’ was Olumi's addition, and your figures don't need it (${sum}), so it is left out.`),
   ];
 }
