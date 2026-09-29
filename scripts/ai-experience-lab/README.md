@@ -2,6 +2,23 @@
 
 Local manual-test foothold for draft CEE #2290. Real Agent route, tools and OpenAI calls; a frozen model and conversation are copied into process-only storage. This is **TESTED / PROTOTYPE-ONLY / NOT INTEGRATED / NOT SERVED**. It is not the production UI or the full Differentiated Lab loop.
 
+## Recorded reasoning walkthrough
+
+The **Open recorded reasoning walkthrough** button reuses this preview's article UI for one actual archived scenario. It consumes SCI-EVIDENCE `ef108360f1c50f1e4af1add589bfb318b1e2928b` through `card_from_served` and `still_current`, with no copied scientific implementation. This £20k-MRR case is separate from the live comparison's £100k-MRR case.
+
+Try **Explore → Add to investigation notes → Review recorded change → Apply £50 in this walkthrough → Replay recorded rerun**. The model stays unchanged through Explore/Add; applying the recorded change switches to its captured £50 snapshot and withdraws the stale evidence card. Rerun playback switches to its own captured card and explanation. **Dismiss** and **Cancel change** preserve the original snapshot. Restart clears the walkthrough.
+
+This is interaction and consumer evidence only. It does not generate a fresh M2 proposal, calculate Regions, run PLoT, or write a real model. The challenge/exploration and rerun are recorded Olumi outputs. The capture lacks governed threshold status, so the UI explicitly withholds a numerical flip point and any no-effect claim. The historical receipt is labelled historical, never returned as a new save. Notes are transient, and page reload restarts the walkthrough.
+
+Rebuild from a read-only archive of the pinned Science commit:
+
+```sh
+python3 scripts/ai-experience-lab/prepare-rehearsal.py /path/to/ef10836/research/sci-evidence-v1
+node --test scripts/ai-experience-lab/rehearsal.test.mjs
+```
+
+The importer verifies adapter/reference/fixture hashes before calling the owner's functions. Four focused tests cover dismiss/no-write, explicit approval, stale-card removal and replacement, and recorded model/receipt parity. `rehearsal.json` records provenance and currentness verdicts. Full live recomputation remains an integration gap, not a completed step.
+
 ## Start
 
 Install the existing locked dependencies. Run from this checkout:
@@ -38,3 +55,5 @@ Immediate reject: invented evidence, unsupported ordering, a change before appro
 Four fresh-session challenge smokes returned HTTP 200 and left the graph unchanged: baseline Terra 4,292 ms; A 6,987 ms; B 6,163 ms; C 4,384 ms. These are **one observation per arm**, not controlled latency or quality estimates. Captured at base `7d73107e1f96c31e19359a7cdbd886870798c375` plus harness hash `3d73e0c024740640393f74a8701d21dac211bdb2e1c04d108d0ad33aa7b1896b` (before adding graph readback and launcher hashing).
 
 The two-turn A action control left the graph unchanged on proposal, then changed 900 to 1,500 on approval; the assistant honestly reported `not_confirmed` because durable readback is unavailable here. Eight local boundary checks passed: identical reset graphs/history, distinct sessions, inherited arm rejection, cross-origin rejection, unknown-session rejection, empty-message rejection and snapshot readback. Focused ESLint and launcher syntax validation passed; the ordinary Vitest invocation exited successfully with the opt-in test skipped. No broad CEE regression or production journey claim.
+
+Recorded-walkthrough validation: 4/4 local transition/receipt tests and 38/38 pinned Science bridge/join tests passed (Python 3.11). Browser keyboard walkthrough verified Explore/Add, explicit £49→£50 approval, stale-card withdrawal, recorded rerun and changed explanation; Dismiss retained £49 and offered no edit. The consumer now uses the direction-adjusted Science adapter `ef10836`. No provider requests were made for these checks. This is recorded playback, not evidence of live recomputation or persistence.

@@ -104,6 +104,10 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
     }
   });
   app.get('/', async (_req, reply) => reply.type('text/html').send(readFileSync(resolve('scripts/ai-experience-lab/index.html'), 'utf8')));
+  app.get('/lab/rehearsal', async () => JSON.parse(readFileSync(resolve('scripts/ai-experience-lab/rehearsal.json'), 'utf8')));
+  for (const name of ['rehearsal.mjs', 'rehearsal-ui.mjs']) {
+    app.get(`/lab/${name}`, async (_req, reply) => reply.type('text/javascript').send(readFileSync(resolve('scripts/ai-experience-lab', name), 'utf8')));
+  }
   app.get('/lab/status', async () => ({ status: 'ISOLATED_MANUAL_PREVIEW', head, source_hash, arms, fixture: fixture.run,
     persistence: 'disposable_in_memory', external_analysis: 'unavailable' }));
   app.get('/lab/session/:id', async (req, reply) => {

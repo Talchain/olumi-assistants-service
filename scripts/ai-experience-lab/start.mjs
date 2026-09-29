@@ -16,7 +16,8 @@ const evidence = resolve(process.env.AI_EXPERIENCE_LAB_OUTPUT ?? resolve(root, '
 mkdirSync(evidence, { recursive: true });
 const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
 const files = ['src/orchestrator-v5/agent-lane/__tests__/ai-experience-lab.manual.test.ts',
-  'scripts/ai-experience-lab/index.html', 'scripts/ai-experience-lab/pricing-fixture.json', 'scripts/ai-experience-lab/start.mjs'];
+  'scripts/ai-experience-lab/index.html', 'scripts/ai-experience-lab/pricing-fixture.json', 'scripts/ai-experience-lab/start.mjs',
+  'scripts/ai-experience-lab/rehearsal.json', 'scripts/ai-experience-lab/rehearsal.mjs', 'scripts/ai-experience-lab/rehearsal-ui.mjs'];
 const hash = createHash('sha256');
 for (const path of files) hash.update(path).update(readFileSync(resolve(root, path)));
 const env = {};
