@@ -1350,9 +1350,9 @@ function markProductIdentities(
    * 5899153490, ISL `robustness_analyzer_v2.py:1737-1751`). PLoT then withholds the goal's chance on every option (#416),
    * and the Run ends with no question — served cut-costs chained "AWS workload spend × GCP workload share" into "× GCP
    * saving rate", the share and the rate with no level. So Olumi's own reading is refused exactly there: a factor with
-   * no level, or at 0 when the outcome has one, or an outcome another product refused here was to give its level — to a
-   * fixpoint, so a chain is refused whole in either order — and `unlevelledProductQuestions` asks for the root figures
-   * once. A declaration the brief states is the user's structure and is kept.
+   * no level, or at 0 when the outcome has one, or an outcome another product declares (no product gives its outcome a
+   * current level: ISL rule 2) — in either declaration order — and `unlevelledProductQuestions` asks for the root
+   * figures once. A declaration the brief states is the user's structure and is kept.
    */
   const productOutcome = new Map<string, CandidateIdentity>();
   for (const d of declared) {
@@ -1373,10 +1373,11 @@ function markProductIdentities(
       const missing = parts.filter((id) => {
         if (levelled(id)) return false;
         if (kindOf.get(id) === 'factor') return true;
-        // An outcome counts only when a product refused here was to give it its level: one no product declares is left
-        // as before (the served MRR "Pro paying subscribers", journey C's tally), unmeasured against ISL.
-        const source = productOutcome.get(id);
-        return kindOf.get(id) === 'outcome' && source !== undefined && levelRefused.has(source);
+        // ISL rule 2 (`identity_operand_missing`, R3 5899291702 / PR Review on #2320): every part needs a current level,
+        // and no product gives its outcome one — so an outcome ANOTHER product declares counts, kept or refused (served
+        // run 0: share 0 today keeps "spend × share", then "× rate" over its level-less outcome is withheld). An outcome
+        // no product declares is left as before (the served MRR "Pro paying subscribers", journey C's tally).
+        return kindOf.get(id) === 'outcome' && productOutcome.has(id);
       });
       if (missing.length > 0) { levelRefused.set(d, missing); changed = true; }
     }
@@ -1412,8 +1413,12 @@ function markProductIdentities(
     if (why === null && factorIds.length < 2) why = 'a product needs at least two different quantities';
     const missing = levelRefused.get(d);
     if (why === null && missing !== undefined) {
-      // The ask names the ROOT figures: an outcome another refused product was to give a level is not asked for.
-      for (const id of missing) if (!productOutcome.has(id) && !unlevelled.includes(id)) unlevelled.push(id);
+      // The ask names the ROOT figures: an outcome whose own product was refused here is not asked for (its parts are);
+      // one whose product is kept is — its current level is the figure ISL lacks.
+      for (const id of missing) {
+        const source = productOutcome.get(id);
+        if ((source === undefined || !levelRefused.has(source)) && !unlevelled.includes(id)) unlevelled.push(id);
+      }
       const none = missing.filter((id) => todayOf(id) === undefined).map(labelOf);
       const zero = missing.filter((id) => todayOf(id) === 0).map(labelOf);
       why = [

@@ -101,11 +101,21 @@ describe('a product Olumi reads over a part with no level is not declared, and i
     ]);
   });
 
-  it('ROW 2 (0 today, the outcome with no level): ISL multiplies it, so both products are carried and nothing is asked (R3 5899153490)', async () => {
-    const { graph, out } = await build(run0({ share: 0, rate: 0.25 }));
-    expect(carriers(graph).sort()).toEqual(['gcp_monthly_saving', 'migrated_monthly_spend']);
-    expect((out as { open_questions?: string[] }).open_questions?.some((q) => q.includes('What do you expect'))).toBe(false);
-  });
+  // Served run 0 as STORED (R3 5899291702, `0c426b00`): the share at 0 today, the rate at 0.28.
+  const MIGRATED_Q = 'What do you expect ‘Migrated monthly spend’ to be? ‘Migrated monthly spend’ has no figure yet, so Olumi adds up their effects on ‘Monthly spend’ instead of multiplying them: treat the comparison as a rough approximation until you say.';
+  for (const order of ['as drafted', 'downstream first'] as const) {
+    it(`ROW 2 (served run 0 as stored, ${order}): "spend × share" (share 0, no outcome level) is kept — ISL multiplies it; "× rate" over its level-less outcome is refused (ISL rule 2) and that figure asked once`, async () => {
+      const wire = run0({ share: 0, rate: 0.28 });
+      if (order === 'downstream first') wire.identities = [...(wire.identities as unknown[])].reverse();
+      const { graph, out } = await build(wire);
+      expect(carriers(graph)).toEqual(['migrated_monthly_spend']);
+      const o = out as { open_questions?: string[]; not_represented?: string[] };
+      expect(o.open_questions?.filter((q) => q.includes('What do you expect'))).toEqual([MIGRATED_Q]);
+      expect((o.not_represented ?? []).filter((l) => l.includes('multiplied together, but'))).toEqual([
+        'Olumi read "GCP monthly saving" as "Migrated monthly spend" and "GCP saving rate" multiplied together, but "Migrated monthly spend" has no figure yet, so that was not used and nothing about it is assumed.',
+      ]);
+    });
+  }
 
   it('ROW 2b (0 today, on a GOAL with a level): ISL withholds it (`identity_zero_level`), so it is refused and said as 0', async () => {
     // The ceiling written in the brief (the held-ceiling test's served shape), so the goal keeps today's £45k.
@@ -146,9 +156,11 @@ describe('a product Olumi reads over a part with no level is not declared, and i
     expect((out as { open_questions?: string[] }).open_questions?.some((q) => q.includes('What do you expect'))).toBe(false);
   });
 
-  it('CONTROL (every part has a level): both products are carried and nothing is asked', async () => {
-    const { graph, out } = await build(run0({ share: 0.1, rate: 0.25 }));
-    expect(carriers(graph).sort()).toEqual(['gcp_monthly_saving', 'migrated_monthly_spend']);
+  it('CONTROL (every part has a level, no chain): the product is carried and nothing is asked', async () => {
+    const wire = run0({ share: 0.1, rate: 0.25 });
+    wire.identities = [(wire.identities as unknown[])[0]];
+    const { graph, out } = await build(wire);
+    expect(carriers(graph)).toEqual(['migrated_monthly_spend']);
     expect((out as { open_questions?: string[] }).open_questions?.some((q) => q.includes('What do you expect'))).toBe(false);
   });
 
