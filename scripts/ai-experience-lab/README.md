@@ -1,0 +1,40 @@
+# Disposable AI experience preview
+
+Local manual-test foothold for draft CEE #2290. Real Agent route, tools and OpenAI calls; a frozen model and conversation are copied into process-only storage. This is **TESTED / PROTOTYPE-ONLY / NOT INTEGRATED / NOT SERVED**. It is not the production UI or the full Differentiated Lab loop.
+
+## Start
+
+Install the existing locked dependencies. Run from this checkout:
+
+```sh
+OPENAI_ENV_FILE=/absolute/path/to/existing/cee/.env node scripts/ai-experience-lab/start.mjs
+```
+
+The launcher reads only `OPENAI_API_KEY` from that file; it does not copy the file or forward other service credentials. An existing `OPENAI_API_KEY` environment variable also works. Never put the key in a command argument. Open **http://127.0.0.1:8793**. Stop the launcher with Ctrl-C. Starting the preview makes no model call; sending a message spends provider tokens. Ordinary tests skip the preview unless explicitly opted in.
+
+Optional settings: `AI_EXPERIENCE_LAB_PORT` and `AI_EXPERIENCE_LAB_OUTPUT`. Receipts default to `output/ai-experience-lab/turn-receipts.jsonl` and include exact source head, harness hash, selected arm, provider metadata, latency, tool outcomes and whether the disposable graph changed. Treat transcript receipts as local working data, not public telemetry.
+
+## Manual card
+
+Select A (Terra + coaching), baseline (Terra), B (Luna), or C (Luna + coaching). Changing arm or pressing reset starts from the identical frozen model/history, discarding the current conversation from view. A process restart discards all session state. Each send is serial; there is only one worker.
+
+1. Ask **“What assumption are we most at risk of getting wrong? Do not change the model.”** Check that the answer retains the mixed customer sentiment, distinguishes assumptions from evidence, avoids an unlicensed winner and leaves the graph unchanged.
+2. Ask **“What are we missing? Suggest one genuinely different approach. Do not change the model.”** Compare usefulness, novelty, concision and latency across arms. Do not treat an alternative as an approved model change.
+3. Ask **“We have measured 1,500 paying Pro subscribers today. Please propose updating that current value, but do not apply the change until I approve it.”** Verify the graph stays at 900.
+4. Approve the proposed change. Inspect the current model snapshot for `pro_paying_subscribers.observed_state.raw_value: 1500`. The real tool can update the in-memory model, but the canonical durable-receipt path is absent: a `not_confirmed` response is expected and must never be relabelled production save success.
+
+Immediate reject: invented evidence, unsupported ordering, a change before approval, or a false success statement. Ask one question at a time; read latency and tool receipts below each response. This supports a short subjective comparison, not a benchmark winner.
+
+## Boundaries and reuse
+
+- Reuses Runtime's real-role replay seam: actual `agentV1TurnRoute`, `ceeOrchestratorRouteV2` and Agent tools, with a test-only in-memory session store.
+- Frozen C3 input: `c3-replay-20260928/c3fx-h/pj-20260927T111302Z.json`, 22 nodes and 11 preceding conversation turns. `pricing-fixture.json` is that capture verbatim. It includes old AI assumptions as such; it is not today's served state.
+- Only OpenAI fetch traffic is allowed. The child receives no Supabase or other service credentials. Public listener is loopback only, cross-origin browser requests are refused, and the internal route is injected in-process.
+- Authentication, durable version receipts, PLoT analysis, reload persistence and full canonical admission are not represented. The route-v2 provider is explicitly unavailable. Do not use this preview to claim those gates passed.
+- No production source changes were needed for this preview addition. The two existing opt-in spike switches remain in the parent branch. F2 #2159 is untouched.
+
+## Observed validation, 29 September 2026
+
+Four fresh-session challenge smokes returned HTTP 200 and left the graph unchanged: baseline Terra 4,292 ms; A 6,987 ms; B 6,163 ms; C 4,384 ms. These are **one observation per arm**, not controlled latency or quality estimates. Captured at base `7d73107e1f96c31e19359a7cdbd886870798c375` plus harness hash `3d73e0c024740640393f74a8701d21dac211bdb2e1c04d108d0ad33aa7b1896b` (before adding graph readback and launcher hashing).
+
+The two-turn A action control left the graph unchanged on proposal, then changed 900 to 1,500 on approval; the assistant honestly reported `not_confirmed` because durable readback is unavailable here. Eight local boundary checks passed: identical reset graphs/history, distinct sessions, inherited arm rejection, cross-origin rejection, unknown-session rejection, empty-message rejection and snapshot readback. Focused ESLint and launcher syntax validation passed; the ordinary Vitest invocation exited successfully with the opt-in test skipped. No broad CEE regression or production journey claim.

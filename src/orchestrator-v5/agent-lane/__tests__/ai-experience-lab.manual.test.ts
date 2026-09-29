@@ -1,0 +1,158 @@
+/**
+ * Opt-in disposable manual preview for #2290. Reuses Runtime's real-role replay
+ * seam: real Agent/tools, fixture-seeded in-memory session store, OpenAI only.
+ * No production storage, model registry, PLoT call or serving claim.
+ */
+import { it, vi } from 'vitest';
+import Fastify from 'fastify';
+import { randomUUID } from 'node:crypto';
+import { appendFileSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+type Row = Record<string, unknown> & { scenario_id: string; turn_id: string; pending_actions: unknown[] };
+const rows = new Map<string, Row>();
+const graphs = new Map<string, unknown>();
+const briefs = new Map<string, string>();
+const clone = <T,>(value: T): T => structuredClone(value);
+const recent = (sid: string) => [...rows.values()].reverse().filter(r => r.scenario_id === sid && !r.turn_id.endsWith(':claim'));
+let tick = 0;
+const store = {
+  ensureScenarioExists: async () => ({ user_id: null }),
+  readCommittedTurn: async (sid: string, tid: string) => rows.get(`${sid}:${tid}`) ?? null,
+  readMostRecentPendingActions: async (sid: string) => {
+    const { parsePendingAction } = await import('../../session/pending-action.js');
+    return (recent(sid)[0]?.pending_actions ?? []).map(x => parsePendingAction(clone(x))).filter(x => x !== null);
+  },
+  append: async (w: Record<string, unknown> & { scenario_id: string; turn_id: string }) => {
+    const key = `${w.scenario_id}:${w.turn_id}`;
+    if (!rows.has(key)) {
+      rows.set(key, {
+        id: `lab-row-${++tick}`, scenario_id: w.scenario_id, turn_id: w.turn_id,
+        request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null,
+        user_message: w.userMessage ?? null, llm_calls_used: 0, turn_class: 'direct_answer', handler_id: null,
+        pending_actions: clone((w.pending_actions ?? []) as unknown[]), handler_facts: clone(w.handler_facts ?? []),
+        created_at: new Date(Date.now() + tick).toISOString(),
+      });
+      if (w.graph !== undefined && w.graph !== null) graphs.set(w.scenario_id, clone(w.graph));
+    }
+    return { id: rows.get(key)!.id };
+  },
+  readRecent: async (sid: string) => recent(sid),
+  readFactsFor: async () => [], readFactsWithTurnFor: async () => [],
+  readScenarioRunAnalysisFactsFor: async () => ({ facts: [], total_count: 0 }),
+  invalidateScoped: async (_sid: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
+  invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
+  storeDraftGraph: async (sid: string, graph: unknown) => { graphs.set(sid, clone(graph)); },
+  loadGraph: async (sid: string) => graphs.get(sid) ?? null,
+  loadGraphAndBriefText: async (sid: string) => ({ graph: graphs.get(sid) ?? null, briefText: briefs.get(sid) ?? null }),
+  hasPriorTurns: async (sid: string) => recent(sid).length > 0,
+};
+
+vi.mock('../../session/index.js', async (original) => ({
+  ...(await original<Record<string, unknown>>()), getSessionStore: () => store, resetSessionStoreForTests: () => {},
+}));
+vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
+  ...(await original<Record<string, unknown>>()), resolveUserIdentity: async () => ({ mode: 'off' }),
+}));
+vi.mock('../../../adapters/llm/router.js', () => {
+  const refuse = async () => { throw new Error('The disposable lab does not run the route-v2 provider.'); };
+  const adapter = { name: 'lab-disabled', model: 'lab-disabled', chat: refuse, chatWithTools: refuse };
+  return { getAdapter: () => adapter, getAdapterWithResolution: () => ({ adapter,
+    resolution: { task: 'narrate', resolved_model: 'lab-disabled', resolution_source: 'task_default' } }),
+    getMaxTokensFromConfig: () => undefined };
+});
+
+it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manual lab until stopped', async () => {
+  const fixturePath = resolve('scripts/ai-experience-lab/pricing-fixture.json');
+  const fixture = JSON.parse(readFileSync(fixturePath, 'utf8')) as {
+    run: string; draft_graph: unknown; history: { user: string; assistant: string }[];
+  };
+  const evidence = process.env.AI_EXPERIENCE_LAB_EVIDENCE!;
+  const port = Number(process.env.AI_EXPERIENCE_LAB_PORT ?? '8793');
+  const head = process.env.AI_EXPERIENCE_LAB_HEAD ?? 'unknown';
+  const source_hash = process.env.AI_EXPERIENCE_LAB_SOURCE_HASH ?? 'unknown';
+  const arms = {
+    baseline: { model: 'gpt-5.6-terra', coaching: false },
+    A: { model: 'gpt-5.6-terra', coaching: true },
+    B: { model: 'gpt-6-luna', coaching: false },
+    C: { model: 'gpt-6-luna', coaching: true },
+  } as const;
+  const sessions = new Map<string, keyof typeof arms>();
+  const network = globalThis.fetch;
+  vi.stubGlobal('fetch', async (input: string | URL | Request, init?: Parameters<typeof fetch>[1]) => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+    if (url.origin !== 'https://api.openai.com') throw new Error('This lab permits only OpenAI provider traffic; external services are unavailable.');
+    return network(input, init);
+  });
+  process.env.AGENT_LANE_ENABLED = 'true';
+  process.env.AGENT_LANE_PREVIEW = 'false';
+  const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
+  const { ceeOrchestratorRouteV2 } = await import('../../../orchestrator/route-v2.js');
+  const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
+  const internal = Fastify({ logger: false });
+  internal.post('/assist/v1/scenarios/:id/graph', async req => {
+    const graph = graphs.get((req.params as { id: string }).id) ?? null;
+    return { graph, graph_hash: graph === null ? null : computeAnalysisAffectingGraphHash(graph as never) };
+  });
+  await internal.register(ceeOrchestratorRouteV2);
+  await internal.register(agentV1TurnRoute);
+  await internal.ready();
+  const app = Fastify({ logger: false, bodyLimit: 64 * 1024 });
+  app.addHook('onRequest', async (req, reply) => {
+    if (req.headers.origin && req.headers.origin !== `http://127.0.0.1:${port}`) {
+      return reply.code(403).send({ error: 'This preview accepts same-origin requests only.' });
+    }
+  });
+  app.get('/', async (_req, reply) => reply.type('text/html').send(readFileSync(resolve('scripts/ai-experience-lab/index.html'), 'utf8')));
+  app.get('/lab/status', async () => ({ status: 'ISOLATED_MANUAL_PREVIEW', head, source_hash, arms, fixture: fixture.run,
+    persistence: 'disposable_in_memory', external_analysis: 'unavailable' }));
+  app.get('/lab/session/:id', async (req, reply) => {
+    const sid = (req.params as { id: string }).id;
+    if (!sessions.has(sid)) return reply.code(404).send({ error: 'Lab session not found; reset to start again.' });
+    return { session_id: sid, arm: sessions.get(sid), graph: graphs.get(sid) };
+  });
+  app.post('/lab/session', async (req, reply) => {
+    const arm = (req.body as { arm?: keyof typeof arms })?.arm;
+    if (!arm || !Object.hasOwn(arms, arm)) return reply.code(400).send({ error: 'Choose a supported arm.' });
+    const sid = randomUUID(); sessions.set(sid, arm);
+    graphs.set(sid, clone(fixture.draft_graph)); briefs.set(sid, fixture.history[0]!.user);
+    for (const [i, h] of fixture.history.entries()) {
+      const tid = `seed-${i}`;
+      rows.set(`${sid}:${tid}`, { id: `${sid}:${tid}`, scenario_id: sid, turn_id: tid, request_hash: 'frozen-fixture',
+        user_message: h.user, assistant_message: h.assistant, pending_actions: [], handler_facts: [],
+        llm_calls_used: 0, turn_class: 'direct_answer', handler_id: null, created_at: new Date(Date.UTC(2026, 8, 27, 0, 0, i)).toISOString() });
+    }
+    return { session_id: sid, arm, ...arms[arm], brief: fixture.history[0]!.user, history: fixture.history, graph: graphs.get(sid) };
+  });
+  let busy = false;
+  app.post('/lab/turn', async (req, reply) => {
+    const body = req.body as { session_id?: string; message?: string };
+    const sid = body?.session_id; const arm = sid ? sessions.get(sid) : undefined;
+    if (!sid || !arm || typeof body.message !== 'string' || !body.message.trim() || body.message.length > 12000) {
+      return reply.code(400).send({ error: 'Start a lab session and enter a message (maximum 12,000 characters).' });
+    }
+    if (busy) return reply.code(409).send({ error: 'One lab turn is already running. Please wait.' });
+    busy = true;
+    process.env.CEE_AI_EXPERIENCE_SPIKE_MODEL = arms[arm].model;
+    process.env.CEE_AI_EXPERIENCE_SPIKE_COACHING = String(arms[arm].coaching);
+    const before = JSON.stringify(graphs.get(sid)); const start = Date.now();
+    try {
+      const response = await internal.inject({ method: 'POST', url: '/agent/v1/turn',
+        payload: { kind: 'message', scenario_id: sid, turn_id: randomUUID(), message: body.message } });
+      const payload = response.json() as Record<string, unknown>;
+      const receipt = { timestamp: new Date().toISOString(), head, source_hash, session_id: sid, arm, ...arms[arm],
+        status: response.statusCode, latency_ms: Date.now() - start, message: body.message,
+        graph_changed: before !== JSON.stringify(graphs.get(sid)), response: payload };
+      appendFileSync(evidence, JSON.stringify(receipt) + '\n');
+      return reply.code(response.statusCode).send(receipt);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      appendFileSync(evidence, JSON.stringify({ timestamp: new Date().toISOString(), head, arm, status: 'failed', error: message }) + '\n');
+      return reply.code(500).send({ error: message });
+    } finally { busy = false; }
+  });
+  await app.listen({ host: '127.0.0.1', port });
+  console.log(`AI_EXPERIENCE_LAB_READY http://127.0.0.1:${port} head=${head}`);
+  await new Promise<void>(done => { process.once('SIGTERM', done); process.once('SIGINT', done); });
+  await app.close(); await internal.close(); vi.unstubAllGlobals();
+}, 43_200_000);
