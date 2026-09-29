@@ -1075,6 +1075,25 @@ function proposalNoteFor(usersCount: number, total: number): string {
     `are assumptions to adopt or correct and NOT measurements, ${ask}`;
 }
 
+/** How many entries of a starting point are the user's own figures, read off the halves' typed markers. */
+function usersFiguresIn(assumptions: unknown, levels: unknown): number {
+  const marked = (xs: unknown, key: string, want: unknown): number =>
+    (Array.isArray(xs) ? xs : []).filter((x) => x !== null && typeof x === 'object' && (x as Record<string, unknown>)[key] === want).length;
+  return marked(assumptions, 'your_figure', true) + marked(levels, 'stated_by', 'user');
+}
+
+/** What `propose_starting_point` tells the Agent to say (the `proposalNoteFor` rule, for values AND levels). */
+function startingPointNoteFor(usersCount: number): string {
+  const tail = 'and that ONE approval applies all of them. Then call authorise_change with this proposal_id once they agree.';
+  if (usersCount === 0) {
+    return 'Nothing has changed. Show the user every value and level and what each rests on, say plainly they are ' +
+      `assumptions to adopt or correct, NOT measurements, ${tail}`;
+  }
+  return 'Nothing has changed. Show the user every value and level and what each rests on. A value marked your_figure ' +
+    "or a level with stated_by 'user' is the user's own figure and will be saved as theirs: never call it an assumption. " +
+    `Say plainly that the others are assumptions to adopt or correct, NOT measurements, ${tail}`;
+}
+
 const pickKeys = (o: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> =>
   Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]));
 
@@ -2979,10 +2998,9 @@ export function createAgentCapabilities(
         ...(a !== null && Array.isArray(a.not_a_factor) ? { not_a_factor: a.not_a_factor, not_a_factor_note: NOT_A_FACTOR_NOTE } : {}),
         ...ambiguity,
         ...refused,
-        note:
-          'Nothing has changed. Show the user every value and level and what each rests on, say plainly they are ' +
-          'assumptions to adopt or correct, NOT measurements, and that ONE approval applies all of them. Then call ' +
-          'authorise_change with this proposal_id once they agree.' + stillBlockedNote(ifApproved),
+        // The same rule as `propose_assumptions`: a level the user gave (`stated_by: 'user'`) or a value marked
+        // `your_figure` is said as theirs; the rest are assumptions. With none of the user's, the note is unchanged.
+        note: startingPointNoteFor(usersFiguresIn(a?.assumptions, b?.interventions)) + stillBlockedNote(ifApproved),
       };
     },
 

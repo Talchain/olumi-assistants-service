@@ -505,8 +505,9 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'have none AND the level each option sets — everything a first comparison needs. Use this instead ' +
       'of propose_assumptions + propose_option_interventions whenever both are needed: two separate ' +
       'proposals cannot both be applied from one approval, because applying the first changes the model ' +
-      'the second was made against. This changes nothing on its own. Every figure is the user’s ' +
-      'assumption to adopt or correct, NEVER a measurement — say so. Values in the factor’s own units.' + LEVEL_BRINGS_ITS_LINK,
+      'the second was made against. This changes nothing on its own. Every figure you propose is an ' +
+      'assumption for the user to adopt or correct, NEVER a measurement — say so; one the result marks `your_figure` or ' +
+      '`stated_by: \'user\'` is the user’s own figure, never called an assumption. Values in the factor’s own units.' + LEVEL_BRINGS_ITS_LINK,
     parameters: obj({
       assumptions: {
         type: 'array',
