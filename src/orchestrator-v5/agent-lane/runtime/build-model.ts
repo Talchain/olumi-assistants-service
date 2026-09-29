@@ -52,6 +52,7 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js';
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
 import { withReconcilingProductIdentity } from '../reconciling-product.js';
+import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
 import { figureTheUserWrote, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
@@ -1232,7 +1233,15 @@ export async function buildModelFromBrief(
   // ⛔ A figure written only as the goal's TARGET is not also its current level (R3 #72 5885498117; DL 5885526452 (3)).
   const writtenAgain = (value: number, unit: unknown): boolean => timesTheUserWrote(value, unit, brief) >= 2;
   // ⛔ A goal whose stated level is the product of its two stated parts is declared one (R3 #72 5886596030).
-  let admitted = admitCandidateModel(withReconcilingProductIdentity(candidate, brief), {}, brief, goalLevelTheUserWrote(candidate, brief), writtenAgain);
+  // #2286's mint on the goal's two parts, or (when the drafter put the product on a carrier that is the goal's only parent)
+  // the carrier folded into the goal under the SAME proof (`goal-product-carrier.ts`, MG #72 5888469185 class 1).
+  const mintOrFold = (c: CandidateModel): { model: CandidateModel; folded: FoldedCarrier | null } => {
+    const minted = withReconcilingProductIdentity(c, brief);
+    return minted !== c ? { model: minted, folded: null } : foldProductCarrierIntoGoal(c, brief);
+  };
+  const firstIdentity = mintOrFold(candidate);
+  let foldedCarrier = firstIdentity.folded;
+  let admitted = admitCandidateModel(firstIdentity.model, {}, brief, goalLevelTheUserWrote(candidate, brief), writtenAgain);
   preparation = gapsOnRegisteredOptions(preparation, firstCandidate, admitted);
 
   /**
@@ -1350,7 +1359,8 @@ export async function buildModelFromBrief(
         );
         const retryPrepared = prepareProvisionalCandidate(retryRaw);
         const retryCandidate = retryPrepared.candidate;
-        const retryAdmitted = admitCandidateModel(withReconcilingProductIdentity(retryCandidate, brief), {}, brief, goalLevelTheUserWrote(retryCandidate, brief), writtenAgain);
+        const retryIdentity = mintOrFold(retryCandidate);
+        const retryAdmitted = admitCandidateModel(retryIdentity.model, {}, brief, goalLevelTheUserWrote(retryCandidate, brief), writtenAgain);
         // ⛔ Leave out only what the FIRST draft never registered: withholding a registered option never closes its gaps in the count (adversarial verify of 843c0960).
         const firstGone = new Set((admitted.options_withheld ?? []).map((w) => canonicalLabel(w.option)));
         const firstRegistered = new Set(firstCandidate.options.map((o) => canonicalLabel(o.label)).filter((l) => !firstGone.has(l)));
@@ -1400,6 +1410,7 @@ export async function buildModelFromBrief(
             .map((n) => ({ kind: String(n.kind), label: String((n as { description?: unknown }).description ?? n.label) }));
           candidate = retryCandidate;
           admitted = retryAdmitted;
+          foldedCarrier = retryIdentity.folded;
           keptApart = retryApart.renamed;
           notToldApart = retryApart.ambiguous;
           size = retrySize;
@@ -1473,6 +1484,16 @@ export async function buildModelFromBrief(
       ambiguous_names: notToldApart.map((a) => ({ option: a.option, owners: [...a.owners], because: a.because })),
     };
   }
+  // Said where the user always sees it: the carrier the model folded into their goal, with their own arithmetic.
+  if (foldedCarrier !== null) {
+    const f = foldedCarrier;
+    admitted = {
+      ...admitted,
+      loss: [...admitted.loss, {
+        field_path: `nodes[${slugId(f.carrier)}].folded_into_goal`, before: f.carrier, after: f.goal, reason: foldedCarrierLines(f).join(' '), severity: 'info',
+      } as AdmittedModel['loss'][number]],
+    };
+  }
   if (keptApart.length > 0) {
     admitted = {
       ...admitted,
@@ -1533,6 +1554,8 @@ export async function buildModelFromBrief(
   // not only said in `not_represented` (which only the Agent's model reads). After the scope and deadline
   // questions, ahead of the drafter's own; nothing for a stable product or a linear model.
   openQuestions.unshift(...productIdentityOpenQuestions(admitted));
+  // AIQ 5888943993 (1)(c): the carrier folded into the goal, and any Olumi addition left out, said where the user sees it.
+  if (foldedCarrier !== null) openQuestions.unshift(...foldedCarrierLines(foldedCarrier));
   /**
    * ⛔ AN OPTION WITHHELD AS INDISTINCT IS SAID WHERE THE USER ALWAYS SEES IT (DL #70 5842400604: "never a
    * silent duplicate"). `not_represented` reaches only the Agent's model; `open_questions` is appended to the
@@ -1797,7 +1820,7 @@ export async function buildModelFromBrief(
         // `pure_limit`: a user-limited cost roll-up's Olumi-signed edge into the goal that was not drawn (`findPureLimits`).
         // `one_route`: a factor → risk link left out because the risk only re-drew the factor's own direct link
         // (`oneRoutePerEffect`, PR Review CR on #2276): the risk stays, and why its link went is said.
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|loop_withheld|loop_kept|magnitude_unconvertible|pure_limit|one_route|label_kept_apart)$|\.observed_state\.baseline$/.test(l.field_path))
+        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|loop_withheld|loop_kept|magnitude_unconvertible|pure_limit|one_route|label_kept_apart|folded_into_goal)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };
