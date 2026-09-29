@@ -43,6 +43,7 @@
 import { collectUnvaluedFactorIds } from '../../coaching/unvalued-factor-ids.js';
 import { IDENTITY_NOT_EVALUATED_CODE, composeIdentityNotEvaluatedAsk } from '../../coaching/identity-not-evaluated-ask.js';
 import { RunAnalysisArgsSchema, RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
+import { recordGoalCertainty } from './run-goal-certainty.js';
 import type {
   RunAnalysisArgs,
   RunAnalysisHandlerFact,
@@ -2450,6 +2451,22 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       });
     }
 
+    // 0.63.0 (DL 5883197828): the Run's own goal certainty, decided once from the stored graph this Run's hash binds
+    // and its own PLoT body. Every consumer reads this array; none recomputes it. Not recorded ⇒ absent, never a failed Run.
+    const goalCertainty = recordGoalCertainty(snapshot.rawPersistedGraph, response, graphHashAtRun);
+    if (!goalCertainty.recorded && goalCertainty.reason !== 'no_run_hash') {
+      log.warn(
+        {
+          event: 'v5.run_analysis.goal_certainty_not_recorded',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          reason: goalCertainty.reason,
+          ...(goalCertainty.detail !== undefined ? { detail: goalCertainty.detail } : {}),
+        },
+        'run_analysis — goal certainty not recorded on the Run (absent = not recorded; the Run itself stands)',
+      );
+    }
+
     const factCandidate: RunAnalysisHandlerFact = {
       fact_type: 'run_analysis',
       fact_version: 1,
@@ -2474,6 +2491,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // if the graph was empty (hash null), we omit graph_hash_at_run
         // rather than emitting an empty string.
         ...(graphHashAtRun !== null ? { graph_hash_at_run: graphHashAtRun } : {}),
+        ...(goalCertainty.recorded ? { goal_certainty: goalCertainty.decisions } : {}),
         computed_at: runComputedAt,
         // T1 claim safety, LAYER 2 — "may a leading option be named" is a FACT
         // ABOUT THIS ANALYSIS, so it is persisted WITH the analysis facts and
