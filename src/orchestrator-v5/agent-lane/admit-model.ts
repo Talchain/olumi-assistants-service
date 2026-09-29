@@ -3557,6 +3557,17 @@ function admitOnce(
     const id = nodeIdForMetric(c.metric);
     if (id !== undefined) percentLevelIds.add(id);
   }
+  // The goal's distance to its target in its own unit (`MagnitudeNode.goal_gap`): a change frame from today's level, a
+  // level frame from the gap between them. Nothing when today's level or the threshold is not held.
+  const goalGap = (n: AdmittedNode): number | undefined => {
+    const raw = n.goal_threshold_raw;
+    const today = n.observed_state?.raw_value;
+    if (n.kind !== 'goal' || typeof raw !== 'number' || !Number.isFinite(raw)) return undefined;
+    if (n.goal_threshold_frame === 'change_abs' || n.goal_threshold_frame === 'delta') return Math.abs(raw);
+    if (typeof today !== 'number' || !Number.isFinite(today)) return undefined;
+    if (n.goal_threshold_frame === 'change_rel') return Math.abs(raw * today);
+    return Math.abs(raw - today);
+  };
   const magnitudeNodeById = new Map<string, MagnitudeNode>(nodes.map((n) => [n.id, {
     label: n.label,
     kind: n.kind,
@@ -3567,6 +3578,7 @@ function admitOnce(
     unit: unitById.get(n.id) ?? null,
     option_levels: optionLevelsById.get(n.id) ?? [],
     ...(percentLevelIds.has(n.id) ? { percent_level: true } : {}),
+    ...(goalGap(n) !== undefined ? { goal_gap: goalGap(n) } : {}),
   }]));
   const sizing = new Map<string, LinkSizing>();
   for (const l of resolvable) {
