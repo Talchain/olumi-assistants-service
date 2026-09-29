@@ -145,6 +145,12 @@ describe('AI Quality 5882734064: an identity counts as exact only if THIS run ev
     // price → MRR is now an ordinary unsized link that can RAISE MRR, so £54's 0 is no longer earned either.
     expect(byId(ds, 'raise_price_to_54')).toMatchObject({ probability_of_goal: 0, earned: false });
   });
+  it('R3 5887059128: an unsized link STRAIGHT into the goal names the goal, never "moves ‘Monthly Pro price’ moves ‘Monthly Pro price’"', () => {
+    const d54 = byId(goalCertaintyDecisions(FX.paul.graph, FX.paul.option_comparison, []), 'raise_price_to_54')!;
+    // PRECONDITION: the path is the moved factor's own edge into the goal.
+    expect(d54.unsized_path).toEqual({ from: 'monthly_pro_price', enters_goal_through: 'monthly_pro_price' });
+    expect(d54.say).toBe('Olumi can’t yet say how likely ‘Raise price to £54’ is to miss the goal: it depends on how ‘Monthly Pro price’ moves ‘MRR’, which isn’t sized.');
+  });
   it('omitted evaluated set = none attested: a declaration alone never counts', () => {
     expect(byId(goalCertaintyDecisions(FX.paul.graph, FX.paul.option_comparison), 'raise_price_to_54')!.earned).toBe(false);
   });
