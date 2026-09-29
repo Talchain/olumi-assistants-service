@@ -55,3 +55,25 @@ export function goalChanceWithheldForAgent(result: unknown): GoalChanceWithheld 
   const nodeIds = [...new Set(warnings.flatMap((w) => (Array.isArray(w.node_ids) ? w.node_ids : [])).filter((id): id is string => typeof id === 'string'))];
   return { withheld: true, say: reason === '' ? OPENING : `${OPENING} ${reason}`, node_ids: nodeIds, note: GOAL_CHANCE_WITHHELD_NOTE };
 }
+
+/**
+ * ⛔ THE REASON IS SAID AS WRITTEN — the reply's own line (AIQ 5887805333 (3); Runtime's served #2285 finding).
+ *
+ * Served on `0497e52e`: the Agent paraphrased `say` ("…adds those effects instead of multiplying them"). That is true for
+ * a PRODUCT identity only; #416 fires for ANY unevaluated declared identity, so for a SUM it is false. The typed `say` is
+ * always true, so it is pinned: when a run THIS turn withheld the goal's chance and the reply does not already carry that
+ * sentence verbatim, it is owed as its own line (`withDisclosures`). The latest run decides — an explicit Run, or the first
+ * pass inside a build — and a later run that did not withhold owes nothing.
+ */
+export function goalChanceLineOwed(toolResults: readonly unknown[], replyText: string): string | null {
+  let say: string | undefined;
+  for (const r of toolResults) {
+    const rec = recordOf(r);
+    const firstPass = recordOf(rec?.first_analysis);
+    const chance = recordOf(rec?.goal_chance) ?? recordOf(firstPass?.goal_chance);
+    if (chance?.withheld === true && typeof chance.say === 'string' && chance.say.trim() !== '') say = chance.say;
+    else if (rec?.ran === true || firstPass?.ran === true) say = undefined;
+  }
+  return say !== undefined && !replyText.includes(say) ? say : null;
+}
+
