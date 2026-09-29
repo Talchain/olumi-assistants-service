@@ -100,6 +100,14 @@ export interface AgentToolContext {
    * the user's only when named here (`bandTheUserWrote`): a band word elsewhere in the conversation is about something else.
    */
   readonly user_turn_text?: string;
+  /**
+   * The proposal THIS request's typed approve chip names (`typedApprovalOf`), bound by the route — never model output.
+   * A link's stated effect is written only from that button, which shows the exact reading it records (PR Review's
+   * fifth CR on #2275): a free-text "yes" to the model never records it.
+   */
+  readonly typed_approval_of?: string;
+  /** That chip's words, bound only when a card for the proposal is on offer: a link-effect card's words carry its reading. */
+  readonly typed_approval_words?: string;
 }
 
 export interface ToolDefinition {
@@ -316,6 +324,28 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       rationale: { type: 'string', description: 'Why this option is worth comparing, in the user\u2019s terms.' },
       whole_request: WHOLE_REQUEST,
     }, ['rationale']),
+  },
+  {
+    type: 'function',
+    name: 'propose_link_effect',
+    description:
+      'Record how much an EXISTING link moves its target, as the user\u2019s own figures, when the user has just said it in numbers '
+      + '(for example "every \u00a31 on the price loses us about 50 subscribers"). This does NOT change anything: it prepares ONE change and '
+      + 'returns its id, which you keep for authorise_change: show the user what it records, never the id, before they approve. '
+      + 'Give both figures exactly as the user wrote them: `amount` is the change in the link\u2019s TARGET (negative when it falls), '
+      + '`per_source_change` the change in its SOURCE, each in that end\u2019s unit as get_canonical_state gives it. `quote` is the '
+      + 'user\u2019s ONE statement from THIS message that says it, copied exactly: the words that give both figures, name both ends '
+      + 'and say which way. Never use this for a figure the user did not write; for a strength '
+      + 'said in words ("strong"), use propose_link_strength.',
+    parameters: obj({
+      from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
+      to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
+      amount: { type: 'number', description: 'The change in the TARGET the user stated, signed (negative when it falls).' },
+      amount_unit: { type: 'string', description: 'The target\u2019s unit (for a percentage level, "percentage points").' },
+      per_source_change: { type: 'number', description: 'The change in the SOURCE the user stated it for (non-zero).' },
+      per_source_change_unit: { type: 'string', description: 'The source\u2019s unit.' },
+      quote: { type: 'string', description: 'The user\u2019s own words from THIS message, copied exactly.' },
+    }, ['from_label', 'to_label', 'amount', 'amount_unit', 'per_source_change', 'per_source_change_unit', 'quote']),
   },
   {
     type: 'function',
@@ -622,7 +652,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_strengths', 'propose_goal_target', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'authorise_change', 'withdraw_proposal'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'authorise_change', 'withdraw_proposal'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -680,6 +710,11 @@ export interface AgentCapabilities {
     from_words?: string;
     /** With a `direction` that reverses the link: the user's own words THIS turn saying it runs the other way. */
     direction_from_words?: string;
+  }): Promise<ToolResult>;
+  /** Optional: the user's stated effect on one link (their figures + words); a capability set without it refuses plainly. */
+  proposeLinkEffect?(ctx: AgentToolContext, args: {
+    from_label: string; to_label: string; amount: number; amount_unit: string;
+    per_source_change: number; per_source_change_unit: string; quote: string;
   }): Promise<ToolResult>;
   /** Optional: a set of link strengths as ONE approval and ONE commit; a capability set without it refuses the tool plainly. */
   proposeLinkStrengths?(ctx: AgentToolContext, args: {
@@ -792,6 +827,10 @@ export async function dispatchTool(
       return caps.proposeLinkStrength !== undefined
         ? caps.proposeLinkStrength(ctx, args as never)
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'Link strengths cannot be recorded here. Nothing was changed.' };
+    case 'propose_link_effect':
+      return caps.proposeLinkEffect !== undefined
+        ? caps.proposeLinkEffect(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A link\u2019s size cannot be recorded here. Nothing was changed.' };
     case 'propose_link_strengths':
       return caps.proposeLinkStrengths !== undefined
         ? caps.proposeLinkStrengths(ctx, args as never)
