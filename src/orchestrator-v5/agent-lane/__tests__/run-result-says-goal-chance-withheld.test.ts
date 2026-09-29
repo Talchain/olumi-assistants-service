@@ -1,0 +1,77 @@
+/**
+ * ⛔ THE AGENT NEVER STATES A CHANCE OF REACHING THE GOAL THE RUN WITHHELD (MG's PLoT #416; AIQ 5886183999; DL 5885276225).
+ *
+ * PLoT #416 @ b1d32385 withholds `probability_of_goal` on every option when a declared identity on the goal's path was not
+ * evaluated, and adds ONE warning built by its `goalIdentityWithheldMessage` — the exact shape and words below. The model
+ * already received the run's enrichment, but no rule said what to say about the missing chance (code-read, 29 Sep): the
+ * run result now carries `goal_chance` with the sentence and the rule.
+ */
+import { describe, it, expect } from 'vitest';
+import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { ProposalStore } from '../proposal.js';
+import { goalChanceWithheldForAgent, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED } from '../goal-chance-withheld.js';
+import { pruneSupersededToolOutputs } from '../history-store.js';
+
+type Json = Record<string, any>;
+const ctx = { scenario_id: '550e8400-e29b-41d4-a716-4466554400d1', authenticated_user_id: null, request_id: 'r' };
+// PLoT #416's own words for Paul's MRR identity (goalIdentityWithheldMessage: product → " × ").
+const PLOT_WORDS = "Not shown. 'MRR' depends on Pro plan price × Pro paying subscribers, but this run couldn't calculate it that way, "
+  + 'so the figures for each option would be wrong.';
+const WITHHELD_WARNING = { code: GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, message: PLOT_WORDS, severity: 'warning', node_ids: ['mrr'] };
+const GRAPH = { nodes: [{ id: 'goal_mrr', kind: 'goal', label: 'MRR' }], edges: [] };
+const WITHHELD_ROWS = [{ option_id: 'raise_price', option_label: 'Raise price to £59' }, { option_id: 'hold_price', option_label: 'Hold price' }];
+const SHOWN_ROWS = WITHHELD_ROWS.map((o, i) => ({ ...o, probability_of_goal: i === 0 ? 0.62 : 0.41 }));
+
+function world(enrichment: Json, leader = { permitted: false, withheld_reason: 'constraint_verdict_withheld' }) {
+  const state = { run_state: { kind: 'complete_current' }, leader_claim: leader };
+  const d: InternalDispatch = async (path) => {
+    if (path.endsWith('/graph')) return { status: 200, json: { graph: GRAPH, graph_hash: 'h1', analysis_state: state } };
+    if (path === '/orchestrate/v2/turn') {
+      return { status: 200, json: { assistant_text: '', analysis_state: state, analysis_ready: { status: 'ready' },
+        blocks: [{ type: 'analysis_result', summary: 's', enrichment }] } };
+    }
+    throw new Error(`unexpected dispatch ${path}`);
+  };
+  return createAgentCapabilities(d, new ProposalStore());
+}
+
+describe('run_analysis carries the run\'s withheld goal chance, with the sentence and the rule', () => {
+  it('RED (PLoT #416\'s shape): every option withheld → `goal_chance` says why, in AIQ\'s words, and forbids any chance', async () => {
+    const r = await world({ option_comparison: WITHHELD_ROWS, inference_warnings: [WITHHELD_WARNING] }).runAnalysis(ctx, { reason: 'Run it.' }) as Json;
+    expect(r.goal_chance, JSON.stringify(Object.keys(r))).toEqual(expect.objectContaining({ withheld: true, node_ids: ['mrr'] }));
+    // The reply's opening, then PLoT's reason verbatim (its UI-slot "Not shown." is not a sentence in a reply).
+    expect(r.goal_chance.say).toBe("The chance of reaching the goal isn’t given for this run. 'MRR' depends on Pro plan price × Pro paying "
+      + "subscribers, but this run couldn't calculate it that way, so the figures for each option would be wrong.");
+    expect(r.goal_chance.note).toMatch(/Never state, estimate, rank or compare a chance/);
+    expect(r.goal_chance.note).toMatch(/estimated value for the goal itself/); // AIQ 5886183999: the means are the same class
+  });
+
+  it('CONTROL (Paul\'s evaluated MRR): no warning, chances present → no `goal_chance`, the run reads as today', async () => {
+    const r = await world({ option_comparison: SHOWN_ROWS, inference_warnings: [] }, { permitted: true } as never).runAnalysis(ctx, { reason: 'Run it.' }) as Json;
+    expect(r.ran).toBe(true);
+    expect(r).not.toHaveProperty('goal_chance');
+  });
+
+  it('the TYPED code decides, never the words: other warnings → nothing; the code with no words → still withheld (fail closed)', () => {
+    expect(goalChanceWithheldForAgent({ enrichment: { inference_warnings: [{ code: 'IDENTITY_NOT_EVALUATED', message: PLOT_WORDS }] } })).toBeUndefined();
+    const bare = goalChanceWithheldForAgent({ enrichment: { inference_warnings: [{ code: GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED }] } });
+    expect(bare).toEqual(expect.objectContaining({ withheld: true, say: 'The chance of reaching the goal isn’t given for this run.', node_ids: [] }));
+    // A chance beside the code is still withheld: the code is the run's decision.
+    expect(goalChanceWithheldForAgent({ enrichment: { option_comparison: SHOWN_ROWS, inference_warnings: [WITHHELD_WARNING] } })?.withheld).toBe(true);
+  });
+
+  it('a KEPT withheld run (its warnings moved to the result\'s top) is read the same way', () => {
+    expect(goalChanceWithheldForAgent({ summary: 's', inference_warnings: [WITHHELD_WARNING] })?.node_ids).toEqual(['mrr']);
+  });
+
+  it('LATER TURNS keep the rule: the kept copy of a withheld run still carries `goal_chance` (history whitelist)', async () => {
+    const r = await world({ option_comparison: WITHHELD_ROWS, inference_warnings: [WITHHELD_WARNING] }).runAnalysis(ctx, { reason: 'Run it.' }) as Json;
+    expect(r.claim_permissions?.leader_may_be_named).not.toBe(true); // precondition: the WITHHELD projection is the one used
+    const kept = pruneSupersededToolOutputs([
+      { type: 'function_call', call_id: 'c1', name: 'run_analysis', arguments: '{}' },
+      { type: 'function_call_output', call_id: 'c1', output: JSON.stringify(r) },
+    ]) as Array<{ type: string; output?: string }>;
+    const out = JSON.parse(kept.find((x) => x.type === 'function_call_output')!.output!) as Json;
+    expect(out.goal_chance).toEqual(r.goal_chance);
+  });
+});
