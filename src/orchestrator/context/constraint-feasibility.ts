@@ -39,6 +39,12 @@ import {
 import { EnrichmentScaleProvenanceSchema } from "@talchain/schemas/boundary";
 
 import { readOptionResultSources } from "./option-result-source.js";
+import {
+  PARTS_IDENTITY_UNMODELLED_REASON,
+  PLACEHOLDER_PARTS_REASON,
+  targetMovedOnlyThroughPlaceholderParts,
+  type PlaceholderPartsReason,
+} from "./placeholder-parts.js";
 import { classifyValueSource, earnsAuthorshipCredit } from "../../cee/graph-readiness/obligation-provenance.js";
 
 export interface WinnerConstraintFeasibility {
@@ -833,8 +839,20 @@ export function limitLevelOwnerReason(stamp: unknown): EstimateOnlyReason | null
 export function collectLimitLevelOwners(
   graph: unknown,
   ratified: readonly RatifiedConstraint[],
-): { userBaselineIds: Set<string>; userAssumptionIds: Set<string>; relativeChangeIds: Set<string> } {
-  const out = { userBaselineIds: new Set<string>(), userAssumptionIds: new Set<string>(), relativeChangeIds: new Set<string>() };
+  /** The options PLoT scores (run_analysis's final wire options). Omitted = no limit is withheld for its parts. */
+  options?: ReadonlyArray<Record<string, unknown>>,
+): {
+  userBaselineIds: Set<string>;
+  userAssumptionIds: Set<string>;
+  relativeChangeIds: Set<string>;
+  placeholderPartsReasons: Map<string, PlaceholderPartsReason>;
+} {
+  const out = {
+    userBaselineIds: new Set<string>(),
+    userAssumptionIds: new Set<string>(),
+    relativeChangeIds: new Set<string>(),
+    placeholderPartsReasons: new Map<string, PlaceholderPartsReason>(),
+  };
   // R1 S4-core: the limits STORED as a relative change from today (`value_frame: 'change_rel'`), read off the same
   // persisted rows the ratified list came from. ISL's `frame_verdict` must be present for these (0.61.0: absent fails
   // closed), so {@link derivePerLimitVerdicts} needs to know which they are.
@@ -848,6 +866,22 @@ export function collectLimitLevelOwners(
   }
   const rawNodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
   if (!Array.isArray(rawNodes)) return out;
+  // ⛔ R-c (AI Quality 5881541947 + 5882087383, DL 5881593118 + 5882019090): a limit on a target the options move only
+  // through its parts, on a link nobody has sized (or through an identity the engine does not honour), has no checkable
+  // P, in ANY frame: the P is the placeholder's. `estimate_only` says whose base it is, not that the effect size is a
+  // default, and a user-stated base cannot upgrade it. The same predicate withholds a level limit's baseline carrier
+  // (`level-limit-baseline.ts`). A limit on the goal is not read here: P(goal) is its own, disclosed claim.
+  const rawEdges = (graph as { edges?: unknown } | null | undefined)?.edges;
+  if (options !== undefined) {
+    const nodes = rawNodes.map(readRecord).filter((n): n is Record<string, unknown> => n !== null);
+    const edges = Array.isArray(rawEdges) ? rawEdges.map(readRecord).filter((e): e is Record<string, unknown> => e !== null) : [];
+    for (const c of ratified) {
+      if (typeof c.node_id !== 'string' || c.node_id.length === 0) continue;
+      if (nodes.find((n) => n.id === c.node_id)?.kind === 'goal') continue;
+      const why = targetMovedOnlyThroughPlaceholderParts(c.node_id, nodes, edges, options);
+      if (why !== null) out.placeholderPartsReasons.set(c.constraint_id, why);
+    }
+  }
   for (const c of ratified) {
     if (typeof c.node_id !== 'string' || c.node_id.length === 0) continue;
     const node = rawNodes.find((n) => readRecord(n)?.id === c.node_id);
@@ -1264,6 +1298,11 @@ function deriveLeaderClaimVerdict(
    * derived at the call site that holds the wire options. OPTIONAL, and omitted is today's verdict exactly.
    */
   leaderStrictThresholdPinIds?: ReadonlySet<string>,
+  /**
+   * R-c: the limits whose target the options move only through links nobody sized ({@link collectLimitLevelOwners}'s
+   * `placeholderPartsReasons`). OPTIONAL, and omitted is today's verdict exactly.
+   */
+  placeholderPartsIds?: ReadonlySet<string>,
 ): ConstraintVerdict {
   // Computed unconditionally so it can be carried on every state (see
   // `leaderInfeasibility`). Fails open to `{ infeasible: false }`.
@@ -1393,7 +1432,10 @@ function deriveLeaderClaimVerdict(
   //        threshold (A2 follow-up, DL verdict on #2180): "under 4%" is not met
   //        at 4%, and the engine, holding "<=", counts it as met. Its score is
   //        withheld, never read as a pass (nor as a breach: nothing is modelled).
-  //    `codes` stays `[]` for (b), (d) and (e): the producer shipped no code, and a
+  //    (f) R-c (AI Quality 5881541947 / 5882087383): the options move the limit's target only through links nobody
+  //        sized, so every option's score for it is the placeholder's. Like (b), it licenses neither a compliance nor
+  //        a breach claim, and the limit card says so.
+  //    `codes` stays `[]` for (b), (d), (e) and (f): the producer shipped no code, and a
   //    CEE-minted one must never be filed as a producer code.
   const notDecisionGrade = collectProducerNotDecisionGradeConstraintIds(envelope);
   const leaderScored = collectLeaderScoredConstraintIds(envelope, leadingOptionId);
@@ -1403,7 +1445,8 @@ function deriveLeaderClaimVerdict(
       notDecisionGrade.has(c.constraint_id) ||
       (leaderScored !== null && !leaderScored.has(c.constraint_id)) ||
       leaderEstimatedTargetIds?.has(c.constraint_id) === true ||
-      leaderStrictThresholdPinIds?.has(c.constraint_id) === true,
+      leaderStrictThresholdPinIds?.has(c.constraint_id) === true ||
+      placeholderPartsIds?.has(c.constraint_id) === true,
   );
   if (unverified.length > 0) {
     return verdict('unevaluated', {
@@ -1454,6 +1497,8 @@ export function deriveConstraintVerdict(
     readonly userAssumptionIds: ReadonlySet<string>;
     /** R1 S4-core: limits stored `change_rel` ({@link collectLimitLevelOwners}). Omitted = none known (as before). */
     readonly relativeChangeIds?: ReadonlySet<string>;
+    /** R-c: limits withheld for their target's unsized parts, with why ({@link collectLimitLevelOwners}). */
+    readonly placeholderPartsReasons?: ReadonlyMap<string, string>;
   },
   /**
    * ⭐ A2 follow-up (DL verdict on #2180): option id → the STRICT limits that option sets at EXACTLY their threshold
@@ -1470,6 +1515,7 @@ export function deriveConstraintVerdict(
     unmeasuredTargetIds,
     leaderEstimatedTargetIds,
     typeof leadingOptionId === 'string' ? strictThresholdPins?.get(leadingOptionId) : undefined,
+    perLimitInput?.placeholderPartsReasons !== undefined ? new Set(perLimitInput.placeholderPartsReasons.keys()) : undefined,
   );
   if (perLimitInput === undefined || ratified.length === 0) return leaderVerdict;
   const pinnedIds = new Set([...(strictThresholdPins?.values() ?? [])].flatMap((ids) => [...ids]));
@@ -1518,6 +1564,8 @@ export const BASE_OWNER_UNESTABLISHED_REASON = 'base_owner_unestablished';
 export const PER_LIMIT_REASON_RANK: ReadonlyMap<string, number> = new Map([
   ['threshold_unframed', 1],
   ['target_unanchored', 2],
+  [PLACEHOLDER_PARTS_REASON, 2],
+  [PARTS_IDENTITY_UNMODELLED_REASON, 2],
   ['threshold_clamped', 3],
   ['CONSTRAINT_NOT_CONVERTIBLE', 4],
   ['CONSTRAINT_OUT_OF_DOMAIN', 4],
@@ -1611,7 +1659,12 @@ const JOINT_WITHHELD_REASON = 'limit_unscored';
 function derivePerLimitVerdicts(
   envelope: Record<string, unknown>,
   ratified: readonly RatifiedConstraint[],
-  levels: { readonly userBaselineIds: ReadonlySet<string>; readonly userAssumptionIds: ReadonlySet<string>; readonly relativeChangeIds?: ReadonlySet<string> },
+  levels: {
+    readonly userBaselineIds: ReadonlySet<string>;
+    readonly userAssumptionIds: ReadonlySet<string>;
+    readonly relativeChangeIds?: ReadonlySet<string>;
+    readonly placeholderPartsReasons?: ReadonlyMap<string, string>;
+  },
   leaderEstimatedTargetIds: ReadonlySet<string> | undefined,
   /** A2 follow-up: the strict limits some option sets at exactly their threshold ({@link STRICT_THRESHOLD_PIN_REASON}). */
   strictThresholdPinnedIds: ReadonlySet<string>,
@@ -1721,6 +1774,9 @@ function derivePerLimitVerdicts(
     }
     // Pushed after `certified` is read: it is CEE's reading of the words, never producer evidence about the block.
     if (strictThresholdPinnedIds.has(c.constraint_id)) reasons.push(STRICT_THRESHOLD_PIN_REASON);
+    // R-c: CEE's reading of the model's links, like the pin above — never producer evidence about the block.
+    const partsReason = levels.placeholderPartsReasons?.get(c.constraint_id);
+    if (partsReason !== undefined) reasons.push(partsReason);
     // ISL's `estimate_only`: the base it compared on is NOT the user's (Olumi's estimate, or an owner it could not
     // establish). It only ever LOWERS a row. When CEE reads that same level as the user's own, the two hops disagree
     // about whose figure it is, so neither "scored" nor "only Olumi's estimates" would be true: the row fails closed.

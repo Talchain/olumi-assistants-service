@@ -334,6 +334,14 @@ const round6 = (x: number): number => Number(x.toPrecision(6));
 /** The unit words the natural size is said in: points for a percentage level, "switch" for a yes/no. */
 export const targetUnitWords = (t: MagnitudeNode, frame: number | undefined): string =>
   isPercentLevel(t, frame) ? 'percentage points' : (unitOf(t) ?? '');
+
+/**
+ * The unit words THIS sizer says a link's natural size in, for the node it points at (`naturalEffectOf`'s
+ * `amount_unit`): "percentage points" only for a percentage LEVEL on 100, else the node's unit.
+ */
+export function naturalAmountUnitOf(target: MagnitudeNode): string {
+  return targetUnitWords(target, resolveMagnitudeFrame(target));
+}
 export const sourceUnitWords = (s: MagnitudeNode, frame: number | undefined): string =>
   isSwitch(s, frame) ? 'switch' : (unitOf(s) ?? '');
 
