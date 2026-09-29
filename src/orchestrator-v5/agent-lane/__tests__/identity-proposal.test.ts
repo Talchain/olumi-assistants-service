@@ -37,7 +37,7 @@ describe('the card on the served graphs', () => {
       outcome_id: 'mrr',
       operation: 'product',
       factor_ids: ['pro_plan_price', 'paying_subscribers'],
-      words: `Is “${node(served(0), 'mrr').label}” your “${node(served(0), 'pro_plan_price').label}” × “${node(served(0), 'paying_subscribers').label}”? £49 × 1,500 = £73,500, close to your £75,000. If yes, Olumi will calculate “${node(served(0), 'mrr').label}” that way and run the analysis again.`,
+      words: `Is “${node(served(0), 'mrr').label}” your “${node(served(0), 'pro_plan_price').label}” × “${node(served(0), 'paying_subscribers').label}”? £49 × 1,500 = £73,500, close to your £75,000. If yes, Olumi will calculate “${node(served(0), 'mrr').label}” that way, and you can run the analysis again.`,
     });
   });
   it('RED: runs 3 and 4 get the card too, the rate first whatever the edge order', () => {

@@ -89,8 +89,9 @@ export function proposeProductIdentity(graph: unknown): IdentityProposal | null 
   const money = (v: number): string => sayFigure(v, c.code);
   const words = `Is “${goalLabel}” your “${rate.label}” × “${count.label}”? `
     + `${money(rate.value)} × ${sayFigure(count.value, '')} = ${money(rate.value * count.value)}, close to your ${money(o.value)}. `
-    // AIQ 5888571809: the card says what "Yes" does.
-    + `If yes, Olumi will calculate “${goalLabel}” that way and run the analysis again.`;
+    // AIQ 5888571809: the card says what "Yes" does. It does NOT run anything: an approval runs nothing (Paul's ruling,
+    // #63 5812069638; enforced server-side), so the Run stays the user's own press (Runtime 5888628288 option (b)).
+    + `If yes, Olumi will calculate “${goalLabel}” that way, and you can run the analysis again.`;
   // Canonical #2292's door takes at most 400 characters of card words (5888513620): a card it would refuse is not issued.
   if (words.length > CARD_WORDS_MAX) return null;
   return { outcome_id: goalId, operation: 'product', factor_ids: [rate.id, count.id], words };
