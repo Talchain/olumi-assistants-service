@@ -448,9 +448,17 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
         : issue === 'not_representable'
           ? `You said ${statement}, ${NOT_REPRESENTABLE}: it would be cut short. It is kept exactly as you said it. Is that the size you meant?`
           : undefined;
+      // ⛔ THE STORED MEAN STAYS IN THE PUBLISHED CONTRACT (`StrengthSchema.mean` ∈ [−1, 1]; Canvas #72 5893089961, P0
+      // Shared Data 5893186777, MG 5893205866). ISL clamps the mean to the bound at parse (`StrengthDistribution`,
+      // STRENGTH_MEAN_CLAMPED), so the bound IS the analysed mean: storing β beyond it made the saved graph differ from
+      // the analysed one and failed a fresh reload. The user's size is kept as stated where it is read — `stated_strength`
+      // and the question — never cut silently (D8).
+      const stored = Math.max(-1, Math.min(1, beta));
       return {
-        outcome: 'user_stated', mean: beta, std: sigma, magnitude: 'user_stated', statement, stated_strength: beta,
-        ...natural(beta, per as number),
+        outcome: 'user_stated', mean: stored, std: sigma, magnitude: 'user_stated', statement, stated_strength: beta,
+        // The natural size said beside the edge is the one analysed (its staleness key is the stored mean); the user's own
+        // figure is `stated_strength` and the question that says it was cut short.
+        ...natural(stored, per as number),
         ...(issue !== undefined ? { problem: issue, question: question! } : {}),
       };
     }
