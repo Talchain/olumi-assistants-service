@@ -1717,23 +1717,13 @@ export function readEvaluatedIdentityNodeIds(wire: unknown): ReadonlySet<string>
  *
  * Pure and total: a malformed graph or carrier is `null`, never a throw on a Run.
  */
-export function nonlinearIdentityLeaderWithhold(
-  graph: unknown,
-  leaderId: string | null,
-  opts: { readonly comparedOptionIds?: readonly string[]; readonly goalId?: string; readonly evaluatedIdentityNodeIds?: ReadonlySet<string> } = {},
-): NonlinearIdentityLeaderWithhold | null {
-  const rawNodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
-  const rawEdges = (graph as { edges?: unknown } | null | undefined)?.edges;
-  if (!Array.isArray(rawNodes) || !Array.isArray(rawEdges)) return null;
-  const nodes = rawNodes.filter((n): n is GraphNodeLike => n !== null && typeof n === 'object' && typeof (n as GraphNodeLike).id === 'string' && typeof (n as GraphNodeLike).kind === 'string');
-  const carried = nodes.map((n) => ({ id: n.id as string, carrier: readCarrier(n) }))
-    .filter((c): c is { id: string; carrier: NonlinearIdentityCarrier } => c.carrier !== null)
-    .filter((c) => opts.evaluatedIdentityNodeIds?.has(c.id) !== true);
-  if (carried.length === 0) return null;
-  const goals = nodes.filter((n) => n.kind === 'goal').map((n) => n.id as string);
-  const goalId = opts.goalId ?? (goals.length === 1 ? goals[0] : undefined);
-  if (goalId === undefined || !goals.includes(goalId)) return null;
-
+/**
+ * A STORED graph as the product rule reads it (`markProductIdentities`): the nodes as admitted-like (levels, today's value),
+ * the causal edges with their direction and origin, the option ids the brief's status quo names. ONE projection, read by
+ * the Run-time re-judge (`nonlinearIdentityLeaderWithhold`) and by the identity-confirm writer's admission check
+ * (`admitStoredProductDeclaration`), so a card can never record a product the construction rule would not have admitted.
+ */
+function storedGraphForProducts(nodes: readonly GraphNodeLike[], rawEdges: readonly unknown[]) {
   const admittedLike: AdmittedNode[] = nodes.map((n) => {
     const levels = n.interventions !== null && typeof n.interventions === 'object'
       ? Object.fromEntries(Object.entries(n.interventions as Record<string, unknown>).flatMap(([k, v]) => {
@@ -1757,11 +1747,72 @@ export function nonlinearIdentityLeaderWithhold(
       ...(typeof e.origin === 'string' ? { origin: e.origin } : {}),
     }));
   const ids = new Set(admittedLike.map((n) => n.id));
-  const optionIds = admittedLike.filter((n) => n.kind === 'option').map((n) => n.id);
+  const resolveId = (id: string): string | undefined => (typeof id === 'string' && ids.has(id) ? id : undefined);
   const statusQuo = new Set(nodes.filter((n) => n.kind === 'option' && readIsBaseline(n as never) === true).map((n) => n.id as string));
+  return { admittedLike, edges, resolveId, statusQuo };
+}
+
+/** Why admission would not take a product the user is asked to confirm; the construction rule's own answer. */
+export type StoredProductDeclarationRefusal = 'invalid_graph' | 'no_single_goal' | 'not_admissible' | 'does_not_bear_on_goal';
+
+/**
+ * ⭐ WOULD CONSTRUCTION ADMIT THIS PRODUCT ON THIS STORED GRAPH? (DL 5887510885: Canonical owns the approved-card write
+ * of "MRR = price × subscribers".) The SAME `markProductIdentities` construction runs, on the SAME projection the Run-time
+ * re-judge reads, for ONE declaration the user states (`explicit`): the outcome is a quantity; each factor is an input
+ * quantity that feeds it; at least two distinct factors; and it bears on the goal. `detail` is admission's own sentence.
+ * Pure and total: a malformed graph is a refusal, never a throw.
+ */
+export function admitStoredProductDeclaration(
+  graph: unknown,
+  declaration: { readonly outcome_id: string; readonly factor_ids: readonly string[] },
+): { readonly ok: true } | { readonly ok: false; readonly reason: StoredProductDeclarationRefusal; readonly detail?: string } {
+  const rawNodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
+  const rawEdges = (graph as { edges?: unknown } | null | undefined)?.edges;
+  if (!Array.isArray(rawNodes) || !Array.isArray(rawEdges)) return { ok: false, reason: 'invalid_graph' };
+  const nodes = rawNodes.filter((n): n is GraphNodeLike => n !== null && typeof n === 'object' && typeof (n as GraphNodeLike).id === 'string' && typeof (n as GraphNodeLike).kind === 'string');
+  const goals = nodes.filter((n) => n.kind === 'goal').map((n) => n.id as string);
+  if (goals.length !== 1) return { ok: false, reason: 'no_single_goal' };
+  const { admittedLike, edges, resolveId, statusQuo } = storedGraphForProducts(nodes, rawEdges);
+  const { accepted, loss } = markProductIdentities(
+    [{ outcome: declaration.outcome_id, operation: 'product', factors: [...declaration.factor_ids], provenance: 'explicit' }],
+    resolveId,
+    admittedLike,
+    edges,
+    goals[0],
+    statusQuo,
+  );
+  const distinct = [...new Set(declaration.factor_ids)];
+  if (accepted.length === 1 && accepted[0]!.outcome_id === declaration.outcome_id
+    && accepted[0]!.factor_ids.length === distinct.length && accepted[0]!.factor_ids.every((id, i) => id === distinct[i])) {
+    return { ok: true };
+  }
+  const detail = (loss[0] as { reason?: unknown } | undefined)?.reason;
+  return { ok: false, reason: loss.length > 0 ? 'not_admissible' : 'does_not_bear_on_goal',
+    ...(typeof detail === 'string' ? { detail } : {}) };
+}
+
+export function nonlinearIdentityLeaderWithhold(
+  graph: unknown,
+  leaderId: string | null,
+  opts: { readonly comparedOptionIds?: readonly string[]; readonly goalId?: string; readonly evaluatedIdentityNodeIds?: ReadonlySet<string> } = {},
+): NonlinearIdentityLeaderWithhold | null {
+  const rawNodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
+  const rawEdges = (graph as { edges?: unknown } | null | undefined)?.edges;
+  if (!Array.isArray(rawNodes) || !Array.isArray(rawEdges)) return null;
+  const nodes = rawNodes.filter((n): n is GraphNodeLike => n !== null && typeof n === 'object' && typeof (n as GraphNodeLike).id === 'string' && typeof (n as GraphNodeLike).kind === 'string');
+  const carried = nodes.map((n) => ({ id: n.id as string, carrier: readCarrier(n) }))
+    .filter((c): c is { id: string; carrier: NonlinearIdentityCarrier } => c.carrier !== null)
+    .filter((c) => opts.evaluatedIdentityNodeIds?.has(c.id) !== true);
+  if (carried.length === 0) return null;
+  const goals = nodes.filter((n) => n.kind === 'goal').map((n) => n.id as string);
+  const goalId = opts.goalId ?? (goals.length === 1 ? goals[0] : undefined);
+  if (goalId === undefined || !goals.includes(goalId)) return null;
+
+  const { admittedLike, edges, resolveId, statusQuo } = storedGraphForProducts(nodes, rawEdges);
+  const optionIds = admittedLike.filter((n) => n.kind === 'option').map((n) => n.id);
   const { analyses } = markProductIdentities(
     carried.map((c) => ({ outcome: c.id, operation: 'product', factors: [...c.carrier.factor_ids], provenance: c.carrier.stated_in_brief ? 'explicit' : 'inferred' })),
-    (id) => (typeof id === 'string' && ids.has(id) ? id : undefined),
+    resolveId,
     admittedLike,
     edges,
     goalId,
