@@ -21,11 +21,15 @@ import {
   type RunTurnCoachingFinal,
 } from '../analysis-coaching-pass-through.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { rebindCapture } from '../../../../tests/helpers/legacy-analysis-hash-v2.js';
 
 type Rec = Record<string, any>;
-const f = JSON.parse(readFileSync(
+// Shared Data row 1 (projection v3): each capture's recorded hash is proven to be the pre-0.62.0 projection of its
+// draft graph, then rebound to the current projection everywhere that exact string appears (tests/helpers).
+const rebound = (f: Rec): Rec => rebindCapture(f, f.draft_graph, f.graph_hash as string);
+const f = rebound(JSON.parse(readFileSync(
   new URL('../../coaching/__tests__/fixtures/served-hiring-9bd3747-link-not-in-model.json', import.meta.url), 'utf8',
-)) as Rec;
+)) as Rec);
 const PHANTOM = 'tech_lead_hires_change_from_today→delivery_capacity';
 // A DERIVED graph is re-hashed through the real hash function, so the run stays bound to it.
 const args = (graph: Rec = f.draft_graph): [CapturedAnalysis, RunTurnCoachingFinal] => {

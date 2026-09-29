@@ -90,7 +90,10 @@ const WARMUP_SCENARIO_ID = '55555555-5555-4555-8555-555555555555';
 // ── the persisted model ────────────────────────────────────────────────────
 // The value-edit suite's fixture (`route-v2-factor-value-edit.test.ts`), with a
 // second option so the seeded analysis compares two real option ids.
-// `f-budget` is capped at 100000 with unit £, currently £40,000 (value 0.4).
+// `f-budget` is capped at 100000 with unit £, currently £40,000 (value 0.4), and it is ALREADY the user's figure
+// (`source: 'user_override'`). Since schemas 0.62.0 the analysis hash reads whose a value is (Shared Data row 1), so a
+// typed edit-back restores the analysed bytes only when the figure was the user's to begin with; an Olumi estimate
+// typed back becomes the user's and is honestly stale (graph-hash-whose-value.test.ts).
 // The P8 concurrent writer reuses the same model with a different budget.
 function buildSeedGraph(budget: { readonly value: number; readonly raw_value: number } = {
   value: 0.4,
@@ -104,7 +107,7 @@ function buildSeedGraph(budget: { readonly value: number; readonly raw_value: nu
         id: 'f-budget',
         kind: 'factor',
         label: 'Marketing budget',
-        observed_state: { value: budget.value, raw_value: budget.raw_value, unit: '£', cap: 100000 },
+        observed_state: { value: budget.value, raw_value: budget.raw_value, unit: '£', cap: 100000, source: 'user_override' },
       },
       { id: 'o-launch', kind: 'option', label: 'Launch now' },
       { id: 'o-hold', kind: 'option', label: 'Hold for a quarter' },
