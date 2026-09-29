@@ -46,7 +46,8 @@ import {
   type ConstructionSizeVerdict,
 } from '../construction-size-gate.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
-import { LIMIT_OPERATOR_WORDS } from '../admit-constraint.js';
+import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js';
+import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
 import { figureTheUserWrote, holdStatedGoalAttributes, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
@@ -105,7 +106,9 @@ export function buildCandidateSchema(): Record<string, unknown> {
       metric: { type: 'string' }, operator: { type: 'string', enum: ['>=', '<=', '>', '<'] },
       value: { type: 'number' }, unit: { type: 'string' }, provenance,
       // The frame the analysis compares the limit in (ISL refuses an unframed limit: `frame_not_stamped`).
-      frame: { type: 'string', enum: ['level', 'delta'] },
+      // R1 (`@talchain/schemas` 0.61.0, `limit-frame.ts`): the contract's three writable frames. Legacy `delta` (a change
+      // from the MODEL'S ORIGIN) gets no new writers.
+      frame: { type: 'string', enum: ['level', 'change_abs', 'change_rel'] },
     }, ['metric', 'operator', 'value', 'unit', 'provenance', 'frame']) },
     /**
      * ⛔ NO `maxItems` ON ANYTHING THAT CAN HOLD USER MATERIAL. Removed after an
@@ -252,7 +255,7 @@ export const BUILD_INSTRUCTIONS = [
   // ⛔ C46 (#70 5841215337): the analysis adds effects up, so a product is approximated and its sign can flip.
   'DECLARE A PRODUCT ONLY WHERE ONE HOLDS BY DEFINITION. When a quantity you keep is, by definition, other quantities you keep multiplied together — a plan’s revenue is its price times its paying subscribers; a cost is headcount times cost per head — add one entry to `identities`: `outcome` is that quantity’s EXACT label, `operation` "product", and `factors` the EXACT labels of every quantity multiplied. Still state each factor’s own link toward the outcome in `links`. Only a definition, never a correlation or a guess. `identities` is empty when none holds.',
   'THE GOAL METRIC MUST BE THE TERMINAL NODE. Every option needs a causal path that ends at the goal metric you named in `goal.metric`. Use that EXACT label as the endpoint of the final link \u2014 do not invent a near-synonym outcome like "X Improvement" for a goal called "X change", because a separate synonym leaves the goal disconnected and the model cannot be analysed at all.',
-  'EVERY LIMIT MUST NAME A NODE THE ANALYSIS CAN CHECK. Each `constraints[].metric` must be the EXACT label of a factor or outcome you keep in this model \u2014 a limit whose metric names no node is withheld from the model, and the analysis cannot check it. If the user limits a total such as cost, budget or spend, keep that total in the model as a factor the options set or an outcome their factors feed, wired toward the goal like every other factor, and use its exact label as the metric. State the `frame` of each limit: "level" when the user limits the value itself ("total first-year cost under \u00a3250k", "gross margin above 70%"), "delta" only when they limit a CHANGE from today ("churn no more than 2 points higher than now"). When the limit is on a cost, budget or spend, give that factor a `baseline_value` at what is spent on it today: 0 when nothing is, as for a new hire, a new system or a new budget. When the user limits a quantity whose current level the brief does not state, still give it a `baseline_value`: your provisional estimate, with baseline_known:false and provenance ai_proposed, never the user\u2019s (the user is asked for theirs) \u2014 a limit on a quantity with no level cannot be checked. Keep the direction the user stated: a budget, cost or spend cap is an upper bound and a floor such as a minimum margin is a lower bound; never add the opposite bound to the same limit. Type the comparator the user wrote: "<" for "under", "below" or "less than"; "<=" for "at most", "no more than" or "up to"; ">" for "over", "above" or "more than"; ">=" for "at least" or "no less than".',
+  'EVERY LIMIT MUST NAME A NODE THE ANALYSIS CAN CHECK. Each `constraints[].metric` must be the EXACT label of a factor or outcome you keep in this model \u2014 a limit whose metric names no node is withheld from the model, and the analysis cannot check it. If the user limits a total such as cost, budget or spend, keep that total in the model as a factor the options set or an outcome their factors feed, wired toward the goal like every other factor, and use its exact label as the metric. State the `frame` of each limit: "level" when the user limits the value itself ("total first-year cost under \u00a3250k", "gross margin above 70%"); "change_abs" when they limit a CHANGE from today in the quantity\u2019s own unit ("churn no more than 2 points higher than now"); "change_rel" when they limit a PERCENTAGE change from today ("cost no more than 10% above today", "cut spend by at least 15%"): give `value` as that signed percentage (10, or -15) and `unit` "%". When the limit is on a cost, budget or spend, give that factor a `baseline_value` at what is spent on it today: 0 when nothing is, as for a new hire, a new system or a new budget. When the user limits a quantity whose current level the brief does not state, still give it a `baseline_value`: your provisional estimate, with baseline_known:false and provenance ai_proposed, never the user\u2019s (the user is asked for theirs) \u2014 a limit on a quantity with no level cannot be checked. Keep the direction the user stated: a budget, cost or spend cap is an upper bound and a floor such as a minimum margin is a lower bound; never add the opposite bound to the same limit. Type the comparator the user wrote: "<" for "under", "below" or "less than"; "<=" for "at most", "no more than" or "up to"; ">" for "over", "above" or "more than"; ">=" for "at least" or "no less than".',
   // ⛔ THE LINK CONTRACT (#63 ruling 5793252993). There is NO default-positive
   // factor->goal repair in admission, by ruling: a sign nobody stated would be a
   // fabricated belief. So the drafter itself must state every link toward the
@@ -504,7 +507,12 @@ function unattachedLimitLines(model: CandidateModel, loss: readonly { readonly f
     // Words, never symbols: this sentence reaches the user (RC 5828938080 §3, Runtime's copy point).
     const bound = OPERATOR_WORDS[c.operator] ?? c.operator;
     const unit = c.unit === undefined || c.unit === '' ? '' : c.unit.startsWith('%') ? c.unit : ` ${c.unit}`;
-    const limit = `${c.metric} of ${bound} ${c.value}${unit}`;
+    // R1 S4-core: a limit on a CHANGE from today is said as that change ("Cost, no more than 10% above today"), in the
+    // frame admission would have written (`writtenLimitFrame`); a level exactly as before.
+    const written = writtenLimitFrame(c);
+    const limit = isChangeFrame(written.frame) && (c.operator === '<=' || c.operator === '>=' || c.operator === '<' || c.operator === '>')
+      ? `${c.metric}, ${sayLimitInFrame({ operator: c.operator, value: written.value, unit: written.unit, frame: written.frame, words: LIMIT_OPERATOR_WORDS, figure: (v, u) => `${v}${u === undefined || u === '' ? '' : u.startsWith('%') ? u : ` ${u}`}` })}`
+      : `${c.metric} of ${bound} ${c.value}${unit}`;
     // The same rule as `admit-constraint.ts` `isUserAuthored`: only a bound the user stated is called theirs.
     const users = c.provenance === 'explicit';
     const key = `${users ? 'user' : 'olumi'}\u0000${limit}`;
@@ -730,9 +738,10 @@ export function findCoverageGaps(
     .filter((f) => actedOn.has(f.label) && !userOwnedBaseline.has(f.label))
     .filter(noBaseline)
     .map((f) => ({ factor: f.label }));
-  // A LEVEL limit's own quantity (a DELTA limit is a change from today: it needs no level of its own), named as
-  // admission names a limit's node (`metricNamesLabel`), so "Monthly Churn" is the factor "Monthly churn" (verifier LOW).
-  const limited = (model.constraints ?? []).filter((c) => c.frame !== 'delta').map((c) => c.metric);
+  // The quantity of a limit that needs today's level (`limitNeedsTodaysLevel`: a level, or a change RELATIVE to today; an
+  // absolute change is read against the status quo and needs none), named as admission names a limit's node
+  // (`metricNamesLabel`), so "Monthly Churn" is the factor "Monthly churn" (verifier LOW).
+  const limited = (model.constraints ?? []).filter((c) => limitNeedsTodaysLevel(c.frame)).map((c) => c.metric);
   for (const f of model.factors) {
     if (limited.some((m) => metricNamesLabel(m, f.label)) && !actedOn.has(f.label) && !userOwnedBaseline.has(f.label) && noBaseline(f)) {
       baseline_gaps.push({ factor: f.label, because: 'limit' });
@@ -744,7 +753,7 @@ export function findCoverageGaps(
   // (goal, options, factors, risks, then outcomes), so an outcome sharing its identity with any of those registers as
   // that entity — a factor is judged by the rules above, once (verifier FIX_FIRST (3) on f773a217: factor AND outcome
   // drew two gaps and two retry lines).
-  const rekinded = (model.constraints ?? []).filter((c) => c.frame !== 'delta' && limitedOutcomeFrame(c) !== undefined).map((c) => c.metric);
+  const rekinded = (model.constraints ?? []).filter((c) => !isChangeFrame(c.frame) && limitedOutcomeFrame(c) !== undefined).map((c) => c.metric);
   const registeredFirst = new Set([
     ...(typeof model.goal?.metric === 'string' ? [model.goal.metric] : []),
     ...model.options.map((o) => o.label), ...model.factors.map((f) => f.label), ...(model.risks ?? []).map((r) => r.label),

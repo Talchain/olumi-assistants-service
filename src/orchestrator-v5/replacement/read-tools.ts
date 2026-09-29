@@ -236,7 +236,13 @@ function describeConstraint(constraint: unknown): string {
 
   const unit = text(partial.unit);
   const label = text(partial.label);
-  const threshold = `${operator} ${num(value)}${unit === null ? '' : ` ${unit}`}`;
+  // R1 S4-core: a CHANGE from today is marked as one, never shown as a level ("<= 0.1"): `change_rel` holds a fraction.
+  const frame = text((partial as { value_frame?: unknown }).value_frame);
+  const threshold = frame === 'change_rel'
+    ? `${operator} ${value >= 0 ? '+' : ''}${num(value * 100)}% change from today`
+    : frame === 'change_abs'
+      ? `${operator} ${value >= 0 ? '+' : ''}${num(value)}${unit === null ? '' : ` ${unit}`} change from today`
+      : `${operator} ${num(value)}${unit === null ? '' : ` ${unit}`}`;
   return `  - ${label === null ? 'target' : label}: ${threshold}`;
 }
 

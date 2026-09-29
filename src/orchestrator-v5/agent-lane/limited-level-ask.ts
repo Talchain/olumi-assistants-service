@@ -21,6 +21,7 @@ import { classifyValueSource } from '../../cee/graph-readiness/obligation-proven
 import { collectInterventionControlledFactorIds } from '../context/intervention-controlled-drivers.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from './limit-operator-words.js';
 import { sayFigure } from './say-figure.js';
+import { isChangeFrame, limitNeedsTodaysLevel, sayRelativeChange } from './limit-frame.js';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
 
 export interface LimitedLevelAsk {
@@ -41,7 +42,7 @@ interface LimitRow {
   readonly operator_as_stated?: string;
   readonly value: number;
   readonly unit?: string;
-  readonly value_frame?: 'level' | 'delta';
+  readonly value_frame?: 'level' | 'delta' | 'change_abs' | 'change_rel';
 }
 
 interface GraphNode {
@@ -53,6 +54,8 @@ interface GraphNode {
 
 function sayLimit(row: LimitRow): string {
   const op = statedOperatorOf(row);
+  // A relative change is a stored FRACTION; it is said as the change it is, never as "at most 0.1".
+  if (row.value_frame === 'change_rel' && op !== undefined) return sayRelativeChange(op, row.value);
   const figure = sayFigure(row.value, typeof row.unit === 'string' ? row.unit.trim() : '');
   return op === undefined ? figure : `${LIMIT_OPERATOR_WORDS[op]} ${figure}`;
 }
@@ -64,7 +67,8 @@ export function limitedLevelAsks(graph: {
   const set = collectInterventionControlledFactorIds(graph);
   const rowsByNode = new Map<string, LimitRow[]>();
   for (const row of graph.goal_constraints ?? []) {
-    if (row.value_frame === 'delta' || set.has(row.node_id)) continue;
+    // An absolute change needs no level of its own (`limitNeedsTodaysLevel`); a relative change is relative TO today's.
+    if (!limitNeedsTodaysLevel(row.value_frame) || set.has(row.node_id)) continue;
     rowsByNode.set(row.node_id, [...(rowsByNode.get(row.node_id) ?? []), row]);
   }
   const asks: LimitedLevelAsk[] = [];
@@ -155,7 +159,8 @@ export function optionSetLimitAsks(graph: {
 }): OptionSetLimitAsk[] {
   const rowsByNode = new Map<string, LimitRow[]>();
   for (const row of graph.goal_constraints ?? []) {
-    if (row.value_frame === 'delta') continue;
+    // What each option SETS a quantity to is a level; a limit on a change from today is not asked this way.
+    if (isChangeFrame(row.value_frame)) continue;
     rowsByNode.set(row.node_id, [...(rowsByNode.get(row.node_id) ?? []), row]);
   }
   const options = optionsOf(graph);

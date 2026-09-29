@@ -159,6 +159,7 @@ import { registrationTurnId } from '../../graph-registration/registration-identi
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel } from '../goal-current-level.js';
 import { sayFigureExactly, sayFigureRead } from '../say-figure.js';
+import { isChangeFrame, sayLimitInFrame } from '../limit-frame.js';
 import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
@@ -1017,7 +1018,14 @@ function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'ana
         ...(stated !== undefined && stated !== c.operator ? { operator_as_stated: stated } : {}),
         value: c.value,
         ...(str(c.unit) ? { unit: c.unit } : {}),
-        ...(stated !== undefined ? { in_words: `${LIMIT_OPERATOR_WORDS[stated]} ${String(c.value)}${unit}` } : {}),
+        // R1 S4-core: a change from today says so, beside its stored value (a fraction for `change_rel`), so the Agent
+        // never reads "0.1" as a level. A level's words are byte-identical (`sayLimitInFrame`).
+        ...(str(c.value_frame) ? { frame: c.value_frame } : {}),
+        ...(stated !== undefined ? { in_words: sayLimitInFrame({
+          // `c.value` is a finite number: the `.filter(... num(c.value))` above.
+          operator: stated, value: c.value as number, unit: str(c.unit) ? c.unit : undefined, frame: c.value_frame,
+          words: LIMIT_OPERATOR_WORDS, figure: (v) => `${String(v)}${unit}`,
+        }) } : {}),
         ...(str(c.provenance) ? { stated_by: c.provenance } : {}),
       };
     });
@@ -5969,6 +5977,14 @@ export function createAgentCapabilities(
             : `More than one limit sits on "${node.label}", so nothing was prepared. Ask the user which one they mean.` };
       }
       const row = matching[0]!;
+      // ⛔ R1 S4-core: a limit stated as a CHANGE from today (`change_rel` holds a fraction; `change_abs` a change, not a
+      // level). This path writes a new LEVEL figure, so the user's "15%" would land as 15 in a fraction's place. Refused
+      // by name until a change can be edited as a change; the door refuses it too (`limit-edit.ts`).
+      if (isChangeFrame(row['value_frame'])) {
+        return { ok: false, mutated: false, refusal: 'limit_is_a_change',
+          detail: `The limit on "${node.label}" is stated as a change from today, and this path cannot yet change a limit stated that way, so nothing was prepared. `
+            + 'Tell the user plainly, and never offer a new figure for it here.' };
+      }
       const unit = typeof row['unit'] === 'string' && row['unit'] !== '' ? row['unit'] : null;
       // ⛔ A limit stored as a FRACTION of one (shown as a percent): the user's percent would be written 100× too large.
       // The door refuses it too (`limit-edit.ts`); saying so here means nothing is offered that cannot be approved.

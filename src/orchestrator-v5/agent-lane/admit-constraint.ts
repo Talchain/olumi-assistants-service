@@ -45,12 +45,13 @@
  * list so that move cannot happen unseen.
  */
 
-import { REPAIR_CODES, type RepairEntry } from '@talchain/schemas';
+import { REPAIR_CODES, type RepairEntry, type GoalThresholdFrameType } from '@talchain/schemas';
 import { GoalConstraintSchema, type GoalConstraintT } from '../../schemas/assist.js';
 import { classifyUnitScaleClass, UNIT_SCALE_CLASS_TOKENS, unitPinnedScaleFrame } from '../../cee/draft/records/unit-scale-class.js';
 import { isCurrencyUnit, sameUnit } from '../../utils/currency-alphabet.js';
 
-import type { CandidateOperator } from './limit-operator-words.js';
+import { LIMIT_OPERATOR_WORDS, type CandidateOperator } from './limit-operator-words.js';
+import { isChangeFrame, sayLimitInFrame } from './limit-frame.js';
 export { type CandidateOperator, LIMIT_OPERATOR_WORDS, statedOperatorOf } from './limit-operator-words.js';
 /** The comparators the canonical store holds: `GoalConstraintSchema.operator`, derived, never restated. */
 export type CanonicalOperator = GoalConstraintT['operator'];
@@ -66,8 +67,11 @@ export interface CandidateConstraint {
   readonly value: number;
   readonly unit?: string;
   readonly provenance: string;
-  /** The drafter's reading of the user's words: the limit is on the value itself, or on a change from today. */
-  readonly frame?: 'level' | 'delta';
+  /**
+   * The drafter's reading of the user's words (`limit-frame.ts`): the value itself, or a change from today in the
+   * quantity's own unit, or a percentage change from today. `delta` is the pre-R1 drafter's word for a change from today.
+   */
+  readonly frame?: 'level' | 'change_abs' | 'change_rel' | 'delta';
 }
 
 export interface AdmittedConstraint {
@@ -80,7 +84,7 @@ export interface AdmittedConstraint {
   label?: string;
   unit?: string;
   /** `GoalConstraintSchema.value_frame`. ISL refuses a limit without it (`frame_not_stamped`); never guessed here. */
-  value_frame?: 'level' | 'delta';
+  value_frame?: GoalThresholdFrameType;
   /**
    * Canonical authorship marker — `GoalConstraintSchema.provenance`
    * (`src/schemas/assist.ts:418`), values `explicit | inferred | proxy`.
@@ -474,6 +478,27 @@ function canonicalProvenance(candidateProvenance: string): 'explicit' | 'inferre
   return isUserAuthored(candidateProvenance) ? 'explicit' : 'inferred';
 }
 
+/**
+ * ⭐ R1 S4-core — THE FRAME A LIMIT IS WRITTEN IN, and its value in that frame (`@talchain/schemas` 0.61.0; `limit-frame.ts`).
+ *   · `level` → as drafted.
+ *   · `change_abs`, and the pre-R1 drafter's `delta` (its prompt defined it as "a CHANGE from today") → `change_abs`, the
+ *     change in the quantity's own unit. The contract's `delta` (a change from the MODEL'S ORIGIN) gets no new writers.
+ *   · `change_rel` → the FRACTION r ("10" in "%" → 0.10; "-15" → -0.15), with no unit: PLoT forwards r untouched and its
+ *     '%' rung would refuse a '%' limit on a £ quantity (PLoT #403). Only a percent unit says the drafter meant a
+ *     percentage; any other unit leaves the limit UNFRAMED (ISL refuses it by name) — the scale is never guessed.
+ *   · anything else → unframed, as before.
+ */
+export function writtenLimitFrame(c: Pick<CandidateConstraint, 'frame' | 'value' | 'unit'>): {
+  readonly frame?: 'level' | 'change_abs' | 'change_rel';
+  readonly value: number;
+  readonly unit?: string;
+} {
+  if (c.frame === 'level') return { frame: 'level', value: c.value, ...(c.unit !== undefined ? { unit: c.unit } : {}) };
+  if (c.frame === 'change_abs' || c.frame === 'delta') return { frame: 'change_abs', value: c.value, ...(c.unit !== undefined ? { unit: c.unit } : {}) };
+  if (c.frame === 'change_rel' && c.unit !== undefined && isPercentWithPeriod(c.unit)) return { frame: 'change_rel', value: c.value / 100 };
+  return { value: c.value, ...(c.unit !== undefined ? { unit: c.unit } : {}) };
+}
+
 export function admitCandidateConstraints(
   candidates: readonly CandidateConstraint[],
   nodeIdFor: (metric: string) => string | undefined,
@@ -503,11 +528,17 @@ export function admitCandidateConstraints(
     }
 
     const operator = admittedOperator(c.operator, operators);
+    const written = writtenLimitFrame(c);
     // The user's number is never adjusted to compensate for the operator. It is rescaled ONLY by a stated magnitude
-    // suffix (£k) onto a node in the bare currency, and every rewrite is stamped (`canonicaliseLimitUnit`).
-    const { value, unit, ...unitProvenance } = canonicaliseLimitUnit(c.value, c.unit, targetScaleFor(nodeId), c.frame);
+    // suffix (£k) onto a node in the bare currency, and every rewrite is stamped (`canonicaliseLimitUnit`). A relative
+    // change is a unitless fraction by then (`writtenLimitFrame`): there is no unit to canonicalise.
+    const { value, unit, ...unitProvenance } = written.frame === 'change_rel'
+      ? { value: written.value, unit: undefined }
+      : canonicaliseLimitUnit(written.value, written.unit, targetScaleFor(nodeId), written.frame);
     const admitted: AdmittedConstraint = {
-      constraint_id: `agent-lane:${nodeId}:${operator}`,
+      // A level keeps its id byte-for-byte; a change carries its frame, so "at most £50k" and "at most 10% above today"
+      // on one node are two limits, not one id twice.
+      constraint_id: isChangeFrame(written.frame) ? `agent-lane:${nodeId}:${operator}:${written.frame}` : `agent-lane:${nodeId}:${operator}`,
       node_id: nodeId,
       operator,
       // ⭐ A2: a STRICT typed operator the store cannot hold as `operator` is held beside it, as stated — so the limit
@@ -522,7 +553,7 @@ export function admitCandidateConstraints(
       ...(unit !== undefined ? { unit } : {}),
       provenance: canonicalProvenance(c.provenance),
       ...unitProvenance,
-      ...(c.frame === 'level' || c.frame === 'delta' ? { value_frame: c.frame } : {}),
+      ...(written.frame !== undefined ? { value_frame: written.frame } : {}),
     };
 
     constraints.push(admitted);
@@ -535,20 +566,25 @@ export function admitCandidateConstraints(
   const contradicted = new Set<string>();
   for (const lower of constraints) {
     if (!isLowerBound(lower.operator)) continue;
-    const upper = constraints.find((u) => u.node_id === lower.node_id && !isLowerBound(u.operator) && lower.value >= u.value);
+    // Only bounds in ONE frame can contradict: a £1,000 floor and a cap of "10% above today" are not comparable numbers.
+    const upper = constraints.find((u) => u.node_id === lower.node_id && !isLowerBound(u.operator) && u.value_frame === lower.value_frame && lower.value >= u.value);
     if (upper === undefined || contradicted.has(lower.node_id)) continue;
     contradicted.add(lower.node_id);
     const metric = candidates.find((c) => nodeIdFor(c.metric) === lower.node_id)?.metric ?? lower.node_id;
     const authored = lower.provenance === 'explicit' || upper.provenance === 'explicit';
+    // R1 S4-core: both bounds share one frame (above); a change is said as the change, a level exactly as before.
+    const said = (row: AdmittedConstraint, words: string): string => (isChangeFrame(row.value_frame)
+      ? sayLimitInFrame({ operator: row.operator, value: row.value, unit: row.unit, frame: row.value_frame, words: LIMIT_OPERATOR_WORDS, figure: (v, u) => `${v}${u ?? ''}` })
+      : `${words} ${row.value}${row.unit ?? ''}`);
     loss.push({
       code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE,
       layer: 'cee',
       field_path: `goal_constraints[${lower.node_id}].bound_direction`,
-      before: `${metric}: at least ${lower.value}${lower.unit ?? ''} and at most ${upper.value}${upper.unit ?? ''}`,
+      before: `${metric}: ${said(lower, 'at least')} and ${said(upper, 'at most')}`,
       after: null,
       reason:
-        `${authored ? 'Your limit' : 'The limit Olumi proposed'} on "${metric}" was drafted both as at least ` +
-        `${lower.value}${lower.unit ?? ''} and as at most ${upper.value}${upper.unit ?? ''}, which would count every ` +
+        `${authored ? 'Your limit' : 'The limit Olumi proposed'} on "${metric}" was drafted both as ` +
+        `${said(lower, 'at least')} and as ${said(upper, 'at most')}, which would count every ` +
         `option on one side of it as breaking it. Neither was attached, so the analysis will not check this limit ` +
         `until you say which way it runs (a budget is usually at most).`,
       severity: 'warn',

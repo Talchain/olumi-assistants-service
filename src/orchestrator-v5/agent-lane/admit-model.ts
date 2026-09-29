@@ -16,7 +16,8 @@
  * the same token stay distinct and stay stable.
  */
 
-import { REPAIR_CODES, type RepairEntry } from '@talchain/schemas';
+import { REPAIR_CODES, type RepairEntry, type GoalThresholdFrameType, type QuantityFrameType } from '@talchain/schemas';
+import { isChangeFrame } from './limit-frame.js';
 import {
   CEE_GOAL_THRESHOLD_FRAME,
   resolveGoalThresholdCapWithProvenance,
@@ -410,8 +411,14 @@ export interface AdmittedNode {
   /**
    * `cee-v3.ts:246`. The contract states a consumer must produce NO goal
    * probability when this is absent, so omitting it silently disables the goal.
+   * Typed from the contract's own enum (0.61.0 R1: `level | delta | change_abs | change_rel`).
    */
-  goal_threshold_frame?: 'level' | 'delta';
+  goal_threshold_frame?: GoalThresholdFrameType;
+  /**
+   * `NodeV3Schema.quantity_frame` (0.61.0 R1): `change` = the node's value IS a change from today.
+   * Absent means `level`. Olumi's reading, disclosed; never presented as the user's.
+   */
+  quantity_frame?: QuantityFrameType;
   /**
    * ⛔ A NODE'S `provenance` IS A DISPLAY ENUM, NOT THE EDGE OBJECT
    * (`cee-v3.ts:363` — `from_brief | ai_inferred | user_set`). Edges carry the
@@ -622,6 +629,9 @@ const inferenceClassFor = (provenance: string): InferenceClass => {
  * see that quantity as the level-less factor admission registers.
  */
 export function limitedOutcomeFrame(c: Pick<CandidateConstraint, 'provenance' | 'value' | 'unit' | 'frame'>): number | undefined {
+  // A CHANGE (`limit-frame.ts`) pins no level frame on its quantity: "no more than 10% above today" says nothing about
+  // the scale "Cloud cost" is held on.
+  if (isChangeFrame(c.frame)) return undefined;
   return inferenceClassFor(c.provenance) === 'brief_stated' ? percentLevelFrame(c.value, c.unit, c.frame) : undefined;
 }
 
