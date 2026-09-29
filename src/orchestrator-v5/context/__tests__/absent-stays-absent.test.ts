@@ -198,6 +198,15 @@ describe('target_fit is P(goal) ONLY — the limits-only joint never refills it'
     expect(JSON.stringify(display(TF.E))).toContain('target_fit');
   });
 
+  it('R1b: a run that says it scored a "goal fit" (PLoT\'s `goal_fit_basis` rides the joint) but gives no P(goal) → still NOT scored', () => {
+    const basis = { ...TF.S3, goal_fit_basis: { scored_from: 'modelled_outcome_distribution' } };
+    expect(deriveGoalFitFromEnrichment(basis), 'precondition: the signal says scored').toEqual(expect.objectContaining({ scored: true }));
+    expect(display(basis).goal_fit).toBe(GOAL_FIT_NOT_SCORED_LINE);
+    // Contrast: with a real P(goal) on an option, the scored basis is said.
+    const withP = structuredClone(basis); (withP.option_comparison as Json[])[0].probability_of_goal = 0.4;
+    expect(display(withP).goal_fit).not.toBe(GOAL_FIT_NOT_SCORED_LINE);
+  });
+
   it('R3: #416\'s withhold + a limit off the identity path → no target_fit', () => {
     const withheld = { ...TF.S3, inference_warnings: [...((TF.S3.inference_warnings as Json[]) ?? []), { code: CODE, message: `Not shown. ${REASON}`, node_ids: ['x'] }] };
     const p = projectAnalysis(withSignals(withheld) as never, null)!;
