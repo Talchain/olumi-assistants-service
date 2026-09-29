@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pruneSupersededToolOutputs } from '../history-store.js';
+import { pruneSupersededToolOutputs, type KeptRunReadback } from '../history-store.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440079';
 const HASH = '7b53bf0ada890991';
@@ -41,7 +41,7 @@ const pair = (value: unknown) => [
   { type: 'function_call', name: 'run_analysis', call_id: 'run', arguments: '{}' },
   { type: 'function_call_output', call_id: 'run', output: JSON.stringify(value) },
 ];
-const projected = (value: unknown, selected: ReturnType<typeof readback> | undefined) => {
+const projected = (value: unknown, selected: KeptRunReadback | undefined) => {
   const items = pruneSupersededToolOutputs(pair(value), [], selected);
   return JSON.parse((items[1] as { output: string }).output) as Record<string, any>;
 };
@@ -68,6 +68,7 @@ describe('AIQ #72: one selected Run, outcome ranges without a leader', () => {
     expect(kept.stale).toBe(true);
     expect(kept.stale_note).toMatch(/Offer to run the analysis again/);
     expect(kept.result.option_comparison.every((row: Record<string, unknown>) => !('outcome' in row))).toBe(true);
+    expect(kept.goal_certainty).toBeUndefined();
   });
 
   it('R4 absent stays absent on an otherwise current Run', () => {
@@ -75,6 +76,20 @@ describe('AIQ #72: one selected Run, outcome ranges without a leader', () => {
     const kept = projected({ ...run, result: noOutcome }, { ...readback(), analysisResult: noOutcome });
     expect(kept.result.option_comparison[1]).toEqual({ option_id: 'p54', label: 'Raise to £54' });
     expect(kept.result.option_comparison[0].outcome).toEqual(outcomes[0]);
+  });
+
+  it('a same-identity tool copy cannot refill or override the selected Run’s outcomes', () => {
+    const selectedRows = [
+      { ...rows[2], outcome: { p10: 1, p90: 2 } },
+      { option_id: 'p54', option_label: 'Raise to £54' },
+      rows[0],
+    ];
+    const selected = { ...result, enrichment: { ...result.enrichment, option_comparison: selectedRows } };
+    const kept = projected(run, { ...readback(), analysisResult: selected });
+    expect(kept.result.option_comparison.map((row: Record<string, unknown>) => row.option_id)).toEqual(['p59', 'p54', 'p49']);
+    expect(kept.result.option_comparison[0].outcome).toEqual({ p10: 1, p90: 2 });
+    expect(kept.result.option_comparison[1]).not.toHaveProperty('outcome');
+    expect(kept.result.option_comparison[2].outcome).toEqual(outcomes[0]);
   });
 
   it('R5 earned zero stays, unearned 0/1 does not', () => {
@@ -91,6 +106,7 @@ describe('AIQ #72: one selected Run, outcome ranges without a leader', () => {
     expect(kept.stale).toBe(true);
     expect(kept.stale_note).toMatch(/different analysis run/);
     expect(kept.result.option_comparison.every((row: Record<string, unknown>) => !('outcome' in row))).toBe(true);
+    expect(kept.goal_certainty).toBeUndefined();
   });
 
   it('an unconfirmed or foreign-scenario read never vouches for the Run', () => {
