@@ -64,6 +64,7 @@ import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { narrateWriteOutcome, notAdoptedLine, openQuestionsOf, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
+import { goalChanceLineOwed } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
@@ -2232,6 +2233,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...disclosuresFor(result.tool_results),
         ...valueChangeDisclosures(stateFacts),
         ...(firstAnalysisSaid !== null ? [firstAnalysisSaid] : []),
+        // ⛔ A withheld goal chance's reason is said as written, unless the Agent already said it (AIQ 5887805333 (3)).
+        ...[goalChanceLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),
       ];
     /**
      * ⛔ WHAT WAS SAVED IS STATED BY OLUMI, FROM THE TOOL RESULTS (RC #63

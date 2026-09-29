@@ -29,6 +29,12 @@ const FOUR_OPTIONS: AnalysisResponseSummary['options'] = [
   { option_id: 'opt-c', option_label: 'Status quo', win_probability: 0.22, outcome_mean: 1 },
   { option_id: 'opt-d', option_label: 'Tiered pricing', win_probability: 0.01, outcome_mean: 1 },
 ];
+/**
+ * An EVALUATED run: each option carries its own P(goal) (`compactAnalysis` → `OptionSummary.probability_of_goal`, the
+ * one carrier on every path, prior-facts included). Opt-d's is a real zero.
+ */
+const E_PROBABILITY_OF_GOAL: Readonly<Record<string, number>> = { 'opt-a': 0.41, 'opt-b': 0.07, 'opt-c': 0.3, 'opt-d': 0 };
+const E_OPTIONS: AnalysisResponseSummary['options'] = FOUR_OPTIONS.map((o) => ({ ...o, probability_of_goal: E_PROBABILITY_OF_GOAL[o.option_id]! }));
 
 function driver(id: string, label: string, sensitivity: number, direction: DriverSummary['direction'] = 'positive'): DriverSummary {
   return { factor_id: id, factor_label: label, sensitivity, direction };
@@ -210,9 +216,9 @@ describe('ContextPack analysis projection breadth (Lane 21)', () => {
     ]);
   });
 
-  it('passes the goal-fit basis signal through, null when absent', () => {
+  it('passes the goal-fit basis signal through on an EVALUATED run (P(goal) present), null when absent', () => {
     const withGoalFit = assemble(
-      makeSummary({ goal_fit: { scored: true, basis: 'modelled_outcome_distribution' } }),
+      makeSummary({ options: E_OPTIONS, goal_fit: { scored: true, basis: 'modelled_outcome_distribution' } }),
     );
     expect(withGoalFit.analysis?.goal_fit).toEqual({
       scored: true,
@@ -223,9 +229,15 @@ describe('ContextPack analysis projection breadth (Lane 21)', () => {
     expect(without.analysis?.goal_fit).toBeNull();
   });
 
+  it('no option carries a P(goal) → the basis signal is NOT passed (it would describe the limits-only joint; AIQ 5887531086)', () => {
+    const jointOnly = assemble(makeSummary({ goal_fit: { scored: true, basis: 'modelled_outcome_distribution' } }));
+    expect(jointOnly.analysis?.goal_fit).toBeNull();
+  });
+
   it('widened projection still validates against the strict ContextPack schema', () => {
     const pack = assemble(
       makeSummary({
+        options: E_OPTIONS,
         tipping_points: [
           { factor_label: 'X', current_value: 1, flip_value: 2, unit: null, no_flip_within_bounds: false },
         ],
@@ -378,62 +390,53 @@ describe('ContextPack tipping/VOI lever suppression (Lane 30, #369 audit P1)', (
 
 // Lane 30 — per-option goal-fit carriage (raw projection). The display-safe
 // rendering (percent strings, target-fit prose) is covered in
-// `../../format/__tests__/format-analysis-for-context.test.ts`; these tests
-// pin the raw value carriage + option-identity matching.
-describe('ContextPack per-option goal-fit (Lane 30)', () => {
+// `../../format/__tests__/format-analysis-for-context.test.ts`.
+// ⛔ #2294 (AIQ 5887531086; DL 5887546998): a goal fit is the option's own P(goal) ONLY. `option_goal_fits` carries only
+// PLoT's `probability_of_joint_goal` — how often ALL the user's limits hold, never the goal's target — so it never
+// attaches, whatever its id or label match (it used to: served w2285 S3 said a downtime-only 100% as savings).
+describe('ContextPack per-option goal-fit = P(goal) only (Lane 30)', () => {
   const GOAL_FITS = [
     { option_id: 'opt-a', option_label: 'Hire locally', probability_of_joint_goal: 0.293 },
     { option_id: 'opt-c', option_label: 'Status quo', probability_of_joint_goal: 0.61 },
   ];
 
-  it('attaches goal_fit_probability to matching options by structural option_id', () => {
-    const pack = assemble(makeSummary({ option_goal_fits: GOAL_FITS }));
+  it('an EVALUATED run: each option\'s own P(goal) is its goal_fit_probability — never the joint beside it', () => {
+    const pack = assemble(makeSummary({ options: E_OPTIONS, option_goal_fits: GOAL_FITS }));
     expect(pack.analysis?.options).toEqual([
-      { label: 'Hire locally', probability: 0.72, goal_fit_probability: 0.293 },
-      { label: 'Status quo', probability: 0.22, goal_fit_probability: 0.61 },
-      { label: 'Offshore partner', probability: 0.05 },
-      { label: 'Tiered pricing', probability: 0.01 },
+      { label: 'Hire locally', probability: 0.72, goal_fit_probability: 0.41 },
+      { label: 'Status quo', probability: 0.22, goal_fit_probability: 0.3 },
+      { label: 'Offshore partner', probability: 0.05, goal_fit_probability: 0.07 },
+      { label: 'Tiered pricing', probability: 0.01, goal_fit_probability: 0 },
     ]);
     expect(pack.analysis?.leading_option).toEqual({
       label: 'Hire locally',
       probability: 0.72,
-      goal_fit_probability: 0.293,
+      goal_fit_probability: 0.41,
     });
     expect(pack.analysis?.runner_up).toEqual({
       label: 'Status quo',
       probability: 0.22,
-      goal_fit_probability: 0.61,
+      goal_fit_probability: 0.3,
     });
   });
 
-  it('matches by option_id even when the option was relabelled from the current graph', () => {
-    // buildAnalysisFromPriorFacts relabels options from the CURRENT graph by
-    // id; the enrichment-derived signal keeps the enrichment label. Identity
-    // must therefore be structural (id), not label equality.
-    const pack = assemble(
-      makeSummary({
-        option_goal_fits: [
-          { option_id: 'opt-a', option_label: 'Old Enrichment Label', probability_of_joint_goal: 0.293 },
-        ],
-      }),
-    );
-    expect(pack.analysis?.options?.[0]).toEqual({
-      label: 'Hire locally',
-      probability: 0.72,
-      goal_fit_probability: 0.293,
-    });
+  it('a joint-only run (no P(goal) on any option) attaches NO goal fit, by id or by label', () => {
+    for (const fits of [GOAL_FITS, [{ option_id: null, option_label: 'Status quo', probability_of_joint_goal: 0.4 }]]) {
+      const pack = assemble(makeSummary({ option_goal_fits: fits }));
+      expect(pack.analysis?.options?.some((o) => 'goal_fit_probability' in o), JSON.stringify(fits)).toBe(false);
+      expect(pack.analysis?.leading_option).not.toHaveProperty('goal_fit_probability');
+    }
   });
 
-  it('falls back to label matching only when the signal carries no option_id', () => {
-    const pack = assemble(
-      makeSummary({
-        option_goal_fits: [
-          { option_id: null, option_label: 'Status quo', probability_of_joint_goal: 0.4 },
-        ],
-      }),
-    );
-    const statusQuo = pack.analysis?.options?.find((o) => o.label === 'Status quo');
-    expect(statusQuo).toEqual({ label: 'Status quo', probability: 0.22, goal_fit_probability: 0.4 });
+  it('P(goal) rides on the option itself, so an option relabelled from the current graph keeps its own', () => {
+    // buildAnalysisFromPriorFacts relabels options from the CURRENT graph by id; the enrichment-derived signal keeps the
+    // enrichment label. The P(goal) is the option's own field, so no label or id match can move it.
+    const relabelled = E_OPTIONS.map((o) => (o.option_id === 'opt-a' ? { ...o, option_label: 'Hire locally (renamed)' } : o));
+    const pack = assemble(makeSummary({
+      options: relabelled,
+      option_goal_fits: [{ option_id: 'opt-a', option_label: 'Old Enrichment Label', probability_of_joint_goal: 0.293 }],
+    }));
+    expect(pack.analysis?.options?.[0]).toEqual({ label: 'Hire locally (renamed)', probability: 0.72, goal_fit_probability: 0.41 });
   });
 
   it('drops an out-of-range goal-fit value rather than projecting a false probability', () => {
@@ -448,7 +451,8 @@ describe('ContextPack per-option goal-fit (Lane 30)', () => {
   });
 
   it('validates against the strict ContextPack schema with goal-fit values attached', () => {
-    const pack = assemble(makeSummary({ option_goal_fits: GOAL_FITS }));
+    const pack = assemble(makeSummary({ options: E_OPTIONS, option_goal_fits: GOAL_FITS }));
+    expect(pack.analysis?.options?.[0]?.goal_fit_probability, 'precondition: values attached').toBe(0.41);
     const parsed = ContextPackSchema.safeParse(pack);
     expect(parsed.success).toBe(true);
   });
