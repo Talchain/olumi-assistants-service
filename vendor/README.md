@@ -7,7 +7,29 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.63.0.tgz` ← **THE CURRENT PIN**
+### `talchain-schemas-0.64.0.tgz` ← **THE CURRENT PIN**
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**
+>
+> The tarball `npm publish` produced from `olumi-schemas` `main`
+> **`5eb351c7`** (the schemas #73 merge, the proposed-option hash vocabulary; the registry's own `gitHead` binds that
+> commit), 2026-09-29. Registry download:
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.64.0/26500d2b3de0e7b4d53e157ec5e50b25451c5948`.
+>
+> **682,917 bytes.** Verified against the registry's published metadata on 29 Sep:
+>
+> ```
+> npm shasum (sha1)  26500d2b3de0e7b4d53e157ec5e50b25451c5948   ← matches
+> integrity (sha512) sha512-N0uhutXWJmZPWKTuMsLBW0I/sSbYZ1y0oDdJmwEnF22PVG8qWXEQIvHr9GxN1qh8TeVyM61a1/DDpwhCPNynEA==   ← matches
+> sha256             2b90c3db5ff022a091630b2f898cdd44975f4a8ea6a0ea051b1216b7e5b004fc
+> ```
+>
+> **What 0.64.0 adds:** node `proposed_by` joins the analysis-hash vocabulary (projection version 3 → 4). CEE's
+> `graph-hash.ts` iterates the published `node.fields`, so this pin alone makes the hash project the marker.
+> **No mass stale:** the field is absent on every graph without an Olumi-proposed option, and absent fields are not
+> projected, so those graphs keep their exact hash (pinned byte-identical in `graph-hash-proposed-by.test.ts`).
+
+### `talchain-schemas-0.63.0.tgz` (historical — no longer vendored as of 0.64.0)
 
 > **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**
 >
