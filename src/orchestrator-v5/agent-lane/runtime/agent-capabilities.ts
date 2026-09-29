@@ -2165,12 +2165,15 @@ export function createAgentCapabilities(
       validation: { admitted: true, loss_count: 0, refusals: [] },
       public_label: card.words,
     });
-  /** The card's hint for a Run on this stored model: once per revision (`identityCardHintFor`). */
-  const identityCardFor = (ctx: { scenario_id: string; authenticated_user_id: string | null },
+  /**
+   * The card's hint for a Run on this stored model: offered on EVERY Run while the reading is unconfirmed (R3 served witness
+   * 57997d1, run k: the draft's card was never shown, "once per revision" then hid it from the Run, and the user was left with
+   * "hasn't been confirmed" and no button). The same revision and words give the same proposal id (`put` is idempotent).
+   */
+  const identityCardFor = (_ctx: { scenario_id: string; authenticated_user_id: string | null },
     read: { readonly raw: unknown; readonly graph_hash: unknown } | null | undefined) => {
     if (read === null || read === undefined || typeof read.graph_hash !== 'string' || read.graph_hash === '') return undefined;
-    const card = proposeProductIdentity(read.raw);
-    return identityCardHintFor(card, card !== null && proposals.get(identityProposalFor(ctx, read.graph_hash, card).proposal_id) !== undefined);
+    return identityCardHintFor(proposeProductIdentity(read.raw), false);
   };
 
   /**

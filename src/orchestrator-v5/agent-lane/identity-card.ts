@@ -68,7 +68,10 @@ export function identityCardToIssue(
   toolResults: readonly unknown[],
 ): boolean {
   if (toolCalls.some((c) => c.name === 'propose_identity' || c.name === 'authorise_change')) return false;
-  return toolResults.some((r) => (r as { identity_card?: { available?: unknown } } | null | undefined)?.identity_card?.available === true);
+  // A Run's own result, or a build's automatic first analysis (`first_analysis.identity_card`, the draft turn: R3 run k).
+  type Hinted = { identity_card?: { available?: unknown }; first_analysis?: { identity_card?: { available?: unknown } } };
+  return toolResults.some((r) => (r as Hinted | null | undefined)?.identity_card?.available === true
+    || (r as Hinted | null | undefined)?.first_analysis?.identity_card?.available === true);
 }
 
 type IdentityRefusalCode = 'reading_not_confirmed' | 'superseded' | 'not_admissible' | 'carrier_conflict' | 'already_carried' | string;
