@@ -76,6 +76,7 @@ import { structuralEdgeValue } from '../routing/add-option-transaction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { applyFactorValueEdit, type FactorValueEditResult } from './factor-value-edit.js';
 import { applyEdgeStrengthEdit } from './edge-strength-edit.js';
+import { applyLinkEffectEdit, type LinkEffectStatement } from './link-effect-edit.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
 
 /**
@@ -460,7 +461,8 @@ async function applyApprovedFactorValues(
     const factorCap = typeof os.cap === 'number' && os.cap > 0 ? os.cap : undefined;
     const unit = v.unit !== undefined && v.unit.trim() !== '' ? v.unit.trim() : undefined;
     // The compound's own event, unchanged: on a capped factor the writer is handed the level AND the user's figure.
-    const event = { kind: 'factor_value_edit' as const, target_id: v.factorId,
+    // `intent: 'set'`: a figure the user approved is authorship even when it equals Olumi's (schemas 0.62.0; AIQ 5881494849).
+    const event = { kind: 'factor_value_edit' as const, target_id: v.factorId, intent: 'set' as const,
       ...(factorCap !== undefined ? { value: v.value / factorCap, raw_value: v.value } : { value: v.value }),
       ...(unit !== undefined ? { unit } : {}) };
     const write = () => applyFactorValueEdit({
@@ -527,6 +529,20 @@ export interface ApprovedLinkStrength {
    * band the user named this turn, stamped as the canvas writer stamps it.
    */
   readonly adopted: boolean;
+}
+
+/**
+ * ⭐ AN APPROVED USER-STATED LINK EFFECT (Canonical #72 5882780438 / 5882989451): ONE link sized from the user's own
+ * words by the canonical writer (`applyLinkEffectEdit`). The revision it was prepared on is the batch's own base
+ * (`expectedGraphHash`, the wire analysis hash); `edge_token` is every stored byte of the link at prepare time.
+ */
+export interface ApprovedLinkEffect {
+  readonly from: string;
+  readonly to: string;
+  readonly effect: LinkEffectStatement;
+  readonly edge_token: string;
+  /** The user's verbatim words (1..400), carried on the receipt. */
+  readonly quote: string;
 }
 
 /** The members of a link the canonical link writer owns: its size, direction and whose size it is. Nothing else. */
@@ -656,6 +672,8 @@ export type OptionInterventionBatchExecutionInput =
     readonly frames?: readonly ApprovedFactorFrame[];
     /** ⭐ An approved set of link strengths: ONE append, alone (never with levels, values or ranges). */
     readonly linkStrengths?: readonly ApprovedLinkStrength[];
+    /** ⭐ One approved user-stated link effect: ONE append, alone (never with a strength set, levels, values or ranges). */
+    readonly linkEffect?: ApprovedLinkEffect;
     /** The last Run's use of each declared identity (`identityRunUseFromFacts`); null = no Run, a definition refuses. */
     readonly lastRunIdentityUse?: IdentityRunUse | null;
   };
@@ -693,7 +711,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       ...(t.figure !== undefined ? { figure: t.figure } : {}) };
   });
   const { targets: _callerTargets, expectedLinks, values: _callerValues, frames: _callerFrames, linkStrengths: _callerLinks,
-    lastRunIdentityUse: _callerRunUse, ...common } = input;
+    linkEffect: _callerEffect, lastRunIdentityUse: _callerRunUse, ...common } = input;
   // ⭐ THE VALUES FIRST, ON THE PERSISTED BASE, IN MEMORY — then the links and levels on the graph they produce, and ONE
   // append for all of it. The caller's base is checked against the PERSISTED model before anything is applied: the
   // levels are prepared on the post-value graph, so their own stale check can no longer see the caller's base.
@@ -750,11 +768,44 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     valueFacts = applied.handlerFacts;
     valueConfirmations = applied.confirmations;
   }
-  const valuesChanged = values.length + frames.length + linkStrengths.length > 0 && !isDeepStrictEqual(levelBase, before);
+  /**
+   * ⭐ ONE USER-STATED LINK EFFECT, the strength set's own shape: alone, on the persisted base, through the canonical
+   * writer in memory, scoped to that one link, then the ONE append and read-back below. One per approval: a second
+   * effect prepared on the same base would read `superseded` once the first moved the analysis revision.
+   */
+  const linkEffect = input.linkEffect;
+  if (linkEffect !== undefined) {
+    if (targets.length + values.length + frames.length + linkStrengths.length > 0 || (expectedLinks?.length ?? 0) > 0) {
+      return { kind: 'refused', reason: 'link_effect_not_alone' };
+    }
+    if (!isEditableGraph(before)
+      || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
+    const written = applyLinkEffectEdit({ persistedGraph: before, from: linkEffect.from, to: linkEffect.to, effect: linkEffect.effect,
+      expected: { graph_hash: input.expectedGraphHash, edge_token: linkEffect.edge_token }, quote: linkEffect.quote,
+      lastRunIdentityUse: input.lastRunIdentityUse ?? null });
+    if (written.kind === 'refused') return { kind: 'refused', reason: `link_${written.reason}`, linkIndex: 0 };
+    const graph = projectGraphForPersistence(written.mutatedGraph);
+    if (!isEditableGraph(graph) || !linkStrengthsPostimageIsScoped(before, graph, [{ from: linkEffect.from, to: linkEffect.to }])) {
+      return { kind: 'refused', reason: 'link_scope_mismatch' };
+    }
+    const appliedHash = computeAnalysisAffectingGraphHash(graph);
+    if (!appliedHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    const labelOfBefore = (id: string): string => String(before.nodes.find(node => node.id === id)?.label ?? id);
+    levelBase = graph;
+    levelBaseHash = appliedHash;
+    valueFacts = written.handlerFacts;
+    valueConfirmations = [`"${labelOfBefore(linkEffect.from)}" → "${labelOfBefore(linkEffect.to)}" now carries the size you stated${
+      written.statement !== undefined ? `: ${written.statement}` : ''}.`];
+  }
+  const effectCount = linkEffect !== undefined ? 1 : 0;
+  const valuesChanged = values.length + frames.length + linkStrengths.length + effectCount > 0 && !isDeepStrictEqual(levelBase, before);
   // ⭐ A VALUES-ONLY APPROVAL IS ONE COMMIT TOO (Canonical #70 5850018984): Olumi's starting point is usually values
   // with no level, and wrote each value as its own commit. With no level to prepare, the values (and their ranges)
   // are the whole plan: the same writer, adoption authority, scope guard, ONE append and ONE read-back.
-  const candidate = targets.length === 0 && values.length + frames.length + linkStrengths.length > 0
+  const candidate = targets.length === 0 && values.length + frames.length + linkStrengths.length + effectCount > 0
     ? ({ kind: 'unchanged' } as const)
     : applyOptionInterventionBatch({ ...common, expectedGraphHash: levelBaseHash, persistedGraph: levelBase, targets });
   if (candidate.kind === 'refused') return candidate;

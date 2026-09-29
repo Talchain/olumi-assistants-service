@@ -125,6 +125,8 @@ const TEMPLATE_PRODUCERS: Readonly<Record<string, () => string>> = {
     receipts.formatFactorValueSet({ label: SLOT, after: { raw_value: 2 } }),
   formatFactorValueUnchanged: () =>
     receipts.formatFactorValueUnchanged({ label: SLOT, after: { raw_value: 2 } }),
+  formatFactorValueNowYours: () =>
+    receipts.formatFactorValueNowYours({ label: SLOT, after: { raw_value: 2 } }),
   formatConstraintAdded: () =>
     receipts.formatConstraintAdded({ targetLabel: SLOT, operator: '>=', value: 2 }),
   formatConstraintUpdated: () =>

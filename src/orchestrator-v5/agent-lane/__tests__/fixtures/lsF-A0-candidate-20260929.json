@@ -1,0 +1,287 @@
+{
+ "source": "MG 7x3 arm lsF (#2276 @ df299ae5), Baseline v1 brief A rep 0, gpt-5.6-terra construction output, saved 29 Sep 04:3xZ",
+ "brief": "Given our goal of reaching \u00a3100k MRR within 12 months [Currently 75k] while keeping monthly churn under 4%, should we increase the Pro plan price from \u00a349 to \u00a359 per month with the next Pro feature release?",
+ "candidate": {
+  "goal": {
+   "metric": "MRR",
+   "operator": ">=",
+   "target_stated": true,
+   "value": 100000,
+   "unit": "GBP/month",
+   "horizon_months": 12,
+   "provenance": "explicit",
+   "baseline_known": true,
+   "baseline_value": 75000,
+   "baseline_provenance": "explicit",
+   "scope": {
+    "modelled": "all plans' MRR",
+    "alternative": "Pro plan MRR only",
+    "stated_in_brief": false
+   }
+  },
+  "constraints": [
+   {
+    "metric": "Monthly churn",
+    "operator": "<",
+    "value": 4,
+    "unit": "%",
+    "provenance": "explicit",
+    "frame": "level"
+   }
+  ],
+  "options": [
+   {
+    "label": "Carry on as now",
+    "provenance": "ai_proposed",
+    "changes": [],
+    "interventions": [],
+    "is_status_quo": true
+   },
+   {
+    "label": "\u00a349 with feature release",
+    "provenance": "inferred",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Pro plan price",
+      "value": 49,
+      "value_kind": "absolute",
+      "unit": "GBP/month",
+      "provenance": "explicit"
+     },
+     {
+      "factor_label": "Feature release coverage",
+      "value": 100,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed"
+     }
+    ],
+    "is_status_quo": null
+   },
+   {
+    "label": "\u00a359 with feature release",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Pro plan price",
+      "value": 59,
+      "value_kind": "absolute",
+      "unit": "GBP/month",
+      "provenance": "explicit"
+     },
+     {
+      "factor_label": "Feature release coverage",
+      "value": 100,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed"
+     }
+    ],
+    "is_status_quo": null
+   },
+   {
+    "label": "\u00a354 with feature release",
+    "provenance": "ai_proposed",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Pro plan price",
+      "value": 54,
+      "value_kind": "absolute",
+      "unit": "GBP/month",
+      "provenance": "ai_proposed"
+     },
+     {
+      "factor_label": "Feature release coverage",
+      "value": 100,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed"
+     }
+    ],
+    "is_status_quo": null
+   }
+  ],
+  "factors": [
+   {
+    "label": "Pro plan price",
+    "role": "controllable",
+    "baseline_known": true,
+    "baseline_value": 49,
+    "unit": "GBP/month",
+    "provenance": "explicit",
+    "plausible_max": 100
+   },
+   {
+    "label": "Feature release coverage",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_value": 0,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Monthly new Pro subscribers",
+    "role": "observable",
+    "baseline_known": false,
+    "baseline_value": 80,
+    "unit": "subscribers/month",
+    "provenance": "ai_proposed",
+    "plausible_max": 1000
+   },
+   {
+    "label": "Monthly churn",
+    "role": "observable",
+    "baseline_known": false,
+    "baseline_value": 3,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Pro paying subscribers",
+    "role": "observable",
+    "baseline_known": false,
+    "baseline_value": 900,
+    "unit": "subscribers",
+    "provenance": "ai_proposed",
+    "plausible_max": 5000
+   }
+  ],
+  "risks": [
+   {
+    "label": "Price sensitivity",
+    "provenance": "ai_proposed"
+   }
+  ],
+  "outcomes": [
+   {
+    "label": "Pro plan MRR",
+    "provenance": "inferred"
+   }
+  ],
+  "links": [
+   {
+    "from": "Pro plan price",
+    "to": "Pro plan MRR",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": 900,
+    "effect_per_source_change": 1,
+    "effect_provenance": "ai_proposed"
+   },
+   {
+    "from": "Pro paying subscribers",
+    "to": "Pro plan MRR",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": 49,
+    "effect_per_source_change": 1,
+    "effect_provenance": "ai_proposed"
+   },
+   {
+    "from": "Pro plan MRR",
+    "to": "MRR",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": 1,
+    "effect_per_source_change": 1,
+    "effect_provenance": "inferred"
+   },
+   {
+    "from": "Pro plan price",
+    "to": "Monthly churn",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": 0.05,
+    "effect_per_source_change": 1,
+    "effect_provenance": "ai_proposed"
+   },
+   {
+    "from": "Feature release coverage",
+    "to": "Monthly churn",
+    "direction": "negative",
+    "provenance": "ai_proposed",
+    "effect_amount": -0.005,
+    "effect_per_source_change": 1,
+    "effect_provenance": "ai_proposed"
+   },
+   {
+    "from": "Pro plan price",
+    "to": "Monthly new Pro subscribers",
+    "direction": "negative",
+    "provenance": "ai_proposed",
+    "effect_amount": -1.5,
+    "effect_per_source_change": 1,
+    "effect_provenance": "ai_proposed"
+   },
+   {
+    "from": "Feature release coverage",
+    "to": "Monthly new Pro subscribers",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": 0.15,
+    "effect_per_source_change": 1,
+    "effect_provenance": "ai_proposed"
+   },
+   {
+    "from": "Monthly new Pro subscribers",
+    "to": "Pro paying subscribers",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": 6,
+    "effect_per_source_change": 1,
+    "effect_provenance": "ai_proposed"
+   },
+   {
+    "from": "Monthly churn",
+    "to": "Pro paying subscribers",
+    "direction": "negative",
+    "provenance": "ai_proposed",
+    "effect_amount": -60,
+    "effect_per_source_change": 1,
+    "effect_provenance": "ai_proposed"
+   },
+   {
+    "from": "Pro plan price",
+    "to": "Price sensitivity",
+    "direction": "positive",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null
+   },
+   {
+    "from": "Price sensitivity",
+    "to": "Monthly new Pro subscribers",
+    "direction": "negative",
+    "provenance": "ai_proposed",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null
+   }
+  ],
+  "identities": [
+   {
+    "outcome": "Pro plan MRR",
+    "operation": "product",
+    "factors": [
+     "Pro plan price",
+     "Pro paying subscribers"
+    ],
+    "provenance": "inferred"
+   }
+  ],
+  "unknowns": [
+   "Does \u00a375k current MRR and the \u00a3100k target cover all plans, or Pro plan MRR only? This model provisionally measures all plans' MRR, with Pro plan MRR as the affected component.",
+   "What are the current Pro paying-subscriber count, monthly churn, and monthly new-Pro-subscriber rate? The provisional values of 900 subscribers, 3% churn, and 80 new subscribers per month are modelling assumptions, not measurements.",
+   "What is the observed effect of a \u00a31 Pro price increase on churn and new-Pro-subscriber acquisition? The price-elasticity estimates are provisional.",
+   "How much does the next Pro feature release change acquisition and churn, and will it reach all Pro customers? This model assumes 100% coverage.",
+   "The conversion from sustained monthly acquisition and churn changes to Pro paying subscribers at month 12 is provisional and should be validated with cohort retention data."
+  ],
+  "decision_question": "should we increase the Pro plan price from \u00a349 to \u00a359 per month with the next Pro feature release?"
+ }
+}

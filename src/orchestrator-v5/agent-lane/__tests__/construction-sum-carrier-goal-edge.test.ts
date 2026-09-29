@@ -9,6 +9,7 @@
  * `buildModelFromBrief`, `/graph/register` and `GraphV3.parse`. Bound by node id. Journey E is T3's served fixture.
  */
 import { describe, it, expect } from 'vitest';
+import { asCurrentDraft } from './pre-r1-capture.js';
 import { readFileSync } from 'node:fs';
 import { Ajv } from 'ajv';
 import { admitCandidateModel, findPureLimitAsks, findPureLimits, findSumTallies, type CandidateModel } from '../admit-model.js';
@@ -20,7 +21,8 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 type Json = Record<string, any>;
 type Graph = { nodes: Json[]; edges: Json[]; goal_constraints: Json[] };
 type Served = { source: string; brief: string; graph: Graph; candidate: Json };
-const load = (name: string): Json => JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8'));
+// Pre-R1 captures, replayed through today's contract (`asCurrentDraft`: goal `frame: 'level'`; bytes untouched).
+const load = (name: string): Json => asCurrentDraft(JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8')));
 const C = load('served-journey-c-sum-tally-20260928.json') as Record<'goal' | 'risk' | 'option_edge' | 'direct' | 'unit_mismatch', Served>;
 const E = load('served-journey-e-pure-limit-074951Z.json') as { brief: string; e01: Graph; a01: Graph; e01_candidate: Json };
 

@@ -48,7 +48,7 @@ import {
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js';
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
-import { figureTheUserWrote, holdStatedGoalAttributes, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
+import { figureTheUserWrote, goalLevelTheUserWrote, holdStatedGoalAttributes, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
@@ -83,6 +83,9 @@ export function buildCandidateSchema(): Record<string, unknown> {
       target_stated: { type: 'boolean' },
       value: { anyOf: [{ type: 'number' }, { type: 'null' }] }, unit: { type: 'string' },
       horizon_months: { anyOf: [{ type: 'integer' }, { type: 'null' }] }, provenance,
+      // R1 (`@talchain/schemas` 0.61.0, `limit-frame.ts`): the frame the TARGET is stated in. REQUIRED, so strict output
+      // must say "level" rather than omit it; `admit-model.ts` writes a change only beside the user's stated level.
+      frame: { type: 'string', enum: ['level', 'change_abs', 'change_rel'] },
       // ⭐ THE GOAL'S CURRENT LEVEL, in the factor pattern (`baseline_known` beside a
       // nullable value). Without it a level-framed goal has no baseline and ISL
       // refuses Goal fit (`missing_goal_baseline`). REQUIRED so strict output must
@@ -101,7 +104,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
         stated_in_brief: { type: 'boolean', description: 'True only when the brief itself says which.' },
       }, ['modelled', 'alternative', 'stated_in_brief'])], description:
         'Null unless the goal metric could mean one part (a plan, product, segment or region) or the whole.' },
-    }, ['metric', 'operator', 'target_stated', 'value', 'unit', 'horizon_months', 'provenance', 'baseline_known', 'baseline_value', 'baseline_provenance', 'scope']),
+    }, ['metric', 'operator', 'target_stated', 'value', 'unit', 'horizon_months', 'provenance', 'frame', 'baseline_known', 'baseline_value', 'baseline_provenance', 'scope']),
     constraints: { type: 'array', items: obj({
       metric: { type: 'string' }, operator: { type: 'string', enum: ['>=', '<=', '>', '<'] },
       value: { type: 'number' }, unit: { type: 'string' }, provenance,
@@ -249,7 +252,7 @@ export const BUILD_INSTRUCTIONS = [
    * is a capability no caller uses — and a 0 attributed to the user is the worst of the
    * available wrong answers, because it reads as a deliberate choice they made.
    */
-  'A GOAL TARGET THE BRIEF DOES NOT STATE MUST BE LEFT UNSTATED. If the user named a number to reach \u2014 "to 40%", "by \u00a33m", "under 4 weeks" \u2014 set `target_stated: true` and put that number in `goal.value`. If they only named a DIRECTION \u2014 "increase productivity", "cut churn", "improve velocity" \u2014 then set `target_stated: false` and `goal.value: null`. Never substitute 0, never invent a plausible target, and never treat the absence of a number as a target of zero: a direction with no number is a complete and ordinary goal, and the analysis compares options against it perfectly well. Getting this wrong tells the user they asked for something they did not ask for.',
+  'A GOAL TARGET THE BRIEF DOES NOT STATE MUST BE LEFT UNSTATED. If the user named a number to reach \u2014 "to 40%", "by \u00a33m", "under 4 weeks" \u2014 set `target_stated: true` and put that number in `goal.value`. If they only named a DIRECTION \u2014 "increase productivity", "cut churn", "improve velocity" \u2014 then set `target_stated: false` and `goal.value: null`. Never substitute 0, never invent a plausible target, and never treat the absence of a number as a target of zero: a direction with no number is a complete and ordinary goal, and the analysis compares options against it perfectly well. Getting this wrong tells the user they asked for something they did not ask for. State the goal\u2019s `frame`: "level" when the user names the level to reach ("MRR to \u00a3250k", "keep the bill under \u00a340k"); "change_rel" when they name a PERCENTAGE change from today ("cut the cloud bill by 15%", "grow MRR by 10%"): `value` is that signed percentage (-15, or 10); "change_abs" when they name a change from today in the metric\u2019s own unit ("reduce churn by 2 points", "grow revenue by \u00a35k"): `value` is that signed amount. With no number, "level". `unit` is always the goal metric\u2019s own unit, the unit of its current level.',
   // ⛔ C46 (#70 5841314428): "£20k MRR" silently became Pro MRR on Paul's captured brief.
   'NEVER PICK THE SCOPE OF THE GOAL SILENTLY. When the goal metric could mean one part or the whole — the brief says "MRR" or "revenue" and the decision is about one plan, product, segment or region — set `goal.scope`: `modelled` is what your model actually measures (e.g. "the Pro plan only"), `alternative` is the other reading (e.g. "all plans together"), and `stated_in_brief` is true only when the brief itself says which. Keep `goal.metric` in the user’s own words: Olumi states the modelled scope as its own assumption and asks the user which they meant from `goal.scope`. When the goal metric has no part-or-whole reading, `goal.scope` is null.',
   // ⛔ C46 (#70 5841215337): the analysis adds effects up, so a product is approximated and its sign can flip.
@@ -271,6 +274,15 @@ export const BUILD_INSTRUCTIONS = [
   // ⭐ THE MAGNITUDE CONTRACT (D1): ONE sentence. Admission reads the size on each end's own frame and never
   // lets it run a bounded quantity out of its range (served T3: a frame-blind 0.5 moved churn by about 50 points).
   'STATE EACH LINK’S SIZE IN NATURAL UNITS: `effect_amount` is the signed change in the target’s own unit (in points for a percentage, so 4% to 3% is -1) caused by `effect_per_source_change` of the source in its own unit (1 for switching a yes/no on), with `effect_provenance` "explicit" only when the user stated that size, and all three null when you cannot give a defensible size.',
+  // ⛔ R-c (AI Quality 5881541947 / 5882087383): a limit is checked only when every link from what an option changes to
+  // the limited quantity carries a size in that quantity's own unit, and a risk has no unit. Measured (MG 7×3, 29 Sep):
+  // 10 of 12 A/C churn limits reached churn only through a risk, so none of them could be checked. The first wording
+  // ("never route a cause … through a risk") left a risk → churn link on 2 of 6 A/C drafts; the ban is now structural.
+  // ⛔ ONE MECHANISM, ONE ROUTE (AIQ 5883228443; PR Review CR on #2276 @ 729ce9d3): "link the risk to the goal metric"
+  // kept a price-sensitivity risk → MRR beside the new sized price → churn path on 5/21 drafts (A-0, A-2, C-1, cloud-2,
+  // techlead-1): the same loss counted twice. No domain example: a worked example steers every brief. A first wording
+  // ("keep a risk only for a separate harm … otherwise leave it out") also dropped separate harms: risks 23 → 10 (lsD).
+  'A LIMIT CAN ONLY BE CHECKED THROUGH SIZED LINKS. NO LINK MAY POINT FROM A RISK TO A QUANTITY IN `constraints`: a risk has no unit, so that link cannot be sized and the user’s limit cannot be checked. Instead, link every factor an option changes that moves the limited quantity STRAIGHT to it and give that link its size. That sized link already IS the risk of the limited quantity moving the wrong way, so do not ALSO keep that one risk as a node: it would count the same loss twice. Every OTHER risk stays exactly as you would draw it, linked to the goal metric or to the quantity it threatens.',
   'GIVE EVERY FACTOR A `plausible_max`. IT IS REQUIRED AND NEVER NULL, for every factor, whether or not it has a baseline today. A number above 1 with no range beside it CANNOT BE ANALYSED \u2014 the engine has nothing to read it against, Olumi refuses the WHOLE analysis rather than guess, and NO LATER EDIT CAN SUPPLY THE RANGE: the only remedy is rebuilding the model. The range is a SCALE, not a forecast: 100 for a percentage or a score out of 100, exactly 1 for something already between 0 and 1, and a round number comfortably above anything realistic for a count, an amount or a price. Measured twice on real models.',
   'Labels are NAMES, not sentences.',
   'Set `decision_question` to the question the brief asks, copied VERBATIM from the brief (only the question itself, without any lead-in clause), or null if it asks none. Never reword it.',
@@ -414,6 +426,9 @@ export function retrySchemaPinningGoal(
     unit: { type: 'string', enum: [goal.unit] },
     horizon_months: goal.horizon_months === null ? { type: 'null' } : { type: 'integer', enum: [goal.horizon_months] },
     provenance: { type: 'string', enum: [goal.provenance] },
+    // R1 S4-core: the frame the target is stated in is part of the goal, so a compaction cannot turn "cut by 15%" into a
+    // level of 15. An absent frame (a candidate from before the field) pins to "level", exactly what it meant.
+    frame: { type: 'string', enum: [goal.frame ?? 'level'] },
     // The current level is part of the goal, so it is pinned too; an absent value
     // (a candidate from before the field) pins to "not given".
     baseline_known: { type: 'boolean', enum: [goal.baseline_known === true] },
@@ -1199,7 +1214,7 @@ export async function buildModelFromBrief(
   const firstCandidate = candidate;
   let preparation = prepareProvisionalCandidate(candidate);
   candidate = preparation.candidate;
-  let admitted = admitCandidateModel(candidate, {}, brief);
+  let admitted = admitCandidateModel(candidate, {}, brief, goalLevelTheUserWrote(candidate, brief));
   preparation = gapsOnRegisteredOptions(preparation, firstCandidate, admitted);
 
   /**
@@ -1316,7 +1331,7 @@ export async function buildModelFromBrief(
         );
         const retryPrepared = prepareProvisionalCandidate(retryRaw);
         const retryCandidate = retryPrepared.candidate;
-        const retryAdmitted = admitCandidateModel(retryCandidate, {}, brief);
+        const retryAdmitted = admitCandidateModel(retryCandidate, {}, brief, goalLevelTheUserWrote(retryCandidate, brief));
         // ⛔ Leave out only what the FIRST draft never registered: withholding a registered option never closes its gaps in the count (adversarial verify of 843c0960).
         const firstGone = new Set((admitted.options_withheld ?? []).map((w) => canonicalLabel(w.option)));
         const firstRegistered = new Set(firstCandidate.options.map((o) => canonicalLabel(o.label)).filter((l) => !firstGone.has(l)));
@@ -1737,7 +1752,9 @@ export async function buildModelFromBrief(
         // `magnitude_unconvertible`: a stated size that could not be read on the two ends' frames, so the standard
         // placeholder stands in (magnitude contract, D2/D6) — never dropped unseen.
         // `pure_limit`: a user-limited cost roll-up's Olumi-signed edge into the goal that was not drawn (`findPureLimits`).
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|loop_withheld|loop_kept|magnitude_unconvertible|pure_limit)$|\.observed_state\.baseline$/.test(l.field_path))
+        // `one_route`: a factor → risk link left out because the risk only re-drew the factor's own direct link
+        // (`oneRoutePerEffect`, PR Review CR on #2276): the risk stays, and why its link went is said.
+        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|loop_withheld|loop_kept|magnitude_unconvertible|pure_limit|one_route)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };

@@ -51,6 +51,7 @@ import {
   formatFactorChange,
   formatFactorValueSet,
   formatFactorValueUnchanged,
+  formatFactorValueNowYours,
   formatValueWithUnit,
 } from './d1-shared/format-confirmation.js';
 import { normaliseFactorValue } from './d1-shared/normalise-factor-value.js';
@@ -63,6 +64,7 @@ import { SET_FACTOR_VALUE_USER_GUIDANCE } from './d1-shared/user-guidance.js';
 import { isSuccessfulRunAnalysisFact, selectRunAnalysisFact } from '../../context/freshness.js';
 import { deriveEditComparisonReach } from '../../coaching/edit-comparison-reach.js';
 import { log } from '../../../utils/telemetry.js';
+import { userTypedStoredFigure } from '../../agent-lane/figure-scope.js';
 
 /**
  * P0 V5 golden-path repair (Wave 2): staleness narrative appended to a
@@ -620,6 +622,26 @@ export function createSetFactorValueHandler(): HandlerFn {
     let rescaledInterventionCount = 0;
     let linksSized: readonly string[] = [];
 
+    // ⭐ R11 FOR NODES — A SET TO THE VALUE ALREADY STORED IS REVIEW, NOT AUTHORSHIP (AIQ #72 5881277231, extending
+    // 5872082179; the edge writer's `reviewOnly` in `adjust-edge-strength.ts` is the precedent). Since schemas 0.62.0 the
+    // analysis hash reads WHOSE a value is (Shared Data row 1, #72 5881225605), so the old re-stamp of the user's source
+    // on an unchanged value made Olumi's figure the user's and staled the Run while the reply said "already set".
+    // Every byte of who-authored-what stays; the act is recorded as `reviewed_by_user` (not a hash input). A verified
+    // panel apply or an approved adoption carries its own provenance and keeps today's write.
+    // AIQ #72 5882852814: in chat (flag absent) the same number is still AUTHORSHIP when the user's own words this turn
+    // state it for this factor ("set churn to 3.2%"); only a figure they did not type ("yes, keep it") is review.
+    const reviewOnly =
+      invocation.unchangedValueIsReview !== false &&
+      !(invocation.unchangedValueIsReview === undefined
+        && userTypedStoredFigure(graph, targetId, after, (invocation.payload as { message?: unknown } | undefined)?.message as string | undefined)) &&
+      appliedProvenance === undefined &&
+      adoptedSource === undefined &&
+      targetNode.observed_state !== undefined &&
+      before.value === after.value &&
+      before.raw_value === after.raw_value &&
+      unitComparisonKey(before.unit) === unitComparisonKey(after.unit) &&
+      before.cap === after.cap;
+
     // Apply the mutation to a clone and Zod-parse the result.
     const result = applyAndValidateMutation(rawGraph, (clone) => {
       const node = clone.nodes.find((n) => n.id === targetId);
@@ -629,6 +651,17 @@ export function createSetFactorValueHandler(): HandlerFn {
         throw new D1HandlerError('ENTITY_NOT_FOUND', `Node ${targetId} disappeared during clone.`, {
           userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
         });
+      }
+      if (reviewOnly) {
+        // A review is recorded on SOMEONE ELSE's figure (Olumi's, the brief's, a colleague's). The user's own figure
+        // re-sent unchanged is a pure no-op: no bytes move, so no new model version is minted.
+        if ((node.observed_state as { source?: unknown } | undefined)?.source !== USER_EDIT_SOURCE) {
+          node.observed_state = {
+            ...(node.observed_state as NonNullable<typeof node.observed_state>),
+            reviewed_by_user: { intent: 'confirm', at: new Date().toISOString() },
+          } as typeof node.observed_state;
+        }
+        return { before, after: before };
       }
       /**
        * ⛔⛔ A VALUE EDIT MUST NOT LEAVE A DECLARATION IT HAS JUST FALSIFIED.
@@ -904,11 +937,21 @@ export function createSetFactorValueHandler(): HandlerFn {
     // non-matching key is refused earlier at guard 2b. It is kept so the invariant is
     // EXPLICIT rather than incidental: if the write rule ever changes, `noop` must not
     // silently start narrating phantom changes again. Do not cite it as mutation-verified.
-    const noop =
+    const valuesSame =
       before.value === after.value &&
       before.raw_value === after.raw_value &&
       unitComparisonKey(before.unit) === unitComparisonKey(after.unit) &&
       before.cap === after.cap;
+    // ⭐ WHOSE IT IS IS PART OF THE WRITE (served witness f297748, #72 5883308747 step L3). Since schemas 0.62.0 the
+    // analysis revision reads `observed_state.source`, so the same number made the user's (an explicit `set` on Olumi's
+    // estimate) is a real write: the owner moves, the hash moves, the last Run goes stale. Receipted as a no-op and said
+    // as "already set", the reply contradicted the persisted bytes and hid the stale Run. A review (`reviewOnly`) and
+    // the user's own figure re-sent keep the owner, so they stay true no-ops.
+    const ownerOf = (g: unknown): unknown =>
+      (g as { nodes?: ReadonlyArray<{ id?: unknown; observed_state?: { source?: unknown } }> } | null)?.nodes
+        ?.find((n) => n.id === targetId)?.observed_state?.source;
+    const ownerMoved = ownerOf(rawGraph) !== ownerOf(result.mutatedGraph);
+    const noop = valuesSame && !ownerMoved;
 
     const fact: SetFactorValueHandlerFact = {
       fact_type: 'set_factor_value',
@@ -961,7 +1004,9 @@ export function createSetFactorValueHandler(): HandlerFn {
     // a value the way a non-resolved `before` could.
     const changeText = noop
       ? formatFactorValueUnchanged({ label, after: narrationSide(after) })
-      : beforeResolution.kind === 'resolved'
+      : valuesSame
+        ? formatFactorValueNowYours({ label, after: narrationSide(after) })
+        : beforeResolution.kind === 'resolved'
         ? formatFactorChange({ label, before: narrationSide(before), after: narrationSide(after) })
         : formatFactorValueSet({ label, after: narrationSide(after) });
 
