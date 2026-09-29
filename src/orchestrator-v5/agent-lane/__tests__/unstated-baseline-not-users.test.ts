@@ -147,6 +147,15 @@ describe('a number in words, or "zero", grounds only the factor it counts', () =
     expect(sourceOf('We promise zero downtime for enterprise customers.', factor('Enterprise customers', 0, 'customers'))).toBe('cee_inference');
   });
 
+  // PR Review 5881612484 / AIQ 5881608887: nor across a VERB into another quantity.
+  it('RED: "zero downtime affects enterprise customers" does not state 0 enterprise customers', () => {
+    expect(sourceOf('Zero downtime affects enterprise customers most.', factor('Enterprise customers', 0, 'customers'))).toBe('cee_inference');
+  });
+
+  it('RED: "three engineers support enterprise customers" does not state 3 enterprise customers', () => {
+    expect(sourceOf('Three engineers support enterprise customers.', factor('Enterprise customers', 3, 'customers'))).toBe('cee_inference');
+  });
+
   it('CONTROL: "three enterprise customers" and "zero enterprise customers" state them', () => {
     expect(sourceOf('We have three enterprise customers today.', factor('Enterprise customers', 3, 'customers'))).toBe('brief_extraction');
     expect(sourceOf('We have zero enterprise customers today.', factor('Enterprise customers', 0, 'customers'))).toBe('brief_extraction');

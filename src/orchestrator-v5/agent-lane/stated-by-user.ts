@@ -140,9 +140,9 @@ const PHRASE_BREAK = new Set([
 ]);
 
 /**
- * Whether the COUNTED NOUN PHRASE right after the amount at `m` — up to three words, ending at the first preposition or
- * conjunction (PR Review 5881529306: "three engineers for enterprise customers" counts engineers) — shares a naming word
- * with the factor's label or unit.
+ * Whether the COUNTED NOUN right after the amount at `m` names the factor: the first naming word of the (up to three)
+ * words before the first preposition or conjunction (PR Review 5881529306: "three engineers for enterprise customers"
+ * counts engineers) is in the factor's label or unit.
  */
 function wordsNameThisFactor(brief: string, m: RegExpMatchArray, label: unknown, unit: unknown): boolean {
   if (typeof m.index !== 'number') return false;
@@ -150,8 +150,10 @@ function wordsNameThisFactor(brief: string, m: RegExpMatchArray, label: unknown,
   const words = window.trim().split(/\s+/);
   const cut = words.findIndex((w) => PHRASE_BREAK.has(w.toLowerCase()));
   const phrase = (cut === -1 ? words : words.slice(0, cut)).join(' ');
-  const names = new Set([...namingWords(label), ...namingWords(unit)]);
-  return namingWords(phrase).some((w) => names.has(w));
+  // Only the FIRST naming word counts: it heads what the number counts. A later word can sit past a verb in another
+  // quantity ("zero downtime AFFECTS enterprise customers", PR Review 5881612484); a filler adjective ("new") is skipped.
+  const first = namingWords(phrase)[0];
+  return first !== undefined && new Set([...namingWords(label), ...namingWords(unit)]).has(first);
 }
 
 /**
