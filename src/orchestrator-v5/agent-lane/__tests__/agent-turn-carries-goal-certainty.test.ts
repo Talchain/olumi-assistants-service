@@ -125,4 +125,30 @@ describe('0.63.0: the Agent turn carries the run\'s STORED goal certainty as the
     expect('goal_certainty' in body).toBe(false);
     expect(OlumiResponseSchema.safeParse(declaredPart(body).declared).success).toBe(true);
   });
+  describe('0.65.0: the Agent turn carries stored option participation beside its selected result', () => {
+  const EXCLUDED = [{ option_id: 'suggested', state: 'excluded_olumi_proposed' }];
+
+  it('turn and cold read carry the same verdict, including a recorded empty array', async () => {
+    for (const participation of [EXCLUDED, []]) {
+      readPayload = { graph: SERVED.graph, graph_hash: SERVED.graph_hash,
+        analysis_option_participation: participation };
+      const body = (await app.inject({ method: 'POST', url: '/agent/v1/turn',
+        payload: { kind: 'message', scenario_id: SCENARIO, message: `What does the model hold ${participation.length}?` },
+      })).json() as Record<string, unknown>;
+      expect(body.option_participation).toEqual(participation);
+      expect(declaredPart(body).additive).toContain('option_participation');
+    }
+  });
+
+  it('an unrecorded or invalid verdict is absent from the turn', async () => {
+    for (const participation of [undefined, [{ option_id: 'suggested', state: 'invalid' }]]) {
+      readPayload = { graph: SERVED.graph, graph_hash: SERVED.graph_hash,
+        ...(participation !== undefined ? { analysis_option_participation: participation } : {}) };
+      const body = (await app.inject({ method: 'POST', url: '/agent/v1/turn',
+        payload: { kind: 'message', scenario_id: SCENARIO, message: `What does the model hold ${String(participation)}?` },
+      })).json() as Record<string, unknown>;
+      expect(body).not.toHaveProperty('option_participation');
+    }
+  });
+});
 });

@@ -17,6 +17,7 @@
 import { goalChanceWithheldForAgent, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { certainOptionRows, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
+import { optionParticipationForExecutedRun, readStoredOptionParticipation } from '../../tools/handlers/run-option-participation.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
@@ -817,6 +818,8 @@ interface GraphRead {
   readonly analysis_result?: unknown;
   /** The read's `analysis_goal_certainty` via #2280's ONE reader (`readStoredGoalCertainty`); absent = not recorded. */
   readonly goal_certainty?: readonly unknown[];
+  /** The selected Run's recorded post-gate verdict; absent means unrecorded. */
+  readonly option_participation?: readonly unknown[];
 }
 
 const norm = (s: unknown): string => String(s ?? '').toLowerCase().replace(/…$/, '').trim();
@@ -1207,6 +1210,7 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
   }) : [];
   return { ...context, analysis: { ...analysis,
     ...(certainty !== undefined ? { goal_certainty: certainty } : {}),
+    ...(current && g.option_participation !== undefined ? { option_participation: g.option_participation } : {}),
     ...(savedRunOptions.length > 0 ? { saved_run_options: savedRunOptions } : {}),
   } };
 }
@@ -1561,6 +1565,7 @@ export function createAgentCapabilities(
       ...(limitVerdicts !== null ? { limit_verdicts: limitVerdicts } : {}),
       ...(r.json.analysis_result !== undefined && r.json.analysis_result !== null ? { analysis_result: r.json.analysis_result } : {}),
       ...(() => { const stored = readStoredGoalCertainty(r.json.analysis_goal_certainty); return stored !== undefined ? { goal_certainty: stored } : {}; })(),
+      ...(() => { const stored = readStoredOptionParticipation(r.json.analysis_option_participation); return stored !== undefined ? { option_participation: stored } : {}; })(),
     };
   };
 
@@ -5321,9 +5326,16 @@ export function createAgentCapabilities(
           const executed = outcome.ran ? outcome.blocks.find((b) => (b as { type?: unknown } | null)?.type === 'analysis_result') : undefined;
           const certainty = goalCertaintyForAgent(executed ?? read.analysis_result,
             { scenario_id: ctx.scenario_id, analysis_state: outcome.ran ? outcome.analysisState : undefined }, certaintyReadOf(read));
+          const participation = outcome.ran && executed !== undefined
+            ? optionParticipationForExecutedRun(ctx.scenario_id, executed, outcome.analysisState, {
+              analysis_result: read.analysis_result,
+              analysis_state: read.analysis_state,
+              option_participation: read.analysis_option_participation,
+            }) : undefined;
           firstAnalysis = { ...firstAnalysis, claim_permissions: withNonlinearIdentity(firstAnalysis.claim_permissions, after.raw,
             readEvaluatedIdentityNodeIds(read.analysis_identity_evaluated_node_ids)), ...withGoalChance(read.analysis_result),
           ...(certainty !== undefined ? { goal_certainty: certainty } : {}),
+          ...(participation !== undefined ? { option_participation: participation } : {}),
           // The read route's own model and revision (the same read as the permission): `graph` / `graph_hash`.
           ...withIdentityCard(identityCardFor(ctx, { raw: read.graph, graph_hash: read.graph_hash })) };
         }
@@ -5336,6 +5348,7 @@ export function createAgentCapabilities(
               claim_permissions: firstAnalysis.claim_permissions,
               ...(firstAnalysis.goal_chance !== undefined ? { goal_chance: firstAnalysis.goal_chance } : {}),
               ...(firstAnalysis.goal_certainty !== undefined ? { goal_certainty: firstAnalysis.goal_certainty } : {}),
+              ...(firstAnalysis.option_participation !== undefined ? { option_participation: firstAnalysis.option_participation } : {}),
               note: 'Olumi already ran the first analysis of this model on this turn, so it was not run again.',
             },
           };
@@ -6620,6 +6633,14 @@ export function createAgentCapabilities(
       if (result !== undefined && postRunRead === undefined && withGoalChance(result).goal_chance !== undefined) {
         try { postRunRead = await readGraph(ctx.scenario_id); } catch { postRunRead = null; }
       }
+      // Participation is a saved Run fact. Read it through the selected fact and match this
+      // execution's full identity; a second Run of the same graph must not lend us its verdict.
+      if (result !== undefined && postRunRead === undefined) {
+        try { postRunRead = await readGraph(ctx.scenario_id); } catch { postRunRead = null; }
+      }
+      const optionParticipation = result !== undefined
+        ? optionParticipationForExecutedRun(ctx.scenario_id, result, r.json.analysis_state, postRunRead ?? null)
+        : undefined;
       // History can regard this result as current only when the selected fact matches this Run's full identity.
       // A second Run of the same graph may have the same headline figures and a different computed_at.
       const runHash = (result as { computed_against_hash?: unknown } | undefined)?.computed_against_hash;
@@ -6654,6 +6675,7 @@ export function createAgentCapabilities(
         // ⛔ PLoT #416: the goal's chance withheld on every option — the sentence to say and the rule (`../goal-chance-withheld.ts`).
         ...withGoalChance(result),
         ...(goalCertainty !== undefined ? { goal_certainty: goalCertainty } : {}),
+        ...(optionParticipation !== undefined ? { option_participation: optionParticipation } : {}),
         // ⭐ The confirm card (`../identity-card.ts`), read from the same post-run read; a Run that made none offers none.
         ...(result !== undefined ? withIdentityCard(identityCardFor(ctx, postRunRead)) : {}),
       };

@@ -25,6 +25,7 @@
 
 import { withRunStateFreshness } from '../orchestrator-v5/agent-lane/analysis-ready-freshness.js';
 import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
+import { readStoredOptionParticipation, type StoredOptionParticipation } from '../orchestrator-v5/tools/handlers/run-option-participation.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
@@ -473,7 +474,7 @@ const AGENT_INSTRUCTIONS = [
    */
   'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never presented as the analysis recommending an option. Never call an option the winner, the best option or the recommended one. Name a leading option ONLY when the result you are reporting carries `claim_permissions.leader_may_be_named: true`; an earlier analysis read from get_canonical_state carries no such permission, so never name a leader from it. Otherwise do not name, rank or hint at one, and do not quote win percentages as a ranking, whatever else the result contains \u2014 say in plain words why no option can be put forward yet. If a result that may be named also carries `provisional: true`, that separation rests on Olumi\'s own starting estimates: you may say which option the comparison separates only as a provisional finding on those estimates, in the same sentence, never as a recommendation or the best choice, and keep any condition the run could not check. When `leader_may_be_named` is false, the finding you lead with is why no option can be put forward \u2014 not which option the comparison favours. Do not say, even hedged or \u201con current assumptions\u201d, that any option leads, is favoured, scores or comes out highest, strongest or best, is ahead, or wins in any share of runs; describe robustness and sensitivity without saying which option they favour. Name an assumption the ordering is sensitive to ONLY from the result\u2019s `decision_sensitivity`: when its status is `measured`, name `most_sensitive`, say whether it comes from the user or is Olumi\u2019s estimate (or that its source is not recorded), and offer to change it; when it is `none_measurable`, say that no single assumption measurably changes which option leads; otherwise make no claim about which assumption matters most. When the result is fragile or a near tie, say that this uncertainty is itself the finding. When the run says a limit cannot be checked in this model yet, say so plainly. When a leader cannot be named, you may give your own provisional view by calling give_provisional_view once: what you would do, your reasoning from the model\u2019s facts and the user\u2019s own words, and the ONE step that would let the analysis confirm or overturn it \u2014 a step the user can take or a change one of your tools can propose, never one that cannot help. Never write that view in your reply text: Olumi shows it beneath your reply, labelled as your provisional view and never as the analysis result, and your reply text still never names, ranks or favours an option.',
   // A saved Run's per-option goal chance is distinct from permission to name a comparative leader.
-  'For a CURRENT saved Run, use CURRENT MODEL STATE analysis.saved_run_options and cover each recorded option in its order. You may repeat its recorded outcome or range with its units, even when leader permission is withheld; a missing outcome is missing, never zero. For goal certainty, use only its projected goal_certainty: earned: true permits the recorded model chance as a conditional result, never a guarantee; earned: false permits its exact say sentence, never an inferred 0 or 1. If goal_certainty is unchecked or the Run is stale, say the chance cannot be confirmed. Leader permission still governs ranking and naming a leader; never turn per-option facts into a ranking.',
+  'For a CURRENT saved Run, use CURRENT MODEL STATE analysis.saved_run_options and cover each recorded option in its order. You may repeat its recorded outcome or range with its units, even when leader permission is withheld; a missing outcome is missing, never zero. If option_participation records excluded_olumi_proposed, say that Olumi suggested that option and it was not compared; if it records kept_olumi_provisional, say Olumi proposed it and it participated provisionally, never as the user\u2019s own option. For goal certainty, use only its projected goal_certainty: earned: true permits the recorded model chance as a conditional result, never a guarantee; earned: false permits its exact say sentence, never an inferred 0 or 1. If goal_certainty is unchecked or the Run is stale, say the chance cannot be confirmed. Leader permission still governs ranking and naming a leader; never turn per-option facts into a ranking.',
   /*
    * ⭐ CHALLENGE → AUTHORISED REVISION → RERUN. Served (F) row F8 on 319dde1: asked to record a link as strong, as
    * the user's own estimate, the Agent said it could not. propose_link_strength reaches the product's own link writer.
@@ -813,7 +814,7 @@ export function timedDispatch(inner: InternalDispatch, ledger: DispatchTiming[],
   };
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty }> {
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -847,6 +848,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   let limitVerdicts: StoredLimitVerdicts | undefined;
   /** 0.63.0: the selected run's STORED goal certainty (`analysis_goal_certainty`), same fact and gates as `analysisResult`. */
   let goalCertainty: StoredGoalCertainty | undefined;
+  let optionParticipation: StoredOptionParticipation | undefined;
   /**
    * C46 × R3-4 (Canonical criterion 1): the carriers the selected run's engine evaluated
    * (`analysis_identity_evaluated_node_ids`), same fact and gates as `analysisResult`. `undefined` = not attested.
@@ -895,6 +897,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
       limitVerdicts = readLimitVerdicts(after.json.analysis_limit_verdicts) ?? undefined;
       // 0.63.0: only an array the published contract accepts is carried (`[]` included): absent = not recorded.
       goalCertainty = readStoredGoalCertainty(after.json.analysis_goal_certainty);
+      optionParticipation = readStoredOptionParticipation(after.json.analysis_option_participation);
       // A product the run's engine evaluated is not one it "adds up": the Agent's view reads it from the SAME read.
       identityEvaluated = readEvaluatedIdentityNodeIds(after.json.analysis_identity_evaluated_node_ids);
       /**
@@ -1023,7 +1026,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty };
+  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1942,7 +1945,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * call. The canonical state is read back from the persisted graph after the run — the
        * SAME reader the response's final readback uses — and handed over beside the run.
        */
-      let canonicalAfterRun: { analysis_state?: unknown; analysis_ready?: unknown; run_delta?: unknown; run_delta_absence_reason?: string } = {};
+      let canonicalAfterRun: { analysis_state?: unknown; analysis_ready?: unknown; option_participation?: StoredOptionParticipation; run_delta?: unknown; run_delta_absence_reason?: string } = {};
       let standingAfterRun: LeaderStanding | null = null;
       try {
         const st = await readBackState(readingDispatch, scenarioId);
@@ -1957,6 +1960,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         canonicalAfterRun = {
           ...(st.analysisState !== undefined ? { analysis_state: st.analysisState } : {}),
           ...(st.analysisReady !== undefined ? { analysis_ready: st.analysisReady } : {}),
+          ...(st.optionParticipation !== undefined ? { option_participation: st.optionParticipation } : {}),
           ...(bound.run_delta !== undefined ? { run_delta: bound.run_delta } : {}),
           ...(bound.run_delta_absence_reason !== undefined ? { run_delta_absence_reason: bound.run_delta_absence_reason } : {}),
         };
@@ -2260,7 +2264,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * BEFORE the reply is composed, because the Run offer below keys on the
      * readiness this same response carries.
      */
-    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty } = await readBackState(readingDispatch, scenarioId);
+    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation } = await readBackState(readingDispatch, scenarioId);
 
     // ⛔ This turn's approval results go with it ONLY on the approve chip's fast path: it puts no authorise_change in
     // the history (only its words and Olumi's status), so they are the only record of which proposal it applied
@@ -2715,6 +2719,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * fact, under the SAME gates, as this turn's `analysis_result`. Never recomputed here. Absent = not recorded.
        */
       ...(goalCertainty !== undefined ? { goal_certainty: goalCertainty } : {}),
+      // The Run's stored post-gate verdict, from the same selected fact as the delivered result.
+      ...(optionParticipation !== undefined ? { option_participation: optionParticipation } : {}),
       /**
        * ⭐ SAY WHICH PATH SERVED THIS TURN.
        *

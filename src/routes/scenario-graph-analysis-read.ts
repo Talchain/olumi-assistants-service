@@ -132,6 +132,7 @@ import { identityRunUseFromFacts } from '../orchestrator-v5/compose/definitional
 import { isScenarioAnalysisReasoningAuthority } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
+import { readStoredOptionParticipation, type StoredOptionParticipation } from '../orchestrator-v5/tools/handlers/run-option-participation.js';
 import { log } from '../utils/telemetry.js';
 
 /** The additive half of the scenario-graph read's 200 body. */
@@ -182,6 +183,8 @@ export interface ScenarioAnalysisRead {
    * no surface may then present a raw 0 or 1 as an earned certainty.
    */
   readonly analysis_goal_certainty?: StoredGoalCertainty;
+  /** The selected current Run's stored post-gate verdict; [] is recorded none, absent is unrecorded. */
+  readonly analysis_option_participation?: StoredOptionParticipation;
   /**
    * C46 × R3-4 (Canonical criterion 1): the carriers the SELECTED fact's engine evaluated (`identity_evaluations`,
    * `evaluated: true`, read by `evaluatedIdentityNodeIds` off the fact's own `enrichment`) under the SAME gates as
@@ -485,6 +488,10 @@ export async function readScenarioAnalysis(
             ...(() => {
               const certainty = readStoredGoalCertainty(fact.result.goal_certainty);
               return certainty === undefined ? {} : { analysis_goal_certainty: certainty };
+            })(),
+            ...(() => {
+              const participation = readStoredOptionParticipation(fact.result.option_participation);
+              return participation === undefined ? {} : { analysis_option_participation: participation };
             })(),
             ...(Array.isArray((fact.result.enrichment as { identity_evaluations?: unknown } | undefined)?.identity_evaluations)
               ? { analysis_identity_evaluated_node_ids: [...evaluatedIdentityNodeIds(fact.result.enrichment)] }

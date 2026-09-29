@@ -2519,6 +2519,14 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // rather than emitting an empty string.
         ...(graphHashAtRun !== null ? { graph_hash_at_run: graphHashAtRun } : {}),
         ...(goalCertainty.recorded ? { goal_certainty: goalCertainty.decisions } : {}),
+        // 0.65.0: the post-gate verdict belongs to this Run, even when empty.
+        // Readers carry this stored array only with the selected current fact.
+        option_participation: olumiFilter.participation.map((entry) => ({
+          option_id: entry.option_id,
+          state: entry.state,
+          ...(entry.unanalysable_user_option_ids !== undefined
+            ? { unanalysable_user_option_ids: [...entry.unanalysable_user_option_ids] } : {}),
+        })),
         computed_at: runComputedAt,
         // T1 claim safety, LAYER 2 — "may a leading option be named" is a FACT
         // ABOUT THIS ANALYSIS, so it is persisted WITH the analysis facts and

@@ -7,7 +7,26 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.64.0.tgz` ← **THE CURRENT PIN**
+### `talchain-schemas-0.65.0.tgz` ← **THE CURRENT PIN**
+
+> Built locally from the exact published `v0.65.0` source tag
+> **`3b9aa1162f9e3f48b55f02b17cf5a3e856957257`** on 2026-09-30 (London time), using
+> `npm ci --ignore-scripts`, `npm run check:contracts`, `npm run build`, and
+> `npm pack --ignore-scripts`. The GitHub Packages tarball could not be fetched
+> because the local registry token was unavailable, so this is **not claimed to
+> be byte-identical to the published artefact**.
+>
+> **685,509 bytes.** `sha256`:
+> `240324c004e9c6b87fc6c7c12a3a676fffe800db861942d14f9f7179fa31c422`.
+> `npm pack` integrity:
+> `sha512-2zyajHHPHaeVyNaQMBTd/DptfocuY2vLHD9No7o4LymAjj5RaUEl7botyONKbtq2PohPF4vPwKKJnbmoAcecUA==`.
+>
+> **What 0.65.0 adds:** `RunAnalysisResultSchema.option_participation` records
+> which Olumi-proposed options were excluded or retained in a provisional
+> comparison, with the user's unanalysable option IDs only where applicable.
+> It is additive and does not change the graph-hash projection.
+
+### `talchain-schemas-0.64.0.tgz` (historical — no longer vendored as of 0.65.0)
 
 > **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**
 >

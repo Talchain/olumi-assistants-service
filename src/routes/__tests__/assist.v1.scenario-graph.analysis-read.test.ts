@@ -95,6 +95,7 @@ import { buildCanonicalAnalysisReadyFromGraph } from "../../orchestrator/tools/a
 import { issuesAsWireBlockers } from "../../orchestrator-v5/compose/analysis-state-v1.js";
 import { RunAnalysisResultSchema } from "@talchain/schemas/orchestrator";
 import { readStoredGoalCertainty } from "../../orchestrator-v5/tools/handlers/run-goal-certainty.js";
+import { readStoredOptionParticipation } from "../../orchestrator-v5/tools/handlers/run-option-participation.js";
 import { leaderWithheldForALimit } from "../../orchestrator-v5/coaching/limit-unchecked-card.js";
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────
@@ -785,6 +786,41 @@ describe("0.63.0 — `analysis_goal_certainty` is the selected Run's stored arra
     readFactsFor.mockResolvedValue([withCertainty(GRAPH_HASH, STORED)]);
     const body = (await read(await buildApp())).json() as Record<string, unknown>;
     expect(readStoredGoalCertainty(body.analysis_goal_certainty)).toEqual(body.analysis_goal_certainty);
+  });
+});
+
+describe("0.65.0 — cold read carries the selected Run's stored option participation", () => {
+  const EXCLUDED = [{ option_id: "opt_hire", state: "excluded_olumi_proposed" }];
+  const withParticipation = (graphHash: string, participation: unknown) => {
+    const fact = runAnalysisFact({ graphHash, mayName: true });
+    (fact.result as Record<string, unknown>).option_participation = participation;
+    return fact;
+  };
+
+  it("current Run carries the recorded verdict; [] remains recorded", async () => {
+    readFactsFor.mockResolvedValue([withParticipation(GRAPH_HASH, EXCLUDED)]);
+    const body = (await read(await buildApp())).json() as Record<string, unknown>;
+    expect(body.analysis_option_participation).toEqual(EXCLUDED);
+    expect(readStoredOptionParticipation(body.analysis_option_participation)).toEqual(EXCLUDED);
+
+    readFactsFor.mockResolvedValue([withParticipation(GRAPH_HASH, [])]);
+    const empty = (await read(await buildApp())).json() as Record<string, unknown>;
+    expect(empty).toHaveProperty("analysis_option_participation", []);
+  });
+
+  it("stale, unrecorded, or contradictory facts do not make an authorship claim", async () => {
+    for (const fact of [
+      withParticipation(PRE_EDIT_GRAPH_HASH, EXCLUDED),
+      runAnalysisFact({ graphHash: GRAPH_HASH, mayName: true }),
+      withParticipation(GRAPH_HASH, [
+        { option_id: "opt_hire", state: "excluded_olumi_proposed" },
+        { option_id: "opt_hire", state: "kept_olumi_provisional" },
+      ]),
+    ]) {
+      readFactsFor.mockResolvedValue([fact]);
+      const body = (await read(await buildApp())).json() as Record<string, unknown>;
+      expect(body).not.toHaveProperty("analysis_option_participation");
+    }
   });
 });
 

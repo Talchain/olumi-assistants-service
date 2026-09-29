@@ -34,15 +34,25 @@ const graph = { nodes: [
   { id: 'unknown', kind: 'option', label: 'Unknown outcome' },
 ], edges: [] };
 
-async function canonicalState(kind: 'complete_current' | 'complete_stale', stored: unknown) {
+async function canonicalState(kind: 'complete_current' | 'complete_stale', stored: unknown, participation?: unknown) {
   const analysis_state = { run_state: { kind, computed_at: COMPUTED_AT, graph_hash_at_run: HASH } };
   const dispatch: InternalDispatch = async (path) => path.endsWith('/graph')
-    ? { status: 200, json: { graph, graph_hash: HASH, analysis_state, analysis_result: result, analysis_goal_certainty: stored } }
+    ? { status: 200, json: { graph, graph_hash: HASH, analysis_state, analysis_result: result, analysis_goal_certainty: stored,
+      ...(participation !== undefined ? { analysis_option_participation: participation } : {}) } }
     : { status: 500, json: {} };
   return createAgentCapabilities(dispatch, new ProposalStore()).getCanonicalState(ctx) as Promise<Record<string, any>>;
 }
 
 describe('saved Run reaches later Agent context without inventing certainty', () => {
+  it('current recorded option participation reaches AI context; stale and invalid records do not', async () => {
+    const verdict = [{ option_id: 'split', state: 'excluded_olumi_proposed' }];
+    const current = await canonicalState('complete_current', decisions, verdict);
+    expect(current.analysis.option_participation).toEqual(verdict);
+    const stale = await canonicalState('complete_stale', decisions, verdict);
+    expect(stale.analysis).not.toHaveProperty('option_participation');
+    const invalid = await canonicalState('complete_current', decisions, [{ option_id: 'split', state: 'invalid' }]);
+    expect(invalid.analysis).not.toHaveProperty('option_participation');
+  });
   it('a current selected Run carries its recorded earned zero and unearned explanation', async () => {
     const state = await canonicalState('complete_current', decisions);
     expect(state.ok).toBe(true);

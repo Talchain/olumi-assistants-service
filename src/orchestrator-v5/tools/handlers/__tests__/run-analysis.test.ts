@@ -290,6 +290,42 @@ describe('run_analysis handler — happy path', () => {
   });
 });
 
+describe('0.65.0 — post-gate option participation is one stored Run fact', () => {
+  const option = (id: string) => ({ id, option_id: id, label: id, interventions: { fac_price: 1.2 } });
+  const snapshot = (proposed: boolean, users = ['opt_a', 'opt_b']) => {
+    const options = [...users.map(option), option('opt_c')];
+    const graph = { nodes: [
+      { id: 'g', kind: 'goal', label: 'Goal' },
+      ...options.map((o) => ({ id: o.id, kind: 'option', label: o.label,
+        ...(proposed && o.id === 'opt_c' ? { proposed_by: 'olumi' as const } : {}) })),
+    ], edges: [] };
+    return makeScenarioSnapshot({ graph, rawPersistedGraph: graph, options });
+  };
+  const execute = async (model: RunAnalysisScenarioSnapshot) => {
+    const plotClient = makePlotClient(happyFixture as unknown as V2RunResponseEnvelope);
+    const outcome = await createRunAnalysisHandler({ plotClient, scenarioReader: makeScenarioReader(model) })(makeInvocation());
+    const fact = outcome.handler_facts[0];
+    if (fact?.fact_type !== 'run_analysis') throw new Error('expected a Run fact');
+    return { fact, submitted: (plotClient.run as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as { options: { option_id: string }[] } };
+  };
+
+  it('two user options exclude Olumi\'s proposal from PLoT and record why on that Run', async () => {
+    const { fact, submitted } = await execute(snapshot(true));
+    expect(submitted.options.map((o) => o.option_id)).toEqual(['opt_a', 'opt_b']);
+    expect(fact.result.option_participation).toEqual([{ option_id: 'opt_c', state: 'excluded_olumi_proposed' }]);
+    expect(talchainSchemas.RunAnalysisResultSchema.safeParse(fact.result).success).toBe(true);
+  });
+
+  it('one user option keeps Olumi\'s provisionally; adoption moves the hash and records []', async () => {
+    const before = await execute(snapshot(true, ['opt_a']));
+    const after = await execute(snapshot(false, ['opt_a']));
+    expect(before.submitted.options.map((o) => o.option_id)).toEqual(['opt_a', 'opt_c']);
+    expect(before.fact.result.option_participation).toEqual([{ option_id: 'opt_c', state: 'kept_olumi_provisional' }]);
+    expect(after.fact.result.option_participation).toEqual([]);
+    expect(after.fact.result.graph_hash_at_run).not.toBe(before.fact.result.graph_hash_at_run);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Seam item 3 — SAMPLES_REDUCED_FOR_COMPLEXITY disclosure (CRITIQUE_BUCKETS
 // ruling): the reduced-samples fact must reach the user on BOTH prose paths.
