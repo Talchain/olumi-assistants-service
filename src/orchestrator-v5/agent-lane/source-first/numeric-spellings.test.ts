@@ -32,6 +32,6 @@ describe('captured numeric spellings', () => {
     const captured = captures.find((item) => item.case === 'cloud')!;
     const result = compileSourceMeaning(captured.brief, captured.meaning);
     expect(result.graph.goal_constraints?.[0]).toMatchObject({ value: 2, unit: 'weeks', source_quote: 'without more than 2 weeks of migration downtime risk.' });
-    expect(result.unresolved).toContainEqual(expect.objectContaining({ ref: 'q2', code: 'unassigned_change' }));
+    expect(result.unresolved).toContainEqual(expect.objectContaining({ ref: 'q2', code: 'relative_goal_metric_unbound' }));
   });
 });

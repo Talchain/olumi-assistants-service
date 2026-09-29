@@ -90,11 +90,13 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
     }
   }
   const frameOf = (node: NodeV3T) => node.scale_frame ?? node.goal_threshold_cap ?? 1;
+  const goalQuantityRefs = new Set<string>();
   for (const [ref, node] of nodes) {
     const entityQuote = node.source_quote!;
     const held = claimsFor(ref);
     const currents = held.filter(({ claim }) => claim.role === 'current');
-    const targets = held.filter(({ claim }) => claim.role === 'target');
+    const targets = held.filter(({ claim }) => claim.role === 'target'
+      || (node.kind === 'goal' && claim.role === 'relative_change'));
     const levelUnits = held.filter(({ claim }) => claim.frame === 'level' && claim.role !== 'evidence');
     const unit = currents[0]?.claim.unit ?? levelUnits[0]?.claim.unit;
     if (unit && levelUnits.some(({ claim }) => !compatibleUnits(unit, claim.unit))) {
@@ -108,6 +110,29 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
       const { claim, value } = targets[0];
       if (node.kind !== 'goal') {
         issue(claim.ref, 'target_needs_goal_carrier', `Should "${node.label}" be the outcome to assess against this target?`);
+      } else if (claim.frame === 'change_rel') {
+        // Canonical relative targets store the signed fraction, while their
+        // unit and baseline belong to the metric, never to the percentage.
+        goalQuantityRefs.add(claim.ref);
+        const current = currents.length === 1 ? currents[0] : undefined;
+        if (!current) {
+          issue(claim.ref, 'relative_goal_metric_unbound', `What current quantity and unit does the stated ${claim.number.literal} change in "${node.label}" apply to?`);
+        } else {
+          node.source_quote = claim.number.source.quote;
+          node.goal_threshold_raw = value / 100;
+          node.goal_threshold_frame = 'change_rel';
+          if (claim.comparator && claim.comparator !== '=') node.goal_direction = claim.comparator;
+          node.goal_threshold_unit = unitText(current.claim.unit);
+          const targetLevel = current.value * (1 + value / 100);
+          const cap = current.value > 0 && targetLevel >= 0
+            ? resolveGoalThresholdCapWithProvenance(undefined, Math.max(current.value, targetLevel), unitText(current.claim.unit), undefined) : null;
+          if (cap) {
+            node.goal_threshold = value / 100;
+            node.goal_threshold_cap = cap.cap;
+            node.goal_threshold_cap_provenance = cap.provenance;
+            node.scale_frame = cap.cap;
+          } else issue(claim.ref, 'relative_goal_baseline_unusable', `What positive current level should the stated ${claim.number.literal} change in "${node.label}" be measured from?`);
+        }
       } else {
         node.source_quote = claim.number.source.quote;
         node.goal_threshold_raw = value;
@@ -257,7 +282,8 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
         value, unit: unitText(claim.unit), value_frame: claim.frame, label: target.label, provenance: 'explicit',
         ...(claim.number.source.quote.length <= 200 ? { source_quote: claim.number.source.quote } : {}),
       });
-    } else if (['proposed_level', 'absolute_change', 'relative_change'].includes(claim.role) && !usedQuantityRefs.has(claim.ref)) {
+    } else if (['proposed_level', 'absolute_change', 'relative_change'].includes(claim.role)
+      && !usedQuantityRefs.has(claim.ref) && !goalQuantityRefs.has(claim.ref)) {
       issue(claim.ref, 'unassigned_change', `Which option does "${claim.number.literal}" for "${target.label}" belong to?`);
     }
   }
