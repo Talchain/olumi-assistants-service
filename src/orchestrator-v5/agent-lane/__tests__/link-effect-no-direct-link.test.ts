@@ -54,6 +54,52 @@ describe('propose_link_effect on a pair the model connects only through other fa
     expect(store.size()).toBe(0);
   });
 
+  it('AIQ 5883735180 (ii) — served D3 has UNSIZED links on its paths: no comparison, and the split offer (never guessed, never one path)', async () => {
+    const { caps, store } = world(D3);
+    const r = await caps.proposeLinkEffect!(ctxSaying(SAID), ARGS) as Json;
+    expect(r).not.toHaveProperty('model_total');
+    const detail = String(r.detail);
+    expect(detail).toMatch(/has not sized every link on those paths, so it cannot compare its own total with theirs yet/);
+    expect(detail).toMatch(/how their figure splits between "Monthly churn", "Monthly gross new Pro subscribers" and "Price sensitivity"/);
+    expect(detail).toMatch(/record each one on its own link/);
+    expect(detail).toMatch(/Never guess the split, never put the whole figure on one path/);
+    expect(store.size()).toBe(0);
+  });
+
+  it('AIQ 5883735180 (i) — every link on the paths sized, units chaining: the model\'s total is the sum over paths of the products, said as a check', async () => {
+    const sized = structuredClone(D3);
+    const size = (from: string, to: string, amount: number, amount_unit: string, per_source_change_unit: string): void => {
+      const e = (sized.edges as Json[]).find((x) => x.from === from && x.to === to)!;
+      e.provenance = { ...(e.provenance ?? {}), magnitude: 'olumi_estimate', natural_effect: { amount, amount_unit, per_source_change: 1, per_source_change_unit } };
+    };
+    size('monthly_churn', 'paying_pro_subscribers', -15, 'subscribers', 'percentage points');
+    size('monthly_gross_new_pro_subscribers', 'paying_pro_subscribers', 1, 'subscribers', 'subscribers/month');
+    size('pro_plan_price', 'price_sensitivity', 0.01, 'index', 'GBP/month');
+    size('price_sensitivity', 'monthly_churn', 2, 'percentage points', 'index');
+    // By hand: churn 0.1 × −15 = −1.5 · sign-ups −5 × 1 = −5 · sensitivity 0.01 × 2 × −15 = −0.3 → −6.8 subscribers per £1.
+    const { caps, store } = world(sized);
+    const r = await caps.proposeLinkEffect!(ctxSaying(SAID), ARGS) as Json;
+    expect(r.refusal).toBe('no_direct_link');
+    expect(r.model_total.amount).toBeCloseTo(-6.8, 9);
+    expect(r.model_total).toEqual(expect.objectContaining({ per_source_change: 1, amount_unit: 'subscribers', per_source_change_unit: 'GBP/month' }));
+    expect(String(r.detail)).toMatch(/The model\u2019s own total through those paths is about -6\.8 subscribers per 1 GBP\/month/);
+    expect(String(r.detail)).toMatch(/as a check/);
+    expect(store.size()).toBe(0);
+  });
+
+  it('(i) FAILS CLOSED when a unit does not chain exactly: no comparison is invented', async () => {
+    const sized = structuredClone(D3);
+    for (const e of sized.edges as Json[]) {
+      if (['monthly_churn', 'monthly_gross_new_pro_subscribers', 'price_sensitivity'].includes(e.from) || (e.from === 'pro_plan_price' && e.to === 'price_sensitivity')) {
+        e.provenance = { ...(e.provenance ?? {}), magnitude: 'olumi_estimate', natural_effect: { amount: 1, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: 'percent/month' } };
+      }
+    }
+    const { caps } = world(sized);
+    const r = await caps.proposeLinkEffect!(ctxSaying(SAID), ARGS) as Json;
+    expect(r).not.toHaveProperty('model_total');
+    expect(String(r.detail)).toMatch(/cannot compare its own total with theirs yet/);
+  });
+
   it('CONTROL: a pair the model does not connect at all stays `no_such_link` (no paths invented)', async () => {
     const { caps } = world(D3);
     const said = 'Every 50 paying subscribers we lose costs us £1 on the Pro price.';

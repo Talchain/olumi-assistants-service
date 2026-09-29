@@ -1095,6 +1095,13 @@ function startingPointNoteFor(usersCount: number): string {
  * the graph, never the model's own reading. Shortest first, then by their words.
  */
 export function connectingPaths(raw: unknown, fromId: string, toId: string): string[][] {
+  const g = raw as { nodes?: { id?: unknown; label?: unknown }[] } | null;
+  const labelOf = new Map((g?.nodes ?? []).map((n) => [String(n?.id), typeof n?.label === 'string' ? n.label : String(n?.id)] as const));
+  return connectingIdPaths(raw, fromId, toId).map((p) => p.map((id) => labelOf.get(id) ?? id));
+}
+
+/** {@link connectingPaths} as node ids, in the same order (the sort reads the labels). */
+function connectingIdPaths(raw: unknown, fromId: string, toId: string): string[][] {
   const g = raw as { nodes?: { id?: unknown; label?: unknown }[]; edges?: { from?: unknown; to?: unknown }[] } | null;
   const labelOf = new Map((g?.nodes ?? []).map((n) => [String(n?.id), typeof n?.label === 'string' ? n.label : String(n?.id)] as const));
   const out = new Map<string, string[]>();
@@ -1111,9 +1118,39 @@ export function connectingPaths(raw: unknown, fromId: string, toId: string): str
     }
   };
   walk(fromId, [fromId]);
-  return found.map((p) => p.map((id) => labelOf.get(id) ?? id))
-    .sort((a, b) => a.length - b.length || a.join(' → ').localeCompare(b.join(' → ')))
-    .slice(0, 6);
+  const words = (p: string[]): string => p.map((id) => labelOf.get(id) ?? id).join(' → ');
+  return found.sort((a, b) => a.length - b.length || words(a).localeCompare(words(b))).slice(0, 6);
+}
+
+/**
+ * The model's own total effect through `idPaths`, in natural units per ONE unit of the source (AIQ 5883735180 (i)):
+ * the sum over paths of the product of each link's `natural_effect` slope. `null` — no comparison — unless EVERY link
+ * is sized (`olumi_estimate` / `user_stated`), each link's unit chains EXACTLY into the next, the first link is per
+ * `perUnit` and the last is in `amountUnit` (the user's), and no node on the way carries a nonlinear identity.
+ */
+function modelTotalThrough(raw: unknown, idPaths: readonly string[][], perUnit: string, amountUnit: string): number | null {
+  const g = raw as { nodes?: { id?: unknown; nonlinear_identity?: unknown }[]; edges?: Record<string, unknown>[] } | null;
+  const unitKey = (u: unknown): string | null => (typeof u === 'string' && u.trim() !== '' ? u.trim().toLowerCase() : null);
+  const nonlinear = new Set((g?.nodes ?? []).filter((n) => n?.nonlinear_identity != null).map((n) => String(n?.id)));
+  let total = 0;
+  for (const path of idPaths) {
+    let slope = 1;
+    let unitIn: string | null = unitKey(perUnit);
+    for (let i = 0; i + 1 < path.length; i += 1) {
+      if (i > 0 && nonlinear.has(path[i]!)) return null;
+      const e = (g?.edges ?? []).find((x) => x?.from === path[i] && x?.to === path[i + 1]);
+      const prov = e?.provenance as { magnitude?: unknown; natural_effect?: Record<string, unknown> } | undefined;
+      const ne = prov?.natural_effect;
+      if (prov?.magnitude !== 'olumi_estimate' && prov?.magnitude !== 'user_stated') return null;
+      if (typeof ne?.amount !== 'number' || typeof ne?.per_source_change !== 'number' || ne.per_source_change === 0) return null;
+      if (unitIn === null || unitKey(ne.per_source_change_unit) !== unitIn) return null;
+      slope *= ne.amount / ne.per_source_change;
+      unitIn = unitKey(ne.amount_unit);
+    }
+    if (unitIn === null || unitIn !== unitKey(amountUnit)) return null;
+    total += slope;
+  }
+  return Number.isFinite(total) ? total : null;
 }
 
 function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: { id: string; label: string }, to: { id: string; label: string }): string {
@@ -2567,14 +2604,27 @@ export function createAgentCapabilities(
       const edgeToken = linkEffectEdgeToken(g.raw, from.id, to.id);
       // ⛔ A TOTAL EFFECT IS NEVER A NEW DIRECT LINK (served 0929 D3): when the model connects the two only through other
       // factors, the user's figure is their total across those paths — said as such, never offered as a parallel link.
-      const paths = edgeToken === null ? connectingPaths(g.raw, from.id, to.id) : [];
-      if (edgeToken === null && paths.length > 0) {
-        return { ok: false, mutated: false, refusal: 'no_direct_link', paths,
+      const idPaths = edgeToken === null ? connectingIdPaths(g.raw, from.id, to.id) : [];
+      if (edgeToken === null && idPaths.length > 0) {
+        const paths = connectingPaths(g.raw, from.id, to.id);
+        const perOne = modelTotalThrough(g.raw, idPaths, perUnit, amountUnit);
+        const model_total = perOne === null ? undefined
+          : { amount: perOne * per, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit };
+        const firstHops = [...new Set(paths.map((p) => p[1]!))].map((l) => `"${l}"`);
+        const hops = firstHops.length > 1 ? `${firstHops.slice(0, -1).join(', ')} and ${firstHops[firstHops.length - 1]}` : firstHops[0]!;
+        // AIQ 5883735180: (i) a check only when every link on the paths is sized; else (ii) the split, never guessed.
+        const offer = model_total !== undefined
+          ? ` The model’s own total through those paths is about ${Math.round(model_total.amount * 100) / 100} ${amountUnit} per ${per} `
+            + `${perUnit}: say both, theirs and the model’s, as a check. That writes nothing.`
+          : ' The model has not sized every link on those paths, so it cannot compare its own total with theirs yet: say so. Offer: if '
+            + `they know how their figure splits between ${hops}, they can tell you each part and you will record each one on its own `
+            + 'link. Never guess the split, never put the whole figure on one path, and "mostly one of them" without numbers is not a split.';
+        return { ok: false, mutated: false, refusal: 'no_direct_link', paths, ...(model_total !== undefined ? { model_total } : {}),
           detail: `The model has no direct link from "${from.label}" to "${to.label}": it connects them through other factors `
             + `(${paths.map((p) => p.join(' → ')).join('; ')}). The user’s figure is their TOTAL effect across those paths, so no `
             + 'single link holds it, and nothing was prepared. Repeat their figure in their own words and say how the model connects the '
             + 'two. Never offer a new direct link between them (it would count the effect twice), and never ask for a strength band in '
-            + 'place of their figure.' };
+            + `place of their figure.${offer}` };
       }
       if (edgeToken === null) {
         return { ok: false, mutated: false, refusal: 'no_such_link',
