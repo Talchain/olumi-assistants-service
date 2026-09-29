@@ -42,6 +42,7 @@ import { buildAnalysisAbsentTemplate } from "../../../orchestrator-v5/tools/hand
 import { GraphV3, type GraphV3T, type OptionV3T } from "../../../schemas/cee-v3.js";
 import { AnalysisReadyPayload as AnalysisReadyPayloadSchema, type AnalysisReadyPayloadT } from "../../../schemas/analysis-ready.js";
 import { buildAnalysisReadyPayload, validateAnalysisReadyPayload } from "../analysis-ready.js";
+import { rebindRecordedAnalysisHash } from "../../../../tests/helpers/legacy-analysis-hash-v2.js";
 
 // ---------------------------------------------------------------------------
 // The served graph (APPEND-ONLY HISTORIC RECORD — see its `_source`).
@@ -296,14 +297,21 @@ function servedGraphWithGrandfatherLevel(): Fixture["graph"] {
 
 describe("A1b — the model-level Run verdict does not move", () => {
   it("may_run, analysis_admission, readiness_issues and payload status are byte-identical to the rule-off record", () => {
-    // CONTROL: the hash function is the one the record was taken with.
-    expect(canonical(servedGraph()).analysis_admission?.graph_hash).toBe(RECORDED_WITH_RULE_OFF.analysis_admission.graph_hash);
+    // CONTROL: the records were taken under the pre-0.62.0 projection; `rebindRecordedAnalysisHash` proves each record's
+    // hash IS that projection of these bytes (throws otherwise), then gives the current projection's hash of the same
+    // bytes. Nothing recorded is edited (Shared Data row 1, projection version 3).
+    expect(canonical(servedGraph()).analysis_admission?.graph_hash)
+      .toBe(rebindRecordedAnalysisHash(servedGraph(), RECORDED_WITH_RULE_OFF.analysis_admission.graph_hash));
+    const recordedPatched = {
+      ...RECORDED_WITH_STATUS_QUO_LEVEL.analysis_admission,
+      graph_hash: rebindRecordedAnalysisHash(servedGraphWithGrandfatherLevel(), RECORDED_WITH_STATUS_QUO_LEVEL.analysis_admission.graph_hash),
+    };
     const r = canonical(servedGraphWithGrandfatherLevel());
     // The demotion really happened in this run — otherwise identity is vacuous.
     expect(optionRow(r, GRANDFATHER_OPTION).status).toBe("needs_encoding");
     expect(r.may_run).toBe(true);
     expect(JSON.stringify(r.may_run)).toBe(JSON.stringify(RECORDED_WITH_STATUS_QUO_LEVEL.may_run));
-    expect(JSON.stringify(r.analysis_admission)).toBe(JSON.stringify(RECORDED_WITH_STATUS_QUO_LEVEL.analysis_admission));
+    expect(JSON.stringify(r.analysis_admission)).toBe(JSON.stringify(recordedPatched));
     expect(JSON.stringify(r.readiness_issues)).toBe(JSON.stringify(RECORDED_WITH_STATUS_QUO_LEVEL.readiness_issues));
     expect(r.status).toBe(RECORDED_WITH_STATUS_QUO_LEVEL.status);
   });

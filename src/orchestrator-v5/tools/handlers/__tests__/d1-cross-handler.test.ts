@@ -296,8 +296,13 @@ describe('D1 cross-handler family invariants', () => {
     expect(churnAfter?.observed_state?.raw_value).toBe(churnBefore?.observed_state?.raw_value);
     expect(churnAfter?.observed_state?.unit).toBe(churnBefore?.observed_state?.unit);
     expect(churnAfter?.observed_state?.cap).toBe(churnBefore?.observed_state?.cap);
-    // Provenance stamping on noop is intentional — see file header.
-    expect(churnAfter?.provenance).toBe('user_set');
+    // R11 FOR NODES (AIQ #72 5881277231; Shared Data row 1): a set to the value already stored is REVIEW — every byte of
+    // who-authored-what stays (no `user_set`, `source` untouched) and the act is recorded as `reviewed_by_user`. Since
+    // schemas 0.62.0 the analysis hash reads `source`, so the old stamp here would have staled the Run on a "no-op".
+    // (Before this row pinned the stamp, as the edge row below did before R11.)
+    expect(churnAfter?.provenance).toBeUndefined();
+    expect(churnAfter?.observed_state?.source).toBe(churnBefore?.observed_state?.source);
+    expect((churnAfter?.observed_state as { reviewed_by_user?: { intent?: string } } | undefined)?.reviewed_by_user?.intent).toBe('confirm');
 
     // 2. adjust_edge_strength — strength unchanged, edge provenance stamped.
     const edgeIngress = buildD1Fixture();

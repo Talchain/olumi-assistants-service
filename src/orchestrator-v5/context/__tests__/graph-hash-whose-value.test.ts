@@ -58,3 +58,62 @@ describe('analysis revision: whose value it is', () => {
     expect(computeAnalysisAffectingGraphHash(churnGraph({ ...olumis, reviewed_by_user: { intent: 'confirm', at: '2026-09-29T00:40:00.000Z' } }))).toBe(base);
   });
 });
+
+// ── The rest of the version-3 inputs (schemas 0.62.0; AIQ 5881600412 / 5881815357; R3 5881451910) ──────────────────
+
+function goalGraph(goal: Record<string, unknown>, edgeProvenance?: Record<string, unknown>): GraphV3T {
+  return {
+    goal_node_id: 'goal',
+    nodes: [
+      { id: 'goal', kind: 'goal', label: 'Monthly recurring revenue', ...goal },
+      { id: 'price', kind: 'factor', label: 'Price', observed_state: { value: 0.5, source: 'user_specified' } },
+    ],
+    edges: [
+      { from: 'price', to: 'goal', strength: { mean: 0.4, std: 0.1 }, exists_probability: 1, effect_direction: 'positive',
+        ...(edgeProvenance !== undefined ? { provenance: edgeProvenance } : {}) },
+    ],
+  } as unknown as GraphV3T;
+}
+
+const h = (g: GraphV3T) => computeAnalysisAffectingGraphHash(g);
+
+describe('analysis revision: the DERIVED direction the run sends (AIQ 5881600412; R3 rows b/c)', () => {
+  it('R3 (b): a held ">" goal renamed from growth to reduce moves the hash (the sent direction flips)', () => {
+    expect(h(goalGraph({ goal_direction: '>', label: 'Reduce monthly costs' })))
+      .not.toBe(h(goalGraph({ goal_direction: '>', label: 'Monthly recurring revenue' })));
+  });
+
+  it('R3 (c): a cosmetic rename that leaves the sent direction alone leaves the hash IDENTICAL', () => {
+    expect(h(goalGraph({ goal_direction: '>', label: 'MRR (monthly)' })))
+      .toBe(h(goalGraph({ goal_direction: '>', label: 'Monthly recurring revenue' })));
+  });
+});
+
+describe('analysis revision: the other stored run inputs', () => {
+  const base = h(goalGraph({}));
+
+  it.each([
+    ['goal_threshold_frame', { goal_threshold_frame: 'level' }],
+    ['goal_direction (held comparator)', { goal_direction: '>=' }],
+    ['quantity_frame', { quantity_frame: 'level' }],
+    ['analysis_participation', { analysis_participation: 'retained_excluded' }],
+  ])('%s moves the hash', (_name, extra) => {
+    expect(h(goalGraph(extra))).not.toBe(base);
+  });
+
+  it('observed_state.std (a stated spread) moves the hash', () => {
+    const g = goalGraph({}) as unknown as { nodes: Array<Record<string, unknown>> };
+    (g.nodes[1]!.observed_state as Record<string, unknown>).std = 0.05;
+    expect(h(g as unknown as GraphV3T)).not.toBe(base);
+  });
+
+  it('edge provenance source / magnitude / natural_effect.amount_unit move the hash; reasoning and amount do not', () => {
+    const effect = { amount: 500, amount_unit: 'GBP', per_source_change: 1, per_source_change_unit: 'GBP', strength_mean: 0.4, strength_mean_frame: 'edge_strength' };
+    const placeholder = h(goalGraph({}, { source: 'cee_hypothesis', magnitude: 'olumi_placeholder', natural_effect: effect }));
+    expect(h(goalGraph({}, { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: effect }))).not.toBe(placeholder);
+    expect(h(goalGraph({}, { source: 'user_specified', magnitude: 'olumi_placeholder', natural_effect: effect }))).not.toBe(placeholder);
+    expect(h(goalGraph({}, { source: 'cee_hypothesis', magnitude: 'olumi_placeholder', natural_effect: { ...effect, amount_unit: '%' } }))).not.toBe(placeholder);
+    // CONTRAST: display members stay out.
+    expect(h(goalGraph({}, { source: 'cee_hypothesis', magnitude: 'olumi_placeholder', natural_effect: { ...effect, amount: 600 }, reasoning: 'why' }))).toBe(placeholder);
+  });
+});
