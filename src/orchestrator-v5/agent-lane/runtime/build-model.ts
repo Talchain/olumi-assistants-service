@@ -36,6 +36,8 @@
 import { createHash } from 'node:crypto';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine } from '../keep-options-apart.js';
+import { markOlumiOptions } from '../olumi-option-marker.js';
+import { quoteListedOptions } from '../option-lineage.js';
 import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, productIdentityOpenQuestions, sumIdentityOpenQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
@@ -150,7 +152,12 @@ export function buildCandidateSchema(): Record<string, unknown> {
       // requires every key, so "optional" is `null`.
       is_status_quo: { anyOf: [{ type: 'boolean' }, { type: 'null' }], description:
         'true ONLY for the one option that keeps things as they are now (the current state or status quo), whatever it is called. null for every other option. Never true on more than one option.' },
-    }, ['label', 'provenance', 'changes', 'interventions', 'is_status_quo']) },
+      // ⭐ OPTION LINEAGE (MG #72 5887699714, DL 5887755959, AIQ 5887822471): the brief's own words for the option, so the
+      // Run can bind each option the brief lists. REQUIRED so strict output says "not named" (null) rather than omit it.
+      // `option-lineage.ts` writes a quote only when these words locate exactly one list item; a label is never evidence.
+      brief_words: { anyOf: [{ type: 'string' }, { type: 'null' }], description:
+        'The words in the brief that name this option, copied exactly as the brief writes them (from a list of options, the whole item). null when the brief does not name it: the status quo you added, or an option you suggest.' },
+    }, ['label', 'provenance', 'changes', 'interventions', 'is_status_quo', 'brief_words']) },
     factors: { type: 'array', items: obj({
       label: { type: 'string' }, role: { type: 'string', enum: ['controllable', 'observable', 'external'] },
       // ⭐ A CHANGE FROM TODAY is 0 today BY DEFINITION, not by estimate (served AI Quality B3, CEE 1f8327c: "cut our list
@@ -1571,7 +1578,9 @@ export async function buildModelFromBrief(
 
   const graph = {
     // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
-    nodes: goalNodes,
+    // An option the brief lists carries the brief's words for it (`source_quote`, the Run's intake binding), and an option
+    // Olumi added carries `proposed_by: 'olumi'` (the Run's filter and the analysis hash read it; never the brief).
+    nodes: markOlumiOptions(quoteListedOptions(goalNodes, candidate, brief), candidate, brief),
     edges: admitted.edges,
     ...(admitted.goal_constraints.length > 0
       ? { goal_constraints: admitted.goal_constraints }

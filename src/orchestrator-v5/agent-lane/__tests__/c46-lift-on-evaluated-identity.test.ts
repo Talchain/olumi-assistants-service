@@ -57,9 +57,9 @@ function paul(): Record<string, unknown> {
     goal,
     constraints: [],
     options: [
-      { label: 'Keep Pro at £49', provenance: 'explicit', is_status_quo: true, changes: [],
+      { label: 'Keep Pro at £49', provenance: 'explicit', is_status_quo: true, brief_words: null, changes: [],
         interventions: [{ factor_label: 'Pro plan price', value: 49, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] },
-      { label: 'Raise Pro to £59', provenance: 'explicit', is_status_quo: null, changes: [],
+      { label: 'Raise Pro to £59', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: [],
         interventions: [{ factor_label: 'Pro plan price', value: 59, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] },
     ],
     factors: [
@@ -90,14 +90,14 @@ function twoPlans(): Record<string, unknown> {
     goal,
     constraints: [],
     options: [
-      { label: 'Keep both plans', provenance: 'explicit', is_status_quo: true, changes: [],
+      { label: 'Keep both plans', provenance: 'explicit', is_status_quo: true, brief_words: null, changes: [],
         interventions: [
           { factor_label: 'Pro plan price', value: 49, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' },
           { factor_label: 'Team plan price', value: 99, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' },
         ] },
-      { label: 'Raise Pro to £59', provenance: 'explicit', is_status_quo: null, changes: [],
+      { label: 'Raise Pro to £59', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: [],
         interventions: [{ factor_label: 'Pro plan price', value: 59, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] },
-      { label: 'Raise Team to £119', provenance: 'explicit', is_status_quo: null, changes: [],
+      { label: 'Raise Team to £119', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: [],
         interventions: [{ factor_label: 'Team plan price', value: 119, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] },
     ],
     factors: [

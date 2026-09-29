@@ -283,8 +283,8 @@ describe('CONTROLS — the brief path\'s operator and scale rules hold on this p
       goal: { metric: 'MRR', operator, target_stated: true, value: 20000, unit: 'GBP MRR', horizon_months: null, provenance: 'explicit', baseline_known: true, baseline_value: baseline, baseline_provenance: 'explicit' },
       constraints: [], risks: [], outcomes: [],
       options: [
-        { label: 'Raise to £59', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [{ factor_label: 'Pro plan price', value: 59, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] },
-        { label: 'Raise to £55', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [{ factor_label: 'Pro plan price', value: 55, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] },
+        { label: 'Raise to £59', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: [], interventions: [{ factor_label: 'Pro plan price', value: 59, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] },
+        { label: 'Raise to £55', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: [], interventions: [{ factor_label: 'Pro plan price', value: 55, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] },
       ],
       factors: [{ label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit', plausible_max: 200 }],
       links: [{ from: 'Pro plan price', to: 'MRR', direction: 'positive', provenance: 'inferred' }],

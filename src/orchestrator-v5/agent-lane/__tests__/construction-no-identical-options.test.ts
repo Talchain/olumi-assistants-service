@@ -89,7 +89,7 @@ function candidateFromServed(g: SGraph, opts: { olumi?: 'ai_proposed' | 'inferre
           factor_label: byId.get(f)!.label, value: round(lv.value * frameOf(byId.get(f)!)), value_kind: 'absolute',
           unit: unitOf(byId.get(f)!) ?? '', provenance: lv.source === 'brief_extraction' ? 'explicit' : 'ai_proposed',
         })),
-        is_status_quo: o.is_baseline === true ? true : null,
+        is_status_quo: o.is_baseline === true ? true : null, brief_words: null,
       };
     }),
     factors: factors.map((f) => {
@@ -357,7 +357,13 @@ describe('controls — what the rule must never touch', () => {
     ['£49 with AI release (f-20260926T022612Z, CEE cb1778b): its price equals today and its AI level equals £59\'s, yet no option matches it on both', 'f-20260926T022612Z', AT_49, '49_with_ai_release'],
   ])('CONTROL %s — kept; the served graph, and base\'s registration byte for byte', async (_name, key, run, olumiId) => {
     expect(run.brief.may_run).toBe(true);
-    const { graph, out } = await build(candidateFromServed(run.brief.draft_graph, { olumi: 'ai_proposed', horizon: null }));
+    const { graph: registered, out } = await build(candidateFromServed(run.brief.draft_graph, { olumi: 'ai_proposed', horizon: null }));
+    // The construction mark (`olumi-option-marker.ts`, DL #72 5887534233): the Olumi-added £54 option, and only it, carries
+    // `proposed_by: 'olumi'`. "£49 with AI release" sets the user's own £49, so it stays unmarked (the level backstop).
+    // The served graph and base's registration predate the mark; everything else is compared byte for byte, as before.
+    const marked = (registered.nodes as { id: string; proposed_by?: unknown }[]).filter((n) => n.proposed_by !== undefined).map((n) => [n.id, n.proposed_by]);
+    expect(marked).toEqual(key === 'f-20260926T001627Z' ? [[olumiId, 'olumi']] : []);
+    const graph = { ...registered, nodes: (registered.nodes as Record<string, unknown>[]).map(({ proposed_by: _mark, ...n }) => n) } as typeof registered;
     expect(optionIds(graph)).toContain(olumiId);
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
     expect(withoutG1(asServedBeforeOneForm(graph, run.brief.draft_graph), G1_NO_HORIZON_WORDS).nodes).toEqual(olumisKnownLevels(run.brief.draft_graph.nodes));
@@ -422,7 +428,7 @@ describe('controls — what the rule must never touch', () => {
       .filter((o) => o.label !== 'Test £59 with AI release')
       .map((o) => (o.label !== 'Keep current pricing' ? o : { ...o, changes: ['Pro plan price', 'AI feature availability'] })) } as typeof base;
     // Vacuity: as drafted it acts on exactly the user's option's factors with no level — the withheld shape, but the status quo.
-    expect(draft.options.find((o) => o.label === 'Keep current pricing')).toMatchObject({ is_status_quo: true, provenance: 'ai_proposed', interventions: [] });
+    expect(draft.options.find((o) => o.label === 'Keep current pricing')).toMatchObject({ is_status_quo: true, brief_words: null, provenance: 'ai_proposed', interventions: [] });
     const { graph, out } = await build(draft);
     expect(optionIds(graph)).toEqual(['keep_current_pricing', '59_with_ai_release']);
     expect(out).not.toHaveProperty('options_withheld');
@@ -467,7 +473,7 @@ describe('controls — what the rule must never touch', () => {
  */
 describe('fix round — an open cell can equal at most one level; the status quo is never a twin', () => {
   const OPT = (label: string, provenance: 'explicit' | 'ai_proposed' | 'inferred', changes: string[], level?: { factor: string; value: number }) => ({
-    label, provenance, changes, is_status_quo: null,
+    label, provenance, changes, is_status_quo: null, brief_words: null,
     interventions: level === undefined ? [] : [{ factor_label: level.factor, value: level.value, value_kind: 'absolute', unit: '£ per month', provenance: 'ai_proposed' }],
   });
   // Read back in the served short form (P2 A5, `one-form-levels.ts`), on the frames of the served shape each row was
@@ -773,7 +779,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
   /** Within the limit: `padded(0, withTest)` (the user's option gap-free) plus Olumi's £54, AI availability open unless `o54` sets it. */
   const with54 = (withTest: boolean, o54: Partial<Opt> = {}) => {
     const base = padded(0, withTest);
-    const opt = { label: '£54 with AI release', provenance: 'ai_proposed', changes: ['AI feature availability'], is_status_quo: null, interventions: [PRICE_54], ...o54 } as unknown as Opt;
+    const opt = { label: '£54 with AI release', provenance: 'ai_proposed', changes: ['AI feature availability'], is_status_quo: null, brief_words: null, interventions: [PRICE_54], ...o54 } as unknown as Opt;
     return { ...base, options: [...base.options, opt] } as typeof base;
   };
   const LEVELLED_54 = { changes: [], interventions: [PRICE_54, { factor_label: 'AI feature availability', value: 0.5, value_kind: 'absolute', unit: '', provenance: 'ai_proposed' }] } as unknown as Partial<Opt>;
@@ -877,7 +883,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
   /** Within the limit, two gaps: `with54(true, o54)` plus Olumi's £64, its price level set and AI availability open unless `o64` sets it. */
   const with54And64 = (o54: Partial<Opt> = {}, o64: Partial<Opt> = {}) => {
     const base = with54(true, o54);
-    const opt = { label: '£64 with AI release', provenance: 'ai_proposed', changes: ['AI feature availability'], is_status_quo: null, interventions: [{ ...PRICE_54, value: 64 }], ...o64 } as unknown as Opt;
+    const opt = { label: '£64 with AI release', provenance: 'ai_proposed', changes: ['AI feature availability'], is_status_quo: null, brief_words: null, interventions: [{ ...PRICE_54, value: 64 }], ...o64 } as unknown as Opt;
     return { ...base, options: [...base.options, opt] } as typeof base;
   };
   const GAP_64 = GAP_54.replace('£54 with AI release', '£64 with AI release');
@@ -939,7 +945,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
     // By identity, never by count: the retry registers four options, as the first draft did, and covers strictly more.
     const first = with54And64();
     const base = with54And64({ interventions: [{ ...PRICE_54, value: 59 }] }, LEVELLED(64, 0.5));
-    const retry = { ...base, options: [...base.options, { label: '£69 with AI release', provenance: 'ai_proposed', is_status_quo: null, ...LEVELLED(69, 0.8) } as unknown as Opt] } as typeof base;
+    const retry = { ...base, options: [...base.options, { label: '£69 with AI release', provenance: 'ai_proposed', is_status_quo: null, brief_words: null, ...LEVELLED(69, 0.8) } as unknown as Opt] } as typeof base;
     expect(gapsOnRegistered(retry)).toHaveLength(1);
     expect(withheldBy(retry)).toEqual(['Test £59 with AI release', '£54 with AI release']);
     const retryAdmitted = admitCandidateModel(prepareProvisionalCandidate(retry).candidate, {});
@@ -987,7 +993,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
   /** `out.withheld`'s loop entries: the first draft's loop link is withheld by admission; a retry that broke the loop has none. */
   const loopWithheld = (out: Record<string, unknown>) => ((out.withheld ?? []) as { from: string; to: string; reason: string }[])
     .filter((w) => w.reason === 'loop_closing_link').map((w) => `${w.from}->${w.to}`);
-  const NEW_64_GAP = { label: '£64 with AI release', provenance: 'ai_proposed', changes: ['AI feature availability'], is_status_quo: null, interventions: [{ ...PRICE_54, value: 64 }] } as unknown as Opt;
+  const NEW_64_GAP = { label: '£64 with AI release', provenance: 'ai_proposed', changes: ['AI feature availability'], is_status_quo: null, brief_words: null, interventions: [{ ...PRICE_54, value: 64 }] } as unknown as Opt;
 
   it('CONTROL (row 2k, loop + gap): a retry that breaks the loop and leaves £54 as drafted is adopted — strict-more is waived, nothing covers less', async () => {
     const { out, graph, reqs } = await construct(withLoop(with54(true)), with54(true));
@@ -1054,7 +1060,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
    */
   const KEEP = 'Keep current pricing';
   const declare = <D extends ReturnType<typeof with54>>(d: D, label: string, v: boolean | null): D =>
-    ({ ...d, options: d.options.map((o) => (o.label === label ? { ...o, is_status_quo: v } : o)) }) as D;
+    ({ ...d, options: d.options.map((o) => (o.label === label ? { ...o, is_status_quo: v, brief_words: null } : o)) }) as D;
   const held = (g: SGraph) => g.nodes.filter((n) => n.kind === 'option' && n.is_baseline === true).map((n) => n.id);
   const keepEdges = (g: SGraph) => g.edges.filter((e) => e.from === 'keep_current_pricing').map((e) => e.to).sort();
   const AI_54 = (value: number, value_kind: 'absolute' | 'additional', unit: string) =>
@@ -1072,7 +1078,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
   };
 
   it('PRECONDITION (rows 3): the first draft declares "Keep current pricing"; its admission holds it, stamped', async () => {
-    expect(with54(true).options.find((o) => o.label === KEEP)).toMatchObject({ is_status_quo: true, changes: [], interventions: [] });
+    expect(with54(true).options.find((o) => o.label === KEEP)).toMatchObject({ is_status_quo: true, brief_words: null, changes: [], interventions: [] });
     const { out, graph } = await construct(with54(true), with54(true));
     expectFirstDraftRegistered(out, graph);
   });

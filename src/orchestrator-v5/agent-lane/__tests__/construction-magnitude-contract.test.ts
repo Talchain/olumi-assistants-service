@@ -48,12 +48,12 @@ function t3(aiToChurn: Size, aiToChurnProvenance: Prov = 'inferred') {
     },
     constraints: [{ metric: 'Monthly churn', operator: '<', value: 10, unit: '%', provenance: 'explicit', frame: 'level' }],
     options: [
-      { label: 'Carry on as now', provenance: 'inferred', changes: [], interventions: [], is_status_quo: true },
-      { label: 'Release AI at £49', provenance: 'inferred', changes: [], is_status_quo: null, interventions: [
+      { label: 'Carry on as now', provenance: 'inferred', changes: [], interventions: [], is_status_quo: true, brief_words: null },
+      { label: 'Release AI at £49', provenance: 'inferred', changes: [], is_status_quo: null, brief_words: null, interventions: [
         { factor_label: 'Pro plan price', value: 49, value_kind: 'absolute', unit: 'GBP/month', provenance: 'explicit' },
         { factor_label: 'AI feature availability', value: 1, value_kind: 'absolute', unit: 'available', provenance: 'ai_proposed' },
       ] },
-      { label: 'Raise price with AI release', provenance: 'explicit', changes: [], is_status_quo: null, interventions: [
+      { label: 'Raise price with AI release', provenance: 'explicit', changes: [], is_status_quo: null, brief_words: null, interventions: [
         { factor_label: 'Pro plan price', value: 59, value_kind: 'absolute', unit: 'GBP/month', provenance: 'explicit' },
         { factor_label: 'AI feature availability', value: 1, value_kind: 'absolute', unit: 'available', provenance: 'ai_proposed' },
       ] },
@@ -178,12 +178,12 @@ function saas(priceToChurn: Size = { amount: 0.5, per: 10, by: 'ai_proposed' }) 
     },
     constraints: [],
     options: [
-      { label: 'Carry on as now', provenance: 'inferred', changes: [], interventions: [], is_status_quo: true },
-      { label: 'Raise price to £59', provenance: 'explicit', changes: [], is_status_quo: null, interventions: [
+      { label: 'Carry on as now', provenance: 'inferred', changes: [], interventions: [], is_status_quo: true, brief_words: null },
+      { label: 'Raise price to £59', provenance: 'explicit', changes: [], is_status_quo: null, brief_words: null, interventions: [
         { factor_label: 'Pro plan price', value: 59, value_kind: 'absolute', unit: 'GBP/month', provenance: 'explicit' }] },
-      { label: 'Launch a free trial', provenance: 'explicit', changes: [], is_status_quo: null, interventions: [
+      { label: 'Launch a free trial', provenance: 'explicit', changes: [], is_status_quo: null, brief_words: null, interventions: [
         { factor_label: 'Free trial', value: 1, value_kind: 'absolute', unit: 'on', provenance: 'explicit' }] },
-      { label: 'Hire two sales reps', provenance: 'explicit', changes: [], is_status_quo: null, interventions: [
+      { label: 'Hire two sales reps', provenance: 'explicit', changes: [], is_status_quo: null, brief_words: null, interventions: [
         { factor_label: 'Sales hires', value: 7, value_kind: 'absolute', unit: 'hires', provenance: 'explicit' }] },
     ],
     factors: [

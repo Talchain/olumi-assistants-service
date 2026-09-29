@@ -45,9 +45,9 @@ function candidate(operator: CandidateConstraint['operator']): CandidateModel {
     },
     constraints: [{ metric: 'Monthly churn', operator, value: 4, unit: '%', provenance: 'explicit', frame: 'level' }],
     options: [
-      { label: 'Increase the Pro plan price to £59', provenance: 'explicit', is_status_quo: false, changes: ['Pro plan price'],
+      { label: 'Increase the Pro plan price to £59', provenance: 'explicit', is_status_quo: false, brief_words: null, changes: ['Pro plan price'],
         interventions: [{ factor_label: 'Pro plan price', value: 59, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] },
-      { label: 'Keep the Pro plan price at £49', provenance: 'explicit', is_status_quo: true, changes: ['Pro plan price'],
+      { label: 'Keep the Pro plan price at £49', provenance: 'explicit', is_status_quo: true, brief_words: null, changes: ['Pro plan price'],
         interventions: [{ factor_label: 'Pro plan price', value: 49, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] },
     ],
     factors: [

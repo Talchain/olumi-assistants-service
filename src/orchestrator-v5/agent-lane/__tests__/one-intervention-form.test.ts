@@ -69,10 +69,10 @@ function aCandidate(): CandidateModel {
     },
     constraints: [{ metric: 'Monthly churn rate', operator: '<=', value: 4, unit: '%', provenance: 'explicit', frame: 'level' }],
     options: [
-      { label: 'Keep Pro at £49', provenance: 'inferred', interventions: [], changes: [], is_status_quo: true },
-      { label: RAISE_59, provenance: 'explicit', changes: [], is_status_quo: false,
+      { label: 'Keep Pro at £49', provenance: 'inferred', interventions: [], changes: [], is_status_quo: true, brief_words: null },
+      { label: RAISE_59, provenance: 'explicit', changes: [], is_status_quo: false, brief_words: null,
         interventions: [{ factor_label: PRICE, value: 59, unit: 'GBP per month', provenance: 'explicit' }] },
-      { label: RAISE_54, provenance: 'ai_proposed', changes: [], is_status_quo: false,
+      { label: RAISE_54, provenance: 'ai_proposed', changes: [], is_status_quo: false, brief_words: null,
         interventions: [{ factor_label: PRICE, value: 54, unit: 'GBP per month', provenance: 'ai_proposed' }] },
     ],
     factors: [
@@ -395,7 +395,7 @@ describe('(h) AIQ Q2 — a scale_frame-only level carries the pair and reaches P
       options: [
         ...c.options.map((o) => o.label !== RAISE_54 ? o
           : { ...o, interventions: [...o.interventions!, { factor_label: SPEND, value: 20000, unit: 'GBP', provenance: 'ai_proposed' }] }),
-        { label: CAMPAIGN, provenance: 'explicit', changes: [], is_status_quo: false,
+        { label: CAMPAIGN, provenance: 'explicit', changes: [], is_status_quo: false, brief_words: null,
           interventions: [{ factor_label: SUBS, value: 90, unit: 'subscribers', provenance: 'explicit' }] },
       ],
       links: [

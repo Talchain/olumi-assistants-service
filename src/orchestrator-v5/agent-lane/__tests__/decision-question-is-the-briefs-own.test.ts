@@ -52,8 +52,8 @@ function pricing(question: string | null | undefined, optionLabels: [string, str
     },
     constraints: [],
     options: [
-      { label: optionLabels[0], provenance: 'explicit', is_status_quo: true, changes: [], interventions: [] },
-      { label: optionLabels[1], provenance: 'explicit', is_status_quo: null, changes: [],
+      { label: optionLabels[0], provenance: 'explicit', is_status_quo: true, brief_words: null, changes: [], interventions: [] },
+      { label: optionLabels[1], provenance: 'explicit', is_status_quo: null, brief_words: null, changes: [],
         interventions: [{ factor_label: 'Pro plan price', value: 59, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] },
     ],
     factors: [
@@ -83,7 +83,7 @@ function midmarket(question: string | null): Record<string, unknown> {
       provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null,
     },
     constraints: [],
-    options: options.map((label, i) => ({ label, provenance: 'explicit', is_status_quo: null, changes: [],
+    options: options.map((label, i) => ({ label, provenance: 'explicit', is_status_quo: null, brief_words: null, changes: [],
       interventions: [{ factor_label: 'Engineering capacity', value: 20 + i, value_kind: 'absolute', unit: 'engineers', provenance: 'explicit' }] })),
     factors: [{ label: 'Engineering capacity', role: 'controllable', baseline_known: true, baseline_value: 20, unit: 'engineers', provenance: 'explicit', plausible_max: 100 }],
     risks: [], outcomes: [],

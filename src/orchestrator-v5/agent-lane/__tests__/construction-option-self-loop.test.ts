@@ -94,18 +94,18 @@ function servedCandidate(edit: { links?: Link[]; advertisingLevel?: Level; adver
       { metric: 'Pro monthly churn', operator: '<=', value: 4, unit: 'percent per month', provenance: 'explicit', frame: 'level' },
     ],
     options: [
-      { label: 'Continue as now', provenance: 'inferred', changes: [], interventions: [], is_status_quo: true },
-      { label: 'Feature + £59 price', provenance: 'explicit', changes: [], is_status_quo: null, interventions: [
+      { label: 'Continue as now', provenance: 'inferred', changes: [], interventions: [], is_status_quo: true, brief_words: null },
+      { label: 'Feature + £59 price', provenance: 'explicit', changes: [], is_status_quo: null, brief_words: null, interventions: [
         { factor_label: 'Pro plan price', value: 59, unit: 'GBP per month', provenance: 'explicit' },
         { factor_label: 'Feature investment', value: 20000, unit: 'GBP over six months', provenance: 'inferred' },
         { factor_label: 'Six-month incremental spend', value: 20000, unit: 'GBP over six months', provenance: 'inferred' },
       ] },
-      { label: 'Advertising investment', provenance: 'explicit', changes: [], is_status_quo: null, interventions: [
+      { label: 'Advertising investment', provenance: 'explicit', changes: [], is_status_quo: null, brief_words: null, interventions: [
         { ...level, factor_label: factorLabel },
         { factor_label: 'Six-month incremental spend', value: 20000, unit: 'GBP over six months', provenance: 'inferred' },
         { factor_label: 'Paid Pro acquisition rate', value: 50, unit: 'new Pro subscribers per month', provenance: 'inferred' },
       ] },
-      { label: 'Features, hold £49 price', provenance: 'inferred', changes: [], is_status_quo: null, interventions: [
+      { label: 'Features, hold £49 price', provenance: 'inferred', changes: [], is_status_quo: null, brief_words: null, interventions: [
         { factor_label: 'Pro plan price', value: 49, unit: 'GBP per month', provenance: 'explicit' },
         { factor_label: 'Feature investment', value: 20000, unit: 'GBP over six months', provenance: 'inferred' },
         { factor_label: 'Six-month incremental spend', value: 20000, unit: 'GBP over six months', provenance: 'inferred' },
