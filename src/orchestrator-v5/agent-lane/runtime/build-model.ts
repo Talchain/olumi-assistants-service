@@ -37,7 +37,7 @@ import { createHash } from 'node:crypto';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine } from '../keep-options-apart.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
-import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, productIdentityOpenQuestions, sumIdentityOpenQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
+import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -1579,6 +1579,8 @@ export async function buildModelFromBrief(
   // not only said in `not_represented` (which only the Agent's model reads). After the scope and deadline
   // questions, ahead of the drafter's own; nothing for a stable product or a linear model.
   openQuestions.unshift(...productIdentityOpenQuestions(admitted));
+  // AIQ 5898415568 run 0 / R3 5898443502: Olumi's product refused for a part with no level asks for those figures, once.
+  openQuestions.unshift(...unlevelledProductQuestions(admitted));
   // AIQ 5888943993 (1)(c): the carrier folded into the goal, and any Olumi addition left out, said where the user sees it.
   if (foldedCarrier !== null) openQuestions.unshift(...foldedCarrierLines(foldedCarrier));
   /**

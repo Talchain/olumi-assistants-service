@@ -282,6 +282,8 @@ interface ProductIdentityFindings {
   loss: RepairEntry[];
   accepted: AcceptedProductIdentity[];
   analyses: ProductIdentityAnalysis[];
+  /** Olumi's declarations refused because a part has no level today (or 0): those parts, by id, in model order. */
+  unlevelled: string[];
 }
 
 export interface WidenerAdditions {
@@ -474,6 +476,8 @@ export interface AdmittedModel {
   readonly treated_as_context?: readonly string[];
   /** Declared products that options move (`markProductIdentities`); each is also a `loss` entry. */
   readonly nonlinear_identities?: readonly NonlinearIdentityMark[];
+  /** Factors whose missing (or 0) level refused Olumi's product over them (`markProductIdentities`); asked once (`unlevelledProductQuestions`). */
+  readonly unlevelled_product_parts?: readonly string[];
   /** User-limited cost roll-ups whose Olumi-signed edge into the goal was not drawn (`findPureLimits`); each is also a `loss` entry. */
   readonly pure_limits?: readonly PureLimit[];
   /** The same shape where a lever reaches the goal ONLY through the roll-up: the edge is kept and ASKED (`findPureLimitAsks`). */
@@ -1279,7 +1283,8 @@ function markProductIdentities(
   const loss: RepairEntry[] = [];
   const accepted: AcceptedProductIdentity[] = [];
   const analyses: ProductIdentityAnalysis[] = [];
-  if (declared.length === 0) return { marks, loss, accepted, analyses };
+  const unlevelled: string[] = [];
+  if (declared.length === 0) return { marks, loss, accepted, analyses, unlevelled };
   const kindOf = new Map(nodes.map((n) => [n.id, n.kind]));
   const nodeOf = new Map(nodes.map((n) => [n.id, n]));
   const labelOf = (id: string): string => nodeOf.get(id)?.label ?? id;
@@ -1337,6 +1342,41 @@ function markProductIdentities(
     return moved;
   };
 
+  /**
+   * ⛔ OLUMI'S PRODUCT OVER A PART WITH NO LEVEL IS NOT DECLARED; ITS FIGURES ARE ASKED (AIQ #72 5898415568 run 0
+   * `0c426b00`; R3 5898443502: "admission could refuse a product over level-less Olumi parts and draft the ask
+   * instead"). The engine multiplies a declared product only when every part has a level above 0 today; otherwise ISL
+   * withholds it (`identity_operand_missing` / `identity_zero_level`), PLoT then withholds the goal's chance on every
+   * option (#416), and the Run ends with no question — served cut-costs chained "AWS workload spend × GCP workload
+   * share" into "× GCP saving rate", the share and the rate with no level. So Olumi's own reading is refused when a part
+   * is a factor with no level (or 0) today, or an outcome another product refused here was to give its level — to a
+   * fixpoint, so a chain is refused whole in either order — and `unlevelledProductQuestions` asks for the root figures once. A
+   * declaration the brief states is the user's structure and is kept.
+   */
+  const productOutcome = new Map<string, CandidateIdentity>();
+  for (const d of declared) {
+    const id = resolve(d.outcome);
+    if (id !== undefined && d.operation === 'product' && !productOutcome.has(id)) productOutcome.set(id, d);
+  }
+  const levelRefused = new Map<CandidateIdentity, string[]>();
+  const levelled = (id: string): boolean => { const t = todayOf(id); return t !== undefined && t !== 0; };
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const d of declared) {
+      if (d.provenance === 'explicit' || d.operation !== 'product' || levelRefused.has(d)) continue;
+      const parts = [...new Set((Array.isArray(d.factors) ? d.factors : []).map((f) => resolve(f)).filter((id): id is string => id !== undefined))];
+      const missing = parts.filter((id) => {
+        if (levelled(id)) return false;
+        if (kindOf.get(id) === 'factor') return true;
+        // An outcome counts only when a product refused here was to give it its level: one no product declares is left
+        // as before (the served MRR "Pro paying subscribers", journey C's tally), unmeasured against ISL.
+        const source = productOutcome.get(id);
+        return kindOf.get(id) === 'outcome' && source !== undefined && levelRefused.has(source);
+      });
+      if (missing.length > 0) { levelRefused.set(d, missing); changed = true; }
+    }
+  }
+
   for (const d of declared) {
     const outcomeId = resolve(d.outcome);
     const factors = Array.isArray(d.factors) ? d.factors : [];
@@ -1365,6 +1405,17 @@ function markProductIdentities(
       if (!factorIds.includes(id)) factorIds.push(id);
     }
     if (why === null && factorIds.length < 2) why = 'a product needs at least two different quantities';
+    const missing = levelRefused.get(d);
+    if (why === null && missing !== undefined) {
+      // The ask names the ROOT figures: an outcome another refused product was to give a level is not asked for.
+      for (const id of missing) if (!productOutcome.has(id) && !unlevelled.includes(id)) unlevelled.push(id);
+      const none = missing.filter((id) => todayOf(id) === undefined).map(labelOf);
+      const zero = missing.filter((id) => todayOf(id) === 0).map(labelOf);
+      why = [
+        none.length > 0 ? `${quotedList(none)} ${none.length === 1 ? 'has' : 'have'} no figure yet` : null,
+        zero.length > 0 ? `${quotedList(zero)} ${zero.length === 1 ? 'is' : 'are'} 0 today` : null,
+      ].filter((x) => x !== null).join(' and ');
+    }
     if (why !== null) { reject(why); continue; }
     if (goalId === undefined || (outcomeId !== goalId && !reaches(outcomeId, goalId))) continue;
     // The DECLARATION holds and bears on the goal: it is persisted as the node's carrier whatever the
@@ -1567,7 +1618,7 @@ function markProductIdentities(
       severity: verdict === 'sign_not_provable' ? 'warn' : 'info',
     } as RepairEntry);
   }
-  return { marks, loss, accepted, analyses };
+  return { marks, loss, accepted, analyses, unlevelled };
 }
 
 /**
@@ -1618,6 +1669,33 @@ export function productIdentityOpenQuestions(admitted: Pick<AdmittedModel, 'node
       return `Which option does better on "${goal.label}"? ${clause}. ${multipliesWhen(labelOf(m.outcome_id))}; ` +
         (stated ? STATED_OTHERWISE : `otherwise it adds those effects up and cannot say which option does better on "${goal.label}".`);
     });
+}
+
+/**
+ * ⛔ THE ONE QUESTION FOR THE MISSING PARTS (R3 #72 5898443502: "ONE question for the two missing figures"). Olumi's
+ * products refused because a part has no level today (`markProductIdentities`) are asked about once, where the user
+ * always sees it: which figures, why they matter, and what the model does meanwhile. Nothing when none was refused.
+ */
+export function unlevelledProductQuestions(admitted: Pick<AdmittedModel, 'nodes' | 'unlevelled_product_parts'>): string[] {
+  const goal = admitted.nodes.find((n) => n.kind === 'goal');
+  const parts = (admitted.unlevelled_product_parts ?? []).map((id) => admitted.nodes.find((n) => n.id === id)).filter((n) => n !== undefined);
+  if (goal === undefined || parts.length === 0) return [];
+  const level = (n: AdmittedNode): number | undefined => n.observed_state?.value;
+  // ‘…’ like the other readings the user sees (AIQ 5898886960).
+  const named = (labels: readonly string[]): string => {
+    const q = labels.map((l) => `‘${l}’`);
+    return q.length <= 1 ? (q[0] ?? '') : `${q.slice(0, -1).join(', ')} and ${q[q.length - 1]}`;
+  };
+  const none = parts.filter((n) => level(n) === undefined).map((n) => n.label);
+  const zero = parts.filter((n) => level(n) !== undefined).map((n) => n.label);
+  const state = [
+    none.length > 0 ? `${named(none)} ${none.length === 1 ? 'has' : 'have'} no figure yet` : null,
+    zero.length > 0 ? `${named(zero)} ${zero.length === 1 ? 'is' : 'are'} 0 today` : null,
+  ].filter((x) => x !== null).join(' and ');
+  return [
+    `What do you expect ${named(parts.map((n) => n.label))} to be? ${state.charAt(0).toUpperCase()}${state.slice(1)}, so Olumi adds up `
+    + `their effects on ‘${goal.label}’ instead of multiplying them: treat the comparison as a rough approximation until you say.`,
+  ];
 }
 
 /** The Run-time check's finding: the named leader cannot be signed against `against`. */
@@ -4196,6 +4274,7 @@ function admitOnce(
     edges: finalEdges,
     ...(levers.demoted.length > 0 ? { treated_as_context: levers.demoted } : {}),
     ...(products.marks.length > 0 ? { nonlinear_identities: products.marks } : {}),
+    ...(products.unlevelled.length > 0 ? { unlevelled_product_parts: products.unlevelled } : {}),
     ...(pureLimits.length > 0 ? { pure_limits: pureLimits } : {}),
     ...(pureLimitAsks.length > 0 ? { pure_limit_asks: pureLimitAsks } : {}),
     ...(sums.length > 0 ? { sum_identities: sums } : {}),
