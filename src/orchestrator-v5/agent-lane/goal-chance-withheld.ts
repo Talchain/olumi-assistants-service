@@ -11,7 +11,11 @@
  * AIQ 5886183999: the goal's per-option estimates come from the same wrong walk, so they are the same unsupported class.
  */
 
-import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED } from '../../orchestrator/context/option-result-source.js';
+import {
+  GOAL_FIGURES_USER_EFFECT_CLAMPED,
+  GOAL_FIGURES_WITHHELD_CODES,
+  GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
+} from '../../orchestrator/context/option-result-source.js';
 
 export { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED };
 
@@ -48,10 +52,16 @@ export function goalChanceWithheldForAgent(result: unknown): GoalChanceWithheld 
   const warnings = [recordOf(block.enrichment)?.inference_warnings, block.inference_warnings]
     .flatMap((w) => (Array.isArray(w) ? w : []))
     .map(recordOf)
-    .filter((w): w is Record<string, unknown> => w !== undefined && w.code === GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED);
+    .filter((w): w is Record<string, unknown> => w !== undefined && typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code));
   if (warnings.length === 0) return undefined;
-  const words = warnings.map((w) => (typeof w.message === 'string' ? w.message.trim() : '')).find((m) => m !== '');
-  const reason = words === undefined ? '' : words.replace(UI_OPENING, '').trim();
+  // One reason per cause, identity first (unchanged when it is alone), then PLoT #422's cut link — each in PLoT's words.
+  const reasonFor = (code: string): string => {
+    const words = warnings.filter((w) => w.code === code)
+      .map((w) => (typeof w.message === 'string' ? w.message.trim() : '')).find((m) => m !== '');
+    return words === undefined ? '' : words.replace(UI_OPENING, '').trim();
+  };
+  const reason = [reasonFor(GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED), reasonFor(GOAL_FIGURES_USER_EFFECT_CLAMPED)]
+    .filter((r) => r !== '').join(' ');
   const nodeIds = [...new Set(warnings.flatMap((w) => (Array.isArray(w.node_ids) ? w.node_ids : [])).filter((id): id is string => typeof id === 'string'))];
   return { withheld: true, say: reason === '' ? OPENING : `${OPENING} ${reason}`, node_ids: nodeIds, note: GOAL_CHANCE_WITHHELD_NOTE };
 }

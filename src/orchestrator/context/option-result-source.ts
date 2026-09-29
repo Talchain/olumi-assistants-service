@@ -60,6 +60,18 @@
  */
 export const GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED = 'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED';
 
+/**
+ * PLoT #422's code for a run that withheld its goal figures because the user's own link size on the goal's path was cut
+ * to fit the model's scale (AIQ 5893355501). Same carrier and the same withheld set as #416; the reason is in `message`.
+ */
+export const GOAL_FIGURES_USER_EFFECT_CLAMPED = 'GOAL_FIGURES_USER_EFFECT_CLAMPED';
+
+/** Every typed code that means "the run withheld its per-option goal figures" (AIQ 5893824972: a code SET, PLoT's words). */
+export const GOAL_FIGURES_WITHHELD_CODES: ReadonlySet<string> = new Set([
+  GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
+  GOAL_FIGURES_USER_EFFECT_CLAMPED,
+]);
+
 function readRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -100,7 +112,7 @@ export function readOptionResultSources(
 
 /**
  * The run's typed decision that its per-option goal figures are withheld (PLoT #416's ONE carrier: an
- * `inference_warnings` entry with code `GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED`). The code decides, never the words.
+ * `inference_warnings` entry whose code is in GOAL_FIGURES_WITHHELD_CODES — #416's or #422's). The code decides, never the words.
  */
 export function runWithheldGoalFigures(envelope: Record<string, unknown>): boolean {
   return goalFiguresWithheldWarning(envelope) !== undefined;
@@ -109,7 +121,7 @@ export function runWithheldGoalFigures(envelope: Record<string, unknown>): boole
 /** That warning (the first), or `undefined`. */
 export function goalFiguresWithheldWarning(envelope: Record<string, unknown>): Record<string, unknown> | undefined {
   const warnings = Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings : [];
-  return filterObjectEntries(warnings).find((w) => w.code === GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED);
+  return filterObjectEntries(warnings).find((w) => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code));
 }
 
 function readEverySource(
