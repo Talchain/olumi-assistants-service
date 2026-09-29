@@ -13,13 +13,35 @@
  *  · the words occur exactly once in the brief;
  *  · they overlap exactly one list item (`extractEnumeratedOptions`, the reconciliation's own reader), and one span holds
  *    the other, so a quote never straddles two items;
- *  · no other option's words land on the same item, and no other option shares the option's name.
+ *  · no other option's words land on the same item, and no other option shares the option's name;
+ *  · no figure the option sets conflicts with one of the same kind the item writes (`figuresAgree`).
  * The quote written is the LIST ITEM's text, which is what the reconciliation compares. Pure.
  */
 import { extractEnumeratedOptions } from '../../orchestrator/context/intake-option-reconciliation.js';
 import { canonicalLabel, type CandidateModel } from './admit-model.js';
+import { figureTheUserWrote } from './stated-by-user.js';
+import { unitPhraseFamily } from './unit-conflict.js';
+import { findStatedAmounts, type AmountKind } from '../../cee/provenance/stated-amounts.js';
 
 interface Span { readonly text: string; readonly from: number; readonly to: number }
+
+/**
+ * ⛔ A QUOTE PROVES THE WORDS, NOT THE FIGURE (AIQ 5892228477; PR Review CHANGES_REQUIRED on #2299 @ 9d85b017). An option
+ * whose figure CONFLICTS with the item is not that item's option: it sets a figure the item does not write, while the
+ * item writes a figure of the same kind (money, a percentage, a plain number). An Olumi "Raise to £54" that copies "raise
+ * Pro price to £59" would otherwise take the user's quote, lose `proposed_by: 'olumi'` and could lead as the user's
+ * choice. A figure the item says nothing of the same kind about (Olumi's level on "shift batch jobs to spot instances")
+ * is no conflict, nor is a name like "tier-1" beside a £ or % figure.
+ */
+function figuresAgree(option: CandidateModel['options'][number], item: string): boolean {
+  const written = findStatedAmounts(item);
+  const kindOf = (unit: unknown): AmountKind => {
+    const family = unitPhraseFamily(unit);
+    return family === 'currency' ? 'currency' : family === 'percent' ? 'percent' : 'plain';
+  };
+  return (option.interventions ?? []).every((i) => typeof i.value !== 'number' || !Number.isFinite(i.value)
+    || figureTheUserWrote(i.value, i.unit, item) || !written.some((a) => a.kind === kindOf(i.unit)));
+}
 
 /** Each unique list item's span in the brief; an item written twice has no span (its quote could not be located). */
 function listedSpans(brief: string): readonly Span[] {
@@ -48,6 +70,7 @@ export function optionQuotes(candidate: CandidateModel, brief: string): Readonly
     if (touched.length !== 1) continue;
     const s = touched[0]!;
     if (!((at >= s.from && end <= s.to) || (s.from >= at && s.to <= end))) continue;
+    if (!figuresAgree(o, s.text)) continue;
     bound.push([name, s.text]);
   }
   // A list item two options claim binds neither: the reconciliation would withhold anyway, and so does this.

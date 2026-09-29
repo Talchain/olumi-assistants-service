@@ -9,7 +9,9 @@ import { readFileSync } from 'node:fs';
 import { optionQuotes, quoteListedOptions } from '../option-lineage.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
 import { buildModelFromBrief, buildCandidateSchema, type CallStructuredModel } from '../runtime/build-model.js';
-import { deriveIntakeOptionReconciliation } from '../../../orchestrator/context/intake-option-reconciliation.js';
+import { deriveIntakeOptionReconciliation, extractEnumeratedOptions } from '../../../orchestrator/context/intake-option-reconciliation.js';
+import { Ajv } from 'ajv';
+import { canonicalLabel } from '../admit-model.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import type { CandidateModel } from '../admit-model.js';
@@ -120,5 +122,55 @@ describe('the binding rule (pure)', () => {
   it('9 — a node that already carries a quote keeps it', () => {
     const nodes = [{ id: 'r', kind: 'option', label: 'Reserved instances', source_quote: 'earlier words' }];
     expect(quoteListedOptions(nodes, c(WORDS), FX.brief)).toBe(nodes);
+  });
+});
+
+// ⛔ PR Review CHANGES_REQUIRED on #2299 @ 9d85b017 (AIQ 5892228477: a quote proves the WORDS, not the figure). An Olumi
+// option that SUBSTITUTES a different figure while copying a unique list item's words must not take the user's quote:
+// it would lose `proposed_by: 'olumi'` and let the Run name it as the user's listed choice.
+const SUB = 'Should we raise our Pro plan price? The options are raise Pro price to £59, or keep it at £49. '
+  + 'We have 1,500 paying subscribers and £75k MRR, and we want MRR above £85k.';
+function priceDraft(first: { label: string; provenance: string; value: number; words: string }): Rec {
+  const iv = (value: number, provenance: string) => [{ factor_label: 'Pro plan price', value, value_kind: 'absolute', unit: 'GBP per month', provenance }];
+  return {
+    goal: { metric: 'MRR', operator: '>', target_stated: true, frame: 'level', value: 85000, unit: 'GBP per month', horizon_months: null, provenance: 'explicit',
+      baseline_known: true, baseline_value: 75000, baseline_provenance: 'explicit', scope: null },
+    constraints: [],
+    options: [
+      { label: first.label, provenance: first.provenance, is_status_quo: null, brief_words: first.words, changes: ['Pro plan price'], interventions: iv(first.value, first.provenance) },
+      { label: 'Keep at £49', provenance: 'explicit', is_status_quo: true, brief_words: 'keep it at £49', changes: ['Pro plan price'], interventions: iv(49, 'explicit') },
+    ],
+    factors: [{ label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP per month', provenance: 'explicit', plausible_max: 200 }],
+    risks: [], outcomes: [],
+    links: [{ from: 'Pro plan price', to: 'MRR', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null }],
+    identities: [], unknowns: [], decision_question: 'Should we raise our Pro plan price?',
+  };
+}
+const optionNode = (g: Rec, label: string): Rec => (g.nodes as Rec[]).find((n) => n.kind === 'option' && n.label === label)!;
+
+describe('a copied quote never covers a different figure (PR Review CR on 9d85b017)', () => {
+  it('PRECONDITION: the Run\'s own reader lists the two items; both drafts pass the strict schema', () => {
+    expect(extractEnumeratedOptions(SUB).map((c) => c.text)).toEqual(['raise Pro price to £59', 'keep it at £49']);
+    const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
+    expect(strict(priceDraft({ label: 'Raise to £54', provenance: 'ai_proposed', value: 54, words: 'raise Pro price to £59' })), JSON.stringify(strict.errors?.slice(0, 2))).toBe(true);
+  });
+  it('10 — RED (real build + the Run\'s reader): Olumi\'s £54 copying "raise Pro price to £59" gets no quote, stays Olumi\'s, and the Run withholds', async () => {
+    const { r, g } = await build(priceDraft({ label: 'Raise to £54', provenance: 'ai_proposed', value: 54, words: 'raise Pro price to £59' }), SUB);
+    expect(r.ok, JSON.stringify(r).slice(0, 300)).toBe(true);
+    expect(optionNode(g, 'Raise to £54').source_quote).toBeUndefined();
+    expect(optionNode(g, 'Raise to £54').proposed_by).toBe('olumi');
+    expect(optionNode(g, 'Keep at £49').source_quote).toBe('keep it at £49');
+    expect(deriveIntakeOptionReconciliation(SUB, g, g).state).not.toBe('reconciled');
+  });
+  it('10b — CONTROL (matching action): the user\'s £59 with those words is quoted and the Run reconciles', async () => {
+    const { r, g } = await build(priceDraft({ label: 'Raise to £59', provenance: 'explicit', value: 59, words: 'raise Pro price to £59' }), SUB);
+    expect(r.ok, JSON.stringify(r).slice(0, 300)).toBe(true);
+    expect(optionNode(g, 'Raise to £59').source_quote).toBe('raise Pro price to £59');
+    expect(optionNode(g, 'Raise to £59').proposed_by).toBeUndefined();
+    expect(deriveIntakeOptionReconciliation(SUB, g, g).state).toBe('reconciled');
+  });
+  it('10c — the drafter\'s tag decides nothing: a £54 tagged explicit with the £59 words is not quoted either', () => {
+    const cand = priceDraft({ label: 'Raise to £54', provenance: 'explicit', value: 54, words: 'raise Pro price to £59' }) as unknown as CandidateModel;
+    expect([...optionQuotes(cand, SUB).keys()]).toEqual([canonicalLabel('Keep at £49')]);
   });
 });
