@@ -19,6 +19,7 @@
  */
 import { extractEnumeratedOptions } from '../../orchestrator/context/intake-option-reconciliation.js';
 import { canonicalLabel, type CandidateModel } from './admit-model.js';
+import { admittedOptionKeys } from './admitted-option-identity.js';
 import { figureTheUserWrote } from './stated-by-user.js';
 import { unitPhraseFamily } from './unit-conflict.js';
 import { findStatedAmounts, type AmountKind } from '../../cee/provenance/stated-amounts.js';
@@ -155,12 +156,8 @@ export function quoteListedOptions<N extends { readonly kind?: unknown; readonly
 ): readonly N[] {
   const quotes = optionQuotes(candidate, brief);
   if (quotes.size === 0) return nodes;
-  const optionNodes = new Map<string, number>();
-  for (const n of nodes) {
-    if (n.kind === 'option' && typeof n.label === 'string') optionNodes.set(canonicalLabel(n.label), (optionNodes.get(canonicalLabel(n.label)) ?? 0) + 1);
-  }
-  const quoteFor = (n: N): string | undefined => (n.kind === 'option' && typeof n.label === 'string' && n.source_quote === undefined
-    && optionNodes.get(canonicalLabel(n.label)) === 1 ? quotes.get(canonicalLabel(n.label)) : undefined);
+  const keys = admittedOptionKeys(nodes, candidate.options);
+  const quoteFor = (n: N): string | undefined => n.source_quote === undefined ? quotes.get(keys.get(n) ?? '') : undefined;
   if (!nodes.some((n) => quoteFor(n) !== undefined)) return nodes;
   return nodes.map((n) => {
     const q = quoteFor(n);

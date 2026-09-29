@@ -19,6 +19,7 @@
  * array), so its analysis hash cannot move. Pure.
  */
 import { canonicalLabel, type CandidateModel } from './admit-model.js';
+import { admittedOptionKeys } from './admitted-option-identity.js';
 import { figureTheUserWroteFor } from './stated-by-user.js';
 import { listedSpans, multiFigureItemBinds } from './option-lineage.js';
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
@@ -73,13 +74,9 @@ export function markOlumiOptions<N extends { readonly kind?: unknown; readonly l
 ): readonly N[] {
   const olumi = olumiAddedOptionLabels(candidate, brief);
   if (olumi.size === 0) return nodes;
-  const optionNodes = new Map<string, number>();
-  for (const n of nodes) {
-    if (n.kind === 'option' && typeof n.label === 'string') optionNodes.set(canonicalLabel(n.label), (optionNodes.get(canonicalLabel(n.label)) ?? 0) + 1);
-  }
+  const keys = admittedOptionKeys(nodes, candidate.options);
   // A node carrying the brief's words for it (`option-lineage.ts`) is the user's, whatever the drafter tagged it.
-  const marks = (n: N): boolean => n.kind === 'option' && typeof n.label === 'string' && n.is_baseline !== true && n.source_quote === undefined
-    && olumi.has(canonicalLabel(n.label)) && optionNodes.get(canonicalLabel(n.label)) === 1;
+  const marks = (n: N): boolean => n.is_baseline !== true && n.source_quote === undefined && olumi.has(keys.get(n) ?? '');
   if (!nodes.some(marks)) return nodes;
   return nodes.map((n) => (marks(n) ? { ...n, proposed_by: PROPOSED_BY_OLUMI } : n));
 }

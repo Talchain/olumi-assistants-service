@@ -14,6 +14,7 @@
  * re-reads the model afterwards and reports what the model actually shows.
  */
 
+import { config } from '../../../config/index.js';
 import { goalChanceWithheldForAgent, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { certainOptionRows, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
@@ -5083,7 +5084,8 @@ export function createAgentCapabilities(
             detail: 'The model already has entities. Propose a change instead of rebuilding it.',
           };
         }
-        built = await buildModelFromBrief(ctx.scenario_id, brief, dispatch, callStructured, opts.onConstructionTrace);
+        built = await buildModelFromBrief(ctx.scenario_id, brief, dispatch, callStructured, opts.onConstructionTrace,
+          config.proxy.constructorM1Partition ? 'm1' : 'current');
         if (built.ok !== true) return built;
       }
 
