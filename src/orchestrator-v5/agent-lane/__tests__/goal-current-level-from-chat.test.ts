@@ -288,7 +288,10 @@ describe('CONTROLS — the brief path\'s operator and scale rules hold on this p
       ],
       factors: [{ label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit', plausible_max: 200 }],
       links: [{ from: 'Pro plan price', to: 'MRR', direction: 'positive', provenance: 'inferred' }],
-    } as unknown as CandidateModel);
+    } as unknown as CandidateModel,
+    // This helper compares the OPERATOR and SCALE rules word for word, with no brief: the level is taken as written
+    // apart from the target, so the grounding rule (goal-target-is-not-the-base.test.ts, R3 #72 5885498117) stays out.
+    {}, undefined, undefined, () => true);
     return m.loss.find((l) => l.field_path === 'nodes[mrr].observed_state.baseline')?.reason;
   };
 

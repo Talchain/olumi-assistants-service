@@ -65,6 +65,9 @@ function candidate(churn: Churn, limits: Limit[], opts: { churnIsRoot?: boolean 
   } as unknown as CandidateModel;
 }
 
+/** No option in play: the scale proofs alone decide (R-c's parts predicate has nothing to withhold). */
+const NO_OPTIONS: ReadonlyArray<Record<string, unknown>> = [];
+
 type WireNode = { id: string; label?: string; observed_state?: { value?: number; baseline?: number }; scale_frame?: number };
 
 /** Admit the model, then derive the wire graph exactly as `run_analysis` does. */
@@ -74,11 +77,13 @@ function carried(churn: Churn, limits: Limit[], opts: { churnIsRoot?: boolean } 
   expect(admitted, 'the churn factor is admitted').toBeDefined();
   const goal = m.nodes.find((n) => n.kind === 'goal');
   const graph = { nodes: m.nodes, edges: m.edges };
-  const wire = carryLevelLimitBaselines(graph, m.goal_constraints, goal?.id) as unknown as { nodes: WireNode[] };
+  // Proof rows: no option in play (`[]`), so R-c's parts predicate has nothing to withhold (its rows:
+  // `placeholder-parts-withhold.test.ts`). Without any options nothing is proven, so nothing would carry.
+  const wire = carryLevelLimitBaselines(graph, m.goal_constraints, goal?.id, NO_OPTIONS) as unknown as { nodes: WireNode[] };
   return {
     m,
     admitted: admitted!,
-    ids: levelLimitBaselineNodeIds(graph, m.goal_constraints, goal?.id),
+    ids: levelLimitBaselineNodeIds(graph, m.goal_constraints, goal?.id, NO_OPTIONS),
     wire: wire.nodes.find((n) => n.id === admitted!.id)!,
   };
 }
@@ -175,10 +180,10 @@ describe('a level limit on a non-root node is checked against that node\'s curre
 
   it('CONTROL: a "%" limit on a non-root GOAL carries nothing, by kind or by id (#1840 owns the goal\'s baseline)', () => {
     const graph = hand({ id: 'g', kind: 'goal' });
-    expect(levelLimitBaselineNodeIds(graph, PCT10('g')).size).toBe(0);
+    expect(levelLimitBaselineNodeIds(graph, PCT10('g'), undefined, NO_OPTIONS).size).toBe(0);
     const asFactor = hand({ id: 'g', kind: 'factor' });
-    expect(levelLimitBaselineNodeIds(asFactor, PCT10('g')), 'PRESENT control: the same node as a factor carries').toEqual(new Set(['g']));
-    expect(levelLimitBaselineNodeIds(asFactor, PCT10('g'), 'g').size, 'the goal id alone excludes it').toBe(0);
+    expect(levelLimitBaselineNodeIds(asFactor, PCT10('g'), undefined, NO_OPTIONS), 'PRESENT control: the same node as a factor carries').toEqual(new Set(['g']));
+    expect(levelLimitBaselineNodeIds(asFactor, PCT10('g'), 'g', NO_OPTIONS).size, 'the goal id alone excludes it').toBe(0);
   });
 
   // ── B3 (review 5842400886): the carrier runs for EVERY scenario, so it stays out of cells other paths own ──
@@ -190,44 +195,44 @@ describe('a level limit on a non-root node is checked against that node\'s curre
       { id: 'risk_churn', kind: 'risk', label: 'Churn risk', observed_state: { value: 0.3, source: 'cee_inference' } },
     ], edges: [{ from: 'fac_price', to: 'risk_churn' }, { from: 'risk_churn', to: 'goal' }] };
     const limits = [{ node_id: 'risk_churn', operator: '<=', value: 10, unit: '%', value_frame: 'level', provenance: 'explicit' }];
-    expect(levelLimitBaselineNodeIds(risk, limits, 'goal').size).toBe(0);
+    expect(levelLimitBaselineNodeIds(risk, limits, 'goal', NO_OPTIONS).size).toBe(0);
     for (const kind of ['risk', 'outcome']) {
-      expect(levelLimitBaselineNodeIds(hand({ id: 'n', kind }), PCT10('n')).size, `${kind} in the carried shape`).toBe(0);
+      expect(levelLimitBaselineNodeIds(hand({ id: 'n', kind }), PCT10('n'), undefined, NO_OPTIONS).size, `${kind} in the carried shape`).toBe(0);
       // By KIND, not only by the factor-only disclosure: even a user-authored level on that cell is add_constraint's.
       const userLevel = { value: 0.07, raw_value: 7, source: 'brief_extraction' };
-      expect(levelLimitBaselineNodeIds(hand({ id: 'n', kind, observed_state: userLevel }), PCT10('n')).size, `${kind}, user level`).toBe(0);
+      expect(levelLimitBaselineNodeIds(hand({ id: 'n', kind, observed_state: userLevel }), PCT10('n'), undefined, NO_OPTIONS).size, `${kind}, user level`).toBe(0);
     }
   });
 
   it('B1: only a limit spelled exactly "%" carries — a verbatim "% per month" or a currency limit does not', () => {
     for (const unit of ['% per month', 'GBP', 'percent']) {
       const limits = [{ node_id: 'n', operator: '<=', value: 10, unit, value_frame: 'level' }];
-      expect(levelLimitBaselineNodeIds(hand({ id: 'n' }), limits).size, unit).toBe(0);
+      expect(levelLimitBaselineNodeIds(hand({ id: 'n' }), limits, undefined, NO_OPTIONS).size, unit).toBe(0);
     }
-    expect(levelLimitBaselineNodeIds(hand({ id: 'n' }), PCT10('n')), 'PRESENT: "%"').toEqual(new Set(['n']));
+    expect(levelLimitBaselineNodeIds(hand({ id: 'n' }), PCT10('n'), undefined, NO_OPTIONS), 'PRESENT: "%"').toEqual(new Set(['n']));
   });
 
   it('B3: a unitless level in [0,1) is not proof of a "%" proportion — carries nothing', () => {
-    expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, source: 'cee_inference' }, scale_frame: undefined }), PCT10('n')).size).toBe(0);
+    expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, source: 'cee_inference' }, scale_frame: undefined }), PCT10('n'), undefined, NO_OPTIONS).size).toBe(0);
   });
 
   it('B3: a level with no author marker carries nothing; the user\'s own level carries', () => {
-    expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, raw_value: 7 } }), PCT10('n')).size, 'no source').toBe(0);
-    expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, raw_value: 7, source: 'brief_extraction' } }), PCT10('n')), 'the user\'s figure').toEqual(new Set(['n']));
+    expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, raw_value: 7 } }), PCT10('n'), undefined, NO_OPTIONS).size, 'no source').toBe(0);
+    expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, raw_value: 7, source: 'brief_extraction' } }), PCT10('n'), undefined, NO_OPTIONS), 'the user\'s figure').toEqual(new Set(['n']));
   });
 
   it('B3: the node must ATTEST percent ÷ 100 (value = raw_value ÷ 100); a mismatched pair carries nothing', () => {
-    expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, raw_value: 20, source: 'cee_inference' } }), PCT10('n')).size).toBe(0);
-    expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, raw_value: 7, source: 'cee_inference', cap: 20 }, scale_frame: undefined }), PCT10('n')).size, 'capped on 20').toBe(0);
-    expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, raw_value: 7, source: 'cee_inference', cap: 100 }, scale_frame: undefined }), PCT10('n')), 'PRESENT: capped on 100').toEqual(new Set(['n']));
+    expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, raw_value: 20, source: 'cee_inference' } }), PCT10('n'), undefined, NO_OPTIONS).size).toBe(0);
+    expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, raw_value: 7, source: 'cee_inference', cap: 20 }, scale_frame: undefined }), PCT10('n'), undefined, NO_OPTIONS).size, 'capped on 20').toBe(0);
+    expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, raw_value: 7, source: 'cee_inference', cap: 100 }, scale_frame: undefined }), PCT10('n'), undefined, NO_OPTIONS), 'PRESENT: capped on 100').toEqual(new Set(['n']));
   });
 
   it('FILL-ONLY: an existing baseline, whoever wrote it, is never overwritten', () => {
     const m = admitCandidateModel(candidate(ESTIMATE, [{ value: 10, unit: '%', frame: 'level' }]));
     const nodes = m.nodes.map((n) => (n.label === CHURN ? { ...n, observed_state: { ...n.observed_state!, baseline: 0.05 } } : n));
     const churnId = nodes.find((n) => n.label === CHURN)!.id;
-    const wire = carryLevelLimitBaselines({ nodes, edges: m.edges }, m.goal_constraints) as unknown as { nodes: WireNode[] };
-    expect(levelLimitBaselineNodeIds({ nodes, edges: m.edges }, m.goal_constraints).size).toBe(0);
+    const wire = carryLevelLimitBaselines({ nodes, edges: m.edges }, m.goal_constraints, undefined, NO_OPTIONS) as unknown as { nodes: WireNode[] };
+    expect(levelLimitBaselineNodeIds({ nodes, edges: m.edges }, m.goal_constraints, undefined, NO_OPTIONS).size).toBe(0);
     expect(wire.nodes.find((n) => n.id === churnId)!.observed_state?.baseline).toBe(0.05);
   });
 });
@@ -262,7 +267,12 @@ const SCENARIO_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const REQUEST_ID = 'req-level-limit-baseline-wire';
 
 /** Churn as the served estimate after the user's value edit: `set_factor_value` writes `{...os, value, raw_value}`. */
-function persistedGraph(churnRaw: number) {
+/**
+ * `sized`: the price → churn link carries Olumi's size in churn's unit (`olumi_estimate`, `natural_effect` in "percentage
+ * points", as the sizer says a percentage level on 100), so
+ * R-c's parts predicate lets the level carry. Unsized (a bare placeholder), churn carries nothing (AI Quality 5882087383).
+ */
+function persistedGraph(churnRaw: number, sized = true) {
   return GraphV3.parse({
     nodes: [
       { id: 'goal_mrr', kind: 'goal', label: 'MRR' },
@@ -271,12 +281,15 @@ function persistedGraph(churnRaw: number) {
       { id: 'fac_price', kind: 'factor', label: 'Pro plan price' },
       {
         id: 'fac_churn', kind: 'factor', label: CHURN, scale_frame: 100,
-        observed_state: { value: churnRaw / 100, raw_value: churnRaw, source: 'cee_inference', extractionType: 'inferred' },
+        observed_state: { value: churnRaw / 100, raw_value: churnRaw, unit: '%', source: 'cee_inference', extractionType: 'inferred' },
       },
     ],
     edges: [
       { from: 'fac_price', to: 'goal_mrr', strength: { mean: 0.6, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
-      { from: 'fac_price', to: 'fac_churn', strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
+      {
+        from: 'fac_price', to: 'fac_churn', strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive',
+        ...(sized ? { provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: { amount: 1, amount_unit: 'percentage points', per_source_change: 10, per_source_change_unit: 'GBP per month', strength_mean: 0.3, strength_mean_frame: 'edge_strength' } } } : {}),
+      },
       { from: 'fac_churn', to: 'goal_mrr', strength: { mean: -0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'negative' },
     ],
   });
@@ -304,8 +317,8 @@ function makeInvocation(): HandlerInvocation {
   } as HandlerInvocation;
 }
 
-async function payloadFor(churnRaw: number, limit: Record<string, unknown>) {
-  const graph = persistedGraph(churnRaw);
+async function payloadFor(churnRaw: number, limit: Record<string, unknown>, sized = true) {
+  const graph = persistedGraph(churnRaw, sized);
   const before = JSON.stringify(graph);
   const snapshot: RunAnalysisScenarioSnapshot = {
     graph,
@@ -345,6 +358,11 @@ describe('WIRE: run_analysis sends the level the model holds NOW', () => {
 
   it('B1 at the wire: a "0.5%" limit reaches PLoT with NO baseline (fails closed as before)', async () => {
     const os = await payloadFor(7, { value: 0.5, unit: '%', value_frame: 'level' });
+    expect(os.baseline).toBeUndefined();
+  });
+
+  it('R-c at the wire: the same limit with the price → churn link UNSIZED reaches PLoT with no baseline', async () => {
+    const os = await payloadFor(7, { value: 10, unit: '%', value_frame: 'level' }, false);
     expect(os.baseline).toBeUndefined();
   });
 

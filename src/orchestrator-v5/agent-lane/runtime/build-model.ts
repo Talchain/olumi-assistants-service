@@ -49,7 +49,7 @@ import {
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js';
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
-import { figureTheUserWrote, goalLevelTheUserWrote, holdStatedGoalAttributes, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
+import { figureTheUserWrote, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
@@ -1221,7 +1221,9 @@ export async function buildModelFromBrief(
   const firstCandidate = candidate;
   let preparation = prepareProvisionalCandidate(candidate);
   candidate = preparation.candidate;
-  let admitted = admitCandidateModel(candidate, {}, brief, goalLevelTheUserWrote(candidate, brief));
+  // ⛔ A figure written only as the goal's TARGET is not also its current level (R3 #72 5885498117; DL 5885526452 (3)).
+  const writtenAgain = (value: number, unit: unknown): boolean => timesTheUserWrote(value, unit, brief) >= 2;
+  let admitted = admitCandidateModel(candidate, {}, brief, goalLevelTheUserWrote(candidate, brief), writtenAgain);
   preparation = gapsOnRegisteredOptions(preparation, firstCandidate, admitted);
 
   /**
@@ -1339,7 +1341,7 @@ export async function buildModelFromBrief(
         );
         const retryPrepared = prepareProvisionalCandidate(retryRaw);
         const retryCandidate = retryPrepared.candidate;
-        const retryAdmitted = admitCandidateModel(retryCandidate, {}, brief, goalLevelTheUserWrote(retryCandidate, brief));
+        const retryAdmitted = admitCandidateModel(retryCandidate, {}, brief, goalLevelTheUserWrote(retryCandidate, brief), writtenAgain);
         // ⛔ Leave out only what the FIRST draft never registered: withholding a registered option never closes its gaps in the count (adversarial verify of 843c0960).
         const firstGone = new Set((admitted.options_withheld ?? []).map((w) => canonicalLabel(w.option)));
         const firstRegistered = new Set(firstCandidate.options.map((o) => canonicalLabel(o.label)).filter((l) => !firstGone.has(l)));
@@ -1472,7 +1474,7 @@ export async function buildModelFromBrief(
   // attested the comparator; with `'<='` now held, the run minimises that goal, so the same rule is asked again
   // (`admitGoalLevelBesideHeldCeiling`). Any other goal: untouched, byte for byte.
   const ceilingLevel = admitGoalLevelBesideHeldCeiling(heldGoal.nodes, candidate.goal, admitted.loss,
-    (value, unit) => figureTheUserWrote(value, unit, brief));
+    (value, unit) => figureTheUserWrote(value, unit, brief) && levelWrittenApartFromTarget(value, unit, candidate.goal.value, brief));
   if (ceilingLevel.loss !== admitted.loss) admitted = { ...admitted, loss: ceilingLevel.loss };
   const statedGoal = { ...heldGoal, nodes: [...ceilingLevel.nodes] };
   /**

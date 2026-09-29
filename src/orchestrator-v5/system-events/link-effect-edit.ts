@@ -66,6 +66,11 @@ export interface ApplyLinkEffectEditParams {
   readonly expected: { readonly graph_hash: string; readonly edge_token: string };
   /** The user's verbatim words (1..400), carried on the receipt for the approval card and audit. */
   readonly quote: string;
+  /**
+   * `linkEffectReadingToken` of the reading the user APPROVED — the card's {from, to, effect, quote}. The writer
+   * recomputes it over what it is asked to write; absent or different ⇒ `reading_not_confirmed`, nothing written.
+   */
+  readonly reading_token: string;
   /** What the last Run did with declared identities (`identityRunUseFromFacts`); absent = no Run yet. */
   readonly lastRunIdentityUse?: IdentityRunUse | null;
 }
@@ -73,6 +78,7 @@ export interface ApplyLinkEffectEditParams {
 export type LinkEffectRefusal =
   | 'invalid_graph'
   | 'quote_invalid'
+  | 'reading_not_confirmed'
   | 'edge_not_found'
   | 'superseded'
   | 'definitional_link'
@@ -104,12 +110,34 @@ export function linkEffectEdgeToken(graph: unknown, from: string, to: string): s
   const edge = edges.find((e): e is Rec => isRec(e) && e.from === from && e.to === to);
   return edge === undefined ? null : `edge:${createHash('sha256').update(stableStringify(edge)).digest('hex')}`;
 }
+
+/**
+ * ⭐ `user_stated` IS WRITTEN ONLY ON THE APPROVAL OF A DISPLAYED READING (AIQ 5885290014, "proposer, not stamper";
+ * DL 5884931550). The approval card shows exactly {from, to, effect, quote}; its caller passes this token of THAT
+ * reading, and the writer recomputes it over what it is asked to write. A proposal with no reading shown has no token
+ * to pass, and one whose shown reading differs from the write has the wrong one: either way nothing is written. It binds
+ * the READING; the graph half is `expected` (analysis hash + edge token).
+ */
+export function linkEffectReadingToken(reading: {
+  readonly from: string;
+  readonly to: string;
+  readonly effect: LinkEffectStatement;
+  readonly quote: string;
+}): string {
+  const { amount, amount_unit, per_source_change, per_source_change_unit } = reading.effect;
+  const bound = { from: reading.from, to: reading.to, effect: { amount, amount_unit, per_source_change, per_source_change_unit }, quote: reading.quote };
+  return `reading:${createHash('sha256').update(stableStringify(bound)).digest('hex')}`;
+}
 const refuse = (reason: LinkEffectRefusal): LinkEffectEditResult => ({ kind: 'refused', reason });
 const finite = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 
 export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffectEditResult {
   const { from, to, effect, expected } = params;
   if (typeof params.quote !== 'string' || params.quote.trim() === '' || params.quote.length > QUOTE_MAX) return refuse('quote_invalid');
+  if (typeof params.reading_token !== 'string'
+    || params.reading_token !== linkEffectReadingToken({ from, to, effect, quote: params.quote })) {
+    return refuse('reading_not_confirmed');
+  }
   if (!isRec(params.persistedGraph) || !Array.isArray(params.persistedGraph.nodes) || !Array.isArray(params.persistedGraph.edges)) {
     return refuse('invalid_graph');
   }

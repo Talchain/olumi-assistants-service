@@ -1,0 +1,407 @@
+{
+ "source": "served cloud brief, MG local run served-downtime.jsonl (row 0, rep \"level\"): handler_out.__run_graph_snapshot \u2014 the graph run_analysis sent to served PLoT/ISL on 29 Sep 2026; the downtime factor is moved by options only through share % and readiness, each edge magnitude olumi_estimate with natural_effect in weeks (AIQ 5881541947 control R-e)",
+ "graph": {
+  "nodes": [
+   {
+    "id": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+    "kind": "decision",
+    "label": "Should we switch our cloud\u2026",
+    "description": "Should we switch our cloud provider from AWS to GCP?",
+    "provenance": "from_brief"
+   },
+   {
+    "id": "monthly_spend",
+    "kind": "goal",
+    "label": "Monthly spend",
+    "provenance": "from_brief",
+    "goal_threshold_unit": "GBP/month",
+    "goal_threshold_frame": "change_rel",
+    "goal_threshold_raw": -0.2,
+    "goal_threshold_cap": 56250,
+    "goal_threshold_cap_provenance": "target_derived_headroom",
+    "goal_threshold": -0.2,
+    "observed_state": {
+     "value": 0.8,
+     "baseline": 0.8,
+     "unit": "GBP/month",
+     "source": "brief_extraction",
+     "raw_value": 45000,
+     "cap": 56250
+    },
+    "threshold_source": "brief_extraction",
+    "goal_direction": "<="
+   },
+   {
+    "id": "continue_with_aws",
+    "kind": "option",
+    "label": "Continue with AWS",
+    "provenance": "ai_inferred",
+    "is_baseline": true
+   },
+   {
+    "id": "switch_to_gcp",
+    "kind": "option",
+    "label": "Switch to GCP",
+    "provenance": "from_brief",
+    "interventions": {
+     "gcp_workload_share": {
+      "value": 1,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "gcp_workload_share",
+       "match_type": "exact_id",
+       "confidence": "high"
+      },
+      "raw_value": 100,
+      "unit": "%"
+     },
+     "migration_execution_readiness": {
+      "value": 0.6,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "migration_execution_readiness",
+       "match_type": "exact_id",
+       "confidence": "high"
+      },
+      "raw_value": 60,
+      "unit": "score out of 100"
+     }
+    }
+   },
+   {
+    "id": "phased_gcp_migration",
+    "kind": "option",
+    "label": "Phased GCP migration",
+    "provenance": "ai_inferred",
+    "interventions": {
+     "gcp_workload_share": {
+      "value": 0.5,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "gcp_workload_share",
+       "match_type": "exact_id",
+       "confidence": "high"
+      },
+      "raw_value": 50,
+      "unit": "%"
+     },
+     "migration_execution_readiness": {
+      "value": 0.7,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "migration_execution_readiness",
+       "match_type": "exact_id",
+       "confidence": "high"
+      },
+      "raw_value": 70,
+      "unit": "score out of 100"
+     }
+    }
+   },
+   {
+    "id": "gcp_workload_share",
+    "kind": "factor",
+    "label": "GCP workload share",
+    "provenance": "from_brief",
+    "category": "controllable",
+    "observed_state": {
+     "value": 0,
+     "raw_value": 0,
+     "cap": 100,
+     "declared_scale": "unit_interval",
+     "unit": "%",
+     "source": "cee_inference"
+    }
+   },
+   {
+    "id": "migration_execution_readiness",
+    "kind": "factor",
+    "label": "Migration execution readiness",
+    "provenance": "ai_inferred",
+    "category": "controllable",
+    "observed_state": {
+     "value": 0.5,
+     "raw_value": 50,
+     "unit": "score out of 100",
+     "source": "cee_inference",
+     "extractionType": "inferred"
+    },
+    "scale_frame": 100
+   },
+   {
+    "id": "migration_downtime_risk",
+    "kind": "factor",
+    "label": "Migration downtime risk",
+    "provenance": "ai_inferred",
+    "category": "observable",
+    "observed_state": {
+     "value": 0,
+     "raw_value": 0,
+     "cap": 12,
+     "declared_scale": "unit_interval",
+     "unit": "weeks",
+     "source": "cee_inference"
+    }
+   },
+   {
+    "id": "service_availability_disruption",
+    "kind": "risk",
+    "label": "Service availability disruption",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "monthly_migration_disruption_cost",
+    "kind": "outcome",
+    "label": "Monthly migration disruption cost",
+    "provenance": "ai_inferred"
+   }
+  ],
+  "edges": [
+   {
+    "from": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+    "to": "continue_with_aws",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+    "to": "switch_to_gcp",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+    "to": "phased_gcp_migration",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "switch_to_gcp",
+    "to": "gcp_workload_share",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "switch_to_gcp",
+    "to": "migration_execution_readiness",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "phased_gcp_migration",
+    "to": "gcp_workload_share",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "phased_gcp_migration",
+    "to": "migration_execution_readiness",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "continue_with_aws",
+    "to": "gcp_workload_share",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "origin": "repair"
+   },
+   {
+    "from": "continue_with_aws",
+    "to": "migration_execution_readiness",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "origin": "repair"
+   },
+   {
+    "from": "gcp_workload_share",
+    "to": "monthly_spend",
+    "strength": {
+     "mean": -0.16,
+     "std": 0.08
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "negative",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": -90,
+      "amount_unit": "GBP/month",
+      "per_source_change": 1,
+      "per_source_change_unit": "%",
+      "strength_mean": -0.16,
+      "strength_mean_frame": "edge_strength"
+     }
+    },
+    "defaulted": true
+   },
+   {
+    "from": "gcp_workload_share",
+    "to": "migration_downtime_risk",
+    "strength": {
+     "mean": 0.125,
+     "std": 0.0625
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 0.015,
+      "amount_unit": "weeks",
+      "per_source_change": 1,
+      "per_source_change_unit": "%",
+      "strength_mean": 0.125,
+      "strength_mean_frame": "edge_strength"
+     }
+    },
+    "defaulted": true
+   },
+   {
+    "from": "migration_execution_readiness",
+    "to": "migration_downtime_risk",
+    "strength": {
+     "mean": -0.08333333333333334,
+     "std": 0.04166666666666667
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "negative",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": -0.01,
+      "amount_unit": "weeks",
+      "per_source_change": 1,
+      "per_source_change_unit": "score out of 100",
+      "strength_mean": -0.08333333333333334,
+      "strength_mean_frame": "edge_strength"
+     }
+    },
+    "defaulted": true
+   },
+   {
+    "from": "migration_downtime_risk",
+    "to": "service_availability_disruption",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.125
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "defaulted": true
+   },
+   {
+    "from": "service_availability_disruption",
+    "to": "monthly_migration_disruption_cost",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.125
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "defaulted": true
+   },
+   {
+    "from": "monthly_migration_disruption_cost",
+    "to": "monthly_spend",
+    "strength": {
+     "mean": 0.2,
+     "std": 0.1
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder"
+    },
+    "defaulted": true
+   }
+  ],
+  "goal_constraints": [
+   {
+    "constraint_id": "agent-lane:migration_downtime_risk:<=",
+    "node_id": "migration_downtime_risk",
+    "operator": "<=",
+    "value": 2,
+    "label": "Migration downtime risk",
+    "unit": "weeks",
+    "provenance": "explicit",
+    "value_frame": "level"
+   }
+  ]
+ }
+}

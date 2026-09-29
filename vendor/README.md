@@ -7,7 +7,34 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.62.0.tgz` ← **THE CURRENT PIN**
+### `talchain-schemas-0.63.0.tgz` ← **THE CURRENT PIN**
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**
+>
+> The tarball `npm publish` produced from `olumi-schemas` `main`
+> **`855a53b4`** (the schemas #71 merge, goal certainty; the registry's own `gitHead` binds that
+> commit), 2026-09-29. Registry download:
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.63.0/0089b2c39a3338fcda8002bfdb531432eec1c36a`.
+>
+> **682,047 bytes.** Verified against the registry's published metadata on 29 Sep:
+>
+> ```
+> npm shasum (sha1)  0089b2c39a3338fcda8002bfdb531432eec1c36a   ← matches
+> integrity (sha512) sha512-rrlBLazbYdvhiZGHlWXZTwHuR5e0nQSog4uwFMFupnMfWzK5Ru99Zk6i0kpHBgAp73L+cts5MwmhYaDUr0qa5w==   ← matches
+> sha256             8666e3b2913b2467c116477cbe747364e943fad4f5dbc4a4480412bf253a2953
+> ```
+>
+> `pnpm install` wrote the same sha512 into `pnpm-lock.yaml`.
+>
+> **What 0.63.0 adds:** `RunAnalysisResultSchema.goal_certainty` (optional) — per option whose
+> probability of meeting the goal is 0 or 1, whether that certainty is `earned` or rests on an
+> `unsized_path` / `identity_mismatch`, with a `break_even` or `no_break_even` reason and the
+> user-facing `say`. A Run with no 0/1 option records `[]`; ABSENT means not recorded.
+> **Additive only:** no analysis-hash input moves, so no stored Run goes stale on this pin.
+> Regenerated `contracts/*.schema.json`: no change (the field is on the stored Run result,
+> which no exported boundary schema carries). Nothing in CEE writes or reads it yet.
+
+### `talchain-schemas-0.62.0.tgz` (historical — no longer vendored as of 0.63.0)
 
 > **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**
 >
