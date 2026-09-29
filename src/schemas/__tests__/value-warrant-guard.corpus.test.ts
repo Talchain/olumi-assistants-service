@@ -294,7 +294,7 @@ describe("the live value-bearing contract, adjudicated", () => {
     expect(report.stale.map((d) => d.id)).toEqual([]);
   });
 
-  it("the first cut is an ENUMERATION: 41 sites, 30 findings, 20 OPEN, 10 accepted", () => {
+  it("the first cut is an ENUMERATION: 42 sites, 31 findings, 20 OPEN, 11 accepted", () => {
     // Pinned so the shape of the first cut cannot move quietly. There is no date
     // trigger anywhere in this check — a CI job that turns red on a calendar is a
     // time bomb. What this gives instead is an OPEN count a human can watch.
@@ -309,14 +309,16 @@ describe("the live value-bearing contract, adjudicated", () => {
     // (`amount_unit`, `per_source_change_unit`, `strength_mean_frame`), so all three are FIELD.
     // +1 site / +1 finding / +1 ACCEPTED, LEVEL_SHARED (27 Sep, G1): CEE's NodeV3 declares the goal's stated deadline
     // `goal_horizon_months`; its warrant is field-scoped by its name and its one writer's rule (value-warrant-guard.ts).
-    expect(SITES.length).toBe(41);
-    expect(FINDINGS.length).toBe(30);
+    // +1 site / +1 finding / +1 ACCEPTED, NONE (29 Sep, MG): CEE's EdgeV3 `strength.clamped_from`, the user's stated size
+    // beyond the contract's bound, kept beside the stored `mean`; its warrant is its one writer's rule (value-warrant-guard.ts).
+    expect(SITES.length).toBe(42);
+    expect(FINDINGS.length).toBe(31);
     expect(report.open.length).toBe(20);
-    expect(report.accepted.length).toBe(10);
+    expect(report.accepted.length).toBe(11);
     expect(SITES.filter((s) => s.verdict === "FIELD").length).toBe(7);
     expect(SITES.filter((s) => s.verdict === "LEVEL_SOLE").length).toBe(4);
     expect(SITES.filter((s) => s.verdict === "LEVEL_SHARED").length).toBe(15);
-    expect(SITES.filter((s) => s.verdict === "NONE").length).toBe(15);
+    expect(SITES.filter((s) => s.verdict === "NONE").length).toBe(16);
   });
 
   it("no decision is a bare exemption — each one argues, or names the one that does", () => {

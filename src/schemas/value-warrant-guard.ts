@@ -799,6 +799,21 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
       "not read as its warrant. It is a DURATION, not a level of the goal metric: " +
       "out of the analysis hash and outside `carriesValue` / `NODE_QUANTITY_FIELDS`.",
   },
+  // ── UNWARRANTED: the cut marker on a user-stated link (declared 29 Sep 2026, MG) ─
+  {
+    id: "unwarranted:cee.EdgeV3::strength.clamped_from",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — its warrant is its one writer's rule, and its frame is its sibling's. " +
+      "Construction (`admitCandidateLinks`, admit-candidate.ts) writes it ONLY when the " +
+      "USER stated the link's size (`provenance.magnitude === 'user_stated'`, the edge's " +
+      "own attestation) and that size, read on the link's natural frame (`sizeLink`, " +
+      "link-effect.ts), lies beyond the contract's [-1, 1]: `mean` is then stored at the " +
+      "bound and this keeps the user's number (AIQ 5893355501 (3)). It is `mean`'s own " +
+      "frame by definition (the refine admits only |x| > 1), no producer may set it (the " +
+      "edge's CEE-owned write), and absence means no cut, never a default. Its one reader, " +
+      "PLoT #422's `clampedEffects`, withholds goal figures on it and reports the stated size.",
+  },
 ];
 
 // ============================================================================
