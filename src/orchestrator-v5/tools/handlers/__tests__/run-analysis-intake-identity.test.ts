@@ -92,12 +92,15 @@ describe('run_analysis handler — source-bound intake identity', () => {
     expect(outcome.assistant_text).not.toContain('does not establish');
   });
 
-  it('still declares a proven omission after complete analysed-set binding', async () => {
+  it('AIQ 5887822471: a listed option NOTHING on the graph declares is asked about by name, never claimed missing', async () => {
+    // Complete analysed-set binding no longer proves an omission: the premium tier was never registered (the drafter
+    // dropped it, or it is a fragment). The claim `missing` is kept for the registered-then-gated case (the each-rows below).
     const { outcome, result } = await run({ nodes: boundNodes },
       'The options are keeping pricing as it is, raising prices, or introducing a premium tier.');
     expect(result.constraint_verdict?.may_name_leading_option).toBe(false);
     expect(outcome.assistant_text).toContain('“introducing a premium tier”');
-    expect(outcome.assistant_text).toContain('candidate is missing');
+    expect(outcome.assistant_text).toContain('Is that one of the options you want compared?');
+    expect(outcome.assistant_text).not.toContain('candidate is missing');
   });
 
   it.each([false, true])('preserves the real unevaluated churn constraint with bound=%s', async (bound) => {
