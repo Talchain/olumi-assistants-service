@@ -11,6 +11,7 @@ const numberEqual = (a, b) => typeof a === 'number' && Number.isFinite(a) && Mat
 const hash = (text) => createHash('sha256').update(text, 'utf8').digest('hex');
 export function unitMatches(wanted, actual) {
   const u = String(actual ?? '').toLowerCase().replaceAll('/', ' per ');
+  if (wanted === 'GBP') return /^(£|gbp|pounds?)$/.test(u.trim());
   if (wanted.startsWith('GBP/')) {
     const period = wanted.endsWith('month') ? /month|monthly|\bmo\b/ : /year|annual|annum|\byr\b/;
     return /£|\bgbp\b|pound/.test(u) && period.test(u);
@@ -102,8 +103,15 @@ export function scoreRecord(record, cases = manifest.briefs) {
     if (!held) failures.push({ kind: 'qualitative_limit_lost', expected: text });
   }
   const options = (graph.nodes ?? []).filter((n) => n.kind === 'option');
+  // A matching action label or copied source quote cannot substitute a different
+  // numeric action for a listed option. Keep this check independent of admission.
+  const matchesExpectedOption = (option, expected) => {
+    if (!matches(expected.pattern, label(option))) return false;
+    const expectedActions = brief.facts.filter((f) => f.role === 'intervention' && f.option && matches(f.option, `${expected.id} ${expected.pattern}`));
+    return expectedActions.every((f) => !obs.some((o) => o.owner === option && o.role === 'intervention' && matches(f.entity, o.entity) && typeof o.value === 'number' && (!numberEqual(o.value, f.value) || !unitMatches(f.unit, o.unit))));
+  };
   const optionRows = brief.options.map((expected) => {
-    const found = options.filter((o) => matches(expected.pattern, label(o)) && USER.has(o.provenance) && o.proposed_by !== 'olumi' && o.ownership !== 'proposed');
+    const found = options.filter((o) => matchesExpectedOption(o, expected) && USER.has(o.provenance) && o.proposed_by !== 'olumi' && o.ownership !== 'proposed');
     if (!found.length) failures.push({ kind: 'user_option_lost_or_reclassified', option: expected.id });
     return { id: expected.id, retained: found.length > 0, label_retained: options.some((o) => matches(expected.pattern, label(o))), source_bound: found.some((o) => sourceResult([o], expected, brief).bound) };
   });
@@ -130,7 +138,7 @@ export function scoreRecord(record, cases = manifest.briefs) {
     if (!supportedFact && !literalSubject && !sourceBound) failures.push({ kind: 'unstated_canonical_entity', entity: n.id, label: n.label, node_kind: n.kind, ownership: n.provenance ?? 'unspecified' });
   }
   for (const o of options) {
-    const known = brief.options.some((e) => matches(e.pattern, label(o))) || o.is_baseline === true;
+    const known = brief.options.some((e) => matchesExpectedOption(o, e)) || o.is_baseline === true;
     if (!known || o.proposed_by === 'olumi' || o.ownership === 'proposed') failures.push({ kind: 'unstated_canonical_option', option: o.id, label: o.label, ownership: o.proposed_by ?? o.provenance ?? 'unspecified' });
     if (!known && o.proposed_by !== 'olumi' && (USER.has(o.provenance) || quotesOf(o).length > 0)) failures.push({ kind: 'invented_user_option', option: o.id });
   }
