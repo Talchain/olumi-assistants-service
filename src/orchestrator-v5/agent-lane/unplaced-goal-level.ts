@@ -44,7 +44,16 @@ export type BriefGoalLevel =
       /** The brief's own clause that states it ("Monthly spend is £45k"), at most QUOTE_MAX characters. */
       readonly quote: string;
     }
-  | { readonly kind: 'refused'; readonly written: readonly string[] };
+  | {
+      readonly kind: 'refused';
+      readonly written: readonly string[];
+      /**
+       * ⛔ PR Review CR on #2307 @ 23ebebd2: the brief's figures (in the goal's own unit) whose own phrase names ANOTHER
+       * quantity. Admission refuses a drafter-supplied level equal to one of them on EVERY route, so the subject rule
+       * governs the "user wrote it" route too ("Our support team costs £45,000…" typed as the cloud bill's level).
+       */
+      readonly otherQuantity?: readonly number[];
+    };
 
 export const QUOTE_MAX = 160;
 
@@ -106,7 +115,11 @@ export function briefGoalLevel(candidate: CandidateModel, brief: string | null |
   const money = findStatedAmounts(brief).filter((a) => a.kind === 'currency' && !isTheChange(a));
   const distinct = money.filter((a, i) => money.findIndex((b) => same(b.magnitude, a.magnitude) && b.currencyCode === a.currencyCode) === i);
   if (distinct.length === 0) return null;
-  const refused: BriefGoalLevel = { kind: 'refused', written: distinct.map((a) => a.matchedText) };
+  const metric = typeof goal.metric === 'string' ? goal.metric : '';
+  const otherQuantity = unit.kind === 'currency' && unit.currencyCode !== undefined
+    ? distinct.filter((a) => a.currencyCode === unit.currencyCode && !phraseNamesOnlyTheGoal(brief, a, metric)).map((a) => a.magnitude / scale)
+    : [];
+  const refused: BriefGoalLevel = { kind: 'refused', written: distinct.map((a) => a.matchedText), ...(otherQuantity.length > 0 ? { otherQuantity } : {}) };
   if (unit.kind !== 'currency' || unit.currencyCode === undefined) return refused;
   const goalMoney = readMoneyTotal(goal.unit, goal.metric);
   if (goalMoney === null || goalMoney.code !== unit.currencyCode) return refused;
@@ -121,7 +134,7 @@ export function briefGoalLevel(candidate: CandidateModel, brief: string | null |
     : c.kind === 'currency' && c.currencyCode === unit.currencyCode && same(c.magnitude, Math.abs(goal.value) * scale)));
   const sentence = sentenceAround(brief, a.index, a.index + a.matchedText.length);
   if (change === undefined || sentence !== sentenceAround(brief, change.index, change.index + change.matchedText.length)) return refused;
-  if (!phraseNamesOnlyTheGoal(brief, a, typeof goal.metric === 'string' ? goal.metric : '')) return refused;
+  if (!phraseNamesOnlyTheGoal(brief, a, metric)) return refused;
   const carried = candidate.factors.some((f) => {
     if (typeof f.baseline_value !== 'number' || !Number.isFinite(f.baseline_value)) return false;
     const fu = readCurrencyUnitWithQualifiers(typeof f.unit === 'string' ? f.unit : '');

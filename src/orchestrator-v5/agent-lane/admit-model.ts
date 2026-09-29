@@ -2543,6 +2543,11 @@ export function admitStatedGoalChange(
       return `Olumi's own estimate of the current level of "${goal.metric}" (${today}) was not used, so no chance of a change of ` +
         `${change} is shown: that figure would rest on a guess, not on anything you said.`;
     }
+    // ⛔ PR Review CR on #2307 @ 23ebebd2: a level equal to a brief figure stated for ANOTHER quantity is never this
+    // goal's, whoever typed it (the subject rule governs both routes).
+    if (fromBrief?.kind === 'refused' && (fromBrief.otherQuantity ?? []).some((v) => Math.abs(v - today) <= 1e-9 * Math.max(1, Math.abs(v)))) {
+      return 'stated for another quantity';
+    }
     if (!userWroteLevel(today, goal.unit)) {
       return `The current level of "${goal.metric}" (${today}) is not a figure your brief states for it, so no chance of a ` +
         `change of ${change} is shown: a change is measured from today's level. Tell me the current level of ` +

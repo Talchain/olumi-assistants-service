@@ -48,6 +48,7 @@ const COSTS = {
   links: [{ from: 'GCP workload share', to: 'costs', direction: 'negative', provenance: 'inferred' }],
 };
 
+let lastBuildResult: Rec | undefined;
 async function build(brief: string, candidate: Rec): Promise<Graph> {
   let stored: string | undefined;
   const dispatch: InternalDispatch = async (path, body) => {
@@ -59,13 +60,16 @@ async function build(brief: string, candidate: Rec): Promise<Graph> {
   };
   const call: CallStructuredModel = async () => ({ text: JSON.stringify(candidate) });
   const result = await buildModelFromBrief(SCENARIO, brief, dispatch, call) as Rec;
+  lastBuildResult = result;
   expect(result.ok, JSON.stringify(result).slice(0, 600)).toBe(true);
   return GraphV3.parse(JSON.parse(stored!)) as unknown as Graph;
 }
 
+/** The last request the faked PLoT received. */
+let lastPlotRequest: Rec | undefined;
 /** The REAL `run_analysis` handler over the graph, PLoT faked: its outcome. */
 async function runOutcome(graph: Graph): Promise<Rec> {
-  const run = vi.fn(async () => ({
+  const run = vi.fn(async (request: unknown) => (lastPlotRequest = request as Rec, {
     meta: { seed_used: 1, n_samples: 1, response_hash: 'sha256:s' }, results: [], response_hash: 'sha256:t', analysis_status: 'completed',
   }) as unknown as V2RunResponseEnvelope);
   const plotClient = { run, validatePatch: vi.fn().mockResolvedValue({}) } as unknown as PLoTClient;
@@ -146,6 +150,37 @@ describe('the Run reply says Olumi\'s goal readings, admitted only as the builde
     const outcome = await runOutcome(g);
     expect(Object.keys(outcome)).not.toContain('__goal_reading_source');
     expect(reply(outcome)).not.toContain('Olumi reads');
+  });
+});
+
+// ⛔ PR Review CR on #2307 @ 23ebebd2: the drafter TYPES the support team's £45,000 as the cloud bill's level
+// (`baseline_known`, `explicit`): the subject rule governs this "user wrote it" route too.
+const SUPPORT = 'Our support team costs £45,000 a month and we want to cut our cloud bill by 15%.';
+const typedLevel = (brief: string) => ({
+  ...COSTS,
+  goal: { ...COSTS.goal, metric: 'Monthly cloud bill', value: -15, unit: 'GBP per month', baseline_known: true, baseline_value: 45000, baseline_provenance: 'explicit' },
+  links: [{ from: 'GCP workload share', to: 'Monthly cloud bill', direction: 'negative', provenance: 'inferred' }],
+  _brief: brief,
+});
+describe('a figure stated for ANOTHER quantity never becomes the goal\'s level, whoever typed it', () => {
+  it('RED (real build → Run): the drafter-typed support-team £45,000 → no base on the goal, none on the wire, no reading said', async () => {
+    const { _brief, ...cand } = typedLevel(SUPPORT);
+    const g = await build(_brief, cand);
+    const goal = g.nodes.find((n) => n.kind === 'goal')!;
+    expect(goal.observed_state).toBeUndefined();
+    expect(goal.goal_level_reading).toBeUndefined();
+    expect(JSON.stringify(lastBuildResult)).toContain('Tell me the current level of ‘Monthly cloud bill’');
+    const outcome = await runOutcome(g);
+    const wireGoal = ((lastPlotRequest!.graph as Graph).nodes).find((n) => n.id === goal.id)!;
+    expect(wireGoal.observed_state).toBeUndefined();
+    expect(reply(outcome)).not.toContain('Olumi reads');
+  });
+  it('CONTROL: the same typed level where the brief says it of the cloud bill → the user\'s own level is kept', async () => {
+    const { _brief, ...cand } = typedLevel('Our cloud bill is £45,000 a month and we want to cut it by 15%.');
+    const g = await build(_brief, cand);
+    const goal = g.nodes.find((n) => n.kind === 'goal')!;
+    expect((goal.observed_state as Rec | undefined)?.raw_value).toBe(45000);
+    expect((goal.observed_state as Rec | undefined)?.source).toBe('brief_extraction');
   });
 });
 

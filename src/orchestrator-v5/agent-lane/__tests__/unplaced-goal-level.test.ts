@@ -23,7 +23,7 @@ function draft(goal: Record<string, unknown> = {}, factors: Record<string, unkno
   } as unknown as CandidateModel;
 }
 const ADOPT_45K = { kind: 'adopt', value: 45000, written: '£45k', quote: 'Monthly spend is £45k' };
-const refused = (...written: string[]) => ({ kind: 'refused', written });
+const refused = (...written: string[]) => expect.objectContaining({ kind: 'refused', written });
 
 describe('briefGoalLevel: AIQ (b) — the sole same-terms figure, in the change\'s own sentence', () => {
   it('(a) RED (the saved "costs" shape): a change goal with no level, the brief\'s £45k on no node → adopted, with its clause', () => {
@@ -71,7 +71,10 @@ describe('briefGoalLevel: AIQ (b) — the sole same-terms figure, in the change\
     ['named under-claim: the goal named by a word its name lacks ("Our AWS bill is £45k a month")', 'Monthly cloud costs',
       'Our AWS bill is £45k a month; we want to cut cloud costs by 20%.', refused('£45k')],
   ])('REFUSED (the figure is stated for another quantity): %s', (_why, metric, brief, expected) => {
-    expect(briefGoalLevel(draft({ metric, value: /15%/.test(brief) ? -15 : -20, unit: 'GBP per month' }), brief)).toEqual(expected);
+    const got = briefGoalLevel(draft({ metric, value: /15%/.test(brief) ? -15 : -20, unit: 'GBP per month' }), brief);
+    expect(got).toEqual(expected);
+    // ⛔ PR Review CR @ 23ebebd2: the figure is named as another quantity's, so admission refuses it on every route.
+    expect(got).toMatchObject({ otherQuantity: [45000] });
   });
   it.each<[string, string, string, string]>([
     ['the goal\'s own words ("Our cloud bill is £45k a month; cut it by 15%")', 'Monthly cloud bill', 'Our cloud bill is £45k a month; we want to cut it by 15%.', 'Our cloud bill is £45k a month'],
