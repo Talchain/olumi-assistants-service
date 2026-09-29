@@ -215,7 +215,10 @@ const HANDLER_APPEND_ORDER = extractHandlerAppendOrder();
  * is the slot→family binding — the handler names a local `const`, not a
  * grammar — so it is stated, and then bounded on both sides.
  */
-const SLOT_FAMILY: ReadonlyArray<readonly [string, string, 'registered' | 'excluded']> = [
+const SLOT_FAMILY: ReadonlyArray<readonly [string, string, 'registered' | 'excluded' | 'exact']> = [
+  // ⭐ AIQ 5895590866 (2): Olumi's goal readings are admitted by EXACT EQUALITY with the forwarder's own rebuild
+  // (`goalReadingTailOf`), never by a registered grammar, so they sit in neither the registry nor its exclusions.
+  ['goalReadingDisclosure', 'buildGoalReadingDisclosure', 'exact'],
   ['scaffoldDisclosure', 'SCAFFOLD_ANY_DISCLOSURE_RE_SRC', 'registered'],
   ['constraintGapDisclosure', 'CONSTRAINT_GAP_DISCLOSURE_RE_SRC', 'registered'],
   ['intakeDisclosure', 'INTAKE_OPTION_DISCLOSURE_RE_SRC', 'registered'],
@@ -304,7 +307,7 @@ describe('⭐⭐ ORDER — the registry mirrors the run_analysis handler append 
   });
 
   it('every family named in the map really is an exported grammar (no invented names)', () => {
-    for (const [slot, name] of SLOT_FAMILY) {
+    for (const [slot, name] of SLOT_FAMILY.filter(([, , d]) => d !== 'exact')) {
       expect(SCANNED.has(name), `${slot} → ${name}, which nothing exports`).toBe(true);
     }
   });
