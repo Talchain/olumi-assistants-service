@@ -45,7 +45,7 @@ export function partitionM1Candidate(candidate: CandidateModel, brief: string): 
     // This deliberately small grammar recognises a USER-PROPOSED ACTION, not any text containing its number.
     // E.g. "Should we switch ... to GCP?" supports "Switch to GCP"; "£49" never supports "Keep £49".
     if (!/(?:^|[.!?]\s*)(?:should|could|can|shall)\s+we\s+$/i.test(brief.slice(0, at))) return undefined;
-    const tokens = (s: string) => s.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+    const tokens = (s: string): string[] => s.toLowerCase().match(/[a-z0-9]+/g) ?? [];
     const source = tokens(words); const label = tokens(o.label);
     if (label.length < 2 || label[0] !== source[0]) return undefined;
     // Matching meaningful label words in order also rules out reusing a correct action quote for another option.
@@ -142,8 +142,9 @@ export function partitionM1Candidate(candidate: CandidateModel, brief: string): 
   }
   // The drafter's free text can still describe discarded guesses as active assumptions.
   // M1 keeps the existing structured scope/limit/deadline questions, plus unmapped user options.
-  const scopeQuestions = candidate.goal.scope?.stated_in_brief === false
-    ? (candidate.unknowns ?? []).filter((q) => typeof q === 'string' && q.includes(candidate.goal.metric) && /scope|plans?|revenue/i.test(q) && !/provision|estimat|assum/i.test(q))
+  const parked = (candidate as { unknowns?: unknown }).unknowns;
+  const scopeQuestions = candidate.goal.scope?.stated_in_brief === false && Array.isArray(parked)
+    ? parked.filter((q: unknown): q is string => typeof q === 'string' && q.includes(candidate.goal.metric) && /scope|plans?|revenue/i.test(q) && !/provision|estimat|assum/i.test(q))
     : [];
   const unknowns = [...scopeQuestions, ...keptOptions
     .filter((o) => (o.interventions ?? []).length === 0 && (o.changes ?? []).length === 0 && o.is_status_quo !== true)
