@@ -158,7 +158,31 @@ export function approvalChipsFor(
   }
   const reading = readingShownFor(tool, labelSourceFor?.(proposalId));
   if (reading !== undefined) return [{ id: approvalChipIdFor(proposalId), ...reading, message: approve.message }, AMEND_CHIP];
+  const effectReading = linkEffectReadingFor(tool, labelSourceFor?.(proposalId));
+  if (effectReading !== undefined) {
+    return [{ id: approvalChipIdFor(proposalId), label: approve.label, message: approve.message, detail: effectReading }, AMEND_CHIP];
+  }
   return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, labelSourceFor?.(proposalId)), message: approve.message }, AMEND_CHIP];
+}
+
+/**
+ * ⭐ THE LINK-EFFECT CARD SHOWS THE READING IT APPROVES (AIQ 5884881500, "proposer, not stamper"): the figures, units and
+ * sentence from the STORED proposal (what `authorise_change` will write), the two labels from the proposer's own result
+ * for that same id — never the Agent's prose. The user approves THIS reading; a wrong one costs a "no".
+ */
+function linkEffectReadingFor(tool: string, source: ApprovalLabelSource | undefined): string | undefined {
+  const proposal = source?.proposal;
+  const result = source?.result;
+  if (tool !== 'propose_link_effect' || proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return undefined;
+  const op = proposal.operations.length === 1 && proposal.operations[0]!.op === 'set_link_effect' ? proposal.operations[0]!.value as
+    { effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown }; quote?: unknown } : undefined;
+  const link = result.link as { from?: unknown; to?: unknown; your_words?: unknown } | undefined;
+  const e = op?.effect;
+  if (e === undefined || typeof op?.quote !== 'string' || typeof link?.from !== 'string' || typeof link.to !== 'string' || link.your_words !== op.quote
+    || typeof e.amount !== 'number' || typeof e.per_source_change !== 'number' || typeof e.amount_unit !== 'string' || typeof e.per_source_change_unit !== 'string') return undefined;
+  const signed = (v: number, unit: string): string => `${v < 0 ? '\u2212' : '+'}${figureInUserUnits(Math.abs(v), unit) ?? `${Math.abs(v)} ${unit}`}`;
+  return `Record: ${signed(e.per_source_change, e.per_source_change_unit)} on "${link.from}" \u2192 ${signed(e.amount, e.amount_unit)} in "${link.to}" `
+    + `\u2014 from your words: "${op.quote}"`;
 }
 
 /** The tools whose proposal can carry Olumi's reading of the user's own words for a link's band (slice C3). */

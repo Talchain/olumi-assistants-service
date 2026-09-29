@@ -748,7 +748,7 @@ export function userWordsOf(typedEarlier: readonly string[], typedNow: string | 
  * elements spread over several sentences.
  */
 export type LinkEffectStatementMiss = 'question' | 'denied' | 'figures_not_in_statement' | 'end_not_named'
-  | 'direction_not_stated' | 'direction_contradicts' | 'figure_not_bound' | 'not_one_statement';
+  | 'direction_not_stated' | 'direction_contradicts' | 'figure_not_bound' | 'not_one_statement' | 'source_figure_not_a_change';
 const TARGET_DOWN = /^(?:lose|loses|losing|lost|cost|costs|costing|fewer)$/;
 const TARGET_UP = /^(?:gain|gains|gaining|gained|win|wins|winning|won|adds|added|adding)$/;
 const MOVE_UP = /^(?:rise|rises|rising|rose|increase|increases|increasing|increased|raise|raises|raising|raised|boost|boosts|boosted|boosting|lift|lifts|lifted|lifting|grow|grows|growing|grew|add)$/;
@@ -763,6 +763,12 @@ const MOVE_DOWN = /^(?:fall|falls|falling|fell|drop|drops|dropping|dropped|decre
 const SOURCE_LINK = /^(?:on|in|of|to|the|a|an|our|its|their|we|you|by|extra|more|each|every|per)$/;
 const AMOUNT_LINK = /^(?:us|about|roughly|around|approximately|some|nearly|almost|over|up|to|the|our|of|by|an|a|extra|another)$/;
 const SOURCE_REACH = 6;
+/**
+ * The source's figure is a CHANGE only when it is distributive ("every / each / per £1") or joined to the source's move
+ * ("£10 rise", "£1 increase", "falls by £1") — PR Review's fourth CR (#2275 @ ce3cd9d0): "With Pro price £1 today,
+ * raising it loses 50 paying subscribers" writes £1 as today's LEVEL, beside "price", and sizes no rise.
+ */
+const DELTA_BEFORE = /^(?:every|each|per)$/;
 const AMOUNT_REACH = 4;
 /** The quote's sentences: split at ! ? ; : a new line, or a period — except a period BETWEEN digits ("0.5", "£1.50"). */
 const sentencesOf = (q: string): string[] => q.split(/[!?;:\n]|(?<!\d)\.|\.(?!\d)/).map((x) => x.trim()).filter((x) => x !== '');
@@ -781,6 +787,22 @@ export function linkEffectTheUserStated(
   const misses = sentences.map((sentence) => linkEffectInOneSentence(sentence, effect, ends, scope));
   if (misses.some((m) => m === null)) return null;
   return sentences.length === 1 ? misses[0]! : 'not_one_statement';
+}
+
+/**
+ * The ONE sentence of the quote that states the effect (`linkEffectTheUserStated` passes on it), verbatim, or null.
+ * AIQ 5884881500 ("proposer, not stamper"): that sentence is what the proposal stores as the user's words and what the
+ * approval card shows beside the reading — the user approves the READING, so a wrong parse costs a "no", never a false
+ * `user_stated`.
+ */
+export function statingSentenceOf(
+  quote: string,
+  effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
+  ends: { readonly source: string; readonly target: string },
+  scope: { readonly quantities: readonly string[] },
+): string | null {
+  if (linkEffectTheUserStated(quote, effect, ends, scope) !== null) return null;
+  return sentencesOf(quote.trim()).find((sentence) => linkEffectInOneSentence(sentence, effect, ends, scope) === null) ?? null;
 }
 
 function linkEffectInOneSentence(
@@ -834,6 +856,11 @@ function linkEffectInOneSentence(
     || sourceLabel.some((x) => sameWord(x, w));
   if (!targetMoves.some((m) => joined(amountAt, m, AMOUNT_REACH, (w) => AMOUNT_LINK.test(w)))
     || !sourceAt.some((s) => joined(perAt, s, SOURCE_REACH, sourceLinkWord))) return 'figure_not_bound';
+  const moveAt = tokens.flatMap((t, i) => (MOVE_UP.test(t.w) || MOVE_DOWN.test(t.w) ? [i] : []));
+  const distributive = perAt > 0 && DELTA_BEFORE.test(tokens[perAt - 1]!.w);
+  if (!distributive && !moveAt.some((m) => joined(perAt, m, SOURCE_REACH, (w) => SOURCE_LINK.test(w) || sourceLabel.some((x) => sameWord(x, w))))) {
+    return 'source_figure_not_a_change';
+  }
   if (target !== Math.sign(effect.amount)) return 'direction_contradicts';
   if (source === 0 ? effect.per_source_change < 0 : source !== Math.sign(effect.per_source_change)) {
     return source === 0 ? 'direction_not_stated' : 'direction_contradicts';

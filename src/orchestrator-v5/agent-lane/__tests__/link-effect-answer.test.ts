@@ -155,6 +155,9 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     ['Every £1 on the Pro price loses us paying subscribers, and we have 50 paying subscribers today.',
       'Every £1 on the Pro price loses us paying subscribers, and we have 50 paying subscribers today', -50, 1,
       'not_the_users_statement', 'figure_not_bound'],
+    // PR Review's fourth CR (@ ce3cd9d0): £1 is today's LEVEL of the price, not a £1 rise — no change is sized.
+    ['With Pro price £1 today, raising it loses 50 paying subscribers.',
+      'With Pro price £1 today, raising it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_not_a_change'],
     // A NAMED under-claim: the source only implied ("a £10 rise") — the Agent asks, never infers the price.
     ['A £10 rise loses us about 500 paying subscribers.', 'A £10 rise loses us about 500 paying subscribers', -500, 10,
       'not_the_users_statement', 'end_not_named'],
@@ -163,6 +166,43 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     expect(r).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal }));
     if (why !== undefined) expect(r.why).toBe(why);
     expect(r.stored).toBe(0);
+  });
+
+  /**
+   * ⭐ PROPOSER, NOT STAMPER (AIQ 5884881500; Canonical 5884892804: `user_stated` is written only on this approval). The
+   * proposal stores the ONE sentence the rule read, and the approval card shows the READING beside it — the user approves
+   * that reading, so a wrong parse costs a "no".
+   */
+  it('the proposal stores the ONE stating sentence, never the longer quote', async () => {
+    const { caps, store } = world(C);
+    const said = 'We checked last quarter. Every £1 on the Pro price loses us about 50 paying subscribers.';
+    const r = await caps.proposeLinkEffect!(ctxSaying(said), { ...SUBS_ARGS, quote: 'We checked last quarter. Every £1 on the Pro price loses us about 50 paying subscribers' }) as Json;
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    const op = store.get(String(r.proposal_id))!.operations[0]!.value as Json;
+    expect(op.quote).toBe('Every £1 on the Pro price loses us about 50 paying subscribers');
+    expect(r.link.your_words).toBe(op.quote);
+    expect(String(r.public_label)).not.toMatch(/We checked last quarter/);
+  });
+
+  it('the approval card SHOWS the reading it records: both changes with their signs, both ends, the user\'s sentence', async () => {
+    const { caps, store } = world(C);
+    const r = await caps.proposeLinkEffect!(ctxSaying(SUBS_SAID), SUBS_ARGS) as Json;
+    const id = String(r.proposal_id);
+    const chips = approvalChipsFor([{ name: 'propose_link_effect', ok: true, mutated: false, proposal_id: id }],
+      () => ({ proposal: store.get(id), result: r as never }));
+    const approve = chips.find((c) => c.id === approvalChipIdFor(id))!;
+    expect(approve.label).toBe('Record your figure');
+    expect(approve.detail).toMatch(/^Record: \+.*1.* on "Pro plan price" \u2192 \u221250 .*subscribers.* in "Pro plan paying subscribers" \u2014 from your words: "every £1 on the Pro price loses us about 50 paying subscribers"$/);
+  });
+
+  it('the card shows NO reading when the proposer\'s result and the stored proposal disagree (never the Agent\'s prose)', async () => {
+    const { caps, store } = world(C);
+    const r = await caps.proposeLinkEffect!(ctxSaying(SUBS_SAID), SUBS_ARGS) as Json;
+    const id = String(r.proposal_id);
+    const other = { ...r, link: { ...r.link, your_words: 'something else' } };
+    const chips = approvalChipsFor([{ name: 'propose_link_effect', ok: true, mutated: false, proposal_id: id }],
+      () => ({ proposal: store.get(id), result: other as never }));
+    expect(chips.find((c) => c.id === approvalChipIdFor(id))).not.toHaveProperty('detail');
   });
 
   it('the tool is registered: dispatchTool routes propose_link_effect to the capability', async () => {

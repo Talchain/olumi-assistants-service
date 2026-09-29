@@ -141,7 +141,7 @@ import { unitFamilyOf } from '../../routing/value-unit-resolution.js';
 import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
 import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, statingSentenceOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { figureInUserUnits } from '../approval-chips.js';
 import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -2506,9 +2506,10 @@ export function createAgentCapabilities(
       // both ends named, and which way (PR Review CHANGES_REQUIRED on #2275; `linkEffectTheUserStated`).
       const labelsOf = (keep: (kind: unknown) => boolean): string[] => g.nodes.filter((n) => keep((n as { kind?: unknown }).kind))
         .map((n) => String(n.label ?? '')).filter((l) => l !== '');
-      const miss = linkEffectTheUserStated(quote, { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit },
-        { source: from.label, target: to.label },
-        { quantities: labelsOf((k) => k !== 'option' && k !== 'decision') });
+      const statedEffect = { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit };
+      const statedEnds = { source: from.label, target: to.label };
+      const statedScope = { quantities: labelsOf((k) => k !== 'option' && k !== 'decision') };
+      const miss = linkEffectTheUserStated(quote, statedEffect, statedEnds, statedScope);
       if (miss === 'figures_not_in_statement') {
         return { ok: false, mutated: false, refusal: 'not_the_users_figure',
           detail: 'Nothing was prepared: the statement quoted does not write both figures. Ask the user how much the one moves the other, in numbers.' };
@@ -2519,6 +2520,8 @@ export function createAgentCapabilities(
             + `"${to.label}" (${miss.replace(/_/g, ' ')}). A figure is recorded as theirs only when they say it: ask them to say it as one `
             + 'statement naming both, which way, and both figures. Never fill in a figure or a direction for them.' };
       }
+      // AIQ 5884881500 ("proposer, not stamper"): the ONE sentence the rule read is what is stored and shown for approval.
+      const said = statingSentenceOf(quote, statedEffect, statedEnds, statedScope) ?? quote;
       const edgeToken = linkEffectEdgeToken(g.raw, from.id, to.id);
       if (edgeToken === null) {
         return { ok: false, mutated: false, refusal: 'no_such_link',
@@ -2526,7 +2529,7 @@ export function createAgentCapabilities(
       }
       const effect = { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit };
       const dry = applyLinkEffectEdit({ persistedGraph: g.raw, from: from.id, to: to.id, effect,
-        expected: { graph_hash: g.graph_hash, edge_token: edgeToken }, quote, lastRunIdentityUse: g.identity_run_use ?? null });
+        expected: { graph_hash: g.graph_hash, edge_token: edgeToken }, quote: said, lastRunIdentityUse: g.identity_run_use ?? null });
       if (dry.kind === 'refused') {
         const definition = dry.reason === 'definitional_link' ? definitionalLinkInUse(g.raw, from.id, to.id, g.identity_run_use ?? null) : null;
         return { ok: false, mutated: false, refusal: dry.reason,
@@ -2537,10 +2540,10 @@ export function createAgentCapabilities(
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash,
         operations: [{ op: 'set_link_effect', path: `${from.id}::${to.id}`,
-          value: { from: from.id, to: to.id, effect, quote, edge_token: edgeToken } }],
-        provenance: { authored_by: 'user_stated', basis: quote },
+          value: { from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken } }],
+        provenance: { authored_by: 'user_stated', basis: said },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Record your figure for how "${from.label}" moves "${to.label}": "${quote}"`,
+        public_label: `Record your figure for how "${from.label}" moves "${to.label}": "${said}"`,
       });
       proposals.put(proposal);
       return {
@@ -2548,7 +2551,7 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        link: { from: from.label, to: to.label, effect, your_words: quote },
+        link: { from: from.label, to: to.label, effect, your_words: said },
         note: 'Nothing has changed yet. Tell the user it will be recorded as THEIR figure for this link, in their words, never the id, '
           + 'and call authorise_change with this proposal_id once they agree.',
       };
