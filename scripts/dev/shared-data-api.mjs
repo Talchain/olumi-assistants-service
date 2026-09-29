@@ -3,6 +3,7 @@
 // shared-data experiment's LOCAL PostgREST (scripts/dev/shared-data-db.mjs). Run it with tsx so the TypeScript app loads:
 //
 //   npx tsx scripts/dev/shared-data-api.mjs [--port 8787] [--require-user-jwt true|false] [--env-dir <dir with .env files>]
+//                                           [--origins <comma-separated browser origins; default the UI's :5173>]
 //
 // Data target: ONLY `connection.json` from the experiment's private state dir, refused unless it is 127.0.0.1.
 // Credentials: every inherited SUPABASE_* / ANTHROPIC_* / telemetry var is scrubbed first; then an explicit
@@ -58,6 +59,16 @@ process.env.NODE_ENV = process.env.NODE_ENV ?? 'development';
 // is really verified (a present-but-invalid token is refused `sign_in_required`). `--require-user-jwt false` mirrors
 // a flag-off deploy, where the token is ignored and the assist key alone authorises.
 process.env.CEE_REQUIRE_USER_JWT = arg('--require-user-jwt', 'true') === 'false' ? 'false' : 'true';
+// The product lane staging serves. A localhost UI sends no `x-olumi-ai-mode` header (only staging hosts default to
+// 'openai'), so `/proxy/v5/turn` falls to PROXY_V5_TARGET, whose code default is the conventional route (Anthropic, and
+// no top-level `goal_certainty` / `limit_verdicts` on the turn). Mount the Agent route and aim the proxy at it.
+process.env.AGENT_LANE_ENABLED = 'true';
+process.env.PROXY_V5_TARGET = 'agent';
+// The UI posts turns only to `/proxy/v5/turn` (its host source is VITE_V5_ENDPOINT); the route is off by default and
+// rejects every origin not listed. Local dev origins only (the UI's Vite server and preview are both :5173).
+process.env.BROWSER_PROXY_ENABLED = 'true';
+process.env.BROWSER_PROXY_ALLOWED_ORIGINS = arg('--origins', 'http://localhost:5173,http://127.0.0.1:5173');
+process.env.ALLOWED_ORIGINS = process.env.BROWSER_PROXY_ALLOWED_ORIGINS; // CORS preflight for the same origins
 
 // ── 3. The real user-auth path against a LOCAL JWKS ──────────────────────────────────────────────────────────────
 const keyFile = resolve(stateDir, 'api-signing-key.json');
@@ -110,6 +121,8 @@ console.log(JSON.stringify({
   user_token_file: tokenFile,
   allowlisted_env: loaded,
   require_user_jwt: process.env.CEE_REQUIRE_USER_JWT,
+  proxy_v5_target: process.env.PROXY_V5_TARGET,
+  browser_origins: process.env.BROWSER_PROXY_ALLOWED_ORIGINS,
   note: 'Bearer the token file\'s JWT (real ES256 path) or send x-olumi-assist-key for assist routes. Ctrl-C stops both servers.',
 }, null, 2));
 const stop = async () => { await app.close(); jwks.close(); process.exit(0); };
