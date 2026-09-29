@@ -192,19 +192,52 @@ describe('a copied quote never covers a different figure (PR Review CR on 9d85b0
     const { g } = await build(priceDraft({ label: 'Raise to £54', provenance: 'ai_proposed', value: 54, words: TWO_WORDS }), TWO);
     expect(optionNode(g, 'Raise to £54').proposed_by).toBeUndefined();
   });
-  it('11b — CONTROL (matching action on the two-money item): the user\'s £59, the figure after "to", is quoted and the Run reconciles', async () => {
+  it('11b — NAMED UNDER-CLAIM: the user\'s own £59 on that item is not quoted either (no "<quantity> from X to Y") → the Run withholds, as before this PR', async () => {
     const { g } = await build(priceDraft({ label: 'Raise to £59', provenance: 'explicit', value: 59, words: TWO_WORDS }), TWO);
-    expect(optionNode(g, 'Raise to £59').source_quote).toBe(TWO_WORDS);
-    expect(deriveIntakeOptionReconciliation(TWO, g, g).state).toBe('reconciled');
+    expect(optionNode(g, 'Raise to £59').source_quote).toBeUndefined();
+    expect(deriveIntakeOptionReconciliation(TWO, g, g).state).not.toBe('reconciled');
   });
-  // The phrase classes a two-money item takes (enumerated for the first review, PR Review CR on fcf35a8b).
+  // ⛔ PR Review CHANGES_REQUIRED on #2299 @ 43815390: "to" alone proves nothing ("…with a setup credit to £54").
+  const CREDIT_TO = 'price Pro at £59 with a setup credit to £54';
+  const CREDIT = `Should we raise our Pro plan price? The options are ${CREDIT_TO}, or keep it at £49. We have 1,500 paying subscribers and £75k MRR, and we want MRR above £85k.`;
+  it('12 — RED (real build + the Run\'s reader): Olumi\'s £54 price copying "price Pro at £59 with a setup credit to £54" gets no quote, and the Run withholds', async () => {
+    expect(extractEnumeratedOptions(CREDIT).map((c) => c.text), 'PRECONDITION').toEqual([CREDIT_TO, 'keep it at £49']);
+    const { r, g } = await build(priceDraft({ label: 'Raise to £54', provenance: 'ai_proposed', value: 54, words: CREDIT_TO }), CREDIT);
+    expect(r.ok, JSON.stringify(r).slice(0, 300)).toBe(true);
+    expect(optionNode(g, 'Raise to £54').source_quote).toBeUndefined();
+    expect(optionNode(g, 'Keep at £49').source_quote).toBe('keep it at £49');
+    expect(deriveIntakeOptionReconciliation(CREDIT, g, g).state).not.toBe('reconciled');
+  });
+  // The matching control, in the corpus's own pricing wording ("increase the Pro plan price from £49 to £59").
+  const FROM_TO = 'increase the Pro plan price from £49 to £59';
+  const PRICING = `Should we raise our Pro plan price? The options are ${FROM_TO}, or keep it at £49. We have 1,500 paying subscribers and £75k MRR, and we want MRR above £85k.`;
+  it('12b — CONTROL (real build + the Run\'s reader): the user\'s £59 on "<the price> from £49 to £59" is quoted and the Run reconciles', async () => {
+    expect(extractEnumeratedOptions(PRICING).map((c) => c.text), 'PRECONDITION').toEqual([FROM_TO, 'keep it at £49']);
+    const { r, g } = await build(priceDraft({ label: 'Raise to £59', provenance: 'explicit', value: 59, words: FROM_TO }), PRICING);
+    expect(r.ok, JSON.stringify(r).slice(0, 300)).toBe(true);
+    expect(optionNode(g, 'Raise to £59').source_quote).toBe(FROM_TO);
+    expect(deriveIntakeOptionReconciliation(PRICING, g, g).state).toBe('reconciled');
+  });
+  it('12c — the same from–to item: Olumi\'s £54 is not quoted and the Run withholds', async () => {
+    const { g } = await build(priceDraft({ label: 'Raise to £54', provenance: 'ai_proposed', value: 54, words: FROM_TO }), PRICING);
+    expect(optionNode(g, 'Raise to £54').source_quote).toBeUndefined();
+    expect(deriveIntakeOptionReconciliation(PRICING, g, g).state).not.toBe('reconciled');
+  });
+  // The phrase classes a two-figure item takes (PR Review CRs on fcf35a8b and 43815390).
   it.each<[string, string, number, boolean]>([
-    ['"from £49 to £59": the new price', 'raise Pro price from £49 to £59', 59, true],
-    ['"from £49 to £59": the OLD price is not the option\'s', 'raise Pro price from £49 to £59', 49, false],
-    ['"to £59 with a £54 setup credit": the credit is not the price', TWO_WORDS, 54, false],
-    ['no "to" figure ("a £59 price with a £54 credit")', 'a £59 Pro price with a £54 setup credit', 59, false],
-    ['two "to" figures ("to £59 then to £64 next year")', 'raise Pro price to £59 then to £64 next year', 59, false],
-    ['a delta the option types ("by £10 to £59", value 10): the named under-claim', 'raise Pro price by £10 to £59', 10, false],
+    ['"<the price> from £49 to £59": the new price', 'raise Pro price from £49 to £59', 59, true],
+    ['"<the price> from £49 to £59", a determiner and no qualifier', 'increase the price from £49 to £59', 59, true],
+    ['"<the price> from £49 to £59": the OLD price is not the option\'s', 'raise Pro price from £49 to £59', 49, false],
+    ['"to £59 with a £54 setup credit": the credit', TWO_WORDS, 54, false],
+    ['"to £59 with a £54 setup credit": the user\'s £59 (named under-claim)', TWO_WORDS, 59, false],
+    ['"price Pro at £59 with a setup credit to £54" (PR Review 43815390)', CREDIT_TO, 54, false],
+    ['no from–to pair ("a £59 Pro price with a £54 credit")', 'a £59 Pro price with a £54 setup credit', 59, false],
+    ['a from–to pair for ANOTHER quantity ("reduce the setup credit from £59 to £54")', 'reduce the setup credit from £59 to £54', 54, false],
+    ['another quantity with the same head noun ("raise Basic price from £49 to £54")', 'raise Basic price from £49 to £54', 54, false],
+    ['the head qualified by a word the quantity lacks ("the Pro setup price")', 'cut the Pro setup price from £59 to £54', 54, false],
+    ['a later figure after the pair ("then £64"; two from–to pairs never list)', 'raise Pro price from £49 to £59 then £64', 59, false],
+    ['a third figure beside the pair ("with £5 off")', 'raise Pro price from £49 to £59 with £5 off', 59, false],
+    ['a delta the option types ("by £10 to £59", value 10; named under-claim)', 'raise Pro price by £10 to £59', 10, false],
   ])('figure binding on a two-money item: %s', (_why, item, value, quoted) => {
     const brief = `Should we raise our Pro plan price? The options are ${item}, or keep it at £49.`;
     expect(extractEnumeratedOptions(brief).map((c) => c.text), 'PRECONDITION: the Run\'s reader lists the item').toEqual([item, 'keep it at £49']);

@@ -32,9 +32,10 @@ interface Span { readonly text: string; readonly from: number; readonly to: numb
  * Pro price to £59" would otherwise take the user's quote, lose `proposed_by: 'olumi'` and could lead as the user's
  * choice. A figure the item says nothing of the same kind about (Olumi's level on "shift batch jobs to spot instances")
  * is no conflict, nor is a name like "tier-1" beside a £ or % figure. An item writing TWO money or percentage figures
- * binds only the one written after "to" ("from £49 to £59"); with none or two such, no quote. Named residuals: a change
- * the option types as a delta ("by £10 to £59" with value 10) is not quoted; two PLAIN numbers with no unit word after
- * either ("hire 2 or 3") still match the one the option sets.
+ * binds only as "<the option's quantity> from X to Y", to Y (`fromToBinds`); any other such item binds none. Named
+ * residuals: a change typed as a delta, or any two-figure item not in that shape ("to £59 with a £54 setup credit"), is
+ * not quoted (the Run withholds, as before this PR); two PLAIN numbers with no unit word after either ("hire 2 or 3")
+ * still match the one the option sets.
  */
 function figuresAgree(option: CandidateModel['options'][number], item: string): boolean {
   const written = findStatedAmounts(item);
@@ -47,19 +48,58 @@ function figuresAgree(option: CandidateModel['options'][number], item: string): 
     const kind = kindOf(i.unit);
     const sameKind = new Set(written.filter((a) => a.kind === kind).map((a) => a.magnitude));
     if (sameKind.size === 0) return true;
-    // ⛔ PR Review CHANGES_REQUIRED on #2299 @ fcf35a8b: an item that writes TWO money (or percentage) figures ("raise Pro
-    // price to £59 with a £54 setup credit") would match an Olumi "Raise to £54" through the setup credit. The option's
-    // figure is then the ONE written right after "to" ("from £49 to £59", "to £59 with a £54 setup credit"): no "to"
-    // figure, or two, binds none (no quote, the Run's honest withhold). A plain number keeps its reading, which the word
-    // after it already binds ("3 months" is never 3 engineers: `figureTheUserWrote`'s unit word).
-    if (kind !== 'plain' && sameKind.size > 1) {
-      const toFigures = written.filter((a) => a.kind === kind && /\bto\s*$/i.test(item.slice(0, a.index)));
-      if (new Set(toFigures.map((a) => a.magnitude)).size !== 1) return false;
-      const t = toFigures[0]!;
-      return figureTheUserWrote(i.value, i.unit, item.slice(t.index, t.index + t.matchedText.length));
-    }
+    // ⛔ PR Review CHANGES_REQUIRED on #2299 @ fcf35a8b and @ 43815390: an item that writes TWO money (or percentage)
+    // figures cannot say by position alone which is the option's ("to £59 with a £54 setup credit"; "price Pro at £59
+    // with a setup credit to £54"). It binds ONLY in the one shape that names the relationship: "<the option's quantity>
+    // from X to Y" — exactly one from–to pair, no other figure of that kind, the intervention's own quantity named right
+    // before "from" — and the option's figure is Y. Anything else binds none: no quote, the Run's honest withhold. A plain number
+    // keeps its reading, which the word after it already binds ("3 months" is never 3 engineers).
+    if (kind !== 'plain' && sameKind.size > 1) return fromToBinds(i, item, written.filter((a) => a.kind === kind));
     return figureTheUserWrote(i.value, i.unit, item);
   });
+}
+
+const singular = (w: string): string => (w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w);
+const wordsOf = (text: string): string[] => text.toLowerCase().split(/[^a-z]+/).filter((w) => w !== '').map(singular);
+const DETERMINERS: ReadonlySet<string> = new Set(['the', 'our', 'your', 'their', 'its', 'my', 'this']);
+
+/**
+ * The words before "from" name the option's OWN quantity: the quantity's head noun ("Pro plan price" → price) directly
+ * before "from", qualified only by the quantity's own words, back to a determiner or the item's first word ("increase
+ * our Pro plan price", "raise Pro price", "raise price"). "raise Basic price", "the setup credit", "the Pro setup price"
+ * name another quantity and bind nothing.
+ */
+function namesTheQuantity(factorLabel: string, beforeFrom: string): boolean {
+  const label = wordsOf(factorLabel).filter((w) => w.length >= 3);
+  const said = wordsOf(beforeFrom);
+  if (label.length === 0 || said.length === 0 || said[said.length - 1] !== label[label.length - 1]) return false;
+  let k = said.length - 2;
+  while (k >= 0 && label.includes(said[k]!)) k--;
+  return k <= 0 || DETERMINERS.has(said[k]!);
+}
+
+/**
+ * "<quantity> from X to Y" on an item writing two figures of the intervention's kind: the ONE relationship an item states
+ * about its figures. Binds only when it is the item's only pair, the item writes no other figure of that kind, the words
+ * before "from" name the intervention's own quantity (`namesTheQuantity`), and the intervention's figure is Y.
+ */
+function fromToBinds(
+  i: NonNullable<CandidateModel['options'][number]['interventions']>[number],
+  item: string,
+  sameKind: readonly { readonly magnitude: number; readonly index: number; readonly matchedText: string }[],
+): boolean {
+  const pairs: [typeof sameKind[number], typeof sameKind[number]][] = [];
+  for (const x of sameKind) {
+    for (const y of sameKind) {
+      if (y.index <= x.index) continue;
+      if (/\bfrom\s*$/i.test(item.slice(0, x.index)) && /^\s*to\s*$/i.test(item.slice(x.index + x.matchedText.length, y.index))) pairs.push([x, y]);
+    }
+  }
+  if (pairs.length !== 1) return false;
+  const [x, y] = pairs[0]!;
+  if (sameKind.some((a) => a !== x && a !== y)) return false;
+  if (!namesTheQuantity(String(i.factor_label ?? ''), item.slice(0, x.index).replace(/\bfrom\s*$/i, ''))) return false;
+  return figureTheUserWrote(i.value as number, i.unit, item.slice(y.index, y.index + y.matchedText.length));
 }
 
 /** Each unique list item's span in the brief; an item written twice has no span (its quote could not be located). */
