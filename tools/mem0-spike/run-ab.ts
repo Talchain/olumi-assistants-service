@@ -118,10 +118,11 @@ async function buildInput(c: Case, arm: Arm, scenarioId: string, client: Mem0Lik
 function scoreLayer1(c: Case, a: ArmInput) {
   const texts = textsOf(a.input);
   const needed = (c.expect.needed ?? []).map((w) => ({ words: w, present: lineHas(texts, w) }));
-  const recall = a.recall ?? '';
+  // The envelope only: the fixed label's own words ("CURRENT MODEL STATE wins") are not recalled content.
+  const recall = a.recall === undefined ? '' : a.recall.slice(RECALL_LABEL.length + 1);
   const staleInRecall = (c.expect.notInRecall ?? []).filter((s) => recall.toLowerCase().includes(s.toLowerCase()));
   const leak = (c.expect.notInInput ?? []).filter((s) => texts.some((t) => t.includes(s)));
-  const unreconciledJson = recall === '' ? undefined : JSON.parse(recall.slice(RECALL_LABEL.length + 1)) as { unreconciled?: { user_said: string }[] };
+  const unreconciledJson = recall === '' ? undefined : JSON.parse(recall) as { unreconciled?: { user_said: string }[] };
   const unreconciled = (c.expect.unreconciled ?? []).map((u) => ({ want: u, present: (unreconciledJson?.unreconciled ?? []).some((x) => x.user_said.toLowerCase().includes(u.toLowerCase())) }));
   return {
     needed_present: needed.filter((n) => n.present).length, needed_total: needed.length, needed,
@@ -230,25 +231,44 @@ async function main(): Promise<void> {
       scenarios.push(scenarioId);
       const w = await writeMemories(client, scenarioId, c.turns, true);
       sentChars += w.chars; sentCount += c.turns.length;
-      await new Promise((r) => setTimeout(r, 15_000)); // inference is asynchronous on the platform
+      // Inference is asynchronous on the platform (probe: 13–20 s): wait until the count is stable for two polls, ≤ 120 s.
+      const getAll = client as unknown as { getAll(o: { filters: unknown }): Promise<{ results?: unknown[] }> };
+      const t0 = Date.now();
+      let last = -1; let stable = 0;
+      while (Date.now() - t0 < 120_000 && stable < 2) {
+        await new Promise((r) => setTimeout(r, 5_000));
+        const n = (await getAll.getAll({ filters: { AND: [{ user_id: USER }, { run_id: scenarioId }] } })).results?.length ?? 0;
+        stable = n > 0 && n === last ? stable + 1 : 0; last = n;
+      }
+      const indexedAfterMs = Date.now() - t0;
       const g = paulGraph(); c.graphEdits?.(g);
       const caps = createAgentCapabilities(dispatchFor(g, c.rev, c.analysisState), new ProposalStore());
       const st = await caps.getCanonicalState({ scenario_id: scenarioId, authenticated_user_id: USER, request_id: 'bench' } as never);
       const r = await recallMemories({ client, userId: USER, scenarioId, query: c.probe });
       const gd = guardMemories(r.memories, { scenarioId, userId: USER, state: st });
-      const recall = renderRecallItem(scenarioId, gd.kept, gd.discrepancies) ?? '';
+      const recall = (renderRecallItem(scenarioId, gd.kept, gd.discrepancies) ?? '').slice(RECALL_LABEL.length + 1);
       side[c.id] = {
-        search_ms: r.ms, recalled: r.memories.map((m) => m.user_words), kept: gd.kept.map((m) => m.user_words),
+        indexed_after_ms: indexedAfterMs, extracted: last, search_ms: r.ms, recalled: r.memories.map((m) => m.user_words), kept: gd.kept.map((m) => m.user_words),
         suppressed: gd.suppressed.map((s) => s.reason), stale_in_recall: (c.expect.notInRecall ?? []).filter((s) => recall.toLowerCase().includes(s.toLowerCase())),
       };
     }
     out.infer_side_run = side;
   }
 
+  // Latency sample: 20 searches with rerank on and 20 off, on a populated scenario (the R case: 24 memories).
+  const sample: Record<string, number[]> = { rerank_on: [], rerank_off: [] };
+  const probeScenario = `${RUN_TAG}-R-restart`;
+  for (let i = 0; i < 20; i += 1) {
+    for (const rerank of [true, false]) {
+      const r = await recallMemories({ client, userId: USER, scenarioId: probeScenario, query: CASES[i % CASES.length]!.probe, rerank });
+      sample[rerank ? 'rerank_on' : 'rerank_off']!.push(r.ms);
+    }
+  }
   const pct = (xs: number[], p: number) => { const s = [...xs].sort((a, b) => a - b); return s.length === 0 ? null : s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))]; };
   out.latency = {
     add_ms: { n: writeLat.length, p50: pct(writeLat, 50), p95: pct(writeLat, 95), max: Math.max(...writeLat) },
     search_ms: { n: searchLat.length, p50: pct(searchLat, 50), p95: pct(searchLat, 95), max: Math.max(...searchLat), within_300ms: searchLat.filter((x) => x <= 300).length },
+    sample: Object.fromEntries(Object.entries(sample).map(([k, xs]) => [k, { n: xs.length, p50: pct(xs, 50), p95: pct(xs, 95), max: Math.max(...xs), within_300ms: xs.filter((x) => x <= 300).length, within_400ms: xs.filter((x) => x <= 400).length }])),
   };
   out.sent_to_mem0 = { messages: sentCount, chars: sentChars, scenarios: scenarios.length };
 

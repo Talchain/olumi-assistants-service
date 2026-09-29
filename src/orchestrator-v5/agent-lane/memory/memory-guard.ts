@@ -63,6 +63,7 @@ export type SuppressionReason =
   | 'analysis_claim_not_current'
   | 'figure_conflict_revision_moved'
   | 'figure_unattributable'
+  | 'paraphrase_conflict_unverifiable'
   | 'band_conflict_revision_moved'
   | 'band_ambiguous'
   | 'superseded_by_newer'
@@ -196,7 +197,19 @@ export function guardMemories(memories: readonly RecalledMemory[], ctx: GuardCon
       const after = !Number.isNaN(time(m.said_at)) && !Number.isNaN(time(canon.runComputedAt)) && time(m.said_at) > time(canon.runComputedAt);
       if (!(current && after)) { drop('analysis_claim_not_current'); continue; }
     }
-    const context = `${m.answered_question ?? ''} ${m.user_words}`;
+    /**
+     * Olumi's question is context, never a claim: a question quoting a figure the model does not hold (e.g. "Shall I
+     * set churn to 9%?" before the user corrected it) would carry the stale figure in, so such a question is dropped
+     * and the user's words travel alone.
+     */
+    const questionFigures = findStatedAmounts(m.answered_question ?? '').filter((a) => a.kind === 'currency' || a.kind === 'percent');
+    const question = questionFigures.every((a) => canon.numbers.some((n) => sameNumber(a.magnitude, n))) ? m.answered_question : undefined;
+    const context = `${question ?? ''} ${m.user_words}`;
+    const { answered_question: _q, ...withoutQuestion } = m;
+    const base: RecalledMemory = question !== undefined ? m : withoutQuestion;
+    // A vendor PARAPHRASE (infer=true) can merge a correction with the figure it corrected: it may be kept when it
+    // agrees, but it can never raise a discrepancy — that channel is for the user's verbatim words only.
+    const paraphrase = m.verbatim === false;
     const sameRevision = canon.revision !== undefined && m.graph_revision_at_time !== undefined && m.graph_revision_at_time === canon.revision;
 
     // ── figures ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -205,10 +218,13 @@ export function guardMemories(memories: readonly RecalledMemory[], ctx: GuardCon
     let key: string | undefined;
     let agrees = figures.length > 0 && unmatched.length === 0;
     if (figures.length > 0) {
-      const about = best(canon.entities, (e) => mentionScore(context, e.label));
+      // The user's own words name the thing first; the question only when the words name nothing.
+      const named = best(canon.entities, (e) => mentionScore(m.user_words, e.label));
+      const about = named.length > 0 ? named : best(canon.entities, (e) => mentionScore(context, e.label));
       if (about.length === 1) key = `entity:${about[0]!.id}`;
       if (unmatched.length > 0) {
         if (about.length !== 1) { drop('figure_unattributable'); continue; }
+        if (paraphrase) { drop('paraphrase_conflict_unverifiable'); continue; }
         if (!sameRevision) { drop('figure_conflict_revision_moved'); continue; }
         if (claimed.has(key!)) { drop('superseded_by_newer'); continue; }
         claimed.add(key!);
@@ -234,6 +250,7 @@ export function guardMemories(memories: readonly RecalledMemory[], ctx: GuardCon
         key = `link:${link.from}->${link.to}`;
         const said = bands[bands.length - 1]!;
         if (said !== link.band) {
+          if (paraphrase) { drop('paraphrase_conflict_unverifiable'); continue; }
           if (!sameRevision) { drop('band_conflict_revision_moved'); continue; }
           if (claimed.has(key)) { drop('superseded_by_newer'); continue; }
           claimed.add(key);
@@ -251,7 +268,7 @@ export function guardMemories(memories: readonly RecalledMemory[], ctx: GuardCon
       if (claimed.has(key)) { drop('superseded_by_newer'); continue; }
       claimed.add(key);
     }
-    kept.push({ ...m, source: 'mem0', scope: 'scenario', authoritative: false, ...(agrees ? { agrees_with_model_state: true as const } : {}), ...(key !== undefined ? { key } : {}) });
+    kept.push({ ...base, source: 'mem0', scope: 'scenario', authoritative: false, ...(agrees ? { agrees_with_model_state: true as const } : {}), ...(key !== undefined ? { key } : {}) });
   }
 
   return {

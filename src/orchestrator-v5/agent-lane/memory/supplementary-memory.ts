@@ -185,17 +185,18 @@ export function renderRecallItem(
   discrepancies: readonly MemoryDiscrepancy[],
   budget: typeof RECALL_BUDGET = RECALL_BUDGET,
 ): string | undefined {
-  const items = [...kept]
-    .sort((a, b) => (Date.parse(b.said_at ?? '') || 0) - (Date.parse(a.said_at ?? '') || 0))
-    .slice(0, budget.maxItems)
-    .map((m) => ({
+  // Chosen by RELEVANCE (the most relevant survive the budget), shown newest first (the newest is the user's position).
+  const byRelevance = [...kept].sort((a, b) => (b.relevance ?? -1) - (a.relevance ?? -1)).slice(0, budget.maxItems);
+  const newestFirst = (xs: typeof byRelevance) => [...xs].sort((a, b) => (Date.parse(b.said_at ?? '') || 0) - (Date.parse(a.said_at ?? '') || 0));
+  const toItem = (m: SupplementaryConversationMemory) => ({
       ...(m.said_at !== undefined ? { said_at: m.said_at } : {}),
       ...(m.turn_id !== undefined ? { turn_id: m.turn_id } : {}),
       ...(m.answered_question !== undefined ? { olumi_asked: clip(m.answered_question, 200) } : {}),
       [m.verbatim === false ? 'user_said_paraphrase' : 'user_said']: clip(m.user_words, budget.maxItemChars),
       ...(m.agrees_with_model_state ? { agrees_with_model_state: true } : {}),
       memory_id: m.memory_id,
-    }));
+    });
+  const chosen = [...byRelevance];
   const unreconciled = discrepancies.slice(0, budget.maxItems).map((d) => ({
     about: clip(d.about, 120), user_said: clip(d.user_said, 80), model_holds: clip(d.model_holds, 80),
     ...(d.said_at !== undefined ? { said_at: d.said_at } : {}), status: d.status, memory_id: d.memory_id,
@@ -203,10 +204,11 @@ export function renderRecallItem(
   const envelope = () => JSON.stringify({
     kind: 'supplementary_historical_recall', authoritative: false, source: 'mem0', scope: 'scenario', scenario_id: scenarioId,
     ...(unreconciled.length > 0 ? { unreconciled } : {}),
-    items,
+    items: newestFirst(chosen).map(toItem),
   });
-  while (items.length > 0 && envelope().length > budget.maxTotalChars) items.pop();
+  // Over budget: the LEAST relevant item goes first; unreconciled entries go last.
+  while (chosen.length > 0 && envelope().length > budget.maxTotalChars) chosen.pop();
   while (unreconciled.length > 0 && envelope().length > budget.maxTotalChars) unreconciled.pop();
-  if (items.length === 0 && unreconciled.length === 0) return undefined;
+  if (chosen.length === 0 && unreconciled.length === 0) return undefined;
   return `${RECALL_LABEL}\n${envelope()}`;
 }

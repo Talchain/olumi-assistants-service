@@ -10,13 +10,12 @@ const olumi = (t: string) => ({ type: 'message', role: 'assistant', content: [{ 
 
 /** A 10-turn conversation: turn 2 answers a strength question; the 8-turn window drops turns 1–2. */
 function conversation(store: HistoryStore): string | undefined {
-  const items: unknown[] = [];
   const said = ['Should we raise our price?', 'It is a moderate effect.', ...Array.from({ length: 8 }, (_, i) => `follow-up ${i}`)];
   const replies = ['Noted. How strongly does price affect churn?', 'Thanks.', ...Array.from({ length: 8 }, () => 'OK.')];
   for (let i = 0; i < said.length; i += 1) {
+    // Exactly as the route does: the held (already trimmed) history plus this turn's items.
     store.recordTyped('s', said[i]!);
-    items.push(user(said[i]!), olumi(replies[i]!));
-    store.set('s', items);
+    store.set('s', [...store.get('s'), user(said[i]!), olumi(replies[i]!)]);
   }
   const first = store.get('s')[0] as { content: { text: string }[] };
   return first.content[0]!.text;

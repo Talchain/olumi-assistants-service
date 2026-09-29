@@ -109,6 +109,18 @@ describe('memory guard — canonical state stays authoritative', () => {
     expect(r.suppressed).toEqual([{ memory_id: 'old', reason: 'superseded_by_newer' }]);
   });
 
+  it('a question quoting a figure the model does not hold is dropped; the user\u2019s correction travels alone', () => {
+    const r = run([mem({ memory_id: 'c', user_words: 'Sorry, I misread it. Monthly churn is 5%.', answered_question: 'Shall I set monthly churn to 9%?' })]);
+    expect(r.kept[0]).toMatchObject({ memory_id: 'c', agrees_with_model_state: true });
+    expect(r.kept[0]!.answered_question).toBeUndefined();
+  });
+
+  it('a vendor paraphrase (infer=true) that merges a correction with the stale figure never raises a discrepancy', () => {
+    const r = run([mem({ memory_id: 'p', user_words: 'User initially thought monthly churn was 9% before correcting it to 5%', verbatim: false })]);
+    expect(r.discrepancies).toEqual([]);
+    expect(r.suppressed).toEqual([{ memory_id: 'p', reason: 'paraphrase_conflict_unverifiable' }]);
+  });
+
   it('malformed or absent state never throws; figures it cannot verify are dropped', () => {
     const r = run([mem({ memory_id: 'm', user_words: 'Monthly price is £49' }), mem({ memory_id: 'q', user_words: 'We sell to SMEs mostly' })], null);
     expect(r.kept.map((k) => k.memory_id)).toEqual(['q']);

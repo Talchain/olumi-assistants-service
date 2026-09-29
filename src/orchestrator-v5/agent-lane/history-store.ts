@@ -527,6 +527,11 @@ export class HistoryStore {
   private readonly older = new Map<string, string[]>();
   /** The question each `older` entry answered, index-aligned (arm B). Always kept; rendered only when paired. */
   private readonly olderQuestions = new Map<string, (string | undefined)[]>();
+  /**
+   * The question each typed message answered, captured when the message is FIRST seen by `set` — while Olumi's reply
+   * before it is still in the window. By the time the message itself is cut, that reply was usually cut a turn earlier.
+   */
+  private readonly answered = new Map<string, Map<string, string | undefined>>();
 
   constructor(
     private readonly maxSessions = DEFAULT_MAX_SESSIONS,
@@ -556,14 +561,21 @@ export class HistoryStore {
     }
     // The labelled item is re-made from `older` on every read, never stored as history.
     const items = next.filter((i) => !isOlderWordsItem(i));
+    const answered = this.answered.get(sessionId) ?? new Map<string, string | undefined>();
+    for (let i = 0; i < items.length; i += 1) {
+      const t = isUserMessage(items[i]) ? textOf(items[i]) : undefined;
+      if (t !== undefined && !answered.has(t)) answered.set(t, questionBefore(items, i));
+    }
+    while (answered.size > MAX_TYPED_WORDS * 2) answered.delete(answered.keys().next().value!);
+    this.answered.set(sessionId, answered);
     const kept = trimToRecentTurns(items, this.maxTurns);
     const cut = items.length - kept.length;
     if (cut > 0) {
       const dropped = items.slice(0, cut);
       // Only what the user TYPED (`recordTyped`): a chip's words, a board-edit note or a reseeded row never qualify.
       const typed = new Set(this.typed.get(sessionId) ?? []);
-      const pairs = dropped.map((item, i) => ({ item, i })).filter(({ item }) => isUserMessage(item))
-        .map(({ item, i }) => ({ text: textOf(item), question: questionBefore(dropped, i) }))
+      const pairs = dropped.filter((item) => isUserMessage(item))
+        .map((item) => { const text = textOf(item); return { text, question: text === undefined ? undefined : answered.get(text) }; })
         .filter((p): p is { text: string; question: string | undefined } => p.text !== undefined && p.text.trim() !== '' && typed.has(p.text));
       if (pairs.length > 0) {
         this.older.set(sessionId, [...(this.older.get(sessionId) ?? []), ...pairs.map((p) => p.text)]);
@@ -575,7 +587,7 @@ export class HistoryStore {
     }
     if (this.older.size > this.maxSessions) {
       const oldest = this.older.keys().next().value;
-      if (oldest !== undefined) { this.older.delete(oldest); this.olderQuestions.delete(oldest); }
+      if (oldest !== undefined) { this.older.delete(oldest); this.olderQuestions.delete(oldest); this.answered.delete(oldest); }
     }
   }
 

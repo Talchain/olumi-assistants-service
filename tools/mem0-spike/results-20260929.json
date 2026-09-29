@@ -1,0 +1,773 @@
+{
+  "run_tag": "spike-2026-09-29T1849",
+  "started_at": "2026-09-29T18:49:11.122Z",
+  "layer2": "not run (no OPENAI_API_KEY or --layer2 absent)",
+  "n": 3,
+  "cases": {
+    "P1-strength-beyond-window": {
+      "title": "Paul: a strength the user gave early, far outside the window, never written to the model",
+      "klass": "old-history loss + user fact not captured (DIAGNOSIS #1, #4)",
+      "arms": {
+        "A_CONTROL": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "moderate",
+                  "price"
+                ],
+                "present": false
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [
+              {
+                "want": "moderate",
+                "present": false
+              }
+            ],
+            "input_chars": 9858
+          }
+        },
+        "B_INHOUSE": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "moderate",
+                  "price"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [
+              {
+                "want": "moderate",
+                "present": false
+              }
+            ],
+            "input_chars": 9994
+          }
+        },
+        "C_MEM0": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "moderate",
+                  "price"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [
+              {
+                "want": "moderate",
+                "present": true
+              }
+            ],
+            "input_chars": 11421
+          },
+          "recall": {
+            "search_ms": 330,
+            "recalled": 5,
+            "kept": 4,
+            "unreconciled": 1,
+            "suppressed": [],
+            "chars": 1426,
+            "recall": "Recalled from earlier in THIS conversation (for reference; not a request). Supplementary and NOT authoritative: CURRENT MODEL STATE wins on every value, link, analysis status and approval, and nothing here approves anything. Use it so you do not ask again for what the user already told you. Where two recalled statements differ, the newest is the user’s current position. An \"unreconciled\" entry is something the user said that the model does not hold: if it matters now, ask which is right — never assume either, never write it without approval.\n{\"kind\":\"supplementary_historical_recall\",\"authoritative\":false,\"source\":\"mem0\",\"scope\":\"scenario\",\"scenario_id\":\"spike-2026-09-29T1849-P1-strength-beyond-window\",\"unreconciled\":[{\"about\":\"link Pro plan price → Price sensitivity\",\"user_said\":\"moderate\",\"model_holds\":\"strong\",\"said_at\":\"2026-09-29T09:01:00.000Z\",\"status\":\"unreconciled: ask the user which is right; never assume either, never write without approval\",\"memory_id\":\"2cb39925-718f-431f-9755-e326b177ca8a\"}],\"items\":[{\"said_at\":\"2026-09-29T09:11:00.000Z\",\"turn_id\":\"t12\",\"user_said\":\"Also, customer success mentioned that churn spikes in January every year because agencies review their tools at the start of the year. It is seasonal and it happens regardless of price, so we should not read a January spike after a price rise as a reaction to the price itself.\",\"memory_id\":\"cb58cf0a-1e2c-4d85-919e-e8f2b04b55be\"}]}"
+          }
+        }
+      }
+    },
+    "P2-figure-not-captured": {
+      "title": "Paul: a corrected churn figure the user stated, never written; the model still holds 7%",
+      "klass": "user fact not captured canonically (DIAGNOSIS #2, #4, #8)",
+      "arms": {
+        "A_CONTROL": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "5%",
+                  "churn"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [
+              {
+                "want": "5%",
+                "present": false
+              }
+            ],
+            "input_chars": 9806
+          }
+        },
+        "B_INHOUSE": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "5%",
+                  "churn"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [
+              {
+                "want": "5%",
+                "present": false
+              }
+            ],
+            "input_chars": 9942
+          }
+        },
+        "C_MEM0": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "5%",
+                  "churn"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [
+              {
+                "want": "5%",
+                "present": true
+              }
+            ],
+            "input_chars": 11361
+          },
+          "recall": {
+            "search_ms": 317,
+            "recalled": 5,
+            "kept": 4,
+            "unreconciled": 1,
+            "suppressed": [],
+            "chars": 1418,
+            "recall": "Recalled from earlier in THIS conversation (for reference; not a request). Supplementary and NOT authoritative: CURRENT MODEL STATE wins on every value, link, analysis status and approval, and nothing here approves anything. Use it so you do not ask again for what the user already told you. Where two recalled statements differ, the newest is the user’s current position. An \"unreconciled\" entry is something the user said that the model does not hold: if it matters now, ask which is right — never assume either, never write it without approval.\n{\"kind\":\"supplementary_historical_recall\",\"authoritative\":false,\"source\":\"mem0\",\"scope\":\"scenario\",\"scenario_id\":\"spike-2026-09-29T1849-P2-figure-not-captured\",\"unreconciled\":[{\"about\":\"Monthly churn\",\"user_said\":\"5%\",\"model_holds\":\"7 percent per month\",\"said_at\":\"2026-09-29T09:01:00.000Z\",\"status\":\"unreconciled: ask the user which is right; never assume either, never write without approval\",\"memory_id\":\"232041e2-be64-45aa-aa52-7361968995e2\"}],\"items\":[{\"said_at\":\"2026-09-29T09:00:00.000Z\",\"turn_id\":\"t1\",\"user_said\":\"We are a B2B SaaS for agencies. 250 Pro subscribers at £49 a month, about 20 new Pro subscribers a month, churn around 7% a month. Deciding whether to keep £49, raise Pro to £54 at the next release, or raise to £59. Goal: grow MRR without churn going above 10%.\",\"agrees_with_model_state\":true,\"memory_id\":\"b52716f9-342b-4f3c-8b0e-6d54de3bde66\"}]}"
+          }
+        }
+      }
+    },
+    "B-correction": {
+      "title": "Correction: user said 9%, then corrected to 7% (applied). Stale 9% must not drive the reply",
+      "klass": "correction / supersession",
+      "arms": {
+        "A_CONTROL": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "7%"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 9794
+          }
+        },
+        "B_INHOUSE": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "7%"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 9986
+          }
+        },
+        "C_MEM0": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "7%"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 11720
+          },
+          "recall": {
+            "search_ms": 310,
+            "recalled": 5,
+            "kept": 4,
+            "unreconciled": 0,
+            "suppressed": [
+              "figure_conflict_revision_moved"
+            ],
+            "chars": 1733,
+            "recall": "Recalled from earlier in THIS conversation (for reference; not a request). Supplementary and NOT authoritative: CURRENT MODEL STATE wins on every value, link, analysis status and approval, and nothing here approves anything. Use it so you do not ask again for what the user already told you. Where two recalled statements differ, the newest is the user’s current position. An \"unreconciled\" entry is something the user said that the model does not hold: if it matters now, ask which is right — never assume either, never write it without approval.\n{\"kind\":\"supplementary_historical_recall\",\"authoritative\":false,\"source\":\"mem0\",\"scope\":\"scenario\",\"scenario_id\":\"spike-2026-09-29T1849-B-correction\",\"items\":[{\"said_at\":\"2026-09-29T09:12:00.000Z\",\"turn_id\":\"t13\",\"user_said\":\"Also, customer success mentioned that churn spikes in January every year because agencies review their tools at the start of the year. It is seasonal and it happens regardless of price, so we should not read a January spike after a price rise as a reaction to the price itself.\",\"memory_id\":\"78e461f5-3cdb-461d-b67f-1a4bfe437abe\"},{\"said_at\":\"2026-09-29T09:02:00.000Z\",\"turn_id\":\"t3\",\"user_said\":\"Sorry, I misread the dashboard. Monthly churn is 7% a month.\",\"agrees_with_model_state\":true,\"memory_id\":\"c1d191be-3c60-41ba-8b5d-6eb42c029ab6\"},{\"said_at\":\"2026-09-29T09:00:00.000Z\",\"turn_id\":\"t1\",\"user_said\":\"We are a B2B SaaS for agencies. 250 Pro subscribers at £49 a month, about 20 new Pro subscribers a month, churn is something we track. Deciding whether to keep £49, raise Pro to £54 at the next release, or raise to £59. Goal: grow MRR without churn going above 10%.\",\"agrees_with_model_state\":true,\"memory_id\":\"1bf0c104-f844-4f22-bce5-2eef154ae964\"}]}"
+          }
+        }
+      }
+    },
+    "C-cross-scenario": {
+      "title": "Isolation: same user, another scenario mentions KESTREL; this scenario must never see it",
+      "klass": "cross-scenario isolation",
+      "arms": {
+        "A_CONTROL": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 0,
+            "needed": [],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 9696
+          }
+        },
+        "B_INHOUSE": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 0,
+            "needed": [],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 9832
+          }
+        },
+        "C_MEM0": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 0,
+            "needed": [],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 11367
+          },
+          "recall": {
+            "search_ms": 362,
+            "recalled": 5,
+            "kept": 4,
+            "unreconciled": 0,
+            "suppressed": [
+              "figure_unattributable"
+            ],
+            "chars": 1534,
+            "recall": "Recalled from earlier in THIS conversation (for reference; not a request). Supplementary and NOT authoritative: CURRENT MODEL STATE wins on every value, link, analysis status and approval, and nothing here approves anything. Use it so you do not ask again for what the user already told you. Where two recalled statements differ, the newest is the user’s current position. An \"unreconciled\" entry is something the user said that the model does not hold: if it matters now, ask which is right — never assume either, never write it without approval.\n{\"kind\":\"supplementary_historical_recall\",\"authoritative\":false,\"source\":\"mem0\",\"scope\":\"scenario\",\"scenario_id\":\"spike-2026-09-29T1849-C-cross-scenario\",\"items\":[{\"said_at\":\"2026-09-29T09:05:00.000Z\",\"turn_id\":\"t6\",\"user_said\":\"We are also thinking about grandfathering existing customers at £49 for six months, and only charging the new price to new sign-ups straight away. The CEO likes it because it protects goodwill, but finance worries it delays the MRR gain by half a year, which matters for the board.\",\"agrees_with_model_state\":true,\"memory_id\":\"1cab3592-374e-4f42-8bd3-600b175c05a3\"},{\"said_at\":\"2026-09-29T09:04:00.000Z\",\"turn_id\":\"t5\",\"user_said\":\"Support says the loudest complaints last time were from very small agencies, one or two people, who feel the Pro plan is priced for bigger teams. The bigger agencies barely mentioned the price at all; they mostly asked for more seats and better client reporting instead.\",\"memory_id\":\"0fa4475c-ced0-4e60-9be5-3ea0870f3d2e\"}]}"
+          }
+        }
+      }
+    },
+    "D-canonical-moved": {
+      "title": "Canonical conflict: user said \"Pro is £49\", the model since moved to £50 (new revision)",
+      "klass": "canonical conflict (fail closed)",
+      "arms": {
+        "A_CONTROL": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "£50"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 9758
+          }
+        },
+        "B_INHOUSE": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "£50"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 9894
+          }
+        },
+        "C_MEM0": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "£50"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 11631
+          },
+          "recall": {
+            "search_ms": 322,
+            "recalled": 5,
+            "kept": 3,
+            "unreconciled": 0,
+            "suppressed": [
+              "figure_conflict_revision_moved",
+              "figure_unattributable"
+            ],
+            "chars": 1736,
+            "recall": "Recalled from earlier in THIS conversation (for reference; not a request). Supplementary and NOT authoritative: CURRENT MODEL STATE wins on every value, link, analysis status and approval, and nothing here approves anything. Use it so you do not ask again for what the user already told you. Where two recalled statements differ, the newest is the user’s current position. An \"unreconciled\" entry is something the user said that the model does not hold: if it matters now, ask which is right — never assume either, never write it without approval.\n{\"kind\":\"supplementary_historical_recall\",\"authoritative\":false,\"source\":\"mem0\",\"scope\":\"scenario\",\"scenario_id\":\"spike-2026-09-29T1849-D-canonical-moved\",\"items\":[{\"said_at\":\"2026-09-29T09:12:00.000Z\",\"turn_id\":\"t13\",\"user_said\":\"We have rounded Pro up to £50 already, please update the Pro plan price.\",\"agrees_with_model_state\":true,\"memory_id\":\"546951ac-9004-4ab7-bebd-609e82c4bd97\"},{\"said_at\":\"2026-09-29T09:05:00.000Z\",\"turn_id\":\"t6\",\"user_said\":\"Support says the loudest complaints last time were from very small agencies, one or two people, who feel the Pro plan is priced for bigger teams. The bigger agencies barely mentioned the price at all; they mostly asked for more seats and better client reporting instead.\",\"memory_id\":\"4875d337-5c4c-4fa3-9182-187b037bd3d8\"},{\"said_at\":\"2026-09-29T09:04:00.000Z\",\"turn_id\":\"t5\",\"user_said\":\"The finance team also asked me to check whether a price rise would affect the annual plan uptake. At the moment only about a fifth of Pro customers pay annually, and they get two months free, so a rise on the monthly price would make the annual discount look more attractive by comparison.\",\"memory_id\":\"c0387703-d1fe-4735-9f6a-7e1f0a9edb7a\"}]}"
+          }
+        }
+      }
+    },
+    "D2-unreconciled": {
+      "title": "Discrepancy: user said \"really £45 after discount\", model holds £50, revision unchanged since",
+      "klass": "user fact not captured → ask, never assume",
+      "arms": {
+        "A_CONTROL": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "£45",
+                  "price"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [
+              {
+                "want": "£45",
+                "present": false
+              }
+            ],
+            "input_chars": 9801
+          }
+        },
+        "B_INHOUSE": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "£45",
+                  "price"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [
+              {
+                "want": "£45",
+                "present": false
+              }
+            ],
+            "input_chars": 9937
+          }
+        },
+        "C_MEM0": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "£45",
+                  "price"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [
+              {
+                "want": "£45",
+                "present": true
+              }
+            ],
+            "input_chars": 11313
+          },
+          "recall": {
+            "search_ms": 309,
+            "recalled": 5,
+            "kept": 3,
+            "unreconciled": 1,
+            "suppressed": [
+              "figure_unattributable"
+            ],
+            "chars": 1375,
+            "recall": "Recalled from earlier in THIS conversation (for reference; not a request). Supplementary and NOT authoritative: CURRENT MODEL STATE wins on every value, link, analysis status and approval, and nothing here approves anything. Use it so you do not ask again for what the user already told you. Where two recalled statements differ, the newest is the user’s current position. An \"unreconciled\" entry is something the user said that the model does not hold: if it matters now, ask which is right — never assume either, never write it without approval.\n{\"kind\":\"supplementary_historical_recall\",\"authoritative\":false,\"source\":\"mem0\",\"scope\":\"scenario\",\"scenario_id\":\"spike-2026-09-29T1849-D2-unreconciled\",\"unreconciled\":[{\"about\":\"Pro plan price\",\"user_said\":\"£45\",\"model_holds\":\"£50\",\"said_at\":\"2026-09-29T09:01:00.000Z\",\"status\":\"unreconciled: ask the user which is right; never assume either, never write without approval\",\"memory_id\":\"0b427a28-00fb-4dbe-8f21-03a4bf2075d9\"}],\"items\":[{\"said_at\":\"2026-09-29T09:05:00.000Z\",\"turn_id\":\"t6\",\"user_said\":\"Support says the loudest complaints last time were from very small agencies, one or two people, who feel the Pro plan is priced for bigger teams. The bigger agencies barely mentioned the price at all; they mostly asked for more seats and better client reporting instead.\",\"memory_id\":\"c7b6e38d-1b4b-415e-8c4e-a34f83b8bcf4\"}]}"
+          }
+        }
+      }
+    },
+    "E-analysis-stale": {
+      "title": "Analysis conflict: user remembered \"analysis shows £59 wins\"; canonical run is complete_stale",
+      "klass": "analysis-state confusion (canonical-only)",
+      "arms": {
+        "A_CONTROL": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 0,
+            "needed": [],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 9943
+          }
+        },
+        "B_INHOUSE": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 0,
+            "needed": [],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 10079
+          }
+        },
+        "C_MEM0": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 0,
+            "needed": [],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 11636
+          },
+          "recall": {
+            "search_ms": 335,
+            "recalled": 5,
+            "kept": 3,
+            "unreconciled": 0,
+            "suppressed": [
+              "figure_unattributable",
+              "analysis_claim_not_current"
+            ],
+            "chars": 1556,
+            "recall": "Recalled from earlier in THIS conversation (for reference; not a request). Supplementary and NOT authoritative: CURRENT MODEL STATE wins on every value, link, analysis status and approval, and nothing here approves anything. Use it so you do not ask again for what the user already told you. Where two recalled statements differ, the newest is the user’s current position. An \"unreconciled\" entry is something the user said that the model does not hold: if it matters now, ask which is right — never assume either, never write it without approval.\n{\"kind\":\"supplementary_historical_recall\",\"authoritative\":false,\"source\":\"mem0\",\"scope\":\"scenario\",\"scenario_id\":\"spike-2026-09-29T1849-E-analysis-stale\",\"items\":[{\"said_at\":\"2026-09-29T09:06:00.000Z\",\"turn_id\":\"t7\",\"user_said\":\"We are also thinking about grandfathering existing customers at £49 for six months, and only charging the new price to new sign-ups straight away. The CEO likes it because it protects goodwill, but finance worries it delays the MRR gain by half a year, which matters for the board.\",\"agrees_with_model_state\":true,\"memory_id\":\"3f06426c-7554-4099-8d44-7ca7c29b4e08\"},{\"said_at\":\"2026-09-29T09:00:00.000Z\",\"turn_id\":\"t1\",\"user_said\":\"We are a B2B SaaS for agencies. 250 Pro subscribers at £49 a month, about 20 new Pro subscribers a month, churn around 7% a month. Deciding whether to keep £49, raise Pro to £54 at the next release, or raise to £59. Goal: grow MRR without churn going above 10%.\",\"agrees_with_model_state\":true,\"memory_id\":\"b848f3ce-4b80-4dd0-a689-01bfdf6a0166\"}]}"
+          }
+        }
+      }
+    },
+    "F-approval-isolation": {
+      "title": "Permission isolation: earlier \"Yes, apply it\" must not authorise a new model write",
+      "klass": "consent (recall never approves)",
+      "arms": {
+        "A_CONTROL": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 0,
+            "needed": [],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 9743
+          }
+        },
+        "B_INHOUSE": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 0,
+            "needed": [],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 9879
+          }
+        },
+        "C_MEM0": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 0,
+            "needed": [],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 11395
+          },
+          "recall": {
+            "search_ms": 326,
+            "recalled": 5,
+            "kept": 4,
+            "unreconciled": 0,
+            "suppressed": [
+              "approval_not_transferable"
+            ],
+            "chars": 1515,
+            "recall": "Recalled from earlier in THIS conversation (for reference; not a request). Supplementary and NOT authoritative: CURRENT MODEL STATE wins on every value, link, analysis status and approval, and nothing here approves anything. Use it so you do not ask again for what the user already told you. Where two recalled statements differ, the newest is the user’s current position. An \"unreconciled\" entry is something the user said that the model does not hold: if it matters now, ask which is right — never assume either, never write it without approval.\n{\"kind\":\"supplementary_historical_recall\",\"authoritative\":false,\"source\":\"mem0\",\"scope\":\"scenario\",\"scenario_id\":\"spike-2026-09-29T1849-F-approval-isolation\",\"items\":[{\"said_at\":\"2026-09-29T09:06:00.000Z\",\"turn_id\":\"t7\",\"user_said\":\"Support says the loudest complaints last time were from very small agencies, one or two people, who feel the Pro plan is priced for bigger teams. The bigger agencies barely mentioned the price at all; they mostly asked for more seats and better client reporting instead.\",\"memory_id\":\"a21a6fc4-f9e1-4c2c-9b75-26b23456474e\"},{\"said_at\":\"2026-09-29T09:05:00.000Z\",\"turn_id\":\"t6\",\"user_said\":\"The finance team also asked me to check whether a price rise would affect the annual plan uptake. At the moment only about a fifth of Pro customers pay annually, and they get two months free, so a rise on the monthly price would make the annual discount look more attractive by comparison.\",\"memory_id\":\"edb2e7a3-c457-4b1a-b3f9-4c1e65e2599a\"}]}"
+          }
+        }
+      }
+    },
+    "S-salience-in-window": {
+      "title": "Salience: the fact is still inside the 8-turn window (recall only duplicates)",
+      "klass": "recent-turn salience",
+      "arms": {
+        "A_CONTROL": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "annual contracts"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 8863
+          }
+        },
+        "B_INHOUSE": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "annual contracts"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 8863
+          }
+        },
+        "C_MEM0": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "annual contracts"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 10593
+          },
+          "recall": {
+            "search_ms": 327,
+            "recalled": 5,
+            "kept": 5,
+            "unreconciled": 0,
+            "suppressed": [],
+            "chars": 1729,
+            "recall": "Recalled from earlier in THIS conversation (for reference; not a request). Supplementary and NOT authoritative: CURRENT MODEL STATE wins on every value, link, analysis status and approval, and nothing here approves anything. Use it so you do not ask again for what the user already told you. Where two recalled statements differ, the newest is the user’s current position. An \"unreconciled\" entry is something the user said that the model does not hold: if it matters now, ask which is right — never assume either, never write it without approval.\n{\"kind\":\"supplementary_historical_recall\",\"authoritative\":false,\"source\":\"mem0\",\"scope\":\"scenario\",\"scenario_id\":\"spike-2026-09-29T1849-S-salience-in-window\",\"items\":[{\"said_at\":\"2026-09-29T09:05:00.000Z\",\"turn_id\":\"t6\",\"user_said\":\"Remember our larger agencies are on annual contracts, so they cannot churn mid-year at all.\",\"memory_id\":\"44f89d92-292f-4412-bb01-f35d99a8104d\"},{\"said_at\":\"2026-09-29T09:04:00.000Z\",\"turn_id\":\"t5\",\"user_said\":\"Support says the loudest complaints last time were from very small agencies, one or two people, who feel the Pro plan is priced for bigger teams. The bigger agencies barely mentioned the price at all; they mostly asked for more seats and better client reporting instead.\",\"memory_id\":\"f71bb96d-7a6b-4789-beb6-e1fdae958a70\"},{\"said_at\":\"2026-09-29T09:00:00.000Z\",\"turn_id\":\"t1\",\"user_said\":\"We are a B2B SaaS for agencies. 250 Pro subscribers at £49 a month, about 20 new Pro subscribers a month, churn around 7% a month. Deciding whether to keep £49, raise Pro to £54 at the next release, or raise to £59. Goal: grow MRR without churn going above 10%.\",\"agrees_with_model_state\":true,\"memory_id\":\"7244fe0d-b945-4d6a-83bb-3f3eec2579fb\"}]}"
+          }
+        }
+      }
+    },
+    "R-restart": {
+      "title": "Restart: a deploy reseeds history as text (last 20 rows); a fact from turn 3 of 24 is gone",
+      "klass": "tool/history loss after restart (user words only)",
+      "arms": {
+        "A_CONTROL": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "creative agencies"
+                ],
+                "present": false
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 8784
+          }
+        },
+        "B_INHOUSE": {
+          "layer1": {
+            "needed_present": 0,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "creative agencies"
+                ],
+                "present": false
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 8784
+          }
+        },
+        "C_MEM0": {
+          "layer1": {
+            "needed_present": 1,
+            "needed_total": 1,
+            "needed": [
+              {
+                "words": [
+                  "creative agencies"
+                ],
+                "present": true
+              }
+            ],
+            "stale_in_recall": [],
+            "cross_scenario_leak": [],
+            "unreconciled": [],
+            "input_chars": 10157
+          },
+          "recall": {
+            "search_ms": 342,
+            "recalled": 5,
+            "kept": 5,
+            "unreconciled": 0,
+            "suppressed": [],
+            "chars": 1372,
+            "recall": "Recalled from earlier in THIS conversation (for reference; not a request). Supplementary and NOT authoritative: CURRENT MODEL STATE wins on every value, link, analysis status and approval, and nothing here approves anything. Use it so you do not ask again for what the user already told you. Where two recalled statements differ, the newest is the user’s current position. An \"unreconciled\" entry is something the user said that the model does not hold: if it matters now, ask which is right — never assume either, never write it without approval.\n{\"kind\":\"supplementary_historical_recall\",\"authoritative\":false,\"source\":\"mem0\",\"scope\":\"scenario\",\"scenario_id\":\"spike-2026-09-29T1849-R-restart\",\"items\":[{\"said_at\":\"2026-09-29T09:04:00.000Z\",\"turn_id\":\"t5\",\"user_said\":\"About acquisition: most new Pro customers come from the free tier after about six weeks, and the conversion rate from free to Pro has been fairly flat all year at around 3 to 4 percent. Paid ads bring a few but they are expensive and we have been cutting that budget since the summer.\",\"memory_id\":\"d569c27b-05a1-47bb-8418-02348f4c4b48\"},{\"said_at\":\"2026-09-29T09:02:00.000Z\",\"turn_id\":\"t3\",\"olumi_asked\":\"Who are most of your Pro customers?\",\"user_said\":\"Most of our Pro customers are small creative agencies with 5 to 20 staff, mostly in the UK.\",\"memory_id\":\"d4e3bf61-782c-4fd3-9d2f-f840fd96ae8b\"}]}"
+          }
+        }
+      }
+    }
+  },
+  "infer_side_run": {
+    "B-correction": {
+      "indexed_after_ms": 123467,
+      "extracted": 0,
+      "search_ms": 424,
+      "recalled": [],
+      "kept": [],
+      "suppressed": [],
+      "stale_in_recall": []
+    },
+    "D-canonical-moved": {
+      "indexed_after_ms": 124566,
+      "extracted": 0,
+      "search_ms": 263,
+      "recalled": [],
+      "kept": [],
+      "suppressed": [],
+      "stale_in_recall": []
+    },
+    "E-analysis-stale": {
+      "indexed_after_ms": 123173,
+      "extracted": 0,
+      "search_ms": 429,
+      "recalled": [],
+      "kept": [],
+      "suppressed": [],
+      "stale_in_recall": []
+    }
+  },
+  "latency": {
+    "add_ms": {
+      "n": 133,
+      "p50": 531,
+      "p95": 893,
+      "max": 1051
+    },
+    "search_ms": {
+      "n": 10,
+      "p50": 327,
+      "p95": 362,
+      "max": 362,
+      "within_300ms": 0
+    },
+    "sample": {
+      "rerank_on": {
+        "n": 20,
+        "p50": 335,
+        "p95": 639,
+        "max": 639,
+        "within_300ms": 3,
+        "within_400ms": 15
+      },
+      "rerank_off": {
+        "n": 20,
+        "p50": 275,
+        "p95": 334,
+        "max": 334,
+        "within_300ms": 17,
+        "within_400ms": 20
+      }
+    }
+  },
+  "sent_to_mem0": {
+    "messages": 172,
+    "chars": 47408,
+    "scenarios": 14
+  },
+  "cleanup": {
+    "deleted_scenarios": 14
+  }
+}

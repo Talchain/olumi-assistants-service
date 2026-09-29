@@ -62,7 +62,12 @@ describe('renderRecallItem', () => {
     const env = JSON.parse(text.slice(RECALL_LABEL.length + 1));
     expect(env.items.length).toBeLessThanOrEqual(RECALL_BUDGET.maxItems);
     expect(text.length - RECALL_LABEL.length - 1).toBeLessThanOrEqual(RECALL_BUDGET.maxTotalChars);
-    expect(env.items[0].said_at).toBe('2026-09-29T18:00:00Z'); // newest first
+  });
+
+  it('the MOST RELEVANT survive the budget, and are shown newest first', () => {
+    const ms = kept(6).map((m, i) => ({ ...m, relevance: [0.1, 0.9, 0.2, 0.8, 0.3, 0.7][i]! }));
+    const env = JSON.parse(renderRecallItem('scn-a', ms, [], { ...RECALL_BUDGET, maxItems: 3 })!.slice(RECALL_LABEL.length + 1));
+    expect(env.items.map((x: { memory_id: string }) => x.memory_id)).toEqual(['m5', 'm3', 'm1']);
   });
 
   it('renders nothing when nothing survived the guard', () => {
