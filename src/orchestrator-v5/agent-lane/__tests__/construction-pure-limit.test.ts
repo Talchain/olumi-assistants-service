@@ -12,6 +12,7 @@
  * condition of the rule one at a time on the served shape, plus the served journey A and C graphs.
  */
 import { describe, it, expect } from 'vitest';
+import { asCurrentDraft } from './pre-r1-capture.js';
 import { readFileSync } from 'node:fs';
 import { Ajv } from 'ajv';
 import { admitCandidateModel, findPureLimits, type CandidateModel } from '../admit-model.js';
@@ -22,7 +23,8 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 
 type Json = Record<string, any>;
 type Graph = { nodes: Json[]; edges: Json[]; goal_constraints: Json[] };
-const load = (name: string): Json => JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8'));
+// Pre-R1 captures, replayed through today's contract (`asCurrentDraft`: goal `frame: 'level'`; bytes untouched).
+const load = (name: string): Json => asCurrentDraft(JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8')));
 const E = load('served-journey-e-pure-limit-074951Z.json') as { brief: string; e01: Graph; a01: Graph; e01_candidate: Json };
 const C = load('served-journey-c-budget-limit-063347Z.json') as { c02: Graph; c10: Graph };
 

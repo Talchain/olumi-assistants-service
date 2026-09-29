@@ -223,10 +223,25 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   // The deadline's attestation, whatever it finds: held below only when `attested`; otherwise returned, never stored.
   const attestation = attestHorizon(brief, goal);
   if (goal === null || goal === undefined || goals.length !== 1) return { nodes: [...nodes], held: none, horizon: attestation };
-  const node = goals[0] as N & { readonly goal_threshold_raw?: unknown; readonly goal_threshold_unit?: unknown };
+  const node = goals[0] as N & { readonly goal_threshold_raw?: unknown; readonly goal_threshold_unit?: unknown; readonly goal_threshold_frame?: unknown };
   const raw = node.goal_threshold_raw;
+  // R1 S4-core: a CHANGE target is stored as the contract's figure (a fraction r for `change_rel`, a signed c for
+  // `change_abs`) and the brief writes it as the user said it: "cut it by 15%" is 15 in "%", "by 2 points" is 2 in the
+  // metric's unit. The sign is the comparator's and the verb's, never a written "-15".
+  const written = node.goal_threshold_frame === 'change_rel' && typeof raw === 'number'
+    ? { figure: Math.abs(raw * 100), unit: '%' as unknown }
+    : node.goal_threshold_frame === 'change_abs' && typeof raw === 'number'
+      ? { figure: Math.abs(raw), unit: goal.unit ?? node.goal_threshold_unit }
+      : { figure: raw, unit: goal.unit ?? node.goal_threshold_unit };
+  // ⛔ A CHANGE target is the user's only where the brief writes it about THIS goal (PR Review CR on #2262 @ 338e4268):
+  // "support volume grew 15%" is not the cloud bill's "cut by 15%". Read as a chat goal target is (`scopeIn`): a figure
+  // the nearest label word gives another quantity is not the goal's; one in a clause naming none ("cut it by 15%") is.
+  const isChange = node.goal_threshold_frame === 'change_rel' || node.goal_threshold_frame === 'change_abs';
+  const wrote = (value: number): boolean => isChange
+    ? figureTheUserWroteFor(value, written.unit, brief, quantityScope(nodes, (node as { readonly label?: unknown }).label))
+    : figureTheUserWrote(value, written.unit, brief);
   const target = typeof raw === 'number' && Number.isFinite(raw) && goal.provenance === 'explicit'
-    && figureTheUserWrote(raw, goal.unit ?? node.goal_threshold_unit, brief);
+    && typeof written.figure === 'number' && wrote(Math.round(written.figure * 1e9) / 1e9);
   // The stored comparator's own schema reads it (one list, `NodeV3`): anything else is undefined, i.e. not held.
   const operator = target ? NodeV3.shape.goal_direction.parse(goal.operator) : undefined;
   const direction = operator !== undefined;
@@ -240,6 +255,38 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
     ...(months !== null ? { goal_horizon_months: months } : {}),
   };
   return { nodes: nodes.map((n) => (n === node ? stamped : n)), held: { target, direction, horizon }, horizon: attestation };
+}
+
+/** A figure's scope among a model's QUANTITIES (every node but options and the decision): `target`'s label, and the rest. */
+function quantityScope(nodes: readonly { readonly kind?: unknown; readonly label?: unknown }[], target: unknown): EntityScope {
+  const label = typeof target === 'string' ? target : '';
+  const others = nodes
+    .filter((n) => n.kind !== 'option' && n.kind !== 'decision')
+    .map((n) => (typeof n.label === 'string' ? n.label : ''))
+    .filter((l) => l !== '' && l !== label);
+  return { target: label === '' ? [] : [label], others };
+}
+
+/**
+ * ⛔ TODAY'S LEVEL OF THE GOAL IS THE USER'S ONLY WHERE THE BRIEF WRITES IT ABOUT THE GOAL (PR Review CR on #2262
+ * @ 338e4268; DL E12 5872375159 before it). The drafter's `baseline_known` + `explicit` is its word, not the brief's:
+ * a £45,000 the brief never states, or states for "our support team", is not the cloud bill's level. STRICT
+ * (`EntityScope.strict`): a current level is written beside its quantity ("our monthly cloud bill is £45,000"), so
+ * among two figures or more one no label word attributes is nobody's — the level is withheld and said, never guessed.
+ * Injected into admission (`admitCandidateModel`), which this module imports from.
+ */
+export function goalLevelTheUserWrote(
+  model: {
+    readonly goal: { readonly metric: string };
+    readonly factors?: readonly { readonly label: string }[];
+    readonly outcomes?: readonly { readonly label: string }[];
+    readonly risks?: readonly { readonly label: string }[];
+  },
+  brief: string | null | undefined,
+): (value: number, unit: unknown) => boolean {
+  const others = [...(model.factors ?? []), ...(model.outcomes ?? []), ...(model.risks ?? [])]
+    .map((q) => q.label).filter((l) => l !== model.goal.metric);
+  return (value, unit) => figureTheUserWroteFor(value, unit, brief, { target: [model.goal.metric], others, strict: true });
 }
 
 /**

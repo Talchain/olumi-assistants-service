@@ -53,6 +53,7 @@
 
 import type { OlumiResponse, SystemEventTurnPayload } from '@talchain/schemas/boundary';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import { isChangeFrame } from '../agent-lane/limit-frame.js';
 
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { log } from '../../utils/telemetry.js';
@@ -214,6 +215,13 @@ export async function applyGoalTargetEdit(
       'goal_target_edit — named node is not a goal; refusing',
     );
     return refused('target_not_goal');
+  }
+  // ⛔ R1 S4-core: a goal whose target is stated as a CHANGE from today (`change_rel` holds a fraction). This door writes
+  // `raw_value` as an absolute LEVEL (the 0.59.0 member's own attestation, below), so it would silently turn the user's
+  // "cut by 15%" into a level. Refused by name until a change can be edited as a change; nothing is written.
+  if (isChangeFrame((matches[0] as { goal_threshold_frame?: unknown }).goal_threshold_frame)) {
+    log.info({ ...logBase, event: 'v5.system_event.goal_target_edit.goal_is_a_change' }, 'goal_target_edit — the goal target is a change from today; refusing');
+    return refused('goal_is_a_change');
   }
 
   // ── 4–7. the SAME proposal, validator, handler and re-merge — shared with the limit edit ──

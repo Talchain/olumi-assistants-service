@@ -23,7 +23,7 @@ const iv = (factor_label: string, value: number, unit: string, provenance = 'ai_
 
 function draft(release: { baseline_value: number | null; plausible_max: number; known?: boolean }) {
   return {
-    goal: { metric: 'MRR', operator: '>=', target_stated: true, value: 100000, unit: 'GBP', horizon_months: 12, provenance: 'explicit', baseline_known: true, baseline_value: 75000, baseline_provenance: 'explicit', scope: null },
+    goal: { metric: 'MRR', operator: '>=', target_stated: true, frame: 'level', value: 100000, unit: 'GBP', horizon_months: 12, provenance: 'explicit', baseline_known: true, baseline_value: 75000, baseline_provenance: 'explicit', scope: null },
     constraints: [{ metric: 'Monthly churn rate', operator: '<', value: 4, unit: '%', provenance: 'explicit', frame: 'level' }],
     options: [
       { label: 'Raise Pro to £59 with the release', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [iv('Pro plan price', 59, 'GBP per month', 'explicit'), iv('Pro feature release delivered', 1, '')] },

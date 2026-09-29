@@ -30,7 +30,7 @@ const GOAL = 'monthly_recurring_revenue';
 function pricing(goal: Partial<CandidateModel['goal']> = {}): CandidateModel {
   return {
     goal: {
-      metric: 'Monthly recurring revenue', operator: '>=', target_stated: true, value: 20000, unit: 'GBP', horizon_months: null, provenance: 'explicit',
+      metric: 'Monthly recurring revenue', operator: '>=', target_stated: true, frame: 'level', value: 20000, unit: 'GBP', horizon_months: null, provenance: 'explicit',
       baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null, ...goal,
     },
     constraints: [],
@@ -151,7 +151,7 @@ describe('the goal carries its current level, in the shape ISL reads', () => {
   });
 
   it('CONTROL: no stated target → no frame to put a baseline on, so none is written', () => {
-    const m = admitCandidateModel(pricing({ target_stated: false, value: null, baseline_known: true, baseline_value: 16000 }));
+    const m = admitCandidateModel(pricing({ target_stated: false, frame: 'level', value: null, baseline_known: true, baseline_value: 16000 }));
     expect(m.nodes.find((n) => n.id === GOAL)).not.toHaveProperty('observed_state');
   });
 
