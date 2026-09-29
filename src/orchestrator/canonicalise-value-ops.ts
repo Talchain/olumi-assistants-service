@@ -558,6 +558,8 @@ export function stampUserEditProvenance(
     if (!writesValue && !userValueTargets.has(op.path)) return op;
     if (!Object.prototype.hasOwnProperty.call(observed, 'value')) return op;
     if (storedGraph !== undefined && !userValueTargets.has(op.path) && restatesStoredValue(observed, storedGraph, op.path)) {
+      // The user's own figure re-sent unchanged is a pure no-op; a review is recorded only on someone else's figure.
+      if (observed.source === USER_EDIT_SOURCE) return op;
       return {
         ...op,
         value: { ...value, [OBSERVED_ROOT]: { ...observed, reviewed_by_user: { intent: 'confirm', at: new Date().toISOString() } } },
