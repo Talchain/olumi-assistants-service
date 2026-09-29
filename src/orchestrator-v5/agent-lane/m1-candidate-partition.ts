@@ -1,7 +1,40 @@
 import { createHash } from 'node:crypto';
 import { canonicalLabel, type CandidateModel } from './admit-model.js';
 import { optionQuotes } from './option-lineage.js';
-import { figureTheUserWroteFor, withdrawUnstatedBaselineStamps } from './stated-by-user.js';
+import { figureTheUserWrote, figureTheUserWroteFor, withdrawUnstatedBaselineStamps } from './stated-by-user.js';
+import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
+import { unitPhraseFamily } from './unit-conflict.js';
+
+/** A located quote is not proof that the candidate performs its action at its stated setting. */
+function quotedOptionAgrees(option: CandidateModel['options'][number], quote: string): boolean {
+  const tokens = (s: string): string[] => s.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  const source = tokens(quote);
+  const label = tokens(option.label).filter((w) => !['our', 'the', 'a', 'an', 'per', 'it'].includes(w));
+  if (label.length < 2) return false;
+  let cursor = 0;
+  for (const word of label) {
+    const next = source.indexOf(word, cursor);
+    if (next < 0) return false;
+    cursor = next + 1;
+  }
+  const amounts = findStatedAmounts(quote);
+  // Qualitative actions can carry guessed settings, which the value partition below removes separately.
+  if (amounts.length === 0) return true;
+  return (option.interventions ?? []).every((i) => {
+    const family = unitPhraseFamily(i.unit);
+    const kind = family === 'currency' || family === 'percent' ? family : 'plain';
+    if (i.provenance !== 'explicit' && family !== null && !amounts.some((a) => a.kind === kind)) return true;
+    return amounts.some((a) => {
+      if (a.kind !== kind || !figureTheUserWrote(i.value, i.unit, a.matchedText)) return false;
+      const money = readCurrencyUnitWithQualifiers(i.unit);
+      if (a.kind === 'currency' && (money.kind !== 'currency' || money.currencyCode !== a.currencyCode)) return false;
+      const role = [...quote.slice(0, a.index).matchAll(/\b(from|to|at|by)\b/gi)].at(-1)?.[1]?.toLowerCase();
+      const valueKind = (i as { value_kind?: string }).value_kind;
+      // A current/from amount cannot license a setting; a change/by amount is not an absolute level.
+      return role !== 'from' && (role !== 'by' || (valueKind !== undefined && valueKind !== 'absolute'));
+    });
+  });
+}
 
 export interface M1Proposal {
   readonly id: string;
@@ -61,9 +94,16 @@ export function partitionM1Candidate(candidate: CandidateModel, brief: string): 
   };
   const options = candidate.options.flatMap((o) => {
     const quote = sourceOption(o);
+    const words = (o as { brief_words?: unknown }).brief_words;
+    const at = typeof words === 'string' && words.trim() !== '' ? brief.indexOf(words) : -1;
+    const claimedQuote = quote ?? (typeof words === 'string' && at >= 0 && brief.indexOf(words, at + 1) < 0 ? words : undefined);
+    if (claimedQuote !== undefined && !quotedOptionAgrees(o, claimedQuote)) {
+      propose('option', o.label, `options[${o.label}]`, o, 'The quoted source action does not verify this option and its setting; confirm it before adding it to the model.');
+      return [];
+    }
     if (quote !== undefined) option_quotes.set(canonicalLabel(o.label), quote);
-    if (o.provenance === 'explicit' || quote !== undefined) return [{ ...o, provenance: 'explicit' as const }];
-    propose('option', o.label, `options[${o.label}]`, o, 'This alternative was added by Olumi; adopt it before adding it to the model.');
+    if ((o.provenance === 'explicit' && claimedQuote !== undefined) || quote !== undefined) return [{ ...o, provenance: 'explicit' as const }];
+    propose('option', o.label, `options[${o.label}]`, o, 'The source action for this alternative is unverified; confirm it before adding it to the model.');
     return [];
   });
   const constraints = candidate.constraints.filter((c) => {
