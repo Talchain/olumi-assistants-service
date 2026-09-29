@@ -1161,6 +1161,21 @@ const pickKeys = (o: Record<string, unknown>, keys: readonly string[]): Record<s
  * so it is dropped here: whether a run may happen now is `readiness`, only. What the stored RESULT is — an
  * earlier run, current or stale — stays, named `earlier_analysis` so it is never read as admission.
  */
+/**
+ * ⭐ THE SAVED RUN'S OWN GOAL CERTAINTY, BESIDE THE EARLIER ANALYSIS (P0 builder #72 5889970136). A follow-up turn, or a
+ * reloaded conversation, is given this state with no Run in its own history: it had only "an earlier analysis exists",
+ * and filled in the rest (browser `d51ed683`: "all three goal chances withheld because the churn limit…", over £49's
+ * EARNED 0 and £54/£59's unearned 0 with their `say`). The Run the read SELECTED, bound to its own result by run identity
+ * (`goalCertaintyForAgent`, the one reader): its recorded decisions and each `say`, or `unchecked` when it cannot be bound
+ * (a stale Run, nothing recorded, a refused record). No second truth, nothing recomputed.
+ */
+function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: string, g: GraphRead): Record<string, unknown> {
+  const analysis = context.analysis as Record<string, unknown> | undefined;
+  if (analysis === undefined) return context;
+  const certainty = goalCertaintyForAgent(g.analysis_result, { scenario_id: scenarioId, analysis_state: g.analysis_state }, g);
+  return certainty === undefined ? context : { ...context, analysis: { ...analysis, goal_certainty: certainty } };
+}
+
 function earlierAnalysisOf(state: unknown): { analysis: Record<string, unknown> } | undefined {
   if (state === null || typeof state !== 'object') return undefined;
   const { readiness: _placeholder, ...rest } = state as Record<string, unknown>;
@@ -2358,8 +2373,9 @@ export function createAgentCapabilities(
         // has to infer topology from an edge list, and measurably does it worse
         // than the product it is being compared against.
         structure: structuralFacts(g.nodes, g.edges),
-        // (B) goal target, limits, links, the ONE readiness verdict, and the earlier analysis kept apart from it.
-        ...projectModelContext(g),
+        // (B) goal target, limits, links, the ONE readiness verdict, and the earlier analysis kept apart from it — with the
+        // saved Run's own goal certainty (`withSavedRunCertainty`).
+        ...withSavedRunCertainty(projectModelContext(g), ctx.scenario_id, g),
         // A7: what of the brief the model does NOT carry — the read's own manifest, projected; none when the read had none.
         ...(g.not_modelled !== undefined ? { not_modelled: notModelledContext(g.not_modelled) } : {}),
         // Every proposal this user has been shown and not yet approved, newest
