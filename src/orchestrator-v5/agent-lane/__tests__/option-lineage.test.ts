@@ -173,4 +173,33 @@ describe('a copied quote never covers a different figure (PR Review CR on 9d85b0
     const cand = priceDraft({ label: 'Raise to £54', provenance: 'explicit', value: 54, words: 'raise Pro price to £59' }) as unknown as CandidateModel;
     expect([...optionQuotes(cand, SUB).keys()]).toEqual([canonicalLabel('Keep at £49')]);
   });
+  // ⛔ PR Review CHANGES_REQUIRED on #2299 @ fcf35a8b: ONE listed item writing TWO money figures. "£54" in the item is
+  // the setup credit, not the price, so Olumi's £54 price must not borrow the item's words through it.
+  const TWO = 'Should we raise our Pro plan price? The options are raise Pro price to £59 with a £54 setup credit, or keep it at £49. '
+    + 'We have 1,500 paying subscribers and £75k MRR, and we want MRR above £85k.';
+  const TWO_WORDS = 'raise Pro price to £59 with a £54 setup credit';
+  it('11 — PRECONDITION: the Run\'s own reader lists the two-money item as ONE option item', () => {
+    expect(extractEnumeratedOptions(TWO).map((c) => c.text)).toEqual([TWO_WORDS, 'keep it at £49']);
+  });
+  it('11 — RED (real build + the Run\'s reader): Olumi\'s £54 price copying the two-money item gets no quote, stays Olumi\'s, and the Run withholds', async () => {
+    const { r, g } = await build(priceDraft({ label: 'Raise to £54', provenance: 'ai_proposed', value: 54, words: TWO_WORDS }), TWO);
+    expect(r.ok, JSON.stringify(r).slice(0, 300)).toBe(true);
+    expect(optionNode(g, 'Raise to £54').source_quote).toBeUndefined();
+    expect(optionNode(g, 'Keep at £49').source_quote).toBe('keep it at £49');
+    expect(deriveIntakeOptionReconciliation(TWO, g, g).state).not.toBe('reconciled');
+  });
+  it('11 — NAMED RESIDUAL (#2295\'s marker, not this quote): the £54 SETUP CREDIT reads as the user\'s Pro-price level to `olumiAddedOptionLabels`, so the £54 option is not marked Olumi\'s — no quote and no leader either way', async () => {
+    const { g } = await build(priceDraft({ label: 'Raise to £54', provenance: 'ai_proposed', value: 54, words: TWO_WORDS }), TWO);
+    expect(optionNode(g, 'Raise to £54').proposed_by).toBeUndefined();
+  });
+  it('11b — the user\'s own £59 on the two-money item is NOT quoted either (the named under-claim: which £ is the price cannot be read) → the Run withholds, never a wrong leader', async () => {
+    const { g } = await build(priceDraft({ label: 'Raise to £59', provenance: 'explicit', value: 59, words: TWO_WORDS }), TWO);
+    expect(optionNode(g, 'Raise to £59').source_quote).toBeUndefined();
+    expect(deriveIntakeOptionReconciliation(TWO, g, g).state).not.toBe('reconciled');
+  });
+  it('11c — CONTROL: the single-money item still quotes the user\'s £59 and the Run reconciles (row 10b is unchanged)', async () => {
+    const { g } = await build(priceDraft({ label: 'Raise to £59', provenance: 'explicit', value: 59, words: 'raise Pro price to £59' }), SUB);
+    expect(optionNode(g, 'Raise to £59').source_quote).toBe('raise Pro price to £59');
+    expect(deriveIntakeOptionReconciliation(SUB, g, g).state).toBe('reconciled');
+  });
 });

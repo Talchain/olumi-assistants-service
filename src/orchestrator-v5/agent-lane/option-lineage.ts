@@ -31,7 +31,9 @@ interface Span { readonly text: string; readonly from: number; readonly to: numb
  * item writes a figure of the same kind (money, a percentage, a plain number). An Olumi "Raise to £54" that copies "raise
  * Pro price to £59" would otherwise take the user's quote, lose `proposed_by: 'olumi'` and could lead as the user's
  * choice. A figure the item says nothing of the same kind about (Olumi's level on "shift batch jobs to spot instances")
- * is no conflict, nor is a name like "tier-1" beside a £ or % figure.
+ * is no conflict, nor is a name like "tier-1" beside a £ or % figure. An item writing TWO money or percentage figures
+ * binds none (which is the option's cannot be read): no quote. Named residual: two PLAIN numbers with no unit word after
+ * either ("hire 2 or 3") still match the one the option sets.
  */
 function figuresAgree(option: CandidateModel['options'][number], item: string): boolean {
   const written = findStatedAmounts(item);
@@ -39,8 +41,18 @@ function figuresAgree(option: CandidateModel['options'][number], item: string): 
     const family = unitPhraseFamily(unit);
     return family === 'currency' ? 'currency' : family === 'percent' ? 'percent' : 'plain';
   };
-  return (option.interventions ?? []).every((i) => typeof i.value !== 'number' || !Number.isFinite(i.value)
-    || figureTheUserWrote(i.value, i.unit, item) || !written.some((a) => a.kind === kindOf(i.unit)));
+  return (option.interventions ?? []).every((i) => {
+    if (typeof i.value !== 'number' || !Number.isFinite(i.value)) return true;
+    const kind = kindOf(i.unit);
+    const sameKind = new Set(written.filter((a) => a.kind === kind).map((a) => a.magnitude));
+    if (sameKind.size === 0) return true;
+    // ⛔ PR Review CHANGES_REQUIRED on #2299 @ fcf35a8b: an item that writes TWO money (or percentage) figures ("raise Pro
+    // price to £59 with a £54 setup credit") cannot say which one is the option's: "£54" would match an Olumi "Raise to
+    // £54" through the setup credit. Fail closed: no quote, the Run's honest withhold. A plain number keeps its reading,
+    // which the word after it already binds ("3 months" is never 3 engineers: `figureTheUserWrote`'s unit word).
+    if (kind !== 'plain' && sameKind.size > 1) return false;
+    return figureTheUserWrote(i.value, i.unit, item);
+  });
 }
 
 /** Each unique list item's span in the brief; an item written twice has no span (its quote could not be located). */
