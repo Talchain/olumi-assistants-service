@@ -54,7 +54,7 @@ import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { getSessionStore } from '../session/index.js';
 import { TurnFenceRejectedError } from '../session/turn-fence.js';
 import { createHash } from 'node:crypto';
-import { executeOptionInterventionBatch, executeOptionInterventionEdit, type ApprovedFactorFrame, type ApprovedFactorValue, type ApprovedLinkEffect, type ApprovedLinkStrength } from './option-intervention-edit.js';
+import { executeOptionInterventionBatch, executeOptionInterventionEdit, type ApprovedFactorFrame, type ApprovedFactorValue, type ApprovedIdentityConfirm, type ApprovedLinkEffect, type ApprovedLinkStrength } from './option-intervention-edit.js';
 import { runWithApprovedLevelAdoptions } from '../agent-lane/approved-adoption-context.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
@@ -2803,11 +2803,14 @@ export async function dispatchOptionLevelsBatch(
     readonly linkStrengths?: readonly ApprovedLinkStrength[];
     /** ⭐ One approved user-stated link effect (Canonical #72 5882780438): ONE commit, alone. */
     readonly linkEffect?: ApprovedLinkEffect;
+    /** ⭐ One approved product confirmation (DL #72 5887510885; Canonical 5887564539): ONE commit, alone. */
+    readonly identityConfirm?: ApprovedIdentityConfirm;
   },
   requestId: string,
 ): Promise<DispatchSystemEventResult> {
   const linkStrengths = batch.linkStrengths ?? [];
-  const eventKind = batch.linkEffect !== undefined ? 'link_effect_edit' : linkStrengths.length > 0 ? 'link_strengths_batch'
+  const eventKind = batch.identityConfirm !== undefined ? 'identity_confirm_edit'
+    : batch.linkEffect !== undefined ? 'link_effect_edit' : linkStrengths.length > 0 ? 'link_strengths_batch'
     : batch.targets.length === 1 ? 'option_intervention_edit' : 'option_levels_batch';
   let priorFactsRead: Awaited<ReturnType<typeof loadPriorFactsWithReadState>>;
   try {
@@ -2864,6 +2867,7 @@ export async function dispatchOptionLevelsBatch(
   // level whose approved links are declared — goes through the batch entry.
   const only = batch.targets.length === 1 && batch.expectedLinks === undefined
     && (batch.values ?? []).length + (batch.frames ?? []).length + linkStrengths.length === 0 && batch.linkEffect === undefined
+    && batch.identityConfirm === undefined
     ? batch.targets[0]! : undefined;
   const outcome: Awaited<ReturnType<typeof executeOptionInterventionBatch>> = only !== undefined
     ? await executeOptionInterventionEdit({ ...common, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue },
@@ -2873,7 +2877,8 @@ export async function dispatchOptionLevelsBatch(
       ...(batch.values !== undefined && batch.values.length > 0 ? { values: batch.values } : {}),
       ...(batch.frames !== undefined && batch.frames.length > 0 ? { frames: batch.frames } : {}),
       ...(linkStrengths.length > 0 ? { linkStrengths, lastRunIdentityUse } : {}),
-      ...(batch.linkEffect !== undefined ? { linkEffect: batch.linkEffect, lastRunIdentityUse } : {}) }, getSessionStore());
+      ...(batch.linkEffect !== undefined ? { linkEffect: batch.linkEffect, lastRunIdentityUse } : {}),
+      ...(batch.identityConfirm !== undefined ? { identityConfirm: batch.identityConfirm } : {}) }, getSessionStore());
 
   if (outcome.kind === 'committed') {
     // ⚠ THE GRAPH FIELD IS A VALIDATED VIEW, AND IT IS NOT THE AUTHORITY.
@@ -3159,6 +3164,20 @@ export type CommitOptionLevelsInput = {
      */
     readonly reading_token: string;
   };
+  /**
+   * ⭐ ONE PRODUCT CONFIRMATION (DL #72 5887510885; Canonical 5887564539): "MRR = price × subscribers" recorded as the
+   * user's own `nonlinear_identity` on `outcome_id` by the canonical writer (`applyIdentityConfirmEdit`), in ONE commit,
+   * alone. `base_graph_hash` is the revision the card was issued on. A writer refusal comes back as `refused` with
+   * `reason: 'identity_<reason>'`; nothing is written.
+   */
+  readonly identity_confirm?: {
+    readonly outcome_id: string;
+    readonly factor_ids: readonly string[];
+    /** The card's displayed sentence. */
+    readonly words: string;
+    /** `identityConfirmReadingToken({outcome_id, factor_ids, words})` of the reading the approval card SHOWED. */
+    readonly reading_token: string;
+  };
 };
 export type CommitOptionLevelsResult =
   | { readonly status: 'committed'; readonly graph_hash: string;
@@ -3204,6 +3223,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(input.frames !== undefined && input.frames.length > 0 ? { frames: input.frames } : {}),
       ...(input.link_strengths !== undefined && input.link_strengths.length > 0 ? { link_strengths: input.link_strengths } : {}),
       ...(input.link_effect !== undefined ? { link_effect: input.link_effect } : {}),
+      ...(input.identity_confirm !== undefined ? { identity_confirm: input.identity_confirm } : {}),
       base_graph_hash: input.base_graph_hash } }))
     .digest('hex').slice(0, 32)}`;
   const payload = { scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame' as const, requestHash };
@@ -3216,6 +3236,9 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       from: l.from, to: l.to, magnitude: l.magnitude, intent: l.intent, expected: l.expected, band: l.band, adopted: l.author === 'model_proposed' })) } : {}),
     ...(input.link_effect !== undefined ? { linkEffect: { from: input.link_effect.from, to: input.link_effect.to, effect: input.link_effect.effect,
       edge_token: input.link_effect.edge_token, quote: input.link_effect.quote, reading_token: input.link_effect.reading_token } } : {}),
+    ...(input.identity_confirm !== undefined ? { identityConfirm: { outcome_id: input.identity_confirm.outcome_id,
+      factor_ids: [...input.identity_confirm.factor_ids], words: input.identity_confirm.words,
+      reading_token: input.identity_confirm.reading_token } } : {}),
   }, requestId));
   if (r.graphConflict !== undefined) return { status: 'stale' };
   if (r.commitSkippedReason === 'refused_no_write') {
