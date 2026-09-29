@@ -93,6 +93,16 @@ function lookupOrUndefined(graph: GraphV3T): GraphLookup | undefined {
  */
 const SCALE_CONSISTENCY_TOLERANCE = 1e-6;
 
+/**
+ * The SAME stored number, allowing only float noise (a figure re-derived through a division can differ in the last
+ * bit). Deliberately far tighter than `SCALE_CONSISTENCY_TOLERANCE`: this decides "did the user change the value?",
+ * where £1 on £1.2bn is a change.
+ */
+function sameStoredNumber(actual: unknown, expected: number): boolean {
+  if (typeof actual !== 'number' || !Number.isFinite(actual) || !Number.isFinite(expected)) return false;
+  return Math.abs(actual - expected) <= 1e-12 * Math.max(1, Math.abs(actual), Math.abs(expected));
+}
+
 function scaleValuesAgree(actual: unknown, expected: number): boolean {
   if (typeof actual !== 'number' || !Number.isFinite(actual) || !Number.isFinite(expected)) {
     return false;
@@ -821,17 +831,21 @@ export async function applyFactorValueEdit(
   //   · `confirm_current`  — keeps the value: review; would MOVE it: refused, never turned into a set;
   //   · ABSENT             — keeps the value: review (today's UI sends a confirm-as-is with no intent); moves it: a set;
   //   · `set`              — authorship, even for the same number (in-process writers restating a figure send it).
-  // A review discards the authoring candidate (which stamps `user_override`) and records only `reviewed_by_user`:
-  // `source` is untouched, so the analysis hash and every verdict are byte-identical.
+  // A review discards the authoring candidate (which would re-stamp whose the value is) and records only
+  // `reviewed_by_user`: `source` is untouched, so the analysis hash and every verdict are byte-identical.
+  // "The same value" is NEAR-EXACT (float noise only), never the scale-consistency tolerance above: a collaborator's
+  // £1 move on £1,234,565,000 is a real edit and must land as one. And a review is recorded only when the write would
+  // CHANGE whose the value is; the same value with the same owner falls through to the ordinary no-op.
   const intent = (event as { readonly intent?: unknown }).intent;
   if (intent === 'confirm_current' || intent === undefined) {
     const before = targetNode.observed_state as { value?: unknown; raw_value?: unknown; source?: unknown } | undefined;
     const after = mergedParse.data.nodes.find((n) => n.id === event.target_id)?.observed_state as
-      | { value?: unknown; raw_value?: unknown }
+      | { value?: unknown; raw_value?: unknown; source?: unknown }
       | undefined;
-    const sameValue = typeof before?.value === 'number' && scaleValuesAgree(after?.value, before.value)
-      && (typeof before.raw_value !== 'number' || scaleValuesAgree(after?.raw_value, before.raw_value));
+    const sameValue = typeof before?.value === 'number' && sameStoredNumber(after?.value, before.value)
+      && (typeof before.raw_value !== 'number' || sameStoredNumber(after?.raw_value, before.raw_value));
     const keepsValue = appliedProvenance === undefined && sameValue;
+    const ownerWouldMove = after?.source !== before?.source;
     if (!keepsValue && intent === 'confirm_current') {
       return refuse(
         payload,
@@ -840,7 +854,7 @@ export async function applyFactorValueEdit(
           `To change the figure, type the new value instead.`,
       );
     }
-    if (keepsValue) {
+    if (keepsValue && ownerWouldMove) {
       const reviewed = structuredClone(persistedGraph) as { nodes: Array<Record<string, unknown>> };
       const node = reviewed.nodes.find((n) => n.id === event.target_id)!;
       node.observed_state = {

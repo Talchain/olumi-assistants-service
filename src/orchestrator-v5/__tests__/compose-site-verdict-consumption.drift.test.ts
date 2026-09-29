@@ -760,6 +760,17 @@ const FACTOR_VALUE_EDIT_SITES: Readonly<Record<string, RegisteredSite>> = {
       '`composeRecoverableHandlerResponse`, whose own copy lives in ' +
       'compose/validation-failure-responses.ts and is keyed where that file is scanned.',
   },
+  '`Kept ${label} ${whose} and noted that you reviewed it. The analysis i': {
+    stance: 'structural',
+    why:
+      'ONE site: the REVIEW receipt (Shared Data row 1 — a confirm, or an unchanged value that would otherwise move ' +
+      'whose it is, is review, not authorship; AIQ #72 5881277231 / 5881405845). A fixed template over the label of ' +
+      'the ONE factor named by id on the wire event (target kinds `[\'factor\']`, never selected by rank) and one of two ' +
+      'fixed phrases chosen by the persisted `source` literal ("as Olumi\'s estimate" / "at its current value"). No LLM ' +
+      'call, no analysis read, no comparison, ordering, probability or margin: IT CANNOT ASSERT A LEADER. "The analysis ' +
+      'is unchanged" is true by construction — the review leaves every analysis-hash input byte-identical ' +
+      '(factor-value-edit-confirm-is-review.test.ts pins the hash).',
+  },
 };
 
 /**
@@ -1243,7 +1254,9 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // site; the old regex keys it too, so the comparison includes that site.
     // #1859 goal_target_edit: 46 -> 47. ONE added file (system-events/goal-target-edit.ts)
     // with the same `confirmation: outcome.assistant_text` site as factor-value-edit.ts.
-    expect(compared, 'the re-key comparison compared nothing').toBe(47);
+    // Shared Data row 1 (REVIEW receipt): 47 -> 48. ONE `confirmation:` template site added in the already-scanned
+    // system-events/factor-value-edit.ts (FACTOR_VALUE_EDIT_SITES), keyable by the same regex.
+    expect(compared, 'the re-key comparison compared nothing').toBe(48);
   });
 
   it('THE DOMAIN IS DERIVED: scanned ∪ unscanned == every compose file in src/', () => {
@@ -1478,8 +1491,11 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // (system-events/goal-target-edit.ts), registered `structural` with its derivation
     // (GOAL_TARGET_EDIT_SITES). This ledger failed `pnpm test:required` on the commit
     // that created the site — the guard found it, not a human.
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(53);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(49);
+    // ⚠ Shared Data row 1 (REVIEW receipt): 53 -> 54 sites, one added in the already-scanned
+    // system-events/factor-value-edit.ts, registered `structural` with its derivation. Found by this ledger on
+    // `pnpm test:required`, again — not remembered.
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(54);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(50); // Shared Data row 1: +1 key (the factor-value-edit REVIEW receipt).
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
       'compose/configure-option-clarify-response.ts',
       'compose/duplicate-option-label-response.ts',

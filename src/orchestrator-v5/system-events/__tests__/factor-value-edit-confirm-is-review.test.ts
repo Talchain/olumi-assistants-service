@@ -91,15 +91,26 @@ describe('factor_value_edit — a confirm is review, a typed figure is authorshi
     if (r.kind === 'refused') expect(r.reason).toBe('confirm_value_moved');
   });
 
-  it('a review of the user\'s own figure keeps it the user\'s and does not call it Olumi\'s', async () => {
+  it('the same value that is ALREADY the user\'s is the ordinary no-op: no review stamp, hash identical', async () => {
     const base = servedGraph() as { nodes: Array<Record<string, unknown>> };
     (base.nodes[1]!.observed_state as Record<string, unknown>).source = 'user_override';
     const r = await edit({ value: 3.2 }, base);
     expect(r.kind).toBe('mutated');
     if (r.kind !== 'mutated') return;
     expect(nodeOf(r.mutatedGraph).observed_state!.source).toBe('user_override');
+    expect(nodeOf(r.mutatedGraph).observed_state!.reviewed_by_user).toBeUndefined();
     expect(hash(r.mutatedGraph)).toBe(hash(base));
-    expect(r.response.assistant_text).toMatch(/at its current value/);
-    expect(r.response.assistant_text).not.toMatch(/Olumi/);
+    expect(r.response.assistant_text).toMatch(/already set to 3\.2%/);
+  });
+
+  it('a collaborator\'s £1 move on £1,234,565,000 is an EDIT, never swallowed as a review (near-exact, not scale tolerance)', async () => {
+    const base = servedGraph() as { nodes: Array<Record<string, unknown>> };
+    base.nodes[1]!.observed_state = { unit: '£', value: 1234564999, source: 'cee_inference' };
+    const r = await edit({ value: 1234565000, unit: '£' }, base);
+    expect(r.kind).toBe('mutated');
+    if (r.kind !== 'mutated') return;
+    expect(nodeOf(r.mutatedGraph).observed_state!.value).toBe(1234565000);
+    expect(nodeOf(r.mutatedGraph).observed_state!.source).toBe('user_override');
+    expect(nodeOf(r.mutatedGraph).observed_state!.reviewed_by_user).toBeUndefined();
   });
 });

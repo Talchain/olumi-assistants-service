@@ -12,11 +12,15 @@ import { readFileSync } from 'node:fs';
 import { runTurnNextMove, type CapturedAnalysis, type RunTurnCoachingFinal } from '../analysis-coaching-pass-through.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { estimatedLimitFromVerdicts } from '../../coaching/estimated-limit-card.js';
+import { rebindCapture } from '../../../../tests/helpers/legacy-analysis-hash-v2.js';
 
 type Rec = Record<string, any>;
-const F = JSON.parse(readFileSync(
+// Shared Data row 1 (projection v3): each capture's recorded hash is proven to be the pre-0.62.0 projection of its
+// draft graph, then rebound to the current projection everywhere that exact string appears (tests/helpers).
+const rebound = (f: Rec): Rec => rebindCapture(f, f.draft_graph, f.graph_hash as string);
+const F = rebound(JSON.parse(readFileSync(
   new URL('../../coaching/__tests__/fixtures/served-c01-08fbba5-per-limit-estimate-only.json', import.meta.url), 'utf8',
-)) as Rec;
+)) as Rec);
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 const args = (f: Rec, over: Partial<RunTurnCoachingFinal> = {}): [CapturedAnalysis, RunTurnCoachingFinal] => {
   const result = { ...f.analysis_result, computed_against_hash: f.graph_hash };

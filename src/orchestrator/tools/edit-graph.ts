@@ -3194,6 +3194,7 @@ export async function handleEditGraph(
     const canonicalisedOps = stampUserEditProvenance(
       canonicaliseValueOps(operations, context.graph).operations,
       operations,
+      context.graph as { readonly nodes?: readonly unknown[] },
     );
     const ambiguousScaleOps = findAmbiguousScaleValueOps(canonicalisedOps, context.graph);
     if (ambiguousScaleOps.length > 0) {
