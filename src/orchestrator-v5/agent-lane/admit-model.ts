@@ -1345,13 +1345,14 @@ function markProductIdentities(
   /**
    * ⛔ OLUMI'S PRODUCT OVER A PART WITH NO LEVEL IS NOT DECLARED; ITS FIGURES ARE ASKED (AIQ #72 5898415568 run 0
    * `0c426b00`; R3 5898443502: "admission could refuse a product over level-less Olumi parts and draft the ask
-   * instead"). The engine multiplies a declared product only when every part has a level above 0 today; otherwise ISL
-   * withholds it (`identity_operand_missing` / `identity_zero_level`), PLoT then withholds the goal's chance on every
-   * option (#416), and the Run ends with no question — served cut-costs chained "AWS workload spend × GCP workload
-   * share" into "× GCP saving rate", the share and the rate with no level. So Olumi's own reading is refused when a part
-   * is a factor with no level (or 0) today, or an outcome another product refused here was to give its level — to a
-   * fixpoint, so a chain is refused whole in either order — and `unlevelledProductQuestions` asks for the root figures once. A
-   * declaration the brief states is the user's structure and is kept.
+   * instead"). ISL withholds a declared product when a part has no level (`identity_operand_missing`), or when a part is
+   * 0 today AND the product's outcome has a level (`identity_zero_level`; with no outcome level it multiplies — R3
+   * 5899153490, ISL `robustness_analyzer_v2.py:1737-1751`). PLoT then withholds the goal's chance on every option (#416),
+   * and the Run ends with no question — served cut-costs chained "AWS workload spend × GCP workload share" into "× GCP
+   * saving rate", the share and the rate with no level. So Olumi's own reading is refused exactly there: a factor with
+   * no level, or at 0 when the outcome has one, or an outcome another product refused here was to give its level — to a
+   * fixpoint, so a chain is refused whole in either order — and `unlevelledProductQuestions` asks for the root figures
+   * once. A declaration the brief states is the user's structure and is kept.
    */
   const productOutcome = new Map<string, CandidateIdentity>();
   for (const d of declared) {
@@ -1359,12 +1360,16 @@ function markProductIdentities(
     if (id !== undefined && d.operation === 'product' && !productOutcome.has(id)) productOutcome.set(id, d);
   }
   const levelRefused = new Map<CandidateIdentity, string[]>();
-  const levelled = (id: string): boolean => { const t = todayOf(id); return t !== undefined && t !== 0; };
   for (let changed = true; changed;) {
     changed = false;
     for (const d of declared) {
       if (d.provenance === 'explicit' || d.operation !== 'product' || levelRefused.has(d)) continue;
       const parts = [...new Set((Array.isArray(d.factors) ? d.factors : []).map((f) => resolve(f)).filter((id): id is string => id !== undefined))];
+      const outcome = resolve(d.outcome);
+      // The goal's level is attached after admission (build-model), so a goal counts as levelled here: it usually holds the
+      // user's current level, and where it does not the refusal only costs an approximation. No other outcome has one.
+      const zeroBlocks = outcome !== undefined && (outcome === goalId || todayOf(outcome) !== undefined);
+      const levelled = (id: string): boolean => { const t = todayOf(id); return t !== undefined && (t !== 0 || !zeroBlocks); };
       const missing = parts.filter((id) => {
         if (levelled(id)) return false;
         if (kindOf.get(id) === 'factor') return true;
