@@ -193,6 +193,12 @@ describe('sayFigure — the input class, not the served example (≥10 unit shap
     [3, '% per month', 'Monthly churn', '3% per month'],
     [12.5, '', 'Score', '12.5'],
     [0.333333, 'ratio', 'Share', '0.33 ratio'],
+    // AIQ 5887805333: the per-item price unit (#2291) and the slash forms read as money, never "49 GBP/subscriber/month".
+    [49, 'GBP/subscriber/month', 'Pro plan price', '£49 / subscriber / month'],
+    [49, '£/subscriber/month', 'Pro plan price', '£49 / subscriber / month'],
+    [49, 'GBP per subscriber per month', 'Pro plan price', '£49 per subscriber per month'],
+    [75000, 'GBP/month', 'MRR', '£75,000 / month'],
+    [73500.4, 'GBP/month', 'MRR', '£73,500 / month'],
   ])('%s %s → %s', (v, unit, label, said) => {
     expect(sayFigure(v, unit, label)).toBe(said);
   });

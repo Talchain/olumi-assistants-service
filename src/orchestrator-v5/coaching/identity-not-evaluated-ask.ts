@@ -21,6 +21,7 @@
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
 import { sayLevel } from './bound-graph.js';
+import { sayFigure as sayLaneFigure } from '../agent-lane/say-figure.js';
 
 export const IDENTITY_NOT_EVALUATED_CODE = 'IDENTITY_NOT_EVALUATED';
 
@@ -89,12 +90,14 @@ const CODE_TO_PREFIX_SYMBOL: ReadonlyMap<string, string> = (() => {
  */
 export function sayFigure(value: number, unit: unknown, label: string): string {
   const u = typeof unit === 'string' ? unit.trim() : '';
-  const head = /^(\S+)\s*(.*)$/.exec(u);
-  const symbol = head !== null ? CODE_TO_PREFIX_SYMBOL.get(head[1]!.toUpperCase()) : undefined;
-  if (head === null || symbol === undefined) return sayLevel(Math.round(value * 100) / 100, u);
-  const money = sayLevel(Math.round(value), symbol);
-  const rest = head[2]!.trim();
-  return rest === '' || label.toLowerCase().includes(rest.toLowerCase()) ? money : `${money} ${rest}`;
+  // The leading token up to a space OR a "/" (AIQ 5887805333: "GBP/subscriber/month" read as "49 GBP/subscriber/month").
+  const head = /^([^\s/]+)(.*)$/.exec(u);
+  const lead = head?.[1] ?? '';
+  const isMoney = CODE_TO_PREFIX_SYMBOL.has(lead.toUpperCase()) || [...CODE_TO_PREFIX_SYMBOL.values()].includes(lead);
+  if (!isMoney) return sayLevel(Math.round(value * 100) / 100, u);
+  const rest = (head?.[2] ?? '').trim();
+  // Money is said in whole units here (a reconstructed total, never pence), through the lane's ONE figure formatter.
+  return sayLaneFigure(Math.round(value), rest === '' || label.toLowerCase().includes(rest.toLowerCase()) ? lead : u);
 }
 
 const q = (label: string): string => `“${label}”`;
