@@ -267,7 +267,7 @@ describe('Olumi\'s typed reading of a decrease target (the served "cut costs" in
     expect(g['goal_threshold_frame'], 'PRECONDITION: typed as a change').toBe('change_rel');
     expect(g['goal_threshold']).toBe(-0.2);
     expect(Object.keys(g), 'PRECONDITION: the served failure — no comparator held').not.toContain('goal_direction');
-    expect(g['goal_sense_reading']).toEqual({ sense: 'minimise', basis: 'typed_change_sign', threshold: -0.2, words: WORDS });
+    expect(g['goal_sense_reading']).toEqual({ sense: 'minimise', basis: 'typed_change_sign', threshold: -0.2, threshold_frame: 'change_rel', words: WORDS });
     expect(wire).toEqual({ direction: 'minimise', provenance: 'typed_change_sign' });
     expect(r.not_represented, 'AIQ (a): the reading is said in the reply').toContain(WORDS);
   });
@@ -300,8 +300,46 @@ describe('Olumi\'s typed reading of a decrease target (the served "cut costs" in
   });
   it('the reading speaks only while the typed sign is negative: an edit to +0.1 keeps the stale field but sends nothing', () => {
     const graph = { nodes: [{ id: 'monthly_spend', kind: 'goal', label: 'Monthly spend', goal_threshold: 0.1, goal_threshold_raw: 0.1, goal_threshold_frame: 'change_rel',
-      goal_sense_reading: { sense: 'minimise', basis: 'typed_change_sign', threshold: -0.2, words: WORDS } }] };
+      goal_sense_reading: { sense: 'minimise', basis: 'typed_change_sign', threshold: -0.2, threshold_frame: 'change_rel', words: WORDS } }] };
     expect(resolveGoalDirection(graph, 'monthly_spend')).toBeUndefined();
+  });
+
+  // ⛔ PR Review 5894041769: a SAVED graph keeps the reading across later edits (every write keeps a CEE-owned field), so
+  // the Run decision binds to the exact target it read and never overrules a comparator held since. Each row starts from
+  // the graph construction REGISTERED on the served shape (a real −20% ceiling reading), then edits only the target.
+  describe('SAVED GRAPH: the reading is bound to the exact target it read', () => {
+    const saved = async () => {
+      const { g } = await sent(cloud(COST_NODES));
+      expect(g['goal_sense_reading'], 'PRECONDITION: construction wrote the −20% ceiling reading').toMatchObject({ threshold: -0.2, threshold_frame: 'change_rel' });
+      expect(resolveGoalDirection({ nodes: [g] }, g.id), 'PRECONDITION: before the edit the run minimises').toEqual({ direction: 'minimise', provenance: 'typed_change_sign' });
+      return g;
+    };
+    const after = (g: Record<string, any>, edit: Record<string, unknown>) => resolveGoalDirection({ nodes: [{ ...g, ...edit }] }, g.id);
+    it('RED: an edit to a −10% FLOOR ("keep spend from falling more than 10%", held >=) keeps the old reading → no minimise', async () => {
+      const g = await saved();
+      expect(after(g, { goal_threshold: -0.1, goal_threshold_raw: -0.1, goal_direction: '>=' })).toBeUndefined();
+    });
+    it('RED: a FLOOR held since on the SAME −20% target → no minimise (a held comparator is never overruled by Olumi\'s reading)', async () => {
+      const g = await saved();
+      expect(after(g, { goal_direction: '>=' })).toBeUndefined();
+      expect(after(g, { goal_direction: '>' })).toBeUndefined();
+    });
+    it('RED: another NEGATIVE target (−10%) with no fresh reading cannot use the stale −20% reading → nothing sent', async () => {
+      const g = await saved();
+      expect(after(g, { goal_threshold: -0.1, goal_threshold_raw: -0.1 })).toBeUndefined();
+    });
+    it('RED: the same figure re-typed in ANOTHER frame (change_abs) cannot use the change_rel reading → nothing sent', async () => {
+      const g = await saved();
+      expect(after(g, { goal_threshold_frame: 'change_abs' })).toBeUndefined();
+    });
+    it('CONTROL: a user CEILING held since speaks as the user\'s own (stated_comparator), never as Olumi\'s reading', async () => {
+      const g = await saved();
+      expect(after(g, { goal_direction: '<=' })).toEqual({ direction: 'minimise', provenance: 'stated_comparator' });
+    });
+    it('CONTROL: an unrelated edit (the label) leaves the target, and the reading, exactly as read → still minimise', async () => {
+      const g = await saved();
+      expect(after(g, { label: 'Monthly cloud spend' })).toEqual({ direction: 'minimise', provenance: 'typed_change_sign' });
+    });
   });
 });
 

@@ -15,13 +15,18 @@
  *    comparator is readable only here, at construction, so the guard lives here;
  *  · no user comparator is held (`goal_direction`): the user's own speaks first (`stated_comparator`).
  * It is OLUMI'S reading, never stamped the user's: its `words` say so (AIQ condition (a)), keyed to the threshold read.
+ * It carries the exact `threshold` and `threshold_frame` it was read from, so a later edit to the target (another
+ * figure, another frame) leaves a stale reading the reader refuses (PR Review 5894041769).
  */
 import { sayFigure } from './say-figure.js';
 
 export interface GoalSenseReading {
   readonly sense: 'minimise';
   readonly basis: 'typed_change_sign';
+  /** The goal's `goal_threshold_raw` this was read from; the reader honours the reading only while it is still that. */
   readonly threshold: number;
+  /** The frame `threshold` was typed in (its warrant); the reader honours the reading only while it is still that. */
+  readonly threshold_frame: 'change_rel' | 'change_abs';
   readonly words: string;
 }
 
@@ -58,6 +63,7 @@ export function withGoalSenseReading<N extends GoalNode>(
     sense: 'minimise',
     basis: 'typed_change_sign',
     threshold: raw,
+    threshold_frame: frame,
     words: `Olumi reads ‘${label}’ as a target to bring it DOWN by ${goal.operator === '<' ? 'more than' : 'at least'} `
       + `${changeAsSaid(frame, raw, node.goal_threshold_unit)} from today.`,
   };

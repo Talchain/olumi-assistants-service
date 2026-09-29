@@ -180,16 +180,24 @@ function goalTargetIsATypedChange(graph: unknown, goalNodeId: unknown): boolean 
  * Served on "cut costs by 20%": the "20%" beside "costs" was given to another node whose label says "cost", so no
  * comparator was held and the run MAXIMISED spend ("Stay on AWS" crowned, 100% "reaches the target"). Construction now
  * types Olumi's reading on the goal (`goal_sense_reading`, written only for a NEGATIVE typed change whose drafter
- * comparator is a ceiling: AIQ's floor guard) and this honours it while the node's typed sign is still negative. No
- * reading (an old graph, a floor, an increase, a level) reads exactly as before.
+ * comparator is a ceiling: AIQ's floor guard) and this honours it only while the node still holds NO comparator and its
+ * target is still the exact negative raw figure and frame the reading was taken from. No reading (an old graph, a floor,
+ * an increase, a level) reads exactly as before.
  */
 function goalHoldsOlumisDecreaseReading(graph: unknown, goalNodeId: unknown): boolean {
   if (!goalTargetIsATypedChange(graph, goalNodeId)) return false;
   const node = readNodes(graph).find((n) => n.id === goalNodeId);
-  const reading = node?.goal_sense_reading as { sense?: unknown; basis?: unknown } | undefined;
+  if (node === undefined) return false;
+  // ⛔ PR Review 5894041769: a comparator on the node — the user's, and above all a FLOOR — is never overruled by
+  // Olumi's reading. It was written only where none was held; one held since means the reading no longer speaks.
+  if (node.goal_direction !== undefined && node.goal_direction !== null) return false;
+  const reading = node.goal_sense_reading as { sense?: unknown; basis?: unknown; threshold?: unknown; threshold_frame?: unknown } | undefined;
   if (reading?.sense !== 'minimise' || reading.basis !== 'typed_change_sign') return false;
-  const signed = typeof node?.goal_threshold_raw === 'number' ? node.goal_threshold_raw : node?.goal_threshold;
-  return typeof signed === 'number' && Number.isFinite(signed) && signed < 0;
+  // ⛔ BOUND TO THE TARGET IT READ: the exact raw figure and frame. An edited target (another figure, another frame)
+  // leaves a stale reading, and a stale reading never speaks for the new one.
+  const raw = node.goal_threshold_raw;
+  return typeof raw === 'number' && Number.isFinite(raw) && raw < 0
+    && reading.threshold === raw && reading.threshold_frame === node.goal_threshold_frame;
 }
 
 /**
