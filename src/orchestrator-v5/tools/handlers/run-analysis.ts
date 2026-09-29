@@ -128,6 +128,7 @@ import {
   withholdUnprovablePercentFrames,
 } from './level-limit-baseline.js';
 import { carryStatedLevelSpread, carrySwitchLevelSpread, statedLevelNodeIds, switchLevelNodeIds } from './stated-level-spread.js';
+import { carryUnconfirmedGoalProduct } from './unconfirmed-goal-product.js';
 import {
   AnalysisNotReadyError,
   readinessQuestions,
@@ -984,8 +985,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
     // A 0/1 switch an option sets is held at its state, never sampled as a partial state (`stated-level-spread.ts`).
-    const wireGraph = carrySwitchLevelSpread(statedGraph, finalWireOptions);
-    if (wireGraph !== statedGraph) {
+    const switchGraph = carrySwitchLevelSpread(statedGraph, finalWireOptions);
+    if (switchGraph !== statedGraph) {
       log.info(
         {
           event: 'run_analysis.switch_level_spread_carried',
@@ -994,6 +995,21 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           node_ids: [...switchLevelNodeIds(statedGraph, finalWireOptions)],
         },
         'run_analysis sent option-set 0/1 switch levels at the minimum spread (wire copy only; no magnitudes)',
+      );
+    }
+    // A graph saved before #2300 carries no identity where the card would offer Olumi's reading: that reading is carried
+    // on this wire copy as the unconfirmed product #2300 would have minted, so PLoT #420 withholds the goal's figures
+    // (`unconfirmed-goal-product.ts`). Nothing persisted; `graph_hash_at_run` is hashed from the raw persisted graph.
+    const wireGraph = carryUnconfirmedGoalProduct(switchGraph, snapshot.rawPersistedGraph ?? snapshot.graph);
+    if (wireGraph !== switchGraph) {
+      log.info(
+        {
+          event: 'run_analysis.unconfirmed_goal_product_carried',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          node_ids: [snapshot.goal_node_id],
+        },
+        'run_analysis carried Olumi\'s unconfirmed goal product on the wire copy of a graph with no identity (ids only)',
       );
     }
     const plotPayload: Record<string, unknown> = {
