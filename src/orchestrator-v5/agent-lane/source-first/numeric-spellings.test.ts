@@ -20,8 +20,8 @@ describe('captured numeric spellings', () => {
     const result = compileSourceMeaning(captured.brief, captured.meaning);
     expect(result.graph.goal_constraints?.[0]).toMatchObject({ value: 400000, unit: 'GBP per year', operator_as_stated: '<' });
     expect(result.graph.nodes.every((node) => node.goal_horizon_months === undefined)).toBe(true);
-    expect(result.graph.nodes.filter((node) => node.kind === 'factor')).toHaveLength(0);
-    expect(result.unresolved.some((item) => item.code === 'intervention_target_unresolved')).toBe(true);
+    expect(result.graph.nodes.filter((node) => node.kind === 'factor')).toHaveLength(2);
+    expect(result.graph.nodes.filter((node) => node.kind === 'factor').every((node) => node.observed_state === undefined)).toBe(true);
   });
   it('retains approximate support volume and its exact qualifying quote', () => {
     const captured = captures.find((item) => item.case === 'support')!;

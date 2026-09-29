@@ -23,7 +23,7 @@ export interface SourceFirstCompilation {
   /** No semantic repairs are performed. Every unrepresented claim is explicit. */
   loss: SourceFinding[];
   trace: { architecture: 'source_first'; transforms: number; repairs: number; retries: number;
-    source_offset_corrections: number; level_direction_annotations_ignored: number };
+    source_offset_corrections: number; level_direction_annotations_ignored: number; projected_option_quantities: number };
 }
 
 export function sourceEntityId(ref: string): string {
@@ -40,6 +40,7 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
   const entities = new Map(meaning.entities.map((entity) => [entity.ref, entity]));
   const edges: EdgeV3T[] = [];
   const constraints: GoalConstraintT[] = [];
+  let projectedOptionQuantities = 0;
   const accepted = new Map<string, { claim: SourceQuantity; value: number }>();
   const issue = (ref: string, code: string, question: string): void => {
     if (!unresolved.some((item) => item.ref === ref && item.code === code)) unresolved.push({ ref, code, question });
@@ -151,8 +152,36 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
     }
     node.interventions = {};
     for (const intervention of option.interventions) {
-      const target = nodes.get(intervention.entity_ref);
+      let target = nodes.get(intervention.entity_ref);
       const source = bindSource(brief, intervention.source);
+      const quantity = intervention.quantity_ref === null ? undefined : accepted.get(intervention.quantity_ref);
+      // The source IR already names a proposed count and its owning option.
+      // GraphV3 needs separate nodes for the alternative and the quantity it
+      // sets. Project that typed quantity; do not turn an option into a factor
+      // or invent a current headcount, scientific relationship or magnitude.
+      if (target === node && source.ok && quantity?.claim.entity_ref === option.entity_ref
+        && quantity.claim.role === 'proposed_level' && quantity.claim.frame === 'level'
+        && quantity.claim.unit.kind === 'count' && quantity.claim.unit.counted_object !== null) {
+        const ownerSource = source_bindings[option.entity_ref];
+        const numberSource = source_bindings[quantity.claim.ref];
+        const counted = quantity.claim.unit.counted_object;
+        const escaped = counted.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const sourceNamesCount = new RegExp(`\\b${escaped}\\b`, 'i').test(numberSource.quote);
+        const sourceOwnsClaim = ownerSource.start <= source.source.start && ownerSource.end >= source.source.end
+          && source.source.start <= numberSource.start && source.source.end >= numberSource.end;
+        const quantityRef = `option_quantity:${option.entity_ref}:${quantity.claim.ref}`;
+        if (sourceNamesCount && sourceOwnsClaim && !allRefs.includes(quantityRef) && !nodes.has(quantityRef)) {
+          target = {
+            id: sourceEntityId(quantityRef), kind: 'factor', label: counted,
+            category: 'controllable', provenance: 'from_brief', source_quote: numberSource.quote,
+            description: numberSource.quote, scale_frame: defaultFrameFor(quantity.value),
+          };
+          nodes.set(quantityRef, target);
+          reference_ids[quantityRef] = target.id;
+          source_bindings[quantityRef] = numberSource;
+          projectedOptionQuantities++;
+        }
+      }
       if (!target || target.kind !== 'factor' || !source.ok) {
         issue(option.entity_ref, 'intervention_target_unresolved', `Which controllable quantity does "${node.label}" change?`); continue;
       }
@@ -165,7 +194,6 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
       if (intervention.quantity_ref === null) {
         issue(option.entity_ref, 'intervention_level_missing', `What level of "${target.label}" does "${node.label}" set?`); continue;
       }
-      const quantity = accepted.get(intervention.quantity_ref);
       if (!quantity || quantity.claim.entity_ref !== intervention.entity_ref
         || !['proposed_level', 'absolute_change', 'relative_change', ...(node.is_baseline ? ['current'] : [])].includes(quantity.claim.role)) {
         issue(intervention.quantity_ref, 'intervention_role_mismatch', `What level or change of "${target.label}" belongs to "${node.label}"?`); continue;
@@ -308,6 +336,7 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
     proposals: meaning.proposals, source_bindings, reference_ids, loss: [...unresolved],
     trace: { architecture: 'source_first', transforms: 1, repairs: 0, retries: 0,
       source_offset_corrections: Object.values(source_bindings).filter((source) => source.offset_corrected).length,
-      level_direction_annotations_ignored: [...accepted.values()].filter(({ claim }) => claim.frame === 'level' && claim.direction !== 'none').length },
+      level_direction_annotations_ignored: [...accepted.values()].filter(({ claim }) => claim.frame === 'level' && claim.direction !== 'none').length,
+      projected_option_quantities: projectedOptionQuantities },
   };
 }
