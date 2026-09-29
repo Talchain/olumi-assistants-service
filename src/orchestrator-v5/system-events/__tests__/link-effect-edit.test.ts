@@ -9,9 +9,8 @@ import { describe, expect, it } from 'vitest';
 import { convertLinkEffect } from '../../../cee/magnitude/link-effect.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
-import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
-import { applyLinkEffectEdit, type ApplyLinkEffectEditParams } from '../link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken, type ApplyLinkEffectEditParams } from '../link-effect-edit.js';
 
 type Rec = Record<string, any>;
 
@@ -34,7 +33,9 @@ function storedGraph(): Rec {
 
 const STATED = { amount: -50, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: '£' } as const;
 
-const revisionOf = (g: unknown): string => computeGraphIdentityHash(g as never)!.value;
+/** What an Agent proposal carries: the wire `graph_hash` (the analysis hash) and the prepared link's token. */
+const revisionOf = (g: unknown, from = 'price', to = 'subs') =>
+  ({ graph_hash: computeAnalysisAffectingGraphHash(g as never), edge_token: linkEffectEdgeToken(g, from, to)! });
 
 function params(over: Partial<ApplyLinkEffectEditParams> = {}, graph: Rec = storedGraph()): ApplyLinkEffectEditParams {
   return {
@@ -43,7 +44,7 @@ function params(over: Partial<ApplyLinkEffectEditParams> = {}, graph: Rec = stor
     to: 'subs',
     effect: { ...STATED },
     // The revision the ask was prepared on — the Agent proposal's `base_graph_identity_hash`.
-    expected: { graph_identity_hash: revisionOf(graph) },
+    expected: revisionOf(graph),
     quote: 'every £1 on the price loses us about 50 subscribers',
     ...over,
   };
@@ -114,7 +115,7 @@ describe('link effect writer — refuses what it cannot do exactly (fail closed,
     const prepared = storedGraph();
     const now = storedGraph();
     edit(now);
-    return params({ expected: { graph_identity_hash: revisionOf(prepared) } }, now);
+    return params({ expected: revisionOf(prepared) }, now);
   };
 
   it('superseded: another turn changed this link\'s natural effect with the SAME mean, direction and magnitude', () => {
@@ -129,8 +130,16 @@ describe('link effect writer — refuses what it cannot do exactly (fail closed,
     refused(preparedThen((g) => { g.edges[0].provenance.source = 'user_specified'; }), 'superseded');
   });
 
-  it('superseded: an UNRELATED edit since the ask (the CAS reads the whole revision, so the approval is re-asked)', () => {
+  it('superseded: an unrelated ANALYSIS edit since the ask (the level door\'s CAS base moved, so the approval is re-asked)', () => {
     refused(preparedThen((g) => { g.nodes[1].observed_state.raw_value = 59; g.nodes[1].observed_state.value = 0.59; }), 'superseded');
+  });
+
+  it('superseded: Olumi\'s reasoning on this link changed (a byte the analysis hash does not read — the edge token does)', () => {
+    refused(preparedThen((g) => { g.edges[0].provenance.reasoning = 'Olumi: revised'; }), 'superseded');
+  });
+
+  it('CONTROL: a cosmetic rename elsewhere does NOT discard the approval (proposal-staleness doctrine: analysis hash)', () => {
+    expect(applyLinkEffectEdit(preparedThen((g) => { g.nodes[3].label = 'Keep the price'; })).kind).toBe('mutated');
   });
 
   it('CONTROL: the unchanged revision writes', () => {
@@ -150,7 +159,7 @@ describe('link effect writer — refuses what it cannot do exactly (fail closed,
     };
     const r = applyLinkEffectEdit({ persistedGraph: g, from: 'price', to: 'churn', quote: 'every £1 on the price adds half a point of churn',
       effect: { amount: 0.5, amount_unit: 'percentage points', per_source_change: 1, per_source_change_unit: '£' },
-      expected: { graph_identity_hash: revisionOf(g) } });
+      expected: revisionOf(g, 'price', 'churn') });
     expect(r.kind, JSON.stringify(r)).toBe('mutated');
     if (r.kind !== 'mutated') return;
     const e = (r.mutatedGraph as Rec).edges[0];

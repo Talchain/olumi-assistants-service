@@ -26,7 +26,10 @@ import { AdjustEdgeStrengthHandlerFactSchema } from '@talchain/schemas/orchestra
 
 import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
 import { resolveMagnitudeFrame, sizeLink, sourceUnitWords, targetUnitWords, unitOf, type LinkSizeProblem } from '../../cee/magnitude/link-effect.js';
-import { computeGraphIdentityHash } from '../context/graph-identity.js';
+import { createHash } from 'node:crypto';
+
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { definitionalLinkInUse, type IdentityRunUse } from '../compose/definitional-links.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
@@ -53,11 +56,14 @@ export interface ApplyLinkEffectEditParams {
   readonly to: string;
   readonly effect: LinkEffectStatement;
   /**
-   * The revision the ask was prepared against: the graph IDENTITY hash (`computeGraphIdentityHash`) — the value every
-   * Agent proposal already carries as `base_graph_identity_hash` and the commit's CAS reads. Any change to the stored
-   * graph since, this link's `natural_effect`, unit, std or provenance included, is `superseded` (DL 5882808387).
+   * What the ask was prepared against (DL 5882808387). Either one moved ⇒ `superseded`, nothing written.
+   *  · `graph_hash` — the wire `graph_hash` (`computeAnalysisAffectingGraphHash`), which every Agent proposal carries as
+   *    `base_graph_identity_hash` and the level door's CAS reads. It is the analysis hash on purpose: proposal staleness
+   *    is owned by it, so a cosmetic edit elsewhere never discards a valid proposal (proposal-staleness-hash-doctrine).
+   *  · `edge_token` — `linkEffectEdgeToken(graph, from, to)` at prepare time: every stored byte of THIS link, so a change
+   *    the analysis hash does not read (the natural effect's amount, Olumi's reasoning) is caught too.
    */
-  readonly expected: { readonly graph_identity_hash: string };
+  readonly expected: { readonly graph_hash: string; readonly edge_token: string };
   /** The user's verbatim words (1..400), carried on the receipt for the approval card and audit. */
   readonly quote: string;
   /** What the last Run did with declared identities (`identityRunUseFromFacts`); absent = no Run yet. */
@@ -86,6 +92,16 @@ export type LinkEffectEditResult =
   | { readonly kind: 'refused'; readonly reason: LinkEffectRefusal };
 
 const QUOTE_MAX = 400;
+
+/**
+ * Every stored byte of one link (key-order independent), as a short digest — the prepared-edge half of `expected`.
+ * `null` when there is no such link. The Agent computes it on the read it proposes from and stores it on the proposal.
+ */
+export function linkEffectEdgeToken(graph: unknown, from: string, to: string): string | null {
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges : [];
+  const edge = edges.find((e): e is Rec => isRec(e) && e.from === from && e.to === to);
+  return edge === undefined ? null : `edge:${createHash('sha256').update(stableStringify(edge)).digest('hex')}`;
+}
 const refuse = (reason: LinkEffectRefusal): LinkEffectEditResult => ({ kind: 'refused', reason });
 const finite = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 
@@ -102,8 +118,11 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   const target = nodes.find((n) => n.id === to);
   if (edge === undefined || source === undefined || target === undefined) return refuse('edge_not_found');
 
-  // ── REVISION-SAFE: the stored graph must be the revision the ask was prepared against (the CAS's own hash) ────────
-  if (computeGraphIdentityHash(params.persistedGraph as never)?.value !== expected.graph_identity_hash) return refuse('superseded');
+  // ── REVISION-SAFE: the analysis revision AND every byte of this link are what the ask was prepared against ─────────
+  if (computeAnalysisAffectingGraphHash(params.persistedGraph as never) !== expected.graph_hash
+    || linkEffectEdgeToken(params.persistedGraph, from, to) !== expected.edge_token) {
+    return refuse('superseded');
+  }
   const strength = isRec(edge.strength) ? edge.strength : {};
   const provenance = isRec(edge.provenance) ? edge.provenance : {};
   if (definitionalLinkInUse(graph, from, to, params.lastRunIdentityUse ?? null) !== null) return refuse('definitional_link');
