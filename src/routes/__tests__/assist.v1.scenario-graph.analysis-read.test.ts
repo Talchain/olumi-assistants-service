@@ -93,6 +93,7 @@ import scenarioGraphRoute from "../assist.v1.scenario-graph.js";
 import { computeAnalysisAffectingGraphHash } from "../../orchestrator-v5/context/graph-hash.js";
 import { buildCanonicalAnalysisReadyFromGraph } from "../../orchestrator/tools/analysis-ready-helper.js";
 import { issuesAsWireBlockers } from "../../orchestrator-v5/compose/analysis-state-v1.js";
+import { leaderWithheldForALimit } from "../../orchestrator-v5/coaching/limit-unchecked-card.js";
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -727,6 +728,10 @@ describe("a leader withheld by the INTAKE axis says so — never `constraint_ver
     const body = (await read(await buildApp())).json() as Record<string, any>;
     expect(body.analysis_state.run_state.kind).toBe("complete_current");
     expect(body.analysis_state.leader_claim).toMatchObject({ permitted: false, withheld_reason: "options_not_reconciled_with_brief" });
+    // The limit-declined card's OWN mount predicate, on this exact payload: it does NOT mount (DL 5886466744).
+    expect(leaderWithheldForALimit(body.analysis_state)).toBe(false);
+    // The scored limit evidence is preserved beside it.
+    expect(body.analysis_limit_verdicts).toMatchObject({ per_limit: [{ state: "scored" }], joint: { state: "scored" } });
   });
 
   it("CONTROL: the constraint verdict itself withholds → `constraint_verdict_withheld` stands", async () => {
@@ -734,5 +739,6 @@ describe("a leader withheld by the INTAKE axis says so — never `constraint_ver
     readFactsFor.mockResolvedValue([intakeWithheld("unevaluated")]);
     const body = (await read(await buildApp())).json() as Record<string, any>;
     expect(body.analysis_state.leader_claim).toMatchObject({ permitted: false, withheld_reason: "constraint_verdict_withheld" });
+    expect(leaderWithheldForALimit(body.analysis_state)).toBe(true);
   });
 });
