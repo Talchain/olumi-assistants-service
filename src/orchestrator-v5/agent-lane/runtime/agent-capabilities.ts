@@ -1089,29 +1089,46 @@ function startingPointNoteFor(usersCount: number): string {
     `Say plainly that the others are assumptions to adopt or correct, NOT measurements, ${tail}`;
 }
 
-/** Canonical's link-effect refusal, said to the Agent in words it can relay truthfully (never a code). */
-/**
- * The simple paths (at most 4 links, at most 6 paths) the model runs from one factor to another, as labels — read from
- * the graph, never the model's own reading. Shortest first, then by their words.
- */
-export function connectingPaths(raw: unknown, fromId: string, toId: string): string[][] {
-  const g = raw as { nodes?: { id?: unknown; label?: unknown }[] } | null;
-  const labelOf = new Map((g?.nodes ?? []).map((n) => [String(n?.id), typeof n?.label === 'string' ? n.label : String(n?.id)] as const));
-  return connectingIdPaths(raw, fromId, toId).map((p) => p.map((id) => labelOf.get(id) ?? id));
-}
+/** How many of the connecting paths the Agent is shown (the census itself is not capped by this). */
+export const PATHS_SHOWN = 6;
+/** The census stops, INCOMPLETE, past this many paths or this many steps — and then nothing is summed over it. */
+const PATH_CENSUS_MAX_PATHS = 64;
+const PATH_CENSUS_MAX_STEPS = 20_000;
 
-/** {@link connectingPaths} as node ids, in the same order (the sort reads the labels). */
-function connectingIdPaths(raw: unknown, fromId: string, toId: string): string[][] {
+/**
+ * ⭐ THE PATH CENSUS (PR Review CHANGES_REQUIRED on #2278 @ e5fb963c): EVERY simple path from one factor to another, of
+ * any length, as node ids — or `complete: false` when there are more than the census can walk. `reachable` is exact
+ * (a plain directed search, no cap), so a pair connected only by a long route is never called unconnected. Shortest
+ * first, then by their words. A total is summed only over a complete census.
+ */
+export interface PathCensus { readonly paths: readonly string[][]; readonly complete: boolean; readonly reachable: boolean }
+
+export function pathCensus(raw: unknown, fromId: string, toId: string): PathCensus {
   const g = raw as { nodes?: { id?: unknown; label?: unknown }[]; edges?: { from?: unknown; to?: unknown }[] } | null;
   const labelOf = new Map((g?.nodes ?? []).map((n) => [String(n?.id), typeof n?.label === 'string' ? n.label : String(n?.id)] as const));
   const out = new Map<string, string[]>();
   for (const e of g?.edges ?? []) {
     if (typeof e?.from === 'string' && typeof e?.to === 'string') out.set(e.from, [...(out.get(e.from) ?? []), e.to]);
   }
+  // Exact reachability first: never capped.
+  const seen = new Set([fromId]);
+  const queue = [fromId];
+  let reachable = false;
+  while (queue.length > 0 && !reachable) {
+    for (const next of out.get(queue.shift()!) ?? []) {
+      if (next === toId) { reachable = true; break; }
+      if (!seen.has(next)) { seen.add(next); queue.push(next); }
+    }
+  }
+  if (!reachable) return { paths: [], complete: true, reachable: false };
   const found: string[][] = [];
+  let steps = 0;
+  let complete = true;
   const walk = (at: string, path: string[]): void => {
-    if (path.length >= 5) return;
     for (const next of out.get(at) ?? []) {
+      if (!complete) return;
+      steps += 1;
+      if (found.length > PATH_CENSUS_MAX_PATHS || steps > PATH_CENSUS_MAX_STEPS) { complete = false; return; }
       if (path.includes(next)) continue;
       if (next === toId) found.push([...path, next]);
       else walk(next, [...path, next]);
@@ -1119,16 +1136,29 @@ function connectingIdPaths(raw: unknown, fromId: string, toId: string): string[]
   };
   walk(fromId, [fromId]);
   const words = (p: string[]): string => p.map((id) => labelOf.get(id) ?? id).join(' → ');
-  return found.sort((a, b) => a.length - b.length || words(a).localeCompare(words(b))).slice(0, 6);
+  return { paths: found.sort((a, b) => a.length - b.length || words(a).localeCompare(words(b))), complete, reachable };
 }
 
 /**
- * The model's own total effect through `idPaths`, in natural units per ONE unit of the source (AIQ 5883735180 (i)):
- * the sum over paths of the product of each link's `natural_effect` slope. `null` — no comparison — unless EVERY link
- * is sized (`olumi_estimate` / `user_stated`), each link's unit chains EXACTLY into the next, the first link is per
- * `perUnit` and the last is in `amountUnit` (the user's), and no node on the way carries a nonlinear identity.
+ * The first {@link PATHS_SHOWN} connecting paths, as labels — read from the graph, never the model's own reading. The
+ * whole census is {@link pathCensus}.
  */
-function modelTotalThrough(raw: unknown, idPaths: readonly string[][], perUnit: string, amountUnit: string): number | null {
+export function connectingPaths(raw: unknown, fromId: string, toId: string): string[][] {
+  const g = raw as { nodes?: { id?: unknown; label?: unknown }[] } | null;
+  const labelOf = new Map((g?.nodes ?? []).map((n) => [String(n?.id), typeof n?.label === 'string' ? n.label : String(n?.id)] as const));
+  return pathCensus(raw, fromId, toId).paths.slice(0, PATHS_SHOWN).map((p) => p.map((id) => labelOf.get(id) ?? id));
+}
+
+/**
+ * The model's own total effect over a COMPLETE path census, in natural units per ONE unit of the source (AIQ 5883735180
+ * (i)): the sum over every path of the product of each link's `natural_effect` slope. `null` — no comparison — unless
+ * the census is complete, EVERY link is sized (`olumi_estimate` / `user_stated`), each link's unit chains EXACTLY into
+ * the next, the first link is per `perUnit` and the last is in `amountUnit` (the user's), and no node on the way
+ * carries a nonlinear identity.
+ */
+function modelTotalThrough(raw: unknown, census: PathCensus, perUnit: string, amountUnit: string): number | null {
+  if (!census.complete || census.paths.length === 0) return null;
+  const idPaths = census.paths;
   const g = raw as { nodes?: { id?: unknown; nonlinear_identity?: unknown }[]; edges?: Record<string, unknown>[] } | null;
   const unitKey = (u: unknown): string | null => (typeof u === 'string' && u.trim() !== '' ? u.trim().toLowerCase() : null);
   const nonlinear = new Set((g?.nodes ?? []).filter((n) => n?.nonlinear_identity != null).map((n) => String(n?.id)));
@@ -2604,24 +2634,35 @@ export function createAgentCapabilities(
       const edgeToken = linkEffectEdgeToken(g.raw, from.id, to.id);
       // ⛔ A TOTAL EFFECT IS NEVER A NEW DIRECT LINK (served 0929 D3): when the model connects the two only through other
       // factors, the user's figure is their total across those paths — said as such, never offered as a parallel link.
-      const idPaths = edgeToken === null ? connectingIdPaths(g.raw, from.id, to.id) : [];
-      if (edgeToken === null && idPaths.length > 0) {
-        const paths = connectingPaths(g.raw, from.id, to.id);
-        const perOne = modelTotalThrough(g.raw, idPaths, perUnit, amountUnit);
+      const census = edgeToken === null ? pathCensus(g.raw, from.id, to.id) : undefined;
+      if (edgeToken === null && census!.reachable) {
+        const labelOfId = new Map((((g.raw as { nodes?: { id?: unknown; label?: unknown }[] }).nodes) ?? [])
+          .map((n) => [String(n?.id), typeof n?.label === 'string' ? n.label : String(n?.id)] as const));
+        const paths = census!.paths.slice(0, PATHS_SHOWN).map((p) => p.map((id) => labelOfId.get(id) ?? id));
+        const perOne = modelTotalThrough(g.raw, census!, perUnit, amountUnit);
         const model_total = perOne === null ? undefined
           : { amount: perOne * per, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit };
-        const firstHops = [...new Set(paths.map((p) => p[1]!))].map((l) => `"${l}"`);
+        // Every first step on the WHOLE census (a split names each route the figure could take), never only the shown ones.
+        const firstHops = [...new Set(census!.paths.map((p) => labelOfId.get(p[1]!) ?? p[1]!))].map((l) => `"${l}"`);
+        const more = census!.complete ? census!.paths.length - paths.length : undefined;
+        const moreWords = !census!.complete ? '; and more routes than Olumi can list here'
+          : more! > 0 ? `; and ${more} more route${more === 1 ? '' : 's'}` : '';
         const hops = firstHops.length > 1 ? `${firstHops.slice(0, -1).join(', ')} and ${firstHops[firstHops.length - 1]}` : firstHops[0]!;
         // AIQ 5883735180: (i) a check only when every link on the paths is sized; else (ii) the split, never guessed.
         const offer = model_total !== undefined
           ? ` The model’s own total through those paths is about ${Math.round(model_total.amount * 100) / 100} ${amountUnit} per ${per} `
             + `${perUnit}: say both, theirs and the model’s, as a check. That writes nothing.`
-          : ' The model has not sized every link on those paths, so it cannot compare its own total with theirs yet: say so. Offer: if '
-            + `they know how their figure splits between ${hops}, they can tell you each part and you will record each one on its own `
-            + 'link. Never guess the split, never put the whole figure on one path, and "mostly one of them" without numbers is not a split.';
-        return { ok: false, mutated: false, refusal: 'no_direct_link', paths, ...(model_total !== undefined ? { model_total } : {}),
+          : !census!.complete
+            ? ' The model connects the two by more routes than Olumi can check here, so it cannot compare its own total with theirs: say '
+              + 'so. Never estimate a total yourself, never guess a split, and never put the whole figure on one path.'
+            : ' The model has not sized every link on those paths, so it cannot compare its own total with theirs yet: say so. Offer: if '
+              + `they know how their figure splits between ${hops}, they can tell you each part and you will record each one on its own `
+              + 'link. Never guess the split, never put the whole figure on one path, and "mostly one of them" without numbers is not a split.';
+        return { ok: false, mutated: false, refusal: 'no_direct_link', paths,
+          ...(census!.complete ? { paths_total: census!.paths.length } : { paths_complete: false }),
+          ...(model_total !== undefined ? { model_total } : {}),
           detail: `The model has no direct link from "${from.label}" to "${to.label}": it connects them through other factors `
-            + `(${paths.map((p) => p.join(' → ')).join('; ')}). The user’s figure is their TOTAL effect across those paths, so no `
+            + `(${paths.map((p) => p.join(' → ')).join('; ')}${moreWords}). The user’s figure is their TOTAL effect across those paths, so no `
             + 'single link holds it, and nothing was prepared. Repeat their figure in their own words and say how the model connects the '
             + 'two. Never offer a new direct link between them (it would count the effect twice), and never ask for a strength band in '
             + `place of their figure.${offer}` };
