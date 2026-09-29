@@ -38,6 +38,8 @@ import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/st
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import { bindOptionLabelToBrief, bindingEarnsBriefClaim } from '../../cee/provenance/brief-binding.js';
 import { sizeLink, type LinkSizing, type MagnitudeNode } from '../../cee/magnitude/link-effect.js';
+import { sayFigure } from './say-figure.js';
+import type { BriefGoalLevel } from './unplaced-goal-level.js';
 import {
   admitCandidateConstraints,
   percentLevelFrame,
@@ -426,6 +428,11 @@ export interface AdmittedNode {
    * Absent means `level`. Olumi's reading, disclosed; never presented as the user's.
    */
   quantity_frame?: QuantityFrameType;
+  /**
+   * AIQ (b) 5894808343 (1): Olumi's reading of the brief's figure as a change goal's today level (`briefGoalLevel`),
+   * keyed to the level it read; `NodeV3.goal_level_reading`. Never the user's; its words are said.
+   */
+  goal_level_reading?: { level: number; level_unit: string; quote: string; words: string };
   /**
    * ⛔ A NODE'S `provenance` IS A DISPLAY ENUM, NOT THE EDGE OBJECT
    * (`cee-v3.ts:363` — `from_brief | ai_inferred | user_set`). Edges carry the
@@ -2507,9 +2514,18 @@ export function admitStatedGoalChange(
    * (`goalLevelTheUserWrote`, injected: stated-by-user.ts imports this module). REQUIRED.
    */
   userWroteLevel: (value: number, unit: unknown) => boolean,
+  /**
+   * ⭐ AIQ (b) 5894808343 (1): what the brief gives in money for today's level when the user's own level is not admitted
+   * (`briefGoalLevel`, injected: its module imports stated-by-user.ts, which imports this one). `adopt` becomes the base
+   * AS OLUMI'S DISCLOSED READING (`goal_level_reading`, never `user_stated`); `refused` says what the brief gave instead of
+   * "was not stated". Absent ⇒ exactly as before.
+   */
+  fromBrief: BriefGoalLevel | null = null,
 ): {
   readonly node: Partial<AdmittedNode>;
   readonly withheld?: string;
+  /** The reading's words, said at construction, when the base is Olumi's reading of the brief's figure. */
+  readonly reading?: string;
 } {
   const frame = goal.frame === 'change_rel' ? 'change_rel' : 'change_abs';
   const unit = goal.unit ? goal.unit : undefined;
@@ -2518,39 +2534,78 @@ export function admitStatedGoalChange(
   const sign = raw > 0 ? '+' : '';
   const change = frame === 'change_rel' ? `${sign}${raw}%` : `${sign}${raw}${unit ? ` ${unit}` : ''}`;
   const today = goal.baseline_value;
-  if (typeof today !== 'number' || !Number.isFinite(today)) {
-    return { node, withheld:
-      `"${goal.metric}" is a goal to change by ${change} from today, and its current level was not stated, so no chance of ` +
-      `reaching it can be shown: a change is measured from today's level of "${goal.metric}".` };
+  const notTheUsers = ((): string | null => {
+    if (typeof today !== 'number' || !Number.isFinite(today)) {
+      return `"${goal.metric}" is a goal to change by ${change} from today, and its current level was not stated, so no chance of ` +
+        `reaching it can be shown: a change is measured from today's level of "${goal.metric}".`;
+    }
+    if (goalLevelIsEstimated(goal)) {
+      return `Olumi's own estimate of the current level of "${goal.metric}" (${today}) was not used, so no chance of a change of ` +
+        `${change} is shown: that figure would rest on a guess, not on anything you said.`;
+    }
+    if (!userWroteLevel(today, goal.unit)) {
+      return `The current level of "${goal.metric}" (${today}) is not a figure your brief states for it, so no chance of a ` +
+        `change of ${change} is shown: a change is measured from today's level. Tell me the current level of ` +
+        `"${goal.metric}" and the chance of reaching it can be shown.`;
+    }
+    return null;
+  })();
+  if (notTheUsers !== null && fromBrief?.kind !== 'adopt') {
+    // ⛔ AIQ 5894808343 (1), no-regret: the brief DID give a figure, so "was not stated" would be false.
+    if (fromBrief?.kind === 'refused') {
+      const gave = fromBrief.written.map((w) => `‘${w}’`).join(' and ');
+      return { node, withheld: `Your brief gives ${gave}, but ${fromBrief.written.length === 1 ? 'it isn\'t' : 'none of them is'} held as today's level ` +
+        `of ‘${goal.metric}’, so no chance of reaching your target is shown.` };
+    }
+    return { node, withheld: notTheUsers };
   }
-  if (goalLevelIsEstimated(goal)) {
-    return { node, withheld:
-      `Olumi's own estimate of the current level of "${goal.metric}" (${today}) was not used, so no chance of a change of ` +
-      `${change} is shown: that figure would rest on a guess, not on anything you said.` };
-  }
-  if (!userWroteLevel(today, goal.unit)) {
-    return { node, withheld:
-      `The current level of "${goal.metric}" (${today}) is not a figure your brief states for it, so no chance of a ` +
-      `change of ${change} is shown: a change is measured from today's level. Tell me the current level of ` +
-      `"${goal.metric}" and the chance of reaching it can be shown.` };
-  }
-  const target = frame === 'change_rel' ? today * (1 + stored) : today + stored;
-  const resolved = today > 0 && target >= 0 ? resolveGoalThresholdCapWithProvenance(undefined, Math.max(today, target), goal.unit, undefined) : null;
+  const level = notTheUsers === null ? today as number : (fromBrief as Extract<BriefGoalLevel, { kind: 'adopt' }>).value;
+  const target = frame === 'change_rel' ? level * (1 + stored) : level + stored;
+  const resolved = level > 0 && target >= 0 ? resolveGoalThresholdCapWithProvenance(undefined, Math.max(level, target), goal.unit, undefined) : null;
   if (resolved === null) {
     return { node, withheld:
-      `The current level of "${goal.metric}" (${today}) and a change of ${change} from it do not sit on a scale starting at ` +
+      `The current level of "${goal.metric}" (${level}) and a change of ${change} from it do not sit on a scale starting at ` +
       'zero, so no chance of reaching it can be shown. If either figure is wrong, say which and it can be corrected.' };
   }
+  const withBase = {
+    ...node,
+    goal_threshold_cap: resolved.cap,
+    goal_threshold_cap_provenance: resolved.provenance,
+    goal_threshold: frame === 'change_rel' ? stored : stored / resolved.cap,
+  };
+  if (notTheUsers === null) {
+    // Only a level the user stated for this goal reaches here (`goalLevelIsEstimated`, `userWroteLevel` above).
+    return { node: { ...withBase, observed_state: briefGoalObservedState(level / resolved.cap, goal.unit, level, resolved.cap) } };
+  }
+  // ⭐ AIQ (b): OLUMI'S READING of the brief's figure. Never `user_stated` (`cee_inference`); the reading carries the
+  // brief's clause and the words, keyed to the level it read (`goalLevelReadingWords`: a level the user states or edits
+  // replaces it).
+  const adopt = fromBrief as Extract<BriefGoalLevel, { kind: 'adopt' }>;
+  const words = goalLevelReadingWords(goal, frame, raw, target, adopt);
   return {
     node: {
-      ...node,
-      goal_threshold_cap: resolved.cap,
-      goal_threshold_cap_provenance: resolved.provenance,
-      goal_threshold: frame === 'change_rel' ? stored : stored / resolved.cap,
-      // Only a level the user stated for this goal reaches here (`goalLevelIsEstimated`, `userWroteLevel` above).
-      observed_state: briefGoalObservedState(today / resolved.cap, goal.unit, today, resolved.cap),
+      ...withBase,
+      observed_state: { value: level / resolved.cap, baseline: level / resolved.cap, ...(goal.unit ? { unit: goal.unit } : {}), source: 'cee_inference', raw_value: level, cap: resolved.cap },
+      goal_level_reading: { level, level_unit: goal.unit ?? '', quote: adopt.quote, words },
     },
+    reading: words,
   };
+}
+
+/**
+ * The words of Olumi's reading of the brief's figure as today's level (AIQ 5894808343 (1)): "Olumi reads your ‘£45k’
+ * (‘Monthly spend is £45k’) as today's level of ‘costs’, so a 20% cut is £36,000 / month or less."
+ */
+function goalLevelReadingWords(
+  goal: CandidateModel['goal'], frame: 'change_rel' | 'change_abs', raw: number, target: number,
+  adopt: Extract<BriefGoalLevel, { kind: 'adopt' }>,
+): string {
+  const unit = typeof goal.unit === 'string' ? goal.unit : '';
+  const size = frame === 'change_rel' ? `${sayFigure(Math.abs(raw), '')}%` : sayFigure(Math.abs(raw), unit);
+  const move = raw < 0 ? 'cut' : 'rise';
+  const bound = goal.operator === '<=' ? ' or less' : goal.operator === '>=' ? ' or more' : '';
+  return `Olumi reads your ‘${adopt.written}’ (‘${adopt.quote}’) as today's level of ‘${goal.metric}’, so a ${size} ${move} is ` +
+    `${sayFigure(Math.round(target * 100) / 100, unit)}${bound}.`;
 }
 
 /** #1840's goal `observed_state` for a level the brief states: `{ value: B, baseline: B, unit?, source, raw_value, cap }`. */
@@ -2644,11 +2699,16 @@ export function admitCandidateModel(
    * 5885651301). Absent ⇒ never (fail closed).
    */
   targetFigureWrittenAgain: (value: number, unit: unknown) => boolean = () => false,
+  /**
+   * ⭐ AIQ (b) 5894808343 (1): what the brief gives in money for a change goal's today level (`briefGoalLevel`, injected:
+   * its module imports stated-by-user.ts, which imports this one). Absent ⇒ nothing (fail closed: exactly as before).
+   */
+  goalLevelFromBrief: (candidate: CandidateModel) => BriefGoalLevel | null = () => null,
 ): AdmittedModel {
   const declared = new Set(candidateModel.options
     .filter((o) => readIsBaseline({ ...(typeof o.is_status_quo === 'boolean' ? { is_baseline: o.is_status_quo } : {}) }) === true)
     .map((o) => canonicalLabel(o.label)));
-  const first = admitOnce(candidateModel, widened, brief, goalLevelStated, targetFigureWrittenAgain);
+  const first = admitOnce(candidateModel, widened, brief, goalLevelStated, targetFigureWrittenAgain, goalLevelFromBrief);
   const verdict = judgeOptionIdentity(first, declared);
   // Never withhold a name another entity shares: removing its links would take that entity's with it.
   const otherNames = new Set([
@@ -2672,6 +2732,7 @@ export function admitCandidateModel(
     brief,
     goalLevelStated,
     targetFigureWrittenAgain,
+    goalLevelFromBrief,
   );
   const options_withheld: WithheldOption[] = withheld.map((w) => ({
     option: w.option, like: w.like, reason: 'option_indistinct', sentence: indistinctStep(w.option, w.like),
@@ -2698,6 +2759,7 @@ function admitOnce(
   brief: string | undefined,
   goalLevelStated: (value: number, unit: unknown) => boolean,
   targetFigureWrittenAgain: (value: number, unit: unknown) => boolean,
+  goalLevelFromBrief: (candidate: CandidateModel) => BriefGoalLevel | null,
 ): AdmittedModel {
   const { model, restated: restatedChanges } = restateSignedPercentChanges(candidateModel);
 
@@ -2817,7 +2879,16 @@ function admitOnce(
         // ⭐ R1 S4-core: a target stated as a CHANGE from today is written as one (`admitStatedGoalChange`); a level
         // target takes the path below, unchanged.
         if (model.goal.frame === 'change_abs' || model.goal.frame === 'change_rel') {
-          const change = admitStatedGoalChange(model.goal, raw, goalLevelStated);
+          const change = admitStatedGoalChange(model.goal, raw, goalLevelStated, goalLevelFromBrief(model));
+          if (change.reading !== undefined) {
+            loss.push({
+              field_path: `nodes[${slugId(model.goal.metric)}].goal_level_reading`,
+              before: null,
+              after: change.node.goal_level_reading?.level ?? null,
+              reason: change.reading,
+              severity: 'info',
+            } as RepairEntry);
+          }
           if (change.withheld !== undefined) {
             loss.push({
               field_path: `nodes[${slugId(model.goal.metric)}].observed_state.baseline`,

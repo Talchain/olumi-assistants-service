@@ -294,7 +294,7 @@ describe("the live value-bearing contract, adjudicated", () => {
     expect(report.stale.map((d) => d.id)).toEqual([]);
   });
 
-  it("the first cut is an ENUMERATION: 42 sites, 30 findings, 20 OPEN, 10 accepted", () => {
+  it("the first cut is an ENUMERATION: 43 sites, 30 findings, 20 OPEN, 10 accepted", () => {
     // Pinned so the shape of the first cut cannot move quietly. There is no date
     // trigger anywhere in this check — a CI job that turns red on a calendar is a
     // time bomb. What this gives instead is an OPEN count a human can watch.
@@ -311,11 +311,13 @@ describe("the live value-bearing contract, adjudicated", () => {
     // `goal_horizon_months`; its warrant is field-scoped by its name and its one writer's rule (value-warrant-guard.ts).
     // +1 site / +0 findings, FIELD (29 Sep, MG #2306): CEE's NodeV3 `goal_sense_reading.threshold` — the goal target
     // Olumi's decrease reading was taken from — names its own warrant `threshold_frame` (change_rel | change_abs).
-    expect(SITES.length).toBe(42);
+    // +1 site / +0 findings, FIELD (29 Sep, MG): CEE's NodeV3 `goal_level_reading.level` — the brief's figure Olumi reads
+    // as a change goal's today level (AIQ (b)) — names its own warrant `level_unit`.
+    expect(SITES.length).toBe(43);
     expect(FINDINGS.length).toBe(30);
     expect(report.open.length).toBe(20);
     expect(report.accepted.length).toBe(10);
-    expect(SITES.filter((s) => s.verdict === "FIELD").length).toBe(8);
+    expect(SITES.filter((s) => s.verdict === "FIELD").length).toBe(9);
     expect(SITES.filter((s) => s.verdict === "LEVEL_SOLE").length).toBe(4);
     expect(SITES.filter((s) => s.verdict === "LEVEL_SHARED").length).toBe(15);
     expect(SITES.filter((s) => s.verdict === "NONE").length).toBe(15);

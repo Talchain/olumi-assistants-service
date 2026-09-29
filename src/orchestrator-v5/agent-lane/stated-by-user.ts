@@ -76,7 +76,7 @@ export function levelWrittenApartFromTarget(value: number, unit: unknown, target
  * "300 subscribers" read as 0.3 £k/month).
  */
 function amountIs(
-  a: { readonly magnitude: number; readonly kind: string; readonly matchedText: string; readonly index?: number },
+  a: { readonly magnitude: number; readonly kind: string; readonly matchedText: string; readonly index?: number; readonly currencyCode?: string },
   value: number,
   unit: unknown,
   family: ReturnType<typeof unitPhraseFamily>,
@@ -84,7 +84,14 @@ function amountIs(
 ): boolean {
   const scale = moneyUnitScale(unit);
   const written = value * scale;
-  if (a.kind === 'currency') return (family === null || family === 'currency') && same(a.magnitude, written);
+  // ⛔ AIQ 5894808343 (1) row (d): the SAME currency, not only the currency family — "£45k" is never a figure the user
+  // wrote in USD. Either code unknown (a bare "dollars", an unread unit) keeps the family reading, as before.
+  if (a.kind === 'currency') {
+    const code = typeof unit === 'string' ? readCurrencyUnitWithQualifiers(unit) : null;
+    const unitCode = code !== null && code.kind === 'currency' ? code.currencyCode : undefined;
+    const sameCurrency = unitCode === undefined || a.currencyCode === undefined || a.currencyCode === unitCode;
+    return (family === null || family === 'currency') && sameCurrency && same(a.magnitude, written);
+  }
   // "40%" is 40 on a percentage, or 0.4 on a share kept as 0–1: the Agent passes the factor's own units.
   if (a.kind === 'percent') return (family === null || family === 'percent') && (same(a.magnitude, value) || same(a.magnitude / 100, value));
   // A count in words grounds a PLAIN figure only: "two" is never £2 or 2%, which need their written unit.

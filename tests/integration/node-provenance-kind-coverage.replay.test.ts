@@ -623,6 +623,10 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       // MG, 29 Sep (R3-B #72 5893233864, AIQ 5893340150 / 5893587951) — THE VALUE-BEARING DECISION: `goal_sense_reading`
       // is NOT value-bearing. It is Olumi's reading of the goal's SENSE (minimise) and the words that say so; its
       // `threshold` is a staleness key copied from `goal_threshold_raw`, never a level of the goal metric of its own.
+      // MG, 29 Sep (R3-B 5894575583, AIQ (b) 5894808343 (1)) — THE VALUE-BEARING DECISION: `goal_level_reading` is NOT
+      // value-bearing. The level it reads is carried where every reader reads it, `observed_state` (raw_value/cap);
+      // its `level` is a staleness key copied from that, and the rest is the brief's clause and Olumi's words.
+      "goal_level_reading",
       "goal_sense_reading",
       "goal_threshold",
       "goal_threshold_cap",
