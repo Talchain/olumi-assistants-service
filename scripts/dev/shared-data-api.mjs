@@ -16,13 +16,16 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import net from 'node:net';
-import { SignJWT, exportJWK, generateKeyPair, importJWK } from 'jose';
+import { SignJWT, importJWK } from 'jose';
+import { ensureSigningKey, publicJwkOf } from './shared-data-signing-key.mjs';
 
 const arg = (name, fallback) => {
   const at = process.argv.indexOf(name);
   return at > 0 && process.argv[at + 1] !== undefined ? process.argv[at + 1] : fallback;
 };
-const stateDir = resolve(homedir(), '.codex/workspaces/shared-data-spine-local');
+const instance = process.env.SHARED_DATA_LOCAL_INSTANCE ?? ''; // the same stack switch as shared-data-db.mjs
+if (!/^[a-z0-9-]*$/.test(instance)) throw new Error('SHARED_DATA_LOCAL_INSTANCE must be [a-z0-9-]');
+const stateDir = resolve(homedir(), `.codex/workspaces/shared-data-spine-local${instance === '' ? '' : `-${instance}`}`);
 const envDir = resolve(arg('--env-dir', resolve(homedir(), 'Documents/GitHub/olumi-assistants-service')));
 const requestedPort = Number(arg('--port', '0'));
 
@@ -69,15 +72,9 @@ Object.assign(process.env, {
 });
 
 // ── 3. The real user-auth path against a LOCAL JWKS ──────────────────────────────────────────────────────────────
-const keyFile = resolve(stateDir, 'api-signing-key.json');
-let privateJwk;
-if (existsSync(keyFile)) privateJwk = JSON.parse(readFileSync(keyFile, 'utf8'));
-else {
-  const { privateKey } = await generateKeyPair('ES256', { extractable: true });
-  privateJwk = { ...(await exportJWK(privateKey)), kid: `local-${randomUUID().slice(0, 8)}`, alg: 'ES256' };
-  writeFileSync(keyFile, JSON.stringify(privateJwk), { mode: 0o600 });
-}
-const { d: _secret, ...publicJwk } = privateJwk;
+// The experiment's one signing key (shared-data-signing-key.mjs): the local PostgREST verifies the same token.
+const privateJwk = ensureSigningKey(stateDir);
+const publicJwk = publicJwkOf(privateJwk);
 const freePort = () => new Promise((ok, fail) => {
   const s = net.createServer();
   s.once('error', fail);

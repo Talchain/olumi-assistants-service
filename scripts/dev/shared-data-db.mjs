@@ -8,11 +8,18 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import http from 'node:http';
+import { ensureSigningKey, publicJwkOf } from './shared-data-signing-key.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
-const stateDir = resolve(homedir(), '.codex/workspaces/shared-data-spine-local');
+// SHARED_DATA_LOCAL_INSTANCE=<name> runs a wholly separate stack (state dir, containers, ports) beside the default one,
+// e.g. to measure a change without restarting a running session. Unset = the default stack, exactly as before.
+const instance = process.env.SHARED_DATA_LOCAL_INSTANCE ?? '';
+if (!/^[a-z0-9-]*$/.test(instance)) throw new Error('SHARED_DATA_LOCAL_INSTANCE must be [a-z0-9-]');
+const suffix = instance === '' ? '' : `-${instance}`;
+const port = Number(process.env.SHARED_DATA_LOCAL_PORT_BASE ?? 55431); // REST route; Postgres +1; PostgREST +2
+const stateDir = resolve(homedir(), `.codex/workspaces/shared-data-spine-local${suffix}`);
 const stateFile = resolve(stateDir, 'connection.json');
-const network = 'olumi-shared-data-local';
+const network = `olumi-shared-data-local${suffix}`;
 const db = `${network}-db`;
 const rest = `${network}-rest`;
 const command = process.argv[2] ?? 'serve';
@@ -35,9 +42,9 @@ else {
   state = {
     secret, password: randomBytes(24).toString('hex'),
     serviceRoleKey: `${unsigned}.${createHmac('sha256', secret).update(unsigned).digest('base64url')}`,
-    supabaseUrl: 'http://127.0.0.1:55431', databaseUrl: null,
+    supabaseUrl: `http://127.0.0.1:${port}`, databaseUrl: null,
   };
-  state.databaseUrl = `postgres://postgres:${state.password}@127.0.0.1:55432/cee`;
+  state.databaseUrl = `postgres://postgres:${state.password}@127.0.0.1:${port + 1}/cee`;
   writeFileSync(stateFile, JSON.stringify(state), { mode: 0o600 });
 }
 if (!has('network', network)) docker('network', 'create', network);
@@ -45,7 +52,7 @@ if (!has('container', db)) {
   const envFile = resolve(stateDir, 'postgres.env');
   writeFileSync(envFile, `POSTGRES_PASSWORD=${state.password}\nPOSTGRES_DB=cee\n`, { mode: 0o600 });
   docker('run', '-d', '--name', db, '--label', 'olumi.experiment=shared-data', '--network', network,
-    '--cpus', '1', '--memory', '384m', '-p', '127.0.0.1:55432:5432', '--env-file', envFile, 'postgres:17');
+    '--cpus', '1', '--memory', '384m', '-p', `127.0.0.1:${port + 1}:5432`, '--env-file', envFile, 'postgres:17');
 } else docker('start', db);
 let ready = false;
 for (let i = 0; i < 40; i++) {
@@ -105,23 +112,38 @@ sql(`GRANT USAGE ON SCHEMA public TO service_role;
   GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO service_role;
   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO service_role;
   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO service_role;`);
+// USER TOKENS: PostgREST verifies the same ES256 token CEE does (the experiment's one signing key) AND keeps the
+// service_role HMAC secret, as one JWKS. The token's `role` claim (`authenticated`) selects the role and `sub` feeds
+// auth.uid(), so RLS decides ownership exactly as for the HMAC path; anon keeps no grants.
+const signingKey = ensureSigningKey(stateDir);
+const jwks = { keys: [
+  { kty: 'oct', alg: 'HS256', k: Buffer.from(state.secret, 'utf8').toString('base64url') },
+  { ...publicJwkOf(signingKey), use: 'sig' },
+] };
+const restEnvFile = resolve(stateDir, 'postgrest.env');
+const restEnv = `PGRST_DB_URI=postgres://authenticator:${state.password}@${db}:5432/cee\nPGRST_DB_SCHEMAS=public\nPGRST_DB_ANON_ROLE=anon\nPGRST_JWT_SECRET=${JSON.stringify(jwks)}\nPGRST_DB_POOL=3\n`;
+// PostgREST reads its config at start and holds no data: a container whose ACTUAL env lacks this config (an older
+// runner's, or a hand-made one) is replaced; the database container is never touched.
+if (has('container', rest)) {
+  const actual = JSON.parse(docker('inspect', '-f', '{{json .Config.Env}}', rest));
+  if (!restEnv.trim().split('\n').every(line => actual.includes(line))) docker('rm', '-f', rest);
+}
 if (!has('container', rest)) {
-  const envFile = resolve(stateDir, 'postgrest.env');
-  writeFileSync(envFile, `PGRST_DB_URI=postgres://authenticator:${state.password}@${db}:5432/cee\nPGRST_DB_SCHEMAS=public\nPGRST_DB_ANON_ROLE=anon\nPGRST_JWT_SECRET=${state.secret}\nPGRST_DB_POOL=3\n`, { mode: 0o600 });
+  writeFileSync(restEnvFile, restEnv, { mode: 0o600 });
   docker('run', '-d', '--name', rest, '--label', 'olumi.experiment=shared-data', '--network', network,
-    '--cpus', '0.5', '--memory', '128m', '-p', '127.0.0.1:55433:3000', '--env-file', envFile, 'postgrest/postgrest:v12.2.3');
+    '--cpus', '0.5', '--memory', '128m', '-p', `127.0.0.1:${port + 2}:3000`, '--env-file', restEnvFile, 'postgrest/postgrest:v12.2.3');
 } else docker('start', rest);
 
 // Supabase's client adds /rest/v1. Forward bytes to real PostgREST; no queries,
 // auth decisions, RPCs or persistence are implemented in this transport shim.
 const server = http.createServer((req, res) => {
   if (!req.url?.startsWith('/rest/v1/')) { res.writeHead(404); res.end(); return; }
-  const upstream = http.request({ hostname: '127.0.0.1', port: 55433,
+  const upstream = http.request({ hostname: '127.0.0.1', port: port + 2,
     method: req.method, path: req.url.slice('/rest/v1'.length), headers: req.headers }, reply => {
     res.writeHead(reply.statusCode ?? 502, reply.headers); reply.pipe(res);
   });
   upstream.on('error', () => { res.writeHead(502); res.end('Local PostgREST unavailable'); });
   req.pipe(upstream);
 });
-server.listen(55431, '127.0.0.1', () => console.log(`Local Supabase REST route: ${state.supabaseUrl}; private connection file: ${stateFile}`));
+server.listen(port, '127.0.0.1', () => console.log(`Local Supabase REST route: ${state.supabaseUrl}; private connection file: ${stateFile}`));
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => server.close(() => process.exit(0)));
