@@ -58,6 +58,15 @@ process.env.NODE_ENV = process.env.NODE_ENV ?? 'development';
 // is really verified (a present-but-invalid token is refused `sign_in_required`). `--require-user-jwt false` mirrors
 // a flag-off deploy, where the token is ignored and the assist key alone authorises.
 process.env.CEE_REQUIRE_USER_JWT = arg('--require-user-jwt', 'true') === 'false' ? 'false' : 'true';
+// Mount the same Agent/browser entry points as the experiment's UI. A local
+// allowlist is needed in BOTH the proxy and global CORS layers.
+const uiOrigin = arg('--ui-origin', 'http://127.0.0.1:5178');
+if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(uiOrigin)) throw new Error('UI origin must be local');
+Object.assign(process.env, {
+  BROWSER_PROXY_ENABLED: 'true', BROWSER_PROXY_ALLOWED_ORIGINS: uiOrigin, ALLOWED_ORIGINS: uiOrigin,
+  AGENT_LANE_ENABLED: 'true', PROXY_V5_TARGET: 'agent',
+  CEE_V5_GRAPH_CAS_MODE: 'enforce', CEE_V5_GRAPH_CAS_RPC: 'enforce', CEE_MODEL_VERSIONS_ENABLED: 'true',
+});
 
 // ── 3. The real user-auth path against a LOCAL JWKS ──────────────────────────────────────────────────────────────
 const keyFile = resolve(stateDir, 'api-signing-key.json');
