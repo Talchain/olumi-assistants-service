@@ -44,7 +44,13 @@ const keptOf = (output: Json): Json => {
   const kept = pruneSupersededToolOutputs([
     { type: 'function_call', call_id: 'c1', name: 'run_analysis', arguments: '{}' },
     { type: 'function_call_output', call_id: 'c1', output: JSON.stringify(output) },
-  ]) as Array<{ type: string; output?: string }>;
+  ], [], {
+    // These assertions concern the current kept Run. Without a selected readback the
+    // history projection must treat its figures as unconfirmed and omit them.
+    scenarioId: ctx.scenario_id,
+    analysisState: STATE,
+    analysisResult: { computed_against_hash: output.result.computed_against_hash },
+  }) as Array<{ type: string; output?: string }>;
   return JSON.parse(kept.find((x) => x.type === 'function_call_output')!.output!) as Json;
 };
 
