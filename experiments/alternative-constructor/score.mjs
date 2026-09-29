@@ -152,7 +152,9 @@ export function scoreRecord(record, cases = manifest.briefs) {
     const conflictRaised = matches(definition.clarification_pattern, clarifications);
     identity = { applicable: true, on_correct_target: correct.length > 0, other_carriers: declared.filter((n) => !correct.includes(n)).map((n) => n.id), conflicting_brief_values: definition.conflicting_current_values, conflict_raised: conflictRaised };
     if (declared.length && !correct.length) failures.push({ kind: 'identity_wrong_target', carriers: declared.map((n) => n.id) });
-    if (definition.conflicting_current_values && correct.length && !conflictRaised) failures.push({ kind: 'identity_contradicts_supplied_values_without_clarification' });
+    // Asking about scope is not resolving scope. This frozen brief supplies conflicting totals;
+    // a product cannot be attached as canonical identity until a later, separately evidenced answer.
+    if (definition.conflicting_current_values && correct.length) failures.push({ kind: 'identity_applied_before_scope_resolved', scope_question_present: conflictRaised });
     if (!declared.length && !conflictRaised) failures.push({ kind: 'identity_or_scope_question_missing' });
     for (const n of declared) if (n.nonlinear_identity.stated_in_brief === true) failures.push({ kind: 'inferred_identity_stamped_user', node: n.id });
   }
