@@ -184,12 +184,14 @@ describe('AIQ 5887822471 / DL 5887922249 — three outcomes, each claim only as 
     expect(result.state).toBe('reconciled');
     expect(result.mayNameLeadingOption).toBe(true);
   });
-  it('RECONCILED: Olumi\'s typed proposal (`proposed_by: \'olumi\'`) needs no binding; the type is read off the registered node', () => {
-    expect(deriveIntakeOptionReconciliation(BRIEF, [...BOUND, PROPOSED]).state).toBe('reconciled');
-    // The wire option carries no type; the same-snapshot graph node does (MG writes the marker on the option node).
-    const wire = [...BOUND, { id: 'moderate_rise', label: 'Moderate rise' }];
-    const graph = { options: wire, nodes: [{ ...PROPOSED, kind: 'option' }] };
-    expect(deriveIntakeOptionReconciliation(BRIEF, wire, graph).state).toBe('reconciled');
+  it('FAIL CLOSED: Olumi\'s proposal the Run DID compare is not exempt — the Run filter, not intake, keeps it out (DL 5887510885)', () => {
+    // Until Runtime's post-gate filter excludes `proposed_by: 'olumi'` options, one can be in the analysed set; reconciling
+    // it would let an option the user never wrote be named as the leader. It stays unbound, named by id, and withholds.
+    const result = deriveIntakeOptionReconciliation(BRIEF, [...BOUND, PROPOSED]);
+    expect(result.state).toBe('identity_unverified');
+    expect(result.unbound_option_ids).toEqual(['moderate_rise']);
+    // Once the filter keeps it out of the analysed set, the listed options alone reconcile.
+    expect(deriveIntakeOptionReconciliation(BRIEF, BOUND, { options: [...BOUND, PROPOSED] }).state).toBe('reconciled');
   });
   it('UNVERIFIED: an UNTYPED extra option the Run analysed with nothing binding it withholds, and is named by id', () => {
     const result = deriveIntakeOptionReconciliation(BRIEF, [...BOUND, { id: 'moderate_rise', label: 'Moderate rise' }]);
