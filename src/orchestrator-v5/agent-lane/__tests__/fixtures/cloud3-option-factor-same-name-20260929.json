@@ -1,0 +1,161 @@
+{
+ "source": "Canvas #72 5884644099 brief, reproduced by MG on the live route (gpt-5.6-terra, staging content 8a260316), rep 0 construction output, 29 Sep 06:09Z",
+ "brief": "Our monthly cloud bill is currently \u00a345,000. We need to cut it by 15% within 6 months without hurting service reliability. The options are: move steady workloads to reserved instances, shift batch jobs to spot instances, or renegotiate our enterprise discount with the provider.",
+ "candidate": {
+  "goal": {
+   "metric": "monthly cloud bill",
+   "operator": "<=",
+   "target_stated": true,
+   "value": -15,
+   "unit": "\u00a3/month",
+   "horizon_months": 6,
+   "provenance": "explicit",
+   "frame": "change_rel",
+   "baseline_known": true,
+   "baseline_value": 45000,
+   "baseline_provenance": "explicit",
+   "scope": null
+  },
+  "constraints": [
+   {
+    "metric": "Service reliability change",
+    "operator": ">=",
+    "value": 0,
+    "unit": "percentage points",
+    "provenance": "explicit",
+    "frame": "change_abs"
+   }
+  ],
+  "options": [
+   {
+    "label": "Reserved instances",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Reserved-instance coverage",
+      "value": 70,
+      "value_kind": "absolute",
+      "unit": "% of cloud spend",
+      "provenance": "ai_proposed"
+     }
+    ],
+    "is_status_quo": null
+   },
+   {
+    "label": "Spot instances",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Spot-instance batch coverage",
+      "value": 70,
+      "value_kind": "absolute",
+      "unit": "% of batch-job spend",
+      "provenance": "ai_proposed"
+     }
+    ],
+    "is_status_quo": null
+   },
+   {
+    "label": "Enterprise discount",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Enterprise discount",
+      "value": 20,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "ai_proposed"
+     }
+    ],
+    "is_status_quo": null
+   }
+  ],
+  "factors": [
+   {
+    "label": "Reserved-instance coverage",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_value": 20,
+    "unit": "% of cloud spend",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Spot-instance batch coverage",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_value": 10,
+    "unit": "% of batch-job spend",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Enterprise discount",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_value": 10,
+    "unit": "%",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   }
+  ],
+  "risks": [],
+  "outcomes": [
+   {
+    "label": "Service reliability change",
+    "provenance": "inferred"
+   }
+  ],
+  "links": [
+   {
+    "from": "Reserved-instance coverage",
+    "to": "monthly cloud bill",
+    "direction": "negative",
+    "provenance": "ai_proposed",
+    "effect_amount": -180,
+    "effect_per_source_change": 1,
+    "effect_provenance": "ai_proposed"
+   },
+   {
+    "from": "Spot-instance batch coverage",
+    "to": "monthly cloud bill",
+    "direction": "negative",
+    "provenance": "ai_proposed",
+    "effect_amount": -100,
+    "effect_per_source_change": 1,
+    "effect_provenance": "ai_proposed"
+   },
+   {
+    "from": "Spot-instance batch coverage",
+    "to": "Service reliability change",
+    "direction": "negative",
+    "provenance": "ai_proposed",
+    "effect_amount": -0.03,
+    "effect_per_source_change": 1,
+    "effect_provenance": "ai_proposed"
+   },
+   {
+    "from": "Enterprise discount",
+    "to": "monthly cloud bill",
+    "direction": "negative",
+    "provenance": "ai_proposed",
+    "effect_amount": -450,
+    "effect_per_source_change": 1,
+    "effect_provenance": "ai_proposed"
+   }
+  ],
+  "identities": [],
+  "unknowns": [
+   "What percentage of current cloud spend is already covered by reserved instances? The provisional 20% baseline is an AI modelling assumption.",
+   "What percentage of batch-job spend is already on spot instances? The provisional 10% baseline is an AI modelling assumption.",
+   "What is the current enterprise discount? The provisional 10% baseline is an AI modelling assumption.",
+   "What savings per percentage point of reserved-instance, spot-instance, and enterprise-discount coverage are available for your actual workload and contract? The link sizes are provisional AI estimates.",
+   "Which measurable service-reliability metric governs the constraint (for example, availability, SLO attainment, or incident rate), and does any decline during the six-month implementation period count as hurting reliability?",
+   "Are batch jobs isolated from customer-facing workloads and protected by retries, checkpointing, and capacity fallback? This determines whether the proposed spot-instance reliability effect is appropriate."
+  ],
+  "decision_question": null
+ }
+}
