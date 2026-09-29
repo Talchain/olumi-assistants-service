@@ -647,10 +647,14 @@ export function createSetFactorValueHandler(): HandlerFn {
         });
       }
       if (reviewOnly) {
-        node.observed_state = {
-          ...(node.observed_state as NonNullable<typeof node.observed_state>),
-          reviewed_by_user: { intent: 'confirm', at: new Date().toISOString() },
-        } as typeof node.observed_state;
+        // A review is recorded on SOMEONE ELSE's figure (Olumi's, the brief's, a colleague's). The user's own figure
+        // re-sent unchanged is a pure no-op: no bytes move, so no new model version is minted.
+        if ((node.observed_state as { source?: unknown } | undefined)?.source !== USER_EDIT_SOURCE) {
+          node.observed_state = {
+            ...(node.observed_state as NonNullable<typeof node.observed_state>),
+            reviewed_by_user: { intent: 'confirm', at: new Date().toISOString() },
+          } as typeof node.observed_state;
+        }
         return { before, after: before };
       }
       /**
