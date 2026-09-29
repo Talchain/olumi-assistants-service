@@ -22,6 +22,8 @@
  * the node, and rewrites the goal's normalised threshold. A floor-bound spread therefore moves and is refused (AIQ 5895379601). MG's
  * builder must produce a graph the oracle accepts; its exact numbers can be checked against this one.
  */
+import { earnsAuthorshipCredit, structureProvenance } from '../../src/cee/graph-readiness/obligation-provenance.js';
+
 type Rec = Record<string, any>;
 
 const TOL = 1e-9;
@@ -45,18 +47,27 @@ export function frameOf(n: Rec | undefined): number | undefined {
   return undefined;
 }
 
-const usersLevel = (n: Rec): boolean => {
+/**
+ * Whether the Run's WIRE sends this level exactly (PR Review CR on #2314, 5898213793): the served Run carries a level a
+ * person stated at std 1e-4 (`carryStatedLevelSpread`, run-analysis.ts) and PLoT honours a stated std first, unfloored;
+ * everything else gets PLoT's default max(0.1, 0.15·value) on the frame. The ONE authority is the wire's own
+ * (`statedLevelNodeIds` = the census's `earnsAuthorshipCredit(structureProvenance)`; the same predicate, read here without
+ * its skip of a node that has its own std, so a user's own spread keeps its owner), never a source-string guess. Without a graph (a bare
+ * node) the old source reading is the fallback.
+ */
+const usersLevel = (n: Rec, graph?: Rec): boolean => {
+  if (graph !== undefined) return earnsAuthorshipCredit(structureProvenance(n as never, graph as never));
   const s = n.observed_state?.source;
   return s === 'brief_extraction' || (typeof s === 'string' && s.startsWith('user'));
 };
 
 /** The sampled spread PLoT would send, in NATURAL units, for a factor (undefined when it is a point mass or n/a). */
-export function naturalSpread(n: Rec): number | undefined {
+export function naturalSpread(n: Rec, graph?: Rec): number | undefined {
   const os = n.observed_state;
   const F = frameOf(n);
   if (n.kind !== 'factor' || os === undefined || F === undefined || !num(os.value)) return undefined;
   if (num(os.std) && os.std > 0) return Math.min(MAX_STD, Math.max(MIN_STD, os.std)) * F; // PLoT clamps any std to [1e-4, 2.0]
-  if (usersLevel(n)) return 0; // CEE sends a stated level at 1e-4 on its frame: EXACT as stated, on any frame
+  if (usersLevel(n, graph)) return 0; // the wire sends a stated level at 1e-4 on its frame: EXACT as stated, on any frame
   if (os.value === 0) return undefined; // held exact, or scaled by option levels (frame-free)
   return Math.max(0.1, 0.15 * Math.abs(os.value)) * F;
 }
@@ -139,7 +150,7 @@ export function frameInvariance(before: Rec, after: Rec): string[] {
         if (num(b.goal_threshold) && (!num(a.goal_threshold) || !close(a.goal_threshold, b.goal_threshold))) out.push(`level_moved ${id} (relative target)`);
       } else if (num(a.goal_threshold) && F !== undefined && !close(a.goal_threshold * F, a.goal_threshold_raw)) out.push(`level_moved ${id} (goal_threshold ≠ raw/F)`);
     }
-    const [spb, spa] = [naturalSpread(b), naturalSpread(a)];
+    const [spb, spa] = [naturalSpread(b, before), naturalSpread(a, after)];
     if (spb !== undefined && spa !== undefined && !close(spb, spa)) {
       const floor = [b, a].some((n) => !(num(n.observed_state?.std) && n.observed_state.std > 0) && 0.15 * Math.abs(n.observed_state.value) < 0.1);
       out.push(`spread_moved ${id} ${spb.toPrecision(4)} → ${spa.toPrecision(4)}${floor ? ' (floor-bound)' : ''}`);
@@ -155,7 +166,7 @@ export function reframe(graph: Rec, id: string, F: number): Rec {
   const Fold = frameOf(node);
   if (node === undefined || Fold === undefined) throw new Error(`reframe: ${id} has no frame`);
   const k = Fold / F; // normalised values scale by Fold/F
-  const spreadBefore = naturalSpread(node);
+  const spreadBefore = naturalSpread(node, graph);
   const os = node.observed_state ?? (node.observed_state = {});
   if (num(os.value)) os.value = os.value * k;
   if (num(os.baseline)) os.baseline = os.baseline * k;
@@ -168,7 +179,7 @@ export function reframe(graph: Rec, id: string, F: number): Rec {
   // `user`; Olumi's → ISL `template`). NEVER mint one: a floor-bound synthesised spread moves, so the oracle refuses it.
   if (num(os.std) && os.std > 0 && spreadBefore !== undefined) {
     os.std = spreadBefore / F;
-    os.std_source ??= usersLevel(node) ? 'user' : 'olumi';
+    os.std_source ??= usersLevel(node, graph) ? 'user' : 'olumi';
   }
   for (const o of g.nodes as Rec[]) { const iv = o.interventions?.[id]; if (iv && num(iv.value)) iv.value = iv.value * k; } // an option's value for it
   const nodes = byId(g);
