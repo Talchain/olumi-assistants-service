@@ -44,6 +44,7 @@ import { collectUnvaluedFactorIds } from '../../coaching/unvalued-factor-ids.js'
 import { IDENTITY_NOT_EVALUATED_CODE, composeIdentityNotEvaluatedAsk } from '../../coaching/identity-not-evaluated-ask.js';
 import { RunAnalysisArgsSchema, RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { recordGoalCertainty } from './run-goal-certainty.js';
+import { filterOlumiProposedOptions } from './olumi-option-filter.js';
 import type {
   RunAnalysisArgs,
   RunAnalysisHandlerFact,
@@ -640,6 +641,32 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
 
+    // --- 2.57. An option Olumi proposed is not compared as the user's ------
+    // (DL 5887510885; `olumi-option-filter.ts`.) After the gate, because only
+    // now is the true compared set known: Olumi's options (MG's typed mark,
+    // read on the persisted graph) leave the submission when at least 2 of the
+    // user's remain; otherwise they stay, provisionally, and are typed so. It
+    // can never create a refusal. The participation it returns is what the
+    // user is told about each option outside the ordinary comparison.
+    const olumiFilter = filterOlumiProposedOptions({
+      submitted: gate.options as ReadonlyArray<Record<string, unknown>>,
+      graph: snapshot.rawPersistedGraph ?? snapshot.graph,
+      excluded: gate.excluded,
+    });
+    if (olumiFilter.participation.length > 0) {
+      // A log line, not an event: `V5RunAnalysisOptionsScaffolded` means the scaffold, a different concept (see 2.7).
+      log.info(
+        {
+          event: 'run_analysis.olumi_option_participation',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          // Redacted: ids and states only.
+          olumi_option_participation: olumiFilter.participation.map((p) => `${p.option_id}:${p.state}`),
+        },
+        'run_analysis: Olumi-proposed options outside the ordinary comparison',
+      );
+    }
+
     // --- 2.6. Load-time intercept guard (Track S 0.13c-1) -----------------
     // Legacy persisted graphs (drafted before #263 / Track S 0.13a) can carry
     // the duplicate observed-root pattern `intercept === observed_state.value`.
@@ -664,7 +691,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // because PLoT's preflight raises `INVALID_EDGE_ENDPOINT` as a BLOCKER for
     // a dangling endpoint, so leaving them would refuse the whole run.
     // See `run-analysis-participation-guard.ts` for the full doctrine.
-    const optionsForParticipation = gate.options as ReadonlyArray<Record<string, unknown>>;
+    const optionsForParticipation = olumiFilter.options;
     const optionInterventionTargetIds = new Set<string>();
     const submittedOptionIds = new Set<string>();
     for (const opt of optionsForParticipation) {
@@ -743,7 +770,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // OBJECTS; the wire numbers exist only from here on.
     const graphNodesForScale = (graphForAnalysis as { nodes?: unknown })?.nodes;
     const factorScaleById = buildFactorScaleMap(graphNodesForScale);
-    const submittedOptions = gate.options as ReadonlyArray<Record<string, unknown>>;
+    const submittedOptions = olumiFilter.options;
     const rawObjectsPerOption = submittedOptions.map((opt) =>
       opt.interventions !== null && typeof opt.interventions === 'object'
         ? (opt.interventions as Record<string, unknown>)
