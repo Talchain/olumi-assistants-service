@@ -11,13 +11,10 @@
  * `/graph/register`, parsed with CEE's `GraphV3`), exactly as `goal-carries-its-baseline.test.ts` does.
  */
 import { describe, it, expect } from 'vitest';
-import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
+import type { CandidateModel } from '../admit-model.js';
 import { Ajv } from 'ajv';
-import { BUILD_INSTRUCTIONS, buildCandidateSchema, buildModelFromBrief, retrySchemaPinningGoal, type CallStructuredModel } from '../runtime/build-model.js';
+import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
-import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
-import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
-import { resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 
 const GOAL = 'monthly_recurring_revenue';
@@ -91,12 +88,35 @@ describe('a figure the user wrote only as the TARGET never becomes the goal\'s c
     expect(goal.observed_state).toBeUndefined();
   });
 
+  it('RED: the brief says "£16,000 today; we want £20,000" but the drafter COPIES the target → the target is refused as the base', async () => {
+    // The exact shape goal-carries-its-baseline's old equality CONTROL admitted (its default brief); that row now states
+    // the equality it is named for.
+    const { goal } = await registeredGoal(TARGET_ONLY, 'Should we raise the Pro plan price? MRR is £16,000 today; we want £20,000.');
+    expect(goal.observed_state).toBeUndefined();
+    expect(goal.goal_threshold_raw).toBe(20000);
+  });
+
   it('CONTROL: "£16,000 today, aiming for £20,000" keeps the true base, 16000, as the user\'s', async () => {
     const { goal } = await registeredGoal(
       pricing({ baseline_known: true, baseline_value: 16000 }),
       'Should we raise the Pro plan price? MRR is about £16,000 today and we are aiming for £20,000.',
     );
     expect(goal.observed_state).toMatchObject({ raw_value: 16000, source: 'brief_extraction' });
+  });
+
+  // AIQ 5885651301: Paul's own briefs are the controls (the strict chain's served witness, #72 5882267370).
+  const PAUL = 'Should we raise our Pro plan price from £49 to £59 a month? We have 1,500 paying subscribers and £75k MRR. '
+    + 'Monthly churn must stay below 5%, and we want MRR above £85k within a year.';
+  const paulGoal = (today: number) => pricing({ operator: '>', value: 85000, baseline_known: true, baseline_value: today });
+
+  it('CONTROL (Paul): "£75k MRR … above £85k" keeps today\'s £75k as the user\'s base', async () => {
+    const { goal } = await registeredGoal(paulGoal(75000), PAUL);
+    expect(goal.observed_state).toMatchObject({ raw_value: 75000, source: 'brief_extraction' });
+  });
+
+  it('CONTROL (Paul, equality): "£85k MRR … above £85k" writes the figure twice, so today\'s £85k is still the base', async () => {
+    const { goal } = await registeredGoal(paulGoal(85000), PAUL.replace('£75k MRR', '£85k MRR'));
+    expect(goal.observed_state).toMatchObject({ raw_value: 85000, source: 'brief_extraction' });
   });
 
   it('CONTROL: a current level stated EQUAL to the target (written twice) is still the user\'s base', async () => {

@@ -2637,11 +2637,18 @@ export function admitCandidateModel(
    * stated-by-user.ts imports this module). Absent ⇒ no level is the user's: a change goal gets no base (fail closed).
    */
   goalLevelStated: (value: number, unit: unknown) => boolean = () => false,
+  /**
+   * ⛔ Whether the brief writes this figure AGAIN, beyond the target's own writing (`timesTheUserWrote` ≥ 2, injected:
+   * stated-by-user.ts imports this module). A current level EQUAL to the goal's target is the user's only then; a
+   * figure written only as the target is never also where it is today (R3 #72 5885498117; DL 5885526452 (3); AIQ
+   * 5885651301). Absent ⇒ never (fail closed).
+   */
+  targetFigureWrittenAgain: (value: number, unit: unknown) => boolean = () => false,
 ): AdmittedModel {
   const declared = new Set(candidateModel.options
     .filter((o) => readIsBaseline({ ...(typeof o.is_status_quo === 'boolean' ? { is_baseline: o.is_status_quo } : {}) }) === true)
     .map((o) => canonicalLabel(o.label)));
-  const first = admitOnce(candidateModel, widened, brief, goalLevelStated);
+  const first = admitOnce(candidateModel, widened, brief, goalLevelStated, targetFigureWrittenAgain);
   const verdict = judgeOptionIdentity(first, declared);
   // Never withhold a name another entity shares: removing its links would take that entity's with it.
   const otherNames = new Set([
@@ -2664,6 +2671,7 @@ export function admitCandidateModel(
     },
     brief,
     goalLevelStated,
+    targetFigureWrittenAgain,
   );
   const options_withheld: WithheldOption[] = withheld.map((w) => ({
     option: w.option, like: w.like, reason: 'option_indistinct', sentence: indistinctStep(w.option, w.like),
@@ -2689,6 +2697,7 @@ function admitOnce(
   widened: WidenerAdditions,
   brief: string | undefined,
   goalLevelStated: (value: number, unit: unknown) => boolean,
+  targetFigureWrittenAgain: (value: number, unit: unknown) => boolean,
 ): AdmittedModel {
   const { model, restated: restatedChanges } = restateSignedPercentChanges(candidateModel);
 
@@ -2868,6 +2877,17 @@ function admitOnce(
             `Olumi's own estimate of the current level of "${model.goal.metric}" (${baselineRaw}) was not used, ` +
             `so no chance of reaching ${raw} is shown: that figure would rest on a guess, not on anything you ` +
             `said. Tell me the current level of "${model.goal.metric}" and the chance of reaching it can be shown.`,
+          );
+        } else if (
+          resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw)
+          && sameLevel(baselineRaw, raw) && !targetFigureWrittenAgain(baselineRaw, model.goal.unit)
+        ) {
+          // ⛔ The figure the user wrote as the TARGET is not also where it is today (R3 #72 5885498117; DL 5885526452
+          // (3)): admitted, the status quo would sit ON the target, and P(goal) would read a certainty nobody stated.
+          withheld(
+            `${raw} was not used as the current level of "${model.goal.metric}": you gave it as the target, not as ` +
+            `where it is today, so no chance of reaching it is shown. Tell me the current level of "${model.goal.metric}" ` +
+            `and the chance of reaching ${raw} can be shown.`,
           );
         } else if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw)) {
           // ONE rule for a stated current level, shared with the chat path (`goal-current-level.ts`).
