@@ -31,6 +31,9 @@ export interface IdentityProposal {
   readonly words: string;
 }
 
+/** The approved-card door's limit on the displayed words (Canonical #2292). */
+export const CARD_WORDS_MAX = 400;
+
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
 const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined);
@@ -81,5 +84,7 @@ export function proposeProductIdentity(graph: unknown): IdentityProposal | null 
   const money = (v: number): string => sayFigure(v, c.code);
   const words = `Is “${goalLabel}” your “${rate.label}” × “${count.label}”? `
     + `${money(rate.value)} × ${sayFigure(count.value, '')} = ${money(rate.value * count.value)}, close to your ${money(o.value)}.`;
+  // Canonical #2292's door takes at most 400 characters of card words (5888513620): a card it would refuse is not issued.
+  if (words.length > CARD_WORDS_MAX) return null;
   return { outcome_id: goalId, operation: 'product', factor_ids: [rate.id, count.id], words };
 }

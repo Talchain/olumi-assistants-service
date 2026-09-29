@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { proposeProductIdentity } from '../identity-proposal.js';
+import { CARD_WORDS_MAX, proposeProductIdentity } from '../identity-proposal.js';
 
 type Json = Record<string, any>;
 const FX = JSON.parse(readFileSync(new URL('./fixtures/served-paul-mrr-ed49d44.json', import.meta.url), 'utf8')) as { runs: { run: number; graph: Json }[] };
@@ -48,6 +48,9 @@ describe('the card on the served graphs', () => {
     expect(proposeProductIdentity(served(1))).toBeNull();
     expect(proposeProductIdentity(served(2))).toBeNull();
   });
+  it('every served card fits the door (≤ CARD_WORDS_MAX characters)', () => {
+    for (const run of [0, 3, 4]) expect(proposeProductIdentity(served(run))!.words.length, `run ${run}`).toBeLessThanOrEqual(CARD_WORDS_MAX);
+  });
   it('the card is not a write: the graph is byte-identical after it', () => {
     const g = served(0);
     const before = JSON.stringify(g);
@@ -75,6 +78,7 @@ describe('NO CARD — one change on run 0\'s served graph each', () => {
     ['the goal is yearly, the price monthly', (g: Json) => { node(g, 'mrr').goal_threshold_unit = 'GBP/year'; }],
     ['the count is a rate ("subscribers per month")', (g: Json) => { node(g, 'paying_subscribers').observed_state.unit = 'subscribers per month'; }],
     ['two goals', (g: Json) => { g.nodes.push({ id: 'g2', kind: 'goal', label: 'Other' }); }],
+    ['card words past the #2292 door\'s 400 characters (a 400-character label)', (g: Json) => { node(g, 'pro_plan_price').label = 'P'.repeat(400); }],
   ] as const)('%s', (_why, f) => {
     expect(proposeProductIdentity(edit(f))).toBeNull();
   });
