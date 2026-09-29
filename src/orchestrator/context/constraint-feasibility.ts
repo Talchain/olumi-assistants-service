@@ -39,6 +39,12 @@ import {
 import { EnrichmentScaleProvenanceSchema } from "@talchain/schemas/boundary";
 
 import { readOptionResultSources } from "./option-result-source.js";
+import {
+  PARTS_IDENTITY_UNMODELLED_REASON,
+  PLACEHOLDER_PARTS_REASON,
+  targetMovedOnlyThroughPlaceholderParts,
+  type PlaceholderPartsReason,
+} from "./placeholder-parts.js";
 import { classifyValueSource, earnsAuthorshipCredit } from "../../cee/graph-readiness/obligation-provenance.js";
 
 export interface WinnerConstraintFeasibility {
@@ -833,8 +839,20 @@ export function limitLevelOwnerReason(stamp: unknown): EstimateOnlyReason | null
 export function collectLimitLevelOwners(
   graph: unknown,
   ratified: readonly RatifiedConstraint[],
-): { userBaselineIds: Set<string>; userAssumptionIds: Set<string>; relativeChangeIds: Set<string> } {
-  const out = { userBaselineIds: new Set<string>(), userAssumptionIds: new Set<string>(), relativeChangeIds: new Set<string>() };
+  /** The options PLoT scores (run_analysis's final wire options). Omitted = no change limit is withheld for its parts. */
+  options?: ReadonlyArray<Record<string, unknown>>,
+): {
+  userBaselineIds: Set<string>;
+  userAssumptionIds: Set<string>;
+  relativeChangeIds: Set<string>;
+  placeholderPartsReasons: Map<string, PlaceholderPartsReason>;
+} {
+  const out = {
+    userBaselineIds: new Set<string>(),
+    userAssumptionIds: new Set<string>(),
+    relativeChangeIds: new Set<string>(),
+    placeholderPartsReasons: new Map<string, PlaceholderPartsReason>(),
+  };
   // R1 S4-core: the limits STORED as a relative change from today (`value_frame: 'change_rel'`), read off the same
   // persisted rows the ratified list came from. ISL's `frame_verdict` must be present for these (0.61.0: absent fails
   // closed), so {@link derivePerLimitVerdicts} needs to know which they are.
@@ -848,6 +866,25 @@ export function collectLimitLevelOwners(
   }
   const rawNodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
   if (!Array.isArray(rawNodes)) return out;
+  // ⛔ R-c (AI Quality 5881541947, DL 5881593118): a limit stated as a CHANGE on a target the options move only through
+  // its parts, on a link Olumi has not sized (or through an identity the engine does not honour), has no checkable P:
+  // the P is the placeholder's. A user-stated base cannot upgrade it (a `change_abs` P never reads the base). The same
+  // predicate withholds a LEVEL limit's baseline carrier (T4, `level-limit-baseline.ts`), so ISL refuses that one.
+  // A limit on the goal is not read here: P(goal) is its own claim.
+  const rawEdges = (graph as { edges?: unknown } | null | undefined)?.edges;
+  if (options !== undefined && Array.isArray(rows)) {
+    const nodes = rawNodes.map(readRecord).filter((n): n is Record<string, unknown> => n !== null);
+    const edges = Array.isArray(rawEdges) ? rawEdges.map(readRecord).filter((e): e is Record<string, unknown> => e !== null) : [];
+    for (const c of ratified) {
+      if (typeof c.node_id !== 'string' || c.node_id.length === 0) continue;
+      const row = rows.map(readRecord).find((r) => r?.constraint_id === c.constraint_id);
+      const frame = row?.value_frame;
+      if (frame !== 'change_abs' && frame !== 'change_rel' && frame !== 'delta') continue;
+      if (nodes.find((n) => n.id === c.node_id)?.kind === 'goal') continue;
+      const why = targetMovedOnlyThroughPlaceholderParts(c.node_id, nodes, edges, options);
+      if (why !== null) out.placeholderPartsReasons.set(c.constraint_id, why);
+    }
+  }
   for (const c of ratified) {
     if (typeof c.node_id !== 'string' || c.node_id.length === 0) continue;
     const node = rawNodes.find((n) => readRecord(n)?.id === c.node_id);
@@ -1454,6 +1491,8 @@ export function deriveConstraintVerdict(
     readonly userAssumptionIds: ReadonlySet<string>;
     /** R1 S4-core: limits stored `change_rel` ({@link collectLimitLevelOwners}). Omitted = none known (as before). */
     readonly relativeChangeIds?: ReadonlySet<string>;
+    /** R-c: change limits withheld for their target's unsized parts, with why ({@link collectLimitLevelOwners}). */
+    readonly placeholderPartsReasons?: ReadonlyMap<string, string>;
   },
   /**
    * ⭐ A2 follow-up (DL verdict on #2180): option id → the STRICT limits that option sets at EXACTLY their threshold
@@ -1518,6 +1557,8 @@ export const BASE_OWNER_UNESTABLISHED_REASON = 'base_owner_unestablished';
 export const PER_LIMIT_REASON_RANK: ReadonlyMap<string, number> = new Map([
   ['threshold_unframed', 1],
   ['target_unanchored', 2],
+  [PLACEHOLDER_PARTS_REASON, 2],
+  [PARTS_IDENTITY_UNMODELLED_REASON, 2],
   ['threshold_clamped', 3],
   ['CONSTRAINT_NOT_CONVERTIBLE', 4],
   ['CONSTRAINT_OUT_OF_DOMAIN', 4],
@@ -1611,7 +1652,12 @@ const JOINT_WITHHELD_REASON = 'limit_unscored';
 function derivePerLimitVerdicts(
   envelope: Record<string, unknown>,
   ratified: readonly RatifiedConstraint[],
-  levels: { readonly userBaselineIds: ReadonlySet<string>; readonly userAssumptionIds: ReadonlySet<string>; readonly relativeChangeIds?: ReadonlySet<string> },
+  levels: {
+    readonly userBaselineIds: ReadonlySet<string>;
+    readonly userAssumptionIds: ReadonlySet<string>;
+    readonly relativeChangeIds?: ReadonlySet<string>;
+    readonly placeholderPartsReasons?: ReadonlyMap<string, string>;
+  },
   leaderEstimatedTargetIds: ReadonlySet<string> | undefined,
   /** A2 follow-up: the strict limits some option sets at exactly their threshold ({@link STRICT_THRESHOLD_PIN_REASON}). */
   strictThresholdPinnedIds: ReadonlySet<string>,
@@ -1721,6 +1767,9 @@ function derivePerLimitVerdicts(
     }
     // Pushed after `certified` is read: it is CEE's reading of the words, never producer evidence about the block.
     if (strictThresholdPinnedIds.has(c.constraint_id)) reasons.push(STRICT_THRESHOLD_PIN_REASON);
+    // R-c: CEE's reading of the model's links, like the pin above — never producer evidence about the block.
+    const partsReason = levels.placeholderPartsReasons?.get(c.constraint_id);
+    if (partsReason !== undefined) reasons.push(partsReason);
     // ISL's `estimate_only`: the base it compared on is NOT the user's (Olumi's estimate, or an owner it could not
     // establish). It only ever LOWERS a row. When CEE reads that same level as the user's own, the two hops disagree
     // about whose figure it is, so neither "scored" nor "only Olumi's estimates" would be true: the row fails closed.

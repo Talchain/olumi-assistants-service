@@ -29,12 +29,13 @@
  *   · its level has an author, as above;
  *   · PLoT reads the limit and the level on one scale, decision-grade (`levelLimitReadsOnNodeLevel`, B1), or the limit
  *     is in the factor's own unit on its own cap and the level's pair attests that cap (`levelLimitReadsOnNodeCap`) AND
- *     no option PLoT scores moves the factor only through its parts (`noOptionMovesTheTargetOnlyThroughItsParts`).
+ *     no option PLoT scores moves the factor only through its parts on an unsized link (`partsMoveTheTargetOnSizedLinks`).
  */
 import { valuesMatch } from '../../../utils/reduction-framing.js';
 import { deriveInferredValues } from '../../coaching/inferred-value-disclosure.js';
 import { percentLimitFrameProvable, percentPeriodsDiffer, statedOperatorOf, type LimitTargetScale } from '../../agent-lane/admit-constraint.js';
 import { classifyUnitScaleClass } from '../../../cee/draft/records/unit-scale-class.js';
+import { targetMovedOnlyThroughPlaceholderParts } from '../../../orchestrator/context/placeholder-parts.js';
 
 type Rec = Record<string, unknown>;
 
@@ -100,44 +101,24 @@ export function levelLimitReadsOnNodeCap(graph: unknown, c: Rec, node: Rec, os: 
 }
 
 /**
- * ⛔ GUARD — verifier FIX_FIRST (T4): a component-set option without the total would be scored through 0.5 placeholder
- * edges. Superseded once the `sum` carrier is minted (AIQ #72 5867700610).
+ * ⛔ GUARD — verifier FIX_FIRST (T4), narrowed to ONE predicate with the per-limit fold (R-c: AI Quality 5881541947,
+ * DL 5881593118; `placeholder-parts.ts`).
  *
  * With a baseline carried by the cap proof, ISL scores the limit as `baseline + (option − status quo)`. An option that
- * sets the limited factor itself is read at the level it sets. An option that sets a PART of it — a factor upstream of
- * it (a direct parent, or further up) — and not the factor itself moves it only through the draft's edges, which are
- * defaulted 0.5 placeholders, not the sum the user means: "Additional Advertising" at £18k on a £15k limit scored
- * P 0.695 (the verifier's measurement). So such a target carries NO baseline, and its limit keeps the honest
- * `missing_target_baseline` refusal it had before the cap proof. The options read are the ones PLoT scores (the run's
- * final wire options); without them nothing is proven, so nothing carries (fail closed). Pure.
+ * sets the limited factor itself is read at the level it sets. An option that sets a PART of it moves it only through
+ * the model's links: when one of those is a bare placeholder, the P is the placeholder's ("Additional Advertising" at
+ * £18k on a £15k limit scored P 0.695, the verifier's measurement), so the target carries NO baseline and its limit keeps
+ * the honest `missing_target_baseline` refusal. Links Olumi SIZED in the target's unit (served cloud: share % and
+ * readiness → downtime, `olumi_estimate` in weeks) are Olumi's model, and the baseline carries: the fold then reads the
+ * level's owner as for any other limit. Without the options PLoT scores nothing is proven, so nothing carries. Pure.
  */
-function noOptionMovesTheTargetOnlyThroughItsParts(
+function partsMoveTheTargetOnSizedLinks(
   targetId: string,
+  nodes: readonly Rec[],
   edges: readonly Rec[],
-  kindById: ReadonlyMap<unknown, unknown>,
   options: ReadonlyArray<Record<string, unknown>> | undefined,
 ): boolean {
-  if (options === undefined) return false;
-  const parts = new Set<unknown>();
-  const queue: unknown[] = [targetId];
-  while (queue.length > 0) {
-    const at = queue.shift();
-    for (const e of edges) {
-      if (e.to !== at || parts.has(e.from) || e.from === targetId) continue;
-      const k = kindById.get(e.from);
-      if (typeof k !== 'string' || k === 'option' || k === 'decision') continue;
-      parts.add(e.from);
-      queue.push(e.from);
-    }
-  }
-  if (parts.size === 0) return true;
-  const setsLevel = (v: unknown): boolean =>
-    (typeof v === 'number' && Number.isFinite(v)) || (isRec(v) && typeof v.value === 'number' && Number.isFinite(v.value));
-  return options.every((o) => {
-    const iv = isRec(o.interventions) ? o.interventions : {};
-    const movesAPart = Object.keys(iv).some((k) => parts.has(k));
-    return !movesAPart || setsLevel(iv[targetId]);
-  });
+  return options !== undefined && targetMovedOnlyThroughPlaceholderParts(targetId, nodes, edges, options) === null;
 }
 
 /** The level's author is known: the user's own figure, or Olumi's in the form the run discloses. */
@@ -181,7 +162,7 @@ export function levelLimitBaselineNodeIds(
     if (statedUnitAcrossPeriod(c, node) !== undefined) continue;
     const unit = typeof c.unit === 'string' ? c.unit : undefined;
     const onLevel = levelLimitReadsOnNodeLevel(c.value, unit, node, os);
-    const onCap = !onLevel && levelLimitReadsOnNodeCap(graph, c, node, os) && noOptionMovesTheTargetOnlyThroughItsParts(node.id, edges, kindById, options);
+    const onCap = !onLevel && levelLimitReadsOnNodeCap(graph, c, node, os) && partsMoveTheTargetOnSizedLinks(node.id, nodes, edges, options);
     if (!onLevel && !onCap) continue;
     out.add(node.id);
   }
