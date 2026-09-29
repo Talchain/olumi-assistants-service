@@ -86,7 +86,7 @@ function paulDraft(over: {
     factors: parts
       ? [factor({ ...parts[0], role: 'controllable' }), factor(parts[1])]
       : [
-          { ...base.factors[0], unit: over.priceUnit ?? 'GBP/month' },
+          { ...base.factors[0], unit: over.priceUnit ?? 'GBP per subscriber per month' },
           { label: 'Paying subscribers', role: 'observable', baseline_known: true, baseline_value: 1500, unit: 'subscribers', provenance: 'explicit', plausible_max: 5000, ...(over.subscribers ?? {}) },
           ...(over.extraFactor ? [{ label: 'Brand strength', role: 'external', baseline_known: false, baseline_value: null, unit: null, provenance: 'inferred', plausible_max: 10 }] : []),
         ],
@@ -134,6 +134,13 @@ describe('a goal whose stated level reconciles with its two stated parts is decl
     expect(withReconcilingProductIdentity(three, PAUL)).toBe(three);
     const minted = paulDraft();
     expect(withReconcilingProductIdentity(minted, PAUL)).not.toBe(minted);
+  });
+
+  it('NO SILENT MINT (AIQ 5886967509): served drafts 3/4 wrote the price as "GBP/month" — no denominator, so a confirmation, not a mint', async () => {
+    const d = paulDraft({ priceUnit: 'GBP/month' });
+    expect(withReconcilingProductIdentity(d, PAUL)).toBe(d);
+    const { goal } = await registeredGoal(d, PAUL);
+    expect(goal.nonlinear_identity ?? null).toBeNull();
   });
 
   it('SERVED shape (draft 2 at 30ee11b): "£/subscriber/month" × "subscribers" composes → minted', async () => {

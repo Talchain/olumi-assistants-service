@@ -59,9 +59,10 @@ function readCount(unit: unknown): string[] | null {
 }
 
 /**
- * ⛔ AIQ 5886846493 (a HARD condition): (money per period [per unit]) × (count of that unit) = money per period, in the
- * goal's OWN currency and period. A per-unit denominator must name the count ("£/subscriber/month" × "subscribers");
- * anything unknown or scaled (£k) → no mint. "3 engineers × £25k budget ≈ £75k MRR" fails on the period.
+ * ⛔ AIQ 5886846493 + 5886967509 (HARD): (money per <unit> per period) × (count of that <unit>) = money per period, in the
+ * goal's OWN currency and period. The rate's per-unit denominator MUST name the count ("£/subscriber/month" ×
+ * "subscribers"): it is what makes a product the only dimensionally valid reading. No denominator ("GBP/month"),
+ * another count, anything unknown or scaled (£k) → no mint. "3 engineers × £25k budget ≈ £75k MRR" fails on the period.
  */
 function unitsCompose(goalUnit: unknown, goalLabel: string, a: { unit: unknown; label: string }, b: { unit: unknown; label: string }): boolean {
   const goal = readMoney(goalUnit, goalLabel);
@@ -71,7 +72,9 @@ function unitsCompose(goalUnit: unknown, goalLabel: string, a: { unit: unknown; 
     const count = readCount(c.unit);
     if (money === null || count === null) continue;
     if (money.code !== goal.code || money.period !== goal.period) continue;
-    if (money.per !== null && !count.includes(money.per)) continue;
+    // AIQ 5886967509: the DENOMINATOR is the dimensional proof. A rate with none ("GBP/month") could be summed as easily
+    // as multiplied, so it is a CONFIRMATION for the user, never a silent mint.
+    if (money.per === null || !count.includes(money.per)) continue;
     return true;
   }
   return false;
