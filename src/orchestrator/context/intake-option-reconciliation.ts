@@ -91,7 +91,6 @@ export const INTAKE_IS_NOT_A_CONSTRAINT_VERDICT = true as const;
 
 import { MAY_NAME_LEADING_OPTION, type PersistedClaimSafety } from './constraint-feasibility.js';
 import { readIsBaseline } from '../../cee/baseline-identity.js';
-import { isOlumiProposedOption } from '../../orchestrator-v5/context/olumi-proposed-option.js';
 
 /** One option the brief spelled out. Tokens aid extraction, never identity. */
 export interface EnumeratedOption {
@@ -429,12 +428,18 @@ function provenanceGroups(source: unknown): readonly (readonly unknown[])[] {
 }
 
 /**
- * An analysed option the GRAPH TYPES as not the user's (AIQ 5887822471; DL 5887922249): a held or added status quo
- * (`is_baseline` / `is_status_quo`, read by the canonical `readIsBaseline`), or Olumi's proposal (`proposed_by: 'olumi'`,
- * `isOlumiProposedOption`). Typed fields only: a label, its similarity to the brief or an origin flag never qualifies.
+ * An analysed option the GRAPH TYPES as not the user's own listed option (AIQ 5887822471; DL 5887922249): a held or
+ * added status quo (`is_baseline` / `is_status_quo`, read by the canonical `readIsBaseline`). Typed fields only: a label,
+ * its similarity to the brief or an origin flag never qualifies.
+ *
+ * ⛔ OLUMI'S PROPOSAL (`proposed_by: 'olumi'`) IS DELIBERATELY NOT EXEMPT HERE. Keeping it out of the ordinary comparison
+ * is the Run filter's job (DL 5887510885, Runtime's post-gate seam): once it runs, a proposed option is not in the analysed
+ * set at all, so it needs no exemption; in the one provisional exception it stays in, the leader is withheld anyway.
+ * Exempting it here BEFORE that filter lands would reconcile a comparison that includes an option the user never wrote
+ * and let it be named as the leader — so an analysed proposal stays unbound and withholds (fail closed).
  */
 function typedNotTheUsers(records: readonly Record<string, unknown>[]): boolean {
-  return records.some((r) => readIsBaseline(r as never) === true || r.is_status_quo === true || isOlumiProposedOption(r));
+  return records.some((r) => readIsBaseline(r as never) === true || r.is_status_quo === true);
 }
 
 type Binding =
@@ -450,7 +455,7 @@ type Binding =
  * analysed set (`optionsSource`) and the same-snapshot registered graph (`provenanceSource`), which is the
  * discriminating pair:
  *   · `reconciled` — every listed candidate is bound by an EXACT, unique `source_quote` to an analysed option, and every
- *     analysed option is bound or typed as not the user's. Only then may a leader be named.
+ *     analysed option is bound or a typed status quo. Only then may a leader be named.
  *   · `options_missing` — a POSITIVE claim, made only when every unbound candidate is bound to a registered graph option
  *     the Run did NOT analyse (constructed, then gated out). The one case where the candidate is known to be an option.
  *   · `identity_unverified` — everything else: an untyped analysed option nothing binds, or a listed phrase no option
