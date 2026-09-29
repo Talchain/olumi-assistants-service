@@ -55,19 +55,21 @@ function usersLevel(node: Rec): { value: number; unit: string } | null {
 }
 
 /**
- * A node's stored figure and whose it is, or null when it holds none. `money`: its unit is money (any currency, scale or
- * period). `value` is the figure only where it reads as a money total in the GOAL'S OWN currency AND period
- * (`readMoneyTotal`); otherwise null.
+ * Another goal parent as the carrier card reads it: its UNIT first, then its figure (AIQ 5894530998 condition 1: a
+ * figure-less "£/year" parent must refuse the card as a figured one does). `money`: the unit is money (any currency,
+ * scale or period). `inGoalTerms`: a money TOTAL in the GOAL'S OWN currency AND period (`readMoneyTotal`). `figure`: the
+ * stored level, or null when there is none. `users`: the figure is the user's own.
  * ⛔ PR Review 5894085840 / AIQ 5894306110 (B): "£1,500 per year" beside a monthly MRR is the same £ and a different
- * quantity. Money NOT in the goal's terms refuses the card (`proposeOnCarrier`); a non-money figure is named by whose it is.
+ * quantity. Money NOT in the goal's terms refuses the card (`proposeOnCarrier`), with a figure or without one.
  */
-function goalTermsLevel(node: Rec | undefined, goal: { code: string; period: 'month' | 'year' } | null): { value: number | null; money: boolean; users: boolean } | null {
-  const os = node?.observed_state;
-  if (!isRec(os) || typeof os.raw_value !== 'number' || !Number.isFinite(os.raw_value)) return null;
-  const money = readCurrencyUnitWithQualifiers(text(os.unit) ?? '').kind === 'currency';
-  const m = goal === null ? null : readMoneyTotal(os.unit, text(node?.label) ?? '');
+function otherParent(node: Rec | undefined, goal: { code: string; period: 'month' | 'year' } | null): { figure: number | null; money: boolean; inGoalTerms: boolean; users: boolean } {
+  const os = isRec(node?.observed_state) ? node!.observed_state as Rec : undefined;
+  const unit = text(os?.unit);
+  const money = unit !== undefined && readCurrencyUnitWithQualifiers(unit).kind === 'currency';
+  const m = money && goal !== null ? readMoneyTotal(unit, text(node?.label) ?? '') : null;
   const inGoalTerms = m !== null && m.code === goal!.code && m.period === goal!.period;
-  return { value: inGoalTerms ? os.raw_value : null, money, users: classifyValueSource(os.source) === 'user_stated' };
+  const figure = typeof os?.raw_value === 'number' && Number.isFinite(os.raw_value) ? os.raw_value : null;
+  return { figure, money, inGoalTerms, users: figure !== null && classifyValueSource(os?.source) === 'user_stated' };
 }
 
 const carriesIdentity = (node: Rec): boolean => node.nonlinear_identity !== undefined && node.nonlinear_identity !== null;
@@ -154,22 +156,24 @@ function proposeOnGoal(graph: unknown): IdentityProposal | null {
  * them (and how many more) and whose figure it is, from the graph. "That gives your £75,000" only where the figures add
  * up to the goal within ISL's 5%; otherwise the card says the goal also adds them, and claims no sum.
  * ⛔ PR Review 5894085840: a figure is said, and summed, only as money in the goal's own currency AND period. Money in
- * any other terms never reaches here (the card is refused, AIQ 5894306110 (B)); a non-money figure (a count, a %) is
- * named by whose it is alone, and no sum is claimed.
+ * any other terms never reaches here (the card is refused, AIQ 5894306110 (B)); a non-money parent (a count, a %, no
+ * unit) is named by whose it is alone, as something the goal depends on, and no sum is claimed.
  */
 function besideTheCarrier(others: readonly string[], byId: Map<string, Rec>, goalMoney: { code: string; period: 'month' | 'year' } | null, code: string, product: number, goal: number, goalLabel: string): string {
   const money = (v: number): string => sayFigure(v, code);
   const first = others[0];
   if (first === undefined) return `, close to your ${money(goal)} “${goalLabel}”.`;
-  const levels = others.map((id) => goalTermsLevel(byId.get(id), goalMoney));
-  const l = levels[0]!;
-  const who = l === null ? 'no figure yet' : l.users ? 'your figure' : 'Olumi\'s estimate';
-  const whose = l === null || l.value === null ? who : `${who}, ${money(l.value)}`;
+  const parents = others.map((id) => otherParent(byId.get(id), goalMoney));
+  const l = parents[0]!;
+  const who = l.figure === null ? 'no figure yet' : l.users ? 'your figure' : 'Olumi\'s estimate';
+  const whose = l.figure !== null && l.inGoalTerms ? `${who}, ${money(l.figure)}` : who;
   const named = `“${text(byId.get(first)?.label) ?? first}” (${whose})${others.length > 1 ? ` (and ${others.length - 1} more)` : ''}`;
-  const sum = levels.every((x) => x !== null && x.value !== null) ? product + levels.reduce((t, x) => t + x!.value!, 0) : null;
+  const sum = parents.every((x) => x.inGoalTerms && x.figure !== null) ? product + parents.reduce((t, x) => t + x.figure!, 0) : null;
+  // ⛔ AIQ 5894530998 condition 2: only money in the goal's own terms is ADDED to it; anything else (a count, a %, a
+  // node with no unit) is something the goal DEPENDS ON — a count is never said to be added to money.
   return sum !== null && Math.abs(sum - goal) <= RECONCILIATION_TOLERANCE * Math.abs(goal)
     ? `; with ${named} that gives your ${money(goal)} “${goalLabel}”.`
-    : `, close to your ${money(goal)} “${goalLabel}”, which also adds ${named}.`;
+    : `, close to your ${money(goal)} “${goalLabel}”, which also ${l.inGoalTerms ? 'adds' : 'depends on'} ${named}.`;
 }
 
 /**
@@ -208,7 +212,7 @@ function proposeOnCarrier(graph: unknown): IdentityProposal | null {
     // period, an unreadable period, a per-item price, a scale or another currency would make that sum dimensionally
     // wrong, so the card would endorse a wrong structure. The carrier stays withheld (PLoT #420's no-card words).
     const others = parentIds.filter((p) => p !== id);
-    if (others.some((pid) => { const l = goalTermsLevel(byId.get(pid), goalMoney); return l !== null && l.money && l.value === null; })) continue;
+    if (others.some((pid) => { const p = otherParent(byId.get(pid), goalMoney); return p.money && !p.inGoalTerms; })) continue;
     const carrierLabel = text(carrier.label) ?? id;
     const money = (v: number): string => sayFigure(v, r.code);
     const made = r.rate.value * r.count.value;

@@ -139,7 +139,9 @@ describe('a card-domain carrier BESIDE another goal parent (the 1/19 served dead
   // AIQ 5892754930 (3): whose figure the other parent is; "that gives" only when the figures add up to the goal (5%).
   it.each<[string, (g: Json) => void, string]>([
     ['the other parent is the user\'s figure', (g) => { node(g, 'other_plan_mrr').observed_state.source = 'brief_extraction'; }, '; with “Other-plan MRR” (your figure, £1,500) that gives your £75,000 “MRR”.'],
-    ['the other parent has no figure', (g) => { delete node(g, 'other_plan_mrr').observed_state; }, ', close to your £75,000 “MRR”, which also adds “Other-plan MRR” (no figure yet).'],
+    // AIQ 5894530998 condition 2: with no unit nothing says it is money in the goal's terms, so the goal DEPENDS ON it.
+    ['the other parent has no figure (and so no unit)', (g) => { delete node(g, 'other_plan_mrr').observed_state; }, ', close to your £75,000 “MRR”, which also depends on “Other-plan MRR” (no figure yet).'],
+    ['the other parent has no figure yet, in the goal\'s own terms (£/month)', (g) => { node(g, 'other_plan_mrr').observed_state = { unit: '£/month' }; }, ', close to your £75,000 “MRR”, which also adds “Other-plan MRR” (no figure yet).'],
     ['the figures do not add up to the goal (£10,000 beside £73,500)', (g) => { node(g, 'other_plan_mrr').observed_state.raw_value = 10000; }, ', close to your £75,000 “MRR”, which also adds “Other-plan MRR” (Olumi\'s estimate, £10,000).'],
     ['two other parents', (g) => { g.edges.push({ ...g.edges.find((e: Json) => e.from === 'other_plan_mrr' && e.to === 'mrr'), id: 'churn_to_mrr', from: 'monthly_churn_rate' }); }, ', close to your £75,000 “MRR”, which also adds “Other-plan MRR” (Olumi\'s estimate, £1,500) (and 1 more).'],
   ])('WORDS: %s', (_why, change, clause) => {
@@ -163,10 +165,19 @@ describe('a card-domain carrier BESIDE another goal parent (the 1/19 served dead
     change(node(g, 'other_plan_mrr'));
     expect(proposeProductIdentity(g)).toBeNull();
   });
-  it('a NON-money figure beside the carrier (a count) is named by whose it is; neither said nor summed', () => {
+  // AIQ 5894530998 condition 2: a count is never said to be ADDED to money; the goal DEPENDS ON it.
+  it('a NON-money figure beside the carrier (a count) is named by whose it is, as something MRR depends on; neither said nor summed', () => {
     const g = beside();
     node(g, 'other_plan_mrr').observed_state.unit = 'subscribers';
-    expect(proposeProductIdentity(g)?.words).toContain('£49 × 1,500 = £73,500, close to your £75,000 “MRR”, which also adds “Other-plan MRR” (Olumi\'s estimate). If yes,');
+    const words = proposeProductIdentity(g)?.words ?? '';
+    expect(words).toContain('£49 × 1,500 = £73,500, close to your £75,000 “MRR”, which also depends on “Other-plan MRR” (Olumi\'s estimate). If yes,');
+    expect(words).not.toMatch(/\badds\b/);
+  });
+  // AIQ 5894530998 condition 1: the UNIT is read before the figure, so a figure-less parent in another period refuses too.
+  it('NO CARD: a FIGURE-LESS other parent whose money is in another period (£/year, no raw_value)', () => {
+    const g = beside();
+    node(g, 'other_plan_mrr').observed_state = { unit: '£/year' };
+    expect(proposeProductIdentity(g)).toBeNull();
   });
   it.each<[string, string]>([
     ['"GBP per month"', 'GBP per month'],
