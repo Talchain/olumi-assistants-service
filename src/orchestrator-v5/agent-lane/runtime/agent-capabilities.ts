@@ -5131,8 +5131,12 @@ export function createAgentCapabilities(
         // carried beside that reason, read from the model just built — only where an analysis exists. C46 × R3-4: not of a
         // product the run's engine evaluated, read from the SAME post-run read as the permission.
         if (firstAnalysis.ran === true || firstAnalysis.reason === 'already_ran_for_construction') {
-          // ⛔ GOAL CERTAINTY (DL 5887061638): the first pass's result IS this read's block, so the SAME read binds it.
-          const certainty = goalCertaintyForAgent(read.analysis_result, { scenario_id: ctx.scenario_id, analysis_state: read.analysis_state }, certaintyReadOf(read));
+          // ⛔ GOAL CERTAINTY (PR Review CR @ ed62f91b): bound to the Run THIS request EXECUTED — its own block and the run turn's
+          // own stamp — never the read's Run matched to itself (another Run may finish before the read). No Run executed here
+          // (an earlier request's) → nothing to bind to → unchecked when it claims a certainty.
+          const executed = outcome.ran ? outcome.blocks.find((b) => (b as { type?: unknown } | null)?.type === 'analysis_result') : undefined;
+          const certainty = goalCertaintyForAgent(executed ?? read.analysis_result,
+            { scenario_id: ctx.scenario_id, analysis_state: outcome.ran ? outcome.analysisState : undefined }, certaintyReadOf(read));
           firstAnalysis = { ...firstAnalysis, claim_permissions: withNonlinearIdentity(firstAnalysis.claim_permissions, after.raw,
             readEvaluatedIdentityNodeIds(read.analysis_identity_evaluated_node_ids)), ...withGoalChance(read.analysis_result),
           ...(certainty !== undefined ? { goal_certainty: certainty } : {}) };

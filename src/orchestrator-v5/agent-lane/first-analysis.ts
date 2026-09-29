@@ -101,7 +101,11 @@ export function recordsFirstAnalysisOf(fact: HandlerFact, constructionTurnId: st
 }
 
 export type FirstAnalysisOutcome =
-  | { readonly ran: true; readonly runTurnId: string; readonly blocks: readonly unknown[]; readonly analysisReady?: unknown }
+  | {
+    readonly ran: true; readonly runTurnId: string; readonly blocks: readonly unknown[]; readonly analysisReady?: unknown;
+    /** The run turn's own `analysis_state` — the EXECUTED Run's stamp (`run_state.computed_at`), so a later read can be bound to it. */
+    readonly analysisState?: unknown;
+  }
   | { readonly ran: false; readonly reason: 'not_admissible'; readonly nextStep: string }
   | { readonly ran: false; readonly reason: 'no_time' }
   | { readonly ran: false; readonly reason: 'already_ran_for_construction' }
@@ -167,10 +171,11 @@ export async function runFirstAnalysisAfterConstruction(params: FirstAnalysisPar
       requestId: `${params.requestId}:first-analysis`,
       autoRun: firstAnalysisAutoRunTrigger(params.constructionTurnId),
     });
-    const response = result.response as { blocks?: unknown; assistant_text?: unknown } | undefined;
+    const response = result.response as { blocks?: unknown; assistant_text?: unknown; analysis_state?: unknown } | undefined;
     const blocks = Array.isArray(response?.blocks) ? (response.blocks as readonly unknown[]) : [];
     if (result.outcome === 'ok' && hasAnalysisResult(blocks)) {
-      return { ran: true, runTurnId: payload.turn_id, blocks, ...(result.analysisReady !== undefined ? { analysisReady: result.analysisReady } : {}) };
+      return { ran: true, runTurnId: payload.turn_id, blocks, ...(result.analysisReady !== undefined ? { analysisReady: result.analysisReady } : {}),
+        ...(response?.analysis_state !== undefined ? { analysisState: response.analysis_state } : {}) };
     }
     if (result.outcome === 'ok' || result.outcome === 'handler_recovered') {
       // The dispatcher's own admission is the authority: it answered, and did not produce a result.
