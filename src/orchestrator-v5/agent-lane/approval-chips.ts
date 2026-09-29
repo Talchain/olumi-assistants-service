@@ -162,7 +162,7 @@ export function approvalChipsFor(
   if (tool === 'propose_link_effect') {
     const effectReading = linkEffectReadingFor(tool, labelSourceFor?.(proposalId));
     return effectReading === undefined ? []
-      : [{ id: approvalChipIdFor(proposalId), label: approve.label, message: approve.message, detail: effectReading }, AMEND_CHIP];
+      : [{ id: approvalChipIdFor(proposalId), label: approve.label, message: linkEffectApproveMessage(effectReading), detail: effectReading }, AMEND_CHIP];
   }
   return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, labelSourceFor?.(proposalId)), message: approve.message }, AMEND_CHIP];
 }
@@ -179,12 +179,36 @@ function linkEffectReadingFor(tool: string, source: ApprovalLabelSource | undefi
   const op = proposal.operations.length === 1 && proposal.operations[0]!.op === 'set_link_effect' ? proposal.operations[0]!.value as
     { effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown }; quote?: unknown } : undefined;
   const link = result.link as { from?: unknown; to?: unknown; your_words?: unknown } | undefined;
+  if (op === undefined || link === undefined || link.your_words !== op.quote) return undefined;
+  return linkEffectReadingOf(proposal, { from: link.from, to: link.to });
+}
+
+/**
+ * The reading a link-effect card shows and its approval records: the STORED change with its signs, both ends by their
+ * labels, and the user's one sentence. The writer recomputes it from the same stored proposal (`applyLinkEffect`).
+ */
+export function linkEffectReadingOf(proposal: StructuredProposal, labels: { readonly from: unknown; readonly to: unknown }): string | undefined {
+  const op = proposal.operations.length === 1 && proposal.operations[0]!.op === 'set_link_effect' ? proposal.operations[0]!.value as
+    { effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown }; quote?: unknown } : undefined;
   const e = op?.effect;
-  if (e === undefined || typeof op?.quote !== 'string' || typeof link?.from !== 'string' || typeof link.to !== 'string' || link.your_words !== op.quote
+  if (e === undefined || typeof op?.quote !== 'string' || typeof labels.from !== 'string' || typeof labels.to !== 'string'
     || typeof e.amount !== 'number' || typeof e.per_source_change !== 'number' || typeof e.amount_unit !== 'string' || typeof e.per_source_change_unit !== 'string') return undefined;
   const signed = (v: number, unit: string): string => `${v < 0 ? '\u2212' : '+'}${figureInUserUnits(Math.abs(v), unit) ?? `${Math.abs(v)} ${unit}`}`;
-  return `Record: ${signed(e.per_source_change, e.per_source_change_unit)} on "${link.from}" \u2192 ${signed(e.amount, e.amount_unit)} in "${link.to}" `
+  return `Record: ${signed(e.per_source_change, e.per_source_change_unit)} on "${labels.from}" \u2192 ${signed(e.amount, e.amount_unit)} in "${labels.to}" `
     + `\u2014 from your words: "${op.quote}"`;
+}
+
+/**
+ * ⭐ THE PRESSED CARD CARRIES ITS READING (AIQ 5885290014: "a forged approval without a reading token → the writer
+ * refuses"). The card's words ARE its reading, so the approval request carries exactly what the user saw; the durable
+ * carrier keeps those words, so a card put back after a restart shows the same reading ({@link readingOfLinkEffectApproval}).
+ */
+const LINK_EFFECT_APPROVE_PREFIX = 'Yes \u2014 ';
+export const linkEffectApproveMessage = (reading: string): string => `${LINK_EFFECT_APPROVE_PREFIX}${reading}`;
+/** The reading a link-effect card's words carry, or `undefined` for any other words. */
+export function readingOfLinkEffectApproval(message: unknown): string | undefined {
+  return typeof message === 'string' && message.startsWith(`${LINK_EFFECT_APPROVE_PREFIX}Record: `)
+    ? message.slice(LINK_EFFECT_APPROVE_PREFIX.length) : undefined;
 }
 
 /** The tools whose proposal can carry Olumi's reading of the user's own words for a link's band (slice C3). */

@@ -41,7 +41,7 @@ import {
   type PendingAction,
 } from '../session/pending-action.js';
 import { log } from '../../utils/telemetry.js';
-import { approvalChipIdFor } from './approval-chips.js';
+import { approvalChipIdFor, readingOfLinkEffectApproval } from './approval-chips.js';
 import { computeProposalId, type ProposalStore, type StructuredProposal } from './proposal.js';
 
 /**
@@ -67,7 +67,7 @@ import { computeProposalId, type ProposalStore, type StructuredProposal } from '
 export const AGENT_PROPOSAL_CARRIER_TURN_TTL = PENDING_ACTION_ASK_TURN_TTL;
 export const AGENT_PROPOSAL_CARRIER_WALL_TTL_MS = PENDING_ACTION_ASK_WALL_TTL_MS;
 
-type ApproveChip = { readonly id: string; readonly label: string; readonly message: string };
+type ApproveChip = { readonly id: string; readonly label: string; readonly message: string; readonly detail?: string };
 
 /**
  * ⛔ WHETHER THE ANSWER THIS ROW RECORDS SHOWED THE APPROVE CHIP. A carrier rides a row for two reasons: the
@@ -127,7 +127,9 @@ function liveCarrierOf(pa: PendingAction, proposalId: string): LiveCarrier | und
   if (!Number.isFinite(expires)) return undefined;
   const { public_label: label, public_message: message } = pa.action as { public_label?: unknown; public_message?: unknown };
   if (typeof label !== 'string' || typeof message !== 'string') return undefined;
-  return { proposal_id: proposalId, chip: { id: pa.chip_id, label, message }, expires_at_ms: expires };
+  // A link-effect card's words carry its reading, so the card put back shows exactly what the offer showed.
+  const detail = readingOfLinkEffectApproval(message);
+  return { proposal_id: proposalId, chip: { id: pa.chip_id, label, message, ...(detail !== undefined ? { detail } : {}) }, expires_at_ms: expires };
 }
 
 /**

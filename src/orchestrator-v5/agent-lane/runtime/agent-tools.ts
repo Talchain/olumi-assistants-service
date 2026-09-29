@@ -106,6 +106,8 @@ export interface AgentToolContext {
    * fifth CR on #2275): a free-text "yes" to the model never records it.
    */
   readonly typed_approval_of?: string;
+  /** The words that typed approve chip sent (its `message`), bound with it: a link-effect card's words carry its reading. */
+  readonly typed_approval_words?: string;
 }
 
 export interface ToolDefinition {

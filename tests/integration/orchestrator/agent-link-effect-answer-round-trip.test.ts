@@ -80,10 +80,12 @@ describe('journey C: the user\'s stated link effect, through the real door, is s
   let commitOptionLevelsInProcess: typeof import('../../../src/orchestrator-v5/system-events/dispatch.js').commitOptionLevelsInProcess;
   let createAgentCapabilities: typeof import('../../../src/orchestrator-v5/agent-lane/runtime/agent-capabilities.js').createAgentCapabilities;
   let ProposalStore: typeof import('../../../src/orchestrator-v5/agent-lane/proposal.js').ProposalStore;
+  let approvalChipsFor: typeof import('../../../src/orchestrator-v5/agent-lane/approval-chips.js').approvalChipsFor;
   beforeAll(async () => {
     ({ commitOptionLevelsInProcess } = await import('../../../src/orchestrator-v5/system-events/dispatch.js'));
     ({ createAgentCapabilities } = await import('../../../src/orchestrator-v5/agent-lane/runtime/agent-capabilities.js'));
     ({ ProposalStore } = await import('../../../src/orchestrator-v5/agent-lane/proposal.js'));
+    ({ approvalChipsFor } = await import('../../../src/orchestrator-v5/agent-lane/approval-chips.js'));
   });
   beforeEach(() => {
     persisted = pricingGraph();
@@ -112,11 +114,18 @@ describe('journey C: the user\'s stated link effect, through the real door, is s
     const caps = createAgentCapabilities(d as never, store, undefined, 'full', undefined, {
       commitOptionLevels: (input) => commitOptionLevelsInProcess(input, 'req-agent'),
     });
-    return { caps, ctx: { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text } };
+    return { caps, store, ctx: { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text } };
   };
   const edgeOf = () => (persisted as { edges: { from: string; to: string; provenance?: Record<string, any>; strength?: { mean?: number }; effect_direction?: string }[] })
     .edges.find((e) => e.from === 'pro_plan_price' && e.to === 'pro_plan_paying_subscribers')!;
   const SAID = 'Honestly, every £1 on the Pro price loses us about 50 paying subscribers.';
+  /** The user PRESSES the card the proposal offers: the route binds the proposal it names and the words it sent (its reading). */
+  const pressing = (a: ReturnType<typeof agent>, p: Record<string, any>) => {
+    const card = approvalChipsFor([{ name: 'propose_link_effect', ok: true, mutated: false, proposal_id: String(p.proposal_id) }],
+      (id) => ({ proposal: a.store.get(id), result: p as never }))[0]!;
+    return { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text: card.message,
+      typed_approval_of: String(p.proposal_id), typed_approval_words: card.message };
+  };
   const ARGS = { from_label: 'Pro plan price', to_label: 'Pro plan paying subscribers', amount: -50, amount_unit: 'subscribers',
     per_source_change: 1, per_source_change_unit: 'GBP per month', quote: 'every £1 on the Pro price loses us about 50 paying subscribers' };
 
@@ -125,7 +134,7 @@ describe('journey C: the user\'s stated link effect, through the real door, is s
     const a = agent(SAID);
     const p = await a.caps.proposeLinkEffect!(a.ctx, ARGS);
     expect(p.ok, JSON.stringify(p)).toBe(true);
-    const out = await a.caps.authoriseChange({ ...a.ctx, typed_approval_of: String(p.proposal_id) }, { proposal_id: String(p.proposal_id) });
+    const out = await a.caps.authoriseChange(pressing(a, p), { proposal_id: String(p.proposal_id) });
     expect(out.ok, JSON.stringify(out)).toBe(true);
     expect(rows.size, 'ONE commit').toBe(1);
     const e = edgeOf();
@@ -149,7 +158,7 @@ describe('journey C: the user\'s stated link effect, through the real door, is s
     const g = persisted as { edges: Array<Record<string, any>> };
     const e = g.edges.find((x) => x.from === 'pro_plan_price' && x.to === 'pro_plan_paying_subscribers')!;
     e.provenance = { ...(e.provenance ?? {}), reasoning: 'changed by another turn' };
-    const out = await a.caps.authoriseChange({ ...a.ctx, typed_approval_of: String(p.proposal_id) }, { proposal_id: String(p.proposal_id) });
+    const out = await a.caps.authoriseChange(pressing(a, p), { proposal_id: String(p.proposal_id) });
     expect(out.ok).toBe(false);
     expect(rows.size, 'nothing written').toBe(0);
     expect(edgeOf().provenance?.magnitude).toBeUndefined();

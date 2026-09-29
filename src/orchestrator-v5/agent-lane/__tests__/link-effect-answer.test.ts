@@ -18,7 +18,7 @@ import { dispatchTool } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { linkEffectEdgeToken } from '../../system-events/link-effect-edit.js';
-import { approvalChipsFor, approvalChipIdFor } from '../approval-chips.js';
+import { approvalChipsFor, approvalChipIdFor, readingOfLinkEffectApproval } from '../approval-chips.js';
 import type { CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 
 type Json = Record<string, any>;
@@ -27,8 +27,11 @@ const C = served('served-journey-c-price-subscribers-unsized-5411da8.json');
 const A = served('served-journey-a-price-churn-0df78f4.json');
 const BEYOND = served('served-price-subscribers-beyond-range-0df78f4-d2.json');
 const ctxSaying = (user_text: string) => ({ scenario_id: '550e8400-e29b-41d4-a716-4466554400a7', authenticated_user_id: null, request_id: 'r', user_text });
-/** The route's context when the user PRESSED the approve card for `proposalId` (`typedApprovalOf`, bound by the route). */
-const ctxPressing = (proposalId: string) => ({ ...ctxSaying('Yes, record that reading.'), typed_approval_of: proposalId });
+/** The card `propose_link_effect` offers for its result, read from the STORED proposal (as the route does). */
+const cardFor = (store: ProposalStore, r: Json) => approvalChipsFor([{ name: 'propose_link_effect', ok: true, mutated: false, proposal_id: String(r.proposal_id) }],
+  (id) => ({ proposal: store.get(id), result: r as never }))[0]!;
+/** The route's context when the user PRESSED a card naming `proposalId`, which sent `words` (`typedApprovalOf`, bound by the route). */
+const ctxPressing = (proposalId: string, words: string) => ({ ...ctxSaying(words), typed_approval_of: proposalId, typed_approval_words: words });
 
 function world(graph: Json) {
   const store = new ProposalStore();
@@ -221,6 +224,14 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     expect(approvalChipsFor(ask)).toEqual([]); // no source to read the reading from at all
   });
 
+  it('A CARD PUT BACK AFTER A RESTART shows the same reading: its words carry it (the durable carrier keeps the words)', async () => {
+    const { caps, store } = world(C);
+    const r = await caps.proposeLinkEffect!(ctxSaying(SUBS_SAID), SUBS_ARGS) as Json;
+    const card = cardFor(store, r);
+    expect(readingOfLinkEffectApproval(card.message)).toBe(card.detail);
+    expect(readingOfLinkEffectApproval('Yes, record that.')).toBeUndefined(); // any other card's words carry no reading
+  });
+
   it('ONLY FROM THE CARD (PR Review\'s fifth CR): the Agent approving from the user\'s "yes" records nothing; the card then does', async () => {
     const graph = structuredClone(C);
     const d: InternalDispatch = async (path) => {
@@ -234,16 +245,25 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
       e.provenance = { ...(e.provenance ?? {}), ...THEIRS };
       return { status: 'committed', graph_hash: 'h-after', receipt: null, already_applied: false, committed_levels: [], links_resized: [] };
     };
-    const caps = createAgentCapabilities(d, new ProposalStore(), undefined, 'full', undefined, { commitOptionLevels });
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(d, store, undefined, 'full', undefined, { commitOptionLevels });
     const r = await caps.proposeLinkEffect!(ctxSaying(SUBS_SAID), SUBS_ARGS) as Json;
     const id = String(r.proposal_id);
-    for (const ctx of [ctxSaying('Yes, record that.'), ctxPressing('prop_0123456789abcdef0123456789abcdef')]) {
+    const card = cardFor(store, r);
+    expect(card.message).toBe(`Yes \u2014 ${card.detail}`); // the card's words ARE its reading
+    for (const ctx of [ctxSaying(card.message), ctxPressing('prop_0123456789abcdef0123456789abcdef', card.message)]) {
       const said = await caps.authoriseChange(ctx, { proposal_id: id }) as Json;
       expect(said).toEqual(expect.objectContaining({ ok: false, mutated: false, reason: 'approve_on_the_card' }));
       expect(String(said.detail)).not.toMatch(/approve_on_the_card/); // never the raw code in the words
     }
-    expect(doorCalls, 'nothing written from words, or from another proposal\'s card').toBe(0);
-    expect(await caps.authoriseChange(ctxPressing(id), { proposal_id: id })).toEqual(expect.objectContaining({ ok: true, applied: true }));
+    // AIQ 5885290014: a FORGED approval of this proposal — no reading, the old plain words, or another reading — is refused.
+    const other = String(card.message).replace('\u221250', '\u221260');
+    for (const words of ['', 'Yes, record that.', 'Yes, record that reading.', other]) {
+      const forged = await caps.authoriseChange(ctxPressing(id, words), { proposal_id: id }) as Json;
+      expect(forged, words).toEqual(expect.objectContaining({ ok: false, mutated: false, reason: 'reading_not_confirmed' }));
+    }
+    expect(doorCalls, 'nothing written from words, another proposal\'s card, or a card without this reading').toBe(0);
+    expect(await caps.authoriseChange(ctxPressing(id, card.message), { proposal_id: id })).toEqual(expect.objectContaining({ ok: true, applied: true }));
     expect(doorCalls).toBe(1);
   });
 
@@ -314,7 +334,7 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     const store = new ProposalStore();
     const caps = createAgentCapabilities(d, store, undefined, 'full', undefined, { commitOptionLevels });
     const r = await caps.proposeLinkEffect!(ctxSaying(SUBS_SAID), SUBS_ARGS) as Json;
-    return await caps.authoriseChange(ctxPressing(String(r.proposal_id)), { proposal_id: String(r.proposal_id) }) as Json;
+    return await caps.authoriseChange(ctxPressing(String(r.proposal_id), cardFor(store, r).message), { proposal_id: String(r.proposal_id) }) as Json;
   };
   const THEIRS = { source: 'user_specified', magnitude: 'user_stated',
     natural_effect: { amount: -50, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: 'GBP per month' } };
@@ -330,9 +350,9 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
   });
 
   it('FAIL CLOSED without the level door: approving writes nothing and says so (never a strength-only or register fallback)', async () => {
-    const { caps } = world(C);
+    const { caps, store } = world(C);
     const r = await caps.proposeLinkEffect!(ctxSaying(SUBS_SAID), SUBS_ARGS) as Json;
-    const out = await caps.authoriseChange(ctxPressing(String(r.proposal_id)), { proposal_id: String(r.proposal_id) }) as Json;
+    const out = await caps.authoriseChange(ctxPressing(String(r.proposal_id), cardFor(store, r).message), { proposal_id: String(r.proposal_id) }) as Json;
     expect(out).toEqual(expect.objectContaining({ ok: false, mutated: false, reason: 'link_effect_writer_unavailable' }));
   });
 });

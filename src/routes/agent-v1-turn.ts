@@ -1824,7 +1824,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     /** Every tool runs as THIS request: its scenario, its user, and the user's own words (`stated-by-user.ts`). */
     const typedNow = typedByUser(body) ? message : null;
     const toolCtx: AgentToolContext = { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow),
-      ...(approvedProposal !== undefined ? { typed_approval_of: approvedProposal } : {}) };
+      ...(approvedProposal !== undefined ? { typed_approval_of: approvedProposal, typed_approval_words: message } : {}) };
     if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
 
     /**

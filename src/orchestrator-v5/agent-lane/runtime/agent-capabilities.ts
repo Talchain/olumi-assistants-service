@@ -143,7 +143,7 @@ import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, statingSentenceOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
-import { figureInUserUnits } from '../approval-chips.js';
+import { figureInUserUnits, linkEffectReadingOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
 
@@ -2053,6 +2053,14 @@ export function createAgentCapabilities(
     if (ctx.typed_approval_of !== parent.proposal_id) {
       return notApplied('approve_on_the_card', 'Nothing was recorded: the user\u2019s own figure for a link is recorded only when they press the '
         + 'button that shows exactly what will be recorded. Point them to that button; never record it from their words.');
+    }
+    // ⛔ …and only when that button carried the EXACT reading this approval records (AIQ 5885290014): recomputed here from
+    // the stored proposal and the labels on the read, never taken from the request.
+    const labelOf = (id: string): unknown => approvedRead.nodes.find((n) => n.id === id)?.label;
+    const reading = linkEffectReadingOf(parent, { from: labelOf(v.from), to: labelOf(v.to) });
+    if (reading === undefined || readingOfLinkEffectApproval(ctx.typed_approval_words) !== reading) {
+      return notApplied('reading_not_confirmed', 'Nothing was recorded: the button pressed did not carry the exact reading that would be '
+        + 'recorded, so the user has not confirmed it. Show them the reading again and let them confirm it on its button; never record it without that.');
     }
     if (approvedRead.graph_hash !== parent.base_graph_identity_hash) {
       return notApplied('model_changed_since_approval', 'The model changed after this was prepared, so nothing was recorded. Read it again and propose afresh.');
