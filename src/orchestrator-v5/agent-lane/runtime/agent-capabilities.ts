@@ -36,6 +36,7 @@ import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../../compose/definitional-links.js';
 import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken, type LinkEffectRefusal } from '../../system-events/link-effect-edit.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
+import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
 import { proposeProductIdentity, type IdentityProposal } from '../identity-proposal.js';
 import { CONFIRM_IDENTITY_OP, identityCardHintFor, identityReadingOf, identityRefusalWords, readingOfIdentityApproval } from '../identity-card.js';
 import { unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
@@ -2173,7 +2174,9 @@ export function createAgentCapabilities(
   const identityCardFor = (_ctx: { scenario_id: string; authenticated_user_id: string | null },
     read: { readonly raw: unknown; readonly graph_hash: unknown } | null | undefined) => {
     if (read === null || read === undefined || typeof read.graph_hash !== 'string' || read.graph_hash === '') return undefined;
-    return identityCardHintFor(proposeProductIdentity(read.raw), false);
+    const card = proposeProductIdentity(read.raw);
+    // An unwritable base (the writer's own check) offers no card: its Yes could not be recorded (DL 5897757819).
+    return identityCardHintFor(card !== null && identityConfirmBaseIsWritable(read.raw) ? card : null, false);
   };
 
   /**
@@ -2724,6 +2727,11 @@ export function createAgentCapabilities(
       if (card === null) {
         return { ok: false, mutated: false, refusal: 'no_reading_to_confirm',
           detail: 'The model holds no reading of the goal for the user to confirm. Nothing was offered; say nothing about one.' };
+      }
+      if (!identityConfirmBaseIsWritable(g.raw)) {
+        return { ok: false, mutated: false, refusal: 'identity_not_writable',
+          detail: 'This model holds a size Olumi cannot record changes on yet (a link larger than the model\u2019s scale), so this reading '
+            + 'cannot be confirmed now and nothing was offered. Say that plainly; never offer a card or ask the user to confirm it.' };
       }
       const dry = applyIdentityConfirmEdit({ persistedGraph: g.raw, outcome_id: card.outcome_id, factor_ids: card.factor_ids, words: card.words,
         expected_graph_hash: g.graph_hash, reading_token: identityConfirmReadingToken(card) });
