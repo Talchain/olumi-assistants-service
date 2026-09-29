@@ -25,7 +25,8 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { AdjustEdgeStrengthHandlerFactSchema } from '@talchain/schemas/orchestrator';
 
 import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
-import { sizeLink, unitOf, type LinkSizeProblem } from '../../cee/magnitude/link-effect.js';
+import { resolveMagnitudeFrame, sizeLink, sourceUnitWords, targetUnitWords, unitOf, type LinkSizeProblem } from '../../cee/magnitude/link-effect.js';
+import { computeGraphIdentityHash } from '../context/graph-identity.js';
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { definitionalLinkInUse, type IdentityRunUse } from '../compose/definitional-links.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
@@ -37,11 +38,11 @@ const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !
 export interface LinkEffectStatement {
   /** Signed change in the TARGET, in `amount_unit`. Its sign is the link's direction. */
   readonly amount: number;
-  /** Must be the target's own unit (folded key). */
+  /** The target's own unit, or the words the ask is phrased in (`targetUnitWords`: "percentage points" for a % level). */
   readonly amount_unit: string;
   /** Non-zero change in the SOURCE, in `per_source_change_unit`. */
   readonly per_source_change: number;
-  /** Must be the source's own unit (folded key). */
+  /** The source's own unit, or the ask's words for it (`sourceUnitWords`: "switch" for a yes/no source). */
   readonly per_source_change_unit: string;
 }
 
@@ -51,12 +52,12 @@ export interface ApplyLinkEffectEditParams {
   readonly from: string;
   readonly to: string;
   readonly effect: LinkEffectStatement;
-  /** The link as the ask was prepared against; any difference is `superseded`. */
-  readonly expected: {
-    readonly strength_mean: number;
-    readonly effect_direction: 'positive' | 'negative';
-    readonly magnitude?: 'user_stated' | 'olumi_estimate' | 'olumi_placeholder';
-  };
+  /**
+   * The revision the ask was prepared against: the graph IDENTITY hash (`computeGraphIdentityHash`) — the value every
+   * Agent proposal already carries as `base_graph_identity_hash` and the commit's CAS reads. Any change to the stored
+   * graph since, this link's `natural_effect`, unit, std or provenance included, is `superseded` (DL 5882808387).
+   */
+  readonly expected: { readonly graph_identity_hash: string };
   /** The user's verbatim words (1..400), carried on the receipt for the approval card and audit. */
   readonly quote: string;
   /** What the last Run did with declared identities (`identityRunUseFromFacts`); absent = no Run yet. */
@@ -101,22 +102,22 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   const target = nodes.find((n) => n.id === to);
   if (edge === undefined || source === undefined || target === undefined) return refuse('edge_not_found');
 
-  // ── REVISION-SAFE: the link must be the one the ask was prepared against ─────────────────────────────────────────
+  // ── REVISION-SAFE: the stored graph must be the revision the ask was prepared against (the CAS's own hash) ────────
+  if (computeGraphIdentityHash(params.persistedGraph as never)?.value !== expected.graph_identity_hash) return refuse('superseded');
   const strength = isRec(edge.strength) ? edge.strength : {};
   const provenance = isRec(edge.provenance) ? edge.provenance : {};
-  if (strength.mean !== expected.strength_mean || edge.effect_direction !== expected.effect_direction
-    || (expected.magnitude !== undefined && provenance.magnitude !== expected.magnitude)) {
-    return refuse('superseded');
-  }
   if (definitionalLinkInUse(graph, from, to, params.lastRunIdentityUse ?? null) !== null) return refuse('definitional_link');
 
   // ── THE UNITS ARE THE ENDS' OWN — never converted by guess ─────────────────────────────────────────────────────────
   const view = magnitudeNodes(nodes, percentLevelIds(graph));
   const sourceNode = view.get(from)!;
   const targetNode = view.get(to)!;
-  const same = (stated: string, own: string | undefined) =>
-    own !== undefined && unitComparisonKey(stated) !== undefined && unitComparisonKey(stated) === unitComparisonKey(own);
-  if (!same(effect.amount_unit, unitOf(targetNode)) || !same(effect.per_source_change_unit, unitOf(sourceNode))) {
+  // Either the end's stored unit or the words the ask itself is phrased in (Runtime 5882802252: a % level is asked in
+  // "percentage points", a yes/no source as "switch") — the same key `sizeLink` says the natural effect back in.
+  const same = (stated: string, ...own: (string | undefined)[]) => unitComparisonKey(stated) !== undefined
+    && own.some((u) => u !== undefined && u !== '' && unitComparisonKey(stated) === unitComparisonKey(u));
+  if (!same(effect.amount_unit, unitOf(targetNode), targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode)))
+    || !same(effect.per_source_change_unit, unitOf(sourceNode), sourceUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode)))) {
     return refuse('unit_mismatch');
   }
   if (!finite(effect.amount) || !finite(effect.per_source_change) || effect.per_source_change === 0 || effect.amount === 0) {

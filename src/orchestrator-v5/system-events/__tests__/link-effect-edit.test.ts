@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { convertLinkEffect } from '../../../cee/magnitude/link-effect.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import { applyLinkEffectEdit, type ApplyLinkEffectEditParams } from '../link-effect-edit.js';
 
@@ -33,13 +34,16 @@ function storedGraph(): Rec {
 
 const STATED = { amount: -50, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: '£' } as const;
 
+const revisionOf = (g: unknown): string => computeGraphIdentityHash(g as never)!.value;
+
 function params(over: Partial<ApplyLinkEffectEditParams> = {}, graph: Rec = storedGraph()): ApplyLinkEffectEditParams {
   return {
     persistedGraph: graph,
     from: 'price',
     to: 'subs',
     effect: { ...STATED },
-    expected: { strength_mean: -0.3, effect_direction: 'negative', magnitude: 'olumi_placeholder' },
+    // The revision the ask was prepared on — the Agent proposal's `base_graph_identity_hash`.
+    expected: { graph_identity_hash: revisionOf(graph) },
     quote: 'every £1 on the price loses us about 50 subscribers',
     ...over,
   };
@@ -105,9 +109,53 @@ describe('link effect writer — refuses what it cannot do exactly (fail closed,
 
   it('edge_not_found: no such link', () => refused(params({ to: 'mrr' }), 'edge_not_found'));
 
-  it('superseded: the stored link is not the one the ask was prepared against', () => {
-    refused(params({ expected: { strength_mean: -0.4, effect_direction: 'negative', magnitude: 'olumi_placeholder' } }), 'superseded');
-    refused(params({ expected: { strength_mean: -0.3, effect_direction: 'negative', magnitude: 'olumi_estimate' } }), 'superseded');
+  // DL 5882808387: bound to the prepared REVISION, not only mean/direction/magnitude.
+  const preparedThen = (edit: (g: Rec) => void): ApplyLinkEffectEditParams => {
+    const prepared = storedGraph();
+    const now = storedGraph();
+    edit(now);
+    return params({ expected: { graph_identity_hash: revisionOf(prepared) } }, now);
+  };
+
+  it('superseded: another turn changed this link\'s natural effect with the SAME mean, direction and magnitude', () => {
+    refused(preparedThen((g) => {
+      g.edges[0].provenance.natural_effect = { amount: -30, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: '£',
+        strength_mean: -0.3, strength_mean_frame: 'edge_strength' };
+    }), 'superseded');
+  });
+
+  it('superseded: this link\'s std or provenance moved with the mean unchanged', () => {
+    refused(preparedThen((g) => { g.edges[0].strength.std = 0.2; }), 'superseded');
+    refused(preparedThen((g) => { g.edges[0].provenance.source = 'user_specified'; }), 'superseded');
+  });
+
+  it('superseded: an UNRELATED edit since the ask (the CAS reads the whole revision, so the approval is re-asked)', () => {
+    refused(preparedThen((g) => { g.nodes[1].observed_state.raw_value = 59; g.nodes[1].observed_state.value = 0.59; }), 'superseded');
+  });
+
+  it('CONTROL: the unchanged revision writes', () => {
+    expect(applyLinkEffectEdit(preparedThen(() => undefined)).kind).toBe('mutated');
+  });
+
+  it('a % LEVEL target answered in the ask\'s own words ("percentage points") is sized, not refused (Runtime 5882802252)', () => {
+    const g: Rec = {
+      goal_node_id: 'mrr',
+      nodes: [
+        { id: 'mrr', kind: 'goal', label: 'MRR' },
+        { id: 'price', kind: 'factor', label: 'Pro plan price', observed_state: { value: 0.49, raw_value: 49, cap: 100, unit: '£', source: 'user_override' } },
+        { id: 'churn', kind: 'factor', label: 'Monthly churn', observed_state: { value: 0.032, raw_value: 3.2, unit: '%', source: 'cee_inference' } },
+      ],
+      edges: [{ from: 'price', to: 'churn', strength: { mean: 0.2, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive',
+        provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' } }],
+    };
+    const r = applyLinkEffectEdit({ persistedGraph: g, from: 'price', to: 'churn', quote: 'every £1 on the price adds half a point of churn',
+      effect: { amount: 0.5, amount_unit: 'percentage points', per_source_change: 1, per_source_change_unit: '£' },
+      expected: { graph_identity_hash: revisionOf(g) } });
+    expect(r.kind, JSON.stringify(r)).toBe('mutated');
+    if (r.kind !== 'mutated') return;
+    const e = (r.mutatedGraph as Rec).edges[0];
+    expect(e.strength.mean).toBeCloseTo(convertLinkEffect(0.5, 1, 100, 100)!, 12);
+    expect(e.provenance.natural_effect.amount_unit).toBe('percentage points');
   });
 
   it('unit_mismatch: the stated units must be the two ends\' own (folded), never converted by guess', () => {
