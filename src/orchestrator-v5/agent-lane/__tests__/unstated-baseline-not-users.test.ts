@@ -138,6 +138,20 @@ describe('a number in words, or "zero", grounds only the factor it counts', () =
     expect(sourceOf('Should we hire three engineers to win more deals?', factor('Enterprise customers', 3, 'customers'))).toBe('cee_inference');
   });
 
+  // PR Review 5881529306: the window must stop at the counted noun phrase — "for enterprise customers" is another quantity.
+  it('RED: "three engineers for enterprise customers" does not state 3 enterprise customers', () => {
+    expect(sourceOf('We hire three engineers for enterprise customers.', factor('Enterprise customers', 3, 'customers'))).toBe('cee_inference');
+  });
+
+  it('RED: "zero downtime for enterprise customers" does not state 0 enterprise customers', () => {
+    expect(sourceOf('We promise zero downtime for enterprise customers.', factor('Enterprise customers', 0, 'customers'))).toBe('cee_inference');
+  });
+
+  it('CONTROL: "three enterprise customers" and "zero enterprise customers" state them', () => {
+    expect(sourceOf('We have three enterprise customers today.', factor('Enterprise customers', 3, 'customers'))).toBe('brief_extraction');
+    expect(sourceOf('We have zero enterprise customers today.', factor('Enterprise customers', 0, 'customers'))).toBe('brief_extraction');
+  });
+
   it('CONTROL: "zero churn" states a 0% monthly churn (zero is zero in any unit, and it names the factor)', () => {
     expect(sourceOf('We have zero churn today and want to keep it that way.', factor('Monthly churn', 0, '%'))).toBe('brief_extraction');
   });

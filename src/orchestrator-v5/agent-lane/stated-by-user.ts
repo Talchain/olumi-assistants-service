@@ -133,12 +133,25 @@ function namingWords(text: unknown): string[] {
   return (text.toLowerCase().match(/[a-z]{3,}/g) ?? []).filter((w) => !NOT_A_NAME.has(w)).map((w) => w.replace(/s$/, ''));
 }
 
-/** Whether the (up to three) words right after the amount at `m` share a naming word with the factor's label or unit. */
+/** Words that end the counted noun phrase: what follows them names another quantity ("three engineers FOR enterprise customers"). */
+const PHRASE_BREAK = new Set([
+  'for', 'of', 'to', 'in', 'on', 'at', 'with', 'by', 'from', 'into', 'across', 'over', 'under', 'within', 'per', 'than',
+  'and', 'or', 'but', 'while', 'which', 'that', 'who', 'as', 'so', 'if', 'when', 'before', 'after', 'because',
+]);
+
+/**
+ * Whether the COUNTED NOUN PHRASE right after the amount at `m` — up to three words, ending at the first preposition or
+ * conjunction (PR Review 5881529306: "three engineers for enterprise customers" counts engineers) — shares a naming word
+ * with the factor's label or unit.
+ */
 function wordsNameThisFactor(brief: string, m: RegExpMatchArray, label: unknown, unit: unknown): boolean {
   if (typeof m.index !== 'number') return false;
-  const after = /^\s+((?:[A-Za-z][A-Za-z-]*\s*){1,3})/.exec(brief.slice(m.index + m[0].length))?.[1] ?? '';
+  const window = /^\s+((?:[A-Za-z][A-Za-z-]*\s*){1,3})/.exec(brief.slice(m.index + m[0].length))?.[1] ?? '';
+  const words = window.trim().split(/\s+/);
+  const cut = words.findIndex((w) => PHRASE_BREAK.has(w.toLowerCase()));
+  const phrase = (cut === -1 ? words : words.slice(0, cut)).join(' ');
   const names = new Set([...namingWords(label), ...namingWords(unit)]);
-  return namingWords(after).some((w) => names.has(w));
+  return namingWords(phrase).some((w) => names.has(w));
 }
 
 /**
