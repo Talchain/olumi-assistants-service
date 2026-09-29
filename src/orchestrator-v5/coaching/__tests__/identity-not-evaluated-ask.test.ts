@@ -103,6 +103,30 @@ describe('the ask, one per typed reason (AIQ 5860888736)', () => {
     expect(a.assistant_text).not.toMatch(NEVER);
   });
 
+  it('SERVED (Canvas 5885532009, CEE 0ba55d2): the frameless target is an OUTCOME, so the ask names it and asks only for today', () => {
+    const S = JSON.parse(readFileSync(
+      new URL('./fixtures/served-identity-frame-missing-outcome-target-0ba55d2.json', import.meta.url), 'utf8',
+    )) as Rec;
+    // Precondition, read off the served graph: target frameless; both operands in their units; the goal is another node.
+    expect(node(S.graph, 'pro_mrr').kind).toBe('outcome');
+    expect(node(S.graph, 'pro_mrr').observed_state ?? null).toBeNull();
+    expect(node(S.graph, 'pro_mrr').goal_threshold_unit ?? null).toBeNull();
+    expect(node(S.graph, 'pro_price').observed_state.unit).toBe('£ per subscriber per month');
+    expect(node(S.graph, 'paying_pro_subscribers').observed_state.unit).toBe('subscribers');
+    const critiques = [{
+      code: 'IDENTITY_NOT_EVALUATED',
+      affected_node_ids: ['pro_mrr', 'pro_price', 'paying_pro_subscribers'],
+      identity: { node_id: 'pro_mrr', operation: 'product', participants: ['pro_price', 'paying_pro_subscribers'], withheld_reason: 'identity_frame_missing' },
+    }];
+    const a = composeIdentityNotEvaluatedAsk(critiques, S.graph)!;
+    // An outcome has no target of its own: "what are you aiming for?" would ask for a figure nothing can hold (AIQ 5885470243).
+    expect(a.assistant_text).toBe(
+      'I can\'t work out “Pro MRR” as “Pro price” × “Paying Pro subscribers” without knowing what “Pro MRR” is measured in: '
+      + 'what unit is it in, and roughly what is it today?',
+    );
+    expect(a.chip_message).toBe('Ask me which unit “Pro MRR” is in.');
+  });
+
   it('CONTROL: a goal whose unit is on its threshold (goal_threshold_unit) is framed, so the operand fallback stands', () => {
     const g = clone(F.graph);
     delete node(g, 'mrr').observed_state;

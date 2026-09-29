@@ -210,11 +210,13 @@ export function composeIdentityNotEvaluatedAsk(critiques: unknown, graph: unknow
       // ISL's rule 1 frames the identity NODE as well as its operands (R3 #72 5884883932, DL 5884896233). Every
       // operand in its unit and the target in none → ask for the TARGET's, never again for units the user gave.
       if (unitless.length === 0 && !hasUnit(w.nodeId)) {
+        // Only a GOAL has a target of its own; an outcome's unit comes from today's figure alone (AIQ 5885470243).
+        const aim = target.kind === 'goal' ? ' or what are you aiming for' : '';
         return {
           reason: w.reason,
           node_id: w.nodeId,
           assistant_text: `I can't work out ${q(T)} ${asFormula} without knowing what ${q(T)} is measured in: `
-            + 'what unit is it in, and roughly what is it today or what are you aiming for?',
+            + `what unit is it in, and roughly what is it today${aim}?`,
           chip_label: 'Give its unit',
           chip_message: `Ask me which unit ${q(T)} is in.`,
         };
