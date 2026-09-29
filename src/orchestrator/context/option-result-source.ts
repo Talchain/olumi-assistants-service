@@ -85,10 +85,17 @@ function filterObjectEntries(arr: readonly unknown[]): ReadonlyArray<Record<stri
 export function readOptionResultSources(
   envelope: Record<string, unknown>,
 ): ReadonlyArray<ReadonlyArray<Record<string, unknown>>> {
-  const sources = readEverySource(envelope);
-  // ⛔ ABSENT STAYS ABSENT (AIQ 5886457733; DL 5886379820): when the run WITHHELD its per-option goal figures, a
-  // downstream copy (`results[]`, `decision_brief.options`) is never read in their place. Current-first only.
-  return runWithheldGoalFigures(envelope) ? sources.slice(0, 1) : sources;
+  // ⛔ ABSENT STAYS ABSENT (AIQ 5886457733; DL 5886379820; PR Review CR @ e4c7f366): when the run WITHHELD its per-option
+  // goal figures, ONLY the current carrier is read — `option_comparison` (top level, or as the UI nests it) — and nothing
+  // when it is absent or empty. A downstream copy (`results[]`, `results.options`, `results.option_results`,
+  // `decision_brief.options`) is never read in its place, even as the first array present.
+  if (runWithheldGoalFigures(envelope)) {
+    const current = [envelope.option_comparison, readRecord(envelope.results)?.option_comparison]
+      .map((v) => (Array.isArray(v) ? filterObjectEntries(v) : []))
+      .find((entries) => entries.length > 0);
+    return current === undefined ? [] : [current];
+  }
+  return readEverySource(envelope);
 }
 
 /**

@@ -237,3 +237,44 @@ describe('the Agent sees the joint only as a LIMITS figure, never as `goal_fit`'
     expect(analysisResultForAgent(block(noJoint))).not.toHaveProperty('limits_note');
   });
 });
+
+describe('under #416\'s code, ONLY the current carrier is read — a stale copy is never the first source (PR Review CR @ e4c7f366)', () => {
+  // #416's warning, NO current option_comparison, and stale numeric copies in results[] and decision_brief.options.
+  const staleOnly = (): Json => {
+    const x = withheld417();
+    const stale = (SERVED.option_comparison as Json[]).map((o) => ({ option_id: o.option_id, option_label: o.option_label, win_probability: o.win_probability, probability_of_goal: 0.5, outcome_mean: 1 }));
+    return { ...x, option_comparison: [], results: stale, decision_brief: { ...x.decision_brief, options: stale } };
+  };
+
+  it('RED: no/empty option_comparison + numeric results[] and brief copies → no source, no winner, no margin', () => {
+    const r = staleOnly();
+    expect(winnerOptionResultSource(r)).toEqual([]);
+    const s = compactAnalysis(r as never)!;
+    expect(s.winner.option_id).toBe('');
+    expect(s.margin).toBeNull();
+    expect(s.figures_withheld?.code).toBe(CODE); // the typed reason stays
+  });
+
+  it('…and the context pack ranks nothing, names no leader and no target fit — the typed reason instead', () => {
+    const r = staleOnly();
+    const p = projectAnalysis({ ...compactAnalysis(r as never)!, option_goal_fits: deriveOptionGoalFitsFromEnrichment(r), goal_fit: deriveGoalFitFromEnrichment(r) } as never, null)!;
+    expect(p.leading_option).toBeNull();
+    expect(p.runner_up).toBeNull();
+    expect(p.margin_pp).toBeNull();
+    expect(p.options ?? []).toEqual([]);
+    expect(p.figures_withheld?.reason_code).toBe(CODE);
+    expect(JSON.stringify(p)).not.toMatch(/goal_fit_probability/);
+  });
+
+  it('the UI-nested current carrier (`results.option_comparison`) is still read; its sibling copies are not', () => {
+    const x = withheld417();
+    const nested = { ...x, option_comparison: undefined, results: { option_comparison: x.option_comparison, options: [{ option_id: 'stale', win_probability: 0.9 }] } };
+    expect(winnerOptionResultSource(nested).map((o) => o.option_id)).toEqual((x.option_comparison as Json[]).map((o) => o.option_id));
+  });
+
+  it('CONTROL: WITHOUT the typed warning, today\'s walk is unchanged (the copy supplies the winner)', () => {
+    const r = withoutWarning(staleOnly());
+    expect(winnerOptionResultSource(r).some((o) => typeof o.win_probability === 'number')).toBe(true);
+    expect(compactAnalysis(r as never)!.winner.option_id).not.toBe('');
+  });
+});
