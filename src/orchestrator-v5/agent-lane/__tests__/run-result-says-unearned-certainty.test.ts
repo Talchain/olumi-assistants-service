@@ -64,7 +64,7 @@ function world(w: World = {}) {
   return { caps: createAgentCapabilities(d, new ProposalStore()), reads };
 }
 const run = async (w: World = {}): Promise<Json> => await world(w).caps.runAnalysis(ctx, { reason: 'Run it.' }) as Json;
-type Certainty = { option: string; option_id: string; probability_of_goal: 0 | 1; earned: boolean; say?: string };
+type Certainty = { option: string; option_id: string; probability_of_goal?: 0 | 1; earned: boolean; say?: string };
 const p59 = (r: Json): Certainty => (r.goal_certainty.options as Certainty[]).find((x) => x.option_id === 'raise_price_to_59')!;
 
 describe('the EXECUTED Run\'s own stored decision (#2280), attributed by its run-fact identity', () => {
@@ -73,7 +73,8 @@ describe('the EXECUTED Run\'s own stored decision (#2280), attributed by its run
     expect(stored.break_even, 'precondition: the stored decision carries the stated-level break-even').toBeDefined();
     const r = await run();
     expect(r.goal_certainty?.options, JSON.stringify(Object.keys(r))).toBeDefined();
-    expect(p59(r)).toEqual(expect.objectContaining({ option: 'Raise price to £59', probability_of_goal: 1, earned: false, say: stored.say }));
+    expect(p59(r)).toEqual(expect.objectContaining({ option: 'Raise price to £59', earned: false, say: stored.say }));
+    expect(p59(r)).not.toHaveProperty('probability_of_goal');
     expect(p59(r).say).toMatch(/5\.9%/);
     expect(r.goal_certainty.note).toMatch(/never .*100%.*certain/i);
   });

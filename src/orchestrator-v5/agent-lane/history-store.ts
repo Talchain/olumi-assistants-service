@@ -1,3 +1,5 @@
+import { compareAnalysisRunFactIdentity } from '../context/analysis-interpretation-identity.js';
+
 /**
  * Conversation history, bounded in both directions.
  *
@@ -169,10 +171,12 @@ const recordOf = (x: unknown): Rec | undefined => (x !== null && typeof x === 'o
  * The route's final readback of the turn (`readBackState`, agent-v1-turn.ts): the scenario's canonical verdict and the
  * result that verdict selected. `undefined` — or a readback that failed — vouches for nothing.
  */
-export interface KeptRunReadback { readonly analysisState?: unknown; readonly analysisResult?: unknown }
+export interface KeptRunReadback { readonly scenarioId?: string; readonly analysisState?: unknown; readonly analysisResult?: unknown }
 
 /** A kept run the model has moved past. */
 export const STALE_RUN_NOTE = 'The model has changed since this run, so these are not the current model’s figures: do not quote them as current. Offer to run the analysis again.';
+/** A newer Run can replace the kept one even when the analysis-affecting graph did not change. */
+export const SUPERSEDED_RUN_NOTE = 'A different analysis run is selected now, so figures from this earlier run are not the current run’s figures. Use the latest saved run.';
 /** A kept run no readback could vouch for (the read failed): fail closed, never presented as current. */
 export const UNCONFIRMED_RUN_NOTE = 'Olumi could not confirm this run is of the current model, so do not quote its figures as the current model’s.';
 
@@ -180,12 +184,12 @@ export const UNCONFIRMED_RUN_NOTE = 'Olumi could not confirm this run is of the 
 const HEAVY_WHEN_PERMITTED: ReadonlySet<string> = new Set(['robustness', 'p_win_sensitivity', 'factor_evppi', 'edge_e_values']);
 /** R&C's pinned KEY set, verbatim, matched on keys never labels; `decision_sensitivity` is the one key AIQ keeps. */
 const RE_RANKING_KEY = /confidence|near_tie|goal_fit|separation|alternative_winner|win_probabilit|sensitivity|evpi|enrichment/i;
-/** AIQ's named withheld drops the pinned set does not match (the per-option means go with the whitelist below). */
+/** AIQ's named withheld drops the pinned set does not match. */
 const RE_RANKING_NAMED: ReadonlySet<string> = new Set(['probability_of_goal', 'probability_of_joint_goal', 'all_limits_hold_probability', 'conditional_winners', 'flip_thresholds', 'leading_option_id', 'run_delta']);
 /** Until B5 `per_limit` lands, no key naming constraint probabilities is kept, whatever the permission. */
 const namesConstraintProbability = (key: string): boolean => /constraint/i.test(key) && /probabilit/i.test(key);
 /** What a withheld run keeps at its top level, in this order (a fixed order is what makes a re-prune byte-identical). */
-const KEPT_WHEN_WITHHELD = ['ok', 'mutated', 'ran', 'status', 'what_is_missing', 'blockers', 'options', 'result', 'claim_permissions', 'goal_chance', 'goal_certainty'] as const;
+const KEPT_WHEN_WITHHELD = ['ok', 'mutated', 'ran', 'status', 'what_is_missing', 'blockers', 'options', 'result', 'claim_permissions', 'goal_chance', 'goal_certainty', 'run_identity'] as const;
 /** A compared option's identity — its id and its label, however the producer named them; nothing it scored. */
 const optionLabelOf = (o: unknown): Rec => {
   const r = recordOf(o) ?? {};
@@ -200,10 +204,8 @@ const withoutKeys = (value: unknown, drop: (key: string) => boolean): unknown =>
   if (r === undefined) return value;
   const out: Rec = {};
   for (const [k, v] of Object.entries(r)) {
-    // Kept WHOLE: `decision_sensitivity` (AIQ's one key) and `goal_certainty` — the Run's own recorded decision on each
-    // 0/100% (earned, or unearned with its `say`), exactly as the live turn gave it (P0 builder #72 5889970136: without it
-    // a follow-up said "all three withheld because of churn" over £49's earned 0).
-    if (k === 'decision_sensitivity' || k === 'goal_certainty') out[k] = v;
+    // The selected Run's outcome range is kept exactly as recorded, but only on its own whitelisted option rows.
+    if (k === 'decision_sensitivity' || k === 'outcome') out[k] = v;
     else if (!drop(k)) out[k] = withoutKeys(v, drop);
   }
   return out;
@@ -214,21 +216,72 @@ const pick = (r: Rec, keys: readonly string[]): Rec => {
   return out;
 };
 
-/** A withheld run's result: its words, its stamp, what decides it, each option's labels, and the warnings on it. */
-function withheldResult(result: Rec): Rec {
+/** An unearned 0/1 is a diagnostic input, never a figure for the Agent to repeat. */
+function keptGoalCertainty(value: unknown): unknown {
+  const certainty = recordOf(value);
+  if (certainty === undefined || !Array.isArray(certainty.options)) return value;
+  return {
+    ...pick(certainty, ['unchecked', 'note']),
+    options: certainty.options.map((raw) => {
+      const row = recordOf(raw) ?? {};
+      return {
+        ...pick(row, ['option', 'option_id', 'earned', 'say']),
+        ...(row.earned === true && (row.probability_of_goal === 0 || row.probability_of_goal === 1)
+          ? { probability_of_goal: row.probability_of_goal } : {}),
+      };
+    }),
+  };
+}
+
+/** A withheld run's result: words, stamp, decision sensitivity, and only recorded per-option outcomes when current. */
+function withheldResult(result: Rec, selected: unknown, goalCertainty: unknown, current: boolean): Rec {
   // A result already projected carries these at its top level: re-projecting reads them back from there.
   const source = recordOf(result.enrichment) ?? result;
   const compared = Array.isArray(source.option_comparison) ? source.option_comparison : undefined;
+  const selectedBlock = recordOf(selected);
+  const selectedSource = recordOf(selectedBlock?.enrichment) ?? selectedBlock;
+  const selectedCompared = selectedSource?.option_comparison;
+  const byId = new Map<string, Rec>();
+  if (current && Array.isArray(selectedCompared)) {
+    for (const raw of selectedCompared) {
+      const row = recordOf(raw);
+      const id = row?.option_id ?? row?.id;
+      if (typeof id === 'string' && !byId.has(id)) byId.set(id, row!);
+    }
+  }
+  const certaintyRows = recordOf(goalCertainty)?.options;
+  const certaintyById = new Map<string, Rec>();
+  if (Array.isArray(certaintyRows)) {
+    for (const raw of certaintyRows) {
+      const row = recordOf(raw);
+      if (typeof row?.option_id === 'string') certaintyById.set(row.option_id, row);
+    }
+  }
   return {
     ...pick(result, ['type', 'summary', 'computed_against_hash', 'decision_sensitivity']),
-    ...(compared !== undefined ? { option_comparison: compared.map(optionLabelOf) } : {}),
+    ...(compared !== undefined ? { option_comparison: compared.map((raw) => {
+      const labels = optionLabelOf(raw);
+      const row = recordOf(raw);
+      const id = labels.option_id;
+      const outcome = current ? row?.outcome ?? (typeof id === 'string' ? byId.get(id)?.outcome : undefined) : undefined;
+      const certainty = typeof id === 'string' ? certaintyById.get(id) : undefined;
+      // If this option has an unearned certainty, its range cannot travel without its own caveat.
+      const say = certainty?.earned === false ? certainty.say : undefined;
+      const mayKeepOutcome = outcome !== undefined && (certainty?.earned !== false || (typeof say === 'string' && say.trim() !== ''));
+      return {
+        ...labels,
+        ...(mayKeepOutcome ? { outcome } : {}),
+        ...(mayKeepOutcome && typeof say === 'string' ? { say } : {}),
+      };
+    }) } : {}),
     ...(source.inference_warnings !== undefined ? { inference_warnings: source.inference_warnings } : {}),
   };
 }
 
 /**
  * The stale marking, re-derived from THIS readback every time (never sticky): current only when the canonical verdict
- * is `complete_current` AND the result it selected carries this run's own stamp.
+ * is `complete_current` AND the selected result has this run's complete fact identity. Graph hash alone is not Run
+ * identity: two analyses of the unchanged graph have the same hash and different `computed_at` values.
  *
  * ⛔ NOT THE READBACK'S WIRE `graph_hash`. That is the RAW hash of the persisted bytes, the writers' compare-and-set
  * base (assist.v1.scenario-graph.ts); `computed_against_hash` is the run's `graph_hash_at_run` over the CANONICAL
@@ -238,15 +291,22 @@ function withheldResult(result: Rec): Rec {
  * route's own words: "`analysis_state.run_state` is the currency verdict". Its `analysis_result` is present only on a
  * fresh verdict for the current graph and carries the SAME canonical stamp, so the two stamps compare in one space.
  */
-function staleNoteFor(result: Rec, readback: KeptRunReadback | undefined): string | undefined {
-  const kind = recordOf(recordOf(readback?.analysisState)?.run_state)?.kind;
-  const hashOf = (x: unknown): string | undefined => (typeof x === 'string' && x !== '' ? x : undefined);
-  const selected = hashOf(recordOf(readback?.analysisResult)?.computed_against_hash);
-  const stamp = hashOf(result.computed_against_hash);
-  if (kind === 'complete_current' && stamp !== undefined && selected === stamp) return undefined;
+function staleNoteFor(run: Rec, result: Rec, readback: KeptRunReadback | undefined): string | undefined {
+  const selectedState = recordOf(recordOf(readback?.analysisState)?.run_state);
+  const kind = selectedState?.kind;
+  const ownIdentity = recordOf(run.run_identity);
+  const selectedIdentity = {
+    scenario_id: readback?.scenarioId,
+    graph_hash_at_run: recordOf(readback?.analysisResult)?.computed_against_hash,
+    computed_at: selectedState?.computed_at,
+  };
+  const binding = compareAnalysisRunFactIdentity(ownIdentity, selectedIdentity);
+  const ownHashMatches = ownIdentity?.graph_hash_at_run === result.computed_against_hash;
+  if (kind === 'complete_current' && ownHashMatches && binding.status === 'match') return undefined;
+  if (kind === 'complete_current' && binding.status === 'mismatch' && binding.reason === 'computed_at_conflict') return SUPERSEDED_RUN_NOTE;
   // MOVED: the verdict says so, or the current run is of another model. A run with no stamp, or a verdict that is
   // neither (unknown, blocked, running…), is only unconfirmed — the note says no more than is known.
-  const moved = kind === 'complete_stale' || (kind === 'complete_current' && stamp !== undefined && selected !== undefined);
+  const moved = kind === 'complete_stale' || (kind === 'complete_current' && binding.status === 'mismatch');
   return moved ? STALE_RUN_NOTE : UNCONFIRMED_RUN_NOTE;
 }
 
@@ -259,8 +319,8 @@ function staleNoteFor(result: Rec, readback: KeptRunReadback | undefined): strin
  *     edge_e_values leave `result.enrichment`; summary, win_probabilities, option_comparison, decision_brief,
  *     inference_warnings, flip_thresholds, decision_sensitivity and computed_against_hash stay.
  *   - WITHHELD (anything else — fail closed): NOTHING that re-ranks. A whitelist (KEPT_WHEN_WITHHELD; the result keeps
- *     its summary, stamp, decision_sensitivity, inference_warnings and each option's LABELS; `options` keeps each one's
- *     label and levels), then R&C's key set and AIQ's named keys are dropped at every depth as a second fence.
+ *     its summary, stamp, decision_sensitivity, inference_warnings, each option's label and, ONLY while this selected
+ *     Run is current, its recorded outcome range; `options` keeps labels and levels. Ranking keys still drop.
  *   - BOTH: no constraint probabilities (until B5 per_limit), and `stale: true` with a one-line note unless the turn's
  *     readback vouches for THIS run (`staleNoteFor`).
  * ⛔ THE RUN CHIP'S `canonical_state` IS NOT KEPT, except a permitted run's `run_delta`. It is the post-run readback the
@@ -274,6 +334,7 @@ function keptRunOf(output: unknown, readback: KeptRunReadback | undefined): Rec 
   const result = recordOf(run?.result);
   if (run === undefined || result === undefined) return undefined;
   const permitted = recordOf(run.claim_permissions)?.leader_may_be_named === true;
+  const note = staleNoteFor(run, result, readback);
   let kept: Rec;
   if (permitted) {
     const { stale: _s, stale_note: _n, canonical_state: canonical, ...rest } = run;
@@ -288,10 +349,10 @@ function keptRunOf(output: unknown, readback: KeptRunReadback | undefined): Rec 
     };
     kept = withoutKeys(kept, namesConstraintProbability) as Rec;
   } else {
-    kept = withoutKeys({ ...pick(run, KEPT_WHEN_WITHHELD), result: withheldResult(result) },
+    kept = withoutKeys({ ...pick(run, KEPT_WHEN_WITHHELD), result: withheldResult(result, readback?.analysisResult, run.goal_certainty, note === undefined) },
       (k) => (RE_RANKING_KEY.test(k) || RE_RANKING_NAMED.has(k) || namesConstraintProbability(k))) as Rec;
   }
-  const note = staleNoteFor(result, readback);
+  if (kept.goal_certainty !== undefined) kept.goal_certainty = keptGoalCertainty(run.goal_certainty);
   return note === undefined ? kept : { ...kept, stale: true, stale_note: note };
 }
 
