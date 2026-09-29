@@ -42,6 +42,7 @@ import {
 } from '../session/pending-action.js';
 import { log } from '../../utils/telemetry.js';
 import { approvalChipIdFor, readingOfLinkEffectApproval } from './approval-chips.js';
+import { readingOfIdentityApproval } from './identity-card.js';
 import { computeProposalId, type ProposalStore, type StructuredProposal } from './proposal.js';
 
 /**
@@ -127,8 +128,8 @@ function liveCarrierOf(pa: PendingAction, proposalId: string): LiveCarrier | und
   if (!Number.isFinite(expires)) return undefined;
   const { public_label: label, public_message: message } = pa.action as { public_label?: unknown; public_message?: unknown };
   if (typeof label !== 'string' || typeof message !== 'string') return undefined;
-  // A link-effect card's words carry its reading, so the card put back shows exactly what the offer showed.
-  const detail = readingOfLinkEffectApproval(message);
+  // A link-effect or identity card's words carry its reading, so the card put back shows exactly what the offer showed.
+  const detail = readingOfLinkEffectApproval(message) ?? readingOfIdentityApproval(message);
   return { proposal_id: proposalId, chip: { id: pa.chip_id, label, message, ...(detail !== undefined ? { detail } : {}) }, expires_at_ms: expires };
 }
 
