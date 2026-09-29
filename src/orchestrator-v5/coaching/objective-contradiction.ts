@@ -160,7 +160,8 @@ import { passesAssistantTextContentDefences } from './assistant-text-defences.js
 export interface ObjectiveOptionView {
   readonly option_id: string;
   readonly option_label: string;
-  readonly win_probability: number;
+  /** `null` = ABSENT: the run gave none. Never read as 0, and no leader is taken from it. */
+  readonly win_probability: number | null;
   readonly probability_of_goal?: number;
   readonly status?: string;
 }
@@ -501,7 +502,7 @@ function isComparable(option: ObjectiveOptionView): boolean {
   return option.status === undefined || option.status === 'computed';
 }
 
-function finite(value: number | undefined): value is number {
+function finite(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
@@ -598,11 +599,13 @@ export function detectGoalAttainmentContradiction(
 ): GoalAttainmentContradiction | null {
   const comparable = options.filter(isComparable);
   if (comparable.length < 2) return null;
+  // ⛔ No leader from ABSENT figures (AIQ 5886457733): one comparable option with no win probability → no claim.
+  if (comparable.some((o) => o.win_probability === null)) return null;
 
   let leader: ObjectiveOptionView | null = null;
   for (const option of comparable) {
     if (!finite(option.win_probability)) continue;
-    if (leader === null || option.win_probability > leader.win_probability) {
+    if (leader === null || option.win_probability > (leader.win_probability as number)) {
       leader = option;
     }
   }
@@ -770,11 +773,13 @@ export function detectDirectionalContradiction(
 
   const comparable = options.filter(isComparable);
   if (comparable.length < 2) return null;
+  // ⛔ No leader from ABSENT figures (AIQ 5886457733): one comparable option with no win probability → no claim.
+  if (comparable.some((o) => o.win_probability === null)) return null;
 
   let leader: ObjectiveOptionView | null = null;
   for (const option of comparable) {
     if (!finite(option.win_probability)) continue;
-    if (leader === null || option.win_probability > leader.win_probability) {
+    if (leader === null || option.win_probability > (leader.win_probability as number)) {
       leader = option;
     }
   }
@@ -813,7 +818,8 @@ export function detectDirectionalContradiction(
 
   let pursuingLeader: ObjectiveOptionView | null = null;
   for (const option of pursuing) {
-    if (pursuingLeader === null || option.win_probability > pursuingLeader.win_probability) {
+    if (!finite(option.win_probability)) continue;
+    if (pursuingLeader === null || option.win_probability > (pursuingLeader.win_probability as number)) {
       pursuingLeader = option;
     }
   }
@@ -1254,7 +1260,7 @@ export function readObjectiveOptionViews(
     const view: ObjectiveOptionView = {
       option_id: optionId,
       option_label: optionLabel,
-      win_probability: typeof record.win_probability === 'number' ? record.win_probability : 0,
+      win_probability: typeof record.win_probability === 'number' ? record.win_probability : null,
       ...(typeof record.probability_of_goal === 'number'
         ? { probability_of_goal: record.probability_of_goal }
         : {}),

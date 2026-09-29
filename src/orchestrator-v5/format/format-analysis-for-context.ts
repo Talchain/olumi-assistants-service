@@ -440,6 +440,12 @@ export interface DisplaySafeAnalysis {
    */
   readonly constraint_infeasible_note?: string;
   /**
+   * ⛔ ABSENT STAYS ABSENT (AIQ 5886457733) — the pack's `figures_withheld.note`, verbatim: the run withheld its goal
+   * figures, or an option has no win probability, so no option leads. NEVER dropped by the char-budget guard (not in
+   * {@link DISPLAY_ANALYSIS_TRUNCATION_ORDER}): it stands in place of a winner. ABSENT otherwise.
+   */
+  readonly figures_withheld_note?: string;
+  /**
    * T1 claim safety (ROADMAP 1.231) — the DISCLOSED absence of the option
    * ranking on a turn whose persisted constraint verdict withholds the
    * leading-option claim.
@@ -1242,6 +1248,11 @@ export function formatAnalysisForContext(
     raw.constraint_infeasible_note.length > 0
   ) {
     out.constraint_infeasible_note = raw.constraint_infeasible_note;
+  }
+
+  // ⛔ Absent stays absent — the typed reason in place of a winner, verbatim; never droppable by the budget guard.
+  if (raw.figures_withheld !== undefined && raw.figures_withheld.note.length > 0) {
+    out.figures_withheld_note = raw.figures_withheld.note;
   }
 
   // CONTEXT/MEMORY V5 defect 2 — in-band staleness disclosure. Set BEFORE the
