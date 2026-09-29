@@ -171,6 +171,8 @@ export interface CandidateModel {
    * Admission takes it only when it is verbatim brief text (`decisionEntityFor`); it is never read as English.
    */
   readonly decision_question?: string | null;
+  /** R1 (0.61.0): labels of quantities that exist only because of the decision (`markChangeCreatedQuantities`). Absent = none. */
+  readonly change_created?: readonly string[];
 }
 
 /**
@@ -2460,6 +2462,30 @@ export function admitStatedGoalLevel(args: {
  */
 function goalLevelIsEstimated(goal: CandidateModel['goal']): boolean {
   return !(goal.baseline_known === true && (goal.baseline_provenance ?? goal.provenance) === 'explicit');
+}
+
+/**
+ * ⭐ R1 (0.61.0) — THE TYPED CHANGE-CREATED MARKER: `quantity_frame: 'change'` on a node that exists ONLY because of the
+ * decision ("migration downtime", "a one-off switching cost"), so today it is 0 by definition (AIQ #72 5881263293 /
+ * 5881419717; MG 5881501167). Olumi's reading, declared by the drafter in `change_created`; NEVER inferred from "computed
+ * and held at 0" (eng-hiring's placeholder £0 salary spend is the false pass that inference would make).
+ *
+ * The reading YIELDS to any non-zero level the node holds (the contract: a stated non-zero today makes it yield), so a
+ * node with a real level is never marked. A draft with no `change_created` (every pre-marker capture) marks nothing.
+ * PLoT reads the marker: a level limit on a marked node is checked as the node's own change (plot-lite-service #407).
+ */
+export function markChangeCreatedQuantities<N extends { readonly label?: unknown; readonly kind?: unknown; readonly observed_state?: unknown }>(
+  nodes: readonly N[],
+  changeCreated: readonly unknown[] | undefined,
+): N[] {
+  const named = new Set((changeCreated ?? []).filter((l): l is string => typeof l === 'string').map((l) => canonicalLabel(l)));
+  if (named.size === 0) return [...nodes];
+  return nodes.map((n) => {
+    if ((n.kind !== 'factor' && n.kind !== 'outcome') || typeof n.label !== 'string' || !named.has(canonicalLabel(n.label))) return n;
+    const os = n.observed_state as { value?: unknown; raw_value?: unknown } | null | undefined;
+    if ([os?.value, os?.raw_value].some((v) => typeof v === 'number' && v !== 0)) return n;
+    return { ...n, quantity_frame: 'change' as const };
+  });
 }
 
 /**

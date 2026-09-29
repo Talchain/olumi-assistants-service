@@ -86,6 +86,7 @@ function outcomeDraft(over: Record<string, unknown> = {}) {
     ],
     identities: [],
     unknowns: [],
+    change_created: [],
     decision_question: null,
     ...over,
   };
@@ -128,6 +129,7 @@ function factorDraft() {
     ],
     identities: [],
     unknowns: [],
+    change_created: [],
     decision_question: null,
   };
 }

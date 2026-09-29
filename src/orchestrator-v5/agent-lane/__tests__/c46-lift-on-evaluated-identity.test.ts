@@ -76,6 +76,7 @@ function paul(): Record<string, unknown> {
     ],
     identities: [{ outcome: 'MRR', operation: 'product', factors: ['Pro plan price', 'Pro subscribers'], provenance: 'inferred' }],
     unknowns: [],
+    change_created: [],
     decision_question: null,
   };
 }
@@ -124,6 +125,7 @@ function twoPlans(): Record<string, unknown> {
       { outcome: 'Team MRR', operation: 'product', factors: ['Team plan price', 'Team seats'], provenance: 'inferred' },
     ],
     unknowns: [],
+    change_created: [],
     decision_question: null,
   };
 }

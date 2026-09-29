@@ -6,7 +6,8 @@
  * NEVER edited. To replay one through today's strict schema, this supplies exactly what admission itself does with such
  * a draft, and nothing else:
  *   · a goal with no `frame` → `frame: 'level'` (admission: an absent frame is a level, the candidate's own doc);
- *   · a limit framed `delta` (the pre-R1 prompt's "a CHANGE from today") → `change_abs` (`writtenLimitFrame`).
+ *   · a limit framed `delta` (the pre-R1 prompt's "a CHANGE from today") → `change_abs` (`writtenLimitFrame`);
+ *   · a draft with no `change_created` → `[]` (admission: absent marks nothing).
  * Every other key, and every value, is the capture's own. A copy is returned; the parsed capture is not mutated.
  */
 export function asCurrentDraft<T>(capture: T): T {
@@ -17,6 +18,8 @@ export function asCurrentDraft<T>(capture: T): T {
     const out: Record<string, unknown> = {};
     for (const [k, x] of Object.entries(o)) out[k] = walk(x, k === 'constraints');
     if ('metric' in o && 'target_stated' in o && !('frame' in o)) out['frame'] = 'level';
+    // A draft from before the change-created marker declared none (admission: absent marks nothing).
+    if ('goal' in o && 'factors' in o && !('change_created' in o)) out['change_created'] = [];
     if (inConstraints && 'metric' in o && o['frame'] === 'delta') out['frame'] = 'change_abs';
     return out;
   };

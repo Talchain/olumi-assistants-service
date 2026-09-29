@@ -115,6 +115,7 @@ function candidateFromServed(g: SGraph, opts: { olumi?: 'ai_proposed' | 'inferre
     ],
     identities: [],
     unknowns: opts.unknowns ?? [],
+    change_created: [],
     decision_question: null,
   } as unknown as CandidateModel & { unknowns: string[] };
 }

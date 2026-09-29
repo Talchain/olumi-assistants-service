@@ -78,6 +78,7 @@ function t3(aiToChurn: Size, aiToChurnProvenance: Prov = 'inferred') {
     ],
     identities: [],
     unknowns: [],
+    change_created: [],
     decision_question: null,
   };
 }
@@ -207,6 +208,7 @@ function saas(priceToChurn: Size = { amount: 0.5, per: 10, by: 'ai_proposed' }) 
     ],
     identities: [],
     unknowns: [],
+    change_created: [],
     decision_question: null,
   };
 }

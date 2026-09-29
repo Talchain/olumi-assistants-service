@@ -40,7 +40,7 @@ function draft(release: { baseline_value: number | null; plausible_max: number; 
       link('Pro feature release delivered', 'MRR', 'positive'), link('Pro feature release delivered', 'Monthly churn rate', 'negative'),
       link('Monthly churn rate', 'MRR', 'negative'),
     ],
-    identities: [], unknowns: [] as string[], decision_question: null,
+    identities: [], unknowns: [] as string[], change_created: [] as string[], decision_question: null,
   };
 }
 

@@ -38,6 +38,7 @@ function candidate(frame?: unknown) {
       link('Engineering spend', 'Billing capability'), link('Platform fees', 'Billing capability'),
     ],
     unknowns: [],
+    change_created: [],
   };
 }
 type Registered = { goal_constraints?: Record<string, unknown>[] } | null;

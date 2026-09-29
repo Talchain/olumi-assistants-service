@@ -50,6 +50,7 @@ function journeyC(subscribers: number | null, withProduct = true) {
       ? [{ outcome: 'MRR', operation: 'product' as const, factors: ['Pro plan price', 'Pro paying subscribers'], provenance: 'ai_proposed' }]
       : [],
     unknowns: [] as string[], decision_question: null,
+    change_created: [],
   };
 }
 

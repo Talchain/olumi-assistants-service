@@ -35,7 +35,7 @@
 
 import { createHash } from 'node:crypto';
 import { FRESH_READ } from '../turn-read-cache.js';
-import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, productIdentityOpenQuestions, sumIdentityOpenQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
+import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, markChangeCreatedQuantities, canonicalLabel, carryWithheldOptions, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, productIdentityOpenQuestions, sumIdentityOpenQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -195,12 +195,15 @@ export function buildCandidateSchema(): Record<string, unknown> {
         provenance,
       }, ['outcome', 'operation', 'factors', 'provenance']) },
     unknowns: { type: 'array', items: { type: 'string' } },
+    // R1 (0.61.0 `quantity_frame: 'change'`, AIQ #72 5881263293): the typed change-created marker, Olumi's reading.
+    change_created: { type: 'array', items: { type: 'string' }, description:
+      'The EXACT labels of factors or outcomes that exist ONLY because of the decision, so today they are 0 by definition. Empty when none.' },
     // ⭐ THE QUESTION CARD'S TITLE (Paul, 27 Sep: served "Decision: MRR"). COPIED, never written: admission takes it only
     // when it is verbatim brief text (`admit-model.ts` `decisionEntityFor`). REQUIRED so strict output must say "no
     // question" (null) rather than omit it.
     decision_question: { anyOf: [{ type: 'string' }, { type: 'null' }], description:
       'The question the brief asks, copied VERBATIM from the brief (only the question itself, without any lead-in clause), or null if it asks none.' },
-  }, ['goal', 'constraints', 'options', 'factors', 'risks', 'outcomes', 'links', 'identities', 'unknowns', 'decision_question']);
+  }, ['goal', 'constraints', 'options', 'factors', 'risks', 'outcomes', 'links', 'identities', 'unknowns', 'change_created', 'decision_question']);
 }
 
 export const BUILD_INSTRUCTIONS = [
@@ -258,7 +261,7 @@ export const BUILD_INSTRUCTIONS = [
   // ⛔ C46 (#70 5841215337): the analysis adds effects up, so a product is approximated and its sign can flip.
   'DECLARE A PRODUCT ONLY WHERE ONE HOLDS BY DEFINITION. When a quantity you keep is, by definition, other quantities you keep multiplied together — a plan’s revenue is its price times its paying subscribers; a cost is headcount times cost per head — add one entry to `identities`: `outcome` is that quantity’s EXACT label, `operation` "product", and `factors` the EXACT labels of every quantity multiplied. Still state each factor’s own link toward the outcome in `links`. Only a definition, never a correlation or a guess. `identities` is empty when none holds.',
   'THE GOAL METRIC MUST BE THE TERMINAL NODE. Every option needs a causal path that ends at the goal metric you named in `goal.metric`. Use that EXACT label as the endpoint of the final link \u2014 do not invent a near-synonym outcome like "X Improvement" for a goal called "X change", because a separate synonym leaves the goal disconnected and the model cannot be analysed at all.',
-  'EVERY LIMIT MUST NAME A NODE THE ANALYSIS CAN CHECK. Each `constraints[].metric` must be the EXACT label of a factor or outcome you keep in this model \u2014 a limit whose metric names no node is withheld from the model, and the analysis cannot check it. If the user limits a total such as cost, budget or spend, keep that total in the model as a factor the options set or an outcome their factors feed, wired toward the goal like every other factor, and use its exact label as the metric. State the `frame` of each limit: "level" when the user limits the value itself ("total first-year cost under \u00a3250k", "gross margin above 70%"); "change_abs" when they limit a CHANGE from today in the quantity\u2019s own unit ("churn no more than 2 points higher than now"); "change_rel" when they limit a PERCENTAGE change from today ("cost no more than 10% above today", "cut spend by at least 15%"): give `value` as that signed percentage (10, or -15) and `unit` "%". When the limit is on a cost, budget or spend, give that factor a `baseline_value` at what is spent on it today: 0 when nothing is, as for a new hire, a new system or a new budget. When the user limits a quantity whose current level the brief does not state, still give it a `baseline_value`: your provisional estimate, with baseline_known:false and provenance ai_proposed, never the user\u2019s (the user is asked for theirs) \u2014 a limit on a quantity with no level cannot be checked. Keep the direction the user stated: a budget, cost or spend cap is an upper bound and a floor such as a minimum margin is a lower bound; never add the opposite bound to the same limit. Type the comparator the user wrote: "<" for "under", "below" or "less than"; "<=" for "at most", "no more than" or "up to"; ">" for "over", "above" or "more than"; ">=" for "at least" or "no less than".',
+  'EVERY LIMIT MUST NAME A NODE THE ANALYSIS CAN CHECK. Each `constraints[].metric` must be the EXACT label of a factor or outcome you keep in this model \u2014 a limit whose metric names no node is withheld from the model, and the analysis cannot check it. If the user limits a total such as cost, budget or spend, keep that total in the model as a factor the options set or an outcome their factors feed, wired toward the goal like every other factor, and use its exact label as the metric. State the `frame` of each limit: "level" when the user limits the value itself ("total first-year cost under \u00a3250k", "gross margin above 70%"); "change_abs" when they limit a CHANGE from today in the quantity\u2019s own unit ("churn no more than 2 points higher than now"); "change_rel" when they limit a PERCENTAGE change from today ("cost no more than 10% above today", "cut spend by at least 15%"): give `value` as that signed percentage (10, or -15) and `unit` "%". When the limit is on a cost, budget or spend, give that factor a `baseline_value` at what is spent on it today: 0 when nothing is, as for a new hire, a new system or a new budget. When the user limits a quantity whose current level the brief does not state, still give it a `baseline_value`: your provisional estimate, with baseline_known:false and provenance ai_proposed, never the user\u2019s (the user is asked for theirs) \u2014 a limit on a quantity with no level cannot be checked. Keep the direction the user stated: a budget, cost or spend cap is an upper bound and a floor such as a minimum margin is a lower bound; never add the opposite bound to the same limit. Type the comparator the user wrote: "<" for "under", "below" or "less than"; "<=" for "at most", "no more than" or "up to"; ">" for "over", "above" or "more than"; ">=" for "at least" or "no less than". List in `change_created` the exact label of every factor or outcome that exists ONLY because of the decision, so it is 0 today by definition ("migration downtime", "a one-off switching cost", "implementation effort"). Never list a quantity that has a real level today, even one whose value you do not know ("annual salary spend", "monthly cloud cost", "churn").',
   // ⛔ THE LINK CONTRACT (#63 ruling 5793252993). There is NO default-positive
   // factor->goal repair in admission, by ruling: a sign nobody stated would be a
   // fabricated belief. So the drafter itself must state every link toward the
@@ -1445,7 +1448,8 @@ export async function buildModelFromBrief(
   const ceilingLevel = admitGoalLevelBesideHeldCeiling(heldGoal.nodes, candidate.goal, admitted.loss,
     (value, unit) => figureTheUserWrote(value, unit, brief));
   if (ceilingLevel.loss !== admitted.loss) admitted = { ...admitted, loss: ceilingLevel.loss };
-  const statedGoal = { ...heldGoal, nodes: [...ceilingLevel.nodes] };
+  // R1 (0.61.0): the drafter's typed change-created marker (`markChangeCreatedQuantities`; PLoT #407 reads it).
+  const statedGoal = { ...heldGoal, nodes: markChangeCreatedQuantities(ceilingLevel.nodes, candidate.change_created) };
   /**
    * ⭐ T2 PART 2 (PJ-E-A2; Canonical #2231 `NodeV3.goal_deadline_as_stated`, G1 contract): an `unresolved` deadline's
    * own words ("by Q3") are HELD on the goal — verbatim, never converted to a month count (that needs a year and a
