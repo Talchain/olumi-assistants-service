@@ -45,28 +45,28 @@ describe('Canvas\'s cloud-bill brief (saved live draft): the option and the fact
     expect(edges.some((e) => e.from === option.id && e.to === 'monthly_cloud_bill'), 'no option → goal shortcut').toBe(false);
     expect(r.not_represented).toContain('"Enterprise discount" names both an option and the factor it acts on, so the factor is called "Enterprise discount level" to keep the two apart.');
   });
-  it('12 (real build) — option, factor AND risk all "Enterprise discount": nothing is renamed, no risk is folded into a renamed factor, and the ambiguity is SAID', async () => {
+  it('12 (real build) — option, factor AND risk all "Enterprise discount": FAIL CLOSED AT REGISTRATION — nothing is saved, the refusal names why', async () => {
     const c = structuredClone(FX.candidate) as Rec;
     c.risks = [...(c.risks ?? []), { label: 'Enterprise discount', provenance: 'inferred' }];
     const pure = keepOptionsAndQuantitiesApart(c as CandidateModel);
     expect(pure.renamed).toEqual([]);
-    expect(pure.ambiguous).toEqual([{ option: 'Enterprise discount', owners: ['factor', 'risk'] }]);
+    expect(pure.ambiguous).toEqual([{ option: 'Enterprise discount', owners: ['factor', 'risk'], because: 'owners' }]);
     const { r, g } = await build(c);
-    expect((g.nodes as Rec[]).filter((n) => /enterprise discount level/i.test(String(n.label)))).toEqual([]);
-    expect((g.nodes as Rec[]).filter((n) => n.id === 'enterprise_discount')).toHaveLength(1);
-    expect(r.not_represented).toContain('"Enterprise discount" names an option and also a factor and a risk in this model, so they could not be told apart and are kept as one item. Say what each one is and they can be separated.');
+    expect(g).toBeNull();
+    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'option_name_ambiguous' });
+    expect(r.detail).toBe('"Enterprise discount" names an option and also a factor and a risk in this model, so they could not be told apart and nothing was saved. Say what each one is, in different words, and the model can be built.');
+    expect(r.ambiguous_names).toEqual([{ option: 'Enterprise discount', owners: ['factor', 'risk'], because: 'owners' }]);
   });
-  it('8 (real build) — a link from the shared name to a RISK may be the option\'s: nothing is renamed, and no factor-origin link to that risk is made', async () => {
+  it('8 (real build) — a link from the shared name to a RISK may be the option\'s: nothing is renamed, and the build FAILS CLOSED (nothing saved, the reason named)', async () => {
     const c = structuredClone(FX.candidate) as Rec;
     c.risks = [...(c.risks ?? []), { label: 'Provider lock-in', provenance: 'inferred' }];
     c.links = [...c.links, { from: 'Enterprise discount', to: 'Provider lock-in', direction: 'positive', provenance: 'inferred' }];
     expect(keepOptionsAndQuantitiesApart(c as CandidateModel).renamed).toEqual([]);
     const { r, g } = await build(c);
-    expect((g.nodes as Rec[]).some((n) => n.label === 'Enterprise discount level')).toBe(false);
-    const factorIds = new Set((g.nodes as Rec[]).filter((n) => n.kind === 'factor').map((n) => n.id));
-    const risk = (g.nodes as Rec[]).find((n) => n.label === 'Provider lock-in');
-    expect((g.edges as Rec[]).some((e) => factorIds.has(e.from) && e.to === risk?.id && /enterprise_discount/.test(String(e.from)))).toBe(false);
-    expect(((r.not_represented ?? []) as string[]).some((l) => /keep the two apart/.test(l))).toBe(false);
+    expect(g).toBeNull();
+    expect(r).toMatchObject({ ok: false, refusal: 'option_name_ambiguous' });
+    expect(r.ambiguous_names).toEqual([{ option: 'Enterprise discount', owners: ['factor'], because: 'links' }]);
+    expect(r.detail).toMatch(/and a link from "Enterprise discount" could belong to either/);
   });
 });
 
@@ -125,6 +125,7 @@ describe('the pure rule', () => {
         expect(out.renamed, `${to} / ${links.length}`).toEqual([]);
         expect(out.model).toBe(c);
         expect(out.model.links.every((l) => l.from === 'Discount')).toBe(true);
+        expect(out.ambiguous, `${to} / ${links.length}`).toEqual([{ option: 'Discount', owners: ['factor'], because: 'links' }]);
       }
     }
   });
@@ -137,6 +138,7 @@ describe('the pure rule', () => {
     expect(out.renamed).toEqual([]);
     expect(out.model).toBe(c);
     expect(out.model.links[0]).toMatchObject({ from: 'Discount', to: 'Discount' });
+    expect(out.ambiguous).toEqual([{ option: 'Discount', owners: ['factor'], because: 'links' }]);
   });
   it('10 — COLLISION: "<name> level" already in the draft → the renamed quantity is "<name> level 2", never merged into it', () => {
     const existing = { label: 'Discount level', role: 'observable', baseline_known: false, baseline_value: null, unit: '%', provenance: 'inferred' };
@@ -163,12 +165,13 @@ describe('the pure rule', () => {
       const out = keepOptionsAndQuantitiesApart(c);
       expect(out.renamed, owners.join('+')).toEqual([]);
       expect(out.model).toBe(c);
-      expect(out.ambiguous).toEqual([{ option: 'Discount', owners }]);
+      expect(out.ambiguous).toEqual([{ option: 'Discount', owners, because: 'owners' }]);
     }
   });
-  it('11b — the said line names every other owner', () => {
-    expect(notToldApartLine({ option: 'Discount', owners: ['factor', 'risk'] })).toBe('"Discount" names an option and also a factor and a risk in this model, so they could not be told apart and are kept as one item. Say what each one is and they can be separated.');
-    expect(notToldApartLine({ option: 'Discount', owners: ['factor', 'factor', 'goal'] })).toMatch(/also 2 factors and the goal in this model/);
+  it('11b — the refusal\'s reason names every other owner, and why they could not be separated', () => {
+    expect(notToldApartLine({ option: 'Discount', owners: ['factor', 'risk'], because: 'owners' })).toBe('"Discount" names an option and also a factor and a risk in this model, so they could not be told apart and nothing was saved. Say what each one is, in different words, and the model can be built.');
+    expect(notToldApartLine({ option: 'Discount', owners: ['factor', 'factor', 'goal'], because: 'owners' })).toMatch(/also 2 factors and the goal in this model/);
+    expect(notToldApartLine({ option: 'Discount', owners: ['factor'], because: 'links' })).toMatch(/^"Discount" names an option and also a factor in this model, and a link from "Discount" could belong to either/);
   });
   it('9 — a link from the shared name to an OUTCOME is the quantity\'s (an option never holds one): renamed', () => {
     const c = base({ outcomes: [{ label: 'Savings', provenance: 'inferred' }], links: [{ from: 'Discount', to: 'Savings', direction: 'positive', provenance: 'inferred' } as never] });

@@ -42,11 +42,17 @@ export interface KeptApart {
   readonly to: string;
 }
 
-/** An option's name that more than one other item also owns: nothing is renamed, and this is said. */
+/**
+ * An option's name the rename cannot safely separate: more than one other item owns it (`owners`), or one does and a link
+ * drawn from the name could be the option's (`links`). ⛔ FAIL CLOSED AT REGISTRATION (PR Review CHANGES_REQUIRED on
+ * #2281 @ b3f0c2ab): admission gives every canonical-equal label one id, so registering it would silently lose the
+ * factor or risk. The build refuses (`option_name_ambiguous`) with the reason, and nothing is saved.
+ */
 export interface NotToldApart {
   readonly option: string;
   /** What else carries the name, e.g. ['factor', 'risk'], ['factor', 'factor'], ['factor', 'goal'], ['factor', 'option']. */
   readonly owners: readonly string[];
+  readonly because: 'owners' | 'links';
 }
 
 export function keepOptionsAndQuantitiesApart(candidate: CandidateModel): {
@@ -62,13 +68,15 @@ export function keepOptionsAndQuantitiesApart(candidate: CandidateModel): {
     canon(candidate.goal.metric),
   ]);
   const onlyAQuantityHolds = new Set([canon(candidate.goal.metric), ...candidate.outcomes.map((o) => canon(o.label))]);
-  // A self-link on the shared name ("Discount -> Discount") is the option-to-factor or self-loop claim the loop handling
-  // owns; renaming it would re-source it as a factor self-loop, so it fails the rename closed like any other ambiguous
-  // link (PR Review CHANGES_REQUIRED on #2281 @ e73b6dbd).
-  const carriesEffect = (name: string): boolean => {
+  // What the links drawn FROM the shared name say. `none`: nothing but (at most) a self-link, the served journey-C shape
+  // the loop handling owns (it withholds the self-link, says it and asks). `quantity`: every link ends at the goal or an
+  // outcome, which only the quantity can hold, so the rename is safe. `ambiguous`: any link to a factor, a risk, an
+  // option, an unnamed label, or the name itself beside another link (PR Review @ e73b6dbd), which the option could hold.
+  const linksFrom = (name: string): 'none' | 'quantity' | 'ambiguous' => {
     const out = candidate.links.filter((l) => canon(l.from) === name);
-    return out.length > 0
-      && out.every((l) => canon(l.to) !== name && onlyAQuantityHolds.has(canon(l.to)) && !optionNames.has(canon(l.to)));
+    if (out.every((l) => canon(l.to) === name)) return 'none';
+    return out.every((l) => canon(l.to) !== name && onlyAQuantityHolds.has(canon(l.to)) && !optionNames.has(canon(l.to)))
+      ? 'quantity' : 'ambiguous';
   };
   const renamed: KeptApart[] = [];
   const to = new Map<string, string>();
@@ -92,10 +100,15 @@ export function keepOptionsAndQuantitiesApart(candidate: CandidateModel): {
     if (option === undefined || to.has(canon(label))) return;
     const owners = ownersBesideTheOption(canon(label));
     if (owners.length > 1) {
-      if (!ambiguous.some((a) => canon(a.option) === canon(option))) ambiguous.push({ option, owners });
+      if (!ambiguous.some((a) => canon(a.option) === canon(option))) ambiguous.push({ option, owners, because: 'owners' });
       return;
     }
-    if (!carriesEffect(canon(label))) return;
+    const links = linksFrom(canon(label));
+    if (links === 'none') return;
+    if (links === 'ambiguous') {
+      ambiguous.push({ option, owners, because: 'links' });
+      return;
+    }
     const suffix = kind === 'risk' && !/\brisk$/i.test(label.trim()) ? ' risk' : ' level';
     let next = `${label.trim()}${suffix}`;
     for (let n = 2; taken.has(canon(next)); n += 1) next = `${label.trim()}${suffix} ${n}`;
@@ -134,12 +147,16 @@ export function keptApartLine(k: KeptApart): string {
 
 const OWNER_WORDS: Record<string, string> = { factor: 'factor', risk: 'risk', outcome: 'outcome', goal: 'goal', option: 'option' };
 
-/** The line said when an option's name is carried by more than one other item (`not_represented`, suffix `.label_ambiguous`). */
+/** The reason for an `option_name_ambiguous` refusal, one line per name. */
 export function notToldApartLine(a: NotToldApart): string {
   const counts = new Map<string, number>();
   for (const o of a.owners) counts.set(o, (counts.get(o) ?? 0) + 1);
   const parts = [...counts].map(([k, n]) => (k === 'goal' ? 'the goal' : n === 1 ? `a ${OWNER_WORDS[k]}` : `${n} ${OWNER_WORDS[k]}s`));
   const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
-  return `"${a.option}" names an option and also ${list} in this model, so they could not be told apart and are kept as one item. `
-    + 'Say what each one is and they can be separated.';
+  if (a.because === 'links') {
+    return `"${a.option}" names an option and also ${list} in this model, and a link from "${a.option}" could belong to either, `
+      + 'so they could not be told apart and nothing was saved. Say what the option changes, in different words, and the model can be built.';
+  }
+  return `"${a.option}" names an option and also ${list} in this model, so they could not be told apart and nothing was saved. `
+    + 'Say what each one is, in different words, and the model can be built.';
 }

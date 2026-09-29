@@ -1452,13 +1452,23 @@ export async function buildModelFromBrief(
   // ⭐ MG's HORIZON ATTESTATION (`attestHorizon`, PJ-A2 rows 25–27) decides the deadline G1 holds, and its verdict is
   // `statedGoal.horizon` whatever it is. ⚠ HAND-OFF: an `unresolved` deadline's own words ("by Q3") have no stored field
   // yet; they stay on this typed result until the joint work frame (Codex rows 2–3, 27) gives them one.
-  if (keptApart.length > 0 || notToldApart.length > 0) {
+  // ⛔ FAIL CLOSED AT REGISTRATION (PR Review CHANGES_REQUIRED on #2281 @ b3f0c2ab): a name the rename could not separate
+  // would register as ONE node and silently lose the factor or risk that shared it, so nothing is saved; the refusal says
+  // which name and why (`REFUSAL_WORDS.option_name_ambiguous`, the Agent reads `detail`).
+  if (notToldApart.length > 0) {
+    return {
+      ok: false,
+      mutated: false,
+      refusal: 'option_name_ambiguous',
+      detail: notToldApart.map(notToldApartLine).join(' '),
+      ambiguous_names: notToldApart.map((a) => ({ option: a.option, owners: [...a.owners], because: a.because })),
+    };
+  }
+  if (keptApart.length > 0) {
     admitted = {
       ...admitted,
       loss: [...admitted.loss, ...keptApart.map((k) => ({
         field_path: `nodes[${slugId(k.to)}].label_kept_apart`, before: k.from, after: k.to, reason: keptApartLine(k), severity: 'info',
-      }) as AdmittedModel['loss'][number]), ...notToldApart.map((a) => ({
-        field_path: `nodes[${slugId(a.option)}].label_ambiguous`, before: a.option, after: null, reason: notToldApartLine(a), severity: 'warn',
       }) as AdmittedModel['loss'][number])],
     };
   }
@@ -1776,7 +1786,7 @@ export async function buildModelFromBrief(
         // `pure_limit`: a user-limited cost roll-up's Olumi-signed edge into the goal that was not drawn (`findPureLimits`).
         // `one_route`: a factor → risk link left out because the risk only re-drew the factor's own direct link
         // (`oneRoutePerEffect`, PR Review CR on #2276): the risk stays, and why its link went is said.
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|loop_withheld|loop_kept|magnitude_unconvertible|pure_limit|one_route|label_kept_apart|label_ambiguous)$|\.observed_state\.baseline$/.test(l.field_path))
+        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|loop_withheld|loop_kept|magnitude_unconvertible|pure_limit|one_route|label_kept_apart)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };
