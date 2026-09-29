@@ -98,6 +98,34 @@ export function targetMovedOnlyThroughPlaceholderParts(
   return placeholderPartsFinding(targetId, nodes, edges, options)?.reason ?? null;
 }
 
+/** An option's id as PLoT and the stored results carry it (`option_id`, else `id`). */
+export function optionIdOf(o: Record<string, unknown>): string | undefined {
+  if (typeof o.option_id === 'string' && o.option_id !== '') return o.option_id;
+  return typeof o.id === 'string' && o.id !== '' ? o.id : undefined;
+}
+
+/**
+ * ⭐ R-c PER OPTION (AI Quality #72 5900908629, lock A PJ-A3; MG 5900810410). The options whose movement of `targetId`
+ * depends on an unsized Olumi link on ANY of their paths into it (AIQ's tightening), with why. One such option withholds
+ * ITS verdict on the limit, never every option's: Paul's added retention offer (an `olumi_placeholder` into churn) no
+ * longer blanks the churn limit for his price options, which move churn by his own stated strength. Pure.
+ */
+export function placeholderMovedOptions(
+  targetId: string,
+  nodes: readonly Rec[],
+  edges: readonly Rec[],
+  options: ReadonlyArray<Record<string, unknown>>,
+): Map<string, PlaceholderPartsReason> {
+  const out = new Map<string, PlaceholderPartsReason>();
+  for (const o of options) {
+    const id = optionIdOf(o);
+    if (id === undefined || out.has(id)) continue;
+    const finding = placeholderPartsFinding(targetId, nodes, edges, [o]);
+    if (finding !== null) out.set(id, finding.reason);
+  }
+  return out;
+}
+
 /**
  * The same predicate, with the PART an option sets whose path to the target carries the unsized link (for
  * `parts_links_placeholder`), so the withheld row can ask for that link's size (AI Quality 5882087383: "How much would a

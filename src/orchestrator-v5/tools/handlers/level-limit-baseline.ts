@@ -27,8 +27,8 @@
  *     node that is not an option or the decision — PLoT strips those; ISL reads a root at its own level);
  *   · FILL-ONLY: an existing baseline, whoever wrote it, is never overwritten;
  *   · its level has an author, as above;
- *   · no option PLoT scores moves the factor only through its parts on an unsized link (`partsMoveTheTargetOnSizedLinks`,
- *     R-c: AI Quality 5881541947 / 5882087383), AND PLoT reads the limit and the level on one scale, decision-grade
+ *   · (R-c is per option, AFTER the run — AIQ 5900908629 — so it no longer gates the carrier here), AND PLoT reads the
+ *     limit and the level on one scale, decision-grade
  *     (`levelLimitReadsOnNodeLevel`, B1), or the limit is in the factor's own unit on its own cap and the level's pair
  *     attests that cap (`levelLimitReadsOnNodeCap`).
  */
@@ -36,7 +36,6 @@ import { valuesMatch } from '../../../utils/reduction-framing.js';
 import { deriveInferredValues } from '../../coaching/inferred-value-disclosure.js';
 import { percentLimitFrameProvable, percentPeriodsDiffer, statedOperatorOf, type LimitTargetScale } from '../../agent-lane/admit-constraint.js';
 import { classifyUnitScaleClass } from '../../../cee/draft/records/unit-scale-class.js';
-import { targetMovedOnlyThroughPlaceholderParts } from '../../../orchestrator/context/placeholder-parts.js';
 
 type Rec = Record<string, unknown>;
 
@@ -101,27 +100,6 @@ export function levelLimitReadsOnNodeCap(graph: unknown, c: Rec, node: Rec, os: 
   return typeof os.value === 'number' && typeof os.raw_value === 'number' && valuesMatch(os.value, os.raw_value / cap);
 }
 
-/**
- * ⛔ GUARD — verifier FIX_FIRST (T4), narrowed to ONE predicate with the per-limit fold (R-c: AI Quality 5881541947,
- * DL 5881593118; `placeholder-parts.ts`).
- *
- * With a baseline carried by the cap proof, ISL scores the limit as `baseline + (option − status quo)`. An option that
- * sets the limited factor itself is read at the level it sets. An option that sets a PART of it moves it only through
- * the model's links: when one of those is a bare placeholder, the P is the placeholder's ("Additional Advertising" at
- * £18k on a £15k limit scored P 0.695, the verifier's measurement), so the target carries NO baseline and its limit keeps
- * the honest `missing_target_baseline` refusal. Links Olumi SIZED in the target's unit (served cloud: share % and
- * readiness → downtime, `olumi_estimate` in weeks) are Olumi's model, and the baseline carries: the fold then reads the
- * level's owner as for any other limit. Without the options PLoT scores nothing is proven, so nothing carries. Pure.
- */
-function partsMoveTheTargetOnSizedLinks(
-  targetId: string,
-  nodes: readonly Rec[],
-  edges: readonly Rec[],
-  options: ReadonlyArray<Record<string, unknown>> | undefined,
-): boolean {
-  return options !== undefined && targetMovedOnlyThroughPlaceholderParts(targetId, nodes, edges, options) === null;
-}
-
 /** The level's author is known: the user's own figure, or Olumi's in the form the run discloses. */
 function levelHasAnAuthor(node: Rec, os: Rec): boolean {
   const source = typeof os.source === 'string' ? os.source : undefined;
@@ -130,14 +108,14 @@ function levelHasAnAuthor(node: Rec, os: Rec): boolean {
 }
 
 /**
- * The ids of the nodes whose current level a level limit is checked against on this run. `options` are the options PLoT
- * scores (the run's final wire options); the cap proof carries nothing without them.
+ * The ids of the nodes whose current level a level limit is checked against on this run. `_options` (the run's final wire
+ * options) no longer decide it: R-c is per option, after the run (AIQ 5900908629). Kept so callers stay unchanged.
  */
 export function levelLimitBaselineNodeIds(
   graph: unknown,
   goalConstraints: unknown,
   goalNodeId?: string,
-  options?: ReadonlyArray<Record<string, unknown>>,
+  _options?: ReadonlyArray<Record<string, unknown>>,
 ): Set<string> {
   const out = new Set<string>();
   if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(goalConstraints)) return out;
@@ -162,10 +140,10 @@ export function levelLimitBaselineNodeIds(
     if (!levelHasAnAuthor(node, os)) continue;
     if (statedUnitAcrossPeriod(c, node) !== undefined) continue;
     const unit = typeof c.unit === 'string' ? c.unit : undefined;
-    // R-c, BOTH proofs (AI Quality 5882087383, DL 5882019090): a limit on a target the options move only through an
-    // unsized link carries no baseline, whichever scale proof admits it. Journey A's churn "%" limit rode `onLevel`
-    // through `price → price_sensitivity → churn` (`olumi_placeholder`), so its P was the placeholder's.
-    if (!partsMoveTheTargetOnSizedLinks(node.id, nodes, edges, options)) continue;
+    // ⭐ R-c is PER OPTION since AIQ #72 5900908629 (lock A PJ-A3, R3 5900778834: #2268's per-limit gate here dropped
+    // churn's baseline for ALL options when one added option moved churn through a placeholder, so Paul's churn ≤ 4% went
+    // unscored). The baseline now always carries, so PLoT scores every option; the options a placeholder moves have
+    // their own P withheld after the run (`collectLimitLevelOwners` → `withholdOptionLimitScores`, `run-analysis.ts`).
     const onLevel = levelLimitReadsOnNodeLevel(c.value, unit, node, os);
     const onCap = !onLevel && levelLimitReadsOnNodeCap(graph, c, node, os);
     if (!onLevel && !onCap) continue;

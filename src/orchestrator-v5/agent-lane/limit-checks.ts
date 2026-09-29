@@ -12,7 +12,12 @@
  * is left out, never named by guess.
  */
 import { readRatifiedConstraints, type StoredLimitVerdicts } from '../../orchestrator/context/constraint-feasibility.js';
-import { PARTS_IDENTITY_UNMODELLED_REASON, PLACEHOLDER_PARTS_REASON } from '../../orchestrator/context/placeholder-parts.js';
+import {
+  PARTS_IDENTITY_UNMODELLED_REASON,
+  PLACEHOLDER_PARTS_REASON,
+  optionIdOf,
+  placeholderPartsFinding,
+} from '../../orchestrator/context/placeholder-parts.js';
 import { log } from '../../utils/telemetry.js';
 import { limitCheckAsks } from './limited-level-ask.js';
 
@@ -28,6 +33,11 @@ export interface LimitCheck {
    * checked against THEIR figures. Read off the same graph; absent when MG asks nothing, and never on a `scored` limit.
    */
   readonly ask?: string;
+  /**
+   * R-c per option (AI Quality #72 5900908629): the options whose own check of this limit was withheld because they move
+   * its quantity through a link Olumi has not sized, by label. Said in `say`, with one question per unsized part.
+   */
+  readonly withheld_for?: readonly string[];
 }
 
 const q = (label: string): string => `‘${label}’`;
@@ -52,6 +62,41 @@ const PARTS_LIMIT_SENTENCES: ReadonlyMap<string, string> = new Map([
   [PLACEHOLDER_PARTS_REASON, 'Olumi’s links from its parts to it are placeholders, not estimates.'],
   [PARTS_IDENTITY_UNMODELLED_REASON, 'the model cannot yet combine its parts the way they really combine.'],
 ]);
+
+const andList = (xs: readonly string[]): string =>
+  xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
+
+/**
+ * ⭐ R-c PER OPTION, SAID (AI Quality #72 5900908629). The options PLoT scored whose check of a limit was withheld: each
+ * moves the limit's quantity through a part whose link Olumi has not sized. Re-read off the SAME stored graph and the same
+ * predicate the run withheld them by (`placeholderPartsFinding`, per option), so the words and the numbers cannot
+ * disagree. Returns their labels and one question per part: a size the user gives is written as theirs (#2274) and ends
+ * the withhold. Nothing when the row is itself withheld for its parts (every option was such an option).
+ */
+function withheldOptionsFor(graph: unknown, targetId: string | null): { labels: string[]; asks: string[] } {
+  const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
+  const edges = (graph as { edges?: unknown } | null | undefined)?.edges;
+  if (targetId === null || !Array.isArray(nodes)) return { labels: [], asks: [] };
+  const recs = nodes.filter((n): n is Record<string, unknown> => n !== null && typeof n === 'object');
+  const links = Array.isArray(edges) ? edges.filter((e): e is Record<string, unknown> => e !== null && typeof e === 'object') : [];
+  const labelOf = (id: unknown): string | null => {
+    const l = recs.find((n) => n.id === id)?.label;
+    return typeof l === 'string' && l.trim() !== '' ? l.trim() : null;
+  };
+  const target = labelOf(targetId);
+  const labels: string[] = [];
+  const asks: string[] = [];
+  for (const o of recs.filter((n) => n.kind === 'option')) {
+    const finding = placeholderPartsFinding(targetId, recs, links, [o]);
+    const label = labelOf(optionIdOf(o));
+    if (finding === null || label === null) continue;
+    labels.push(label);
+    const part = finding.reason === PLACEHOLDER_PARTS_REASON ? labelOf(finding.partId) : null;
+    const ask = part !== null && target !== null ? `How much does ${q(part)} change ${q(target)}?` : null;
+    if (ask !== null && !asks.includes(ask)) asks.push(ask);
+  }
+  return { labels, asks };
+}
 
 /** One sentence per state (and, for `estimate_only`, per whose figure it was checked against). */
 function sentenceFor(label: string, state: LimitCheck['state'], reason: string | undefined): string {
@@ -112,7 +157,20 @@ export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdict
     const levelCannotHelp = row.state === 'unscored' && typeof row.reason === 'string'
       && (OFF_SCALE_LIMIT_REASONS.has(row.reason) || PARTS_LIMIT_SENTENCES.has(row.reason));
     const ask = row.state === 'scored' || levelCannotHelp ? undefined : asks.get(row.constraint_id);
-    out.push({ constraint_id: row.constraint_id, limit: label, state: row.state, say: sentenceFor(label, row.state, row.reason), ...(ask !== undefined ? { ask } : {}) });
+    // R-c per option: a row the options checked, with some options' own check withheld — say which, and ask once.
+    const perOption = row.state === 'unscored' && typeof row.reason === 'string' && PARTS_LIMIT_SENTENCES.has(row.reason)
+      ? { labels: [], asks: [] }
+      : withheldOptionsFor(graph, limit?.node_id ?? null);
+    const say = perOption.labels.length === 0
+      ? sentenceFor(label, row.state, row.reason)
+      : `${sentenceFor(label, row.state, row.reason)} For ${andList(perOption.labels.map(q))} it couldn’t be checked: `
+        + `${perOption.labels.length === 1 ? 'that option moves' : 'those options move'} it through a link Olumi has not sized `
+        + `(a placeholder, not an estimate).${perOption.asks.length > 0 ? ` ${perOption.asks.join(' ')}` : ''}`;
+    out.push({
+      constraint_id: row.constraint_id, limit: label, state: row.state, say,
+      ...(ask !== undefined ? { ask } : {}),
+      ...(perOption.labels.length > 0 ? { withheld_for: perOption.labels } : {}),
+    });
   }
   return out.length > 0 ? out : undefined;
 }
