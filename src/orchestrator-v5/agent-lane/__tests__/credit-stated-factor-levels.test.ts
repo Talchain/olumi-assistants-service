@@ -71,6 +71,15 @@ describe('a level the brief states for a factor is the user\'s, whatever the dra
     expect(source(node(g, 'Monthly churn')), 'CONTROL: an estimate the brief never states stays Olumi\'s').toBe('cee_inference');
     expect(proposeProductIdentity(g), 'the card the Run offers on the product-shaped goal').not.toBeNull();
   });
+  // ⛔ PR Review CR on #2311 @ ff5e7480: the status quo ("keep Pro at £49") sets today's price by definition, so it
+  // never excludes the brief's "from £49" as today's level.
+  it('⭐ RED (PR Review): the £49 price ALSO drafted as an estimate, beside the status quo\'s £49 → both parts the user\'s, and the card', async () => {
+    const d = draft() as unknown as { factors: Rec[] };
+    const g = await build({ ...d, factors: d.factors.map((f) => (f.label === 'Pro plan price' ? { ...f, baseline_known: false, provenance: 'inferred' } : f)) });
+    expect(source(node(g, 'Pro plan price'))).toBe('brief_extraction');
+    expect(source(node(g, 'Pro plan paying subscribers'))).toBe('brief_extraction');
+    expect(proposeProductIdentity(g)).not.toBeNull();
+  });
   it('CONTROL (the stated count, drafted as the user\'s): the same saved graph', async () => {
     const g = await build(draft({ baseline_known: true, provenance: 'explicit' }));
     expect(source(node(g, 'Pro plan paying subscribers'))).toBe('brief_extraction');
@@ -89,7 +98,9 @@ describe('creditStatedFactorLevels: only a figure the brief writes FOR that fact
     ['an estimate the brief never states (churn 3.5%)', draft(), 'Monthly churn', false],
     ['the LIMIT as today\'s churn (5%, "must stay below 5%")',
       { ...draft(), factors: draft().factors.map((f) => (f.label === 'Monthly churn' ? { ...f, baseline_value: 5 } : f)) } as CandidateModel, 'Monthly churn', false],
-    ['an OPTION\'s level as today\'s price (£59)',
+    ['the STATUS QUO\'s level is today\'s ("from £49", keep Pro at £49): the price estimate of 49',
+      { ...draft(), factors: draft().factors.map((f) => (f.label === 'Pro plan price' ? { ...f, baseline_known: false, provenance: 'inferred' } : f)) } as CandidateModel, 'Pro plan price', true],
+    ['a PROPOSED option\'s level as today\'s price (£59)',
       { ...draft(), factors: draft().factors.map((f) => (f.label === 'Pro plan price' ? { ...f, baseline_known: false, provenance: 'inferred', baseline_value: 59 } : f)) } as CandidateModel, 'Pro plan price', false],
     ['another factor\'s figure (1,500 as "New subscribers per month")',
       withFactor({ label: 'New subscribers per month', role: 'observable', baseline_known: false, baseline_value: 1500, unit: 'subscribers', provenance: 'inferred', plausible_max: 10000 }), 'New subscribers per month', false],

@@ -38,6 +38,7 @@ import { attestHorizon, type HorizonAttestation } from './horizon-attestation.js
 import { unitPhraseFamily } from './unit-conflict.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
 import { countedNoun } from './counted-nouns.js';
+import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 
 const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
 
@@ -227,8 +228,9 @@ export function withdrawUnstatedBaselineStamps<N extends { readonly kind?: unkno
  * The mirror of `withdrawUnstatedBaselineStamps`, applied to the CANDIDATE before admission so every later reader (the
  * product mint, the card, the disclosure) sees one author. A factor's level is credited to the user (`baseline_known:
  * true`, `explicit`) only when the brief writes that figure FOR THAT FACTOR (`figureTheUserWroteFor`, the per-entity door
- * #2284/#2275 and the Olumi option mark trust). A figure the brief gives as a limit, the goal's target or an option's
- * level is never today's level of anything, so it is never credited. Anything unclear stays Olumi's.
+ * #2284/#2275 and the Olumi option mark trust). A figure the brief gives as a limit, the goal's target or a proposed
+ * (non-status-quo) option's level is never today's level of anything, so it is never credited; the status quo's level
+ * is today's. Anything unclear stays Olumi's.
  */
 export function creditStatedFactorLevels(candidate: CandidateModel, brief: string): CandidateModel {
   const labels = [
@@ -238,7 +240,11 @@ export function creditStatedFactorLevels(candidate: CandidateModel, brief: strin
   const notToday = [
     ...(candidate.constraints ?? []).map((c) => c.value),
     candidate.goal?.value,
-    ...(candidate.options ?? []).flatMap((o) => (o.interventions ?? []).map((i) => i.value)),
+    // ⛔ PR Review CR on #2311 @ ff5e7480: a STATUS QUO sets today's level by definition ("keep it at £49" beside "from
+    // £49"), so only another option's level is a proposed one, never today's. Recognised as the Olumi mark does.
+    ...(candidate.options ?? [])
+      .filter((o) => o.is_status_quo !== true && !labelMatchesBaseline(o.label ?? ''))
+      .flatMap((o) => (o.interventions ?? []).map((i) => i.value)),
   ].filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
   let credited = false;
   const factors = (candidate.factors ?? []).map((f) => {
