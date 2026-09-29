@@ -7,7 +7,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { optionQuotes, quoteListedOptions } from '../option-lineage.js';
-import { markOlumiOptions } from '../olumi-option-marker.js';
+import { markOlumiOptions, olumiAddedOptionLabels } from '../olumi-option-marker.js';
 import { buildModelFromBrief, buildCandidateSchema, type CallStructuredModel } from '../runtime/build-model.js';
 import { deriveIntakeOptionReconciliation, extractEnumeratedOptions } from '../../../orchestrator/context/intake-option-reconciliation.js';
 import { Ajv } from 'ajv';
@@ -188,14 +188,15 @@ describe('a copied quote never covers a different figure (PR Review CR on 9d85b0
     expect(optionNode(g, 'Keep at £49').source_quote).toBe('keep it at £49');
     expect(deriveIntakeOptionReconciliation(TWO, g, g).state).not.toBe('reconciled');
   });
-  it('11 — NAMED RESIDUAL (#2295\'s marker, not this quote): the £54 SETUP CREDIT reads as the user\'s Pro-price level to `olumiAddedOptionLabels`, so the £54 option is not marked Olumi\'s — no quote and no leader either way', async () => {
+  it('11 — (was #2295\'s NAMED RESIDUAL; AIQ 5895604637) the £54 SETUP CREDIT is not the user\'s Pro price: the £54 option keeps `proposed_by: \'olumi\'`', async () => {
     const { g } = await build(priceDraft({ label: 'Raise to £54', provenance: 'ai_proposed', value: 54, words: TWO_WORDS }), TWO);
-    expect(optionNode(g, 'Raise to £54').proposed_by).toBeUndefined();
+    expect(optionNode(g, 'Raise to £54').proposed_by).toBe('olumi');
   });
-  it('11b — NAMED UNDER-CLAIM: the user\'s own £59 on that item is not quoted either (no "<quantity> from X to Y") → the Run withholds, as before this PR', async () => {
+  it('11b — CONTROL (matching action on the two-money item): the user\'s £59, the item\'s OPENING action on the price, is quoted, unmarked, and the Run reconciles', async () => {
     const { g } = await build(priceDraft({ label: 'Raise to £59', provenance: 'explicit', value: 59, words: TWO_WORDS }), TWO);
-    expect(optionNode(g, 'Raise to £59').source_quote).toBeUndefined();
-    expect(deriveIntakeOptionReconciliation(TWO, g, g).state).not.toBe('reconciled');
+    expect(optionNode(g, 'Raise to £59').source_quote).toBe(TWO_WORDS);
+    expect(optionNode(g, 'Raise to £59').proposed_by).toBeUndefined();
+    expect(deriveIntakeOptionReconciliation(TWO, g, g).state).toBe('reconciled');
   });
   // ⛔ PR Review CHANGES_REQUIRED on #2299 @ 43815390: "to" alone proves nothing ("…with a setup credit to £54").
   const CREDIT_TO = 'price Pro at £59 with a setup credit to £54';
@@ -205,8 +206,16 @@ describe('a copied quote never covers a different figure (PR Review CR on 9d85b0
     const { r, g } = await build(priceDraft({ label: 'Raise to £54', provenance: 'ai_proposed', value: 54, words: CREDIT_TO }), CREDIT);
     expect(r.ok, JSON.stringify(r).slice(0, 300)).toBe(true);
     expect(optionNode(g, 'Raise to £54').source_quote).toBeUndefined();
+    expect(optionNode(g, 'Raise to £54').proposed_by).toBe('olumi');
     expect(optionNode(g, 'Keep at £49').source_quote).toBe('keep it at £49');
     expect(deriveIntakeOptionReconciliation(CREDIT, g, g).state).not.toBe('reconciled');
+  });
+  it('12a — CONTROL (AIQ 5895604637, the same item): the user\'s £59 ("price Pro at £59") is quoted, carries no Olumi mark, and the Run reconciles', async () => {
+    const { r, g } = await build(priceDraft({ label: 'Raise to £59', provenance: 'explicit', value: 59, words: CREDIT_TO }), CREDIT);
+    expect(r.ok, JSON.stringify(r).slice(0, 300)).toBe(true);
+    expect(optionNode(g, 'Raise to £59').source_quote).toBe(CREDIT_TO);
+    expect(optionNode(g, 'Raise to £59').proposed_by).toBeUndefined();
+    expect(deriveIntakeOptionReconciliation(CREDIT, g, g).state).toBe('reconciled');
   });
   // The matching control, in the corpus's own pricing wording ("increase the Pro plan price from £49 to £59").
   const FROM_TO = 'increase the Pro plan price from £49 to £59';
@@ -221,6 +230,7 @@ describe('a copied quote never covers a different figure (PR Review CR on 9d85b0
   it('12c — the same from–to item: Olumi\'s £54 is not quoted and the Run withholds', async () => {
     const { g } = await build(priceDraft({ label: 'Raise to £54', provenance: 'ai_proposed', value: 54, words: FROM_TO }), PRICING);
     expect(optionNode(g, 'Raise to £54').source_quote).toBeUndefined();
+    expect(optionNode(g, 'Raise to £54').proposed_by).toBe('olumi');
     expect(deriveIntakeOptionReconciliation(PRICING, g, g).state).not.toBe('reconciled');
   });
   // The phrase classes a two-figure item takes (PR Review CRs on fcf35a8b and 43815390).
@@ -228,21 +238,37 @@ describe('a copied quote never covers a different figure (PR Review CR on 9d85b0
     ['"<the price> from £49 to £59": the new price', 'raise Pro price from £49 to £59', 59, true],
     ['"<the price> from £49 to £59", a determiner and no qualifier', 'increase the price from £49 to £59', 59, true],
     ['"<the price> from £49 to £59": the OLD price is not the option\'s', 'raise Pro price from £49 to £59', 49, false],
+    ['"to £59 with a £54 setup credit": the opening action\'s £59', TWO_WORDS, 59, true],
     ['"to £59 with a £54 setup credit": the credit', TWO_WORDS, 54, false],
-    ['"to £59 with a £54 setup credit": the user\'s £59 (named under-claim)', TWO_WORDS, 59, false],
-    ['"price Pro at £59 with a setup credit to £54" (PR Review 43815390)', CREDIT_TO, 54, false],
-    ['no from–to pair ("a £59 Pro price with a £54 credit")', 'a £59 Pro price with a £54 setup credit', 59, false],
+    ['"price Pro at £59 with a setup credit to £54": the opening action\'s £59', CREDIT_TO, 59, true],
+    ['"price Pro at £59 with a setup credit to £54": the credit (PR Review 43815390)', CREDIT_TO, 54, false],
+    ['"from £49 to £59 then £64": the later £64 is never the option\'s', 'raise Pro price from £49 to £59 then £64', 64, false],
+    ['"from £49 to £59 with £5 off": £54 is written nowhere', 'raise Pro price from £49 to £59 with £5 off', 54, false],
+    ['a figure written before its quantity ("a £59 Pro price with a £54 credit"; named under-claim)', 'a £59 Pro price with a £54 setup credit', 59, false],
     ['a from–to pair for ANOTHER quantity ("reduce the setup credit from £59 to £54")', 'reduce the setup credit from £59 to £54', 54, false],
-    ['another quantity with the same head noun ("raise Basic price from £49 to £54")', 'raise Basic price from £49 to £54', 54, false],
+    ['an opening on another quantity with the same head noun ("raise Basic price")', 'raise Basic price from £49 to £54', 54, false],
     ['the head qualified by a word the quantity lacks ("the Pro setup price")', 'cut the Pro setup price from £59 to £54', 54, false],
-    ['a later figure after the pair ("then £64"; two from–to pairs never list)', 'raise Pro price from £49 to £59 then £64', 59, false],
-    ['a third figure beside the pair ("with £5 off")', 'raise Pro price from £49 to £59 with £5 off', 59, false],
+    ['no quantity named ("raise to £59 with a £54 setup credit")', 'raise to £59 with a £54 setup credit', 59, false],
+    ['an item opening on another quantity (the user\'s Pro £59; named under-claim)', 'raise Basic price to £54 with Pro price at £59', 59, false],
     ['a delta the option types ("by £10 to £59", value 10; named under-claim)', 'raise Pro price by £10 to £59', 10, false],
   ])('figure binding on a two-money item: %s', (_why, item, value, quoted) => {
     const brief = `Should we raise our Pro plan price? The options are ${item}, or keep it at £49.`;
     expect(extractEnumeratedOptions(brief).map((c) => c.text), 'PRECONDITION: the Run\'s reader lists the item').toEqual([item, 'keep it at £49']);
     const cand = priceDraft({ label: `Raise to £${value}`, provenance: 'explicit', value, words: item }) as unknown as CandidateModel;
     expect([...optionQuotes(cand, brief).keys()].includes(canonicalLabel(`Raise to £${value}`))).toBe(quoted);
+  });
+  // AIQ 5895604637: the Olumi mark reads a two-figure item through the SAME binder as the quote (the fail-safe: unproven ⇒ Olumi's).
+  it.each<[string, string, number, boolean]>([
+    ['PR Review\'s item, Olumi\'s £54', CREDIT_TO, 54, true],
+    ['PR Review\'s item, the £59 the drafter tagged ai_proposed', CREDIT_TO, 59, false],
+    ['the setup-credit item, Olumi\'s £54', TWO_WORDS, 54, true],
+    ['the from–to item, Olumi\'s £54', FROM_TO, 54, true],
+    ['the from–to item, the £59 the drafter tagged ai_proposed', FROM_TO, 59, false],
+  ])('the Olumi mark on a two-money item: %s', (_why, item, value, marked) => {
+    const brief = `Should we raise our Pro plan price? The options are ${item}, or keep it at £49.`;
+    expect(extractEnumeratedOptions(brief).map((c) => c.text), 'PRECONDITION: the Run\'s reader lists the item').toEqual([item, 'keep it at £49']);
+    const cand = priceDraft({ label: `Raise to £${value}`, provenance: 'ai_proposed', value, words: item }) as unknown as CandidateModel;
+    expect(olumiAddedOptionLabels(cand, brief).has(canonicalLabel(`Raise to £${value}`))).toBe(marked);
   });
   it('11c — CONTROL: the single-money item still quotes the user\'s £59 and the Run reconciles (row 10b is unchanged)', async () => {
     const { g } = await build(priceDraft({ label: 'Raise to £59', provenance: 'explicit', value: 59, words: 'raise Pro price to £59' }), SUB);
