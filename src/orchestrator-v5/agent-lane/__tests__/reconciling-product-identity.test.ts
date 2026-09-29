@@ -185,6 +185,9 @@ describe('a goal whose stated level reconciles with its two stated parts is decl
     ['GBP per subscriber', 'subscribers', 'GBP/month', false],
     ['GBP per subscriber per year', 'subscribers', 'GBP/month', false],
     ['USD per subscriber per month', 'subscribers', 'GBP/month', false],
+    // AIQ 5887464051: an ARR goal is a YEAR period; a monthly rate × a count is money per month.
+    ['GBP per subscriber per month', 'subscribers', 'GBP ARR', false],
+    ['£/subscriber/month', 'subscribers', 'GBP/year', false],
   ] as const)('unit class: %s × %s → goal %s mints = %s', (priceUnit, count, goalUnit, mints) => {
     const d = paulDraft({ priceUnit, goalUnit, subscribers: { unit: count } });
     const out = withReconcilingProductIdentity(d, PAUL);
