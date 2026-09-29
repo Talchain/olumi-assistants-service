@@ -92,11 +92,13 @@ describe('2.579 — the ranking is withheld when the intake lost an option', () 
     // PRECONDITION PINNED IN-TEST (CLAUDE.md trap 13b). Without this the
     // withhold below could be caused by a fixture that stopped reproducing the
     // gap — a discriminator whose discrimination is unguarded at rest.
-    expect(intake.state).toBe('options_missing');
-    expect(intake.missing.map((m) => m.text)).toEqual(['a new retail concession']);
+    // AIQ 5887822471: the drafter DROPPED the concession (nothing on the graph declares it), so the gap is ASKED about by
+    // name (`identity_unverified`), never claimed missing. Still a withhold: the reason changes, the outcome doesn't.
+    expect(intake.state).toBe('identity_unverified');
+    expect(intake.unbound.map((m) => m.text)).toEqual(['a new retail concession']);
 
     expect(buildAnalysisResultHeadline(input)).toBeNull();
-    expect(describeAnalysisHeadline(input).reason).toBe('intake_options_missing');
+    expect(describeAnalysisHeadline(input).reason).toBe('intake_identity_unverified');
   });
 
   it('POSITIVE CONTROL — the SAME result names the leader once all five are on the graph', () => {
@@ -162,7 +164,7 @@ describe('2.579 — the user is told WHICH option and WHAT to do, at the wire', 
     const summary = `${template}${buildIntakeOptionDisclosure(intake)}`;
 
     expect(summary).toContain('“a new retail concession”');
-    expect(summary).toContain('confirm you meant to leave it out');
+    expect(summary).toContain('Is that one of the options you want compared?');
     // The integration property a builder unit test cannot see: rejected here,
     // the user receives the bare template and never learns which option went
     // missing — which is how the sibling constraint disclosure shipped dark.

@@ -685,13 +685,15 @@ describe('extractSetAsideOptions — the extractor, on its own', () => {
   });
 });
 
-it('withholds widening for a proven missing option and restores it with reconciled lineage', () => {
+it('withholds widening for a listed option no saved option binds (AIQ 5887822471: named, never claimed missing) and restores it with reconciled lineage', () => {
   const graph = crmGraph();
   const nodes = graph.nodes.map((node) => node.id === 'opt_0'
     ? { ...node, source_quote: 'replacing the CRM' }
     : node.id === 'opt_1' ? { ...node, source_quote: 'keeping it' } : node);
   const boundGraph = { ...graph, nodes };
-  expect(deriveIntakeOptionReconciliation(BRIEF_OPTIONS_MISSING, boundGraph).state).toBe('options_missing');
+  const dropped = deriveIntakeOptionReconciliation(BRIEF_OPTIONS_MISSING, boundGraph);
+  expect(dropped.state).toBe('identity_unverified');
+  expect(dropped.unbound.length).toBeGreaterThan(0);
   expect(build({ graph: boundGraph, briefText: BRIEF_OPTIONS_MISSING })).toEqual([]);
   const completeBrief = 'We are choosing between replacing the CRM or keeping it.';
   expect(deriveIntakeOptionReconciliation(completeBrief, boundGraph).state).toBe('reconciled');

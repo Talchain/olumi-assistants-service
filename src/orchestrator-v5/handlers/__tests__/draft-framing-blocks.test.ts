@@ -281,14 +281,16 @@ describe('buildDraftFramingBlocks — the FRAME/IDEATE complement', () => {
   });
 });
 
-it('keeps framing silent for a proven omission and restores it for reconciled lineage', () => {
+it('keeps framing silent for a listed option no saved option binds (AIQ 5887822471: named, never claimed missing) and restores it for reconciled lineage', () => {
   const briefText = 'The options are electrify the fleet, subcontract the routes, or buy a rival depot.';
   const nodes = [
     { id: 'opt-0', kind: 'option', label: 'Electric fleet', source_quote: 'electrify the fleet' },
     { id: 'opt-1', kind: 'option', label: 'Subcontract', source_quote: 'subcontract the routes' },
   ];
   const graph = { nodes, edges: [] };
-  expect(deriveIntakeOptionReconciliation(briefText, graph).state).toBe('options_missing');
+  const dropped = deriveIntakeOptionReconciliation(briefText, graph);
+  expect(dropped.state).toBe('identity_unverified');
+  expect(dropped.unbound.map((c) => c.text)).toEqual(['buy a rival depot']);
   expect(build({ graph, briefText })).toEqual([]);
   const complete = { nodes: [...nodes, { id: 'opt-2', kind: 'option', label: 'Depot acquisition', source_quote: 'buy a rival depot' }], edges: [] };
   expect(deriveIntakeOptionReconciliation(briefText, complete).state).toBe('reconciled');

@@ -36,10 +36,16 @@ const FOUR_OPTIONS = [
   { id: 'vans', source_quote: 'refrigerated delivery vans' },
   { id: 'retrofit', source_quote: 'an energy-efficiency retrofit' },
 ];
+// AIQ 5887822471: an omission is PROVEN only when the listed option was constructed and registered, then not analysed
+// (gated out). The registered graph below carries the concession; the Run analysed four (or three) of the five.
+const REGISTERED = { options: [...FOUR_OPTIONS, { id: 'concession', source_quote: 'a new retail concession' }] };
 const missingOne = (): IntakeOptionReconciliation =>
-  deriveIntakeOptionReconciliation(BAKERY_BRIEF, FOUR_OPTIONS);
+  deriveIntakeOptionReconciliation(BAKERY_BRIEF, FOUR_OPTIONS, REGISTERED);
 const missingTwo = (): IntakeOptionReconciliation =>
-  deriveIntakeOptionReconciliation(BAKERY_BRIEF, FOUR_OPTIONS.slice(0, 3));
+  deriveIntakeOptionReconciliation(BAKERY_BRIEF, FOUR_OPTIONS.slice(0, 3), REGISTERED);
+/** The drafter DROPPED the concession: nothing on the graph declares it, so it is asked about, never claimed missing. */
+const droppedOne = (): IntakeOptionReconciliation =>
+  deriveIntakeOptionReconciliation(BAKERY_BRIEF, FOUR_OPTIONS);
 
 describe('2.579 disclosure — names the gap and both repairs', () => {
   it('QUOTES the missing option from the real capture, not a count', () => {
@@ -199,4 +205,30 @@ it('does not tell the user to recreate a canonical option excluded from this com
   expect(summary).toContain('Check whether it should be included');
   expect(summary).not.toMatch(/not in the model|Add it|Add them/);
   expect(isAllowedRunAnalysisAssistantText(summary)).toBe(true);
+});
+
+describe('AIQ 5887822471 — a listed phrase no option binds is ASKED about by name, never claimed missing', () => {
+  it('PRECONDITION — the dropped concession is `identity_unverified` naming it, and the gated-out one is `options_missing`', () => {
+    expect(droppedOne().state).toBe('identity_unverified');
+    expect(droppedOne().unbound.map((c) => c.text)).toEqual(['a new retail concession']);
+    expect(missingOne().state).toBe('options_missing');
+  });
+  it('names the phrase and asks the one clearable question; it survives the egress allowlist and names no leader', () => {
+    const text = buildIntakeOptionDisclosure(droppedOne());
+    expect(text).toBe(' Your brief also mentions “a new retail concession”. Is that one of the options you want compared?'
+      + ' No option can be put forward from this result until that is confirmed.');
+    expect(new RegExp(`^(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})$`).test(text)).toBe(true);
+    const template = [...RUN_ANALYSIS_LOCKED_TEMPLATES][0] as string;
+    expect(isAllowedRunAnalysisAssistantText(`${template}${text}`)).toBe(true);
+    expect(textNamesLeadingOption(text)).toBe(false);
+    expect(text.length).toBeLessThanOrEqual(INTAKE_OPTION_DISCLOSURE_MAX_CHARS);
+  });
+  it('never claims the phrase is missing from the comparison', () => {
+    expect(buildIntakeOptionDisclosure(droppedOne())).not.toContain('not included in this comparison');
+  });
+  it('an untyped extra option ALSO unbound keeps the general sentence (the phrase is not the whole cause)', () => {
+    const r = deriveIntakeOptionReconciliation(BAKERY_BRIEF, [...FOUR_OPTIONS, { id: 'extra' }]);
+    expect(r.unbound_option_ids).toEqual(['extra']);
+    expect(buildIntakeOptionDisclosure(r)).toContain('The saved model does not establish which options correspond');
+  });
 });
