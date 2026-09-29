@@ -50,6 +50,11 @@ export const GOAL_THRESHOLD_CAP_PROVENANCE = [
   'inherited',
   /** Rule 3 — `raw * 1.25`, derived from the target, so the threshold is 0.8. */
   'target_derived_headroom',
+  /**
+   * Widened so a USER-STATED link's per-unit size fits the contract's |β| ≤ 1 (`refit-frames.ts`; AIQ 5895140735): a
+   * choice of units, every link's natural size and the raw target held. Typed for audit; nothing the user sees moves.
+   */
+  'stated_effect_fit',
 ] as const;
 
 export type GoalThresholdCapProvenance =
