@@ -242,7 +242,9 @@ describe('goal certainty rides the first analysis too (DL 5887061638; the call-s
   };
 
   it('RECORDED: the first pass follows the Run\'s own recorded decision, its sentence verbatim', async () => {
-    const recorded = [{ option_id: optionId, probability_of_goal: 1, earned: false, say: 'The first pass\u2019s RECORDED sentence.' }];
+    // A contract-valid unearned record (#2280's writer schema): its unsized path, its no-break-even reason and its sentence.
+    const recorded = [{ option_id: optionId, probability_of_goal: 1, earned: false, unsized_path: { from: 'f', enters_goal_through: 'g' },
+      no_break_even: 'not_an_identity', say: 'The first pass\u2019s RECORDED sentence.' }];
     const gc = (await firstPass({ optionId, hash: 'c'.repeat(16), recorded })).goal_certainty as { options?: { option_id: string; earned: boolean; say?: string }[] };
     expect(gc?.options, JSON.stringify(gc)).toEqual([expect.objectContaining({ option_id: optionId, earned: false, say: 'The first pass\u2019s RECORDED sentence.' })]);
   });

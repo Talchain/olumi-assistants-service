@@ -16,6 +16,7 @@
 
 import { goalChanceWithheldForAgent, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { certainOptionRows, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
+import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
@@ -209,13 +210,12 @@ function withGoalChance(result: unknown): { goal_chance?: GoalChanceWithheld } {
 
 /** A raw graph-read body as the goal-certainty rule reads it: the same fields `readGraph` keeps. */
 function certaintyReadOf(json: Record<string, unknown>): GoalCertaintyRead {
-  const identityEvaluated = readEvaluatedIdentityNodeIds(json.analysis_identity_evaluated_node_ids);
+  const stored = readStoredGoalCertainty(json.analysis_goal_certainty);
   return {
     raw: json.graph,
     analysis_state: json.analysis_state,
     analysis_result: json.analysis_result,
-    ...(identityEvaluated !== undefined ? { identity_evaluated: identityEvaluated } : {}),
-    ...(Array.isArray(json.analysis_goal_certainty) ? { goal_certainty: json.analysis_goal_certainty as unknown[] } : {}),
+    ...(stored !== undefined ? { goal_certainty: stored } : {}),
   };
 }
 
@@ -807,7 +807,7 @@ interface GraphRead {
   readonly limit_verdicts?: StoredLimitVerdicts;
   /** The read's `analysis_result` block — the selected Run, present only when the route delivers it (`goal-certainty-for-agent.ts`). */
   readonly analysis_result?: unknown;
-  /** The read's `analysis_goal_certainty` — the selected Run's own recorded array (#2280); absent = not recorded. */
+  /** The read's `analysis_goal_certainty` via #2280's ONE reader (`readStoredGoalCertainty`); absent = not recorded. */
   readonly goal_certainty?: readonly unknown[];
 }
 
@@ -1510,7 +1510,7 @@ export function createAgentCapabilities(
       ...(identityEvaluated !== undefined ? { identity_evaluated: identityEvaluated } : {}),
       ...(limitVerdicts !== null ? { limit_verdicts: limitVerdicts } : {}),
       ...(r.json.analysis_result !== undefined && r.json.analysis_result !== null ? { analysis_result: r.json.analysis_result } : {}),
-      ...(Array.isArray(r.json.analysis_goal_certainty) ? { goal_certainty: r.json.analysis_goal_certainty as unknown[] } : {}),
+      ...(() => { const stored = readStoredGoalCertainty(r.json.analysis_goal_certainty); return stored !== undefined ? { goal_certainty: stored } : {}; })(),
     };
   };
 
@@ -6414,8 +6414,8 @@ export function createAgentCapabilities(
           limitChecks = limitChecksForAgent(read?.raw, read?.limit_verdicts);
         } catch { postRunRead = null; graphForProduct = undefined; evaluatedForProduct = undefined; limitChecks = undefined; }
       }
-      // ⛔ GOAL CERTAINTY (DL 5887061638, route A; MG's producer #2270): an option at P(goal) exactly 0 or 1 is said as a
-      // certainty only when the Run's own decision earns it — recorded, or the SAME producer on the Run's exact graph.
+      // ⛔ GOAL CERTAINTY (DL 5887593253; MG's producer #2270, stored per Run by #2280): an option at P(goal) exactly 0 or 1 is
+      // said as a certainty only when THIS Run's own stored decision earns it — attributed by its run-fact identity.
       // One graph read (the one above when made); a Run that cannot be bound is said as unchecked (`goal-certainty-for-agent.ts`).
       let goalCertainty: Record<string, unknown> | undefined;
       if (certainOptionRows(result).length > 0) {
