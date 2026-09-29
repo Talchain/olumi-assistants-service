@@ -11,6 +11,7 @@
  *   · spread_moved: a factor's sampled spread in natural units changed (PLoT's default is max(0.1, 0.15·value) on the
  *     FRAME, `translator-v3.ts` `buildParameterUncertaintiesV3`; a user-stated level is sent at 1e-4; a std is clamped to
  *     [1e-4, 2.0], so a carried spread that binds moves and the re-frame must be refused, R3-B 5895208669).
+ *   · bounded_scale (AIQ 5895590866 (1)): a frame widened past a bounded unit's natural top ("out of 5" → 10);
  *   · frame_below_level (design R3): a frame below the node's own level or an option's value for it (normalised > 1);
  *   · level_moved <option>→<factor> (intervention): an option's value for a re-framed factor no longer reads back raw.
  *   A synthesised spread on PLoT's 0.1 floor (0.15·|value| < 0.1) at either frame is reported `(floor-bound)`: AIQ
@@ -62,6 +63,16 @@ export function naturalSpread(n: Rec): number | undefined {
 
 const interventionsOn = (g: Rec, id: string): [string, Rec][] =>
   (g.nodes ?? []).flatMap((o: Rec) => (o.interventions?.[id] ? [[o.id, o.interventions[id]] as [string, Rec]] : []));
+/** The natural top of a BOUNDED unit (AIQ 5895590866 (1)): "out of N", ratings/stars, a share in %, a fixed-end index. */
+export function naturalTop(n: Rec | undefined): number | undefined {
+  const u = String(n?.observed_state?.unit ?? n?.unit ?? '').toLowerCase().trim();
+  const outOf = /out of\s*(\d+(?:\.\d+)?)/.exec(u);
+  if (outOf) return Number(outOf[1]);
+  if (/\b(stars?|rating)\b/.test(u)) return 5;
+  if (/\bnps\b/.test(u)) return 100;
+  if (/^(%|percent|percentage)$/.test(u)) return 100; // a share or probability; a % CHANGE is not bounded
+  return undefined;
+}
 const byId = (g: Rec): Map<string, Rec> => new Map((g.nodes ?? []).map((n: Rec) => [n.id, n]));
 const edgeKey = (e: Rec): string => `${e.from}→${e.to}`;
 const meanOf = (e: Rec): number | undefined => (num(e.strength?.mean) ? e.strength.mean : num(e.strength_mean) ? e.strength_mean : undefined);
@@ -102,6 +113,10 @@ export function frameInvariance(before: Rec, after: Rec): string[] {
     const levels = [a.observed_state?.raw_value, ...interventionsOn(after, id).map(([, iv]) => iv.raw_value)].filter(num).map(Math.abs);
     const top = Math.max(0, ...levels);
     if (top > F * (1 + TOL)) out.push(`frame_below_level ${id} ${F} < ${top}`);
+  }
+  for (const [id, a] of na) { // a bounded scale's top is NEVER widened (AIQ 5895590866 (1))
+    const [top, Fb, Fa] = [naturalTop(a), frameOf(nb.get(id)), frameOf(a)];
+    if (top !== undefined && Fb !== undefined && Fa !== undefined && Fa > Fb * (1 + TOL) && Fa > top * (1 + TOL)) out.push(`bounded_scale ${id} ${Fb} → ${Fa} (top ${top})`);
   }
   for (const o of after.nodes ?? []) {
     for (const [fid, iv] of Object.entries<Rec>(o.interventions ?? {})) {

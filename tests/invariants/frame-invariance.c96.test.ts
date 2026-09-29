@@ -128,6 +128,16 @@ describe('frame invariance — the oracle on the served c96 graph', () => {
     expect(node(after, 'paying_subscribers').observed_state.std_source).toBeUndefined();
   });
 
+  it('⭐ bounded_scale (AIQ 5895590866 (1)): CSAT "out of 5" widened 5 → 10 is refused; MRR widened (money) is not', () => {
+    const g: Rec = { nodes: [
+      { id: 'sla', kind: 'factor', observed_state: { value: 4 / 24, raw_value: 4, cap: 24, unit: 'hours', source: 'brief_extraction' } },
+      { id: 'csat', kind: 'factor', observed_state: { value: 0.84, raw_value: 4.2, cap: 5, unit: 'out of 5', source: 'brief_extraction' } },
+    ], edges: [{ from: 'sla', to: 'csat', strength: { mean: -1.44 } }] }; // the served support brief: −0.3 points per SLA hour
+    expect(frameInvariance(g, reframe(g, 'csat', 10))).toEqual(['bounded_scale csat 5 → 10 (top 5)']);
+    expect(frameInvariance(c96(), reframe(c96(), 'mrr', 500_000))).toEqual([]); // control: money is not bounded
+    expect(frameInvariance(g, reframe(g, 'sla', 12))).toEqual([]); // tightening the source fits it without touching CSAT
+  });
+
   it('⭐ R3: no frame below the node\'s own level or an option\'s value for it', () => {
     const before = reframe(c96(), 'mrr', 500_000);
     expect(frameInvariance(before, reframe(before, 'paying_subscribers', 1_000))).toContain('frame_below_level paying_subscribers 1000 < 1500');
