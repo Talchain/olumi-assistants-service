@@ -32,6 +32,7 @@ import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../../graph-management/types.js'
 import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../../compose/definitional-links.js';
 import { applyLinkEffectEdit, linkEffectEdgeToken, type LinkEffectRefusal } from '../../system-events/link-effect-edit.js';
+import { unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
 
 /**
@@ -140,7 +141,7 @@ import { unitFamilyOf } from '../../routing/value-unit-resolution.js';
 import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
 import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, quoteOfFigure, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { figureInUserUnits } from '../approval-chips.js';
 import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -2078,9 +2079,15 @@ export function createAgentCapabilities(
     const receipts: ReceiptSummary[] = res.receipt !== null ? [{ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' }] : [];
     const check = await readGraph(ctx.scenario_id);
     const stored = check?.edges.find((x) => x.from === v.from && x.to === v.to) as { provenance?: unknown } | undefined;
-    const prov = (stored?.provenance ?? {}) as { magnitude?: unknown; natural_effect?: { amount?: unknown; per_source_change?: unknown } };
-    const holds = prov.magnitude === 'user_stated' && prov.natural_effect?.amount === effect.amount
-      && prov.natural_effect?.per_source_change === effect.per_source_change;
+    const prov = (stored?.provenance ?? {}) as { source?: unknown; magnitude?: unknown;
+      natural_effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown } };
+    // PR Review on #2275: the read-back proves THIS figure — the user's source, both numbers, and both units (by the
+    // writer's own unit key: the sizer stores each end's unit words, which the writer accepted the stated unit as).
+    const unitKey = (u: unknown): string | undefined => (typeof u === 'string' ? unitComparisonKey(u) : undefined);
+    const sameUnit = (stored: unknown, stated: string): boolean => unitKey(stored) !== undefined && unitKey(stored) === unitKey(stated);
+    const holds = prov.source === 'user_specified' && prov.magnitude === 'user_stated'
+      && prov.natural_effect?.amount === effect.amount && prov.natural_effect?.per_source_change === effect.per_source_change
+      && sameUnit(prov.natural_effect?.amount_unit, effect.amount_unit) && sameUnit(prov.natural_effect?.per_source_change_unit, effect.per_source_change_unit);
     if (!holds) {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
         detail: 'This link\u2019s size was sent, but reading the model back did not show it as recorded. Say exactly that; never say it was recorded or not recorded.' };
@@ -2477,11 +2484,6 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'unreadable_effect',
           detail: 'Nothing was prepared: the effect needs the change in the target and the change in the source it is per, each with its unit.' };
       }
-      // ⛔ Both figures are the user's, or nothing is prepared: a size is recorded as THEIRS (`magnitude: user_stated`).
-      if (!figureTheUserWrote(Math.abs(amount), amountUnit, text) || !figureTheUserWrote(Math.abs(per), perUnit, text)) {
-        return { ok: false, mutated: false, refusal: 'not_the_users_figure',
-          detail: 'Nothing was prepared: the user has not written both figures in this message. Ask them how much the one moves the other, in numbers.' };
-      }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const fromRes = resolveNamed(g, String(args.from_label ?? ''), () => true);
@@ -2499,6 +2501,23 @@ export function createAgentCapabilities(
       if (from === undefined || to === undefined) {
         return { ok: false, mutated: false, refusal: 'unresolved_entity',
           detail: `No entity is labelled "${from === undefined ? args.from_label : args.to_label}". Read the state again and use a label exactly as it appears.` };
+      }
+      // ⛔ A size is recorded as THEIRS (`magnitude: user_stated`) only when ONE statement of theirs says it: both figures,
+      // both ends named, and which way (PR Review CHANGES_REQUIRED on #2275; `linkEffectTheUserStated`).
+      const labelsOf = (keep: (kind: unknown) => boolean): string[] => g.nodes.filter((n) => keep((n as { kind?: unknown }).kind))
+        .map((n) => String(n.label ?? '')).filter((l) => l !== '');
+      const miss = linkEffectTheUserStated(quote, { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit },
+        { source: from.label, target: to.label },
+        { quantities: labelsOf((k) => k !== 'option' && k !== 'decision') });
+      if (miss === 'figures_not_in_statement') {
+        return { ok: false, mutated: false, refusal: 'not_the_users_figure',
+          detail: 'Nothing was prepared: the statement quoted does not write both figures. Ask the user how much the one moves the other, in numbers.' };
+      }
+      if (miss !== null) {
+        return { ok: false, mutated: false, refusal: 'not_the_users_statement', why: miss,
+          detail: `Nothing was prepared: the words quoted do not state, as one statement of the user\u2019s, how much "${from.label}" moves `
+            + `"${to.label}" (${miss.replace(/_/g, ' ')}). A figure is recorded as theirs only when they say it: ask them to say it as one `
+            + 'statement naming both, which way, and both figures. Never fill in a figure or a direction for them.' };
       }
       const edgeToken = linkEffectEdgeToken(g.raw, from.id, to.id);
       if (edgeToken === null) {

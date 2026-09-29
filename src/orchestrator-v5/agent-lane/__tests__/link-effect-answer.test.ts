@@ -19,6 +19,7 @@ import { ProposalStore } from '../proposal.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { linkEffectEdgeToken } from '../../system-events/link-effect-edit.js';
 import { approvalChipsFor, approvalChipIdFor } from '../approval-chips.js';
+import type { CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 
 type Json = Record<string, any>;
 const served = (f: string): Json => (JSON.parse(readFileSync(new URL(`./fixtures/${f}`, import.meta.url), 'utf8')) as { graph: Json }).graph;
@@ -60,10 +61,10 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
 
   it('RED (served journey A): "0.5 points" of a % churn is the ask\'s own unit words — prepared, not refused', async () => {
     const { caps } = world(A);
-    const said = 'A £10 rise adds about 0.5 points of monthly churn.';
+    const said = 'A £10 rise in the Pro price adds about 0.5 points of monthly churn.';
     const r = await caps.proposeLinkEffect!(ctxSaying(said), {
       from_label: 'Pro plan price', to_label: 'Monthly churn', amount: 0.5, amount_unit: 'percentage points',
-      per_source_change: 10, per_source_change_unit: '£/month', quote: 'A £10 rise adds about 0.5 points of monthly churn',
+      per_source_change: 10, per_source_change_unit: '£/month', quote: 'A £10 rise in the Pro price adds about 0.5 points of monthly churn',
     }) as Json;
     expect(r.ok, JSON.stringify(r)).toBe(true);
   });
@@ -83,10 +84,61 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
 
   it('REFUSED by the writer\'s own rule, at propose time: a unit that is not the end\'s ("customers") → unit_mismatch, said', async () => {
     const { caps } = world(C);
-    const said = 'Every £1 on the Pro price loses us about 50 customers.';
-    const r = await caps.proposeLinkEffect!(ctxSaying(said), { ...SUBS_ARGS, amount_unit: 'customers', quote: 'Every £1 on the Pro price loses us about 50 customers' }) as Json;
+    const r = await caps.proposeLinkEffect!(ctxSaying(SUBS_SAID), { ...SUBS_ARGS, amount_unit: 'customers' }) as Json;
     expect(r).toEqual(expect.objectContaining({ ok: false, refusal: 'unit_mismatch' }));
     expect(String(r.detail)).toMatch(/subscribers/);
+  });
+
+  /**
+   * ⛔ PR Review CHANGES_REQUIRED on #2275 @ `ac0023c7`: a size is the user's only when ONE statement of theirs says it
+   * (`linkEffectTheUserStated`). The input CLASS, on served journey C (Pro plan price → Pro plan paying subscribers):
+   * six ways a user states it, each prepared; eight near-misses, each refused — the same numerals in the turn, a
+   * question, a denial, an unnamed end, the opposite way, no way at all, a source said to fall with no word of it.
+   */
+  const stated = async (turn: string, quote: string, amount: number, per: number): Promise<Json> => {
+    const { caps, store } = world(C);
+    const r = await caps.proposeLinkEffect!(ctxSaying(turn), { ...SUBS_ARGS, amount, per_source_change: per, quote }) as Json;
+    return { ...r, stored: store.size() };
+  };
+  it.each([
+    ['every £1 on the Pro price loses us about 50 paying subscribers', -50, 1],
+    ['every £1 we add to the Pro price costs us roughly 50 paying subscribers', -50, 1],
+    ['A £10 rise in the Pro price would lose us about 500 paying subscribers', -500, 10],
+    ['every £1 increase in the Pro price loses us 50 paying subscribers', -50, 1],
+    ['If the Pro price falls by £1 we gain about 50 paying subscribers', 50, -1],
+    ['each £1 on the Pro price means 50 fewer paying subscribers', -50, 1],
+  ])('STATED, prepared: "%s"', async (quote, amount, per) => {
+    const r = await stated(`${quote}.`, quote as string, amount as number, per as number);
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+  });
+  it.each([
+    // PR Review's case: both numerals in the turn, the quote a question — and the statement with them names no price.
+    ['Our budget is £1 per month and we currently have 50 subscribers. Does a Pro price rise affect paying subscribers?',
+      'Does a Pro price rise affect paying subscribers?', -50, 1, 'not_the_users_statement', 'question'],
+    ['Our budget is £1 per month and we currently have 50 paying subscribers. Does a Pro price rise affect them?',
+      'Our budget is £1 per month and we currently have 50 paying subscribers', -50, 1, 'not_the_users_statement', 'end_not_named'],
+    ['Does every £1 on the Pro price lose us 50 paying subscribers?', 'Does every £1 on the Pro price lose us 50 paying subscribers', -50, 1,
+      'not_the_users_statement', 'question'],
+    ['Every £1 on the Pro price does not lose us 50 paying subscribers.', 'Every £1 on the Pro price does not lose us 50 paying subscribers',
+      -50, 1, 'not_the_users_statement', 'denied'],
+    // The opposite way, with the STORED sign supplied: the user said "wins", the tool says −50.
+    ['Every £1 on the Pro price wins us about 50 paying subscribers.', 'Every £1 on the Pro price wins us about 50 paying subscribers',
+      -50, 1, 'not_the_users_statement', 'direction_contradicts'],
+    ['£1 on the Pro price and 50 paying subscribers.', '£1 on the Pro price and 50 paying subscribers', -50, 1,
+      'not_the_users_statement', 'direction_not_stated'],
+    ['Every £1 on the Pro price loses us about 50 paying subscribers.', 'Every £1 on the Pro price loses us about 50 paying subscribers',
+      50, -1, 'not_the_users_statement', 'direction_contradicts'],
+    // The figures only ELSEWHERE in the turn; the quoted statement names both ends and the way, but no size.
+    ['Our budget is £1 a month; we have 50 paying subscribers. Raising the Pro price loses us paying subscribers.',
+      'Raising the Pro price loses us paying subscribers', -50, 1, 'not_the_users_figure', undefined],
+    // A NAMED under-claim: the source only implied ("a £10 rise") — the Agent asks, never infers the price.
+    ['A £10 rise loses us about 500 paying subscribers.', 'A £10 rise loses us about 500 paying subscribers', -500, 10,
+      'not_the_users_statement', 'end_not_named'],
+  ])('NOT STATED, refused: %s', async (turn, quote, amount, per, refusal, why) => {
+    const r = await stated(turn as string, quote as string, amount as number, per as number);
+    expect(r).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal }));
+    if (why !== undefined) expect(r.why).toBe(why);
+    expect(r.stored).toBe(0);
   });
 
   it('the tool is registered: dispatchTool routes propose_link_effect to the capability', async () => {
@@ -135,6 +187,39 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     expect(detail).not.toMatch(/Olumi\u2019s own|Olumi's own|their range|range they gave/);
     expect(detail).not.toMatch(/not_representable|not representable/); // never the raw code
     expect(store.size()).toBe(0);
+  });
+
+  /**
+   * PR Review on #2275: the read-back proves THIS figure — the user's source, both numbers AND both units. A door that
+   * reports "committed" while the stored link holds another source or unit is never said as "recorded".
+   */
+  const readBackAfter = async (stored: Json): Promise<Json> => {
+    const graph = structuredClone(C);
+    const d: InternalDispatch = async (path) => {
+      if (path.endsWith('/graph')) return { status: 200, json: { graph, graph_hash: computeAnalysisAffectingGraphHash(graph as never) } };
+      throw new Error(`unexpected dispatch ${path}`);
+    };
+    const commitOptionLevels = async (): Promise<CommitOptionLevelsResult> => {
+      const e = (graph.edges as Json[]).find((x) => x.from === 'pro_plan_price' && x.to === 'pro_plan_paying_subscribers')!;
+      e.provenance = { ...(e.provenance ?? {}), ...stored };
+      return { status: 'committed', graph_hash: 'h-after', receipt: null, already_applied: false, committed_levels: [], links_resized: [] };
+    };
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(d, store, undefined, 'full', undefined, { commitOptionLevels });
+    const r = await caps.proposeLinkEffect!(ctxSaying(SUBS_SAID), SUBS_ARGS) as Json;
+    return await caps.authoriseChange(ctxSaying('yes'), { proposal_id: String(r.proposal_id) }) as Json;
+  };
+  const THEIRS = { source: 'user_specified', magnitude: 'user_stated',
+    natural_effect: { amount: -50, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: 'GBP per month' } };
+  it('READ-BACK: the user\'s source, numbers and units → recorded', async () => {
+    expect(await readBackAfter(THEIRS)).toEqual(expect.objectContaining({ ok: true, applied: true }));
+  });
+  it.each([
+    ['another source', { ...THEIRS, source: 'cee_hypothesis' }],
+    ['another target unit', { ...THEIRS, natural_effect: { ...THEIRS.natural_effect, amount_unit: 'customers' } }],
+    ['another source unit', { ...THEIRS, natural_effect: { ...THEIRS.natural_effect, per_source_change_unit: 'percent' } }],
+  ])('READ-BACK: %s → never said as recorded', async (_why, stored) => {
+    expect(await readBackAfter(stored as Json)).toEqual(expect.objectContaining({ ok: false, applied: false, refusal: 'not_verified' }));
   });
 
   it('FAIL CLOSED without the level door: approving writes nothing and says so (never a strength-only or register fallback)', async () => {

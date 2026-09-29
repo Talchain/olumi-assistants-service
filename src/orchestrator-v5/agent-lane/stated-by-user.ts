@@ -722,3 +722,75 @@ export function typedByUser(body: Record<string, unknown>): boolean {
 export function userWordsOf(typedEarlier: readonly string[], typedNow: string | null): string {
   return [...typedEarlier, ...(typedNow !== null ? [typedNow] : [])].join('\n');
 }
+
+/**
+ * ⛔ A LINK'S SIZE IS THE USER'S ONLY WHEN ONE STATEMENT OF THEIRS SAYS IT (PR Review CHANGES_REQUIRED on #2275 @
+ * `ac0023c7`): a verbatim quote plus the two numerals somewhere in the turn is not authorship. "Our budget is £1 per
+ * month and we currently have 50 subscribers. Does a Pro price rise affect subscribers?" writes 1 and 50, and says no
+ * effect at all. The quote itself must, read with the model's OWN labels:
+ *   1. STATE, not ask: no "?", and not opened by an auxiliary (the same reading as `bandTheUserWrote`);
+ *   2. not DENY it (the shared negator);
+ *   3. write BOTH figures (`figureTheUserWrote`, on the quote only — never the rest of the turn);
+ *   4. NAME BOTH ENDS: each end by a word of its label the OTHER end lacks ("the Pro price" / "paying subscribers" for
+ *      Pro plan price → Pro plan paying subscribers), unless the quote also writes a word of another quantity that
+ *      carries that word and the end lacks ("price sensitivity" claims "price" for Price sensitivity risk) — the same
+ *      label words and stems as `factorTheUserNamed`; the two ends named in one statement disambiguate each other;
+ *   5. SAY WHICH WAY the target moves, the same way as the amount's sign, with ONE closed class of verbs: lose / cost /
+ *      fewer / drop … against gain / win / adds / rise … A move word right after the SOURCE's figure ("£1 increase",
+ *      "£10 rise", "£1 we add to the price") or beside a word naming the source ("the price falls", "raise the price")
+ *      is the SOURCE's move, and must match the sign of `per_source_change`; with none, the source is read as rising.
+ * Every miss under-claims (the Agent asks the user to say it as one statement): an unlisted verb ("sheds"), a source
+ * named only by implication ("a £10 rise adds…"), both movements for one end, or a quote spanning two statements.
+ */
+export type LinkEffectStatementMiss = 'question' | 'denied' | 'figures_not_in_statement' | 'end_not_named'
+  | 'direction_not_stated' | 'direction_contradicts';
+const TARGET_DOWN = /^(?:lose|loses|losing|lost|cost|costs|costing|fewer)$/;
+const TARGET_UP = /^(?:gain|gains|gaining|gained|win|wins|winning|won|adds|added|adding)$/;
+const MOVE_UP = /^(?:rise|rises|rising|rose|increase|increases|increasing|increased|raise|raises|raising|raised|boost|boosts|boosted|boosting|lift|lifts|lifted|lifting|grow|grows|growing|grew|add)$/;
+const MOVE_DOWN = /^(?:fall|falls|falling|fell|drop|drops|dropping|dropped|decrease|decreases|decreasing|decreased|reduce|reduces|reducing|reduced|lower|lowers|lowering|lowered|cut|cuts|cutting)$/;
+export function linkEffectTheUserStated(
+  quote: string,
+  effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
+  ends: { readonly source: string; readonly target: string },
+  scope: { readonly quantities: readonly string[] },
+): LinkEffectStatementMiss | null {
+  const q = quote.trim();
+  if (q.includes('?') || (AUXILIARY_FIRST.test(q) && !REQUEST_FORM.test(q))) return 'question';
+  if (NEGATOR.test(q)) return 'denied';
+  if (!figureTheUserWrote(Math.abs(effect.amount), effect.amount_unit, q)
+    || !figureTheUserWrote(Math.abs(effect.per_source_change), effect.per_source_change_unit, q)) return 'figures_not_in_statement';
+  const othersOf = (label: string): string[] => scope.quantities.filter((l) => l !== label);
+  const quoteWords = wordsOf(q);
+  const has = (w: string): boolean => quoteWords.some((t) => sameWord(w, t));
+  const named = (end: string, other: string): boolean => wordsOf(end).some((w) => has(w)
+    && !wordsOf(other).some((o) => sameWord(w, o))
+    && !othersOf(end).filter((l) => l !== other).some((l) => wordsOf(l).some((x) => sameWord(x, w))
+      && wordsOf(l).some((x) => !wordsOf(end).some((e) => sameWord(e, x)) && has(x))));
+  if (!named(ends.source, ends.target) || !named(ends.target, ends.source)) return 'end_not_named';
+  const tokens = [...q.matchAll(/[\p{L}\p{N}]+/gu)].map((m) => ({ w: m[0].toLowerCase(), at: m.index ?? 0 }));
+  const sourceOwn = wordsOf(ends.source).filter((w) => !wordsOf(ends.target).some((s) => sameWord(w, s)));
+  const sourceAt = tokens.flatMap((t, i) => (sourceOwn.some((w) => sameWord(w, t.w)) ? [i] : []));
+  const perFigure = findStatedAmounts(q).find((a) => amountIs(a, Math.abs(effect.per_source_change), effect.per_source_change_unit,
+    unitPhraseFamily(effect.per_source_change_unit), q));
+  const perAt = perFigure === undefined ? -1 : tokens.findIndex((t) => t.at >= (perFigure.index ?? 0));
+  // "£1 increase", "£10 rise", "£1 we add": right after the source's figure. "the price falls", "raise the price": beside
+  // a word naming the source. "add … to the Pro price": up to four words before it.
+  const isSourceMove = (i: number, w: string): boolean => (perAt >= 0 && i > perAt && i - perAt <= 3)
+    || sourceAt.some((s) => (w === 'add' ? s > i && s - i <= 4 : Math.abs(s - i) <= 2));
+  let target = 0; let targetBoth = false; let source = 0; let sourceBoth = false;
+  const say = (end: 'target' | 'source', dir: 1 | -1): void => {
+    if (end === 'target') { if (target !== 0 && target !== dir) targetBoth = true; target = dir; } else { if (source !== 0 && source !== dir) sourceBoth = true; source = dir; }
+  };
+  tokens.forEach((t, i) => {
+    if (TARGET_DOWN.test(t.w)) say('target', -1);
+    else if (TARGET_UP.test(t.w)) say('target', 1);
+    else if (MOVE_UP.test(t.w)) say(isSourceMove(i, t.w) ? 'source' : 'target', 1);
+    else if (MOVE_DOWN.test(t.w)) say(isSourceMove(i, t.w) ? 'source' : 'target', -1);
+  });
+  if (target === 0 || targetBoth || sourceBoth) return 'direction_not_stated';
+  if (target !== Math.sign(effect.amount)) return 'direction_contradicts';
+  if (source === 0 ? effect.per_source_change < 0 : source !== Math.sign(effect.per_source_change)) {
+    return source === 0 ? 'direction_not_stated' : 'direction_contradicts';
+  }
+  return null;
+}

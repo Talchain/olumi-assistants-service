@@ -326,7 +326,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'returns its id, which you keep for authorise_change: show the user what it records, never the id, before they approve. '
       + 'Give both figures exactly as the user wrote them: `amount` is the change in the link\u2019s TARGET (negative when it falls), '
       + '`per_source_change` the change in its SOURCE, each in that end\u2019s unit as get_canonical_state gives it. `quote` is the '
-      + 'user\u2019s own words from THIS message, copied exactly. Never use this for a figure the user did not write; for a strength '
+      + 'user\u2019s ONE statement from THIS message that says it, copied exactly: the words that give both figures, name both ends '
+      + 'and say which way. Never use this for a figure the user did not write; for a strength '
       + 'said in words ("strong"), use propose_link_strength.',
     parameters: obj({
       from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
