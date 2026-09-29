@@ -2555,7 +2555,8 @@ export function admitStatedGoalChange(
     if (fromBrief?.kind === 'refused') {
       const gave = fromBrief.written.map((w) => `‘${w}’`).join(' and ');
       return { node, withheld: `Your brief gives ${gave}, but ${fromBrief.written.length === 1 ? 'it isn\'t' : 'none of them is'} held as today's level ` +
-        `of ‘${goal.metric}’, so no chance of reaching your target is shown.` };
+        `of ‘${goal.metric}’, so no chance of reaching your target is shown. Tell me the current level of ‘${goal.metric}’ ` +
+        `and the chance of reaching it can be shown.` };
     }
     return { node, withheld: notTheUsers };
   }
