@@ -18,10 +18,10 @@ type Json = Record<string, any>;
 const FX = JSON.parse(
   readFileSync(new URL('../../__tests__/fixtures/served-strict-journey-5411da8-goal-certainty.json', import.meta.url), 'utf8'),
 ) as { paul: Run; equality: Run };
-type Run = { graph: Json; option_comparison: Json[]; analysis_identity_evaluated_node_ids: string[] };
+type Run = { graph: Json; option_comparison: Json[]; analysis_identity_evaluated_node_ids: string[]; identity_evaluations: Json[] };
 
-/** As served: the run's own evaluated identities (the graph read's `analysis_identity_evaluated_node_ids`, ["mrr"]). */
-const decide = (run: Run) => goalCertaintyDecisions(run.graph, run.option_comparison, new Set(run.analysis_identity_evaluated_node_ids));
+/** The run's identity evaluations (served ids ["mrr"]; `level_source` DERIVED from R3's ISL code-read, see the fixture). */
+const decide = (run: Run) => goalCertaintyDecisions(run.graph, run.option_comparison, run.identity_evaluations);
 const byId = (ds: ReturnType<typeof decide>, id: string) => ds.find((d) => d.option_id === id);
 
 /** Paul's graph with the lowering path's links SIZED (price → churn in points, churn → subscribers in subscribers). */
@@ -114,7 +114,7 @@ describe('AI Quality 5882734064: an identity counts as exact only if THIS run ev
     expect(FX.paul.analysis_identity_evaluated_node_ids).toEqual(['mrr']);
   });
   it('the identity NOT evaluated (e.g. PLoT did not forward it): £59 and £54 are judged on their links, with no identity break-even', () => {
-    const ds = goalCertaintyDecisions(FX.paul.graph, FX.paul.option_comparison, new Set());
+    const ds = goalCertaintyDecisions(FX.paul.graph, FX.paul.option_comparison, []);
     const d59 = byId(ds, 'raise_price_to_59')!;
     expect(d59.earned).toBe(false);
     expect(d59.break_even).toBeUndefined();
@@ -124,5 +124,28 @@ describe('AI Quality 5882734064: an identity counts as exact only if THIS run ev
   });
   it('omitted evaluated set = none attested: a declaration alone never counts', () => {
     expect(byId(goalCertaintyDecisions(FX.paul.graph, FX.paul.option_comparison), 'raise_price_to_54')!.earned).toBe(false);
+  });
+});
+
+describe('R3 5882943255: the break-even is exact only for a stated-level identity with no addends and no other goal parent', () => {
+  const withEval = (level_source: string): Run => ({ ...structuredClone(FX.paul), identity_evaluations: [{ node_id: 'mrr', evaluated: true, level_source }] });
+  it('level_source "identity_inputs" (the goal\'s level did not reach ISL: no k) → still unearned, but NO break-even figure', () => {
+    const d = byId(decide(withEval('identity_inputs')), 'raise_price_to_59')!;
+    expect(d.earned).toBe(false);
+    expect(d.break_even).toBeUndefined();
+    expect(d.say).toMatch(/^Olumi can’t yet say how likely ‘Raise price to £59’ is to meet the goal/);
+  });
+  it('an identity with an ADDEND → no break-even figure', () => {
+    const run = structuredClone(FX.paul);
+    (run.graph.nodes as Json[]).find((n) => n.id === 'mrr')!.nonlinear_identity.addends = [{ label: 'Other revenue', value: 1000 }];
+    expect(byId(decide(run), 'raise_price_to_59')!.break_even).toBeUndefined();
+  });
+  it('a goal parent OUTSIDE the identity\'s operands → no break-even figure', () => {
+    const run = structuredClone(FX.paul);
+    (run.graph.edges as Json[]).push({ from: 'monthly_new_subscribers', to: 'mrr', strength: { mean: 0.1, std: 0.05 }, exists_probability: 0.9, effect_direction: 'positive' });
+    expect(byId(decide(run), 'raise_price_to_59')!.break_even).toBeUndefined();
+  });
+  it('CONTROL: Paul\'s run passes all three (stated level, no addends, the goal\'s parents are exactly the two operands)', () => {
+    expect(byId(decide(FX.paul), 'raise_price_to_59')!.break_even?.operand_count).toBe(88);
   });
 });

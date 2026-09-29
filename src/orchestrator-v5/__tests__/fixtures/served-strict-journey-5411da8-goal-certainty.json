@@ -356,6 +356,13 @@
   ],
   "analysis_identity_evaluated_node_ids": [
    "mrr"
+  ],
+  "identity_evaluations": [
+   {
+    "node_id": "mrr",
+    "evaluated": true,
+    "level_source": "stated_level"
+   }
   ]
  },
  "equality": {
@@ -748,7 +755,14 @@
   ],
   "analysis_identity_evaluated_node_ids": [
    "mrr"
+  ],
+  "identity_evaluations": [
+   {
+    "node_id": "mrr",
+    "evaluated": true,
+    "level_source": "stated_level"
+   }
   ]
  },
- "source": "R3 SCIENCE served strict journey on CEE 5411da8 / PLoT 4837917 / ISL 707a816 (programme-docs r3/science-notes r3-science/evidence/strict-journey-5411da8-20260929/{paul,equality}.json): the stored graph and the served option_comparison P(goal), trimmed to those two. The graph read's analysis_identity_evaluated_node_ids is carried verbatim."
+ "source": "R3 SCIENCE served strict journey on CEE 5411da8 / PLoT 4837917 / ISL 707a816 (programme-docs r3/science-notes r3-science/evidence/strict-journey-5411da8-20260929/{paul,equality}.json): the stored graph and the served option_comparison P(goal), trimmed to those two. The graph read's analysis_identity_evaluated_node_ids is carried verbatim. identity_evaluations is DERIVED, not captured: the served graph read's evaluated ids ['mrr'] plus level_source 'stated_level' per R3's code-read of ISL 707a8162 (#72 5882943255; the goal's level 75,000 reached ISL). A wire witness of level_source is owed."
 }

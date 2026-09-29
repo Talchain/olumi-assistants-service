@@ -63,7 +63,7 @@ function linkIsSized(edge: Rec, unitById: ReadonlyMap<unknown, string | undefine
  * rulings (AI Quality 5882087383, 5882366427) read one definition of "unsized".
  */
 export function sizedLinkTest(nodes: readonly Rec[]): (edge: Rec) => boolean {
-  const unitById = new Map(nodes.map((n) => [n.id, unitOfNode(n)] as const));
+  const unitById = sizerUnitsOf(nodes);
   return (edge) => linkIsSized(edge, unitById);
 }
 

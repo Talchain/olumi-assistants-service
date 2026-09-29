@@ -82,12 +82,12 @@ export function goalCertaintyDecisions(
   graph: unknown,
   optionResults: ReadonlyArray<Record<string, unknown>>,
   /**
-   * The identities THIS run's engine evaluated (the graph read's `analysis_identity_evaluated_node_ids`, as
-   * `break-even.ts` reads it). A declared identity whose run did not evaluate it (PLoT's `identities_not_forwarded`,
-   * ISL's withheld identity) was walked as ordinary links, so its operand links are read by their own provenance and it
-   * gives no break-even (AI Quality 5882734064). Omitted = none attested: a declaration alone never counts.
+   * THIS run's identity evaluations (the stored fact's `identity_evaluations[]`: `node_id`, `evaluated`,
+   * `level_source`). A declared identity the run did not evaluate (PLoT's `identities_not_forwarded`, ISL's withheld
+   * identity) was walked as ordinary links, so its operand links are read by their own provenance and it gives no
+   * break-even (AI Quality 5882734064). Omitted = none attested: a declaration alone never counts.
    */
-  evaluatedIdentityNodeIds?: ReadonlySet<string>,
+  identityEvaluations?: ReadonlyArray<unknown>,
 ): GoalCertaintyDecision[] {
   if (!isRec(graph) || !Array.isArray(graph.nodes)) return [];
   const nodes = graph.nodes.filter(isRec);
@@ -95,7 +95,10 @@ export function goalCertaintyDecisions(
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
   const goal = nodes.find((n) => n.kind === 'goal');
   if (goal === undefined || typeof goal.id !== 'string') return [];
-  const evaluated = (id: unknown): boolean => typeof id === 'string' && evaluatedIdentityNodeIds?.has(id) === true;
+  const evaluations = new Map((identityEvaluations ?? []).filter(isRec)
+    .filter((e) => e.evaluated === true && typeof e.node_id === 'string')
+    .map((e) => [e.node_id as string, e] as const));
+  const evaluated = (id: unknown): boolean => typeof id === 'string' && evaluations.has(id);
   const identity = isRec(goal.nonlinear_identity) && evaluated(goal.id) ? goal.nonlinear_identity : undefined;
   const operands = new Set(Array.isArray(identity?.factor_ids) ? identity!.factor_ids.filter((x): x is string => typeof x === 'string') : []);
   const sized = sizedLinkTest(nodes);
@@ -151,7 +154,9 @@ export function goalCertaintyDecisions(
       out.push({ option_id: optionId, probability_of_goal: certainty, earned: true });
       continue;
     }
-    const breakEven = breakEvenOf(goal, identity, operands, byId, iv, found.through);
+    const breakEven = exactBreakEven(goal, identity, operands, edges, byId, evaluations.get(goal.id))
+      ? breakEvenOf(goal, identity, operands, byId, iv, found.through)
+      : undefined;
     out.push({
       option_id: optionId,
       probability_of_goal: certainty,
@@ -162,6 +167,30 @@ export function goalCertaintyDecisions(
     });
   }
   return out;
+}
+
+/**
+ * R3 5882943255 (CODE-READ ISL `robustness_analyzer_v2.py`): ISL evaluates goal = k × Π(operands) + addends + L, with
+ * k set from the goal's STATED level. `today × Π(now ÷ was)` is ISL's own projection only when (1) this run evaluated
+ * the identity from the stated level (`level_source: 'stated_level'`; `'identity_inputs'` has no k), (2) the identity
+ * has no addends, and (3) the goal has no parent outside the identity's operands (L = 0). Otherwise there is no exact
+ * break-even, and the decision says "can't yet say how likely" (fail closed: never a wrong figure).
+ */
+function exactBreakEven(
+  goal: Rec,
+  identity: Rec | undefined,
+  operands: ReadonlySet<string>,
+  edges: readonly Rec[],
+  byId: ReadonlyMap<unknown, Rec>,
+  evaluation: Rec | undefined,
+): boolean {
+  if (identity === undefined || evaluation?.level_source !== 'stated_level') return false;
+  if (Array.isArray(identity.addends) ? identity.addends.length > 0 : identity.addends !== undefined) return false;
+  return edges.every((e) => {
+    if (e.to !== goal.id) return true;
+    const k = byId.get(e.from)?.kind;
+    return k === 'option' || k === 'decision' || (typeof e.from === 'string' && operands.has(e.from));
+  });
 }
 
 function breakEvenOf(
