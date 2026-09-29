@@ -63,11 +63,12 @@ describe('AIQ #72: one selected Run, outcome ranges without a leader', () => {
     expect(projected(kept, readback())).toEqual(kept);
   });
 
-  it('R3 stale after edit: the kept copy has no outcome and asks for a rerun', () => {
+  it('R3 stale after edit: the kept copy has no old claims and asks for a rerun', () => {
     const kept = projected(run, readback(RUN_AT, 'complete_stale'));
     expect(kept.stale).toBe(true);
     expect(kept.stale_note).toMatch(/Offer to run the analysis again/);
-    expect(kept.result.option_comparison.every((row: Record<string, unknown>) => !('outcome' in row))).toBe(true);
+    expect(kept.result).toEqual({ computed_against_hash: HASH });
+    expect(kept.claim_permissions).toBeUndefined();
     expect(kept.goal_certainty).toBeUndefined();
   });
 
@@ -105,7 +106,7 @@ describe('AIQ #72: one selected Run, outcome ranges without a leader', () => {
     const kept = projected(run, readback(LATER_AT));
     expect(kept.stale).toBe(true);
     expect(kept.stale_note).toMatch(/different analysis run/);
-    expect(kept.result.option_comparison.every((row: Record<string, unknown>) => !('outcome' in row))).toBe(true);
+    expect(kept.result).toEqual({ computed_against_hash: HASH });
     expect(kept.goal_certainty).toBeUndefined();
   });
 
@@ -113,15 +114,16 @@ describe('AIQ #72: one selected Run, outcome ranges without a leader', () => {
     for (const selected of [undefined, { ...readback(), scenarioId: undefined }, { ...readback(), scenarioId: 'another-scenario' }]) {
       const kept = projected(run, selected);
       expect(kept.stale).toBe(true);
-      expect(kept.result.option_comparison.every((row: Record<string, unknown>) => !('outcome' in row))).toBe(true);
+      expect(kept.result).toEqual({ computed_against_hash: HASH });
     }
     expect(projected({ ...run, run_identity: undefined }, readback()).stale).toBe(true);
   });
 
-  it('a stale projection can recover the same selected Run’s recorded ranges when readback proves identity again', () => {
+  it('a stale projection stays range-free if the same Run becomes current again without its old certainty caveats', () => {
     const stale = projected(run, readback(RUN_AT, 'complete_stale'));
     const current = projected(stale, readback());
     expect(current.stale).toBeUndefined();
-    expect(current.result.option_comparison.map((row: Record<string, unknown>) => row.outcome)).toEqual(outcomes);
+    expect(current.result.option_comparison.map((row: Record<string, unknown>) => row.outcome)).toEqual([undefined, undefined, undefined]);
+    expect(projected(current, readback())).toEqual(current);
   });
 });

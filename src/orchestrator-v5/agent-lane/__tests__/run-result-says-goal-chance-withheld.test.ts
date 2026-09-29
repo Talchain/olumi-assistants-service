@@ -64,14 +64,23 @@ describe('run_analysis carries the run\'s withheld goal chance, with the sentenc
     expect(goalChanceWithheldForAgent({ summary: 's', inference_warnings: [WITHHELD_WARNING] })?.node_ids).toEqual(['mrr']);
   });
 
-  it('LATER TURNS keep the rule: the kept copy of a withheld run still carries `goal_chance` (history whitelist)', async () => {
+  it('LATER TURNS keep the rule only while the selected Run is confirmed current', async () => {
     const r = await world({ option_comparison: WITHHELD_ROWS, inference_warnings: [WITHHELD_WARNING] }).runAnalysis(ctx, { reason: 'Run it.' }) as Json;
     expect(r.claim_permissions?.leader_may_be_named).not.toBe(true); // precondition: the WITHHELD projection is the one used
-    const kept = pruneSupersededToolOutputs([
+    const stamp = 'aaaaaaaaaaaaaaaa';
+    const computed_at = '2026-09-29T13:07:48.159Z';
+    const run = { ...r, result: { ...r.result, computed_against_hash: stamp },
+      run_identity: { scenario_id: ctx.scenario_id, graph_hash_at_run: stamp, computed_at } };
+    const history = [
       { type: 'function_call', call_id: 'c1', name: 'run_analysis', arguments: '{}' },
-      { type: 'function_call_output', call_id: 'c1', output: JSON.stringify(r) },
-    ]) as Array<{ type: string; output?: string }>;
-    const out = JSON.parse(kept.find((x) => x.type === 'function_call_output')!.output!) as Json;
-    expect(out.goal_chance).toEqual(r.goal_chance);
+      { type: 'function_call_output', call_id: 'c1', output: JSON.stringify(run) },
+    ];
+    const output = (items: readonly unknown[]) => JSON.parse((items[1] as { output: string }).output) as Json;
+    const current = pruneSupersededToolOutputs(history, [], { scenarioId: ctx.scenario_id,
+      analysisState: { run_state: { kind: 'complete_current', computed_at } }, analysisResult: run.result });
+    expect(output(current).goal_chance).toEqual(r.goal_chance);
+    const unconfirmed = pruneSupersededToolOutputs(history);
+    expect(output(unconfirmed).stale).toBe(true);
+    expect(output(unconfirmed).goal_chance).toBeUndefined();
   });
 });
