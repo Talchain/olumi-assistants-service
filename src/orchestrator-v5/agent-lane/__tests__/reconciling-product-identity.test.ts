@@ -160,6 +160,38 @@ describe('a goal whose stated level reconciles with its two stated parts is decl
     expect(goal.nonlinear_identity ?? null).toBeNull();
   });
 
+  it('NEGATIVE (PR Review on 9fdc3f96): a SECOND denominator ("GBP per subscriber per seat per month" × "subscribers") → no identity', async () => {
+    // price × subscribers is then GBP per seat per month, not the goal's GBP per month.
+    const d = paulDraft({ priceUnit: 'GBP per subscriber per seat per month' });
+    expect(withReconcilingProductIdentity(d, PAUL)).toBe(d);
+    const { goal } = await registeredGoal(d, PAUL);
+    expect(goal.nonlinear_identity ?? null).toBeNull();
+  });
+
+  // The CLASS, not the example (one row per unit shape; the price is Paul's £49, the count his 1,500).
+  it.each([
+    ['GBP per subscriber per month', 'subscribers', 'GBP/month', true],
+    ['£/subscriber/month', 'paying subscribers', 'GBP/month', true],
+    ['GBP per month per subscriber', 'subscribers', 'GBP/month', true],
+    ['GBP per subscriber per month', 'subscribers', 'GBP recurring revenue per month', true],
+    ['GBP per subscriber per seat per month', 'subscribers', 'GBP/month', false],
+    ['GBP/seat/subscriber/month', 'subscribers', 'GBP/month', false],
+    ['GBP per subscriber-month', 'subscribers', 'GBP/month', false],
+    ['GBP per subscriber per month', 'subscriber seats', 'GBP/month', false],
+    ['GBP per subscriber per month', 'subscribers', 'GBP per subscriber per month', false],
+    ['GBP per subscriber per month per year', 'subscribers', 'GBP/month', false],
+    ['GBP per 1000 subscribers per month', 'subscribers', 'GBP/month', false],
+    ['GBP per user per month', 'subscribers', 'GBP/month', false],
+    ['GBP per subscriber', 'subscribers', 'GBP/month', false],
+    ['GBP per subscriber per year', 'subscribers', 'GBP/month', false],
+    ['USD per subscriber per month', 'subscribers', 'GBP/month', false],
+  ] as const)('unit class: %s × %s → goal %s mints = %s', (priceUnit, count, goalUnit, mints) => {
+    const d = paulDraft({ priceUnit, goalUnit, subscribers: { unit: count } });
+    const out = withReconcilingProductIdentity(d, PAUL);
+    expect(out === d).toBe(!mints);
+    if (mints) expect(out.identities).toStrictEqual([{ outcome: 'Monthly recurring revenue', operation: 'product', factors: ['Pro plan price', 'Paying subscribers'], provenance: 'inferred' }]);
+  });
+
   it('NEGATIVE (DL): a same-shape numeric coincidence the brief states as an UNRELATED relation → no identity', async () => {
     // £49 × 1,500 = £73,500 ≈ £75k, but the brief is about support tickets, and "tickets per month" is a rate, not a count.
     const draft = paulDraft({ parts: [{ label: 'Cost per support ticket', unit: 'GBP per ticket', level: 49 }, { label: 'Support tickets', unit: 'tickets per month', level: 1500 }] });

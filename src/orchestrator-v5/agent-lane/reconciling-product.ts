@@ -35,19 +35,37 @@ function periodOf(ws: readonly string[]): Period | 'both' {
   return m && y ? 'both' : m ? 'month' : y ? 'year' : null;
 }
 
-/** Money in ONE unscaled currency, its period, and its per-unit denominator ("£/subscriber/month" → subscriber). */
-function readMoney(unit: unknown, label: string): { code: string; period: Period; per: string | null } | null {
+const isPeriod = (w: string): boolean => MONTH.has(w) || YEAR.has(w);
+const isCurrency = (w: string): boolean => readCurrencyUnitWithQualifiers(w).kind === 'currency';
+/** The words `readCurrencyUnitWithQualifiers` lets stand beside the currency itself ("GBP recurring revenue", "£ a month"). */
+const MONEY_WORDS = new Set(['revenue', 'recurring', 'a']);
+
+/**
+ * Money in ONE unscaled currency, its period, and its ONE per-unit denominator ("£/subscriber/month" → [subscriber]).
+ *
+ * ⛔ PR Review on 9fdc3f96: every "/" or "per" opens a segment, and each segment after the money must be a period or THE
+ * denominator. A second denominator ("GBP per subscriber per seat per month") makes price × subscribers money per seat
+ * per month, not the goal's money per month. So it is refused, as is a segment that mixes a period into a denominator.
+ */
+function readMoney(unit: unknown, label: string): { code: string; period: Period; per: string[] | null } | null {
   if (typeof unit !== 'string') return null;
   const r = readCurrencyUnitWithQualifiers(unit);
   if (r.kind !== 'currency' || r.currencyCode === undefined || (r.multiplier ?? 1) !== 1) return null;
   const ws = words(unit);
+  const segments: string[][] = [[]];
+  for (const w of ws) {
+    if (w === '/' || w === 'per') segments.push([]);
+    else segments[segments.length - 1]!.push(w);
+  }
+  if (segments.some((s) => s.length === 0) || !segments[0]!.every((w) => isCurrency(w) || isPeriod(w) || MONEY_WORDS.has(w))) return null;
+  const denominators = segments.slice(1).filter((s) => !s.every(isPeriod));
+  if (denominators.length > 1) return null;
+  if (denominators.some((s) => !s.every((w) => /^[a-z]+$/.test(w) && !isPeriod(w) && !isCurrency(w) && !MONEY_WORDS.has(w)))) return null;
   // The goal's own name can carry its period ("MRR", "Monthly recurring revenue") when its unit does not.
   const own = periodOf(ws);
   const period = own !== null ? own : periodOf(words(label));
   if (period === 'both') return null;
-  const perAt = ws.findIndex((w, i) => i > 0 && (ws[i - 1] === '/' || ws[i - 1] === 'per') && /^[a-z]+$/.test(w)
-    && !MONTH.has(w) && !YEAR.has(w) && readCurrencyUnitWithQualifiers(w).kind !== 'currency');
-  return { code: r.currencyCode, period, per: perAt === -1 ? null : singular(ws[perAt]!) };
+  return { code: r.currencyCode, period, per: denominators.length === 1 ? denominators[0]!.map(singular) : null };
 }
 
 /** A COUNT: words only ("subscribers", "paying customers") — no currency, no %, no period, no "per" (a rate). */
@@ -66,15 +84,18 @@ function readCount(unit: unknown): string[] | null {
  */
 function unitsCompose(goalUnit: unknown, goalLabel: string, a: { unit: unknown; label: string }, b: { unit: unknown; label: string }): boolean {
   const goal = readMoney(goalUnit, goalLabel);
-  if (goal === null) return false;
+  // The goal is money per period itself: a goal per subscriber (ARPU) is not price × subscribers.
+  if (goal === null || goal.per !== null) return false;
   for (const [m, c] of [[a, b], [b, a]] as const) {
     const money = readMoney(m.unit, '');
     const count = readCount(c.unit);
     if (money === null || count === null) continue;
     if (money.code !== goal.code || money.period !== goal.period) continue;
     // AIQ 5886967509: the DENOMINATOR is the dimensional proof. A rate with none ("GBP/month") could be summed as easily
-    // as multiplied, so it is a CONFIRMATION for the user, never a silent mint.
-    if (money.per === null || !count.includes(money.per)) continue;
+    // as multiplied, so it is a CONFIRMATION for the user, never a silent mint. It must be the count's own noun (its last
+    // word: "subscriber seats" counts seats), and every word of it must be in the count.
+    const per = money.per;
+    if (per === null || per[per.length - 1] !== count[count.length - 1] || !per.every((w) => count.includes(w))) continue;
     return true;
   }
   return false;
