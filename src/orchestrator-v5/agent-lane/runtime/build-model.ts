@@ -34,6 +34,7 @@
  */
 
 import { keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine } from '../keep-options-apart.js';
+import { bindM1ClaimSources } from '../m1-claim-lineage.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
 import { quoteListedOptions } from '../option-lineage.js';
 import { admittedOptionKeys } from '../admitted-option-identity.js';
@@ -1567,7 +1568,8 @@ export async function buildModelFromBrief(
       : {}),
   };
 
-  const registered = await registerConstructedGraph({ scenarioId, brief, graph, dispatch });
+  const claimLineage = faithfulM1 ? bindM1ClaimSources(graph, brief) : null;
+  const registered = await registerConstructedGraph({ scenarioId, brief, graph: claimLineage?.graph ?? graph, dispatch });
   if (!registered.ok || !registered.mutated) return registered;
   const modelVersion = registered.model_version;
   const replayed = registered.replayed === true;
@@ -1586,7 +1588,7 @@ export async function buildModelFromBrief(
     within_compact_limits: size.within,
     size_retried: sizeRetried,
     construction_retried: constructionRetried,
-    ...(faithfulM1 ? { construction_policy: 'm1', constructor_proposals: m1Proposals, constructor_placeholders: m1Placeholders, deferred_suggestions: m1Proposals.length } : {}),
+    ...(faithfulM1 ? { construction_policy: 'm1', constructor_proposals: m1Proposals, constructor_placeholders: m1Placeholders, constructor_source_bindings: claimLineage?.bindings ?? [], constructor_unbound_claims: claimLineage?.unbound ?? [], deferred_suggestions: m1Proposals.length } : {}),
     ...(size.user_material_exceeds_limit
       ? { admitted_over_limit_because: 'your own stated options and facts exceed the compact limit' }
       : {}),
