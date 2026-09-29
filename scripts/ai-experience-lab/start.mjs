@@ -17,7 +17,11 @@ mkdirSync(evidence, { recursive: true });
 const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
 const files = ['src/orchestrator-v5/agent-lane/__tests__/ai-experience-lab.manual.test.ts',
   'scripts/ai-experience-lab/index.html', 'scripts/ai-experience-lab/pricing-fixture.json', 'scripts/ai-experience-lab/start.mjs',
-  'scripts/ai-experience-lab/rehearsal.json', 'scripts/ai-experience-lab/rehearsal.mjs', 'scripts/ai-experience-lab/rehearsal-ui.mjs'];
+  'scripts/ai-experience-lab/rehearsal.json', 'scripts/ai-experience-lab/rehearsal.mjs', 'scripts/ai-experience-lab/rehearsal-ui.mjs',
+  'scripts/ai-experience-lab/m2-runner.mjs',
+  'scripts/ai-experience-lab/pinned-runtime/artefact-runtime/canonical.ts',
+  'scripts/ai-experience-lab/pinned-runtime/artefact-runtime/evals/mm-1/package.ts',
+  'scripts/ai-experience-lab/pinned-runtime/artefact-runtime/evals/mm-1/sealed-provider-pack.ts'];
 const hash = createHash('sha256');
 for (const path of files) hash.update(path).update(readFileSync(resolve(root, path)));
 const env = {};
@@ -31,6 +35,8 @@ Object.assign(env, {
   AI_EXPERIENCE_LAB_HEAD: head, AI_EXPERIENCE_LAB_SOURCE_HASH: hash.digest('hex'),
   AI_EXPERIENCE_LAB_PORT: process.env.AI_EXPERIENCE_LAB_PORT ?? '8793',
   AI_EXPERIENCE_LAB_EVIDENCE: resolve(evidence, 'turn-receipts.jsonl'),
+  AI_EXPERIENCE_LAB_M2_ENABLED: process.env.AI_EXPERIENCE_LAB_M2_ENABLED === '1' ? '1' : '0',
+  AI_EXPERIENCE_LAB_M2_EVIDENCE: resolve(evidence, 'm2-receipts.jsonl'),
 });
 const vitest = resolve(root, 'node_modules/vitest/vitest.mjs');
 if (!existsSync(vitest)) throw new Error('Install the locked dependencies before starting the lab.');

@@ -19,6 +19,14 @@ pnpm exec vitest run scripts/ai-experience-lab/rehearsal.test.mjs
 
 The importer verifies adapter/reference/fixture hashes before calling the owner's functions. Four focused tests cover dismiss/no-write, explicit approval, stale-card removal and replacement, and recorded model/receipt parity. `rehearsal.json` records provenance and currentness verdicts. Full live recomputation remains an integration gap, not a completed step.
 
+## Opt-in live M2 widening (branch-only)
+
+Start the Lab with `AI_EXPERIENCE_LAB_M2_ENABLED=1` and the existing OpenAI key. The live comparison then shows **Explore fresh AI hypotheses for this model**. Pressing it makes one bounded, no-tool Luna-low Responses call over the current session's full model and original brief. The Lab only displays proposals that pass the exact MM-1 output and pointer validator from `Talchain/olumi-programme-docs@03897e41`. Those source files are pinned byte-for-byte under `scripts/ai-experience-lab/pinned-runtime/`; their hashes are checked before every call. Source or output drift withholds the suggestions.
+
+Explore shows the proposal's suggested check and declared pointers. Add records a temporary investigation note in the page; Dismiss removes the card. None of these actions changes the model. A model change during the call withholds the entire result. The full raw response, usage, latency, model and input hashes are saved locally to `m2-receipts.jsonl`; the browser receives only validated provisional proposals. Zero proposals is valid. The validator checks shape and pointer location, but it cannot prove a claimed graph absence or scientific merit. The user must inspect every hypothesis.
+
+This first live path uses the existing frozen pricing model in the preview, which can be changed through its ordinary approval route. It does not yet construct an M1 model from a new brief; that needs the M1 constructor binding. PLoT analysis and recompute remain unavailable in this host. This call is a product prototype, not the separate sealed MM-1 20-call benchmark and not a model-selection result.
+
 ## Start
 
 Install the existing locked dependencies. Run from this checkout:

@@ -6,6 +6,7 @@
 import { it, vi } from 'vitest';
 import Fastify from 'fastify';
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -71,6 +72,8 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
   const port = Number(process.env.AI_EXPERIENCE_LAB_PORT ?? '8793');
   const head = process.env.AI_EXPERIENCE_LAB_HEAD ?? 'unknown';
   const source_hash = process.env.AI_EXPERIENCE_LAB_SOURCE_HASH ?? 'unknown';
+  const m2Enabled = process.env.AI_EXPERIENCE_LAB_M2_ENABLED === '1';
+  const m2Evidence = process.env.AI_EXPERIENCE_LAB_M2_EVIDENCE;
   const arms = {
     baseline: { model: 'gpt-5.6-terra', coaching: false },
     A: { model: 'gpt-5.6-terra', coaching: true },
@@ -109,7 +112,7 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
     app.get(`/lab/${name}`, async (_req, reply) => reply.type('text/javascript').send(readFileSync(resolve('scripts/ai-experience-lab', name), 'utf8')));
   }
   app.get('/lab/status', async () => ({ status: 'ISOLATED_MANUAL_PREVIEW', head, source_hash, arms, fixture: fixture.run,
-    persistence: 'disposable_in_memory', external_analysis: 'unavailable' }));
+    persistence: 'disposable_in_memory', external_analysis: 'unavailable', m2_available: m2Enabled }));
   app.get('/lab/session/:id', async (req, reply) => {
     const sid = (req.params as { id: string }).id;
     if (!sessions.has(sid)) return reply.code(404).send({ error: 'Lab session not found; reset to start again.' });
@@ -129,6 +132,57 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
     return { session_id: sid, arm, ...arms[arm], brief: fixture.history[0]!.user, history: fixture.history, graph: graphs.get(sid) };
   });
   let busy = false;
+  // The opt-in M2 child reads only this session's current brief/model and the existing pinned MM-1 contract.
+  // It has no session store or model-write handle. Only validated proposals may reach the browser.
+  async function callReadOnlyM2(snapshot: { session_id: string; brief: string; graph: unknown }) {
+    const script = resolve('scripts/ai-experience-lab/m2-runner.mjs');
+    return await new Promise<Record<string, unknown>>((done, fail) => {
+      const child = spawn(process.execPath, ['--import', 'tsx', script], {
+        cwd: resolve('.'),
+        env: { PATH: process.env.PATH ?? '', OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '' },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      let output = '', diagnostics = '';
+      const timer = setTimeout(() => child.kill('SIGTERM'), 65_000);
+      child.stdout.on('data', (part: Buffer) => { output += part.toString(); if (output.length > 2_000_000) child.kill('SIGTERM'); });
+      child.stderr.on('data', (part: Buffer) => { diagnostics += part.toString(); if (diagnostics.length > 4_000) child.kill('SIGTERM'); });
+      child.on('error', fail);
+      child.on('close', code => {
+        clearTimeout(timer);
+        if (code !== 0) return fail(new Error(`M2 worker failed (${code}); no proposal was shown.`));
+        try { done(JSON.parse(output) as Record<string, unknown>); }
+        catch { fail(new Error('M2 worker returned no readable result.')); }
+      });
+      child.stdin.end(JSON.stringify(snapshot));
+    });
+  }
+  app.post('/lab/widen', async (req, reply) => {
+    if (!m2Enabled) return reply.code(404).send({ error: 'Live M2 is not enabled in this preview.' });
+    const sid = (req.body as { session_id?: unknown })?.session_id;
+    if (typeof sid !== 'string' || !sessions.has(sid)) return reply.code(404).send({ error: 'Start a Lab session first.' });
+    if (busy) return reply.code(409).send({ error: 'Another Lab call is still running.' });
+    const graph = graphs.get(sid), brief = briefs.get(sid);
+    if (graph === undefined || !brief) return reply.code(409).send({ error: 'The current model or brief is unavailable.' });
+    const before = JSON.stringify({ graph, brief });
+    busy = true;
+    try {
+      const result = await callReadOnlyM2({ session_id: sid, brief, graph: clone(graph) });
+      const current = JSON.stringify({ graph: graphs.get(sid), brief: briefs.get(sid) });
+      const stale = current !== before;
+      if (m2Evidence && result.receipt) appendFileSync(m2Evidence, JSON.stringify({
+        timestamp: new Date().toISOString(), head, source_hash, stale, ...result.receipt as object,
+      }) + '\n');
+      if (stale) return reply.code(409).send({ error: 'The model changed during M2; its proposals were withheld.' });
+      if (!result.receipt) return reply.code(502).send({ error: 'M2 could not finish; nothing was shown.' });
+      return { accepted: result.accepted === true, proposals: result.accepted === true ? result.proposals : [],
+        withheld_reason: result.accepted === true ? null : 'proposal_validation_or_provider_incomplete',
+        model: (result.receipt as { model?: string }).model,
+        graph_hash: (result.receipt as { graph_hash?: string }).graph_hash,
+        latency_ms: (result.receipt as { latency_ms?: number }).latency_ms };
+    } catch {
+      return reply.code(502).send({ error: 'M2 could not finish; nothing was shown.' });
+    } finally { busy = false; }
+  });
   app.post('/lab/turn', async (req, reply) => {
     const body = req.body as { session_id?: string; message?: string };
     const sid = body?.session_id; const arm = sid ? sessions.get(sid) : undefined;
