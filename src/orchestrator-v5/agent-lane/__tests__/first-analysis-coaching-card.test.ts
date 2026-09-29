@@ -20,14 +20,18 @@ import { CoachingBlockSchema } from '@talchain/schemas/boundary';
 import { READY_GRAPH, BLOCKED_GRAPH } from './fixtures/first-analysis-graphs.js';
 import { runTurnCoaching } from '../analysis-coaching-pass-through.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { rebindCapture } from '../../../../tests/helpers/legacy-analysis-hash-v2.js';
 
 type Turn = { graph_hash: string; analysis_state: Record<string, unknown>; analysis_ready: unknown; analysis_result: Record<string, unknown> };
 const fixture = JSON.parse(readFileSync(new URL('../../coaching/__tests__/fixtures/c19-8428207-B.run-turns.trimmed.json', import.meta.url), 'utf8')) as { turns: Record<string, Turn> };
 const T2 = fixture.turns.t2!;
 const COMPUTED_AT = (T2.analysis_state.run_state as { computed_at: string }).computed_at;
 // Paul's served first pass (1a298d6d, CEE bdd43f4) and its WHOLE draft graph, byte-identical: one limit node.
-const PAUL_T1 = (JSON.parse(readFileSync(new URL('../../coaching/__tests__/fixtures/cbd15f83-bdd43f4-paul.run-turns.trimmed.json', import.meta.url), 'utf8')) as { turns: Record<string, Turn> }).turns.t1!;
 const PAUL_GRAPH = (JSON.parse(readFileSync(new URL('../../coaching/__tests__/fixtures/cbd15f83-bdd43f4-paul.draft-graph.json', import.meta.url), 'utf8')) as { graph: Record<string, unknown> }).graph;
+// Shared Data row 1 (projection v3): the recorded hash is proven to be the pre-0.62.0 projection of the draft graph,
+// then rebound to the current projection wherever it appears (tests/helpers/legacy-analysis-hash-v2.ts).
+const PAUL_T1_RAW = (JSON.parse(readFileSync(new URL('../../coaching/__tests__/fixtures/cbd15f83-bdd43f4-paul.run-turns.trimmed.json', import.meta.url), 'utf8')) as { turns: Record<string, Turn> }).turns.t1!;
+const PAUL_T1 = rebindCapture(PAUL_T1_RAW, PAUL_GRAPH, PAUL_T1_RAW.graph_hash);
 
 interface Scenario { registered: boolean; graph: typeof READY_GRAPH; ran: boolean; inProcessRuns: number; injectRuns: number }
 const scenarios = new Map<string, Scenario>();

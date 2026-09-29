@@ -19,6 +19,7 @@ import { readFileSync } from 'node:fs';
 import { runTurnCoaching, type CapturedAnalysis, type RunTurnCoachingFinal } from '../analysis-coaching-pass-through.js';
 import { composeLimitUncheckedCard } from '../../coaching/limit-unchecked-card.js';
 import { RUN_TURN_COACHING_CONTRACT } from '../../coaching/fragile-link-challenge.js';
+import { rebindCapture } from '../../../../tests/helpers/legacy-analysis-hash-v2.js';
 
 type Served = {
   graph_hash: string;
@@ -30,9 +31,12 @@ type Served = {
 };
 // Verbatim wire fields of the served re-run turn (dloop-3 04d-rerun: analysis_state, the analysis_result block,
 // analysis_ready, draft_graph, graph_hash).
-const served = JSON.parse(readFileSync(
+// Shared Data row 1 (projection v3): the recorded hash is proven to be the pre-0.62.0 projection of the draft graph,
+// then rebound to the current projection wherever it appears (tests/helpers/legacy-analysis-hash-v2.ts).
+const servedRaw = JSON.parse(readFileSync(
   new URL('../../coaching/__tests__/fixtures/served-rerun-no-option-meets-limit-20260927.json', import.meta.url), 'utf8',
 )) as Served;
+const served = rebindCapture(servedRaw, servedRaw.draft_graph, servedRaw.graph_hash);
 
 const withReason = (withheld_reason: string) => {
   const state = { ...served.analysis_state, leader_claim: { ...served.analysis_state.leader_claim, withheld_reason } };
