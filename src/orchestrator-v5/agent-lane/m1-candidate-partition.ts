@@ -114,8 +114,8 @@ export function partitionM1Candidate(candidate: CandidateModel, brief: string): 
     return { ...o, interventions, changes };
   });
   const identities = (candidate.identities ?? []).filter((i) => {
-    if (i.provenance !== 'ai_proposed' && quantities.has(canonicalLabel(i.outcome)) && i.factors.every((label) => quantities.has(canonicalLabel(label)))) return true;
-    propose('definition', i.outcome, `identities[${i.outcome}]`, i, 'This definition depends on modelling additions outside the user model.');
+    if (i.provenance === 'explicit' && quantities.has(canonicalLabel(i.outcome)) && i.factors.every((label) => quantities.has(canonicalLabel(label)))) return true;
+    propose('definition', i.outcome, `identities[${i.outcome}]`, i, 'This definition was not stated by the user or depends on modelling additions outside the user model.');
     return false;
   });
   const entities = new Set([...quantities, ...keptOptions.map((o) => canonicalLabel(o.label))]);
@@ -142,9 +142,10 @@ export function partitionM1Candidate(candidate: CandidateModel, brief: string): 
   }
   // The drafter's free text can still describe discarded guesses as active assumptions.
   // M1 keeps the existing structured scope/limit/deadline questions, plus unmapped user options.
+  const removedClaims = proposals.filter((p) => ['factor', 'risk', 'outcome', 'definition'].includes(p.kind)).map((p) => canonicalLabel(p.label));
   const parked = (candidate as { unknowns?: unknown }).unknowns;
   const scopeQuestions = candidate.goal.scope?.stated_in_brief === false && Array.isArray(parked)
-    ? parked.filter((q: unknown): q is string => typeof q === 'string' && q.includes(candidate.goal.metric) && /scope|plans?|revenue/i.test(q) && !/provision|estimat|assum/i.test(q))
+    ? parked.filter((q: unknown): q is string => typeof q === 'string' && q.includes(candidate.goal.metric) && /scope|plans?|revenue/i.test(q) && !/provision|estimat|assum|inferred|treats it as/i.test(q) && !removedClaims.some((label) => label !== '' && canonicalLabel(q).includes(label)))
     : [];
   const unknowns = [...scopeQuestions, ...keptOptions
     .filter((o) => (o.interventions ?? []).length === 0 && (o.changes ?? []).length === 0 && o.is_status_quo !== true)

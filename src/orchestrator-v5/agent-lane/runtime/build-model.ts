@@ -1142,10 +1142,14 @@ export async function buildModelFromBrief(
 
   const faithfulM1 = constructionPolicy === 'm1';
   const modelForAdmission = (draft: CandidateModel): { model: CandidateModel; folded: FoldedCarrier | null } => {
+    // M1 has no source-bound proof that a part and the goal share scope. Numerical reconciliation within 5%
+    // cannot supply that meaning. Keep inferred definitions as proposals; never mint/hoist one before admission.
+    // One gate covers both first passes and both retry passes; production's current path remains unchanged.
+    if (faithfulM1) return { model: draft, folded: null };
     const minted = withReconcilingProductIdentity(draft, brief);
     return minted !== draft ? { model: minted, folded: null } : foldProductCarrierIntoGoal(draft, brief);
   };
-  // Reuse MG's existing identity proof before deciding which intermediate additions can be left out.
+  // Apply the selected policy before partitioning and again at the admission boundary; M1 never imports a fold.
   const firstProof = faithfulM1 ? modelForAdmission(candidate) : { model: candidate, folded: null };
   const firstPartition = faithfulM1 ? partitionM1Candidate(firstProof.model, brief) : null;
   let m1Proposals: readonly M1Proposal[] = firstPartition?.proposals ?? [];
@@ -1541,7 +1545,10 @@ export async function buildModelFromBrief(
   // analysis; asked here, in the channel the Agent already reads, never only in prose. Ahead of the
   // deadline question (merge of staging #1939): both lead the parked questions, so neither is cut by
   // the five-question cap.
-  openQuestions.unshift(...admitted.loss.filter((l) => /\.goal_scope$/.test(l.field_path)).map((l) => l.reason));
+  const scope = candidate.goal.scope;
+  openQuestions.unshift(...(faithfulM1 && scope?.stated_in_brief === false
+    ? [`Does your "${candidate.goal.metric}" goal cover ${scope.modelled} or ${scope.alternative}?`]
+    : admitted.loss.filter((l) => /\.goal_scope$/.test(l.field_path)).map((l) => l.reason)));
 
   const markedNodes = markOlumiOptions(quoteListedOptions(goalNodes, candidate, brief), candidate, brief);
   const optionKeys = faithfulM1 ? admittedOptionKeys(markedNodes, candidate.options) : new Map();
