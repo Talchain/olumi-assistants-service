@@ -17,13 +17,15 @@ import { goalCertaintyDecisions } from '../goal-certainty.js';
 type Json = Record<string, any>;
 const FX = JSON.parse(
   readFileSync(new URL('../../__tests__/fixtures/served-strict-journey-5411da8-goal-certainty.json', import.meta.url), 'utf8'),
-) as { paul: { graph: Json; option_comparison: Json[] }; equality: { graph: Json; option_comparison: Json[] } };
+) as { paul: Run; equality: Run };
+type Run = { graph: Json; option_comparison: Json[]; analysis_identity_evaluated_node_ids: string[] };
 
-const decide = (run: { graph: Json; option_comparison: Json[] }) => goalCertaintyDecisions(run.graph, run.option_comparison);
+/** As served: the run's own evaluated identities (the graph read's `analysis_identity_evaluated_node_ids`, ["mrr"]). */
+const decide = (run: Run) => goalCertaintyDecisions(run.graph, run.option_comparison, new Set(run.analysis_identity_evaluated_node_ids));
 const byId = (ds: ReturnType<typeof decide>, id: string) => ds.find((d) => d.option_id === id);
 
 /** Paul's graph with the lowering path's links SIZED (price → churn in points, churn → subscribers in subscribers). */
-function sizedPaul(): { graph: Json; option_comparison: Json[] } {
+function sizedPaul(): Run {
   const run = structuredClone(FX.paul);
   const g = run.graph;
   g.nodes = (g.nodes as Json[]).filter((n) => n.id !== 'price_sensitivity');
@@ -70,7 +72,7 @@ describe('the rule on Paul\'s served run', () => {
   it('it is said as the conditional result plus the break-even — never "100%" or "certain"', () => {
     const d = byId(decide(FX.paul), 'raise_price_to_59')!;
     expect(d.say).toBe(
-      '‘Raise price to £59’ gives about £90,300 MRR if ‘Paying subscribers’ holds. It misses £85,000 MRR if it loses more than '
+      '‘Raise price to £59’ gives about £90,300 MRR if ‘Paying subscribers’ holds. It misses £85,000 MRR if raising ‘Monthly Pro price’ loses more than '
       + 'about 5.9% of ‘Paying subscribers’ (about 88 of your 1,500 subscribers). Olumi hasn’t sized how ‘Monthly Pro price’ '
       + 'moves ‘Paying subscribers’, so it can’t yet say how likely that is.',
     );
@@ -104,5 +106,23 @@ describe('controls and the variants R3 and AI Quality added', () => {
     const into = (FX.paul.graph.edges as Json[]).filter((e) => e.to === 'mrr').map((e) => [e.from, e.provenance?.magnitude]);
     expect(into).toEqual([['monthly_pro_price', undefined], ['paying_subscribers', undefined]]);
     expect(byId(decide(FX.paul), 'raise_price_to_54')!.earned).toBe(true);
+  });
+});
+
+describe('AI Quality 5882734064: an identity counts as exact only if THIS run evaluated it', () => {
+  it('PRECONDITION: the served run evaluated the MRR identity', () => {
+    expect(FX.paul.analysis_identity_evaluated_node_ids).toEqual(['mrr']);
+  });
+  it('the identity NOT evaluated (e.g. PLoT did not forward it): £59 and £54 are judged on their links, with no identity break-even', () => {
+    const ds = goalCertaintyDecisions(FX.paul.graph, FX.paul.option_comparison, new Set());
+    const d59 = byId(ds, 'raise_price_to_59')!;
+    expect(d59.earned).toBe(false);
+    expect(d59.break_even).toBeUndefined();
+    expect(d59.say).toBe('Olumi can’t yet say how likely ‘Raise price to £59’ is to meet the goal: it depends on how ‘Monthly Pro price’ moves ‘Paying subscribers’, which isn’t sized.');
+    // price → MRR is now an ordinary unsized link that can RAISE MRR, so £54's 0 is no longer earned either.
+    expect(byId(ds, 'raise_price_to_54')).toMatchObject({ probability_of_goal: 0, earned: false });
+  });
+  it('omitted evaluated set = none attested: a declaration alone never counts', () => {
+    expect(byId(goalCertaintyDecisions(FX.paul.graph, FX.paul.option_comparison), 'raise_price_to_54')!.earned).toBe(false);
   });
 });

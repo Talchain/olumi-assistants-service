@@ -353,6 +353,9 @@
     "probability_of_goal": 0,
     "outcome_mean": 74999.99999999999
    }
+  ],
+  "analysis_identity_evaluated_node_ids": [
+   "mrr"
   ]
  },
  "equality": {
@@ -742,7 +745,10 @@
     "probability_of_goal": 0.7721,
     "outcome_mean": 88539.69048778893
    }
+  ],
+  "analysis_identity_evaluated_node_ids": [
+   "mrr"
   ]
  },
- "source": "R3 SCIENCE served strict journey on CEE 5411da8 / PLoT 4837917 / ISL 707a816 (programme-docs r3/science-notes r3-science/evidence/strict-journey-5411da8-20260929/{paul,equality}.json): the stored graph and the served option_comparison P(goal), trimmed to those two."
+ "source": "R3 SCIENCE served strict journey on CEE 5411da8 / PLoT 4837917 / ISL 707a816 (programme-docs r3/science-notes r3-science/evidence/strict-journey-5411da8-20260929/{paul,equality}.json): the stored graph and the served option_comparison P(goal), trimmed to those two. The graph read's analysis_identity_evaluated_node_ids is carried verbatim."
 }

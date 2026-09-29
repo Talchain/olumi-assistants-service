@@ -6,7 +6,7 @@
  * moves to the goal, through a link nobody has sized, runs in the direction that could reverse it: for P = 1 a path that
  * can move the goal away from its target, for P = 0 a path that can move it towards. "Unsized" is the R-c test
  * (`sizedLinkTest`: magnitude absent or `olumi_placeholder`, a natural effect in another unit, or written for another
- * mean), except that a link from a declared identity operand INTO its identity is exact by definition.
+ * mean), except that a link from an identity operand INTO its identity is exact, when THIS run evaluated that identity.
  *
  * An unearned certainty is never said as 100% or certain. It is said as the model-conditional result plus the
  * BREAK-EVEN, exact arithmetic on the user's own figures that the unsized link cannot change:
@@ -78,19 +78,30 @@ const round3 = (x: number): number => Number(x.toPrecision(3));
  * The decision for every option the run reports at P(goal) exactly 0 or 1. Options with an interior P get none.
  * `optionResults` are the run's per-option results (`option_comparison`: `option_id`, `probability_of_goal`).
  */
-export function goalCertaintyDecisions(graph: unknown, optionResults: ReadonlyArray<Record<string, unknown>>): GoalCertaintyDecision[] {
+export function goalCertaintyDecisions(
+  graph: unknown,
+  optionResults: ReadonlyArray<Record<string, unknown>>,
+  /**
+   * The identities THIS run's engine evaluated (the graph read's `analysis_identity_evaluated_node_ids`, as
+   * `break-even.ts` reads it). A declared identity whose run did not evaluate it (PLoT's `identities_not_forwarded`,
+   * ISL's withheld identity) was walked as ordinary links, so its operand links are read by their own provenance and it
+   * gives no break-even (AI Quality 5882734064). Omitted = none attested: a declaration alone never counts.
+   */
+  evaluatedIdentityNodeIds?: ReadonlySet<string>,
+): GoalCertaintyDecision[] {
   if (!isRec(graph) || !Array.isArray(graph.nodes)) return [];
   const nodes = graph.nodes.filter(isRec);
   const edges = Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
   const goal = nodes.find((n) => n.kind === 'goal');
   if (goal === undefined || typeof goal.id !== 'string') return [];
-  const identity = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
+  const evaluated = (id: unknown): boolean => typeof id === 'string' && evaluatedIdentityNodeIds?.has(id) === true;
+  const identity = isRec(goal.nonlinear_identity) && evaluated(goal.id) ? goal.nonlinear_identity : undefined;
   const operands = new Set(Array.isArray(identity?.factor_ids) ? identity!.factor_ids.filter((x): x is string => typeof x === 'string') : []);
   const sized = sizedLinkTest(nodes);
   const exact = (e: Rec): boolean => {
     const to = byId.get(e.to);
-    const id = isRec(to?.nonlinear_identity) ? to!.nonlinear_identity : undefined;
+    const id = isRec(to?.nonlinear_identity) && evaluated(to!.id) ? to!.nonlinear_identity : undefined;
     return (Array.isArray(id?.factor_ids) && id!.factor_ids.includes(e.from)) || sized(e);
   };
   const good = goodSign(goal.goal_direction);
@@ -106,7 +117,7 @@ export function goalCertaintyDecisions(graph: unknown, optionResults: ReadonlyAr
     const iv = option !== undefined ? mergeInterventionSourceObjects(option) : {};
     // The goal would move AWAY from its target (P = 1) or TOWARDS it (P = 0) to reverse the certainty.
     const reversing = certainty === 1 ? -good : good;
-    let found: { from: string; through: string } | undefined;
+    let found: { from: string; through: string; move: number } | undefined;
     for (const [factorId, set] of Object.entries(iv)) {
       if (found !== undefined) break;
       if (!byId.has(factorId)) continue;
@@ -128,7 +139,7 @@ export function goalCertaintyDecisions(graph: unknown, optionResults: ReadonlyAr
           if (e.to === goal.id) {
             const effect = move * s;
             const couldReverse = reversing === 0 || effect === 0 || effect === reversing;
-            if (!ok && couldReverse) found = { from: factorId, through: at };
+            if (!ok && couldReverse) found = { from: factorId, through: at, move };
             continue;
           }
           walk(e.to, s, ok, new Set([...seen, e.to]));
@@ -188,7 +199,7 @@ function sayUnearned(
   option: Rec | undefined,
   goal: Rec,
   byId: ReadonlyMap<unknown, Rec>,
-  found: { from: string; through: string },
+  found: { from: string; through: string; move: number },
   be: GoalCertaintyDecision['break_even'],
 ): string {
   const label = (id: unknown): string => text(byId.get(id)?.label) ?? String(id);
@@ -203,6 +214,8 @@ function sayUnearned(
   const target = sayFigure(be.threshold, unit);
   const holds = `${opt} gives about ${sayFigure(round3(be.projected_if_held), unit)} if ${part} holds.`;
   const verb = reversing < 0 ? 'loses' : 'gains';
+  // The CHANGE loses or gains, not the option (AI Quality nit 5882734064): "if raising ‘Monthly Pro price’ loses …".
+  const change = found.move > 0 ? `raising ${moved}` : found.move < 0 ? `lowering ${moved}` : `the change to ${moved}`;
   const outcome = certainty === 1 ? `It misses ${target} if` : `It reaches ${target} only if`;
   if (be.kind === 'sum') {
     return `${holds} ${outcome} ${part} ${reversing < 0 ? 'falls' : 'rises'} by more than ${sayFigure(round3(be.margin!), unit)}. ${unsized}`;
@@ -212,5 +225,5 @@ function sayUnearned(
     ? ` (about ${be.operand_count} of your ${sayFigure(operand.raw, operand.unit ?? '')})`
     : '';
   const pct = Math.round(be.fraction! * 1000) / 10;
-  return `${holds} ${outcome} it ${verb} more than about ${pct}% of ${part}${count}. ${unsized}`;
+  return `${holds} ${outcome} ${change} ${verb} more than about ${pct}% of ${part}${count}. ${unsized}`;
 }
