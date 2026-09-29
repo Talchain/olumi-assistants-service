@@ -321,7 +321,10 @@ describe('0.65.0 — post-gate option participation is one stored Run fact', () 
     const after = await execute(snapshot(false, ['opt_a']));
     expect(before.submitted.options.map((o) => o.option_id)).toEqual(['opt_a', 'opt_c']);
     expect(before.fact.result.option_participation).toEqual([{ option_id: 'opt_c', state: 'kept_olumi_provisional' }]);
+    expect(before.fact.result.constraint_verdict?.may_name_leading_option).toBe(false);
+    expect(before.fact.result.summary).not.toContain('Option A scored highest');
     expect(after.fact.result.option_participation).toEqual([]);
+    expect(after.fact.result.constraint_verdict?.may_name_leading_option).toBe(true);
     expect(after.fact.result.graph_hash_at_run).not.toBe(before.fact.result.graph_hash_at_run);
   });
 });

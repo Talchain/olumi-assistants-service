@@ -83,6 +83,19 @@ describe('get_canonical_state shows each option’s stored levels (RCA D1)', () 
     }
   });
 
+  it('cold read keeps an excluded Olumi option visibly unadopted even when there is no Run participation row', async () => {
+    const graph = { ...PA_GRAPH, nodes: [
+      ...PA_GRAPH.nodes,
+      { id: 'suggested', kind: 'option', label: 'Olumi suggestion', proposed_by: 'olumi' },
+      { id: 'unmarked', kind: 'option', label: 'Another option' },
+    ] };
+    const r = await capsOver(graph).getCanonicalState(ctx as never);
+    const entities = r.entities as { id: string; proposed_by?: string }[];
+    expect(entities.find((e) => e.id === 'suggested')?.proposed_by).toBe('olumi');
+    expect(entities.find((e) => e.id === 'unmarked')).not.toHaveProperty('proposed_by');
+    expect(entities.find((e) => e.id === 'hire_pa')).not.toHaveProperty('proposed_by');
+  });
+
   it('ROUND TRIP: the writer’s range and the reader’s range are one rule (raw → raw / range → raw)', () => {
     const factors = new Map(PA_GRAPH.nodes.filter((n) => n.kind === 'factor').map((n) => [n.id, n as never]));
     for (const [factorId, raw, range] of [['annual_pa_salary', 42500, 100000], ['pa_hours', 22.5, 40]] as const) {
@@ -99,5 +112,6 @@ describe('the build prompt quotes stored levels and asks only for missing ones',
     expect(src).toContain('get_canonical_state lists the levels each option already sets (`levels`): quote those as stored, and never propose again a level that is already stored unless the user asks to change it.');
     expect(src).toContain('a level for each option and factor that has none yet');
     expect(src).not.toContain('and the level each option sets, in the user');
+    expect(src).toContain('even if Run option_participation is empty because readiness excluded it');
   });
 });

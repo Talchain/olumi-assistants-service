@@ -53,6 +53,7 @@ const DELTA = built.delta;
 const CLAIM = { permitted: false, withheld_reason: 'options_do_not_separate', separation: 'near_tie' };
 const STATE = { run_state: { kind: 'complete_current', computed_at: RUN_AT }, leader_claim: CLAIM };
 const RESULT = { type: 'analysis_result', computed_against_hash: HASH, summary: 'A provisional comparison.', leading_option_id: null };
+const PARTICIPATION = [{ option_id: 'suggested', state: 'excluded_olumi_proposed' }];
 
 describe('a re-run on the Agent route carries the run turn\'s run_delta, bound to the run it shows', () => {
   let app: FastifyInstance;
@@ -101,6 +102,7 @@ describe('a re-run on the Agent route carries the run turn\'s run_delta, bound t
       analysis_ready: { status: 'ready', options: [], blockers: [], goal_node_id: 'g' },
       analysis_state: readback === 'newer_run' ? { ...STATE, run_state: { kind: 'complete_current', computed_at: '2026-09-26T20:41:00.000Z' } } : STATE,
       analysis_result: readback === 'other_graph' ? { ...RESULT, computed_against_hash: 'fedcba9876543210' } : RESULT,
+      analysis_option_participation: PARTICIPATION,
     }));
     await app.register(agentV1TurnRoute);
     await app.ready();
@@ -150,6 +152,17 @@ describe('a re-run on the Agent route carries the run turn\'s run_delta, bound t
     expect(cs, 'PRECONDITION: the interpreter call happened and read canonical state').toBeDefined();
     expect(cs?.run_delta).toBeUndefined();
     expect(cs?.run_delta_absence_reason).toBeUndefined();
+  });
+
+  it('binds participation to the executed Run, never lends a same-hash newer Run fact to its interpretation', async () => {
+    await pressRun();
+    expect(interpreterSaw?.option_participation).toEqual(PARTICIPATION);
+    expect((interpreterSaw?.canonical_state as Record<string, unknown> | undefined)?.option_participation).toBeUndefined();
+
+    readback = 'newer_run';
+    await pressRun();
+    expect(interpreterSaw?.option_participation).toBeUndefined();
+    expect((interpreterSaw?.canonical_state as Record<string, unknown> | undefined)?.option_participation).toBeUndefined();
   });
 
   it('RED: the Agent\'s own run_analysis call (the user asked in words) carries it the same way', async () => {

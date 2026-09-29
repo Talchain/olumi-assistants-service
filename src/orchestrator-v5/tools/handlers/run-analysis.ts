@@ -653,6 +653,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       graph: snapshot.rawPersistedGraph ?? snapshot.graph,
       excluded: gate.excluded,
     });
+    const keptOlumiProvisional = olumiFilter.participation.some((p) => p.state === 'kept_olumi_provisional');
     if (olumiFilter.participation.length > 0) {
       // A log line, not an event: `V5RunAnalysisOptionsScaffolded` means the scaffold, a different concept (see 2.7).
       log.info(
@@ -2163,7 +2164,11 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         'run_analysis: leader withheld — its sign on a multiplied goal is not proven',
       );
     }
-    const headline = nonlinearIdentityWithhold !== null ? null : buildAnalysisResultHeadline(headlineInput);
+    // A provisional Olumi option can remain in a two-option Run when the user supplied
+    // only one analysable option. The intake gate is then not_applicable, but this
+    // cannot become a confident comparison against the user's own options.
+    const headline = nonlinearIdentityWithhold !== null || keptOlumiProvisional
+      ? null : buildAnalysisResultHeadline(headlineInput);
     // ⛔ THE GOAL FRAME THE HEADLINE WAS COMPOSED UNDER (R&C round 1, F1). The
     // objective-contradiction tail below must not say "against your goal" where
     // this headline has withdrawn it, nor assert attainment while the frame is
@@ -2494,6 +2499,14 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
 
+    const leaderPermission = applyNonlinearIdentityToLeaderPermission(
+      applyIntakeToLeaderPermission(projectClaimSafety(constraintVerdict), intakeReconciliation),
+      nonlinearIdentityWithhold,
+    );
+    const runLeaderPermission = keptOlumiProvisional
+      ? { ...leaderPermission, may_name_leading_option: false }
+      : leaderPermission;
+
     const factCandidate: RunAnalysisHandlerFact = {
       fact_type: 'run_analysis',
       fact_version: 1,
@@ -2568,13 +2581,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // ⛔ C46 stage 1 (b): a THIRD remove-only conjunct, the intake precedent's shape — it can only
         // take the permission away, and leaves `constraint_verdict_state` untouched (its REASON is chosen
         // at compose, where the constraint code keeps precedence: AI Quality option (i), #70 5842615260).
-        constraint_verdict: applyNonlinearIdentityToLeaderPermission(
-          applyIntakeToLeaderPermission(
-            projectClaimSafety(constraintVerdict),
-            intakeReconciliation,
-          ),
-          nonlinearIdentityWithhold,
-        ),
+        constraint_verdict: runLeaderPermission,
       },
     };
 

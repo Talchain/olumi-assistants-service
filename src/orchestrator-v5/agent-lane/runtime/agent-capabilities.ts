@@ -778,6 +778,8 @@ interface GraphRead {
     display_value?: unknown;
     scale_frame?: unknown;
     provenance?: unknown;
+    /** Saved option authorship marker; an excluded suggestion may have no Run participation row. */
+    proposed_by?: unknown;
     observed_state?: Record<string, unknown>;
     interventions?: Record<string, unknown>;
     changes?: unknown;
@@ -976,6 +978,9 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
               ? {}
               : { value_provenance: valueProvenance }),
             ...(n.provenance === undefined ? {} : { provenance: n.provenance }),
+            // The mark belongs to the stored option, even if readiness excluded it
+            // before Run participation could record an outcome. Never infer user adoption.
+            ...(n.kind === 'option' && n.proposed_by === 'olumi' ? { proposed_by: 'olumi' } : {}),
           };
         }
 
