@@ -68,6 +68,7 @@ import { goalChanceLineOwed } from '../orchestrator-v5/agent-lane/goal-chance-wi
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import { identityCardToIssue } from '../orchestrator-v5/agent-lane/identity-card.js';
 import { CarriedProposals, carrierForAnswerRow, offeredApproveChipOnRow, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compose/derive-pending-actions.js';
@@ -2264,6 +2265,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // the history (only its words and Olumi's status), so they are the only record of which proposal it applied
     // (PJ-C1). On every other turn an approval is already in `items` at its TRUE position; passing it again would
     // place it after everything and could stub a same-id proposal made later in the turn (adversarial review F2).
+    // ⭐ The confirm card is issued here when this turn's Run says one is waiting and the Agent proposed none
+    // (`identityCardToIssue`): the SAME tool, once; it writes nothing, and `approvalChipsFor` offers its button.
+    if (identityCardToIssue(result.tool_calls, result.tool_results)) {
+      const issued = await dispatchTool('propose_identity', '{}', toolCtx, capabilities, mode);
+      result = {
+        ...result,
+        tool_calls: [...result.tool_calls, { name: 'propose_identity', ok: issued.ok === true, mutated: false,
+          ...(typeof issued.proposal_id === 'string' ? { proposal_id: issued.proposal_id } : {}) }],
+        tool_results: [...result.tool_results, issued],
+      };
+      log.info({ scenario_id: scenarioId, ok: issued.ok === true, refusal: issued.refusal }, 'agent-lane: identity card issued by the route after the Run');
+    }
     const results = result.tool_results;
     const chipApprovals = fastPath === 'approve'
       ? result.tool_calls.flatMap((c, k) => (c.name === 'authorise_change' && k < results.length ? [results[k]] : []))
