@@ -21,6 +21,7 @@
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
 import { sayLevel } from './bound-graph.js';
+import { sayFigure as sayLaneFigure } from '../agent-lane/say-figure.js';
 
 export const IDENTITY_NOT_EVALUATED_CODE = 'IDENTITY_NOT_EVALUATED';
 
@@ -89,12 +90,14 @@ const CODE_TO_PREFIX_SYMBOL: ReadonlyMap<string, string> = (() => {
  */
 export function sayFigure(value: number, unit: unknown, label: string): string {
   const u = typeof unit === 'string' ? unit.trim() : '';
-  const head = /^(\S+)\s*(.*)$/.exec(u);
-  const symbol = head !== null ? CODE_TO_PREFIX_SYMBOL.get(head[1]!.toUpperCase()) : undefined;
-  if (head === null || symbol === undefined) return sayLevel(Math.round(value * 100) / 100, u);
-  const money = sayLevel(Math.round(value), symbol);
-  const rest = head[2]!.trim();
-  return rest === '' || label.toLowerCase().includes(rest.toLowerCase()) ? money : `${money} ${rest}`;
+  // The leading token up to a space OR a "/" (AIQ 5887805333: "GBP/subscriber/month" read as "49 GBP/subscriber/month").
+  const head = /^([^\s/]+)(.*)$/.exec(u);
+  const lead = head?.[1] ?? '';
+  const isMoney = CODE_TO_PREFIX_SYMBOL.has(lead.toUpperCase()) || [...CODE_TO_PREFIX_SYMBOL.values()].includes(lead);
+  if (!isMoney) return sayLevel(Math.round(value * 100) / 100, u);
+  const rest = (head?.[2] ?? '').trim();
+  // Money is said in whole units here (a reconstructed total, never pence), through the lane's ONE figure formatter.
+  return sayLaneFigure(Math.round(value), rest === '' || label.toLowerCase().includes(rest.toLowerCase()) ? lead : u);
 }
 
 const q = (label: string): string => `“${label}”`;
@@ -201,10 +204,26 @@ export function composeIdentityNotEvaluatedAsk(critiques: unknown, graph: unknow
       };
     }
     case 'identity_frame_missing': {
-      const unitless = w.participants.filter((p) => {
-        const u = rec(byId.get(p)?.observed_state)?.unit;
-        return typeof u !== 'string' || u.trim() === '';
-      });
+      const hasUnit = (id: string): boolean => {
+        const n = byId.get(id);
+        const u = rec(n?.observed_state)?.unit ?? (id === w.nodeId ? n?.goal_threshold_unit : undefined);
+        return typeof u === 'string' && u.trim() !== '';
+      };
+      const unitless = w.participants.filter((p) => !hasUnit(p));
+      // ISL's rule 1 frames the identity NODE as well as its operands (R3 #72 5884883932, DL 5884896233). Every
+      // operand in its unit and the target in none → ask for the TARGET's, never again for units the user gave.
+      if (unitless.length === 0 && !hasUnit(w.nodeId)) {
+        // Only a GOAL has a target of its own; an outcome's unit comes from today's figure alone (AIQ 5885470243).
+        const aim = target.kind === 'goal' ? ' or what are you aiming for' : '';
+        return {
+          reason: w.reason,
+          node_id: w.nodeId,
+          assistant_text: `I can't work out ${q(T)} ${asFormula} without knowing what ${q(T)} is measured in: `
+            + `what unit is it in, and roughly what is it today${aim}?`,
+          chip_label: 'Give its unit',
+          chip_message: `Ask me which unit ${q(T)} is in.`,
+        };
+      }
       const named = andList(say(unitless.length > 0 ? unitless : w.participants));
       const one = (unitless.length > 0 ? unitless : w.participants).length === 1;
       return {
