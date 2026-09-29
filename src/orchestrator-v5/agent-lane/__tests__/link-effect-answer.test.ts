@@ -123,7 +123,9 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     }) as Json;
     expect(r).toEqual(expect.objectContaining({ ok: false, refusal: 'not_representable' }));
     expect(String(r.detail)).toMatch(/more than the analysis can represent on the ranges/);
-    expect(String(r.detail)).toMatch(/Is that the size they meant\?/);
+    // Canonical 5883568580: refuse and ASK — the size, or either end's range; the user's figure kept in the reply.
+    expect(String(r.detail)).toMatch(/Is that the size they meant, or should the range of "Pro plan price" or "Pro paying subscribers" change\?/);
+    expect(String(r.detail)).toMatch(/Repeat their figure in their own words/);
     expect(String(r.detail)).not.toMatch(/not_representable|not representable/); // never the raw code
     expect(store.size()).toBe(0);
   });

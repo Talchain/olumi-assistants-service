@@ -1103,13 +1103,16 @@ function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: {
         + 'Tell them so plainly, and offer to reverse the link\u2019s direction with propose_link_strength (their words on one link).';
     case 'superseded':
       return 'Nothing was prepared: the model changed while this was being read. Read the state again and propose once more.';
-    // The sizer's own terms and questions (`link-effect.ts` D7) — the user's figure is never shrunk to fit.
+    // The sizer's own terms and questions (`link-effect.ts` D7). At the answer door the writer refuses and asks (Canonical
+    // 5883568580): nothing is stored, the user's figure stays in the reply, and never shrunk to fit.
     case 'not_representable':
       return `Nothing was prepared: the user's figure is more than the analysis can represent on the ranges "${from.label}" and "${to.label}" `
-        + 'are measured on, so it would be cut short. Tell them so plainly and ask: Is that the size they meant? Never shrink their figure yourself.';
+        + 'are measured on, so it would be cut short. Repeat their figure in their own words, tell them so plainly and ask: Is that the '
+        + `size they meant, or should the range of "${from.label}" or "${to.label}" change? Never shrink their figure yourself.`;
     case 'out_of_domain':
-      return `Nothing was prepared: across the options, the user's figure would take "${to.label}" outside the range it can hold. Tell them so `
-        + `plainly and ask whether the size of that effect should change, or today's level of "${to.label}". Never adjust their figure yourself.`;
+      return `Nothing was prepared: across the options, the user's figure would take "${to.label}" outside the range it can hold. Repeat `
+        + `their figure in their own words, tell them so plainly and ask whether the size of that effect should change, or today's level `
+        + `of "${to.label}". Never adjust their figure yourself.`;
     default:
       return `Nothing was prepared: this effect cannot be recorded with this model yet (${String(reason).replace(/_/g, ' ')}). Tell the user plainly.`;
   }
