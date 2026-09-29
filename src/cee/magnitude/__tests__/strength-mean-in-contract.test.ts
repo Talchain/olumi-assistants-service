@@ -10,6 +10,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { sizeLink, type MagnitudeNode } from '../link-effect.js';
+import { admitCandidateLinks } from '../../../orchestrator-v5/agent-lane/admit-candidate.js';
+import { EdgeStrengthV3 } from '../../../schemas/cee-v3.js';
+import { computeAnalysisAffectingGraphHash } from '../../../orchestrator-v5/context/graph-hash.js';
 
 const mrr: MagnitudeNode = {
   label: 'MRR', kind: 'goal', goal_threshold_cap: 25000, goal_threshold_unit: 'GBP per month', option_levels: [],
@@ -54,5 +57,40 @@ describe('a user-stated size beyond the frames is stored at the bound the engine
     const s = sizeLink({ direction: 'positive', effect_amount: 49, effect_per_source_change: 1, user_stated: false }, subscribers, mrr);
     expect(s.outcome).not.toBe('user_stated');
     expect(Math.abs(s.mean)).toBeLessThanOrEqual(1);
+  });
+});
+
+// ⛔ AIQ 5893355501 (3) + R3-B contract 5893779548: storing the bound alone would ERASE the evidence PLoT #422 needs to
+// withhold, so the cut is MARKED on the written edge (`strength.clamped_from`), kept by every re-parse, and hashed.
+describe('the cut marker on the written edge', () => {
+  const link = (user_stated: boolean, amount = 49) => ({
+    from: 'Pro paying subscribers', to: 'MRR', direction: 'positive', provenance: user_stated ? 'explicit' : 'inferred',
+    effect_amount: amount, effect_per_source_change: 1,
+  });
+  const admitted = (user_stated: boolean, amount = 49) => {
+    const l = link(user_stated, amount);
+    const sizing = new Map([[`${l.from}::${l.to}`, sizeLink({ direction: 'positive', effect_amount: amount, effect_per_source_change: 1, user_stated }, subscribers, mrr)]]);
+    return admitCandidateLinks([l] as never, sizing).edges[0]!;
+  };
+  it('RED: a user-stated β of 3.92 is written as mean 1 WITH clamped_from 3.92', () => {
+    const e = admitted(true);
+    expect(e.strength.mean).toBe(1);
+    expect(e.strength.clamped_from).toBeCloseTo(3.92, 9);
+  });
+  it('CONTROL: an in-range user-stated size carries no marker', () => {
+    expect(admitted(true, 5).strength).not.toHaveProperty('clamped_from');
+  });
+  it('CONTROL: Olumi\'s own estimate beyond the frames carries no marker (set aside for the placeholder, never "the user\'s")', () => {
+    expect(admitted(false).strength).not.toHaveProperty('clamped_from');
+  });
+  it('the marker survives the re-parse every write makes; a malformed one is absence, never a refused graph', () => {
+    expect(EdgeStrengthV3.parse({ mean: 1, std: 1.96, clamped_from: 3.92 })).toEqual({ mean: 1, std: 1.96, clamped_from: 3.92 });
+    expect(EdgeStrengthV3.parse({ mean: 1, std: 1.96, clamped_from: 0.5 })).toEqual({ mean: 1, std: 1.96 });
+  });
+  it('the marker is analysis-affecting: the same graph with and without it hashes differently', () => {
+    const g = (strength: Record<string, number>) => ({ nodes: [{ id: 'a', kind: 'factor', label: 'A' }, { id: 'b', kind: 'goal', label: 'B' }],
+      edges: [{ from: 'a', to: 'b', strength, exists_probability: 1, effect_direction: 'positive' }] });
+    expect(computeAnalysisAffectingGraphHash(g({ mean: 1, std: 1.96, clamped_from: 3.92 }) as never))
+      .not.toBe(computeAnalysisAffectingGraphHash(g({ mean: 1, std: 1.96 }) as never));
   });
 });

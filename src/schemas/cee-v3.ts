@@ -606,6 +606,13 @@ export const EdgeStrengthV3 = z.object({
   mean: z.number(),
   /** Parametric uncertainty, must be > 0 */
   std: z.number().positive(),
+  /**
+   * ⛔ THE CUT MARKER (AIQ #72 5893355501 (3); R3-B contract 5893779548). The user's own stated β, when it did not fit
+   * the frames and `mean` holds the bound the engine analyses instead. PLoT #422 withholds the goal figures that rest on
+   * a marked user-stated edge. DECLARED so every re-parse keeps it (this object strips undeclared keys); IN the analysis
+   * hash (`graph-hash.ts`); written only by construction. A malformed value (not a finite number beyond ±1) is absence.
+   */
+  clamped_from: z.number().finite().refine((x) => Math.abs(x) > 1).optional().catch(undefined),
 });
 export type EdgeStrengthV3T = z.infer<typeof EdgeStrengthV3>;
 

@@ -100,7 +100,7 @@ export interface CandidateLink {
 export interface AdmittedEdge {
   from: string;
   to: string;
-  strength: { mean: number; std: number };
+  strength: { mean: number; std: number; clamped_from?: number };
   exists_probability: number;
   effect_direction?: 'positive' | 'negative' | 'unknown';
   /**
@@ -249,7 +249,15 @@ export function admitCandidateLinks(
       const edge: AdmittedEdge = {
         from: link.from,
         to: link.to,
-        strength: { mean: sized.mean, std },
+        // ⛔ AIQ 5893355501 (3), R3-B contract 5893779548: a USER-STATED β beyond the frames is stored at the bound the
+        // engine analyses, and the cut is MARKED on the edge (`clamped_from`, the β as the user stated it), so PLoT #422
+        // still withholds the figures that rest on it. Never on Olumi's own estimate (set aside for the placeholder).
+        strength: {
+          mean: sized.mean, std,
+          ...(sized.magnitude === 'user_stated' && typeof sized.stated_strength === 'number'
+            && Math.abs(sized.stated_strength) > 1 && sized.mean !== sized.stated_strength
+            ? { clamped_from: sized.stated_strength } : {}),
+        },
         exists_probability: existenceStated ? (link.existence_probability as number) : DEFAULT_EXISTS_PROBABILITY,
         effect_direction: link.direction,
         provenance: {

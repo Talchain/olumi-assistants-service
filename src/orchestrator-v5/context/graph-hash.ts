@@ -350,6 +350,8 @@ function projectEdge(raw: unknown): EdgeProjection {
     const strength: Record<string, unknown> = {};
     if (s.mean !== undefined) strength.mean = s.mean;
     if (s.std !== undefined) strength.std = s.std;
+    // The cut marker changes what PLoT withholds (AIQ 5893355501 (3)), so it is analysis-affecting.
+    if (s.clamped_from !== undefined) strength.clamped_from = s.clamped_from;
     if (Object.keys(strength).length > 0) out.strength = strength;
   }
 
