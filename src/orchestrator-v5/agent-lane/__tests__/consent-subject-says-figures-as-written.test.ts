@@ -81,7 +81,7 @@ describe('⭐ a consent subject says a figure as the user writes it', () => {
       expect(String(r.public_label)).not.toMatch(RAW);
       // The re-derived count keeps its own words.
       expect(String(r.public_label)).toMatch(/becomes about 1,469 subscribers \(was 1,300 subscribers\)/);
-      const reply = composeProposalReply('propose_goal_current_level', { whole_request: true }, r, C03.message);
+      const reply = composeProposalReply('propose_goal_current_level', { goal_label: 'MRR', value: 72000, unit, goal_is: 'at_least', user_stated: true, whole_request: true }, r, C03.message);
       expect(reply).toContain(said);
       expect(reply).not.toMatch(RAW);
     });
@@ -95,7 +95,7 @@ describe('⭐ a consent subject says a figure as the user writes it', () => {
       const r = await produce(graph, 'propose_limit_change', LIMIT_ARGS);
       expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true }));
       expect(r.public_label).toBe(`Change the limit on "${limitLabel}" from at most £20,000 over 6 months to at most £30,000 over 6 months`);
-      const reply = composeProposalReply('propose_limit_change', { whole_request: true }, r, C05.message);
+      const reply = composeProposalReply('propose_limit_change', { ...LIMIT_ARGS, whole_request: true }, r, C05.message);
       expect(reply).toContain('from at most £20,000 over 6 months to at most £30,000 over 6 months');
       expect(reply).not.toMatch(RAW);
     });
@@ -122,7 +122,10 @@ describe('⭐ a consent subject says a figure as the user writes it', () => {
     expect(String(r.public_label)).not.toMatch(RAW);
     // Olumi's estimate, said by the one-call template's own line.
     const estimated = { ok: true, mutated: false, proposal_id: r.proposal_id, public_label: r.public_label, base_revision: r.base_revision, interventions: [{ option: 'Additional advertising', factor: 'Advertising spend', value: 15000, unit: 'GBP over 6 months', basis: 'a planning figure', stated_by: 'olumi_estimate' }] };
-    const reply = composeProposalReply('propose_option_interventions', { interventions: [], whole_request: true }, estimated, msg);
+    const reply = composeProposalReply('propose_option_interventions', { interventions: [
+      { option_label: 'Additional advertising', factor_label: 'Advertising spend', value: 15000, unit: 'GBP over 6 months', basis: msg },
+      { option_label: 'Additional advertising', factor_label: 'Pro paying subscribers', value: 1200, unit: 'subscribers', basis: msg },
+    ], whole_request: true }, estimated, msg);
     expect(reply).toContain('‘Advertising spend’ under ‘Additional advertising’ is set to £15,000 over 6 months, Olumi’s estimate');
     expect(reply).not.toMatch(RAW);
   });

@@ -236,7 +236,7 @@ describe('the one-call reply (PJ-C1) is kept: the reading adds no second model c
       note: 'Nothing has changed yet.',
     };
     const withReading = { ...held, switch_placeholder_levels_read_as_on: [{ option: GRANDFATHER, factor: GF_SWITCH }], switch_placeholder_levels_note: '…' };
-    expect(composeProposalReply('propose_new_option', { whole_request: true }, held, A07)).not.toBeNull();
-    expect(composeProposalReply('propose_new_option', { whole_request: true }, withReading, A07)).toBe(composeProposalReply('propose_new_option', { whole_request: true }, held, A07));
+    expect(composeProposalReply('propose_new_option', { whole_request: true, label: GRANDFATHER }, held, A07)).not.toBeNull();
+    expect(composeProposalReply('propose_new_option', { whole_request: true, label: GRANDFATHER }, withReading, A07)).toBe(composeProposalReply('propose_new_option', { whole_request: true, label: GRANDFATHER }, held, A07));
   });
 });

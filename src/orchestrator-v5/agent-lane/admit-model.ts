@@ -23,7 +23,7 @@ import {
   resolveGoalThresholdCapWithProvenance,
 } from '../../utils/goal-threshold-cap.js';
 import { admitGoalBaseline } from '../../cee/factor-extraction/goal-baseline-admissibility.js';
-import { ceilingTargetUnitMayBeALevel, heldComparatorSense } from '../goal-target/goal-direction.js';
+import { ceilingTargetUnitMayBeALevel, heldComparatorSense, heldStrictFloorIsScoredStrictly } from '../goal-target/goal-direction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { MAY_NAME_LEADING_OPTION } from '../../orchestrator/context/constraint-feasibility.js';
 import type { InterventionV3T } from '../../schemas/cee-v3.js';
@@ -2374,6 +2374,12 @@ export type StatedGoalLevelVerdict =
  * `<` stays refused, as `>` is. With no held ceiling, `<=` is refused exactly as before. And a held ceiling makes a
  * `>=` reading (the chat path's `goal_is`) a contradiction of the user's own comparator: refused, never scored `>=`.
  *
+ * ⭐ AND `>` BESIDE A HELD `'>'` THE RUN SCORES STRICTLY (R1 S4 (B), #72 5879602608). The wire sends
+ * `goal_threshold_strict` for that goal (`resolveGoalThresholdStrict`) and ISL then counts reaching the target itself as
+ * not met (ISL #209), so a `>` level is admitted on the floor rule — ONLY where `heldStrictFloorIsScoredStrictly` says the
+ * run maximises (a reduce label sends `minimise`, where strict would read "below"). There an "at least" reading is a
+ * contradiction of the user's own comparator: refused. With no held `'>'`, `>` is refused exactly as before.
+ *
  * Then the shared scale/direction rule (`admitGoalBaseline`): a level above the target is a decrease the `>=`
  * frame would invert; a level off the target's own cap is on another scale. Both withheld and said.
  *
@@ -2415,7 +2421,20 @@ export function admitStatedGoalLevel(args: {
         'round, and it was not used. If the goal is to stay under the target, say so and give the current level again.',
     };
   }
-  if (operator === '>') {
+  // ⭐ R1 S4 (B) (#72 5879602608): beside a HELD `'>'` that the run scores strictly (`heldStrictFloorIsScoredStrictly`:
+  // the wire sends `goal_threshold_strict`, and ISL then counts reaching the target itself as NOT met), a `>` level is
+  // admitted on the floor rule, and an "at least" reading contradicts the user's own comparator: refused, never scored.
+  const strictFloor = heldStrictFloorIsScoredStrictly(heldComparator, metric);
+  if (operator === '>=' && strictFloor) {
+    return {
+      admitted: false,
+      reason:
+        `"${metric}" is held as a goal to get above ${raw}, as the brief put it, so a current level (${baselineRaw}) ` +
+        `read as reaching at least ${raw} would be scored against a goal the brief did not set, and it was not used. ` +
+        `If the goal is to get above ${raw}, give the current level again on that reading.`,
+    };
+  }
+  if (operator === '>' && !strictFloor) {
     return {
       admitted: false,
       reason:
@@ -2425,7 +2444,7 @@ export function admitStatedGoalLevel(args: {
         `shown. If reaching ${raw} is enough, say the goal is "at least ${raw}" and it can be shown.`,
     };
   }
-  if (operator !== '>=') {
+  if (operator !== '>=' && operator !== '>') {
     return {
       admitted: false,
       reason:
@@ -2493,7 +2512,10 @@ export function admitGoalLevelBesideHeldCeiling<N extends { readonly kind?: unkn
     readonly goal_direction?: unknown; readonly goal_threshold_raw?: unknown; readonly goal_threshold_cap?: unknown;
     readonly observed_state?: unknown;
   };
-  if (node.goal_direction !== '<=' || goal.operator !== '<=' || node.observed_state !== undefined) return unchanged;
+  // ⭐ R1 S4 (B) (#72 5879602608): a held STRICT floor (`'>'` beside a `>` candidate) is asked again the same way — the
+  // run sends `goal_threshold_strict` for it (`admitStatedGoalLevel` decides whether it is scored strictly).
+  const heldPair = (node.goal_direction === '<=' && goal.operator === '<=') || (node.goal_direction === '>' && goal.operator === '>');
+  if (!heldPair || node.observed_state !== undefined) return unchanged;
   const raw = node.goal_threshold_raw;
   const cap = node.goal_threshold_cap;
   const baselineRaw = goal.baseline_value;

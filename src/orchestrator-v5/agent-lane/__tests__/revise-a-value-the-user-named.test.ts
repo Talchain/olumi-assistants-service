@@ -55,7 +55,7 @@ describe('the user can change an assumption the analysis named', () => {
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r.assumptions).toEqual([
-      { factor: 'Monthly churn rate', value: 6, unit: '%', basis: 'the user asked what 6% would do', replaces: 4 },
+      { factor: 'Monthly churn rate', value: 6, unit: '%', basis: 'the user asked what 6% would do', replaces: 4, your_figure: true },
     ]);
   });
 
@@ -209,7 +209,7 @@ describe('a value the user revises is saved on its own frame, and only called sa
 
     // (1) The approval shows the user's OWN number, not the model's divisor.
     expect(proposed.assumptions).toEqual([
-      { factor: 'Evidence strength', value: 50, unit: 'points', basis: 'the user said 50', replaces: 70 },
+      { factor: 'Evidence strength', value: 50, unit: 'points', basis: 'the user said 50', replaces: 70, your_figure: true },
     ]);
     expect(String(proposed.public_label)).toContain('70 points → 50 points');
     expect(String(proposed.public_label), 'the model divisor must never reach the chip').not.toContain('0.7');
@@ -269,7 +269,7 @@ describe('a value the user revises is saved on its own frame, and only called sa
       assumptions: [{ factor_label: 'Monthly churn rate', value: 6, unit: '%', basis: 'the user asked', revise: true }],
     });
     expect(proposed.assumptions).toEqual([
-      { factor: 'Monthly churn rate', value: 6, unit: '%', basis: 'the user asked', replaces: 4 },
+      { factor: 'Monthly churn rate', value: 6, unit: '%', basis: 'the user asked', replaces: 4, your_figure: true },
     ]);
     await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
     const edit = (p.posted as Record<string, unknown>[]).find((e) => e?.kind === 'factor_value_edit');

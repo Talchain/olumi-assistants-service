@@ -93,7 +93,7 @@ describe('the composed reply says exactly what the tool returned, in AIC’s wor
   });
 
   it('RED (C08): Olumi’s levels say so, with their basis, for the user to correct', () => {
-    const r = composeProposalReply('propose_new_option', WHOLE, clean(SPLIT), 'Let’s split it 50/50 at this stage.');
+    const r = composeProposalReply('propose_new_option', { ...WHOLE, options: [{ label: 'Split it 50/50' }] }, clean(SPLIT), 'Let’s split it 50/50 at this stage.');
     expect(r).toContain('‘Incremental feature investment’ is set to £15,000, Olumi’s estimate (half of your £30,000 budget), for you to correct.');
     expect(r).toContain('‘Incremental advertising spend’ is set to £15,000, Olumi’s estimate (half of your £30,000 budget), for you to correct.');
     expect(r!.endsWith('Approve these 4 changes?')).toBe(true);
@@ -101,7 +101,7 @@ describe('the composed reply says exactly what the tool returned, in AIC’s wor
   });
 
   it('RED (A grandfather): a new switch is off today and on under the option, Olumi’s reading', () => {
-    const r = composeProposalReply('propose_new_option', WHOLE, clean(GRANDFATHER), 'Let’s add the grandfathering of existing customers: "£59 for new Pro customers; grandfather existing customers".');
+    const r = composeProposalReply('propose_new_option', { ...WHOLE, options: [{ label: '£59 for new Pro customers; grandfather existing customers' }] }, clean(GRANDFATHER), 'Let’s add the grandfathering of existing customers: "£59 for new Pro customers; grandfather existing customers".');
     expect(r).toContain('‘Existing customers grandfathered’ is off today and on under this option. That is Olumi’s reading, for you to correct.');
     guard(r!, GRANDFATHER);
   });
