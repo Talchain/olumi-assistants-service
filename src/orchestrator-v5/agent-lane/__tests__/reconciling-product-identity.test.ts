@@ -10,7 +10,7 @@
  * parents with user-stated levels a, b reconcile within ISL's own 5% (|o − a·b| ≤ 5% of |o|), the product is
  * declared as Olumi's reading (`provenance: inferred` → `stated_in_brief: false`). Every row reads the REGISTERED graph.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { CandidateModel } from '../admit-model.js';
 import { Ajv } from 'ajv';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
@@ -45,7 +45,7 @@ function pricing(goal: Partial<CandidateModel['goal']> = {}): CandidateModel {
 /** The production contract: the candidate must pass the real strict schema, as the model's output would. */
 const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
 
-async function registeredGoal(model: CandidateModel, brief = 'Should we raise the Pro plan price? MRR is £16,000 today; we want £20,000.') {
+async function registeredGoal(model: CandidateModel, brief = 'Should we raise the Pro plan price? MRR is £16,000 today; we want £20,000.', build: typeof buildModelFromBrief = buildModelFromBrief) {
   const wire = { ...model, unknowns: [], decision_question: null };
   expect(strict(wire), JSON.stringify(strict.errors)).toBe(true);
   let graph: unknown = null;
@@ -57,7 +57,7 @@ async function registeredGoal(model: CandidateModel, brief = 'Should we raise th
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief('77777777-7777-4777-8777-777777777777', brief, d, call) as Record<string, unknown>;
+  const out = await build('77777777-7777-4777-8777-777777777777', brief, d, call) as Record<string, unknown>;
   expect(out.ok, JSON.stringify(out)).toBe(true);
   const parsed = GraphV3.parse(graph);
   const goal = parsed.nodes.find((n) => n.id === GOAL);
@@ -69,20 +69,30 @@ async function registeredGoal(model: CandidateModel, brief = 'Should we raise th
 const PAUL = 'Should we raise our Pro plan price from £49 to £59 a month? We have 1,500 paying subscribers and £75k MRR. '
   + 'Monthly churn must stay below 5%, and we want MRR above £85k within a year.';
 
-function paulDraft(over: { identities?: unknown[]; goalLevel?: number; subscribers?: Record<string, unknown>; extraFactor?: boolean } = {}): CandidateModel {
-  const base = pricing({ operator: '>', value: 85000, baseline_known: true, baseline_value: over.goalLevel ?? 75000 }) as unknown as Record<string, any>;
+type Part = { label: string; unit: string; level: number; role?: string };
+function paulDraft(over: {
+  identities?: unknown[]; goalLevel?: number; goalUnit?: string; priceUnit?: string; subscribers?: Record<string, unknown>;
+  extraFactor?: boolean; parts?: readonly [Part, Part];
+} = {}): CandidateModel {
+  const base = pricing({ operator: '>', value: 85000, unit: over.goalUnit ?? 'GBP/month', baseline_known: true, baseline_value: over.goalLevel ?? 75000 }) as unknown as Record<string, any>;
+  const factor = (p: Part) => ({ label: p.label, role: p.role ?? 'observable', baseline_known: true, baseline_value: p.level, unit: p.unit, provenance: 'explicit', plausible_max: p.level * 4 });
+  const link = (from: string) => ({ from, to: 'Monthly recurring revenue', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
+  const parts = over.parts;
   return {
     ...base,
-    factors: [
-      ...base.factors,
-      { label: 'Paying subscribers', role: 'observable', baseline_known: true, baseline_value: 1500, unit: 'subscribers', provenance: 'explicit', plausible_max: 5000, ...(over.subscribers ?? {}) },
-      ...(over.extraFactor ? [{ label: 'Brand strength', role: 'external', baseline_known: false, baseline_value: null, unit: null, provenance: 'inferred', plausible_max: 10 }] : []),
-    ],
-    links: [
-      ...base.links,
-      { from: 'Paying subscribers', to: 'Monthly recurring revenue', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
-      ...(over.extraFactor ? [{ from: 'Brand strength', to: 'Monthly recurring revenue', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null }] : []),
-    ],
+    options: parts
+      ? base.options.map((o: Record<string, any>) => ({ ...o, interventions: o.interventions.map((i: Record<string, any>) => ({ ...i, factor_label: parts[0].label, unit: parts[0].unit })) }))
+      : base.options,
+    factors: parts
+      ? [factor({ ...parts[0], role: 'controllable' }), factor(parts[1])]
+      : [
+          { ...base.factors[0], unit: over.priceUnit ?? 'GBP/month' },
+          { label: 'Paying subscribers', role: 'observable', baseline_known: true, baseline_value: 1500, unit: 'subscribers', provenance: 'explicit', plausible_max: 5000, ...(over.subscribers ?? {}) },
+          ...(over.extraFactor ? [{ label: 'Brand strength', role: 'external', baseline_known: false, baseline_value: null, unit: null, provenance: 'inferred', plausible_max: 10 }] : []),
+        ],
+    links: parts
+      ? [link(parts[0].label), link(parts[1].label)]
+      : [link('Pro plan price'), link('Paying subscribers'), ...(over.extraFactor ? [link('Brand strength')] : [])],
     identities: over.identities ?? [],
   } as unknown as CandidateModel;
 }
@@ -124,6 +134,49 @@ describe('a goal whose stated level reconciles with its two stated parts is decl
     expect(withReconcilingProductIdentity(three, PAUL)).toBe(three);
     const minted = paulDraft();
     expect(withReconcilingProductIdentity(minted, PAUL)).not.toBe(minted);
+  });
+
+  it('SERVED shape (draft 2 at 30ee11b): "£/subscriber/month" × "subscribers" composes → minted', async () => {
+    const { goal } = await registeredGoal(paulDraft({ priceUnit: '£/subscriber/month' }), PAUL);
+    expect(goal.nonlinear_identity).toStrictEqual(PRODUCT);
+  });
+
+  // ⛔ AIQ 5886846493 (a HARD condition) + DL 5886781042: numbers that match are not enough; the UNITS must compose.
+  it('NEGATIVE (AIQ): "3 engineers × £25k budget ≈ £75k MRR" — exact numbers, but a period-less £ × a count is not £/month', async () => {
+    const draft = paulDraft({ parts: [{ label: 'Budget per engineer', unit: 'GBP', level: 25000 }, { label: 'Engineers', unit: 'engineers', level: 3 }] });
+    const { goal } = await registeredGoal(draft, 'We have 3 engineers and a £25,000 budget per engineer. MRR is £75,000 and we want MRR above £85k.');
+    expect(goal.nonlinear_identity ?? null).toBeNull();
+  });
+
+  it('NEGATIVE (DL): a denominator that names another count ("£ per seat per month" × "subscribers") → no identity', async () => {
+    const { goal } = await registeredGoal(paulDraft({ priceUnit: '£ per seat per month' }), PAUL);
+    expect(goal.nonlinear_identity ?? null).toBeNull();
+  });
+
+  it('NEGATIVE (DL): a same-shape numeric coincidence the brief states as an UNRELATED relation → no identity', async () => {
+    // £49 × 1,500 = £73,500 ≈ £75k, but the brief is about support tickets, and "tickets per month" is a rate, not a count.
+    const draft = paulDraft({ parts: [{ label: 'Cost per support ticket', unit: 'GBP per ticket', level: 49 }, { label: 'Support tickets', unit: 'tickets per month', level: 1500 }] });
+    const { goal } = await registeredGoal(draft, 'Each support ticket costs us £49 to handle and we get 1,500 tickets a month. MRR is £75k and we want MRR above £85k.');
+    expect(goal.nonlinear_identity ?? null).toBeNull();
+  });
+
+  it('BYTE-IDENTICAL (whole graph, MG + DL): with the mint switched off, a declared draft and a non-minting draft register the SAME graph', async () => {
+    const declared = paulDraft({ identities: [{ outcome: 'Monthly recurring revenue', operation: 'product', factors: ['Pro plan price', 'Paying subscribers'], provenance: 'inferred' }] });
+    const engineers = paulDraft({ parts: [{ label: 'Budget per engineer', unit: 'GBP', level: 25000 }, { label: 'Engineers', unit: 'engineers', level: 3 }] });
+    const ENG = 'We have 3 engineers and a £25,000 budget per engineer. MRR is £75,000 and we want MRR above £85k.';
+    const on = { declared: (await registeredGoal(declared, PAUL)).graph, engineers: (await registeredGoal(engineers, ENG)).graph, mint: (await registeredGoal(paulDraft(), PAUL)).graph };
+    vi.resetModules();
+    vi.doMock('../reconciling-product.js', () => ({ withReconcilingProductIdentity: (c: unknown) => c }));
+    try {
+      const off = (await import('../runtime/build-model.js')).buildModelFromBrief;
+      expect((await registeredGoal(declared, PAUL, off)).graph).toStrictEqual(on.declared);
+      expect((await registeredGoal(engineers, ENG, off)).graph).toStrictEqual(on.engineers);
+      // Positive control on the comparator: where the mint fires, the graphs DO differ.
+      expect((await registeredGoal(paulDraft(), PAUL, off)).graph).not.toStrictEqual(on.mint);
+    } finally {
+      vi.doUnmock('../reconciling-product.js');
+      vi.resetModules();
+    }
   });
 
   it('CONTROL: a third parent into the goal → no identity (the product would not be the whole goal)', async () => {

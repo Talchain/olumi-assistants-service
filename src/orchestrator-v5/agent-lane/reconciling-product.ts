@@ -15,12 +15,67 @@
  * and PLoT/ISL frame-check it (a zero operand is withdrawn; ISL's k-scale absorbs the ≤ 5% gap).
  */
 import type { CandidateModel } from './admit-model.js';
+import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { figureTheUserWrote, levelWrittenApartFromTarget } from './stated-by-user.js';
 
 /** ISL `robustness_analyzer_v2.py` `IDENTITY_RECONCILIATION_TOLERANCE`: the same share, never a looser one. */
 const RECONCILIATION_TOLERANCE = 0.05;
 
 const stated = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v !== 0;
+
+type Period = 'month' | 'year' | null;
+const MONTH = new Set(['month', 'months', 'mo', 'monthly', 'pcm', 'mrr']);
+const YEAR = new Set(['year', 'years', 'yr', 'annum', 'annual', 'annually', 'pa', 'arr']);
+const words = (s: string): string[] => s.toLowerCase().replace(/[()]/g, ' ').replace(/\//g, ' / ').split(/[\s-]+/).filter((w) => w !== '');
+const singular = (w: string): string => (w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w);
+
+function periodOf(ws: readonly string[]): Period | 'both' {
+  const m = ws.some((w) => MONTH.has(w));
+  const y = ws.some((w) => YEAR.has(w));
+  return m && y ? 'both' : m ? 'month' : y ? 'year' : null;
+}
+
+/** Money in ONE unscaled currency, its period, and its per-unit denominator ("£/subscriber/month" → subscriber). */
+function readMoney(unit: unknown, label: string): { code: string; period: Period; per: string | null } | null {
+  if (typeof unit !== 'string') return null;
+  const r = readCurrencyUnitWithQualifiers(unit);
+  if (r.kind !== 'currency' || r.currencyCode === undefined || (r.multiplier ?? 1) !== 1) return null;
+  const ws = words(unit);
+  // The goal's own name can carry its period ("MRR", "Monthly recurring revenue") when its unit does not.
+  const own = periodOf(ws);
+  const period = own !== null ? own : periodOf(words(label));
+  if (period === 'both') return null;
+  const perAt = ws.findIndex((w, i) => i > 0 && (ws[i - 1] === '/' || ws[i - 1] === 'per') && /^[a-z]+$/.test(w)
+    && !MONTH.has(w) && !YEAR.has(w) && readCurrencyUnitWithQualifiers(w).kind !== 'currency');
+  return { code: r.currencyCode, period, per: perAt === -1 ? null : singular(ws[perAt]!) };
+}
+
+/** A COUNT: words only ("subscribers", "paying customers") — no currency, no %, no period, no "per" (a rate). */
+function readCount(unit: unknown): string[] | null {
+  if (typeof unit !== 'string' || !/^[a-z][a-z\s-]*$/i.test(unit.trim())) return null;
+  const ws = words(unit);
+  if (ws.length === 0 || ws.includes('per') || periodOf(ws) !== null || readCurrencyUnitWithQualifiers(unit).kind === 'currency') return null;
+  return ws.map(singular);
+}
+
+/**
+ * ⛔ AIQ 5886846493 (a HARD condition): (money per period [per unit]) × (count of that unit) = money per period, in the
+ * goal's OWN currency and period. A per-unit denominator must name the count ("£/subscriber/month" × "subscribers");
+ * anything unknown or scaled (£k) → no mint. "3 engineers × £25k budget ≈ £75k MRR" fails on the period.
+ */
+function unitsCompose(goalUnit: unknown, goalLabel: string, a: { unit: unknown; label: string }, b: { unit: unknown; label: string }): boolean {
+  const goal = readMoney(goalUnit, goalLabel);
+  if (goal === null) return false;
+  for (const [m, c] of [[a, b], [b, a]] as const) {
+    const money = readMoney(m.unit, '');
+    const count = readCount(c.unit);
+    if (money === null || count === null) continue;
+    if (money.code !== goal.code || money.period !== goal.period) continue;
+    if (money.per !== null && !count.includes(money.per)) continue;
+    return true;
+  }
+  return false;
+}
 
 export function withReconcilingProductIdentity(candidate: CandidateModel, brief: string): CandidateModel {
   const goal = candidate.goal;
@@ -40,6 +95,7 @@ export function withReconcilingProductIdentity(candidate: CandidateModel, brief:
     levels.push(f.baseline_value);
   }
   if (Math.abs(o - levels[0]! * levels[1]!) > RECONCILIATION_TOLERANCE * Math.abs(o)) return candidate;
+  if (!unitsCompose(goal.unit, metric, parts[0]!, parts[1]!)) return candidate;
   return {
     ...candidate,
     identities: [...(candidate.identities ?? []), { outcome: metric, operation: 'product', factors: [parts[0]!.label, parts[1]!.label], provenance: 'inferred' }],
