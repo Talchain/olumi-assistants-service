@@ -34,7 +34,7 @@ import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/an
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 
 type Iv = { factor_label: string; value: number; value_kind: 'absolute' | 'additional'; unit: string; provenance: string };
-type Opt = { label: string; provenance: string; is_status_quo: boolean | null; changes: string[]; interventions: Iv[] };
+type Opt = { label: string; provenance: string; is_status_quo: boolean | null; brief_words?: string | null; changes: string[]; interventions: Iv[] };
 
 const factor = (label: string, baseline_value: number | null, plausible_max: number, unit: string) => ({
   label, role: 'controllable' as const, baseline_known: false, baseline_value, unit, provenance: 'ai_proposed', plausible_max,

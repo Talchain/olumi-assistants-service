@@ -36,7 +36,7 @@ import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/an
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 
 type Iv = { factor_label: string; value: number; value_kind: 'absolute' | 'additional'; unit: string; provenance: string };
-type Opt = { label: string; provenance: string; is_status_quo: boolean | null; changes: string[]; interventions: Iv[] };
+type Opt = { label: string; provenance: string; is_status_quo: boolean | null; brief_words?: string | null; changes: string[]; interventions: Iv[] };
 type Link = { from: string; to: string; direction: 'positive' | 'negative' | 'unknown'; provenance: string; effect_amount?: number | null; effect_per_source_change?: number | null; effect_provenance?: string | null };
 type Limit = { metric: string; operator: '>=' | '<=' | '>' | '<'; value: number; unit: string; provenance: string; frame: 'level' | 'delta' };
 
