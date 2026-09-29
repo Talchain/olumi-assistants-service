@@ -111,3 +111,42 @@ describe('a baseline is the user\'s only when the brief states it', () => {
     f.nodes.forEach((n, i) => expect(out[i], n.id).toBe(n));
   });
 });
+
+/**
+ * ⛔ AIQ 5881132458 (Row 7 over-claim): the words / "zero" fallback grounded ANY cardinal phrase of the same value and ANY
+ * "zero", with no unit and no noun check. So an unstated Olumi estimate became the user's figure whenever the brief
+ * wrote the same number about something else. A number in words now grounds a PLAIN count only ("two" is never 2% or
+ * £2), and the words or "zero" ground a factor only when the words right after them name it.
+ */
+describe('a number in words, or "zero", grounds only the factor it counts', () => {
+  const factor = (label: string, raw: number, unit: string) => ({
+    id: label.toLowerCase().replace(/\W+/g, '_'), kind: 'factor', label,
+    observed_state: { value: raw, raw_value: raw, unit, source: 'brief_extraction' },
+  });
+  const sourceOf = (brief: string, node: ReturnType<typeof factor>): unknown =>
+    (withdrawUnstatedBaselineStamps([node], brief)[0]!.observed_state as Record<string, unknown>).source;
+
+  it('RED (AIQ row 1): "hire three engineers" does not state an unstated 3% monthly churn', () => {
+    expect(sourceOf('Should we hire three engineers to fix onboarding?', factor('Monthly churn', 3, '%'))).toBe('cee_inference');
+  });
+
+  it('RED (AIQ row 2): "zero downtime" does not state an unstated 0 enterprise customers', () => {
+    expect(sourceOf('We want to switch providers with zero downtime.', factor('Enterprise customers', 0, 'customers'))).toBe('cee_inference');
+  });
+
+  it('RED: "three engineers" does not state 3 enterprise customers either: a count of something else', () => {
+    expect(sourceOf('Should we hire three engineers to win more deals?', factor('Enterprise customers', 3, 'customers'))).toBe('cee_inference');
+  });
+
+  it('CONTROL: "zero churn" states a 0% monthly churn (zero is zero in any unit, and it names the factor)', () => {
+    expect(sourceOf('We have zero churn today and want to keep it that way.', factor('Monthly churn', 0, '%'))).toBe('brief_extraction');
+  });
+
+  it('CONTROL: the UNIT can name the factor: "four account executives" states 4 on "Sales headcount" in account executives', () => {
+    expect(sourceOf('We have four account executives today.', factor('Sales headcount', 4, 'account executives'))).toBe('brief_extraction');
+  });
+
+  it('KNOWN UNDER-CLAIM (safe direction): an abbreviation is not read — "four account executives" does not name "AEs"', () => {
+    expect(sourceOf('We have four account executives today.', factor('Sales headcount', 4, 'AEs'))).toBe('cee_inference');
+  });
+});
