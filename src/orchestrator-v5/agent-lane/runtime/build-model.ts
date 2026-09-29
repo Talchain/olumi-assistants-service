@@ -1635,7 +1635,9 @@ export async function buildModelFromBrief(
       // d2362e9d, item e). Its question is asked first in `open_questions`, above.
       ...admitted.loss
         .filter((l) => /\.goal_scope$/.test(l.field_path))
-        .map((l) => l.after)
+        .map((l) => faithfulM1 && scope?.stated_in_brief === false
+          ? `The scope of your "${candidate.goal.metric}" goal is unresolved and needs your confirmation.`
+          : l.after)
         .filter((a): a is string => typeof a === 'string'),
       ...unattachedLimitLines(candidate, admitted.loss),
       ...preparation.additions_without_total.map(sayAdditionWithoutTotal),

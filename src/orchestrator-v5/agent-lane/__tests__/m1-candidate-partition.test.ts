@@ -174,6 +174,9 @@ describe('M1 saved live target-scope regression', () => {
     expect(questions.some((q) => /MRR/.test(q) && /all plans/.test(q) && /Pro plan/.test(q))).toBe(true);
     expect(questions.join(' ')).not.toMatch(/accounts for your|is worked out as|£1\.5k|so the model measures|treats it as all-plan/i);
     expect((result.constructor_proposals as Rec[]).some((p) => p.kind === 'definition')).toBe(true);
+    const disclosures = result.not_represented as string[];
+    expect(disclosures.some((line) => /scope.*unresolved/i.test(line))).toBe(true);
+    expect(disclosures.join(' ')).not.toMatch(/model measures.*all plans|Olumi.s assumption.*brief does not say/i);
   });
 
   it('keeps an inferred direct goal identity outside M1 even when its scope flag says resolved', async () => {
