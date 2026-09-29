@@ -178,6 +178,20 @@ describe('PR Review 5883209483 + R3 5883225699: the goal\'s parents must be EXAC
     expect(byId(ds, 'raise_price_to_54')).toMatchObject({ probability_of_goal: 0, earned: false, no_break_even: 'operand_not_parent' });
     expect(byId(ds, 'carry_on_as_now')).toMatchObject({ probability_of_goal: 0, earned: true });
   });
+  it('RED — an EXTRA parent (fully sized £59 + a factor → MRR outside the operands, no price path to it): unequal sets, so the P = 1 is NOT earned, with no figure', () => {
+    const run = sizedPaul();
+    (run.graph.nodes as Json[]).push({ id: 'annual_contracts', kind: 'factor', label: 'Annual contracts' });
+    (run.graph.edges as Json[]).push({ from: 'annual_contracts', to: 'mrr', strength: { mean: 0.2, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' });
+    const d = byId(decide(run), 'raise_price_to_59')!;
+    expect(d).toMatchObject({ probability_of_goal: 1, earned: false, no_break_even: 'extra_goal_parent' });
+    expect(d.unsized_path).toEqual({ from: 'monthly_pro_price', enters_goal_through: 'annual_contracts' });
+    expect(d.break_even).toBeUndefined();
+    expect(d.say).toBe('Olumi can’t yet say how likely ‘Raise price to £59’ is to meet the goal: the model links ‘Annual contracts’ into ‘MRR’ beside the parts it is worked out from, so it can’t check what ‘Monthly Pro price’ does to it.');
+    expect(byId(decide(run), 'carry_on_as_now')).toMatchObject({ probability_of_goal: 0, earned: true });
+  });
+  it('CONTROL (exact equality): the same fully sized £59 without the extra parent stands, earned', () => {
+    expect(byId(decide(sizedPaul()), 'raise_price_to_59')).toMatchObject({ probability_of_goal: 1, earned: true });
+  });
   it('CONTROL: an identity the run did NOT evaluate is walked as links, so an unlinked operand is not read (ISL did not read it either)', () => {
     const run = without('paying_subscribers');
     const d = byId(goalCertaintyDecisions(run.graph, run.option_comparison, []), 'raise_price_to_59');

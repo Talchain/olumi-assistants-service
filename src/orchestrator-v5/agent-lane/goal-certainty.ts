@@ -122,13 +122,17 @@ export function goalCertaintyDecisions(
   const parents = new Set(edges.filter((e) => e.to === goal.id).map((e) => e.from)
     .filter((f): f is string => typeof f === 'string' && byId.get(f)?.kind !== 'option' && byId.get(f)?.kind !== 'decision'));
   const unlinkedOperand = identity === undefined ? undefined : [...operands].find((id) => !parents.has(id));
+  const extraParent = identity === undefined ? undefined : [...parents].find((id) => !operands.has(id));
+  // Either inequality fails the earned result closed, not only the break-even (PR Review on 8dd6343b; R3 5883225699).
+  const mismatch = unlinkedOperand !== undefined ? { id: unlinkedOperand, reason: 'operand_not_parent' as const }
+    : extraParent !== undefined ? { id: extraParent, reason: 'extra_goal_parent' as const } : undefined;
   const evaluation = evaluations.get(goal.id);
   const noExact: NoBreakEven | undefined = declared === undefined ? 'not_an_identity'
     : identity === undefined ? 'identity_not_evaluated'
       : evaluation?.level_source !== 'stated_level' ? 'level_from_inputs'
         : (Array.isArray(identity.addends) ? identity.addends.length > 0 : identity.addends !== undefined) ? 'addends'
           : unlinkedOperand !== undefined ? 'operand_not_parent'
-            : [...parents].some((id) => !operands.has(id)) ? 'extra_goal_parent'
+            : extraParent !== undefined ? 'extra_goal_parent'
               : undefined;
   const sized = sizedLinkTest(nodes);
   const exact = (e: Rec): boolean => {
@@ -160,14 +164,15 @@ export function goalCertaintyDecisions(
       const move = known ? Math.sign(to.value! - now.value!) : 0;
       return move === 0 && known ? [] : [{ factorId, move }];
     });
-    // ⛔ An operand with no link into the goal: the walk cannot see what reaches it, so nothing moved is earned.
-    if (unlinkedOperand !== undefined && moved.length > 0) {
-      found = { from: moved[0]!.factorId, through: unlinkedOperand, move: moved[0]!.move };
+    // ⛔ The goal's parents are not exactly its operands: an operand with no link into the goal hides what reaches it,
+    // and a parent outside them adds what the identity does not say. Nothing an option moves is earned (fail closed).
+    if (mismatch !== undefined && moved.length > 0) {
+      found = { from: moved[0]!.factorId, through: mismatch.id, move: moved[0]!.move };
       out.push({
         option_id: optionId, probability_of_goal: certainty, earned: false,
         unsized_path: { from: found.from, enters_goal_through: found.through },
-        no_break_even: 'operand_not_parent',
-        say: sayUnlinked(certainty, option, goal, byId, found),
+        no_break_even: mismatch.reason,
+        say: sayMismatch(certainty, option, goal, byId, found, mismatch.reason),
       });
       continue;
     }
@@ -247,19 +252,23 @@ function breakEvenOf(
   return { kind: 'product', projected_if_held: projected, threshold, fraction, operand_id: through, ...(count !== undefined ? { operand_count: count } : {}) };
 }
 
-/** The sentence when an operand has no link into the goal: the model cannot follow the option through it. */
-function sayUnlinked(
+/** The sentence when the goal's parents are not exactly its operands: the model cannot follow the option through it. */
+function sayMismatch(
   certainty: 0 | 1,
   option: Rec | undefined,
   goal: Rec,
   byId: ReadonlyMap<unknown, Rec>,
   found: { from: string; through: string },
+  reason: 'operand_not_parent' | 'extra_goal_parent',
 ): string {
   const label = (id: unknown): string => text(byId.get(id)?.label) ?? String(id);
   const opt = `‘${text(option?.label) ?? String(option?.id ?? '')}’`;
-  return `Olumi can’t yet say how likely ${opt} is to ${certainty === 1 ? 'meet' : 'miss'} the goal: ‘${label(goal.id)}’ is worked `
-    + `out from ‘${label(found.through)}’, but the model has no link from it to ‘${label(goal.id)}’, so it can’t follow what `
-    + `‘${label(found.from)}’ does through it.`;
+  const head = `Olumi can’t yet say how likely ${opt} is to ${certainty === 1 ? 'meet' : 'miss'} the goal: `;
+  return reason === 'operand_not_parent'
+    ? `${head}‘${label(goal.id)}’ is worked out from ‘${label(found.through)}’, but the model has no link from it to `
+      + `‘${label(goal.id)}’, so it can’t follow what ‘${label(found.from)}’ does through it.`
+    : `${head}the model links ‘${label(found.through)}’ into ‘${label(goal.id)}’ beside the parts it is worked out from, so it `
+      + `can’t check what ‘${label(found.from)}’ does to it.`;
 }
 
 /**
