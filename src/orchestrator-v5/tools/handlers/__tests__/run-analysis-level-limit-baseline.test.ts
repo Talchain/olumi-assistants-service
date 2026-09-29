@@ -268,7 +268,8 @@ const REQUEST_ID = 'req-level-limit-baseline-wire';
 
 /** Churn as the served estimate after the user's value edit: `set_factor_value` writes `{...os, value, raw_value}`. */
 /**
- * `sized`: the price → churn link carries Olumi's size in churn's unit (`olumi_estimate`, `natural_effect` in "%"), so
+ * `sized`: the price → churn link carries Olumi's size in churn's unit (`olumi_estimate`, `natural_effect` in "percentage
+ * points", as the sizer says a percentage level on 100), so
  * R-c's parts predicate lets the level carry. Unsized (a bare placeholder), churn carries nothing (AI Quality 5882087383).
  */
 function persistedGraph(churnRaw: number, sized = true) {
@@ -287,7 +288,7 @@ function persistedGraph(churnRaw: number, sized = true) {
       { from: 'fac_price', to: 'goal_mrr', strength: { mean: 0.6, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
       {
         from: 'fac_price', to: 'fac_churn', strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive',
-        ...(sized ? { provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: { amount: 1, amount_unit: '%', per_source_change: 10, per_source_change_unit: 'GBP per month', strength_mean: 0.3, strength_mean_frame: 'edge_strength' } } } : {}),
+        ...(sized ? { provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: { amount: 1, amount_unit: 'percentage points', per_source_change: 10, per_source_change_unit: 'GBP per month', strength_mean: 0.3, strength_mean_frame: 'edge_strength' } } } : {}),
       },
       { from: 'fac_churn', to: 'goal_mrr', strength: { mean: -0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'negative' },
     ],

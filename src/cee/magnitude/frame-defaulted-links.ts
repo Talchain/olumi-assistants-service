@@ -18,7 +18,7 @@
 import { STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 
 import { percentLevelFrame } from '../../orchestrator-v5/agent-lane/admit-constraint.js';
-import { sizeLink, type MagnitudeNode } from './link-effect.js';
+import { naturalAmountUnitOf, sizeLink, type MagnitudeNode } from './link-effect.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { edgeReviewedByUser } from '../graph-readiness/obligation-provenance.js';
 
@@ -84,6 +84,16 @@ function magnitudeNodes(nodes: readonly Rec[], percentLevel: ReadonlySet<string>
     option_levels: optionLevels.get(n.id as string) ?? [],
     ...(percentLevel.has(n.id as string) ? { percent_level: true } : {}),
   }]));
+}
+
+/**
+ * R-c's unit rule (PR Review 5882690939): per node of a graph, the unit words the sizer says a link's natural size in,
+ * built from the graph exactly as this re-sizer builds its nodes (option levels from the options' interventions). A
+ * natural effect in any other unit ("percentage points" on a "percent change" or a "percentile rank") is not sized for
+ * that node. Pure.
+ */
+export function naturalAmountUnitsOf(nodes: readonly Rec[]): Map<string, string> {
+  return new Map([...magnitudeNodes(nodes, new Set())].map(([id, n]) => [id, naturalAmountUnitOf(n)] as const));
 }
 
 export interface FramedLinks<G> {

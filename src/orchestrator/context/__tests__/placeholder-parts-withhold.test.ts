@@ -205,7 +205,8 @@ describe('R-c on journey A (served 17d1): the churn limit moved by price only th
   const CHURN_LIMIT = 'agent-lane:monthly_churn:<=';
   const churnId = () => idOf(A, 'Monthly churn');
   /** The same graph with the price → churn path replaced by ONE link sized in churn's unit, by `magnitude`. */
-  const sized = (magnitude: 'olumi_estimate' | 'user_stated', amountUnit = '% per month'): Json => {
+  /** `amountUnit` defaults to what the sizer writes for churn, a percentage level on 100: "percentage points". */
+  const sized = (magnitude: 'olumi_estimate' | 'user_stated', amountUnit = 'percentage points'): Json => {
     const g = structuredClone(A);
     const price = idOf(g, 'Pro plan price');
     const sens = (g.nodes as Json[]).find((n) => n.id === 'price_sensitivity')!.id as string;
@@ -257,14 +258,19 @@ describe('R-c on journey A (served 17d1): the churn limit moved by price only th
     expect(carried(sized('olumi_estimate'))).toBe(true);
     expect(fold(sized('olumi_estimate'))).toEqual({ constraint_id: CHURN_LIMIT, state: 'estimate_only', reason: 'level_olumi_estimate' });
   });
-  it('CONTROL — sized in "percentage points" (the sizer\'s words for a percent level, served A-0 at 288ab0c9): it carries', () => {
+  it('PRECONDITION: churn is a percentage LEVEL on 100, so the sizer says a link into it in "percentage points"', () => {
+    expect((A.nodes as Json[]).find((n) => n.id === churnId())!.observed_state.unit).toBe('% per month');
     expect(carried(sized('olumi_estimate', 'percentage points'))).toBe(true);
-    expect(fold(sized('olumi_estimate', 'percentage points'))).toEqual({ constraint_id: CHURN_LIMIT, state: 'estimate_only', reason: 'level_olumi_estimate' });
   });
-  it('CONTRAST — "percentage points" on a node that is NOT a percent is not its unit → withheld', () => {
-    const g = sized('olumi_estimate', 'percentage points');
-    (g.nodes as Json[]).find((n) => n.id === churnId())!.observed_state.unit = 'subscribers per month';
-    expect(fold(g)).toEqual({ constraint_id: CHURN_LIMIT, state: 'unscored', reason: 'parts_links_placeholder' });
+  it('PR Review 5882690939 — "percentage points" on a node that is NOT a percentage level is not its unit → withheld', () => {
+    for (const unit of ['percent change', 'percentile rank', 'subscribers per month']) {
+      const g = sized('olumi_estimate', 'percentage points');
+      (g.nodes as Json[]).find((n) => n.id === churnId())!.observed_state.unit = unit;
+      expect(fold(g), unit).toEqual({ constraint_id: CHURN_LIMIT, state: 'unscored', reason: 'parts_links_placeholder' });
+    }
+  });
+  it('a natural effect in the node\'s raw spelling ("% per month") is not what the sizer writes for a level on 100 → withheld', () => {
+    expect(fold(sized('olumi_estimate', '% per month'))).toEqual({ constraint_id: CHURN_LIMIT, state: 'unscored', reason: 'parts_links_placeholder' });
   });
   it('CONTROL — the link sized by the USER (user_stated): it carries, and folds normally', () => {
     expect(carried(sized('user_stated'))).toBe(true);
