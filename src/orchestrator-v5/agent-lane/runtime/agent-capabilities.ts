@@ -1090,6 +1090,32 @@ function startingPointNoteFor(usersCount: number): string {
 }
 
 /** Canonical's link-effect refusal, said to the Agent in words it can relay truthfully (never a code). */
+/**
+ * The simple paths (at most 4 links, at most 6 paths) the model runs from one factor to another, as labels — read from
+ * the graph, never the model's own reading. Shortest first, then by their words.
+ */
+export function connectingPaths(raw: unknown, fromId: string, toId: string): string[][] {
+  const g = raw as { nodes?: { id?: unknown; label?: unknown }[]; edges?: { from?: unknown; to?: unknown }[] } | null;
+  const labelOf = new Map((g?.nodes ?? []).map((n) => [String(n?.id), typeof n?.label === 'string' ? n.label : String(n?.id)] as const));
+  const out = new Map<string, string[]>();
+  for (const e of g?.edges ?? []) {
+    if (typeof e?.from === 'string' && typeof e?.to === 'string') out.set(e.from, [...(out.get(e.from) ?? []), e.to]);
+  }
+  const found: string[][] = [];
+  const walk = (at: string, path: string[]): void => {
+    if (path.length >= 5) return;
+    for (const next of out.get(at) ?? []) {
+      if (path.includes(next)) continue;
+      if (next === toId) found.push([...path, next]);
+      else walk(next, [...path, next]);
+    }
+  };
+  walk(fromId, [fromId]);
+  return found.map((p) => p.map((id) => labelOf.get(id) ?? id))
+    .sort((a, b) => a.length - b.length || a.join(' → ').localeCompare(b.join(' → ')))
+    .slice(0, 6);
+}
+
 function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: { id: string; label: string }, to: { id: string; label: string }): string {
   const unitOfNode = (id: string): string => {
     const n = ((raw as { nodes?: unknown[] } | null)?.nodes ?? []).find((x) => (x as { id?: unknown })?.id === id) as { observed_state?: { unit?: unknown } } | undefined;
@@ -2539,6 +2565,17 @@ export function createAgentCapabilities(
       // AIQ 5884881500 ("proposer, not stamper"): the ONE sentence the rule read is what is stored and shown for approval.
       const said = statingSentenceOf(quote, statedEffect, statedEnds, statedScope) ?? quote;
       const edgeToken = linkEffectEdgeToken(g.raw, from.id, to.id);
+      // ⛔ A TOTAL EFFECT IS NEVER A NEW DIRECT LINK (served 0929 D3): when the model connects the two only through other
+      // factors, the user's figure is their total across those paths — said as such, never offered as a parallel link.
+      const paths = edgeToken === null ? connectingPaths(g.raw, from.id, to.id) : [];
+      if (edgeToken === null && paths.length > 0) {
+        return { ok: false, mutated: false, refusal: 'no_direct_link', paths,
+          detail: `The model has no direct link from "${from.label}" to "${to.label}": it connects them through other factors `
+            + `(${paths.map((p) => p.join(' → ')).join('; ')}). The user’s figure is their TOTAL effect across those paths, so no `
+            + 'single link holds it, and nothing was prepared. Repeat their figure in their own words and say how the model connects the '
+            + 'two. Never offer a new direct link between them (it would count the effect twice), and never ask for a strength band in '
+            + 'place of their figure.' };
+      }
       if (edgeToken === null) {
         return { ok: false, mutated: false, refusal: 'no_such_link',
           detail: `The model has no link from "${from.label}" to "${to.label}", so there is no effect to record. Nothing was prepared.` };

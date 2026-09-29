@@ -336,7 +336,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + '`per_source_change` the change in its SOURCE, each in that end\u2019s unit as get_canonical_state gives it. `quote` is the '
       + 'user\u2019s ONE statement from THIS message that says it, copied exactly: the words that give both figures, name both ends '
       + 'and say which way. Never use this for a figure the user did not write; for a strength '
-      + 'said in words ("strong"), use propose_link_strength.',
+      + 'said in words ("strong"), use propose_link_strength. Call it even when the model has no DIRECT link between the two: the '
+      + 'result then says how the model connects them.',
     parameters: obj({
       from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
       to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
