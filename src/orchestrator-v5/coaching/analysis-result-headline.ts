@@ -2955,8 +2955,21 @@ function matchesHeadlineGrammar(text: string): boolean {
  *        - no ID-prefix tokens (opt_, fac_, …)
  *        - no raw decimal numbers (only integer % allowed)
  */
-export function isAllowedRunAnalysisAssistantText(text: unknown): boolean {
+export function isAllowedRunAnalysisAssistantText(text: unknown, goalReadingTail = ''): boolean {
   if (typeof text !== 'string') return false;
+  // ⭐ OLUMI'S GOAL READINGS, BY EXACT EQUALITY (AIQ 5895590866 (2); DL lease 5895635885): `goalReadingTail` is the
+  // forwarder's own rebuild of `buildGoalReadingDisclosure` for the graph this Run analysed. The reply may carry that
+  // exact string once, straight after an admitted headline or template; the rest is then checked exactly as before. No
+  // pattern is widened, so a model-written sentence shaped like a reading still fails.
+  if (goalReadingTail !== '') {
+    const at = text.indexOf(goalReadingTail);
+    if (at > 0 && text.indexOf(goalReadingTail, at + 1) === -1) {
+      const base = text.slice(0, at);
+      return isAllowedRunAnalysisAssistantText(base)
+        && isAllowedRunAnalysisAssistantText(base + text.slice(at + goalReadingTail.length))
+        && passesAssistantTextContentDefences(goalReadingTail);
+    }
+  }
   // Length rule: base headline stays within MAX_HEADLINE_CHARS by
   // construction; the outer registry cap adds the Mission B tail budget
   // (provisional_doctrine_v0) — see MAX_ASSISTANT_TEXT_CHARS.

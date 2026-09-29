@@ -114,6 +114,8 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
       'goal_deadline_as_stated',
       'goal_direction',
       'goal_horizon_months',
+      // MG (29 Sep, AIQ (b)): Olumi's reading of the brief's figure as a change goal's today level — construction only.
+      'goal_level_reading',
       // MG #2306 (29 Sep): Olumi's reading of a decrease target — CEE-owned; only construction writes it.
       'goal_sense_reading',
       // The saved-example stamps: CEE-owned and deliberately unread here (writer audit 2026-09-27).
@@ -161,6 +163,8 @@ const SIX_SMUGGLE_NAMES = [
   'goal_deadline_as_stated',
   // MG #2306 (29 Sep): Olumi's reading of a decrease target, written only by construction.
   'goal_sense_reading',
+  // MG (29 Sep, AIQ (b)): Olumi's reading of the brief's figure as a change goal's today level, construction only.
+  'goal_level_reading',
 ] as const;
 
 describe('corpus B — the six (now eight) smuggle names, hand-written', () => {

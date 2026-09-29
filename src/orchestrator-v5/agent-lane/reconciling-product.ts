@@ -36,6 +36,12 @@ function periodOf(ws: readonly string[]): Period | 'both' {
   return m && y ? 'both' : m ? 'month' : y ? 'year' : null;
 }
 
+/** The ONE period a piece of text names ("Monthly spend", "£540k a year"), or null when it names none or both. */
+export function periodIn(text: string): 'month' | 'year' | null {
+  const p = periodOf(words(text));
+  return p === 'both' ? null : p;
+}
+
 const isPeriod = (w: string): boolean => MONTH.has(w) || YEAR.has(w);
 const isCurrency = (w: string): boolean => readCurrencyUnitWithQualifiers(w).kind === 'currency';
 /** The words `readCurrencyUnitWithQualifiers` lets stand beside the currency itself ("GBP recurring revenue", "£ a month"). */

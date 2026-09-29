@@ -315,6 +315,27 @@ export const NodeV3 = z.object({
     words: z.string().min(1).max(300),
   }).optional().catch(undefined),
   /**
+   * ⛔ OLUMI'S READING OF THE BRIEF'S FIGURE AS A CHANGE GOAL'S TODAY LEVEL (goal nodes only; R3-B #72 5894575583, MG
+   * 5894657102 / 5894719651, AIQ (b) 5894808343 (1)). Written ONLY by construction (`admitStatedGoalChange`, from
+   * `briefGoalLevel`): "Monthly spend is £45k; we want to cut costs by 20%" drafts the goal "costs" with no level, so the
+   * brief's ONE figure in the goal's own currency and period, in the change's own sentence, becomes the base AS OLUMI'S
+   * READING — `observed_state.source` is `cee_inference`, never `user_stated`, and `words` say the join ("Olumi reads your
+   * ‘£45k’ (‘Monthly spend is £45k’) as today's level of ‘costs’, so a 20% cut is £36,000 / month or less."), its target
+   * clause composed from the goal's CURRENT target at read time (AIQ 5895379601 (2)). `level` is the staleness key
+   * (`goalLevelReadingWords`): a level the user states or edits replaces it, and a stale reading is
+   * never said. `level_unit` is the warrant of `level` (the value-warrant guard's FIELD qualifier). The same G1
+   * contract as the fields above: kept by every write, CEE-owned (`field-safety.ts`), a malformed value is absence.
+   */
+  goal_level_reading: z.object({
+    level: z.number().finite(),
+    level_unit: z.string().max(64),
+    quote: z.string().min(1).max(160),
+    /** The reading's own clause; the target clause is composed at read time (`goalLevelSentence`), never stored. */
+    lead: z.string().min(1).max(300),
+    /** The drafter's comparator as read at construction; a comparator the user holds (`goal_direction`) speaks first. */
+    bound: z.enum(['<=', '<', '>=', '>']).optional(),
+  }).optional().catch(undefined),
+  /**
    * ⛔ THE SAVED-EXAMPLE STAMPS (the UI's register writes them on the nodes of a loaded saved example).
    *
    * THIS DECLARATION IS LOAD-BEARING, for the same reason as `threshold_source` above. The UI registers

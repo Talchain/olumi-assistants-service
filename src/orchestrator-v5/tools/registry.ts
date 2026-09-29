@@ -626,6 +626,12 @@ export interface HandlerOutcome {
    * reconciling them is the wrong move — the review needs THIS one.
    */
   readonly __run_graph_snapshot?: unknown;
+  /**
+   * ⭐ THE GRAPH AND GOAL THE RUN'S GOAL-READING TAIL WAS BUILT FROM — server-only, never the wire (AIQ 5895590866 (2)).
+   * Set by `run_analysis` only when Olumi's reading of the goal spoke. The registry forwarder rebuilds the tail from it
+   * (`goalReadingTailOf`) and admits the reply's tail only by exact equality with that rebuild.
+   */
+  readonly __goal_reading_source?: import('../coaching/goal-reading-disclosure.js').GoalReadingSource;
   readonly __excluded_options?: ReadonlyArray<
     import('../coaching/scaffold-disclosure.js').OmittedOptionRecord
   >;

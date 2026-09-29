@@ -28,6 +28,7 @@ import {
   isAllowedRunAnalysisAssistantText,
   TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS,
 } from '../coaching/analysis-result-headline.js';
+import { goalReadingTailOf } from '../coaching/goal-reading-disclosure.js';
 
 /**
  * run_analysis precondition (Phase 1.5 review — P0-1 wire reality fix).
@@ -134,7 +135,9 @@ const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
     return RUN_ANALYSIS_FALLBACK_TEXT;
   }
   const candidate = (outcome as { assistant_text: unknown }).assistant_text;
-  if (isAllowedRunAnalysisAssistantText(candidate)) {
+  // ⭐ The goal-reading tail is REBUILT here from the handler's own graph, never taken from its text (AIQ 5895590866).
+  const goalReadingTail = goalReadingTailOf(outcome);
+  if (isAllowedRunAnalysisAssistantText(candidate, goalReadingTail)) {
     return candidate as string;
   }
   // Review fix B6 (honesty floor): if the rejected composed summary carried a
@@ -151,9 +154,11 @@ const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
     // itself, so the combined text is a shape the allowlist's template branch
     // recognises. Any, none, or all may be present.
     const slices = TEMPLATE_SUFFIX_EXTRACT_RES.map((re) => candidate.match(re)?.[0] ?? '');
+    // Olumi's goal readings survive the fallback too: the goal's chance still shows, and it rests on them.
+    const tail = goalReadingTail !== '' && candidate.includes(goalReadingTail) ? goalReadingTail : '';
     if (slices.some((slice) => slice.length > 0)) {
-      const combined = RUN_ANALYSIS_FALLBACK_TEXT + slices.join('');
-      if (isAllowedRunAnalysisAssistantText(combined)) return combined;
+      const combined = RUN_ANALYSIS_FALLBACK_TEXT + tail + slices.join('');
+      if (isAllowedRunAnalysisAssistantText(combined, tail)) return combined;
       // A poisoned slice in one disclosure must not cost us the others: retry
       // with each alone before giving up on disclosure entirely.
       //
@@ -167,10 +172,11 @@ const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
       // not a refactor, and does not belong in a mirror-removal.
       for (const only of [...slices].reverse()) {
         if (only.length === 0) continue;
-        const single = RUN_ANALYSIS_FALLBACK_TEXT + only;
-        if (isAllowedRunAnalysisAssistantText(single)) return single;
+        const single = RUN_ANALYSIS_FALLBACK_TEXT + tail + only;
+        if (isAllowedRunAnalysisAssistantText(single, tail)) return single;
       }
     }
+    if (tail !== '' && isAllowedRunAnalysisAssistantText(RUN_ANALYSIS_FALLBACK_TEXT + tail, tail)) return RUN_ANALYSIS_FALLBACK_TEXT + tail;
   }
   return RUN_ANALYSIS_FALLBACK_TEXT;
 };

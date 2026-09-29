@@ -52,6 +52,7 @@ import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js'
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
 import { droppedGoalProductLine, unconfirmGoalProducts, withReconcilingProductIdentity, type DroppedGoalProduct } from '../reconciling-product.js';
 import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-reading.js';
+import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
 import { figureTheUserWrote, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
@@ -1240,7 +1241,7 @@ export async function buildModelFromBrief(
   const firstIdentity = mintOrFold(candidate);
   let foldedCarrier = firstIdentity.folded;
   let droppedProducts = firstIdentity.dropped;
-  let admitted = admitCandidateModel(firstIdentity.model, {}, brief, goalLevelTheUserWrote(candidate, brief), writtenAgain);
+  let admitted = admitCandidateModel(firstIdentity.model, {}, brief, goalLevelTheUserWrote(candidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief));
   preparation = gapsOnRegisteredOptions(preparation, firstCandidate, admitted);
 
   /**
@@ -1359,7 +1360,7 @@ export async function buildModelFromBrief(
         const retryPrepared = prepareProvisionalCandidate(retryRaw);
         const retryCandidate = retryPrepared.candidate;
         const retryIdentity = mintOrFold(retryCandidate);
-        const retryAdmitted = admitCandidateModel(retryIdentity.model, {}, brief, goalLevelTheUserWrote(retryCandidate, brief), writtenAgain);
+        const retryAdmitted = admitCandidateModel(retryIdentity.model, {}, brief, goalLevelTheUserWrote(retryCandidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief));
         // ⛔ Leave out only what the FIRST draft never registered: withholding a registered option never closes its gaps in the count (adversarial verify of 843c0960).
         const firstGone = new Set((admitted.options_withheld ?? []).map((w) => canonicalLabel(w.option)));
         const firstRegistered = new Set(firstCandidate.options.map((o) => canonicalLabel(o.label)).filter((l) => !firstGone.has(l)));
@@ -1841,7 +1842,7 @@ export async function buildModelFromBrief(
         // `pure_limit`: a user-limited cost roll-up's Olumi-signed edge into the goal that was not drawn (`findPureLimits`).
         // `one_route`: a factor → risk link left out because the risk only re-drew the factor's own direct link
         // (`oneRoutePerEffect`, PR Review CR on #2276): the risk stays, and why its link went is said.
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|loop_withheld|loop_kept|magnitude_unconvertible|pure_limit|one_route|label_kept_apart|folded_into_goal)$|\.observed_state\.baseline$/.test(l.field_path))
+        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|loop_withheld|loop_kept|magnitude_unconvertible|pure_limit|one_route|label_kept_apart|folded_into_goal)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };
