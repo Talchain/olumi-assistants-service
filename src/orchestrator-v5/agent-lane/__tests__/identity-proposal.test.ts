@@ -148,6 +148,36 @@ describe('a card-domain carrier BESIDE another goal parent (the 1/19 served dead
     expect(node(g, 'other_plan_mrr').label).toBe('Other-plan MRR');
     expect(proposeProductIdentity(g)?.words).toContain(`£49 × 1,500 = £73,500${clause} If yes,`);
   });
+  // ⛔ PR Review 5894085840: a figure is said and added only as money in the goal's own currency AND period. Each row
+  // changes ONE field of the other parent on the served graph; the card still offers the carrier, names whose figure the
+  // other parent is, and neither says the figure nor claims the sum.
+  const WHOSE_ONLY = ', close to your £75,000 “MRR”, which also adds “Other-plan MRR” (Olumi\'s estimate).';
+  it.each<[string, (os: Json) => void]>([
+    ['RED (PR Review\'s row): £1,500 per YEAR beside a monthly MRR', (os) => { os.unit = '£/year'; }],
+    ['the same, spelled "GBP per annum"', (os) => { os.unit = 'GBP per annum'; }],
+    ['a per-item price ("£ per seat per month"), not a total', (os) => { os.unit = '£ per seat per month'; }],
+    ['a scaled figure ("£k/month")', (os) => { os.unit = '£k/month'; os.raw_value = 1.5; }],
+    ['another currency ("$/month")', (os) => { os.unit = '$/month'; }],
+    ['a count', (os) => { os.unit = 'subscribers'; }],
+  ])('NO SUM, NO FIGURE: %s', (_why, change) => {
+    const g = beside();
+    change(node(g, 'other_plan_mrr').observed_state);
+    expect(proposeProductIdentity(g)?.words).toContain(`£49 × 1,500 = £73,500${WHOSE_ONLY} If yes,`);
+  });
+  it('NO SUM, NO FIGURE: a period-less £ on a node whose name carries no period either ("Other-plan revenue")', () => {
+    const g = beside();
+    node(g, 'other_plan_mrr').label = 'Other-plan revenue';
+    node(g, 'other_plan_mrr').observed_state.unit = '£';
+    expect(proposeProductIdentity(g)?.words).toContain('£49 × 1,500 = £73,500, close to your £75,000 “MRR”, which also adds “Other-plan revenue” (Olumi\'s estimate). If yes,');
+  });
+  it.each<[string, string]>([
+    ['"GBP per month"', 'GBP per month'],
+    ['a period-less £ on a node NAMED for its period ("Other-plan MRR")', '£'],
+  ])('CONTROL — the same period, so the sum is said: %s', (_why, unit) => {
+    const g = beside();
+    node(g, 'other_plan_mrr').observed_state.unit = unit;
+    expect(proposeProductIdentity(g)?.words).toContain('£49 × 1,500 = £73,500; with “Other-plan MRR” (Olumi\'s estimate, £1,500) that gives your £75,000 “MRR”. If yes,');
+  });
   it('the card is not a write: the graph is byte-identical after it', () => {
     const g = beside();
     const before = JSON.stringify(g);

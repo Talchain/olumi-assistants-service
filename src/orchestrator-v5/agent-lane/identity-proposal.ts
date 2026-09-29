@@ -20,10 +20,9 @@
  *  · the units compose as a money rate × a count into the goal's money per period (`unitsCompose`, one source with the
  *    mint), with or without the per-item denominator: the drafter's typed unit licenses nothing (AIQ 5891286280).
  */
-import { RECONCILIATION_TOLERANCE, unitsCompose } from './reconciling-product.js';
+import { RECONCILIATION_TOLERANCE, readMoneyTotal, unitsCompose } from './reconciling-product.js';
 import { sayFigure } from './say-figure.js';
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
-import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 
 export interface IdentityProposal {
   readonly outcome_id: string;
@@ -54,13 +53,17 @@ function usersLevel(node: Rec): { value: number; unit: string } | null {
   return { value, unit };
 }
 
-/** A node's stored money level in `code` and whose figure it is, or null when it holds none in that currency. */
-function moneyLevel(node: Rec | undefined, code: string): { value: number; users: boolean } | null {
+/**
+ * A node's stored figure and whose it is, or null when it holds none. `value` is the figure only where it reads as money
+ * in the GOAL'S OWN currency AND period (`readMoneyTotal`); otherwise null, and the card neither says it nor sums it.
+ * ⛔ PR Review 5894085840: "£1,500 per year" beside a monthly MRR is the same £ and a different quantity.
+ */
+function goalTermsLevel(node: Rec | undefined, goal: { code: string; period: 'month' | 'year' } | null): { value: number | null; users: boolean } | null {
   const os = node?.observed_state;
   if (!isRec(os) || typeof os.raw_value !== 'number' || !Number.isFinite(os.raw_value)) return null;
-  const u = readCurrencyUnitWithQualifiers(text(os.unit) ?? '');
-  if (u.kind !== 'currency' || u.currencyCode !== code || (u.multiplier ?? 1) !== 1) return null;
-  return { value: os.raw_value, users: classifyValueSource(os.source) === 'user_stated' };
+  const m = goal === null ? null : readMoneyTotal(os.unit, text(node?.label) ?? '');
+  const inGoalTerms = m !== null && m.code === goal!.code && m.period === goal!.period;
+  return { value: inGoalTerms ? os.raw_value : null, users: classifyValueSource(os.source) === 'user_stated' };
 }
 
 const carriesIdentity = (node: Rec): boolean => node.nonlinear_identity !== undefined && node.nonlinear_identity !== null;
@@ -146,16 +149,20 @@ function proposeOnGoal(graph: unknown): IdentityProposal | null {
  * ⛔ AIQ 5892754930 (3): a Yes makes the goal this carrier PLUS the goal's other parents, so the card names the first of
  * them (and how many more) and whose figure it is, from the graph. "That gives your £75,000" only where the figures add
  * up to the goal within ISL's 5%; otherwise the card says the goal also adds them, and claims no sum.
+ * ⛔ PR Review 5894085840: a figure is said, and summed, only as money in the goal's own currency AND period. Any other
+ * figure (another period, a per-item price, £k, another currency, a count or a %) is named by whose it is alone, and
+ * no sum is claimed.
  */
-function besideTheCarrier(others: readonly string[], byId: Map<string, Rec>, code: string, product: number, goal: number, goalLabel: string): string {
+function besideTheCarrier(others: readonly string[], byId: Map<string, Rec>, goalMoney: { code: string; period: 'month' | 'year' } | null, code: string, product: number, goal: number, goalLabel: string): string {
   const money = (v: number): string => sayFigure(v, code);
   const first = others[0];
   if (first === undefined) return `, close to your ${money(goal)} “${goalLabel}”.`;
-  const levels = others.map((id) => moneyLevel(byId.get(id), code));
+  const levels = others.map((id) => goalTermsLevel(byId.get(id), goalMoney));
   const l = levels[0]!;
-  const whose = l === null ? 'no figure yet' : `${l.users ? 'your figure' : 'Olumi\'s estimate'}, ${money(l.value)}`;
+  const who = l === null ? 'no figure yet' : l.users ? 'your figure' : 'Olumi\'s estimate';
+  const whose = l === null || l.value === null ? who : `${who}, ${money(l.value)}`;
   const named = `“${text(byId.get(first)?.label) ?? first}” (${whose})${others.length > 1 ? ` (and ${others.length - 1} more)` : ''}`;
-  const sum = levels.every((x) => x !== null) ? product + levels.reduce((t, x) => t + x!.value, 0) : null;
+  const sum = levels.every((x) => x !== null && x.value !== null) ? product + levels.reduce((t, x) => t + x!.value!, 0) : null;
   return sum !== null && Math.abs(sum - goal) <= RECONCILIATION_TOLERANCE * Math.abs(goal)
     ? `; with ${named} that gives your ${money(goal)} “${goalLabel}”.`
     : `, close to your ${money(goal)} “${goalLabel}”, which also adds ${named}.`;
@@ -177,6 +184,8 @@ function proposeOnCarrier(graph: unknown): IdentityProposal | null {
   const g = goalAndParents(graph);
   if (g === null || carriesIdentity(g.goal)) return null;
   const { goal, goalLabel, o, byId, parentIds, edges } = g;
+  // The goal's own money per period, read as `reading` reads it: the terms another parent's figure must be in to be added.
+  const goalMoney = readMoneyTotal(text(goal.goal_threshold_unit) ?? o.unit, goalLabel);
   const found: IdentityProposal[] = [];
   for (const id of parentIds) {
     const carrier = byId.get(id);
@@ -195,7 +204,7 @@ function proposeOnCarrier(graph: unknown): IdentityProposal | null {
     const money = (v: number): string => sayFigure(v, r.code);
     const made = r.rate.value * r.count.value;
     const words = `Is “${carrierLabel}” your “${r.rate.label}” × “${r.count.label}”? `
-      + `${money(r.rate.value)} × ${sayFigure(r.count.value, '')} = ${money(made)}${besideTheCarrier(parentIds.filter((p) => p !== id), byId, r.code, made, o.value, goalLabel)} `
+      + `${money(r.rate.value)} × ${sayFigure(r.count.value, '')} = ${money(made)}${besideTheCarrier(parentIds.filter((p) => p !== id), byId, goalMoney, r.code, made, o.value, goalLabel)} `
       + `If yes, Olumi will calculate “${carrierLabel}” that way, and you can run the analysis again.`;
     if (words.length > CARD_WORDS_MAX) continue;
     found.push({ outcome_id: id, operation: 'product', factor_ids: [r.rate.id, r.count.id], words });
