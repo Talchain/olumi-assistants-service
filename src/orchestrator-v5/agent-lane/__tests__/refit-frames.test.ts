@@ -111,3 +111,38 @@ describe('accepted on a factor target, and the no-op', () => {
     expect([490000, 500000, 150, 1, 10.5, 2e6].map(niceFrameAtLeast)).toEqual([500000, 500000, 200, 1, 20, 2e6]);
   });
 });
+
+// ⭐ DL 5897504696 / AIQ 5897383982: served MRR run 4 (`5f6b85e5`, CEE 57997d1), a FRESH draft. "£49 per subscriber" stated on a
+// 106,250 MRR frame is β 2.31, so the Run clamped the user's effect and withheld the chance.
+const RUN4 = JSON.parse(readFileSync(new URL('./fixtures/served-mrr-run4-5f6b85e5-registered-graph-57997d1.json', import.meta.url), 'utf8')) as Rec;
+const beta = (g: Rec, from: string, to: string): number => (g.edges as Rec[]).find((e) => e.from === from && e.to === to)!.strength.mean;
+describe('served MRR run 4 (fresh draft): the stated £49 per subscriber fits by widening MRR, every natural size held', () => {
+  it('PRECONDITION: the served graph carries the out-of-contract stated link', () => {
+    expect(beta(RUN4, 'paying_subscribers', 'mrr')).toBeCloseTo(2.3059, 3);
+  });
+  it('⭐ RED: MRR widened 106,250 → 500,000; the stated link is in contract; R3\'s oracle finds no violation', () => {
+    const { graph, refits, refused } = refitFramesForStatedEffects(RUN4);
+    expect(refused).toEqual([]);
+    expect(refits).toEqual([{ node: 'mrr', from: 106250, to: 500000, for_link: 'paying_subscribers→mrr' }]);
+    expect(Math.abs(beta(graph, 'paying_subscribers', 'mrr'))).toBeLessThanOrEqual(1);
+    expect(frameInvariance(RUN4, graph)).toEqual([]);
+  });
+});
+
+describe('bounded_scale (AIQ 5895590866 (1)): a bounded scale\'s top is never widened', () => {
+  const g = (unit: string): Rec => ({
+    nodes: [
+      { id: 'sla', kind: 'factor', label: 'Support SLA', observed_state: { value: 0.5, raw_value: 12, unit: 'hours', cap: 24, source: 'brief_extraction' } },
+      { id: 'csat', kind: 'goal', label: 'CSAT', goal_threshold_cap: 5, observed_state: { value: 0.8, baseline: 0.8, raw_value: 4, unit, cap: 5, source: 'brief_extraction' } },
+    ],
+    edges: [{ from: 'sla', to: 'csat', strength: { mean: 2, std: 0.2 }, provenance: { magnitude: 'user_stated' } }],
+  });
+  it('⭐ CSAT "out of 5" (β 2) → refused bounded_scale, the graph unchanged', () => {
+    const r = refitFramesForStatedEffects(g('out of 5'));
+    expect(r.refused).toEqual([{ link: 'sla→csat', reason: 'bounded_scale' }]);
+    expect(r.refits).toEqual([]);
+  });
+  it('CONTROL: the same link on a money goal ("£/month") → widened', () => {
+    expect(refitFramesForStatedEffects(g('£/month')).refits.map((x) => x.node)).toEqual(['csat']);
+  });
+});

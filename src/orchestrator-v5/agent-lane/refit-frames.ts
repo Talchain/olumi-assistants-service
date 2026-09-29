@@ -37,7 +37,7 @@ export interface FrameRefit {
 }
 export interface FrameRefusal {
   readonly link: string;
-  readonly reason: 'no_frame' | 'levels_set_on_node' | 'new_cut' | 'spread_would_move';
+  readonly reason: 'no_frame' | 'levels_set_on_node' | 'new_cut' | 'spread_would_move' | 'bounded_scale';
   /** For `new_cut`: the link that would be cut instead. */
   readonly detail?: string;
 }
@@ -57,6 +57,21 @@ export function frameOf(n: Rec | undefined): number | undefined {
 }
 
 /** The smallest {1, 2, 5}·10^k at or above x. */
+/**
+ * ⛔ A BOUNDED SCALE'S TOP IS NEVER WIDENED (AIQ 5895590866 (1)): "out of 5" bounds what the quantity can be, it is not a
+ * choice of units. The natural top of a bounded unit, else undefined (money, counts and a % CHANGE are not bounded). The
+ * same reading as R3's oracle (`tests/helpers/frame-invariance.ts` `naturalTop`, #2308).
+ */
+export function naturalTop(n: Rec | undefined): number | undefined {
+  const u = String(n?.observed_state?.unit ?? n?.unit ?? '').toLowerCase().trim();
+  const outOf = /out of\s*(\d+(?:\.\d+)?)/.exec(u);
+  if (outOf) return Number(outOf[1]);
+  if (/\b(stars?|rating)\b/.test(u)) return 5;
+  if (/\bnps\b/.test(u)) return 100;
+  if (/^(%|percent|percentage)$/.test(u)) return 100; // a share or probability; a % CHANGE is not bounded
+  return undefined;
+}
+
 export function niceFrameAtLeast(x: number): number {
   const p = 10 ** Math.floor(Math.log10(x));
   for (const m of [1, 2, 5, 10]) if (m * p >= x * (1 - TOL)) return m * p;
@@ -141,6 +156,8 @@ export function refitFramesForStatedEffects(graph: Rec): { readonly graph: Rec; 
     const namedByLimit = Array.isArray(g.goal_constraints) && g.goal_constraints.some((c: Rec) => c?.node_id === target.id);
     if (setByOption || namedByLimit) { refused.push({ link: key(e), reason: 'levels_set_on_node' }); continue; }
     const F = niceFrameAtLeast(Math.abs(e.strength.mean) * Fold);
+    const top = naturalTop(target);
+    if (top !== undefined && F > top * (1 + TOL)) { refused.push({ link: key(e), reason: 'bounded_scale' }); continue; }
     if (spreadWouldMove(target, Fold, F)) { refused.push({ link: key(e), reason: 'spread_would_move' }); continue; }
     const next = reframed(g, target.id, F);
     const newCut = cuts(next).find((x) => !cuts(g).some((y) => key(y) === key(x)));
