@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs';
 import { markOlumiOptions, olumiAddedOptionLabels } from '../olumi-option-marker.js';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
-import type { CandidateModel } from '../admit-model.js';
+import { shortLabel, type CandidateModel } from '../admit-model.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 
 type Rec = Record<string, any>;
@@ -49,6 +49,23 @@ describe('real drafts, real build: the saved graph marks Olumi\'s option and not
     const g1 = (await build(draft('lsF', 'E').candidate, draft('lsF', 'E').brief)).g;
     expect(marks(g1)['Hire two senior and two junior']).toBeNull();
     expect(Object.values(marks(g1)).filter((v) => v !== null)).toEqual([]);
+  });
+  it('a long Olumi option keeps its ownership marker through admission\'s label shortening', async () => {
+    const d = draft('base', 'A');
+    const full = 'Release the Pro plan at the intermediate monthly price of £54';
+    const candidate = {
+      ...d.candidate,
+      options: d.candidate.options.map((o) => o.label === '£54 Pro release' ? { ...o, label: full } : o),
+      links: d.candidate.links.map((l) => ({ ...l, from: l.from === '£54 Pro release' ? full : l.from, to: l.to === '£54 Pro release' ? full : l.to })),
+    };
+    const { r, g } = await build(candidate, d.brief);
+    expect(r.ok, JSON.stringify(r).slice(0, 400)).toBe(true);
+    const option = g.nodes.find((n: Rec) => n.kind === 'option' && n.description === full);
+    expect(option.label).toBe(shortLabel(full));
+    expect(option.proposed_by).toBe('olumi');
+    const parsed = GraphV3.safeParse(g);
+    expect(parsed.success).toBe(true);
+    expect((parsed as { data: Rec }).data.nodes.find((n: Rec) => n.description === full).proposed_by).toBe('olumi');
   });
 });
 

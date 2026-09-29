@@ -18,6 +18,7 @@
  */
 import { extractEnumeratedOptions } from '../../orchestrator/context/intake-option-reconciliation.js';
 import { canonicalLabel, type CandidateModel } from './admit-model.js';
+import { admittedOptionKeys } from './admitted-option-identity.js';
 
 interface Span { readonly text: string; readonly from: number; readonly to: number }
 
@@ -60,17 +61,16 @@ export function optionQuotes(candidate: CandidateModel, brief: string): Readonly
  * The admitted graph's nodes with `source_quote` on each option node whose copied words bind one list item. A node that
  * already carries a quote keeps it. The same array comes back when nothing binds.
  */
-export function quoteListedOptions<N extends { readonly kind?: unknown; readonly label?: unknown; readonly source_quote?: unknown }>(
+export function quoteListedOptions<N extends { readonly kind?: unknown; readonly label?: unknown; readonly description?: unknown; readonly source_quote?: unknown }>(
   nodes: readonly N[], candidate: CandidateModel, brief: string,
 ): readonly N[] {
   const quotes = optionQuotes(candidate, brief);
   if (quotes.size === 0) return nodes;
-  const optionNodes = new Map<string, number>();
-  for (const n of nodes) {
-    if (n.kind === 'option' && typeof n.label === 'string') optionNodes.set(canonicalLabel(n.label), (optionNodes.get(canonicalLabel(n.label)) ?? 0) + 1);
-  }
-  const quoteFor = (n: N): string | undefined => (n.kind === 'option' && typeof n.label === 'string' && n.source_quote === undefined
-    && optionNodes.get(canonicalLabel(n.label)) === 1 ? quotes.get(canonicalLabel(n.label)) : undefined);
+  const optionKeys = admittedOptionKeys(nodes, candidate.options ?? []);
+  const quoteFor = (n: N): string | undefined => {
+    const key = optionKeys.get(n);
+    return n.source_quote === undefined && key !== undefined ? quotes.get(key) : undefined;
+  };
   if (!nodes.some((n) => quoteFor(n) !== undefined)) return nodes;
   return nodes.map((n) => {
     const q = quoteFor(n);

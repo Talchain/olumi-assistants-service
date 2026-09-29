@@ -1,0 +1,36 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { manifest, scoreRecord } from './score.mjs';
+import { acquireProviderQueue, reserveAttempt, readAttempts, finishAttempt } from './provider-budget.mjs';
+let checks = 0;
+const check = (name, fn) => { fn(); checks += 1; console.log(`PASS ${name}`); };
+const support = manifest.briefs.find((b) => b.id === 'support');
+const graph = { nodes: [
+ { id: 'csat', kind: 'goal', label: 'CSAT', provenance: 'from_brief', threshold_source: 'brief_extraction', goal_threshold_raw: 90, goal_threshold_unit: '%', goal_threshold_frame: 'level', goal_horizon_months: 6, source_quote: 'reach 90% within 6 months', observed_state: { raw_value: 82, unit: '%', source: 'brief_extraction', source_quote: 'our CSAT is 82%' } },
+ { id: 'agents', kind: 'factor', label: 'Support agents', observed_state: { raw_value: 3, unit: 'agents', source: 'brief_extraction', source_quote: '3 agents' } },
+ { id: 'tickets', kind: 'factor', label: 'Tickets per week', observed_state: { raw_value: 400, unit: 'tickets/week', source: 'brief_extraction', source_quote: 'about 400 tickets a week' } },
+ { id: 'chat', kind: 'option', label: 'Live chat', provenance: 'from_brief', source_quote: 'move customer support from email to live chat' },
+], edges: [], goal_constraints: [{ node_id: 'agents', operator: '<=', value: 3, unit: 'agents', label: 'without hiring', provenance: 'derived' }] };
+const record = () => ({ brief: 'support', source_sha256: support.source_sha256, graph: structuredClone(graph) });
+check('correct supplied roles, units and scoped quotes pass', () => { const s = scoreRecord(record()); assert.equal(s.fidelity.facts_retained, 4); assert.equal(s.fidelity.source_bound, 4); assert.equal(s.fidelity.negative_findings, 0); });
+check('current and target swap cannot pass merely because numbers remain', () => { const r = record(); r.graph.nodes[0].observed_state.raw_value = 90; r.graph.nodes[0].goal_threshold_raw = 82; assert.equal(scoreRecord(r).fidelity.facts_retained, 2); });
+check('correct number on wrong entity fails', () => { const r = record(); r.graph.nodes[1].label = 'Customers'; r.graph.nodes[1].id = 'customers'; assert.equal(scoreRecord(r).fidelity.facts_retained, 3); });
+check('period lost from counted unit fails', () => { const r = record(); r.graph.nodes[2].observed_state.unit = 'tickets'; assert.equal(scoreRecord(r).fidelity.facts_retained, 3); });
+check('different source item cannot earn source binding', () => { const r = record(); r.graph.nodes[1].observed_state.source_quote = 'our CSAT is 82%'; assert.equal(scoreRecord(r).fidelity.source_bound, 3); });
+check('proposal cannot pass as user option', () => { const r = record(); r.graph.nodes[3].proposed_by = 'olumi'; assert.equal(scoreRecord(r).fidelity.user_options_retained, 0); assert.equal(scoreRecord(r).authority.proposals_outside_model, false); });
+check('external proposal stays out of graph and denominator', () => { const r = record(); r.proposals = [{ type: 'option', label: 'AI triage' }]; assert.equal(scoreRecord(r).authority.external_proposals, 1); assert.equal(scoreRecord(r).fidelity.negative_findings, 0); });
+check('invention using another supplied number is penalized', () => { const r = record(); r.graph.nodes.push({ id: 'cost', kind: 'factor', label: 'Cost', observed_state: { raw_value: 82, unit: 'GBP/month', source: 'brief_extraction' } }); assert(scoreRecord(r).fidelity.failures.some((f) => f.kind === 'invented_or_misassigned_user_number')); });
+check('no hiring plus three existing agents permits the equivalent three-agent cap', () => { const r=record(); r.graph.goal_constraints[0].provenance='explicit'; assert.equal(scoreRecord(r).fidelity.false_user_claims,0); });
+check('honestly labelled invention is still a fidelity penalty', () => { const r=record(); r.graph.nodes.push({id:'growth',kind:'factor',label:'New customer growth',provenance:'ai_inferred',observed_state:{raw_value:53,unit:'customers/month',source:'cee_inference'}}); const s=scoreRecord(r); assert.equal(s.fidelity.false_user_claims,0); assert(s.fidelity.unstated_canonical_content>=2); });
+check('intermediate identity cannot satisfy goal identity', () => { const r = { brief: 'paul-mrr', graph: { nodes: [{ id: 'mrr', kind: 'goal', label: 'MRR' }, { id: 'carrier', kind: 'factor', label: 'Pro MRR', nonlinear_identity: { operation: 'product', factor_ids: ['price','subs'], stated_in_brief: false } }, { id: 'price', label: 'Pro price' }, { id: 'subs', label: 'Subscribers' }], edges: [{ from: 'carrier', to: 'mrr' }] } }; const s=scoreRecord(r); assert.equal(s.identity.on_correct_target, false); assert(s.fidelity.failures.some((f) => f.kind === 'identity_wrong_target')); });
+check('same labels on disconnected current and target quantities fail', () => { const r=record(); const goal=r.graph.nodes[0]; const state=goal.observed_state; delete goal.observed_state; r.graph.nodes.push({ id: 'other-csat', kind: 'factor', label: 'CSAT', observed_state: state }); assert(scoreRecord(r).fidelity.failures.some((f)=>f.kind==='current_target_different_quantity')); });
+check('horizon and no-hiring limit cannot disappear silently', () => { const r=record(); delete r.graph.nodes[0].goal_horizon_months; r.graph.goal_constraints=[]; const s=scoreRecord(r); assert(s.fidelity.failures.some((f)=>f.kind==='goal_horizon_lost')); assert(s.fidelity.failures.some((f)=>f.kind==='qualitative_limit_lost')); });
+check('source byte mismatch is an error, not a scored pass', () => { const r = record(); r.source_sha256 = 'changed'; assert.throws(() => scoreRecord(r), /source differs/); });
+check('admission fixture does not claim analysis or recovery witness', () => { const s=scoreRecord(record()); assert.equal(s.scientific_usability.verified_analysis, false); assert.equal(s.experience.recovery_verified, false); assert.equal(s.experience.user_quality_score, null); });
+check('one queue and durable attempt ceiling include failed calls', () => {
+ const dir=mkdtempSync(join(tmpdir(),'alt-budget-')); const ledger=join(dir,'attempts.jsonl');
+ try { const release=acquireProviderQueue(ledger); assert.throws(()=>acquireProviderQueue(ledger),/already held/); const one=reserveAttempt(ledger, { arm: 'control' }, 2); finishAttempt(ledger,one,{error:'timeout'}); reserveAttempt(ledger,{arm:'source_first'},2); assert.equal(readAttempts(ledger).length,2); assert.throws(()=>reserveAttempt(ledger,{},2),/ceiling reached/); release(); assert.throws(()=>reserveAttempt(ledger),/queue lock/); } finally { rmSync(dir,{recursive:true,force:true}); }
+});
+console.log(`${checks} offline checks passed; zero provider calls.`);

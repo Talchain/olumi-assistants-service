@@ -18,6 +18,7 @@
  * array), so its analysis hash cannot move. Pure.
  */
 import { canonicalLabel, type CandidateModel } from './admit-model.js';
+import { admittedOptionKeys } from './admitted-option-identity.js';
 import { figureTheUserWroteFor } from './stated-by-user.js';
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 
@@ -57,18 +58,17 @@ export function olumiAddedOptionLabels(candidate: CandidateModel, brief: string)
  * exactly one option node carries that name, and never on a node stamped `is_baseline` or carrying a brief quote;
  * otherwise nothing is marked for it.
  */
-export function markOlumiOptions<N extends { readonly kind?: unknown; readonly label?: unknown; readonly is_baseline?: unknown; readonly source_quote?: unknown }>(
+export function markOlumiOptions<N extends { readonly kind?: unknown; readonly label?: unknown; readonly description?: unknown; readonly is_baseline?: unknown; readonly source_quote?: unknown }>(
   nodes: readonly N[], candidate: CandidateModel, brief: string,
 ): readonly N[] {
   const olumi = olumiAddedOptionLabels(candidate, brief);
   if (olumi.size === 0) return nodes;
-  const optionNodes = new Map<string, number>();
-  for (const n of nodes) {
-    if (n.kind === 'option' && typeof n.label === 'string') optionNodes.set(canonicalLabel(n.label), (optionNodes.get(canonicalLabel(n.label)) ?? 0) + 1);
-  }
+  const optionKeys = admittedOptionKeys(nodes, candidate.options ?? []);
   // A node carrying the brief's words for it (`option-lineage.ts`) is the user's, whatever the drafter tagged it.
-  const marks = (n: N): boolean => n.kind === 'option' && typeof n.label === 'string' && n.is_baseline !== true && n.source_quote === undefined
-    && olumi.has(canonicalLabel(n.label)) && optionNodes.get(canonicalLabel(n.label)) === 1;
+  const marks = (n: N): boolean => {
+    const key = optionKeys.get(n);
+    return n.is_baseline !== true && n.source_quote === undefined && key !== undefined && olumi.has(key);
+  };
   if (!nodes.some(marks)) return nodes;
   return nodes.map((n) => (marks(n) ? { ...n, proposed_by: PROPOSED_BY_OLUMI } : n));
 }

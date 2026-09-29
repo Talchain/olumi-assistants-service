@@ -15,6 +15,7 @@
  */
 
 import { goalChanceWithheldForAgent, type GoalChanceWithheld } from '../goal-chance-withheld.js';
+import { config } from '../../../config/index.js';
 import { certainOptionRows, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
@@ -156,6 +157,7 @@ import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
+import { buildSourceFirstFromBrief } from './source-first-build.js';
 import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysisInput, type FirstAnalysisOutcome } from '../first-analysis.js';
 import { limitChecksForAgent, LIMIT_CHECKS_NOTE } from '../limit-checks.js';
 import { readLimitVerdicts, type StoredLimitVerdicts } from '../../../orchestrator/context/constraint-feasibility.js';
@@ -5083,7 +5085,11 @@ export function createAgentCapabilities(
             detail: 'The model already has entities. Propose a change instead of rebuilding it.',
           };
         }
-        built = await buildModelFromBrief(ctx.scenario_id, brief, dispatch, callStructured, opts.onConstructionTrace);
+        // Branch-only constructor selection. Both arms reach the same GraphV3
+        // validation, create-only registration and canonical readback below.
+        built = config.proxy.constructorArm === 'source_first'
+          ? await buildSourceFirstFromBrief(ctx.scenario_id, brief, dispatch, callStructured)
+          : await buildModelFromBrief(ctx.scenario_id, brief, dispatch, callStructured, opts.onConstructionTrace);
         if (built.ok !== true) return built;
       }
 

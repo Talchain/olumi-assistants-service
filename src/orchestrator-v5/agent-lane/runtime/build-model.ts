@@ -33,13 +33,10 @@
  * the hash.
  */
 
-import { createHash } from 'node:crypto';
-import { FRESH_READ } from '../turn-read-cache.js';
 import { keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine } from '../keep-options-apart.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
 import { quoteListedOptions } from '../option-lineage.js';
 import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, productIdentityOpenQuestions, sumIdentityOpenQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
-import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
   assessConstructionSize,
@@ -48,15 +45,17 @@ import {
   nodeIdentity,
   type ConstructionSizeVerdict,
 } from '../construction-size-gate.js';
-import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js';
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
 import { withReconcilingProductIdentity } from '../reconciling-product.js';
+import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
 import { figureTheUserWrote, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
+import { registerConstructedGraph } from './construction-registration.js';
+export { constructionOperationId, findConstructionVersion, type ConstructionVersion } from './construction-registration.js';
 
 /** The construction contract: the banked schema plus typed interventions. */
 export function buildCandidateSchema(): Record<string, unknown> {
@@ -310,86 +309,6 @@ export type CallStructuredModel = (req: {
    */
   status?: string; incomplete_reason?: string;
 }>;
-
-/**
- * ⭐ THE CONSTRUCTION'S OPERATION IDENTITY — derived, never minted.
- *
- * The same (scenario, brief) always names the same operation, so if a
- * registration response is lost and the build is retried, the retry reaches the
- * registration route's replay arm and gets back the ORIGINAL receipt instead of
- * minting a second version. A different brief is a different operation.
- *
- * A v4-shaped UUID because the route validates `operation_id` as a UUID; the
- * version and variant nibbles are forced, the rest is the digest.
- */
-export function constructionOperationId(scenarioId: string, brief: string): string {
-  const h = createHash('sha256').update(`agent_construction:${scenarioId}:${brief}`).digest();
-  const b = Buffer.from(h.subarray(0, 16));
-  b[6] = (b[6] & 0x0f) | 0x40;
-  b[8] = (b[8] & 0x3f) | 0x80;
-  const x = b.toString('hex');
-  return `${x.slice(0, 8)}-${x.slice(8, 12)}-${x.slice(12, 16)}-${x.slice(16, 20)}-${x.slice(20)}`;
-}
-
-/** The version a construction became, as the Agent may cite it. */
-export interface ConstructionVersion {
-  readonly version_id: string;
-  readonly version_number: number;
-  readonly mutation_id: string | null;
-  readonly creation_kind: string;
-  readonly source_turn_id: string;
-}
-
-/**
- * ⭐ FIND A CONSTRUCTION THAT ALREADY COMMITTED — by its operation, not by guessing.
- *
- * ⛔ THE DEFECT THIS CLOSES, from the independent review of #1691 at 84dadabb:
- * after a build commits and its response is lost, a retry reached the
- * "model already has entities" guard BEFORE it ever sent the derived
- * operation id, so the registration replay arm was unreachable from the Agent
- * — the model was saved and the Agent reported a refusal.
- *
- * The lookup is a READ through the product's own versions route: the
- * construction's version carries `creation.source_turn_id`, and the turn id is
- * derived from the SAME function the registration route uses. Anything the read
- * cannot answer (a guest has no versions; the flag is off; a non-200) is "not
- * found", never a receipt — so the caller falls back to today's behaviour
- * rather than inventing one.
- */
-export async function findConstructionVersion(
-  dispatch: InternalDispatch,
-  scenarioId: string,
-  brief: string,
-): Promise<ConstructionVersion | null> {
-  const turnId = registrationTurnId(scenarioId, constructionOperationId(scenarioId, brief));
-  let cursor: string | undefined;
-  // Bounded: a construction is the FIRST version, so it is on the last page of
-  // a newest-first history; five pages of 200 is far past any retry window.
-  for (let page = 0; page < 5; page += 1) {
-    const r = await dispatch(`/assist/v1/scenarios/${scenarioId}/versions`, {
-      limit: 200,
-      ...(cursor === undefined ? {} : { cursor }),
-    });
-    if (r.status !== 200) return null;
-    const versions = Array.isArray(r.json.versions) ? (r.json.versions as Array<Record<string, unknown>>) : [];
-    const hit = versions.find((v) => (v.creation as { source_turn_id?: unknown } | undefined)?.source_turn_id === turnId);
-    if (hit !== undefined) {
-      const creation = hit.creation as { kind?: unknown; mutation_id?: unknown; source_turn_id?: unknown };
-      return {
-        version_id: String(hit.version_id),
-        version_number: Number(hit.sequence),
-        mutation_id: typeof creation.mutation_id === 'string' ? creation.mutation_id : null,
-        creation_kind: String(creation.kind),
-        // The id the ROW carries, not the one we searched for: equal under a
-        // correct match, and under any drift the returned object must not mask it.
-        source_turn_id: String(creation.source_turn_id),
-      };
-    }
-    cursor = typeof r.json.next_cursor === 'string' ? r.json.next_cursor : undefined;
-    if (cursor === undefined) return null;
-  }
-  return null;
-}
 
 /**
  * The retry's contract, with the user's OWN goal fixed as structured input
@@ -1231,8 +1150,15 @@ export async function buildModelFromBrief(
   candidate = preparation.candidate;
   // ⛔ A figure written only as the goal's TARGET is not also its current level (R3 #72 5885498117; DL 5885526452 (3)).
   const writtenAgain = (value: number, unit: unknown): boolean => timesTheUserWrote(value, unit, brief) >= 2;
-  // ⛔ A goal whose stated level is the product of its two stated parts is declared one (R3 #72 5886596030).
-  let admitted = admitCandidateModel(withReconcilingProductIdentity(candidate, brief), {}, brief, goalLevelTheUserWrote(candidate, brief), writtenAgain);
+  // First retain an identity already justified on the goal. Only when that proof
+  // cannot mint one may MG's carrier guard fold an eligible intermediate into it.
+  const modelForAdmission = (draft: CandidateModel): { model: CandidateModel; folded: FoldedCarrier | null } => {
+    const minted = withReconcilingProductIdentity(draft, brief);
+    return minted !== draft ? { model: minted, folded: null } : foldProductCarrierIntoGoal(draft, brief);
+  };
+  const admissionInput = modelForAdmission(candidate);
+  let foldedCarrier = admissionInput.folded;
+  let admitted = admitCandidateModel(admissionInput.model, {}, brief, goalLevelTheUserWrote(candidate, brief), writtenAgain);
   preparation = gapsOnRegisteredOptions(preparation, firstCandidate, admitted);
 
   /**
@@ -1350,7 +1276,8 @@ export async function buildModelFromBrief(
         );
         const retryPrepared = prepareProvisionalCandidate(retryRaw);
         const retryCandidate = retryPrepared.candidate;
-        const retryAdmitted = admitCandidateModel(withReconcilingProductIdentity(retryCandidate, brief), {}, brief, goalLevelTheUserWrote(retryCandidate, brief), writtenAgain);
+        const retryAdmissionInput = modelForAdmission(retryCandidate);
+        const retryAdmitted = admitCandidateModel(retryAdmissionInput.model, {}, brief, goalLevelTheUserWrote(retryCandidate, brief), writtenAgain);
         // ⛔ Leave out only what the FIRST draft never registered: withholding a registered option never closes its gaps in the count (adversarial verify of 843c0960).
         const firstGone = new Set((admitted.options_withheld ?? []).map((w) => canonicalLabel(w.option)));
         const firstRegistered = new Set(firstCandidate.options.map((o) => canonicalLabel(o.label)).filter((l) => !firstGone.has(l)));
@@ -1400,6 +1327,7 @@ export async function buildModelFromBrief(
             .map((n) => ({ kind: String(n.kind), label: String((n as { description?: unknown }).description ?? n.label) }));
           candidate = retryCandidate;
           admitted = retryAdmitted;
+          foldedCarrier = retryAdmissionInput.folded;
           keptApart = retryApart.renamed;
           notToldApart = retryApart.ambiguous;
           size = retrySize;
@@ -1481,6 +1409,18 @@ export async function buildModelFromBrief(
       }) as AdmittedModel['loss'][number])],
     };
   }
+  if (foldedCarrier !== null) {
+    admitted = {
+      ...admitted,
+      loss: [...admitted.loss, {
+        field_path: `nodes[${slugId(foldedCarrier.carrier)}].folded_into_goal`,
+        before: foldedCarrier.carrier,
+        after: foldedCarrier.goal,
+        reason: foldedCarrierLines(foldedCarrier).join(' '),
+        severity: 'info',
+      } as AdmittedModel['loss'][number]],
+    };
+  }
   const heldGoal = holdStatedGoalAttributes(withdrawUnstatedBaselineStamps(admitted.nodes, brief), candidate.goal, brief);
   if (heldGoal.held.horizon || heldGoal.held.direction) {
     admitted = {
@@ -1533,6 +1473,7 @@ export async function buildModelFromBrief(
   // not only said in `not_represented` (which only the Agent's model reads). After the scope and deadline
   // questions, ahead of the drafter's own; nothing for a stable product or a linear model.
   openQuestions.unshift(...productIdentityOpenQuestions(admitted));
+  if (foldedCarrier !== null) openQuestions.unshift(...foldedCarrierLines(foldedCarrier));
   /**
    * ⛔ AN OPTION WITHHELD AS INDISTINCT IS SAID WHERE THE USER ALWAYS SEES IT (DL #70 5842400604: "never a
    * silent duplicate"). `not_represented` reaches only the Agent's model; `open_questions` is appended to the
@@ -1587,111 +1528,10 @@ export async function buildModelFromBrief(
       : {}),
   };
 
-  // Never persist a graph the product cannot then read.
-  const parsed = GraphV3.safeParse(graph);
-  if (!parsed.success) {
-    return {
-      ok: false, mutated: false, refusal: 'admitted_graph_invalid',
-      issues: parsed.error.issues.slice(0, 5).map((i) => i.path.join('.')),
-    };
-  }
-
-  /**
-   * ⛔⛔ THE CALLER'S EMPTY-GRAPH GUARD WENT STALE WHILE THIS WAS THINKING.
-   *
-   * `agent-capabilities.ts` refuses `model_already_exists` when the graph already
-   * has nodes — but it reads that BEFORE calling in here, and the generative call
-   * above takes tens of seconds. So a person who starts a build from a brief and
-   * then adds a node on the canvas, well inside that window, had their node
-   * REPLACED: this registration writes the whole graph, and `operation_id` only
-   * de-duplicates an IDENTICAL construction, so it cannot see a different writer.
-   *
-   * ⚠ IT HAS TO BE HERE, NOT AT THE CALL SITE. My first attempt put the re-check
-   * after `buildModelFromBrief` returned — which is too late, because the
-   * registration happens inside this function. A check after the write cannot
-   * prevent the write.
-   *
-   * ⚠ THIS RE-READ ALONE NARROWED THE WINDOW; IT DID NOT CLOSE IT. What remained was
-   * this read to the route's own read. The route has since gained an assert-absent
-   * convention (explicit `null` `expected_graph_identity_hash`), and the
-   * registration below now sends it — see "CREATE-ONLY". This re-read stays: it
-   * refuses before a register call is spent, with the same words.
-   *
-   * ⭐ A FAILED READ DOES NOT REFUSE. Degrading to today's behaviour is right —
-   * throwing away a build we have already paid for because a READ failed would
-   * cost the user their turn for no gain.
-   */
-  // `fresh`: this read exists to see OTHER writers, so the turn's read cache must not answer it (turn-read-cache.ts).
-  const stillEmpty = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, { ...FRESH_READ });
-  if (stillEmpty.status === 200) {
-    const g = (stillEmpty.json.graph ?? {}) as { nodes?: unknown[] };
-    if (Array.isArray(g.nodes) && g.nodes.length > 0) {
-      return {
-        ok: false,
-        mutated: false,
-        refusal: 'model_already_exists',
-        detail: 'While that model was being built, something was added to this one — so nothing was written, and '
-          + 'your own change is untouched. Ask me to propose a change to the model you now have.',
-      };
-    }
-  }
-
-  /**
-   * ⛔ CREATE-ONLY: THE REGISTRATION ASSERTS THE MODEL IS STILL EMPTY (ChatGPT #69 5834761926 item 1).
-   *
-   * The re-read above leaves the gap from that read to the route's own read. An explicit `null`
-   * `expected_graph_identity_hash` closes it with the route's existing absence contract
-   * (`assist.v1.scenario-graph-register.ts`, "explicit `null` now asserts absence"): the route refuses 409
-   * `GRAPH_STALE` if a graph exists at ITS read, and hands its own read to the atomic writer as a KNOWN-absent
-   * base (`p_expected_base_known`, `append_turn_atomic_v5`), which refuses the same way in CAS `enforce` mode.
-   *
-   * ⚠ THE ROUTE CHECKS ABSENCE BEFORE THE ATOMIC RPC DECIDES A REPLAY, so a retry of THIS construction, already
-   * committed, now meets `GRAPH_STALE` rather than a replayed receipt. It is recovered below exactly as the
-   * `OPERATION_ID_REUSED` loser is: the versions read finds this construction's own version, or it is not ours.
-   */
-  const reg = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph/register`, {
-    graph,
-    brief_text: brief,
-    operation_id: constructionOperationId(scenarioId, brief),
-    expected_graph_identity_hash: null,
-  });
-  const regCode = (reg.json.details as { code?: unknown } | undefined)?.code;
-  if (reg.status === 409 && regCode === 'GRAPH_STALE') {
-    const prior = await findConstructionVersion(dispatch, scenarioId, brief);
-    if (prior !== null) return { ok: true, mutated: false, replayed: true, model_version: prior };
-    return {
-      ok: false,
-      mutated: false,
-      refusal: 'model_already_exists',
-      detail: 'While that model was being built, something was added to this one — so nothing was written, and '
-        + 'your own change is untouched. Ask me to propose a change to the model you now have.',
-    };
-  }
-  if (reg.status === 409 && regCode === 'OPERATION_ID_REUSED') {
-    /**
-     * ⭐ A CONCURRENT BUILD OF THE SAME CONSTRUCTION ALREADY WON. Both calls passed
-     * the empty-graph guard and generated a model — generation is not
-     * deterministic, so the bytes differ — and the route refused this one
-     * because the operation was already committed. That is the SAME
-     * construction, saved once: recover its receipt instead of reporting a
-     * refusal for a model the user now has.
-     */
-    const prior = await findConstructionVersion(dispatch, scenarioId, brief);
-    if (prior !== null) return { ok: true, mutated: false, replayed: true, model_version: prior };
-  }
-  if (reg.status !== 200) {
-    return { ok: false, mutated: false, refusal: 'registration_refused', http: reg.status, detail: String(reg.json.message ?? '').slice(0, 200) };
-  }
-
-  // The canonical version this construction produced, so the Agent can cite a
-  // real version number instead of asserting one. Absent when the registration
-  // wrote no version (a graph GraphV3 cannot version) — the Agent must then not
-  // claim one.
-  const modelVersion = (reg.json as { model_version?: unknown }).model_version;
-  // True only when this construction had ALREADY been committed and the route
-  // handed back the original version rather than writing another.
-  const replayed = (reg.json as { replayed?: unknown }).replayed === true;
-  // A link left out of a loop has its own sentence (`loop_withheld`, below), and its direction WAS stated.
+  const registered = await registerConstructedGraph({ scenarioId, brief, graph, dispatch });
+  if (!registered.ok || !registered.mutated) return registered;
+  const modelVersion = registered.model_version;
+  const replayed = registered.replayed === true;
   const directionless = admitted.withheld.filter((w) => w.reason !== 'loop_closing_link');
 
   return {
@@ -1797,7 +1637,7 @@ export async function buildModelFromBrief(
         // `pure_limit`: a user-limited cost roll-up's Olumi-signed edge into the goal that was not drawn (`findPureLimits`).
         // `one_route`: a factor → risk link left out because the risk only re-drew the factor's own direct link
         // (`oneRoutePerEffect`, PR Review CR on #2276): the risk stays, and why its link went is said.
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|loop_withheld|loop_kept|magnitude_unconvertible|pure_limit|one_route|label_kept_apart)$|\.observed_state\.baseline$/.test(l.field_path))
+        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|loop_withheld|loop_kept|magnitude_unconvertible|pure_limit|one_route|label_kept_apart|folded_into_goal)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };

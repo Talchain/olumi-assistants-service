@@ -1504,6 +1504,9 @@ const ConfigSchema = z.object({
     // declared to the model, dispatch refuses their names, and the capabilities
     // refuse too. Default false so nothing changes for the full lane.
     agentLanePreview: booleanString.default(false),
+    // Local, explicit constructor experiment. The existing path remains the
+    // default; both arms use the same canonical registration boundary.
+    constructorArm: z.enum(['pragmatic', 'source_first']).default('pragmatic'),
     // PROXY_V5_TARGET — which internal route /proxy/v5/turn forwards to.
     // ⛔ AN ENUM, NEVER A PATH FROM THE ENVIRONMENT.
     proxyV5Target: z.enum(['orchestrator', 'agent']).default('orchestrator'),
@@ -1914,6 +1917,7 @@ function parseConfig(): Config {
       browserProxyEnabled: env.BROWSER_PROXY_ENABLED,
       agentLaneEnabled: env.AGENT_LANE_ENABLED,
       agentLanePreview: env.AGENT_LANE_PREVIEW,
+      constructorArm: env.OLUMI_CONSTRUCTOR_ARM,
       proxyV5Target: env.PROXY_V5_TARGET,
       browserProxyAllowedOrigins: env.BROWSER_PROXY_ALLOWED_ORIGINS,
       browserProxyTimeoutMs: env.BROWSER_PROXY_TIMEOUT_MS,

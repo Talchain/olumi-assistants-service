@@ -1,0 +1,808 @@
+[
+  {
+    "case": "paul-mrr",
+    "brief": "Should we raise our Pro plan price from £49 to £59 a month? We have 1,500 paying subscribers and £75k MRR. Monthly churn must stay below 5%, and we want MRR above £85k within a year.",
+    "original_prompt_sha256": "5563f1462b28dcd2986ba114650b486dbd47ca7505feae91810fa49b670b4527",
+    "meaning": {
+      "entities": [
+        {
+          "ref": "d1",
+          "kind": "decision",
+          "label": "Whether to raise the Pro plan price from £49 to £59 a month",
+          "source": {
+            "quote": "Should we raise our Pro plan price from £49 to £59 a month?",
+            "start": 0,
+            "end": 58
+          }
+        },
+        {
+          "ref": "f1",
+          "kind": "factor",
+          "label": "Pro plan price",
+          "source": {
+            "quote": "raise our Pro plan price from £49 to £59 a month",
+            "start": 10,
+            "end": 57
+          }
+        },
+        {
+          "ref": "f2",
+          "kind": "factor",
+          "label": "Paying subscribers",
+          "source": {
+            "quote": "We have 1,500 paying subscribers",
+            "start": 59,
+            "end": 89
+          }
+        },
+        {
+          "ref": "f3",
+          "kind": "factor",
+          "label": "Monthly churn",
+          "source": {
+            "quote": "Monthly churn must stay below 5%",
+            "start": 107,
+            "end": 140
+          }
+        },
+        {
+          "ref": "g1",
+          "kind": "goal",
+          "label": "MRR",
+          "source": {
+            "quote": "we want MRR above £85k within a year",
+            "start": 146,
+            "end": 184
+          }
+        },
+        {
+          "ref": "f4",
+          "kind": "factor",
+          "label": "MRR",
+          "source": {
+            "quote": "£75k MRR",
+            "start": 94,
+            "end": 102
+          }
+        }
+      ],
+      "quantities": [
+        {
+          "ref": "q1",
+          "entity_ref": "f1",
+          "role": "current",
+          "frame": "level",
+          "direction": "none",
+          "number": {
+            "literal": "£49",
+            "value": "49",
+            "source": {
+              "quote": "£49",
+              "start": 37,
+              "end": 40
+            }
+          },
+          "unit": {
+            "kind": "currency",
+            "currency": "GBP",
+            "period": "month",
+            "counted_object": "Pro plan price",
+            "as_stated": "£49 a month"
+          },
+          "comparator": "=",
+          "horizon_months": null
+        },
+        {
+          "ref": "q2",
+          "entity_ref": "f1",
+          "role": "proposed_level",
+          "frame": "level",
+          "direction": "increase",
+          "number": {
+            "literal": "£59",
+            "value": "59",
+            "source": {
+              "quote": "£59",
+              "start": 44,
+              "end": 47
+            }
+          },
+          "unit": {
+            "kind": "currency",
+            "currency": "GBP",
+            "period": "month",
+            "counted_object": "Pro plan price",
+            "as_stated": "£59 a month"
+          },
+          "comparator": "=",
+          "horizon_months": null
+        },
+        {
+          "ref": "q3",
+          "entity_ref": "f2",
+          "role": "current",
+          "frame": "level",
+          "direction": "none",
+          "number": {
+            "literal": "1,500",
+            "value": "1500",
+            "source": {
+              "quote": "1,500",
+              "start": 67,
+              "end": 72
+            }
+          },
+          "unit": {
+            "kind": "count",
+            "currency": null,
+            "period": null,
+            "counted_object": "paying subscribers",
+            "as_stated": "paying subscribers"
+          },
+          "comparator": "=",
+          "horizon_months": null
+        },
+        {
+          "ref": "q4",
+          "entity_ref": "f4",
+          "role": "current",
+          "frame": "level",
+          "direction": "none",
+          "number": {
+            "literal": "£75k",
+            "value": "75000",
+            "source": {
+              "quote": "£75k",
+              "start": 94,
+              "end": 98
+            }
+          },
+          "unit": {
+            "kind": "currency",
+            "currency": "GBP",
+            "period": "month",
+            "counted_object": "MRR",
+            "as_stated": "MRR"
+          },
+          "comparator": "=",
+          "horizon_months": null
+        },
+        {
+          "ref": "q5",
+          "entity_ref": "f3",
+          "role": "limit",
+          "frame": "level",
+          "direction": "none",
+          "number": {
+            "literal": "5%",
+            "value": "5",
+            "source": {
+              "quote": "5%",
+              "start": 138,
+              "end": 140
+            }
+          },
+          "unit": {
+            "kind": "percent",
+            "currency": null,
+            "period": "month",
+            "counted_object": "churn",
+            "as_stated": "Monthly churn"
+          },
+          "comparator": "<",
+          "horizon_months": null
+        },
+        {
+          "ref": "q6",
+          "entity_ref": "g1",
+          "role": "target",
+          "frame": "level",
+          "direction": "increase",
+          "number": {
+            "literal": "£85k",
+            "value": "85000",
+            "source": {
+              "quote": "£85k",
+              "start": 165,
+              "end": 169
+            }
+          },
+          "unit": {
+            "kind": "currency",
+            "currency": "GBP",
+            "period": "month",
+            "counted_object": "MRR",
+            "as_stated": "MRR"
+          },
+          "comparator": ">",
+          "horizon_months": 12
+        }
+      ],
+      "options": [
+        {
+          "entity_ref": "d1",
+          "is_status_quo": false,
+          "interventions": [
+            {
+              "entity_ref": "f1",
+              "quantity_ref": "q2",
+              "source": {
+                "quote": "raise our Pro plan price from £49 to £59 a month",
+                "start": 10,
+                "end": 57
+              }
+            }
+          ]
+        }
+      ],
+      "definitions": [],
+      "causal_claims": [],
+      "unknowns": [
+        {
+          "ref": "u1",
+          "entity_refs": [
+            "f4",
+            "f1",
+            "f2"
+          ],
+          "question": "Does the stated £75k MRR cover the Pro plan and these 1,500 paying subscribers, or a different revenue/subscriber scope?",
+          "source": null
+        }
+      ],
+      "proposals": []
+    }
+  },
+  {
+    "case": "cloud",
+    "brief": "Should we switch our cloud provider from AWS to GCP? Monthly spend is £45k; we want to cut costs by 20% without more than 2 weeks of migration downtime risk.",
+    "original_prompt_sha256": "5563f1462b28dcd2986ba114650b486dbd47ca7505feae91810fa49b670b4527",
+    "meaning": {
+      "entities": [
+        {
+          "ref": "e_provider",
+          "kind": "factor",
+          "label": "Cloud provider (AWS to GCP)",
+          "source": {
+            "quote": "switch our cloud provider from AWS to GCP",
+            "start": 11,
+            "end": 53
+          }
+        },
+        {
+          "ref": "e_switch",
+          "kind": "option",
+          "label": "Switch cloud provider from AWS to GCP",
+          "source": {
+            "quote": "switch our cloud provider from AWS to GCP",
+            "start": 11,
+            "end": 53
+          }
+        },
+        {
+          "ref": "e_cost",
+          "kind": "goal",
+          "label": "Cloud costs",
+          "source": {
+            "quote": "we want to cut costs by 20%",
+            "start": 78,
+            "end": 100
+          }
+        },
+        {
+          "ref": "e_downtime",
+          "kind": "risk",
+          "label": "Migration downtime risk",
+          "source": {
+            "quote": "without more than 2 weeks of migration downtime risk.",
+            "start": 101,
+            "end": 151
+          }
+        }
+      ],
+      "quantities": [
+        {
+          "ref": "q_spend",
+          "entity_ref": "e_cost",
+          "role": "current",
+          "frame": "level",
+          "direction": "none",
+          "number": {
+            "literal": "£45k",
+            "value": "45000",
+            "source": {
+              "quote": "£45k",
+              "start": 72,
+              "end": 76
+            }
+          },
+          "unit": {
+            "kind": "currency",
+            "currency": "GBP",
+            "period": "month",
+            "counted_object": null,
+            "as_stated": "Monthly spend"
+          },
+          "comparator": null,
+          "horizon_months": null
+        },
+        {
+          "ref": "q_cost_cut",
+          "entity_ref": "e_cost",
+          "role": "target",
+          "frame": "change_rel",
+          "direction": "decrease",
+          "number": {
+            "literal": "20%",
+            "value": "20",
+            "source": {
+              "quote": "20%",
+              "start": 97,
+              "end": 100
+            }
+          },
+          "unit": {
+            "kind": "percent",
+            "currency": null,
+            "period": null,
+            "counted_object": null,
+            "as_stated": "%"
+          },
+          "comparator": "=",
+          "horizon_months": null
+        },
+        {
+          "ref": "q_downtime_limit",
+          "entity_ref": "e_downtime",
+          "role": "limit",
+          "frame": "level",
+          "direction": "none",
+          "number": {
+            "literal": "2",
+            "value": "2",
+            "source": {
+              "quote": "2 weeks",
+              "start": 119,
+              "end": 126
+            }
+          },
+          "unit": {
+            "kind": "time",
+            "currency": null,
+            "period": "week",
+            "counted_object": null,
+            "as_stated": "weeks"
+          },
+          "comparator": "<=",
+          "horizon_months": null
+        }
+      ],
+      "options": [
+        {
+          "entity_ref": "e_switch",
+          "is_status_quo": false,
+          "interventions": [
+            {
+              "entity_ref": "e_provider",
+              "quantity_ref": null,
+              "source": {
+                "quote": "switch our cloud provider from AWS to GCP",
+                "start": 11,
+                "end": 53
+              }
+            }
+          ]
+        }
+      ],
+      "definitions": [],
+      "causal_claims": [],
+      "unknowns": [
+        {
+          "ref": "u_switch_impact",
+          "entity_refs": [
+            "e_switch",
+            "e_cost",
+            "e_downtime"
+          ],
+          "question": "What cost reduction and migration downtime risk are expected from switching from AWS to GCP?",
+          "source": null
+        }
+      ],
+      "proposals": []
+    }
+  },
+  {
+    "case": "E",
+    "brief": "Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under £400k?",
+    "original_prompt_sha256": "5563f1462b28dcd2986ba114650b486dbd47ca7505feae91810fa49b670b4527",
+    "meaning": {
+      "entities": [
+        {
+          "ref": "opt_senior",
+          "kind": "option",
+          "label": "Hire two senior engineers",
+          "source": {
+            "quote": "hire two senior engineers",
+            "start": 7,
+            "end": 33
+          }
+        },
+        {
+          "ref": "opt_junior",
+          "kind": "option",
+          "label": "Hire four junior engineers",
+          "source": {
+            "quote": "four junior engineers",
+            "start": 37,
+            "end": 58
+          }
+        },
+        {
+          "ref": "goal_platform",
+          "kind": "goal",
+          "label": "Ship the new platform by Q3",
+          "source": {
+            "quote": "ship the new platform by Q3",
+            "start": 62,
+            "end": 90
+          }
+        },
+        {
+          "ref": "goal_salary_spend",
+          "kind": "goal",
+          "label": "Annual salary spend",
+          "source": {
+            "quote": "keeping annual salary spend under £400k",
+            "start": 98,
+            "end": 138
+          }
+        },
+        {
+          "ref": "factor_senior_engineers",
+          "kind": "factor",
+          "label": "Senior engineers hired",
+          "source": {
+            "quote": "two senior engineers",
+            "start": 12,
+            "end": 32
+          }
+        },
+        {
+          "ref": "factor_junior_engineers",
+          "kind": "factor",
+          "label": "Junior engineers hired",
+          "source": {
+            "quote": "four junior engineers",
+            "start": 37,
+            "end": 58
+          }
+        }
+      ],
+      "quantities": [
+        {
+          "ref": "qty_senior_engineers",
+          "entity_ref": "factor_senior_engineers",
+          "role": "proposed_level",
+          "frame": "level",
+          "direction": "none",
+          "number": {
+            "literal": "two",
+            "value": "2",
+            "source": {
+              "quote": "two",
+              "start": 12,
+              "end": 15
+            }
+          },
+          "unit": {
+            "kind": "count",
+            "currency": null,
+            "period": null,
+            "counted_object": "senior engineers",
+            "as_stated": "senior engineers"
+          },
+          "comparator": "=",
+          "horizon_months": null
+        },
+        {
+          "ref": "qty_junior_engineers",
+          "entity_ref": "factor_junior_engineers",
+          "role": "proposed_level",
+          "frame": "level",
+          "direction": "none",
+          "number": {
+            "literal": "four",
+            "value": "4",
+            "source": {
+              "quote": "four",
+              "start": 37,
+              "end": 41
+            }
+          },
+          "unit": {
+            "kind": "count",
+            "currency": null,
+            "period": null,
+            "counted_object": "junior engineers",
+            "as_stated": "junior engineers"
+          },
+          "comparator": "=",
+          "horizon_months": null
+        },
+        {
+          "ref": "qty_salary_spend_limit",
+          "entity_ref": "goal_salary_spend",
+          "role": "limit",
+          "frame": "level",
+          "direction": "none",
+          "number": {
+            "literal": "£400k",
+            "value": "400000",
+            "source": {
+              "quote": "£400k",
+              "start": 132,
+              "end": 137
+            }
+          },
+          "unit": {
+            "kind": "currency",
+            "currency": "GBP",
+            "period": "year",
+            "counted_object": "salary spend",
+            "as_stated": "annual salary spend"
+          },
+          "comparator": "<",
+          "horizon_months": null
+        }
+      ],
+      "options": [
+        {
+          "entity_ref": "opt_senior",
+          "is_status_quo": false,
+          "interventions": [
+            {
+              "entity_ref": "factor_senior_engineers",
+              "quantity_ref": "qty_senior_engineers",
+              "source": {
+                "quote": "hire two senior engineers",
+                "start": 7,
+                "end": 33
+              }
+            }
+          ]
+        },
+        {
+          "entity_ref": "opt_junior",
+          "is_status_quo": false,
+          "interventions": [
+            {
+              "entity_ref": "factor_junior_engineers",
+              "quantity_ref": "qty_junior_engineers",
+              "source": {
+                "quote": "four junior engineers",
+                "start": 37,
+                "end": 58
+              }
+            }
+          ]
+        }
+      ],
+      "definitions": [],
+      "causal_claims": [],
+      "unknowns": [
+        {
+          "ref": "unk_salary_cost",
+          "entity_refs": [
+            "opt_senior",
+            "opt_junior",
+            "goal_salary_spend"
+          ],
+          "question": "What is the annual salary cost for each senior-engineer and junior-engineer hire?",
+          "source": null
+        },
+        {
+          "ref": "unk_delivery_feasibility",
+          "entity_refs": [
+            "opt_senior",
+            "opt_junior",
+            "goal_platform"
+          ],
+          "question": "Can either hiring option ship the new platform by Q3?",
+          "source": null
+        }
+      ],
+      "proposals": []
+    }
+  },
+  {
+    "case": "support",
+    "brief": "Should we move customer support from email to live chat? We have 3 agents handling about 400 tickets a week and our CSAT is 82%; we want to reach 90% within 6 months without hiring.",
+    "original_prompt_sha256": "5563f1462b28dcd2986ba114650b486dbd47ca7505feae91810fa49b670b4527",
+    "meaning": {
+      "entities": [
+        {
+          "ref": "f1",
+          "kind": "factor",
+          "label": "Customer support channel",
+          "source": {
+            "quote": "move customer support from email to live chat",
+            "start": 11,
+            "end": 55
+          }
+        },
+        {
+          "ref": "f2",
+          "kind": "factor",
+          "label": "Support agents",
+          "source": {
+            "quote": "3 agents",
+            "start": 66,
+            "end": 74
+          }
+        },
+        {
+          "ref": "f3",
+          "kind": "factor",
+          "label": "Support tickets handled",
+          "source": {
+            "quote": "about 400 tickets a week",
+            "start": 83,
+            "end": 107
+          }
+        },
+        {
+          "ref": "g1",
+          "kind": "goal",
+          "label": "CSAT",
+          "source": {
+            "quote": "our CSAT is 82%; we want to reach 90% within 6 months",
+            "start": 112,
+            "end": 167
+          }
+        },
+        {
+          "ref": "r1",
+          "kind": "risk",
+          "label": "Hiring",
+          "source": {
+            "quote": "without hiring",
+            "start": 168,
+            "end": 182
+          }
+        },
+        {
+          "ref": "o1",
+          "kind": "option",
+          "label": "Move customer support from email to live chat",
+          "source": {
+            "quote": "move customer support from email to live chat",
+            "start": 11,
+            "end": 55
+          }
+        }
+      ],
+      "quantities": [
+        {
+          "ref": "q1",
+          "entity_ref": "f2",
+          "role": "current",
+          "frame": "level",
+          "direction": "none",
+          "number": {
+            "literal": "3",
+            "value": "3",
+            "source": {
+              "quote": "3 agents",
+              "start": 66,
+              "end": 74
+            }
+          },
+          "unit": {
+            "kind": "count",
+            "currency": null,
+            "period": null,
+            "counted_object": "agents",
+            "as_stated": "agents"
+          },
+          "comparator": null,
+          "horizon_months": null
+        },
+        {
+          "ref": "q2",
+          "entity_ref": "f3",
+          "role": "current",
+          "frame": "level",
+          "direction": "none",
+          "number": {
+            "literal": "about 400",
+            "value": "400",
+            "source": {
+              "quote": "about 400 tickets a week",
+              "start": 83,
+              "end": 107
+            }
+          },
+          "unit": {
+            "kind": "count",
+            "currency": null,
+            "period": "week",
+            "counted_object": "tickets",
+            "as_stated": "tickets a week"
+          },
+          "comparator": null,
+          "horizon_months": null
+        },
+        {
+          "ref": "q3",
+          "entity_ref": "g1",
+          "role": "current",
+          "frame": "level",
+          "direction": "none",
+          "number": {
+            "literal": "82%",
+            "value": "82",
+            "source": {
+              "quote": "our CSAT is 82%",
+              "start": 112,
+              "end": 128
+            }
+          },
+          "unit": {
+            "kind": "percent",
+            "currency": null,
+            "period": null,
+            "counted_object": null,
+            "as_stated": "%"
+          },
+          "comparator": null,
+          "horizon_months": null
+        },
+        {
+          "ref": "q4",
+          "entity_ref": "g1",
+          "role": "target",
+          "frame": "level",
+          "direction": "increase",
+          "number": {
+            "literal": "90%",
+            "value": "90",
+            "source": {
+              "quote": "reach 90% within 6 months",
+              "start": 142,
+              "end": 166
+            }
+          },
+          "unit": {
+            "kind": "percent",
+            "currency": null,
+            "period": null,
+            "counted_object": null,
+            "as_stated": "%"
+          },
+          "comparator": "=",
+          "horizon_months": 6
+        }
+      ],
+      "options": [
+        {
+          "entity_ref": "o1",
+          "is_status_quo": false,
+          "interventions": [
+            {
+              "entity_ref": "f1",
+              "quantity_ref": null,
+              "source": {
+                "quote": "move customer support from email to live chat",
+                "start": 11,
+                "end": 55
+              }
+            }
+          ]
+        }
+      ],
+      "definitions": [],
+      "causal_claims": [],
+      "unknowns": [],
+      "proposals": []
+    }
+  }
+]

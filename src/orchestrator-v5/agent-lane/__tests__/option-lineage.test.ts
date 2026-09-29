@@ -12,7 +12,7 @@ import { buildModelFromBrief, buildCandidateSchema, type CallStructuredModel } f
 import { deriveIntakeOptionReconciliation } from '../../../orchestrator/context/intake-option-reconciliation.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
-import type { CandidateModel } from '../admit-model.js';
+import { shortLabel, type CandidateModel } from '../admit-model.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync(new URL('./fixtures/cloud3-option-factor-same-name-20260929.json', import.meta.url), 'utf8')) as { brief: string; candidate: CandidateModel };
@@ -64,6 +64,25 @@ describe('Canvas\'s cloud-bill brief, real build: each listed option is saved wi
     const { g } = await build(withWords(FX.candidate, {}), FX.brief);
     expect(Object.values(quotes(g)).every((q) => q === null)).toBe(true);
     expect(deriveIntakeOptionReconciliation(FX.brief, g, g).state).toBe('identity_unverified');
+  });
+  it('a long option keeps its exact source quote through admission\'s label shortening', async () => {
+    const full = 'Move steady production workloads onto reserved cloud instances';
+    const cand = withWords(FX.candidate, WORDS);
+    const renamed = {
+      ...cand,
+      options: cand.options.map((o) => o.label === 'Reserved instances' ? { ...o, label: full } : o),
+      links: cand.links.map((l) => ({ ...l, from: l.from === 'Reserved instances' ? full : l.from, to: l.to === 'Reserved instances' ? full : l.to })),
+    };
+    const { r, g } = await build(renamed, FX.brief);
+    expect(r.ok, JSON.stringify(r).slice(0, 300)).toBe(true);
+    const option = g.nodes.find((n: Rec) => n.kind === 'option' && n.description === full);
+    expect(option.label).toBe(shortLabel(full));
+    expect(option.source_quote).toBe(WORDS['Reserved instances']);
+    const parsed = GraphV3.safeParse(g);
+    expect(parsed.success).toBe(true);
+    expect((parsed as { data: Rec }).data.nodes.find((n: Rec) => n.description === full).source_quote).toBe(WORDS['Reserved instances']);
+    const userOnly = { ...g, nodes: (g.nodes as Rec[]).filter((n) => n.kind !== 'option' || n.source_quote !== undefined) };
+    expect(deriveIntakeOptionReconciliation(FX.brief, userOnly, userOnly).state).toBe('reconciled');
   });
 });
 

@@ -1,0 +1,20 @@
+/** Explicit lead-operated launcher. Does not install dependencies or print credentials. */
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import dotenv from 'dotenv';
+const root = fileURLToPath(new URL('../../', import.meta.url));
+const arm = process.argv[2] ?? 'pragmatic';
+const only = process.argv[3] ?? 'paul-mrr,cloud,E,support';
+if (!['control', 'pragmatic', 'source_first'].includes(arm)) throw new Error('Arm must be control, pragmatic, or source_first');
+if (process.env.ALT_CONSTRUCTOR_LIVE !== '1') throw new Error('Live calls are gated: lead must explicitly set ALT_CONSTRUCTOR_LIVE=1');
+const envFile = process.env.ALT_CONSTRUCTOR_ENV_FILE ?? resolve(root, '.env');
+if (existsSync(envFile)) Object.assign(process.env, Object.fromEntries(Object.entries(dotenv.parse(readFileSync(envFile))).filter(([key]) => process.env[key] === undefined)));
+if (!process.env.OPENAI_API_KEY) throw new Error('Set OPENAI_API_KEY or ALT_CONSTRUCTOR_ENV_FILE; no credentials were printed');
+const runner = resolve(root, 'node_modules/.bin/vitest');
+if (!existsSync(runner)) throw new Error('Existing dependencies must be linked before running; no package installation attempted');
+const env = { ...process.env, OLUMI_CONSTRUCTOR_ARM: arm, ALT_CONSTRUCTOR_ONLY: only, ALT_CONSTRUCTOR_REPS: process.env.ALT_CONSTRUCTOR_REPS ?? '1' };
+delete env.ANTHROPIC_API_KEY; delete env.ANTHROPIC_BASE_URL;
+const result = spawnSync(runner, ['run', '--config', 'experiments/alternative-constructor/vitest.config.ts'], { cwd: root, env, stdio: 'inherit' });
+process.exit(result.status ?? 1);
