@@ -1182,7 +1182,34 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
   const analysis = context.analysis as Record<string, unknown> | undefined;
   if (analysis === undefined) return context;
   const certainty = goalCertaintyForAgent(g.analysis_result, { scenario_id: scenarioId, analysis_state: g.analysis_state }, g);
-  return certainty === undefined ? context : { ...context, analysis: { ...analysis, goal_certainty: certainty } };
+  // The graph read selects ONE current Run. Carry only its recorded per-option outcomes, in record order; a withheld
+  // comparative leader does not erase ranges (AI Quality #72 5890704395). The raw P(goal), win share and ranking
+  // fields never come across this projection. A missing outcome stays missing, never a numeric zero.
+  const rec = (value: unknown): Record<string, unknown> | undefined =>
+    value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+  const current = rec(rec(g.analysis_state)?.run_state)?.kind === 'complete_current';
+  const compared = rec(rec(g.analysis_result)?.enrichment)?.option_comparison;
+  const decisions = Array.isArray(certainty?.options) ? certainty.options : [];
+  const byId = new Map(decisions.flatMap((value) => {
+    const row = rec(value);
+    return typeof row?.option_id === 'string' ? [[row.option_id, row] as const] : [];
+  }));
+  const savedRunOptions = current && Array.isArray(compared) ? compared.flatMap((value) => {
+    const row = rec(value);
+    const id = row?.option_id ?? row?.id;
+    if (typeof id !== 'string') return [];
+    const label = row?.option_label ?? row?.label;
+    const decision = byId.get(id);
+    return [{ option_id: id,
+      ...(typeof label === 'string' ? { option_label: label } : {}),
+      ...(rec(row?.outcome) !== undefined ? { outcome: row!.outcome } : {}),
+      ...(decision !== undefined ? { goal_certainty: decision } : {}),
+    }];
+  }) : [];
+  return { ...context, analysis: { ...analysis,
+    ...(certainty !== undefined ? { goal_certainty: certainty } : {}),
+    ...(savedRunOptions.length > 0 ? { saved_run_options: savedRunOptions } : {}),
+  } };
 }
 
 function earlierAnalysisOf(state: unknown): { analysis: Record<string, unknown> } | undefined {
@@ -6604,6 +6631,12 @@ export function createAgentCapabilities(
       if (result !== undefined && postRunRead === undefined && withGoalChance(result).goal_chance !== undefined) {
         try { postRunRead = await readGraph(ctx.scenario_id); } catch { postRunRead = null; }
       }
+      // History can regard this result as current only when the selected fact matches this Run's full identity.
+      // A second Run of the same graph may have the same headline figures and a different computed_at.
+      const runHash = (result as { computed_against_hash?: unknown } | undefined)?.computed_against_hash;
+      const runAt = (r.json.analysis_state as { run_state?: { computed_at?: unknown } } | undefined)?.run_state?.computed_at;
+      const runIdentity = typeof runHash === 'string' && typeof runAt === 'string'
+        ? { scenario_id: ctx.scenario_id, graph_hash_at_run: runHash, computed_at: runAt } : undefined;
       // ⛔ A Run with no result says the ENGINE's typed outcome, never a readiness issue it did not stop on (`run-outcome.ts`).
       const runOutcome = result === undefined ? runOutcomeOf(r.json) : undefined;
       return {
@@ -6622,6 +6655,7 @@ export function createAgentCapabilities(
         options: ready.options ?? [],
         // ⛔ The Agent reads decision sensitivity from EVPPI only, never PLoT's structural ranking (`../decision-sensitivity.ts`).
         ...(result !== undefined ? { result: analysisResultForAgent(result) } : {}),
+        ...(runIdentity !== undefined ? { run_identity: runIdentity } : {}),
         // The typed leader permission for THIS run, read from its own wire verdict — so the Agent names a
         // leader only when `leader_may_be_named` (see the route's reporting instruction). `requested`: every
         // run_analysis dispatch is one the user asked for (the Agent's own call, or the Run chip's fast path);
