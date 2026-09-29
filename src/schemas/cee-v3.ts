@@ -425,6 +425,12 @@ export const NodeV3 = z.object({
   interventions: z.record(z.string(), z.any()).optional(),
   /** Marks the status-quo / baseline option node (option-kind nodes only, v191+). */
   is_baseline: z.boolean().optional(),
+  /** ⭐ An option OLUMI added rather than the user (option-kind nodes only; MG `olumi-option-marker.ts`, DL #72
+   *  5887489508 / 5887534233 / 5887755959). Written at construction ONLY as `'olumi'`, never as `'user'`, so a graph
+   *  with no Olumi option is unchanged. Read by the Run's proposed-option filter, the analysis hash and the intake
+   *  reconciliation (typed extras), never re-derived from the brief. Declared here because `NodeV3` strips undeclared
+   *  keys: without it the mark would be lost on the register write. Adopting the option removes it. */
+  proposed_by: z.literal('olumi').optional(),
   /** UI display vocabulary for the node's origin. Set by the V3 transform from
    *  `extractionType`: `explicit`/`observed` → `from_brief`,
    *  `inferred`/`range` → `ai_inferred`, absent/unknown → `ai_inferred`.
