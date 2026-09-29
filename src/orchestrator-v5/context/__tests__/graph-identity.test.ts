@@ -31,6 +31,7 @@ import {
   ANALYSIS_NORMALISER_VERSION,
   ANALYSIS_PROJECTION_VERSION,
 } from '../graph-identity.js';
+import { legacyAnalysisHashV2 } from '../../../../tests/helpers/legacy-analysis-hash-v2.js';
 
 // ---------------------------------------------------------------------------
 // Fixture builders — permissive GraphStateIngress (the boundary type the live
@@ -345,7 +346,11 @@ describe('golden byte-parity pins', () => {
   });
 
   it('analysisAffectingHash is byte-stable (drift tripwire)', () => {
-    expect(computeAnalysisAffectingGraphHash(golden)).toBe('e48d776aa7552f74');
+    // MOVED DELIBERATELY by projection version 3 (schemas 0.62.0, Shared Data row 1): `observed_state.source` / `unit`
+    // and the derived run semantics joined the hash. The old pin stays, through the frozen pre-0.62.0 projection, so
+    // this row proves the move is exactly the projection bump and nothing else.
+    expect(legacyAnalysisHashV2(golden)).toBe('e48d776aa7552f74');
+    expect(computeAnalysisAffectingGraphHash(golden)).toBe('b692e08bb4f4f189');
   });
 
   it('topology hash is byte-stable', () => {
