@@ -74,8 +74,26 @@ describe('frame invariance — the oracle on the served c96 graph', () => {
 
   it('R7c (R3-B 5895208669): a carried spread that BINDS PLoT\'s 2.0 std cap moves, so that re-frame is refused', () => {
     const before = reframe(c96(), 'mrr', 500_000);
-    const after = reframe(before, 'monthly_gross_additions', 40); // 100 natural / 40 = std 2.5 → PLoT sends 2.0 → 80
-    expect(frameInvariance(before, after)).toEqual(['spread_moved monthly_gross_additions 100.0 → 80.00']);
+    const after = reframe(before, 'monthly_churn', 4); // 3% on a frame of 4: 10 natural / 4 = std 2.5 → PLoT sends 2.0 → 8
+    expect(frameInvariance(before, after)).toEqual([
+      'beta_out_of_contract pro_plan_price→monthly_churn 2.500', // tightening also makes a cut (0.1 × 100/4)
+      'spread_moved monthly_churn 10.00 → 8.000',
+    ]);
+  });
+
+  it('⭐ R3: no frame below the node\'s own level or an option\'s value for it', () => {
+    const before = reframe(c96(), 'mrr', 500_000);
+    expect(frameInvariance(before, reframe(before, 'paying_subscribers', 1_000))).toContain('frame_below_level paying_subscribers 1000 < 1500');
+    expect(frameInvariance(before, reframe(before, 'pro_plan_price', 55))).toEqual(['frame_below_level pro_plan_price 55 < 59']); // the £59 option
+  });
+
+  it('R3b: re-framing a factor carries every option\'s value for it; leaving them on the old frame moves £59 → £29.50', () => {
+    const before = reframe(c96(), 'mrr', 500_000);
+    const after = reframe(before, 'pro_plan_price', 100);
+    expect(frameInvariance(before, after)).toEqual([]);
+    expect(node(after, 'raise_price_to_59').interventions.pro_plan_price.value).toBeCloseTo(0.59, 12);
+    node(after, 'raise_price_to_59').interventions.pro_plan_price.value = 0.295; // MUTANT: not carried
+    expect(frameInvariance(before, after)).toEqual(['level_moved raise_price_to_59→pro_plan_price (intervention ≠ raw/F)']);
   });
 
   it('a zero held exact is never given a spread (it stays a point mass)', () => {

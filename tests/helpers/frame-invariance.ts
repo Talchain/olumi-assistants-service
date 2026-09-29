@@ -11,6 +11,8 @@
  *   · spread_moved: a factor's sampled spread in natural units changed (PLoT's default is max(0.1, 0.15·value) on the
  *     FRAME, `translator-v3.ts` `buildParameterUncertaintiesV3`; a user-stated level is sent at 1e-4; a std is clamped to
  *     [1e-4, 2.0], so a carried spread that binds moves and the re-frame must be refused, R3-B 5895208669).
+ *   · frame_below_level (design R3): a frame below the node's own level or an option's value for it (normalised > 1);
+ *   · level_moved <option>→<factor> (intervention): an option's value for a re-framed factor no longer reads back raw.
  *   The oracle forbids the MOVE, not a particular fix: a builder that never mints a std and refuses every re-frame whose
  *   default spread is floor-bound also passes.
  *
@@ -57,6 +59,8 @@ export function naturalSpread(n: Rec): number | undefined {
   return Math.max(0.1, 0.15 * Math.abs(os.value)) * F;
 }
 
+const interventionsOn = (g: Rec, id: string): [string, Rec][] =>
+  (g.nodes ?? []).flatMap((o: Rec) => (o.interventions?.[id] ? [[o.id, o.interventions[id]] as [string, Rec]] : []));
 const byId = (g: Rec): Map<string, Rec> => new Map((g.nodes ?? []).map((n: Rec) => [n.id, n]));
 const edgeKey = (e: Rec): string => `${e.from}→${e.to}`;
 const meanOf = (e: Rec): number | undefined => (num(e.strength?.mean) ? e.strength.mean : num(e.strength_mean) ? e.strength_mean : undefined);
@@ -88,6 +92,21 @@ export function frameInvariance(before: Rec, after: Rec): string[] {
     if (ne && num(ne.amount) && num(ne.per_source_change) && ne.per_source_change !== 0) {
       const size = (m * frameOf(na.get(ea.to))!) / frameOf(na.get(ea.from))!;
       if (!close(size, ne.amount / ne.per_source_change) || (num(ne.strength_mean) && !close(ne.strength_mean, m))) out.push(`natural_effect_off ${edgeKey(ea)}`);
+    }
+  }
+  for (const [id, a] of na) {
+    const F = frameOf(a);
+    if (F === undefined) continue;
+    const levels = [a.observed_state?.raw_value, ...interventionsOn(after, id).map(([, iv]) => iv.raw_value)].filter(num).map(Math.abs);
+    const top = Math.max(0, ...levels);
+    if (top > F * (1 + TOL)) out.push(`frame_below_level ${id} ${F} < ${top}`);
+  }
+  for (const o of after.nodes ?? []) {
+    for (const [fid, iv] of Object.entries<Rec>(o.interventions ?? {})) {
+      const F = frameOf(na.get(fid));
+      const ivb = nb.get(o.id)?.interventions?.[fid];
+      if (num(ivb?.raw_value) && (!num(iv?.raw_value) || !close(ivb.raw_value, iv.raw_value))) out.push(`level_moved ${o.id}→${fid} (intervention)`);
+      else if (F !== undefined && num(iv?.value) && num(iv?.raw_value) && !close(iv.value * F, iv.raw_value)) out.push(`level_moved ${o.id}→${fid} (intervention ≠ raw/F)`);
     }
   }
   for (const [id, a] of na) {
@@ -130,6 +149,7 @@ export function reframe(graph: Rec, id: string, F: number): Rec {
     if (num(os.std) && os.std > 0) os.std = spreadBefore / F;
     else if (!close(Math.max(0.1, 0.15 * Math.abs(os.value)) * F, spreadBefore)) { os.std = spreadBefore / F; os.std_source = 'olumi'; }
   }
+  for (const o of g.nodes as Rec[]) { const iv = o.interventions?.[id]; if (iv && num(iv.value)) iv.value = iv.value * k; } // an option's value for it
   const nodes = byId(g);
   for (const e of g.edges as Rec[]) {
     const scale = e.from === id ? F / Fold : e.to === id ? Fold / F : 1; // β·F_to/F_from held
