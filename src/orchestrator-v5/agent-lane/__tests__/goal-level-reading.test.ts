@@ -75,7 +75,8 @@ describe('AIQ (b): the brief\'s £45k as Olumi\'s disclosed reading of today\'s 
     expect(g['goal_threshold_frame']).toBe('change_rel');
     expect(g['goal_threshold']).toBe(-0.2);
     expect(g['observed_state']).toMatchObject({ raw_value: 45000, source: 'cee_inference', cap: 56250 });
-    expect(g['goal_level_reading']).toEqual({ level: 45000, level_unit: '£/month', quote: 'Monthly spend is £45k', words: WORDS });
+    expect(g['goal_level_reading']).toEqual({ level: 45000, level_unit: '£/month', quote: 'Monthly spend is £45k',
+      lead: 'Olumi reads your ‘£45k’ (‘Monthly spend is £45k’) as today\'s level of ‘costs’', bound: '<=' });
     expect(said(r)).toContain(WORDS);
     expect(said(r)).not.toMatch(/current level was not stated/);
     expect(goalLevelReadingWords(registered, g.id)).toBe(WORDS);
@@ -137,5 +138,18 @@ describe('goalLevelReadingWords: the reading speaks only for the level it read',
   it('CONTROL: an unrelated edit (the label) → still speaks', async () => {
     const g = await saved();
     expect(goalLevelReadingWords({ nodes: [{ ...g, label: 'Monthly cloud costs' }] }, g.id)).toBe(WORDS);
+  });
+  // ⛔ AIQ 5895379601 (2): the level is still Olumi's reading after a TARGET edit, so the reading speaks — with the target
+  // as it now stands, composed at read time, never the stored old one.
+  const node = (g: Record<string, any>, over: Record<string, unknown>) => goalLevelReadingWords({ nodes: [{ ...g, ...over }] }, g.id);
+  it('RED: the target edited −20% → −25% → "a 25% cut is £33,750 / month or less" (never the old £36,000)', async () => {
+    const g = await saved();
+    expect(node(g, { goal_threshold_raw: -0.25, goal_threshold: -0.25 })).toBe(
+      'Olumi reads your ‘£45k’ (‘Monthly spend is £45k’) as today\'s level of ‘costs’, so a 25% cut is £33,750 / month or less.');
+  });
+  it('a comparator the USER holds speaks first: a strict ceiling says "less than" (AIQ\'s nit)', async () => {
+    const g = await saved();
+    expect(node(g, { goal_direction: '<' })).toBe(
+      'Olumi reads your ‘£45k’ (‘Monthly spend is £45k’) as today\'s level of ‘costs’, so a 20% cut is less than £36,000 / month.');
   });
 });

@@ -38,8 +38,8 @@ import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/st
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import { bindOptionLabelToBrief, bindingEarnsBriefClaim } from '../../cee/provenance/brief-binding.js';
 import { sizeLink, type LinkSizing, type MagnitudeNode } from '../../cee/magnitude/link-effect.js';
-import { sayFigure } from './say-figure.js';
 import type { BriefGoalLevel } from './unplaced-goal-level.js';
+import { goalLevelSentence } from '../goal-target/goal-level-reading.js';
 import {
   admitCandidateConstraints,
   percentLevelFrame,
@@ -432,7 +432,7 @@ export interface AdmittedNode {
    * AIQ (b) 5894808343 (1): Olumi's reading of the brief's figure as a change goal's today level (`briefGoalLevel`),
    * keyed to the level it read; `NodeV3.goal_level_reading`. Never the user's; its words are said.
    */
-  goal_level_reading?: { level: number; level_unit: string; quote: string; words: string };
+  goal_level_reading?: { level: number; level_unit: string; quote: string; lead: string; bound?: '<=' | '<' | '>=' | '>' };
   /**
    * ⛔ A NODE'S `provenance` IS A DISPLAY ENUM, NOT THE EDGE OBJECT
    * (`cee-v3.ts:363` — `from_brief | ai_inferred | user_set`). Edges carry the
@@ -2581,32 +2581,22 @@ export function admitStatedGoalChange(
   // brief's clause and the words, keyed to the level it read (`goalLevelReadingWords`: a level the user states or edits
   // replaces it).
   const adopt = fromBrief as Extract<BriefGoalLevel, { kind: 'adopt' }>;
-  const words = goalLevelReadingWords(goal, frame, raw, target, adopt);
+  // ⛔ AIQ 5895379601 condition 2: the reading stores only its LEAD and the drafter's comparator; the target clause is
+  // composed from the goal's current target by the one composer (`goalLevelSentence`), here and in the reader.
+  const lead = `Olumi reads your ‘${adopt.written}’ (‘${adopt.quote}’) as today's level of ‘${goal.metric}’`;
+  const bound = goal.operator === '<=' || goal.operator === '<' || goal.operator === '>=' || goal.operator === '>' ? goal.operator : null;
+  const unitText = typeof goal.unit === 'string' ? goal.unit : '';
+  const words = goalLevelSentence(lead, { level, frame, stored, unit: unitText, bound }) ?? `${lead}.`;
   return {
     node: {
       ...withBase,
       observed_state: { value: level / resolved.cap, baseline: level / resolved.cap, ...(goal.unit ? { unit: goal.unit } : {}), source: 'cee_inference', raw_value: level, cap: resolved.cap },
-      goal_level_reading: { level, level_unit: goal.unit ?? '', quote: adopt.quote, words },
+      goal_level_reading: { level, level_unit: unitText, quote: adopt.quote, lead, ...(bound !== null ? { bound } : {}) },
     },
     reading: words,
   };
 }
 
-/**
- * The words of Olumi's reading of the brief's figure as today's level (AIQ 5894808343 (1)): "Olumi reads your ‘£45k’
- * (‘Monthly spend is £45k’) as today's level of ‘costs’, so a 20% cut is £36,000 / month or less."
- */
-function goalLevelReadingWords(
-  goal: CandidateModel['goal'], frame: 'change_rel' | 'change_abs', raw: number, target: number,
-  adopt: Extract<BriefGoalLevel, { kind: 'adopt' }>,
-): string {
-  const unit = typeof goal.unit === 'string' ? goal.unit : '';
-  const size = frame === 'change_rel' ? `${sayFigure(Math.abs(raw), '')}%` : sayFigure(Math.abs(raw), unit);
-  const move = raw < 0 ? 'cut' : 'rise';
-  const bound = goal.operator === '<=' ? ' or less' : goal.operator === '>=' ? ' or more' : '';
-  return `Olumi reads your ‘${adopt.written}’ (‘${adopt.quote}’) as today's level of ‘${goal.metric}’, so a ${size} ${move} is ` +
-    `${sayFigure(Math.round(target * 100) / 100, unit)}${bound}.`;
-}
 
 /** #1840's goal `observed_state` for a level the brief states: `{ value: B, baseline: B, unit?, source, raw_value, cap }`. */
 function briefGoalObservedState(normalised: number, unit: string | null | undefined, raw: number, cap: number): NonNullable<AdmittedNode['observed_state']> {
