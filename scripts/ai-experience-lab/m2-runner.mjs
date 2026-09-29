@@ -43,6 +43,18 @@ export function currentM2Input({ session_id, brief, graph }) {
   return { binding, providerInput, input_hash: contentHash(providerInput), graph_hash: graphHash };
 }
 
+/** OpenAI requires an explicit type beside JSON Schema const; this changes transport syntax only. */
+export function providerSchema(value) {
+  if (Array.isArray(value)) return value.map(providerSchema);
+  if (value === null || typeof value !== 'object') return value;
+  const mapped = Object.fromEntries(Object.entries(value).map(([key, part]) => [key, providerSchema(part)]));
+  if (Object.hasOwn(mapped, 'const') && !Object.hasOwn(mapped, 'type')) {
+    if (typeof mapped.const !== 'string') throw new Error('unsupported_mm1_const_type');
+    return { type: 'string', ...mapped };
+  }
+  return mapped;
+}
+
 export function validateM2Output(binding, output) {
   const errors = validateMM1Output(binding, output);
   if (errors.length === 0 && binding.evidence_refs.length === 0 &&
@@ -55,14 +67,17 @@ export function validateM2Output(binding, output) {
 export async function callM2(snapshot, send = fetch) {
   assertPinnedSource();
   const current = currentM2Input(snapshot);
+  const instructions = current.binding.evidence_refs.length === 0
+    ? `${MM1_WIDENING_PROMPT}\n\nLive binding: evidence_refs is empty. Every proposal must use origin "olumi_hypothesis"; do not label an idea evidence-derived. Cite only an exact brief span, a current model reference, or a specific graph absence, and keep each idea provisional.`
+    : MM1_WIDENING_PROMPT;
   const request = {
     model: MM1_DIFFERENT_MODEL,
-    instructions: MM1_WIDENING_PROMPT,
+    instructions,
     input: JSON.stringify(current.providerInput),
     reasoning: { effort: MM1_EFFORT },
     max_output_tokens: 3200,
     text: { format: { type: 'json_schema', name: 'mm1_widening_proposals', strict: true,
-      schema: MM1_PROPOSAL_JSON_SCHEMA } },
+      schema: providerSchema(MM1_PROPOSAL_JSON_SCHEMA) } },
   };
   const started = Date.now();
   const response = await send('https://api.openai.com/v1/responses', {
@@ -83,8 +98,9 @@ export async function callM2(snapshot, send = fetch) {
     accepted: verdict.accepted, proposals: verdict.proposals, errors: verdict.errors,
     receipt: { mode: 'live_m2_read_only', source, session_id: snapshot.session_id, model: request.model,
       effort: MM1_EFFORT, input_hash: current.input_hash, graph_hash: current.graph_hash,
-      instruction_hash: createHash('sha256').update(MM1_WIDENING_PROMPT).digest('hex'),
-      schema_hash: contentHash(MM1_PROPOSAL_JSON_SCHEMA), request_input: current.providerInput,
+      instruction_hash: createHash('sha256').update(instructions).digest('hex'),
+      schema_hash: contentHash(MM1_PROPOSAL_JSON_SCHEMA), provider_schema_hash: contentHash(request.text.format.schema),
+      request_input: current.providerInput,
       provider_status: response.status, provider_state: raw.status ?? null, latency_ms, usage: raw.usage ?? null,
       validation_errors: verdict.errors, raw_response: raw },
   };

@@ -1,5 +1,6 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { assertPinnedSource, callM2, currentM2Input } from './m2-runner.mjs';
 
 const snapshot = () => ({ session_id: 'lab-1', brief: 'We need to improve MRR while customers may leave.',
@@ -16,6 +17,7 @@ const fake = output => async (_url, request) => {
   assert.equal(body.reasoning.effort, 'low');
   assert.equal(body.tools, undefined);
   assert.equal(body.text.format.strict, true);
+  assert.equal(body.text.format.schema.properties.proposals.items.properties.evidence_pointers.items.anyOf[0].properties.kind.type, 'string');
   return { ok: true, status: 200, json: async () => ({ status: 'completed', output: [
     { type: 'message', content: [{ type: 'output_text', text: JSON.stringify(output) }] }],
     usage: { input_tokens: 100, output_tokens: 50 } }) };
@@ -30,10 +32,17 @@ test('uses the exact pinned MM-1 contract; full model text affects content ident
 
 test('shows only a locatable provisional proposal, while preserving the model', async () => {
   const current = snapshot(), before = structuredClone(current);
-  const result = await callM2(current, fake({ proposals: [proposal()] }));
+  let sentInstructions;
+  const send = fake({ proposals: [proposal()] });
+  const result = await callM2(current, (url, request) => {
+    sentInstructions = JSON.parse(request.body).instructions;
+    return send(url, request);
+  });
   assert.equal(result.accepted, true);
   assert.equal(result.proposals.length, 1);
   assert.equal(result.receipt.model, 'gpt-6-luna');
+  assert.match(sentInstructions, /Every proposal must use origin "olumi_hypothesis"/);
+  assert.equal(result.receipt.instruction_hash, createHash('sha256').update(sentInstructions).digest('hex'));
   assert.deepEqual(current, before);
 });
 
