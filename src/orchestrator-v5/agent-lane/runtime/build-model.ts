@@ -48,6 +48,7 @@ import {
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js';
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
+import { withReconcilingProductIdentity } from '../reconciling-product.js';
 import { figureTheUserWrote, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
@@ -1216,7 +1217,8 @@ export async function buildModelFromBrief(
   candidate = preparation.candidate;
   // ⛔ A figure written only as the goal's TARGET is not also its current level (R3 #72 5885498117; DL 5885526452 (3)).
   const writtenAgain = (value: number, unit: unknown): boolean => timesTheUserWrote(value, unit, brief) >= 2;
-  let admitted = admitCandidateModel(candidate, {}, brief, goalLevelTheUserWrote(candidate, brief), writtenAgain);
+  // ⛔ A goal whose stated level is the product of its two stated parts is declared one (R3 #72 5886596030).
+  let admitted = admitCandidateModel(withReconcilingProductIdentity(candidate, brief), {}, brief, goalLevelTheUserWrote(candidate, brief), writtenAgain);
   preparation = gapsOnRegisteredOptions(preparation, firstCandidate, admitted);
 
   /**
@@ -1333,7 +1335,7 @@ export async function buildModelFromBrief(
         );
         const retryPrepared = prepareProvisionalCandidate(retryRaw);
         const retryCandidate = retryPrepared.candidate;
-        const retryAdmitted = admitCandidateModel(retryCandidate, {}, brief, goalLevelTheUserWrote(retryCandidate, brief), writtenAgain);
+        const retryAdmitted = admitCandidateModel(withReconcilingProductIdentity(retryCandidate, brief), {}, brief, goalLevelTheUserWrote(retryCandidate, brief), writtenAgain);
         // ⛔ Leave out only what the FIRST draft never registered: withholding a registered option never closes its gaps in the count (adversarial verify of 843c0960).
         const firstGone = new Set((admitted.options_withheld ?? []).map((w) => canonicalLabel(w.option)));
         const firstRegistered = new Set(firstCandidate.options.map((o) => canonicalLabel(o.label)).filter((l) => !firstGone.has(l)));
