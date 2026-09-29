@@ -66,7 +66,7 @@ describe('a link\'s stated effect is recorded only from its card, on the real ro
   const script: Json[] = [];
   const say = { output: [{ type: 'message', content: [{ type: 'output_text', text: 'Here is what I would record. Press the button if that is right.' }] }] };
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: RequestInit) => {
+    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
       modelCalls += 1;
       // Only the Agent's own call (the one offering its tools) takes the script; any other model call (the turn summary,
       // written after the answer) gets words, so it can never consume the next turn's tool call.
