@@ -51,6 +51,7 @@ import {
   formatFactorChange,
   formatFactorValueSet,
   formatFactorValueUnchanged,
+  formatFactorValueNowYours,
   formatValueWithUnit,
 } from './d1-shared/format-confirmation.js';
 import { normaliseFactorValue } from './d1-shared/normalise-factor-value.js';
@@ -936,11 +937,21 @@ export function createSetFactorValueHandler(): HandlerFn {
     // non-matching key is refused earlier at guard 2b. It is kept so the invariant is
     // EXPLICIT rather than incidental: if the write rule ever changes, `noop` must not
     // silently start narrating phantom changes again. Do not cite it as mutation-verified.
-    const noop =
+    const valuesSame =
       before.value === after.value &&
       before.raw_value === after.raw_value &&
       unitComparisonKey(before.unit) === unitComparisonKey(after.unit) &&
       before.cap === after.cap;
+    // ⭐ WHOSE IT IS IS PART OF THE WRITE (served witness f297748, #72 5883308747 step L3). Since schemas 0.62.0 the
+    // analysis revision reads `observed_state.source`, so the same number made the user's (an explicit `set` on Olumi's
+    // estimate) is a real write: the owner moves, the hash moves, the last Run goes stale. Receipted as a no-op and said
+    // as "already set", the reply contradicted the persisted bytes and hid the stale Run. A review (`reviewOnly`) and
+    // the user's own figure re-sent keep the owner, so they stay true no-ops.
+    const ownerOf = (g: unknown): unknown =>
+      (g as { nodes?: ReadonlyArray<{ id?: unknown; observed_state?: { source?: unknown } }> } | null)?.nodes
+        ?.find((n) => n.id === targetId)?.observed_state?.source;
+    const ownerMoved = ownerOf(rawGraph) !== ownerOf(result.mutatedGraph);
+    const noop = valuesSame && !ownerMoved;
 
     const fact: SetFactorValueHandlerFact = {
       fact_type: 'set_factor_value',
@@ -993,7 +1004,9 @@ export function createSetFactorValueHandler(): HandlerFn {
     // a value the way a non-resolved `before` could.
     const changeText = noop
       ? formatFactorValueUnchanged({ label, after: narrationSide(after) })
-      : beforeResolution.kind === 'resolved'
+      : valuesSame
+        ? formatFactorValueNowYours({ label, after: narrationSide(after) })
+        : beforeResolution.kind === 'resolved'
         ? formatFactorChange({ label, before: narrationSide(before), after: narrationSide(after) })
         : formatFactorValueSet({ label, after: narrationSide(after) });
 
