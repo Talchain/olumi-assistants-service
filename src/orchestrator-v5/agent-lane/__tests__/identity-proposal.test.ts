@@ -44,12 +44,27 @@ describe('the card on the served graphs', () => {
     expect(proposeProductIdentity(served(3))?.factor_ids).toStrictEqual(['pro_plan_price', 'paying_pro_subscribers']);
     expect(proposeProductIdentity(served(4))?.factor_ids).toStrictEqual(['pro_plan_price', 'pro_paying_subscribers']);
   });
-  it('NO CARD: run 1 (the identity is already there) and run 2 (one intermediate parent: MG\'s construction guard)', () => {
-    expect(proposeProductIdentity(served(1))).toBeNull();
+  it('FORK (iii) (R3 5891486222): served run 1 (Olumi\'s own product on the goal, the "99.8%" reply) → the card, over exactly its two parents', () => {
+    expect(proposeProductIdentity(served(1))?.factor_ids).toStrictEqual(['pro_plan_price', 'paying_subscribers']);
+  });
+  it('NO CARD: the user\'s own product (stated_in_brief: true, e.g. after the card\'s Yes) and run 2 (one intermediate parent)', () => {
+    const g = served(1);
+    node(g, 'mrr').nonlinear_identity.stated_in_brief = true;
+    expect(proposeProductIdentity(g)).toBeNull();
     expect(proposeProductIdentity(served(2))).toBeNull();
+  });
+  it('NO CARD: Olumi\'s product over OTHER factors than the goal\'s two parents is not this card\'s to confirm', () => {
+    const g = served(1);
+    node(g, 'mrr').nonlinear_identity.factor_ids = ['pro_plan_price', 'something_else'];
+    expect(proposeProductIdentity(g)).toBeNull();
   });
   it('every served card fits the door (≤ CARD_WORDS_MAX characters)', () => {
     for (const run of [0, 3, 4]) expect(proposeProductIdentity(served(run))!.words.length, `run ${run}`).toBeLessThanOrEqual(CARD_WORDS_MAX);
+  });
+  it('the price names its item ("GBP per subscriber per month"): STILL the card: the drafter\'s unit licenses nothing (AIQ 5891286280, DL 5891050797)', () => {
+    const g = served(0);
+    node(g, 'pro_plan_price').observed_state.unit = 'GBP per subscriber per month';
+    expect(proposeProductIdentity(g)?.factor_ids).toStrictEqual(['pro_plan_price', 'paying_subscribers']);
   });
   it('the card is not a write: the graph is byte-identical after it', () => {
     const g = served(0);
@@ -82,7 +97,6 @@ describe('NO CARD — one change on run 0\'s served graph each', () => {
     ['the price is per SEAT (a mismatched denominator is invalid, not a question)', (g: Json) => { node(g, 'pro_plan_price').observed_state.unit = '£ per seat per month'; }],
     ['the goal is yearly, the price monthly', (g: Json) => { node(g, 'mrr').goal_threshold_unit = 'GBP/year'; }],
     ['the count is a rate ("subscribers per month")', (g: Json) => { node(g, 'paying_subscribers').observed_state.unit = 'subscribers per month'; }],
-    ['the price names its item ("GBP per subscriber per month"): the mint applies, not a card (AIQ 5888571809)', (g: Json) => { node(g, 'pro_plan_price').observed_state.unit = 'GBP per subscriber per month'; }],
     ['the subscribers level was only CONFIRMED by the user (ratification, not a stated figure)', (g: Json) => { node(g, 'paying_subscribers').observed_state.source = 'user_confirmed'; }],
     ['two goals', (g: Json) => { g.nodes.push({ id: 'g2', kind: 'goal', label: 'Other' }); }],
     ['card words past the #2292 door\'s 400 characters (a 400-character label)', (g: Json) => { node(g, 'pro_plan_price').label = 'P'.repeat(400); }],

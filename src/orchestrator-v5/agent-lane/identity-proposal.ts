@@ -12,12 +12,13 @@
  * presses exactly this reading. PURE: no model call, no store, no brief text (authorship is the stored `source`).
  *
  * Null (no card) unless ALL hold:
- *  · ONE goal, carrying no identity of its own;
+ *  · ONE goal, carrying no identity of its own, or only OLUMI's product reading over its two parents (`stated_in_brief:
+ *    false`: FORK (iii), R3 5891486222 — every goal product Olumi derives, minted or drafter-declared, waits for this Yes);
  *  · its level is the user's (`classifyValueSource(observed_state.source) === 'user_stated'`), finite and non-zero;
  *  · EXACTLY TWO non-option parents, both factors whose levels are the user's, neither a product/sum carrier itself;
  *  · the parts reconcile with the goal within ISL's 5% (`RECONCILIATION_TOLERANCE`, one source with the mint);
  *  · the units compose as a money rate × a count into the goal's money per period (`unitsCompose`, one source with the
- *    mint) with ONLY the per-item denominator missing ('confirm'). With it ('proof') the mint applies, not a card.
+ *    mint), with or without the per-item denominator: the drafter's typed unit licenses nothing (AIQ 5891286280).
  */
 import { RECONCILIATION_TOLERANCE, unitsCompose } from './reconciling-product.js';
 import { sayFigure } from './say-figure.js';
@@ -54,6 +55,13 @@ function usersLevel(node: Rec): { value: number; unit: string } | null {
 
 const carriesIdentity = (node: Rec): boolean => node.nonlinear_identity !== undefined && node.nonlinear_identity !== null;
 
+/** Olumi's own product reading on the goal, awaiting the user's Yes (`stated_in_brief: false`): its factor ids, else null. */
+function unconfirmedProduct(node: Rec): readonly string[] | null {
+  const i = node.nonlinear_identity;
+  if (!isRec(i) || i.operation !== 'product' || i.stated_in_brief !== false || !Array.isArray(i.factor_ids)) return null;
+  return i.factor_ids.every((f) => typeof f === 'string') ? (i.factor_ids as string[]) : null;
+}
+
 export function proposeProductIdentity(graph: unknown): IdentityProposal | null {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
@@ -63,12 +71,15 @@ export function proposeProductIdentity(graph: unknown): IdentityProposal | null 
   const goalId = text(goal.id);
   const goalLabel = text(goal.label);
   const o = usersLevel(goal);
-  if (goalId === undefined || goalLabel === undefined || o === null || carriesIdentity(goal)) return null;
+  const reading = unconfirmedProduct(goal);
+  if (goalId === undefined || goalLabel === undefined || o === null || (carriesIdentity(goal) && reading === null)) return null;
 
   const byId = new Map(nodes.flatMap((n) => (typeof n.id === 'string' ? [[n.id, n] as const] : [])));
   const parentIds = [...new Set(edges.filter((e) => e.to === goalId && typeof e.from === 'string').map((e) => e.from as string))]
     .filter((id) => { const k = byId.get(id)?.kind; return k !== 'option' && k !== 'decision'; });
   if (parentIds.length !== 2) return null;
+  // Olumi's reading must be over exactly these two parents: any other product is not this card's to confirm.
+  if (reading !== null && (reading.length !== 2 || !reading.every((f) => parentIds.includes(f)))) return null;
   const parts = parentIds.map((id) => {
     const n = byId.get(id);
     const level = n !== undefined ? usersLevel(n) : null;
@@ -82,8 +93,8 @@ export function proposeProductIdentity(graph: unknown): IdentityProposal | null 
 
   const goalUnit = text(goal.goal_threshold_unit) ?? o.unit;
   const c = unitsCompose(goalUnit, goalLabel, { unit: p.unit, label: p.id }, { unit: q.unit, label: q.id });
-  // AIQ 5888571809 (2): ONLY the missing per-item denominator makes a card. With it ('proof') the mint applies instead.
-  if (c.kind !== 'confirm') return null;
+  // FORK (iii): composing units make the card, with or without the denominator; nothing is silent.
+  if (c.kind === 'no') return null;
   const rate = c.rate === p.id ? p : q;
   const count = c.rate === p.id ? q : p;
   const money = (v: number): string => sayFigure(v, c.code);
