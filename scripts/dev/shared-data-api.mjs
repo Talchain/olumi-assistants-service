@@ -15,10 +15,9 @@ import { createServer } from 'node:http';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import net from 'node:net';
 import { SignJWT, importJWK } from 'jose';
-import { ensureSigningKey, publicJwkOf } from './shared-data-signing-key.mjs';
+import { ensureLocalUser, ensureSigningKey, publicJwkOf } from './shared-data-signing-key.mjs';
 
 const arg = (name, fallback) => {
   const at = process.argv.indexOf(name);
@@ -91,9 +90,7 @@ const jwks = createServer((req, res) => {
 await new Promise((ok) => jwks.listen(jwksPort, '127.0.0.1', ok));
 process.env.SUPABASE_JWKS_URL = `http://127.0.0.1:${jwksPort}/auth/v1/.well-known/jwks.json`;
 
-const userFile = resolve(stateDir, 'api-user.json');
-const user = existsSync(userFile) ? JSON.parse(readFileSync(userFile, 'utf8')) : { id: randomUUID() };
-if (!existsSync(userFile)) writeFileSync(userFile, JSON.stringify(user), { mode: 0o600 });
+const user = ensureLocalUser(stateDir);
 const token = await new SignJWT({ role: 'authenticated' })
   .setProtectedHeader({ alg: 'ES256', kid: privateJwk.kid, typ: 'JWT' })
   .setSubject(user.id)

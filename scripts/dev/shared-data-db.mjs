@@ -8,7 +8,7 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import http from 'node:http';
-import { ensureSigningKey, publicJwkOf } from './shared-data-signing-key.mjs';
+import { ensureLocalUser, ensureSigningKey, publicJwkOf } from './shared-data-signing-key.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 // SHARED_DATA_LOCAL_INSTANCE=<name> runs a wholly separate stack (state dir, containers, ports) beside the default one,
@@ -112,6 +112,73 @@ sql(`GRANT USAGE ON SCHEMA public TO service_role;
   GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO service_role;
   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO service_role;
   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO service_role;`);
+
+// ── THE UI's OWN PLATFORM BASELINE (P0 builder 5889727894: reuse, never emulate) ──────────────────────────────────────
+// The browser's own Supabase calls (scenario create/list/load, thread and turn RPCs) need columns and RPCs only the UI
+// repository's migrations define. Their statements are applied VERBATIM from a UI checkout (SHARED_DATA_UI_ROOT), each
+// file once, recorded as `ui:<file>`. The one rewrite: v2's `CREATE TABLE IF NOT EXISTS scenarios` is a no-op here (the
+// table predates it), so its column definitions are lifted into ADD COLUMN IF NOT EXISTS — minus `id` and `user_id`
+// (CEE 20260422000000 dropped the auth.users reference for guest mode). Left out: v2's PUBLIC scenario policies (the owner
+// policy above covers every operation), every sharing RPC (it grants anon), and apply_patch_and_log (client graph writes
+// are off: the UI's clientCanWriteReadableGraph() is false). RLS, the owner checks inside each RPC and anon's empty
+// grants are exactly the UI's.
+const sqlStatements = text => {
+  const out = []; let cur = ''; let i = 0;
+  while (i < text.length) {
+    const rest = text.slice(i);
+    const dollar = /^\$[A-Za-z0-9_]*\$/.exec(rest);
+    if (dollar) { const end = text.indexOf(dollar[0], i + dollar[0].length); const stop = end < 0 ? text.length : end + dollar[0].length; cur += text.slice(i, stop); i = stop; continue; }
+    if (rest.startsWith('--')) { const nl = text.indexOf('\n', i); i = nl < 0 ? text.length : nl; continue; }
+    if (rest.startsWith('/*')) { const end = text.indexOf('*/', i + 2); i = end < 0 ? text.length : end + 2; continue; }
+    if (text[i] === "'") { let j = i + 1; while (j < text.length && !(text[j] === "'" && text[j + 1] !== "'")) j += text[j] === "'" ? 2 : 1; cur += text.slice(i, j + 1); i = j + 1; continue; }
+    if (text[i] === ';') { if (cur.trim()) out.push(cur.trim()); cur = ''; i++; continue; }
+    cur += text[i]; i++;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+};
+const liftScenarioColumns = createTable => {
+  const body = createTable.slice(createTable.indexOf('(') + 1, createTable.lastIndexOf(')'));
+  const cols = []; let depth = 0, cur = '';
+  for (const c of body) { if (c === ',' && depth === 0) { cols.push(cur.trim()); cur = ''; continue; } depth += c === '(' ? 1 : c === ')' ? -1 : 0; cur += c; }
+  cols.push(cur.trim());
+  const kept = cols.filter(c => c !== '' && !/^(id|user_id)\s/i.test(c)).map(c => `ADD COLUMN IF NOT EXISTS ${c.replace(/\s+/g, ' ')}`);
+  return `ALTER TABLE scenarios ${kept.join(', ')}`;
+};
+const V2_RPCS = ['append_scenario_event', 'store_analysis_and_log', 'store_analysis_failure', 'store_brief_and_log', 'set_stage_and_log'];
+const namesRpc = st => V2_RPCS.some(f => new RegExp(`FUNCTION\\s+(public\\.)?${f}\\s*\\(`, 'i').test(st));
+const UI_BASELINE = [
+  ['20260226000000_scenario_schema_v2.sql', sts => [
+    liftScenarioColumns(sts.find(st => /^CREATE TABLE IF NOT EXISTS scenarios\s*\(/i.test(st))),
+    ...sts.filter(st => /^CREATE INDEX IF NOT EXISTS idx_scenarios_/i.test(st)
+      || /^CREATE OR REPLACE FUNCTION update_updated_at\(/i.test(st) || /^CREATE TRIGGER scenarios_updated_at\b/i.test(st)
+      || (/^(CREATE OR REPLACE|GRANT|REVOKE)\b/i.test(st) && namesRpc(st))),
+  ]],
+  ['20260306000000_auth_hub_profiles.sql', sts => sts.filter(st => /^ALTER TABLE scenarios\s+ADD COLUMN IF NOT EXISTS is_pinned\b/i.test(st)
+    || /^CREATE INDEX IF NOT EXISTS idx_scenarios_(hub_query|user_updated)\b/i.test(st))],
+  ['20260308000000_thread_persistence.sql', sts => sts],
+  ['20260309000000_scenario_snapshots.sql', sts => sts],
+  ['20260309000001_conversation_turns.sql', sts => sts],
+];
+const uiRoot = process.env.SHARED_DATA_UI_ROOT;
+if (!uiRoot) {
+  console.warn('UI platform baseline NOT imported (set SHARED_DATA_UI_ROOT=<DecisionGuideAI checkout>): the browser\'s scenario create/list will fail.');
+} else {
+  const done = docker('exec', db, 'psql', '-U', 'postgres', '-d', 'cee', '-Atc',
+    "SELECT name FROM public.shared_data_local_migrations WHERE name LIKE 'ui:%'").split('\n').filter(Boolean);
+  const imported = [];
+  for (const [file, pick] of UI_BASELINE) {
+    if (done.includes(`ui:${file}`)) continue;
+    const chosen = pick(sqlStatements(readFileSync(resolve(uiRoot, 'supabase/migrations', file), 'utf8')));
+    if (chosen.length === 0 || chosen.includes(undefined)) throw new Error(`UI baseline: nothing matched in ${file}`);
+    try { sql(`BEGIN;\n${chosen.map(st => `${st};`).join('\n')}\nINSERT INTO public.shared_data_local_migrations VALUES ('ui:${file}');\nCOMMIT;`); }
+    catch (error) { throw new Error(`UI baseline failed: ${file}`, { cause: error }); }
+    imported.push(`${file} (${chosen.length} statements)`);
+  }
+  // The synthetic user exists in the local auth.users, as a signed-in user does on the platform (snapshot/turn rows reference it).
+  sql(`INSERT INTO auth.users (id) VALUES ('${ensureLocalUser(stateDir).id}') ON CONFLICT DO NOTHING; NOTIFY pgrst, 'reload schema';`);
+  console.log(imported.length ? `Imported the UI platform baseline: ${imported.join('; ')}` : 'UI platform baseline already imported.');
+}
 // USER TOKENS: PostgREST verifies the same ES256 token CEE does (the experiment's one signing key) AND keeps the
 // service_role HMAC secret, as one JWKS. The token's `role` claim (`authenticated`) selects the role and `sub` feeds
 // auth.uid(), so RLS decides ownership exactly as for the HMAC path; anon keeps no grants.
