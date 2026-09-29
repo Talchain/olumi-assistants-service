@@ -93,6 +93,14 @@ describe('factor_value_edit — a confirm is review, a typed figure is authorshi
     if (r.kind === 'refused') expect(r.reason).toBe('confirm_value_moved');
   });
 
+  it('confirm_current with a £1 move on £1,234,565,000 is REFUSED (near-exact, never the scale tolerance)', async () => {
+    const base = servedGraph() as { nodes: Array<Record<string, unknown>> };
+    base.nodes[1]!.observed_state = { unit: '£', value: 1234564999, source: 'cee_inference' };
+    const r = await edit({ intent: 'confirm_current', value: 1234565000, unit: '£' }, base);
+    expect(r.kind).toBe('refused');
+    if (r.kind === 'refused') expect(r.reason).toBe('confirm_value_moved');
+  });
+
   it('the same value that is ALREADY the user\'s stays the user\'s: hash identical, no-op receipt', async () => {
     const base = servedGraph() as { nodes: Array<Record<string, unknown>> };
     (base.nodes[1]!.observed_state as Record<string, unknown>).source = 'user_override';
