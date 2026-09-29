@@ -14,7 +14,7 @@
 import { readRatifiedConstraints, type StoredLimitVerdicts } from '../../orchestrator/context/constraint-feasibility.js';
 import { PARTS_IDENTITY_UNMODELLED_REASON, PLACEHOLDER_PARTS_REASON } from '../../orchestrator/context/placeholder-parts.js';
 import { log } from '../../utils/telemetry.js';
-import { limitCheckAsks, partsLinkAsk } from './limited-level-ask.js';
+import { limitCheckAsks } from './limited-level-ask.js';
 
 export interface LimitCheck {
   /** The join key for MG's per-limit ask (`limited-level-ask.ts`, seam 5865033356): its sentence rides here verbatim. */
@@ -45,7 +45,8 @@ export const OFF_SCALE_LIMIT_REASONS: ReadonlySet<string> = new Set(['threshold_
 /**
  * R-c (AI Quality 5881541947): a limit withheld because the options move its quantity only through parts the model has
  * not sized (or combines by an identity the engine does not honour yet). A today-level cannot make it checkable, so it
- * carries no today-level ask; an unsized link carries MG's link-size ask instead (`partsLinkAsk`).
+ * carries no today-level ask. Nor a link-size ask yet: nothing can write the user's answer as a sized link today, and an
+ * ask the model cannot act on is its own over-claim (AI Quality 5882619314; Runtime's code-read 5882633365).
  */
 const PARTS_LIMIT_SENTENCES: ReadonlyMap<string, string> = new Map([
   [PLACEHOLDER_PARTS_REASON, 'Olumi’s links from its parts to it are placeholders, not estimates.'],
@@ -91,17 +92,6 @@ export function limitAskIdsOf(graph: unknown): ReadonlySet<string> {
   return new Set(asksByLimit(graph).keys());
 }
 
-/** MG's link-size question for a limit withheld for an unsized link — never throws (see `asksByLimit`). */
-function partsAskOf(graph: unknown, constraintId: string): string | undefined {
-  try {
-    const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
-    return Array.isArray(nodes) ? partsLinkAsk(graph as Parameters<typeof partsLinkAsk>[0], constraintId) : undefined;
-  } catch (err) {
-    log.warn({ event: 'agent_lane.parts_link_ask_failed', err: err instanceof Error ? err.message : String(err) }, 'agent-lane: the link-size ask could not be read; the limit row goes without it');
-    return undefined;
-  }
-}
-
 /** `undefined` when the run carries no per-limit rows, or none can be named. */
 export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdicts | null | undefined): LimitCheck[] | undefined {
   if (verdicts === null || verdicts === undefined) return undefined;
@@ -121,10 +111,7 @@ export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdict
     // A today-level ask only where a level could make the limit checkable: never on a scored, an off-scale or a parts limit.
     const levelCannotHelp = row.state === 'unscored' && typeof row.reason === 'string'
       && (OFF_SCALE_LIMIT_REASONS.has(row.reason) || PARTS_LIMIT_SENTENCES.has(row.reason));
-    // R-c: a limit withheld for an unsized link asks for that link's size instead (AI Quality 5882087383).
-    const ask = row.state === 'unscored' && row.reason === PLACEHOLDER_PARTS_REASON
-      ? partsAskOf(graph, row.constraint_id)
-      : row.state === 'scored' || levelCannotHelp ? undefined : asks.get(row.constraint_id);
+    const ask = row.state === 'scored' || levelCannotHelp ? undefined : asks.get(row.constraint_id);
     out.push({ constraint_id: row.constraint_id, limit: label, state: row.state, say: sentenceFor(label, row.state, row.reason), ...(ask !== undefined ? { ask } : {}) });
   }
   return out.length > 0 ? out : undefined;

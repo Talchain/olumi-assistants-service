@@ -167,8 +167,8 @@ describe('R-c at the fold: a limit moved only through placeholder parts is WITHH
     const checks = limitChecksForAgent(graph, { per_limit: [row], joint: { state: 'unscored', reason: row.reason } } as never)!;
     const check = checks.find((c) => c.constraint_id === BUDGET_LIMIT)!;
     expect(check.say).toBe('‘Total initiative spend’ cannot be checked in this model yet: Olumi’s links from its parts to it are placeholders, not estimates.');
-    // A today-level cannot make it checkable; the link's size can (AI Quality 5882087383).
-    expect(check.ask).toBe('How much would a change in ‘Advertising spend’ move ‘Total initiative spend’? Give a figure, or let Olumi estimate it.');
+    // No ask: a today-level cannot make it checkable, and nothing can write a link size the user gives yet (AI Quality 5882619314).
+    expect(check.ask).toBeUndefined();
   });
   it('without the options PLoT scores, the fold withholds nothing (the level owners are unchanged)', () => {
     const { graph } = journeyCPartsOnly('change_abs');
@@ -246,12 +246,12 @@ describe('R-c on journey A (served 17d1): the churn limit moved by price only th
       collectLimitLevelOwners(g, ratified, options));
     expect(v.state).toBe('evaluated_feasible');
   });
-  it('the row says why and asks for the link\'s size, naming what the options set', () => {
+  it('the row says why, and offers NO ask: nothing can write the link size the user would give (AIQ 5882619314)', () => {
     const row = fold(A)!;
     const check = limitChecksForAgent(A, { per_limit: [row], joint: { state: 'unscored', reason: row.reason } } as never)!
       .find((c) => c.constraint_id === CHURN_LIMIT)!;
     expect(check.say).toBe('‘Monthly churn’ cannot be checked in this model yet: Olumi’s links from its parts to it are placeholders, not estimates.');
-    expect(check.ask).toBe('How much would a change in ‘Pro plan price’ move ‘Monthly churn’? Give a figure, or let Olumi estimate it.');
+    expect(check.ask).toBeUndefined();
   });
   it('CONTROL — the same limit, the price → churn link SIZED by Olumi in churn\'s unit: it carries, and folds normally (estimate_only)', () => {
     expect(carried(sized('olumi_estimate'))).toBe(true);
