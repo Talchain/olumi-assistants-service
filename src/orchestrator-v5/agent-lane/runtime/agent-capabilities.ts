@@ -35,6 +35,9 @@ import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../../graph-management/types.js'
 import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../../compose/definitional-links.js';
 import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken, type LinkEffectRefusal } from '../../system-events/link-effect-edit.js';
+import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
+import { proposeProductIdentity, type IdentityProposal } from '../identity-proposal.js';
+import { CONFIRM_IDENTITY_OP, identityCardHintFor, identityReadingOf, identityRefusalWords, readingOfIdentityApproval } from '../identity-card.js';
 import { unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
 
@@ -203,6 +206,11 @@ export function limitScopeIn(g: { readonly nodes: readonly { readonly label?: un
 }
 
 /** `goal_chance` beside a run's result when the run withheld the goal's chance (PLoT #416); nothing otherwise. */
+/** The confirm card's hint, when a Run's stored model holds one not yet offered on this revision (`../identity-card.ts`). */
+function withIdentityCard(hint: { readonly available: true; readonly note: string } | undefined): { identity_card?: { readonly available: true; readonly note: string } } {
+  return hint === undefined ? {} : { identity_card: hint };
+}
+
 function withGoalChance(result: unknown): { goal_chance?: GoalChanceWithheld } {
   const withheld = goalChanceWithheldForAgent(result);
   return withheld !== undefined ? { goal_chance: withheld } : {};
@@ -2142,6 +2150,103 @@ export function createAgentCapabilities(
     };
   };
 
+  /**
+   * ⭐ THE CONFIRM CARD'S PROPOSAL (`../identity-card.ts`): R3's reading verbatim, on the revision it was read from. Its id
+   * is its content, so the same card on the same revision is the same proposal — which is how it is offered once.
+   */
+  const identityProposalFor = (ctx: { scenario_id: string; authenticated_user_id: string | null }, graphHash: string, card: IdentityProposal): StructuredProposal =>
+    createProposal({
+      scenario_id: ctx.scenario_id,
+      user_id: ctx.authenticated_user_id,
+      base_graph_identity_hash: graphHash,
+      operations: [{ op: CONFIRM_IDENTITY_OP, path: card.outcome_id,
+        value: { outcome_id: card.outcome_id, operation: card.operation, factor_ids: [...card.factor_ids], words: card.words } }],
+      provenance: { authored_by: 'user_stated', basis: card.words },
+      validation: { admitted: true, loss_count: 0, refusals: [] },
+      public_label: card.words,
+    });
+  /** The card's hint for a Run on this stored model: once per revision (`identityCardHintFor`). */
+  const identityCardFor = (ctx: { scenario_id: string; authenticated_user_id: string | null },
+    read: { readonly raw: unknown; readonly graph_hash: unknown } | null | undefined) => {
+    if (read === null || read === undefined || typeof read.graph_hash !== 'string' || read.graph_hash === '') return undefined;
+    const card = proposeProductIdentity(read.raw);
+    return identityCardHintFor(card, card !== null && proposals.get(identityProposalFor(ctx, read.graph_hash, card).proposal_id) !== undefined);
+  };
+
+  /**
+   * ⭐ "YES" ON THE CONFIRM CARD (DL 5888399097 / 5888631168; Canonical #2292's door): the goal's product recorded as the
+   * user's own, ONE append, alone — only from the button showing EXACTLY the words the proposal stores, on the revision it
+   * was offered on. It runs nothing (Paul's ruling, #63 5812069638): the reply offers the Run.
+   */
+  const applyIdentityConfirm = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0],
+    parent: StructuredProposal,
+    approvedRead: GraphRead,
+  ): Promise<ToolResult> => {
+    const notApplied = (reason: string, detail: string): ToolResult => ({
+      ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id, refusal: 'not_applied', reason, detail, receipts: [],
+    });
+    const reading = identityReadingOf(parent);
+    if (reading === undefined) {
+      return notApplied('unreadable_proposal', 'This reading could not be read from the stored proposal, so nothing was recorded. Offer it again only if it still applies.');
+    }
+    const labelOf = (id: string): string => { const l = approvedRead.nodes.find((n) => n.id === id)?.label; return typeof l === 'string' && l !== '' ? l : id; };
+    const goalLabel = labelOf(reading.outcome_id);
+    if (ctx.typed_approval_of !== parent.proposal_id) {
+      return notApplied('approve_on_the_card', 'Nothing was recorded: a reading of the goal is recorded only when the user presses the button '
+        + 'that shows it. Point them to that button; never record it from their words.');
+    }
+    if (readingOfIdentityApproval(ctx.typed_approval_words) !== reading.words) {
+      return notApplied('reading_not_confirmed', identityRefusalWords('reading_not_confirmed', goalLabel));
+    }
+    if (approvedRead.graph_hash !== parent.base_graph_identity_hash) {
+      return notApplied('model_changed_since_approval', 'The model changed after this was offered, so nothing was recorded. Read it again; offer the reading afresh only if it still applies.');
+    }
+    if (opts.commitOptionLevels === undefined) {
+      return notApplied('identity_writer_unavailable', 'This reading could not be recorded here, so nothing was recorded.');
+    }
+    const res = await opts.commitOptionLevels({
+      scenario_id: ctx.scenario_id,
+      base_graph_hash: parent.base_graph_identity_hash,
+      turn_id: authorisationTurnId(`${parent.proposal_id}#identity`),
+      links: [],
+      levels: [],
+      // Canonical 5888513620: the token of the words the pressed card SHOWED (checked above), recomputed from the stored proposal.
+      identity_confirm: { outcome_id: reading.outcome_id, factor_ids: [...reading.factor_ids], words: reading.words,
+        reading_token: identityConfirmReadingToken({ outcome_id: reading.outcome_id, factor_ids: reading.factor_ids, words: reading.words }) },
+    });
+    if (res.status === 'unconfirmed') {
+      return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed', receipts: [],
+        detail: 'This reading was sent, but Olumi could not read the model back to confirm it. Say exactly that; never say it was recorded or not recorded.' };
+    }
+    if (res.status === 'stale') {
+      return notApplied('model_changed_since_approval', 'The model changed after this was approved, so nothing was recorded. Read it again; offer the reading afresh only if it still applies.');
+    }
+    if (res.status === 'refused') {
+      const code = String(res.reason ?? '').replace(/^identity_/, '');
+      return notApplied(`identity_${code}`, identityRefusalWords(code, goalLabel));
+    }
+    const receipts: ReceiptSummary[] = res.receipt !== null ? [{ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' }] : [];
+    // The read-back proves THIS reading: the goal carries the user's product of exactly these two figures.
+    const check = await readGraph(ctx.scenario_id);
+    const held = (check?.raw as { nodes?: Array<{ id?: unknown; nonlinear_identity?: unknown }> } | undefined)?.nodes
+      ?.find((n) => n.id === reading.outcome_id)?.nonlinear_identity as { operation?: unknown; factor_ids?: unknown; stated_in_brief?: unknown } | undefined;
+    const holds = held?.operation === 'product' && held.stated_in_brief === true && Array.isArray(held.factor_ids)
+      && held.factor_ids.length === 2 && reading.factor_ids.every((id) => (held.factor_ids as unknown[]).includes(id));
+    if (!holds) {
+      return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
+        detail: 'This reading was sent, but reading the model back did not show it as recorded. Say exactly that; never say it was recorded or not recorded.' };
+    }
+    proposals.markApplied(parent.proposal_id, receipts);
+    const [rate, count] = [labelOf(reading.factor_ids[0]), labelOf(reading.factor_ids[1])];
+    return {
+      ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
+      revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
+      follow_up: `Recorded, as you confirmed: "${goalLabel}" is calculated as "${rate}" \u00d7 "${count}". Any earlier result is now out of date; `
+        + 'run the analysis again to see it calculated that way.',
+    };
+  };
+
   const applyLinkStrengthSet = async (
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0],
     parent: StructuredProposal,
@@ -2598,6 +2703,41 @@ export function createAgentCapabilities(
         link: { from: from.label, to: to.label, effect, your_words: said },
         note: 'Nothing has changed yet. Tell the user it will be recorded as THEIR figure for this link, in their words, never the id, '
           + 'and call authorise_change with this proposal_id once they agree.',
+      };
+    },
+
+    /**
+     * ⭐ THE CONFIRM CARD (DL 5888399097; `../identity-card.ts`): R3's reading of the goal as a product of two of the user's
+     * figures, read from the STORED model (`proposeProductIdentity`), held as ONE proposal whose button shows exactly its
+     * words. Dry-run through the door first: a card the door would refuse is never offered. Nothing is written here.
+     */
+    async proposeIdentity(ctx): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) {
+        return { ok: false, mutated: false, refusal: 'unreadable_model', detail: 'The model could not be read, so no reading was offered. Nothing was changed.' };
+      }
+      const card = proposeProductIdentity(g.raw);
+      if (card === null) {
+        return { ok: false, mutated: false, refusal: 'no_reading_to_confirm',
+          detail: 'The model holds no reading of the goal for the user to confirm. Nothing was offered; say nothing about one.' };
+      }
+      const dry = applyIdentityConfirmEdit({ persistedGraph: g.raw, outcome_id: card.outcome_id, factor_ids: card.factor_ids, words: card.words,
+        expected_graph_hash: g.graph_hash, reading_token: identityConfirmReadingToken(card) });
+      if (dry.kind === 'refused') {
+        const label = g.nodes.find((n) => n.id === card.outcome_id)?.label;
+        return { ok: false, mutated: false, refusal: `identity_${dry.reason}`,
+          detail: identityRefusalWords(dry.reason, typeof label === 'string' && label !== '' ? label : card.outcome_id) };
+      }
+      const proposal = proposals.put(identityProposalFor(ctx, g.graph_hash, card));
+      return {
+        ok: true, mutated: false,
+        proposal_id: proposal.proposal_id,
+        public_label: proposal.public_label,
+        base_revision: g.graph_hash,
+        card: { words: card.words },
+        note: 'Nothing has changed yet. Ask the user `card.words` exactly as written, and tell them to confirm on the button. '
+          + 'If they say no, nothing is recorded: carry on without it. Never run the analysis again yourself.',
       };
     },
 
@@ -3830,6 +3970,7 @@ export function createAgentCapabilities(
       // The user's stated link effect writes ONLY through the level door's `link_effects` (Canonical 5882965890); until that
       // door is wired here, nothing is written and the Agent says so — never a strength-only or register fallback.
       if (ops.some((o) => o.op === 'set_link_effect')) return applyLinkEffect(ctx, decision.proposal, before);
+      if (ops.some((o) => o.op === CONFIRM_IDENTITY_OP)) return applyIdentityConfirm(ctx, decision.proposal, before);
       if (ops.length > 0 && ops.every((o) => o.op === 'set_link_strength')) return applyLinkStrengthSet(ctx, decision.proposal, before);
 
       // A starting point mixes kinds; each single-kind path below handles one.
@@ -5139,7 +5280,9 @@ export function createAgentCapabilities(
             { scenario_id: ctx.scenario_id, analysis_state: outcome.ran ? outcome.analysisState : undefined }, certaintyReadOf(read));
           firstAnalysis = { ...firstAnalysis, claim_permissions: withNonlinearIdentity(firstAnalysis.claim_permissions, after.raw,
             readEvaluatedIdentityNodeIds(read.analysis_identity_evaluated_node_ids)), ...withGoalChance(read.analysis_result),
-          ...(certainty !== undefined ? { goal_certainty: certainty } : {}) };
+          ...(certainty !== undefined ? { goal_certainty: certainty } : {}),
+          // The read route's own model and revision (the same read as the permission): `graph` / `graph_hash`.
+          ...withIdentityCard(identityCardFor(ctx, { raw: read.graph, graph_hash: read.graph_hash })) };
         }
         if (outcome.ran) {
           firstAnalysisThisRequest = {
@@ -6429,6 +6572,11 @@ export function createAgentCapabilities(
         // The Run is the one THIS turn returned: its own state carries the stamp the read must match.
         goalCertainty = goalCertaintyForAgent(result, { scenario_id: ctx.scenario_id, analysis_state: r.json.analysis_state }, postRunRead);
       }
+      // The confirm card reads the stored model: the post-run read when one was made; a Run whose goal chance #416 withheld
+      // (no certainty to check, so no read yet) reads once, because there the card is the way to a figure. No extra read otherwise.
+      if (result !== undefined && postRunRead === undefined && withGoalChance(result).goal_chance !== undefined) {
+        try { postRunRead = await readGraph(ctx.scenario_id); } catch { postRunRead = null; }
+      }
       // ⛔ A Run with no result says the ENGINE's typed outcome, never a readiness issue it did not stop on (`run-outcome.ts`).
       const runOutcome = result === undefined ? runOutcomeOf(r.json) : undefined;
       return {
@@ -6456,6 +6604,8 @@ export function createAgentCapabilities(
         // ⛔ PLoT #416: the goal's chance withheld on every option — the sentence to say and the rule (`../goal-chance-withheld.ts`).
         ...withGoalChance(result),
         ...(goalCertainty !== undefined ? { goal_certainty: goalCertainty } : {}),
+        // ⭐ The confirm card (`../identity-card.ts`), read from the same post-run read; a Run that made none offers none.
+        ...(result !== undefined ? withIdentityCard(identityCardFor(ctx, postRunRead)) : {}),
       };
     },
   };

@@ -91,7 +91,13 @@ export interface ProposalOperation {
      * is `{magnitude, intent, expected, band, author}`. A set is written ONLY whole: every link through the canonical link
      * writer, in ONE commit (`commitOptionLevels` → `link_strengths`). An Olumi band is stamped as Olumi's estimate.
      */
-    | 'set_link_strength';
+    | 'set_link_strength'
+    /**
+     * ⭐ THE USER CONFIRMS A READING OF THEIR GOAL AS A PRODUCT (DL 5888399097; `identity-card.ts`) — `path` is the goal's
+     * id, `value` is R3's `{outcome_id, operation: 'product', factor_ids, words}` verbatim. Written only through the
+     * approved-card door (`commitOptionLevels` → `identity_confirm`, Canonical #2292), one append, alone.
+     */
+    | 'confirm_identity';
   /** Node id, or `from::to` for an edge. */
   readonly path: string;
   readonly value?: unknown;
