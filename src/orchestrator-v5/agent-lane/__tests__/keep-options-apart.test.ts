@@ -2,8 +2,9 @@
  * ⛔ AN OPTION AND A QUANTITY NEVER SHARE A NAME (Canvas #72 5884644099, the morning-path cloud-bill brief). Admission
  * gives one id per name, so a factor named like its option vanished into the option and the model could not be run.
  * Row 1: Canvas's own brief, reproduced on the live route (saved draft), through the real build. Rows 2–7: the pure rule.
- * Rows 8–9 (PR Review CHANGES_REQUIRED on #2281 @ bcd8d856): a link from the shared name that the OPTION could hold
- * (to a factor, a risk, an option or an unnamed label) is never re-sourced to the quantity; the candidate is left as it came.
+ * Rows 8–9 (PR Review CHANGES_REQUIRED on #2281 @ bcd8d856; 8c @ e73b6dbd): a link from the shared name that the OPTION could hold
+ * (to a factor, a risk, an option, an unnamed label, or itself) is never re-sourced to the quantity; the candidate is left
+ * as it came. Row 10 (AI Quality 5885116642): a rename never collides with a label already in the draft.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -114,6 +115,27 @@ describe('the pure rule', () => {
         expect(out.model.links.every((l) => l.from === 'Discount')).toBe(true);
       }
     }
+  });
+  it('8c — FAIL CLOSED: a self-link on the shared name beside a goal link is never re-sourced as a factor self-loop', () => {
+    const c = base({ links: [
+      { from: 'Discount', to: 'Discount', direction: 'positive', provenance: 'explicit' },
+      { from: 'Discount', to: 'Monthly cloud bill', direction: 'negative', provenance: 'inferred' },
+    ] as never, constraints: [], identities: [] });
+    const out = keepOptionsAndQuantitiesApart(c);
+    expect(out.renamed).toEqual([]);
+    expect(out.model).toBe(c);
+    expect(out.model.links[0]).toMatchObject({ from: 'Discount', to: 'Discount' });
+  });
+  it('10 — COLLISION: "<name> level" already in the draft → the renamed quantity is "<name> level 2", never merged into it', () => {
+    const existing = { label: 'Discount level', role: 'observable', baseline_known: false, baseline_value: null, unit: '%', provenance: 'inferred' };
+    const c = base({ factors: [base().factors[0]!, existing] as never, constraints: [], identities: [] });
+    const out = keepOptionsAndQuantitiesApart(c);
+    expect(out.renamed.map((k) => k.to)).toEqual(['Discount level 2']);
+    const labels = out.model.factors.map((f) => f.label.toLowerCase());
+    expect(new Set(labels).size).toBe(labels.length);
+    expect(labels).toEqual(['discount level 2', 'discount level']);
+    expect(out.model.options[0]!.interventions![0]!.factor_label).toBe('Discount level 2');
+    expect(out.model.links[0]).toMatchObject({ from: 'Discount level 2', to: 'Monthly cloud bill' });
   });
   it('9 — a link from the shared name to an OUTCOME is the quantity\'s (an option never holds one): renamed', () => {
     const c = base({ outcomes: [{ label: 'Savings', provenance: 'inferred' }], links: [{ from: 'Discount', to: 'Savings', direction: 'positive', provenance: 'inferred' } as never] });

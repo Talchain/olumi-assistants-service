@@ -25,8 +25,10 @@
  * Rewriting that link to start at "Discount level" would silently change its source. So the rename happens only when
  * EVERY link from the shared name ends at the goal or an outcome: an option never holds such a link (options act
  * only through factors; merged, cloud3's became a dead option -> goal edge and the blocker), so it can only be the
- * quantity's. Any link from the shared name to a factor, a risk, an option or an unnamed label fails closed: the
- * candidate is left exactly as it came.
+ * quantity's. Any link from the shared name to a factor, a risk, an option, an unnamed label, or the shared name
+ * ITSELF (a self-link) fails closed: the candidate is left exactly as it came. The new name never collides: "<name>
+ * level" already in the draft becomes "<name> level 2" (AI Quality 5885116642's collision row), so the renamed
+ * quantity cannot merge into another node one label later.
  */
 import type { CandidateModel } from './admit-model.js';
 
@@ -49,10 +51,13 @@ export function keepOptionsAndQuantitiesApart(candidate: CandidateModel): { read
     canon(candidate.goal.metric),
   ]);
   const onlyAQuantityHolds = new Set([canon(candidate.goal.metric), ...candidate.outcomes.map((o) => canon(o.label))]);
-  const effectsFrom = (name: string) => candidate.links.filter((l) => canon(l.from) === name && canon(l.to) !== name);
+  // A self-link on the shared name ("Discount -> Discount") is the option-to-factor or self-loop claim the loop handling
+  // owns; renaming it would re-source it as a factor self-loop, so it fails the rename closed like any other ambiguous
+  // link (PR Review CHANGES_REQUIRED on #2281 @ e73b6dbd).
   const carriesEffect = (name: string): boolean => {
-    const out = effectsFrom(name);
-    return out.length > 0 && out.every((l) => onlyAQuantityHolds.has(canon(l.to)) && !optionNames.has(canon(l.to)));
+    const out = candidate.links.filter((l) => canon(l.from) === name);
+    return out.length > 0
+      && out.every((l) => canon(l.to) !== name && onlyAQuantityHolds.has(canon(l.to)) && !optionNames.has(canon(l.to)));
   };
   const renamed: KeptApart[] = [];
   const to = new Map<string, string>();
