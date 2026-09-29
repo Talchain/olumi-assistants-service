@@ -13,14 +13,15 @@
  *
  * Null (no card) unless ALL hold:
  *  · ONE goal, carrying no identity of its own;
- *  · its level is the user's (`observed_state.source === 'brief_extraction'`), finite and non-zero;
+ *  · its level is the user's (`classifyValueSource(observed_state.source) === 'user_stated'`), finite and non-zero;
  *  · EXACTLY TWO non-option parents, both factors whose levels are the user's, neither a product/sum carrier itself;
  *  · the parts reconcile with the goal within ISL's 5% (`RECONCILIATION_TOLERANCE`, one source with the mint);
  *  · the units compose as a money rate × a count into the goal's money per period (`unitsCompose`, one source with the
- *    mint): with the per-item denominator ('proof', a graph stored before the mint) or without it ('confirm').
+ *    mint) with ONLY the per-item denominator missing ('confirm'). With it ('proof') the mint applies, not a card.
  */
 import { RECONCILIATION_TOLERANCE, unitsCompose } from './reconciling-product.js';
 import { sayFigure } from './say-figure.js';
+import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 
 export interface IdentityProposal {
   readonly outcome_id: string;
@@ -38,10 +39,13 @@ type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
 const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined);
 
-/** The node's level when the USER stated it: raw value and unit. */
+/**
+ * The node's level when the USER stated it (AIQ 5888571809 (1)): in the brief or since (an edit, an override), by the
+ * estate's ONE authorship reading (`classifyValueSource` → `user_stated`). Ratifying Olumi's figure is not stating one.
+ */
 function usersLevel(node: Rec): { value: number; unit: string } | null {
   const os = node.observed_state;
-  if (!isRec(os) || os.source !== 'brief_extraction') return null;
+  if (!isRec(os) || classifyValueSource(os.source) !== 'user_stated') return null;
   const value = os.raw_value;
   const unit = text(os.unit);
   if (typeof value !== 'number' || !Number.isFinite(value) || value === 0 || unit === undefined) return null;
@@ -78,12 +82,15 @@ export function proposeProductIdentity(graph: unknown): IdentityProposal | null 
 
   const goalUnit = text(goal.goal_threshold_unit) ?? o.unit;
   const c = unitsCompose(goalUnit, goalLabel, { unit: p.unit, label: p.id }, { unit: q.unit, label: q.id });
-  if (c.kind === 'no') return null;
+  // AIQ 5888571809 (2): ONLY the missing per-item denominator makes a card. With it ('proof') the mint applies instead.
+  if (c.kind !== 'confirm') return null;
   const rate = c.rate === p.id ? p : q;
   const count = c.rate === p.id ? q : p;
   const money = (v: number): string => sayFigure(v, c.code);
   const words = `Is “${goalLabel}” your “${rate.label}” × “${count.label}”? `
-    + `${money(rate.value)} × ${sayFigure(count.value, '')} = ${money(rate.value * count.value)}, close to your ${money(o.value)}.`;
+    + `${money(rate.value)} × ${sayFigure(count.value, '')} = ${money(rate.value * count.value)}, close to your ${money(o.value)}. `
+    // AIQ 5888571809: the card says what "Yes" does.
+    + `If yes, Olumi will calculate “${goalLabel}” that way and run the analysis again.`;
   // Canonical #2292's door takes at most 400 characters of card words (5888513620): a card it would refuse is not issued.
   if (words.length > CARD_WORDS_MAX) return null;
   return { outcome_id: goalId, operation: 'product', factor_ids: [rate.id, count.id], words };

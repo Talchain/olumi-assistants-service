@@ -37,7 +37,7 @@ describe('the card on the served graphs', () => {
       outcome_id: 'mrr',
       operation: 'product',
       factor_ids: ['pro_plan_price', 'paying_subscribers'],
-      words: `Is “${node(served(0), 'mrr').label}” your “${node(served(0), 'pro_plan_price').label}” × “${node(served(0), 'paying_subscribers').label}”? £49 × 1,500 = £73,500, close to your £75,000.`,
+      words: `Is “${node(served(0), 'mrr').label}” your “${node(served(0), 'pro_plan_price').label}” × “${node(served(0), 'paying_subscribers').label}”? £49 × 1,500 = £73,500, close to your £75,000. If yes, Olumi will calculate “${node(served(0), 'mrr').label}” that way and run the analysis again.`,
     });
   });
   it('RED: runs 3 and 4 get the card too, the rate first whatever the edge order', () => {
@@ -56,6 +56,11 @@ describe('the card on the served graphs', () => {
     const before = JSON.stringify(g);
     proposeProductIdentity(g);
     expect(JSON.stringify(g)).toBe(before);
+  });
+  it('a level the user EDITED since the brief is still theirs: the card (AIQ 5888571809 (1))', () => {
+    const g = served(0);
+    node(g, 'paying_subscribers').observed_state.source = 'user_edited';
+    expect(proposeProductIdentity(g)?.factor_ids).toStrictEqual(['pro_plan_price', 'paying_subscribers']);
   });
   it('an option edge into the goal is not a parent: still the card', () => {
     const g = served(0);
@@ -77,6 +82,8 @@ describe('NO CARD — one change on run 0\'s served graph each', () => {
     ['the price is per SEAT (a mismatched denominator is invalid, not a question)', (g: Json) => { node(g, 'pro_plan_price').observed_state.unit = '£ per seat per month'; }],
     ['the goal is yearly, the price monthly', (g: Json) => { node(g, 'mrr').goal_threshold_unit = 'GBP/year'; }],
     ['the count is a rate ("subscribers per month")', (g: Json) => { node(g, 'paying_subscribers').observed_state.unit = 'subscribers per month'; }],
+    ['the price names its item ("GBP per subscriber per month"): the mint applies, not a card (AIQ 5888571809)', (g: Json) => { node(g, 'pro_plan_price').observed_state.unit = 'GBP per subscriber per month'; }],
+    ['the subscribers level was only CONFIRMED by the user (ratification, not a stated figure)', (g: Json) => { node(g, 'paying_subscribers').observed_state.source = 'user_confirmed'; }],
     ['two goals', (g: Json) => { g.nodes.push({ id: 'g2', kind: 'goal', label: 'Other' }); }],
     ['card words past the #2292 door\'s 400 characters (a 400-character label)', (g: Json) => { node(g, 'pro_plan_price').label = 'P'.repeat(400); }],
   ] as const)('%s', (_why, f) => {
