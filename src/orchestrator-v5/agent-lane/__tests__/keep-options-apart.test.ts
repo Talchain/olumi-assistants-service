@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { keepOptionsAndQuantitiesApart, notToldApartLine } from '../keep-options-apart.js';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
+import { narrateWriteOutcome } from '../write-outcome.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import type { CandidateModel } from '../admit-model.js';
 
@@ -56,6 +57,10 @@ describe('Canvas\'s cloud-bill brief (saved live draft): the option and the fact
     expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'option_name_ambiguous' });
     expect(r.detail).toBe('"Enterprise discount" names an option and also a factor and a risk in this model, so they could not be told apart and nothing was saved. Say what each one is, in different words, and the model can be built.');
     expect(r.ambiguous_names).toEqual([{ option: 'Enterprise discount', owners: ['factor', 'risk'], because: 'owners' }]);
+    // What the USER reads: the server-owned status line for the build tool (never the Agent-only tool result, never a code).
+    const status = String(narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [r as never]).status);
+    expect(status).toContain('your brief uses one name for an option and for something else in the model, so they could not be told apart and nothing was saved');
+    expect(status).not.toMatch(/option_name_ambiguous/);
   });
   it('8 (real build) — a link from the shared name to a RISK may be the option\'s: nothing is renamed, and the build FAILS CLOSED (nothing saved, the reason named)', async () => {
     const c = structuredClone(FX.candidate) as Rec;
