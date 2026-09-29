@@ -93,6 +93,7 @@ import scenarioGraphRoute from "../assist.v1.scenario-graph.js";
 import { computeAnalysisAffectingGraphHash } from "../../orchestrator-v5/context/graph-hash.js";
 import { buildCanonicalAnalysisReadyFromGraph } from "../../orchestrator/tools/analysis-ready-helper.js";
 import { issuesAsWireBlockers } from "../../orchestrator-v5/compose/analysis-state-v1.js";
+import { RunAnalysisResultSchema } from "@talchain/schemas/orchestrator";
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -704,5 +705,59 @@ describe("the reload carries the last Run's identity use (`analysis_identity_run
     const app = await buildApp();
     const body = (await read(app)).json() as Record<string, unknown>;
     expect(body.analysis_identity_run_use).toBeNull();
+  });
+});
+
+// ─── 0.63.0: the cold read carries the Run's OWN goal certainty (DL 5883197828) ───────────────────────────────────
+
+describe("0.63.0 — `analysis_goal_certainty` is the selected Run's stored array, under the same gates as its block", () => {
+  /** One earned and one unearned decision, contract-valid (`GoalCertaintyDecisionSchema`), stored on the Run itself. */
+  const STORED = [
+    { option_id: "opt_hire", probability_of_goal: 1, earned: true },
+    {
+      option_id: "opt_hold", probability_of_goal: 0, earned: false,
+      unsized_path: { from: "fac_market", enters_goal_through: "fac_market" },
+      no_break_even: "not_an_identity",
+      say: "Olumi can’t yet say how likely ‘Hold headcount’ is to miss the goal.",
+    },
+  ];
+  const withCertainty = (graphHash: string, certainty: unknown) => {
+    const fact = runAnalysisFact({ graphHash, mayName: true });
+    (fact.result as Record<string, unknown>).goal_certainty = certainty;
+    return fact;
+  };
+
+  it("PRECONDITION — the stored fixture parses under the published Run result contract", () => {
+    const fact = withCertainty(GRAPH_HASH, STORED);
+    expect(RunAnalysisResultSchema.safeParse(fact.result).success).toBe(true);
+  });
+
+  it("FRESH — carries the stored array verbatim, by option id (no recomputation, nothing dropped)", async () => {
+    readFactsFor.mockResolvedValue([withCertainty(GRAPH_HASH, STORED)]);
+    const body = (await read(await buildApp())).json() as Record<string, unknown>;
+    expect((body.analysis_state as { run_state: { kind: string } }).run_state.kind).toBe("complete_current");
+    expect(body.analysis_goal_certainty).toEqual(STORED);
+  });
+
+  it("RECORDED EMPTY — `[]` (no option claims a certainty) is carried as `[]`, never dropped to absent", async () => {
+    readFactsFor.mockResolvedValue([withCertainty(GRAPH_HASH, [])]);
+    const body = (await read(await buildApp())).json() as Record<string, unknown>;
+    expect(body).toHaveProperty("analysis_goal_certainty");
+    expect(body.analysis_goal_certainty).toEqual([]);
+  });
+
+  it("STALE — no block, so no certainty: a stale Run's certainty is never current", async () => {
+    readFactsFor.mockResolvedValue([withCertainty(PRE_EDIT_GRAPH_HASH, STORED)]);
+    const body = (await read(await buildApp())).json() as Record<string, unknown>;
+    expect((body.analysis_state as { run_state: { kind: string } }).run_state.kind).toBe("complete_stale");
+    expect(body.analysis_result).toBeNull();
+    expect(body).not.toHaveProperty("analysis_goal_certainty");
+  });
+
+  it("NOT RECORDED — a Run from before 0.63.0 leaves the key ABSENT (never defaulted to `[]`)", async () => {
+    readFactsFor.mockResolvedValue([runAnalysisFact({ graphHash: GRAPH_HASH, mayName: true })]);
+    const body = (await read(await buildApp())).json() as Record<string, unknown>;
+    expect(body.analysis_result).not.toBeNull();
+    expect(body).not.toHaveProperty("analysis_goal_certainty");
   });
 });
