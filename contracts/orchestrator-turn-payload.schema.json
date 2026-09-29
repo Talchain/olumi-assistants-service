@@ -256,6 +256,51 @@
                               "participant_id"
                             ],
                             "additionalProperties": false
+                          },
+                          "reviewed_by_user": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "intent": {
+                                    "type": "string",
+                                    "const": "confirm"
+                                  },
+                                  "at": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  }
+                                },
+                                "required": [
+                                  "intent",
+                                  "at"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "intent": {
+                                    "type": "string",
+                                    "const": "confirm_pairing"
+                                  },
+                                  "quote": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 400
+                                  },
+                                  "at": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  }
+                                },
+                                "required": [
+                                  "intent",
+                                  "quote"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ]
                           }
                         },
                         "required": [
@@ -292,7 +337,16 @@
                         "type": "string",
                         "enum": [
                           "level",
-                          "delta"
+                          "delta",
+                          "change_abs",
+                          "change_rel"
+                        ]
+                      },
+                      "quantity_frame": {
+                        "type": "string",
+                        "enum": [
+                          "level",
+                          "change"
                         ]
                       }
                     },
@@ -533,6 +587,14 @@
                     "applied_from": {
                       "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/graph_state/properties/nodes/items/properties/observed_state/properties/elicited_from",
                       "description": "Present iff this edit applies a named participant's panel answer (\"Use this value\" on a reveal row). ABSENCE IS DISTINCT: it means an ordinary inspector/panel-free edit, never \"attribution lost\". When present, CEE MUST verify the claim against its own collab store before stamping any provenance, and MUST refuse the edit loudly on any mismatch — the wire never carries a provenance claim the server could not verify for itself."
+                    },
+                    "intent": {
+                      "type": "string",
+                      "enum": [
+                        "set",
+                        "confirm_current"
+                      ],
+                      "description": "`set`: the user states this figure, even the same number — CEE stamps it as the user's (`user_override`), an analysis input. `confirm_current`: the user reviews Olumi's CURRENT figure as-is — CEE keeps `observed_state.source` and adds `observed_state.reviewed_by_user`; review is never authorship and changes no analysis meaning; CEE MUST refuse one whose value differs from the PERSISTED value rather than turning it into a set. ABSENCE IS CONDITIONAL: absent with the same value as the persisted one is read as `confirm_current`; absent with a different value is read as `set`. Compare against the persisted value, never a client copy."
                     }
                   },
                   "required": [

@@ -19,6 +19,7 @@ import { createHash } from 'node:crypto';
 
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
+import { CANONICAL_GRAPH_HASH_NESTED_PROJECTION as VOCABULARY } from '@talchain/schemas/boundary';
 import { resolveGoalDirection } from '../goal-target/goal-direction.js';
 
 /** Length of the returned hex prefix. 16 gives collision odds ~1 in 2^64. */
@@ -196,15 +197,12 @@ function pickDefined<T extends Record<string, unknown>>(
 
 function projectObservedState(raw: unknown): Record<string, unknown> | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
-  // ⭐ `source` IS ANALYTICAL (Shared Data row 1, #72 5881225605): the engines read WHOSE a value is — ISL derives the
-  // base/level owner from this literal and CEE's per-limit verdict reads `level_olumi_estimate` from it. Live on served
-  // f79119b, the same 3.2% moving from Olumi's estimate to the user's left this hash unchanged, so a Run whose verdict was
-  // `estimate_only` stayed CURRENT while a rerun gave `scored`. The literal is hashed as stored (fail closed: a change
-  // between two user-class literals over-stales once; it never under-stales). `unit` and `raw_value` are analytical too
-  // (AIQ 5881494849): `level-limit-baseline.ts` reads them — with node `scale_frame` — into the PLoT wire (the relabelled
-  // `%` limit's unit; `percentLimitFrameProvable`, framed vs withheld). Vocabulary: schemas 0.62.0, projection version 3.
-  // `std` is a stated spread: PLoT honours it first and unfloored, and ISL reads it.
-  return pickDefined(raw as Record<string, unknown>, ['value', 'baseline', 'cap', 'source', 'unit', 'raw_value', 'std']);
+  // ⭐ THE PUBLISHED VOCABULARY, IMPORTED — never re-spelled here (schemas 0.62.0, projection version 3; Shared Data
+  // row 1, #72 5881225605). `source` (whose a value is: ISL's base owner, CEE's per-limit verdict), `unit` / `raw_value`
+  // (the PLoT wire: `level-limit-baseline.ts`) and `std` (a stated spread) all decide the run. Live on served f79119b the
+  // same 3.2% moving from Olumi's estimate to the user's left the old hand-kept list's hash unchanged, so a Run whose
+  // verdict was `estimate_only` stayed CURRENT while a rerun gave `scored`.
+  return pickDefined(raw as Record<string, unknown>, VOCABULARY.node.observed_state_fields);
 }
 
 function projectPrior(raw: unknown): Record<string, unknown> | undefined {
@@ -303,31 +301,11 @@ function projectNode(raw: unknown): NodeProjection {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const out: NodeProjection = { id: typeof r.id === 'string' ? r.id : '' };
 
-  for (const key of [
-    'kind',
-    'category',
-    'factor_type',
-    'is_baseline',
-    'goal_threshold',
-    'goal_threshold_raw',
-    'goal_threshold_cap',
-    'intercept',
-    'encoding_map',
-    // C46 (#1972): the declaration the leader withhold is judged on. In the identity so `fresh` means the run's own
-    // carrier; absent on every graph before #1972, so no stored graph changes hash.
-    'nonlinear_identity',
-    // Shared Data row 1 (schemas 0.62.0, AIQ 5881494849): the frame `percentLimitFrameProvable` reads with `unit` /
-    // `raw_value` to decide whether a percent limit goes out framed or withheld.
-    'scale_frame',
-    // schemas 0.61.0 (projection version 2, R1 S2): the goal's threshold frame, its held comparator, and what the
-    // node's value measures — each changes what the analysis answers.
-    'goal_threshold_frame',
-    'goal_direction',
-    'quantity_frame',
-    // schemas 0.62.0: `retained_excluded` removes the node and its edges from the run (participation guard).
-    'analysis_participation',
-  ] as const) {
-    if (r[key] !== undefined) out[key] = r[key];
+  // The published node vocabulary (schemas 0.62.0): the 0.61.0 frame / direction / quantity fields, `scale_frame`
+  // (read with `unit` / `raw_value` by `percentLimitFrameProvable`), the C46 `nonlinear_identity` carrier and
+  // `analysis_participation` (`retained_excluded` removes the node from the run). `id` is set above.
+  for (const key of VOCABULARY.node.fields) {
+    if (key !== 'id' && r[key] !== undefined) out[key] = r[key];
   }
 
   const observed = projectObservedState(r.observed_state);
@@ -377,9 +355,9 @@ function projectEdge(raw: unknown): EdgeProjection {
   // the placeholder-parts predicate (DL 5881593118); `source: 'user_specified'` wins over `magnitude` at read time.
   if (r.provenance && typeof r.provenance === 'object') {
     const p = r.provenance as Record<string, unknown>;
-    const provenance: Record<string, unknown> = pickDefined(p, ['source', 'magnitude']);
+    const provenance: Record<string, unknown> = pickDefined(p, VOCABULARY.edge.provenance_fields);
     if (p.natural_effect && typeof p.natural_effect === 'object') {
-      const ne = pickDefined((p.natural_effect as Record<string, unknown>), ['amount_unit']);
+      const ne = pickDefined((p.natural_effect as Record<string, unknown>), VOCABULARY.edge.provenance_natural_effect_fields);
       if (Object.keys(ne).length > 0) provenance.natural_effect = ne;
     }
     if (Object.keys(provenance).length > 0) out.provenance = provenance;
