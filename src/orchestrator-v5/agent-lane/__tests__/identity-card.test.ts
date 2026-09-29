@@ -18,6 +18,7 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { proposeProductIdentity } from '../identity-proposal.js';
 import { approvalChipsFor, approvalChipIdFor } from '../approval-chips.js';
+import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
 import { identityCardToIssue, readingOfIdentityApproval } from '../identity-card.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 
@@ -126,6 +127,34 @@ describe('the route issues the card when the Agent did not (served 3727537: 0/3 
     const run = await world(confirmed(1)).caps.runAnalysis(ctxSaying('Run it'), { reason: 'Run it.' }) as Json;
     expect(identityCardToIssue([{ name: 'run_analysis' }], [run])).toBe(false);
     expect(identityCardToIssue([{ name: 'run_analysis' }], [{ identity_card: { available: false } }, null, undefined])).toBe(false);
+  });
+});
+
+describe('an unwritable base offers no card (DL 5897757819; served 8826224 run o: a stated link at β 2.31)', () => {
+  /** Run 0's model with the user's "£49 per subscriber" stored as a stated link at β 2.31, as served run o drafted it. */
+  const unwritable = (): Json => {
+    const g = served(0);
+    const e = (g.edges as Json[]).find((x) => x.to === 'mrr' && x.from !== 'pro_plan_price')!;
+    e.strength = { ...(e.strength ?? {}), mean: 2.3058823529411763 };
+    return g;
+  };
+
+  it('the writer\'s own base check: the β 2.31 model fails it, run 0 passes it (the control)', () => {
+    expect(identityConfirmBaseIsWritable(unwritable())).toBe(false);
+    expect(identityConfirmBaseIsWritable(served(0))).toBe(true);
+  });
+
+  it('no card, said plainly: propose_identity refuses; the Run raises no card; the route issues none; nothing written', async () => {
+    const w = world(unwritable());
+    expect(proposeProductIdentity(unwritable())).not.toBeNull(); // the reading exists; only its Yes cannot be written
+    const r = await w.caps.proposeIdentity!(ctxSaying('x')) as Json;
+    expect(r).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'identity_not_writable' }));
+    const run = await w.caps.runAnalysis(ctxSaying('Run it'), { reason: 'Run it.' }) as Json;
+    expect(run).not.toHaveProperty('identity_card');
+    expect(identityCardToIssue([{ name: 'run_analysis' }], [run])).toBe(false);
+    expect(w.s.writes).toBe(0);
+    const control = await world(served(0)).caps.proposeIdentity!(ctxSaying('x')) as Json;
+    expect(control.ok).toBe(true);
   });
 });
 

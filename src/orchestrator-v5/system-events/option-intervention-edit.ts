@@ -2,7 +2,7 @@ import { CANONICAL_ID_REGEX } from '../../cee/utils/id-normalizer.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import { z } from 'zod';
-import { GraphV3, InterventionV3, TargetMatch, type GraphV3T } from '../../schemas/cee-v3.js';
+import { InterventionV3, TargetMatch } from '../../schemas/cee-v3.js';
 
 /**
  * ⭐⭐ WHAT THIS WRITER NEEDS TO READ OFF AN EXISTING ENTRY — deliberately NOT
@@ -49,13 +49,14 @@ const ExistingInterventionRead = z.object({
   target_match: TargetMatch.optional(),
 }).passthrough();
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
-import { assertIngressGraphNumericBounds, floorGraphSigmaForCompute } from '../../validators/numeric-bounds.js';
+import { assertIngressGraphNumericBounds } from '../../validators/numeric-bounds.js';
 import { parseEditGraphResponse, buildAppliedChanges } from '../../orchestrator/tools/edit-graph.js';
 import { validatePatchOperations } from '../../orchestrator/patch-validation.js';
 import { applyPatchOperations } from '../../orchestrator/patch-applier.js';
 import { encodeOptionInterventionsForEdit } from '../../orchestrator/tools/encode-option-interventions.js';
 import type { PatchOperation } from '../../orchestrator/types.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
+import { identityConfirmBaseIsWritable, isEditableGraph, type EditableGraph } from './editable-graph.js';
 import { commitDirectAnswer } from '../commit.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
@@ -117,18 +118,9 @@ export interface OptionInterventionTransactionInput extends OptionInterventionEd
   readonly hasExistingAnalysis: boolean;
 }
 
-type EditableGraph = GraphV3T & Record<string, unknown>;
 // Derive the injected port from the canonical commit entrypoint. This module
 // neither constructs a session store nor introduces another persistence API.
 type OptionInterventionStore = NonNullable<Parameters<typeof commitDirectAnswer>[2]>;
-
-// Same check-only sigma projection used by commit and model-version receipts.
-// This narrows the raw object; it NEVER returns the floored/parsed copy.
-function isEditableGraph(value: unknown): value is EditableGraph {
-  const ingress = GraphStateIngressSchema.safeParse(value);
-  return ingress.success && assertIngressGraphNumericBounds(ingress.data).ok
-    && GraphV3.passthrough().safeParse(floorGraphSigmaForCompute(value).graph).success;
-}
 
 /** One (option, factor) level this commit writes, with the cell's stamp when it is not the user's own. */
 export type OptionLevelTarget = Pick<OptionInterventionEditInput, 'optionId' | 'factorId' | 'modelValue' | 'source' | 'figure'>;
@@ -830,8 +822,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       || (expectedLinks?.length ?? 0) > 0) {
       return { kind: 'refused', reason: 'identity_confirm_not_alone' };
     }
-    if (!isEditableGraph(before)
-      || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
+    if (!identityConfirmBaseIsWritable(before)) {
       return { kind: 'refused', reason: 'canonical_graph_unavailable' };
     }
     if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
