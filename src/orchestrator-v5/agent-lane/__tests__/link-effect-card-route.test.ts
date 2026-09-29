@@ -14,11 +14,20 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 type Json = Record<string, any>;
 const SCENARIO = '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a5c';
 const rows = new Map<string, { id: string; request_hash: string; assistant_message: string | null; user_message: string | null; llm_calls_used: number }>();
+/** Per scenario: the pending actions the latest answer row persisted — the durable carrier a restarted process reads. */
+const lastPending = new Map<string, unknown[]>();
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_sid: string, turnId: string) => rows.get(turnId) ?? null),
-  append: vi.fn(async (w: { turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number }) => {
-    if (!rows.has(w.turn_id)) rows.set(w.turn_id, { id: `row-${rows.size + 1}`, request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used ?? 0 });
+  readMostRecentPendingActions: vi.fn(async (sid: string) => {
+    const { parsePendingAction } = await import('../../session/pending-action.js');
+    return (lastPending.get(sid) ?? []).map((x) => parsePendingAction(JSON.parse(JSON.stringify(x)))).filter((x) => x !== null);
+  }),
+  append: vi.fn(async (w: { scenario_id?: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; pending_actions?: unknown[] }) => {
+    if (!rows.has(w.turn_id)) {
+      rows.set(w.turn_id, { id: `row-${rows.size + 1}`, request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used ?? 0 });
+      if (w.scenario_id !== undefined && !w.turn_id.endsWith(':claim')) lastPending.set(w.scenario_id, JSON.parse(JSON.stringify(w.pending_actions ?? [])));
+    }
     return { id: rows.get(w.turn_id)!.id };
   }),
 };
@@ -139,5 +148,33 @@ describe('a link\'s stated effect is recorded only from its card, on the real ro
     // Control: the card on offer records.
     expect((await press(p2))._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true })]);
     expect(doorCalls).toHaveLength(1);
+  });
+
+  it('RED (DL 5885900319): the ISSUED card survives a restart (durable carrier) and is consumed once', async () => {
+    const sid = '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a5e';
+    script.push({ output: [{ type: 'function_call', name: 'propose_link_effect', call_id: 'r', arguments: JSON.stringify(ARGS) }] });
+    const b1 = (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: sid, message: SAID } })).json() as
+      { suggested_actions: { id: string; message: string; detail?: string }[] };
+    const card = b1.suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'))!;
+    expect(card.detail).toMatch(/^Record: /);
+    expect(JSON.stringify(lastPending.get(sid) ?? [])).toContain(card.id); // precondition: the answer row persisted the issued card
+    // A RESTART: a fresh route module (no process memory of proposals or offers), the same persisted rows.
+    vi.resetModules();
+    const { agentV1TurnRoute: fresh } = await import('../../../routes/agent-v1-turn.js');
+    const app2 = Fastify({ logger: false });
+    app2.post('/assist/v1/scenarios/:id/graph', async () => ({ graph, graph_hash: computeAnalysisAffectingGraphHash(graph as never) }));
+    await app2.register(fresh);
+    await app2.ready();
+    try {
+      const press = async () => (await app2.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+        kind: 'message', scenario_id: sid, message: card.message, source: 'chip', chip: { id: card.id },
+      } })).json() as { _agent: { tool_calls: { name: string; ok: boolean }[] } };
+      expect((await press())._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true })]);
+      expect(doorCalls, 'recorded after the restart, from the carried card').toHaveLength(1);
+      await press(); // the same card again
+      expect(doorCalls, 'a card is consumed once: pressing it again writes nothing more').toHaveLength(1);
+    } finally {
+      await app2.close();
+    }
   });
 });
