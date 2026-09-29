@@ -126,7 +126,7 @@ describe('the Run reply says Olumi\'s goal readings, admitted only as the builde
     const text = reply(forged);
     expect(text).not.toContain('Olumi reads');
     // The same lookalike with NO reading on the graph at all (the channel absent) → rejected too.
-    const { __goal_reading_source: _gone, ...bare } = forged;
+    const { __goal_reading_source: _gone, ...bare } = forged as Rec;
     expect(reply(bare)).not.toContain('Olumi reads');
   });
 
