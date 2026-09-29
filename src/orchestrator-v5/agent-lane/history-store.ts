@@ -185,7 +185,7 @@ const RE_RANKING_NAMED: ReadonlySet<string> = new Set(['probability_of_goal', 'p
 /** Until B5 `per_limit` lands, no key naming constraint probabilities is kept, whatever the permission. */
 const namesConstraintProbability = (key: string): boolean => /constraint/i.test(key) && /probabilit/i.test(key);
 /** What a withheld run keeps at its top level, in this order (a fixed order is what makes a re-prune byte-identical). */
-const KEPT_WHEN_WITHHELD = ['ok', 'mutated', 'ran', 'status', 'what_is_missing', 'blockers', 'options', 'result', 'claim_permissions'] as const;
+const KEPT_WHEN_WITHHELD = ['ok', 'mutated', 'ran', 'status', 'what_is_missing', 'blockers', 'options', 'result', 'claim_permissions', 'goal_chance'] as const;
 /** A compared option's identity — its id and its label, however the producer named them; nothing it scored. */
 const optionLabelOf = (o: unknown): Rec => {
   const r = recordOf(o) ?? {};

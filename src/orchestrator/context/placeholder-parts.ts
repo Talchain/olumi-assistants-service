@@ -57,6 +57,16 @@ function linkIsSized(edge: Rec, unitById: ReadonlyMap<unknown, string | undefine
   return typeof mean === 'number' && mean === effect.strength_mean;
 }
 
+/**
+ * THE ONE "is this link sized" test, over a graph's nodes: a link Olumi or the user sized, in the unit of the node it
+ * points at, written for the mean it now holds. Shared with the goal-certainty rule (`goal-certainty.ts`), so the two
+ * rulings (AI Quality 5882087383, 5882366427) read one definition of "unsized".
+ */
+export function sizedLinkTest(nodes: readonly Rec[]): (edge: Rec) => boolean {
+  const unitById = sizerUnitsOf(nodes);
+  return (edge) => linkIsSized(edge, unitById);
+}
+
 /** The option sets a level on the node (a bare finite number, or `{ value }`), as PLoT reads an intervention. */
 function setsLevel(v: unknown): boolean {
   return (typeof v === 'number' && Number.isFinite(v)) || (isRec(v) && typeof v.value === 'number' && Number.isFinite(v.value));

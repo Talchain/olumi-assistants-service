@@ -14,6 +14,7 @@
  * re-reads the model afterwards and reports what the model actually shows.
  */
 
+import { goalChanceWithheldForAgent, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
@@ -197,6 +198,12 @@ export function limitScopeIn(g: { readonly nodes: readonly { readonly label?: un
   const risks = new Set(g.nodes.filter((n) => n.kind === 'risk').map((n) => (typeof n.label === 'string' ? n.label : '')));
   const { target, others } = scopeIn(g, limitLabel);
   return { target: [...target, 'limit'], others: others.filter((l) => !risks.has(l)) };
+}
+
+/** `goal_chance` beside a run's result when the run withheld the goal's chance (PLoT #416); nothing otherwise. */
+function withGoalChance(result: unknown): { goal_chance?: GoalChanceWithheld } {
+  const withheld = goalChanceWithheldForAgent(result);
+  return withheld !== undefined ? { goal_chance: withheld } : {};
 }
 
 /**
@@ -5106,7 +5113,7 @@ export function createAgentCapabilities(
         // product the run's engine evaluated, read from the SAME post-run read as the permission.
         if (firstAnalysis.ran === true || firstAnalysis.reason === 'already_ran_for_construction') {
           firstAnalysis = { ...firstAnalysis, claim_permissions: withNonlinearIdentity(firstAnalysis.claim_permissions, after.raw,
-            readEvaluatedIdentityNodeIds(read.analysis_identity_evaluated_node_ids)) };
+            readEvaluatedIdentityNodeIds(read.analysis_identity_evaluated_node_ids)), ...withGoalChance(read.analysis_result) };
         }
         if (outcome.ran) {
           firstAnalysisThisRequest = {
@@ -5115,6 +5122,7 @@ export function createAgentCapabilities(
               ok: true, mutated: false, ran: true, already_run_this_turn: true,
               ...(firstAnalysis.summary !== undefined ? { summary: firstAnalysis.summary } : {}),
               claim_permissions: firstAnalysis.claim_permissions,
+              ...(firstAnalysis.goal_chance !== undefined ? { goal_chance: firstAnalysis.goal_chance } : {}),
               note: 'Olumi already ran the first analysis of this model on this turn, so it was not run again.',
             },
           };
@@ -6404,6 +6412,8 @@ export function createAgentCapabilities(
         // the automatic first analysis reads its permission in `describeFirstAnalysisForAgent`, not here.
         claim_permissions: graphForProduct === undefined ? permissions : withNonlinearIdentity(permissions, graphForProduct, evaluatedForProduct),
         ...(limitChecks !== undefined ? { limit_checks: { limits: limitChecks, note: LIMIT_CHECKS_NOTE } } : {}),
+        // ⛔ PLoT #416: the goal's chance withheld on every option — the sentence to say and the rule (`../goal-chance-withheld.ts`).
+        ...withGoalChance(result),
       };
     },
   };
