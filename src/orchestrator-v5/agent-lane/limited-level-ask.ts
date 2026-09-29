@@ -23,6 +23,7 @@ import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from './limit-operator-words.j
 import { sayFigure } from './say-figure.js';
 import { isChangeFrame, limitNeedsTodaysLevel, sayRelativeChange } from './limit-frame.js';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { PLACEHOLDER_PARTS_REASON, placeholderPartsFinding } from '../../orchestrator/context/placeholder-parts.js';
 
 export interface LimitedLevelAsk {
   readonly kind: 'limited_quantity_level';
@@ -237,4 +238,32 @@ export function limitCheckAsks(graph: {
 }): LimitCheckAsk[] {
   return [...limitedLevelAsks(graph), ...optionSetLimitAsks(graph)].flatMap((a) =>
     a.constraint_ids.map((constraint_id) => ({ kind: a.kind, constraint_id, node_id: a.node_id, question: a.question })));
+}
+
+/**
+ * ⭐ R-c (AI Quality 5882087383): a limit WITHHELD because the options move its quantity only through a link nobody has
+ * sized is made checkable by that link's size, never by a level, so the question asks for the size. It names the part
+ * an option sets and the limited quantity: "How much would a change in ‘Pro plan price’ move ‘Monthly churn’? Give a
+ * figure, or let Olumi estimate it." A figure the user gives is `user_stated`, which sizes the link. The same predicate
+ * as the fold (`placeholderPartsFinding`), over the graph's own options. `undefined` when no such part can be named.
+ */
+export function partsLinkAsk(
+  graph: { readonly nodes: readonly GraphNode[]; readonly edges?: readonly unknown[]; readonly goal_constraints?: readonly LimitRow[]; readonly options?: readonly unknown[] },
+  constraintId: string,
+): string | undefined {
+  const row = (graph.goal_constraints ?? []).find((c) => c?.constraint_id === constraintId);
+  if (row === undefined || typeof row.node_id !== 'string') return undefined;
+  const nodes = graph.nodes.map((n): Record<string, unknown> => ({ ...n }));
+  const edges = (graph.edges ?? []).filter((e): e is Record<string, unknown> => e !== null && typeof e === 'object');
+  const options = optionsOf(graph).map((o) => ({ interventions: mergeInterventionSourceObjects(o as Record<string, unknown>) }));
+  const finding = placeholderPartsFinding(row.node_id, nodes, edges, options);
+  if (finding?.reason !== PLACEHOLDER_PARTS_REASON || finding.partId === undefined) return undefined;
+  const labelOf = (id: string): string | undefined => {
+    const l = graph.nodes.find((n) => n.id === id)?.label;
+    return typeof l === 'string' && l.trim() !== '' ? l.trim() : undefined;
+  };
+  const part = labelOf(finding.partId);
+  const quantity = labelOf(row.node_id);
+  if (part === undefined || quantity === undefined) return undefined;
+  return `How much would a change in ‘${part}’ move ‘${quantity}’? Give a figure, or let Olumi estimate it.`;
 }

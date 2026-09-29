@@ -27,9 +27,10 @@
  *     node that is not an option or the decision — PLoT strips those; ISL reads a root at its own level);
  *   · FILL-ONLY: an existing baseline, whoever wrote it, is never overwritten;
  *   · its level has an author, as above;
- *   · PLoT reads the limit and the level on one scale, decision-grade (`levelLimitReadsOnNodeLevel`, B1), or the limit
- *     is in the factor's own unit on its own cap and the level's pair attests that cap (`levelLimitReadsOnNodeCap`) AND
- *     no option PLoT scores moves the factor only through its parts on an unsized link (`partsMoveTheTargetOnSizedLinks`).
+ *   · no option PLoT scores moves the factor only through its parts on an unsized link (`partsMoveTheTargetOnSizedLinks`,
+ *     R-c: AI Quality 5881541947 / 5882087383), AND PLoT reads the limit and the level on one scale, decision-grade
+ *     (`levelLimitReadsOnNodeLevel`, B1), or the limit is in the factor's own unit on its own cap and the level's pair
+ *     attests that cap (`levelLimitReadsOnNodeCap`).
  */
 import { valuesMatch } from '../../../utils/reduction-framing.js';
 import { deriveInferredValues } from '../../coaching/inferred-value-disclosure.js';
@@ -161,8 +162,12 @@ export function levelLimitBaselineNodeIds(
     if (!levelHasAnAuthor(node, os)) continue;
     if (statedUnitAcrossPeriod(c, node) !== undefined) continue;
     const unit = typeof c.unit === 'string' ? c.unit : undefined;
+    // R-c, BOTH proofs (AI Quality 5882087383, DL 5882019090): a limit on a target the options move only through an
+    // unsized link carries no baseline, whichever scale proof admits it. Journey A's churn "%" limit rode `onLevel`
+    // through `price → price_sensitivity → churn` (`olumi_placeholder`), so its P was the placeholder's.
+    if (!partsMoveTheTargetOnSizedLinks(node.id, nodes, edges, options)) continue;
     const onLevel = levelLimitReadsOnNodeLevel(c.value, unit, node, os);
-    const onCap = !onLevel && levelLimitReadsOnNodeCap(graph, c, node, os) && partsMoveTheTargetOnSizedLinks(node.id, nodes, edges, options);
+    const onCap = !onLevel && levelLimitReadsOnNodeCap(graph, c, node, os);
     if (!onLevel && !onCap) continue;
     out.add(node.id);
   }

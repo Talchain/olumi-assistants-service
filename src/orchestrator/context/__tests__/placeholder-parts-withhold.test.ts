@@ -51,10 +51,9 @@ function journeyCPartsOnly(frame: 'level' | 'change_abs'): { graph: Json; option
   graph.edges = (graph.edges as Json[]).filter((e) => !(e.from === 'additional_advertising' && e.to === budgetId));
   const limit = (graph.goal_constraints as Json[]).find((c) => c.constraint_id === BUDGET_LIMIT)!;
   Object.assign(limit, { value: 15000, value_frame: frame });
-  const options = optionsOf(graph).map((o) =>
-    o.option_id === 'additional_advertising' ? { ...o, interventions: { advertising_spend: o.interventions.advertising_spend } } : o,
-  );
-  return { graph, options };
+  const adv = (graph.nodes as Json[]).find((n) => n.id === 'additional_advertising')!;
+  adv.interventions = { advertising_spend: adv.interventions.advertising_spend };
+  return { graph, options: optionsOf(graph) };
 }
 
 function cloudWith(frame: 'level' | 'change_abs', edit?: (g: Json) => void): { graph: Json; options: Json[] } {
@@ -142,12 +141,18 @@ describe('the ONE predicate (targetMovedOnlyThroughPlaceholderParts)', () => {
     });
     expect(on(graph, options, DOWNTIME_LABEL)).toBe('parts_links_placeholder');
   });
+  it('a sized link whose mean has moved since it was sized (the natural effect no longer describes it) → withheld', () => {
+    const { graph, options } = cloudWith('change_abs', (g) => {
+      (g.edges as Json[]).find((e) => e.from === 'gcp_workload_share' && e.to === 'migration_downtime_risk')!.strength.mean = 0.5;
+    });
+    expect(on(graph, options, DOWNTIME_LABEL)).toBe('parts_links_placeholder');
+  });
   it('CONTROL (served C15): every option that moves a part also sets the total → not withheld', () => {
     expect(on(JOURNEY_C, optionsOf(JOURNEY_C), BUDGET_LABEL)).toBeNull();
   });
 });
 
-describe('R-c at the fold: a change_abs limit moved only through placeholder parts is WITHHELD, never scored or estimate_only', () => {
+describe('R-c at the fold: a limit moved only through placeholder parts is WITHHELD, never scored or estimate_only', () => {
   it('RED — journey C, change_abs, ISL scored it on the user\'s own base → unscored / parts_links_placeholder', () => {
     const { graph, options } = journeyCPartsOnly('change_abs');
     expect(rowFor(graph, options, BUDGET_LIMIT)).toEqual({ constraint_id: BUDGET_LIMIT, state: 'unscored', reason: 'parts_links_placeholder' });
@@ -162,9 +167,10 @@ describe('R-c at the fold: a change_abs limit moved only through placeholder par
     const checks = limitChecksForAgent(graph, { per_limit: [row], joint: { state: 'unscored', reason: row.reason } } as never)!;
     const check = checks.find((c) => c.constraint_id === BUDGET_LIMIT)!;
     expect(check.say).toBe('‘Total initiative spend’ cannot be checked in this model yet: Olumi’s links from its parts to it are placeholders, not estimates.');
-    expect(check.ask, 'a today-level cannot make it checkable, so it is never asked for').toBeUndefined();
+    // A today-level cannot make it checkable; the link's size can (AI Quality 5882087383).
+    expect(check.ask).toBe('How much would a change in ‘Advertising spend’ move ‘Total initiative spend’? Give a figure, or let Olumi estimate it.');
   });
-  it('without the options PLoT scores, the fold withholds nothing it did not before (the level owners are unchanged)', () => {
+  it('without the options PLoT scores, the fold withholds nothing (the level owners are unchanged)', () => {
     const { graph } = journeyCPartsOnly('change_abs');
     const ratified = readRatifiedConstraints(graph);
     expect(collectLimitLevelOwners(graph, ratified).placeholderPartsReasons.size).toBe(0);
@@ -185,5 +191,83 @@ describe('R-c for a LEVEL limit: the same predicate gates T4\'s baseline carrier
       (g.nodes as Json[]).find((n) => n.label === DOWNTIME_LABEL)!.nonlinear_identity = { operation: 'product', factor_ids: ['gcp_workload_share'], stated_in_brief: false };
     });
     expect(levelLimitBaselineNodeIds(graph, graph.goal_constraints, goalIdOf(graph), options).has(idOf(graph, DOWNTIME_LABEL))).toBe(false);
+  });
+});
+
+/**
+ * ⛔ R-c EXTENDED TO `onLevel` (AI Quality 5882087383, DL 5882019090) — Paul's served journey A (17d1): "keep monthly churn
+ * under 4%". The options set the Pro plan price; churn moves only through `price → price_sensitivity → churn`, whose links
+ * carry no size (`olumi_placeholder` into churn). The churn "%" limit rode the `onLevel` proof, so it carried Olumi's 3%
+ * and read `estimate_only` from the placeholder's P. It is WITHHELD, with the link-size ask.
+ */
+describe('R-c on journey A (served 17d1): the churn limit moved by price only through an unsized link is withheld, with an ask', () => {
+  const A = JSON.parse(readFileSync('tests/fixtures/cross-service/b5-per-limit/17d1cd3a.graph.json', 'utf8')).graph as Json;
+  const CHURN_LIMIT = 'agent-lane:monthly_churn:<=';
+  const churnId = () => idOf(A, 'Monthly churn');
+  /** The same graph with the price → churn path replaced by ONE link sized in churn's unit, by `magnitude`. */
+  const sized = (magnitude: 'olumi_estimate' | 'user_stated', amountUnit = '% per month'): Json => {
+    const g = structuredClone(A);
+    const price = idOf(g, 'Pro plan price');
+    const sens = (g.nodes as Json[]).find((n) => n.id === 'price_sensitivity')!.id as string;
+    g.edges = (g.edges as Json[]).filter((e) => !(e.from === price && e.to === sens) && !(e.from === sens && e.to === churnId()));
+    g.edges.push({ from: price, to: churnId(), strength: { mean: 0.3, std: 0.15 }, defaulted: true,
+      provenance: { source: 'cee_hypothesis', magnitude, natural_effect: { amount: 0.4, amount_unit: amountUnit, per_source_change: 10, per_source_change_unit: 'GBP per month', strength_mean: 0.3, strength_mean_frame: 'edge_strength' } } });
+    return g;
+  };
+  const carried = (g: Json) => levelLimitBaselineNodeIds(g, g.goal_constraints, goalIdOf(g), optionsOf(g)).has(churnId());
+  const fold = (g: Json) => rowFor(g, optionsOf(g), CHURN_LIMIT);
+
+  it('PRECONDITION (served bytes): churn\'s only way in is price_sensitivity, on links with no size; the churn limit is a "%" level', () => {
+    const into = (A.edges as Json[]).filter((e) => e.to === churnId());
+    expect(into.map((e) => e.from)).toEqual(['price_sensitivity']);
+    expect(into[0].provenance.magnitude).toBe('olumi_placeholder');
+    expect((A.goal_constraints as Json[]).find((c) => c.constraint_id === CHURN_LIMIT)).toMatchObject({ unit: '%', value_frame: 'level' });
+  });
+  it('RED — the churn limit carries NO baseline (it rode onLevel before)', () => {
+    expect(carried(A)).toBe(false);
+  });
+  it('RED — the fold: unscored / parts_links_placeholder, never estimate_only from the placeholder\'s P', () => {
+    expect(fold(A)).toEqual({ constraint_id: CHURN_LIMIT, state: 'unscored', reason: 'parts_links_placeholder' });
+  });
+  it('RULE 3(f) — the leader verdict never reads the placeholder\'s P as the limit met: unevaluated on churn, as for any unchecked limit', () => {
+    const options = optionsOf(A);
+    const ratified = readRatifiedConstraints(A);
+    const v = deriveConstraintVerdict(scoredEnvelope(CHURN_LIMIT, churnId(), options), ratified, options[1]!.option_id, undefined, new Set(),
+      collectLimitLevelOwners(A, ratified, options));
+    expect(v.state).toBe('unevaluated');
+    expect(v.mayNameLeadingOption).toBe(false);
+    expect(v.constraints.map((c) => c.constraint_id)).toEqual([CHURN_LIMIT]);
+  });
+  it('RULE 3(f) CONTROL — the same run with the link sized: the leader is decided on the certified score (evaluated_feasible)', () => {
+    const g = sized('olumi_estimate');
+    const options = optionsOf(g);
+    const ratified = readRatifiedConstraints(g);
+    const v = deriveConstraintVerdict(scoredEnvelope(CHURN_LIMIT, churnId(), options), ratified, options[1]!.option_id, undefined, new Set(),
+      collectLimitLevelOwners(g, ratified, options));
+    expect(v.state).toBe('evaluated_feasible');
+  });
+  it('the row says why and asks for the link\'s size, naming what the options set', () => {
+    const row = fold(A)!;
+    const check = limitChecksForAgent(A, { per_limit: [row], joint: { state: 'unscored', reason: row.reason } } as never)!
+      .find((c) => c.constraint_id === CHURN_LIMIT)!;
+    expect(check.say).toBe('‘Monthly churn’ cannot be checked in this model yet: Olumi’s links from its parts to it are placeholders, not estimates.');
+    expect(check.ask).toBe('How much would a change in ‘Pro plan price’ move ‘Monthly churn’? Give a figure, or let Olumi estimate it.');
+  });
+  it('CONTROL — the same limit, the price → churn link SIZED by Olumi in churn\'s unit: it carries, and folds normally (estimate_only)', () => {
+    expect(carried(sized('olumi_estimate'))).toBe(true);
+    expect(fold(sized('olumi_estimate'))).toEqual({ constraint_id: CHURN_LIMIT, state: 'estimate_only', reason: 'level_olumi_estimate' });
+  });
+  it('CONTROL — sized in "percentage points" (the sizer\'s words for a percent level, served A-0 at 288ab0c9): it carries', () => {
+    expect(carried(sized('olumi_estimate', 'percentage points'))).toBe(true);
+    expect(fold(sized('olumi_estimate', 'percentage points'))).toEqual({ constraint_id: CHURN_LIMIT, state: 'estimate_only', reason: 'level_olumi_estimate' });
+  });
+  it('CONTRAST — "percentage points" on a node that is NOT a percent is not its unit → withheld', () => {
+    const g = sized('olumi_estimate', 'percentage points');
+    (g.nodes as Json[]).find((n) => n.id === churnId())!.observed_state.unit = 'subscribers per month';
+    expect(fold(g)).toEqual({ constraint_id: CHURN_LIMIT, state: 'unscored', reason: 'parts_links_placeholder' });
+  });
+  it('CONTROL — the link sized by the USER (user_stated): it carries, and folds normally', () => {
+    expect(carried(sized('user_stated'))).toBe(true);
+    expect(fold(sized('user_stated'))).toEqual({ constraint_id: CHURN_LIMIT, state: 'estimate_only', reason: 'level_olumi_estimate' });
   });
 });

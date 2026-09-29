@@ -107,9 +107,11 @@ describe('RED — served journey C: the budget limit reaches PLoT with the budge
     });
   }
 
-  it('PRESENT control on the same run: the churn "%" limit still carries its own level (0.03)', async () => {
+  it('R-c on the same run: the churn "%" limit carries NOTHING — the options move churn only through unsized links', async () => {
     const body = await wireOf(SERVED.c15);
-    expect(nodeOf(body.graph, CHURN_LABEL).observed_state.baseline).toBe(0.03);
+    // R-c (AI Quality 5882087383): churn moves only through `price → price_sensitivity → churn`, links nobody sized, so
+    // its limit's P would be the placeholder's (it carried 0.03 before the ruling).
+    expect(nodeOf(body.graph, CHURN_LABEL).observed_state.baseline).toBeUndefined();
   });
 
   it('INVARIANT (the spec, not the symptom): a level limit whose threshold goes out on a non-root factor\'s own cap goes out with that factor\'s level', async () => {
@@ -180,10 +182,11 @@ describe('the proof: the limit is in the factor\'s own unit on its own cap, and 
     expect(carries(edited({ root: true }))).toBe(false);
   });
 
-  it('CONTRAST (served, the earlier journey-C shape): ROOT `total_investment` carries nothing; its churn "%" limit still does', () => {
+  it('CONTRAST (served, the earlier journey-C shape): ROOT `total_investment` carries nothing; with no option in play its churn "%" limit does', () => {
     const g = EARLIER.c10;
     const goalId = (g.nodes as Json[]).find((n) => n.kind === 'goal')!.id as string;
-    const ids = levelLimitBaselineNodeIds({ nodes: g.nodes, edges: g.edges }, g.goal_constraints, goalId);
+    // A proof row: no option in play (`[]`), so R-c's parts predicate has nothing to withhold.
+    const ids = levelLimitBaselineNodeIds({ nodes: g.nodes, edges: g.edges }, g.goal_constraints, goalId, []);
     expect(ids).toEqual(new Set([idOf(g, 'Monthly churn')]));
     expect(ids.has(idOf(g, 'Total investment'))).toBe(false);
   });
@@ -250,8 +253,8 @@ describe('GUARD — a total an option moves only through its parts carries no ba
     expect(wire.observed_state.baseline, 'no baseline: ISL would score £18k through 0.5 placeholder edges').toBeUndefined();
     expect(wire.goal_threshold_cap, 'the threshold is still read on the node\'s own cap, as at base').toBe(100000);
     expect((body.goal_constraints as Json[]).find((c) => c.constraint_id === BUDGET_LIMIT)).toMatchObject({ value: 15000, value_frame: 'level' });
-    // Scoped to the cap proof: the churn "%" limit on the same run still carries its level.
-    expect(nodeOf(body.graph, CHURN_LABEL).observed_state.baseline).toBe(0.03);
+    // R-c (AI Quality 5882087383): churn on the same run is moved only through unsized links, so it carries nothing too.
+    expect(nodeOf(body.graph, CHURN_LABEL).observed_state.baseline).toBeUndefined();
   });
 
   it('CONTROL (served C01/C15): every option that sets a part also sets the total — the baseline is still carried', async () => {
@@ -281,11 +284,13 @@ describe('GUARD — a total an option moves only through its parts carries no ba
     expect(levelLimitBaselineNodeIds(graph, graph.goal_constraints, goalId, withTotal).has(budgetId)).toBe(true);
   });
 
-  it('FAIL CLOSED: without the options PLoT scores, the cap proof carries nothing; the churn "%" limit still does', () => {
+  it('FAIL CLOSED: without the options PLoT scores, nothing carries (R-c: neither proof can rule out an unsized path)', () => {
     const g = SERVED.c15;
     const goalId = (g.nodes as Json[]).find((n) => n.kind === 'goal')!.id as string;
-    expect(levelLimitBaselineNodeIds(g, g.goal_constraints, goalId)).toEqual(new Set([idOf(g, CHURN_LABEL)]));
-    expect(levelLimitBaselineNodeIds(g, g.goal_constraints, goalId, optionsOf(g))).toEqual(new Set([idOf(g, CHURN_LABEL), idOf(g, BUDGET_LABEL)]));
+    expect(levelLimitBaselineNodeIds(g, g.goal_constraints, goalId)).toEqual(new Set());
+    // With them: the budget (every option that moves a part sets the total) carries; churn (moved only through
+    // unsized links, AI Quality 5882087383) does not.
+    expect(levelLimitBaselineNodeIds(g, g.goal_constraints, goalId, optionsOf(g))).toEqual(new Set([idOf(g, BUDGET_LABEL)]));
   });
 });
 
@@ -424,10 +429,10 @@ describe('AIQ REQUIRED row 2 (#72 5869646768, B5) — WHOSE baseline: Olumi\'s �
     expect(budgetRowOf(result)).toEqual({ constraint_id: BUDGET_LIMIT, state: 'scored' });
   });
 
-  it('SCOPE: on both runs the churn limit (Olumi\'s 3 %) stays estimate_only — row 2 is bound to the budget limit by id', async () => {
+  it('SCOPE: on both runs the churn limit is WITHHELD for its unsized links (R-c, AI Quality 5882087383) — row 2 is bound to the budget limit by id', async () => {
     for (const k of ['c01', 'c15'] as const) {
       const rows = (await storedRunOf(SERVED[k], CAPTURED[k])).constraint_verdict.per_limit as Json[];
-      expect(rows.find((r) => r.constraint_id === 'agent-lane:monthly_churn:<='), k).toEqual({ constraint_id: 'agent-lane:monthly_churn:<=', state: 'estimate_only', reason: 'level_olumi_estimate' });
+      expect(rows.find((r) => r.constraint_id === 'agent-lane:monthly_churn:<='), k).toEqual({ constraint_id: 'agent-lane:monthly_churn:<=', state: 'unscored', reason: 'parts_links_placeholder' });
     }
   });
 });

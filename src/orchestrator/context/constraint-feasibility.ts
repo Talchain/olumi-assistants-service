@@ -839,7 +839,7 @@ export function limitLevelOwnerReason(stamp: unknown): EstimateOnlyReason | null
 export function collectLimitLevelOwners(
   graph: unknown,
   ratified: readonly RatifiedConstraint[],
-  /** The options PLoT scores (run_analysis's final wire options). Omitted = no change limit is withheld for its parts. */
+  /** The options PLoT scores (run_analysis's final wire options). Omitted = no limit is withheld for its parts. */
   options?: ReadonlyArray<Record<string, unknown>>,
 ): {
   userBaselineIds: Set<string>;
@@ -866,20 +866,17 @@ export function collectLimitLevelOwners(
   }
   const rawNodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
   if (!Array.isArray(rawNodes)) return out;
-  // ⛔ R-c (AI Quality 5881541947, DL 5881593118): a limit stated as a CHANGE on a target the options move only through
-  // its parts, on a link Olumi has not sized (or through an identity the engine does not honour), has no checkable P:
-  // the P is the placeholder's. A user-stated base cannot upgrade it (a `change_abs` P never reads the base). The same
-  // predicate withholds a LEVEL limit's baseline carrier (T4, `level-limit-baseline.ts`), so ISL refuses that one.
-  // A limit on the goal is not read here: P(goal) is its own claim.
+  // ⛔ R-c (AI Quality 5881541947 + 5882087383, DL 5881593118 + 5882019090): a limit on a target the options move only
+  // through its parts, on a link nobody has sized (or through an identity the engine does not honour), has no checkable
+  // P, in ANY frame: the P is the placeholder's. `estimate_only` says whose base it is, not that the effect size is a
+  // default, and a user-stated base cannot upgrade it. The same predicate withholds a level limit's baseline carrier
+  // (`level-limit-baseline.ts`). A limit on the goal is not read here: P(goal) is its own, disclosed claim.
   const rawEdges = (graph as { edges?: unknown } | null | undefined)?.edges;
-  if (options !== undefined && Array.isArray(rows)) {
+  if (options !== undefined) {
     const nodes = rawNodes.map(readRecord).filter((n): n is Record<string, unknown> => n !== null);
     const edges = Array.isArray(rawEdges) ? rawEdges.map(readRecord).filter((e): e is Record<string, unknown> => e !== null) : [];
     for (const c of ratified) {
       if (typeof c.node_id !== 'string' || c.node_id.length === 0) continue;
-      const row = rows.map(readRecord).find((r) => r?.constraint_id === c.constraint_id);
-      const frame = row?.value_frame;
-      if (frame !== 'change_abs' && frame !== 'change_rel' && frame !== 'delta') continue;
       if (nodes.find((n) => n.id === c.node_id)?.kind === 'goal') continue;
       const why = targetMovedOnlyThroughPlaceholderParts(c.node_id, nodes, edges, options);
       if (why !== null) out.placeholderPartsReasons.set(c.constraint_id, why);
@@ -1301,6 +1298,11 @@ function deriveLeaderClaimVerdict(
    * derived at the call site that holds the wire options. OPTIONAL, and omitted is today's verdict exactly.
    */
   leaderStrictThresholdPinIds?: ReadonlySet<string>,
+  /**
+   * R-c: the limits whose target the options move only through links nobody sized ({@link collectLimitLevelOwners}'s
+   * `placeholderPartsReasons`). OPTIONAL, and omitted is today's verdict exactly.
+   */
+  placeholderPartsIds?: ReadonlySet<string>,
 ): ConstraintVerdict {
   // Computed unconditionally so it can be carried on every state (see
   // `leaderInfeasibility`). Fails open to `{ infeasible: false }`.
@@ -1430,7 +1432,10 @@ function deriveLeaderClaimVerdict(
   //        threshold (A2 follow-up, DL verdict on #2180): "under 4%" is not met
   //        at 4%, and the engine, holding "<=", counts it as met. Its score is
   //        withheld, never read as a pass (nor as a breach: nothing is modelled).
-  //    `codes` stays `[]` for (b), (d) and (e): the producer shipped no code, and a
+  //    (f) R-c (AI Quality 5881541947 / 5882087383): the options move the limit's target only through links nobody
+  //        sized, so every option's score for it is the placeholder's. Like (b), it licenses neither a compliance nor
+  //        a breach claim, and the limit card says so.
+  //    `codes` stays `[]` for (b), (d), (e) and (f): the producer shipped no code, and a
   //    CEE-minted one must never be filed as a producer code.
   const notDecisionGrade = collectProducerNotDecisionGradeConstraintIds(envelope);
   const leaderScored = collectLeaderScoredConstraintIds(envelope, leadingOptionId);
@@ -1440,7 +1445,8 @@ function deriveLeaderClaimVerdict(
       notDecisionGrade.has(c.constraint_id) ||
       (leaderScored !== null && !leaderScored.has(c.constraint_id)) ||
       leaderEstimatedTargetIds?.has(c.constraint_id) === true ||
-      leaderStrictThresholdPinIds?.has(c.constraint_id) === true,
+      leaderStrictThresholdPinIds?.has(c.constraint_id) === true ||
+      placeholderPartsIds?.has(c.constraint_id) === true,
   );
   if (unverified.length > 0) {
     return verdict('unevaluated', {
@@ -1491,7 +1497,7 @@ export function deriveConstraintVerdict(
     readonly userAssumptionIds: ReadonlySet<string>;
     /** R1 S4-core: limits stored `change_rel` ({@link collectLimitLevelOwners}). Omitted = none known (as before). */
     readonly relativeChangeIds?: ReadonlySet<string>;
-    /** R-c: change limits withheld for their target's unsized parts, with why ({@link collectLimitLevelOwners}). */
+    /** R-c: limits withheld for their target's unsized parts, with why ({@link collectLimitLevelOwners}). */
     readonly placeholderPartsReasons?: ReadonlyMap<string, string>;
   },
   /**
@@ -1509,6 +1515,7 @@ export function deriveConstraintVerdict(
     unmeasuredTargetIds,
     leaderEstimatedTargetIds,
     typeof leadingOptionId === 'string' ? strictThresholdPins?.get(leadingOptionId) : undefined,
+    perLimitInput?.placeholderPartsReasons !== undefined ? new Set(perLimitInput.placeholderPartsReasons.keys()) : undefined,
   );
   if (perLimitInput === undefined || ratified.length === 0) return leaderVerdict;
   const pinnedIds = new Set([...(strictThresholdPins?.values() ?? [])].flatMap((ids) => [...ids]));
