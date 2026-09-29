@@ -77,6 +77,7 @@ import {
   WITHHELD_CONSTRAINT_VERDICT,
   WITHHELD_NEAR_TIE,
   WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN,
+  WITHHELD_OPTIONS_NOT_RECONCILED,
   WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT,
   WITHHELD_NO_OPTION_MEETS_LIMIT,
   WITHHELD_RUN_OUT_OF_DATE,
@@ -987,6 +988,11 @@ const BY_WITHHELD_REASON: Readonly<Record<string, string>> = {
   [WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN]:
     'because Olumi reads your goal as depending on quantities that multiply together, and this model adds their ' +
     'effects up rather than multiplying them; running the analysis again will not change that',
+  // The INTAKE axis (Canvas #72 5886223069): the served disclosure's own words (`intake-option-disclosure.ts`), so the
+  // reason and the result's summary say the same thing; no move is offered that no writer makes. Never "your limit".
+  [WITHHELD_OPTIONS_NOT_RECONCILED]:
+    'because the saved model does not establish which of its options correspond to the options in your brief, so no ' +
+    'option can be put forward until that correspondence is confirmed',
 };
 
 /**
