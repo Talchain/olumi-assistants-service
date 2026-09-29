@@ -88,6 +88,8 @@ export type LinkEffectEditResult =
       /** The same graph through the strict parse — the gate every writer passes. */
       readonly graph: GraphV3T;
       readonly handlerFacts: readonly HandlerFact[];
+      /** The size said back in the user's units (`sizeLink`'s own words), for the one-line acknowledgement. */
+      readonly statement?: string;
     }
   | { readonly kind: 'refused'; readonly reason: LinkEffectRefusal };
 
@@ -178,5 +180,6 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
       after: { from, to, strength: { ...(edge.strength as Rec) }, effect_direction: direction, provenance: edge.provenance, stated_quote: params.quote },
     },
   });
-  return { kind: 'mutated', mutatedGraph: graph, graph: parsed.data, handlerFacts: [fact as HandlerFact] };
+  return { kind: 'mutated', mutatedGraph: graph, graph: parsed.data, handlerFacts: [fact as HandlerFact],
+    ...(sizing.statement !== undefined ? { statement: sizing.statement } : {}) };
 }
