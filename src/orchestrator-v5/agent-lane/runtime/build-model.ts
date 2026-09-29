@@ -36,6 +36,7 @@
 import { createHash } from 'node:crypto';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine } from '../keep-options-apart.js';
+import { bindM1ClaimSources } from '../m1-claim-lineage.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
 import { quoteListedOptions } from '../option-lineage.js';
 import { admittedOptionKeys } from '../admitted-option-identity.js';
@@ -1674,8 +1675,10 @@ export async function buildModelFromBrief(
       : {}),
   };
 
+  const claimLineage = faithfulM1 ? bindM1ClaimSources(graph, brief) : null;
+  const graphToRegister = claimLineage?.graph ?? graph;
   // Never persist a graph the product cannot then read.
-  const parsed = GraphV3.safeParse(graph);
+  const parsed = GraphV3.safeParse(graphToRegister);
   if (!parsed.success) {
     return {
       ok: false, mutated: false, refusal: 'admitted_graph_invalid',
@@ -1737,7 +1740,7 @@ export async function buildModelFromBrief(
    * `OPERATION_ID_REUSED` loser is: the versions read finds this construction's own version, or it is not ours.
    */
   const reg = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph/register`, {
-    graph,
+    graph: graphToRegister,
     brief_text: brief,
     operation_id: constructionOperationId(scenarioId, brief),
     expected_graph_identity_hash: null,
@@ -1794,7 +1797,7 @@ export async function buildModelFromBrief(
     within_compact_limits: size.within,
     size_retried: sizeRetried,
     construction_retried: constructionRetried,
-    ...(faithfulM1 ? { construction_policy: 'm1', constructor_proposals: m1Proposals, constructor_placeholders: m1Placeholders, deferred_suggestions: m1Proposals.length } : {}),
+    ...(faithfulM1 ? { construction_policy: 'm1', constructor_proposals: m1Proposals, constructor_placeholders: m1Placeholders, constructor_source_bindings: claimLineage?.bindings ?? [], constructor_unbound_claims: claimLineage?.unbound ?? [], deferred_suggestions: m1Proposals.length } : {}),
     ...(size.user_material_exceeds_limit
       ? { admitted_over_limit_because: 'your own stated options and facts exceed the compact limit' }
       : {}),
