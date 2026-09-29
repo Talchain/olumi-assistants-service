@@ -181,7 +181,7 @@ const HEAVY_WHEN_PERMITTED: ReadonlySet<string> = new Set(['robustness', 'p_win_
 /** R&C's pinned KEY set, verbatim, matched on keys never labels; `decision_sensitivity` is the one key AIQ keeps. */
 const RE_RANKING_KEY = /confidence|near_tie|goal_fit|separation|alternative_winner|win_probabilit|sensitivity|evpi|enrichment/i;
 /** AIQ's named withheld drops the pinned set does not match (the per-option means go with the whitelist below). */
-const RE_RANKING_NAMED: ReadonlySet<string> = new Set(['probability_of_goal', 'probability_of_joint_goal', 'conditional_winners', 'flip_thresholds', 'leading_option_id', 'run_delta']);
+const RE_RANKING_NAMED: ReadonlySet<string> = new Set(['probability_of_goal', 'probability_of_joint_goal', 'all_limits_hold_probability', 'conditional_winners', 'flip_thresholds', 'leading_option_id', 'run_delta']);
 /** Until B5 `per_limit` lands, no key naming constraint probabilities is kept, whatever the permission. */
 const namesConstraintProbability = (key: string): boolean => /constraint/i.test(key) && /probabilit/i.test(key);
 /** What a withheld run keeps at its top level, in this order (a fixed order is what makes a re-prune byte-identical). */
