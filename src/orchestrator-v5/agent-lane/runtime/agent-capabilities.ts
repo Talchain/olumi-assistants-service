@@ -1781,6 +1781,8 @@ export function createAgentCapabilities(
       const event = {
         kind: 'factor_value_edit' as const,
         target_id: o.path,
+        // A figure the user approved is authorship even when it equals Olumi's (schemas 0.62.0; AIQ 5881494849).
+        intent: 'set' as const,
         ...(targetCap !== undefined
           ? { value: v.value / targetCap, raw_value: v.value }
           : { value: v.value }),

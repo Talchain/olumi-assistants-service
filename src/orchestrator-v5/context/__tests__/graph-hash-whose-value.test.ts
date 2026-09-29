@@ -7,8 +7,11 @@
  * f79119b (scenario 0938f068): churn 3.2% moved cee_inference → user_override with the value unchanged; the hash did not
  * move, the Run stayed `complete_current` with verdict `estimate_only`, and a rerun on the same hash gave `scored`.
  *
- * Contrast in the same file: a label, `unit` or `raw_value` change (display, never read by the engines) still leaves
- * the hash unchanged — this row must not pass by hashing everything.
+ * `unit`, `raw_value` and node `scale_frame` are analytical too (AIQ #72 5881494849): `level-limit-baseline.ts` reads
+ * them into the PLoT wire (the relabelled-`%` wire unit; `percentLimitFrameProvable`, framed vs withheld).
+ *
+ * Contrast in the same file: a label, `extractionType` or `reviewed_by_user` change (never read by an analysis path)
+ * still leaves the hash unchanged — this row must not pass by hashing everything.
  */
 import { describe, it, expect } from 'vitest';
 import type { GraphV3T } from '../../../schemas/cee-v3.js';
@@ -39,10 +42,19 @@ describe('analysis revision: whose value it is', () => {
     expect(computeAnalysisAffectingGraphHash(churnGraph(unstamped))).not.toBe(computeAnalysisAffectingGraphHash(churnGraph(olumis)));
   });
 
-  it('CONTRAST: label, unit and raw_value stay display-only (hash unchanged)', () => {
+  it('unit, raw_value and node scale_frame move the analysis hash (each decides the PLoT wire)', () => {
+    const base = computeAnalysisAffectingGraphHash(churnGraph(olumis));
+    expect(computeAnalysisAffectingGraphHash(churnGraph({ ...olumis, unit: '% per year' }))).not.toBe(base);
+    expect(computeAnalysisAffectingGraphHash(churnGraph({ ...olumis, raw_value: 32 }))).not.toBe(base);
+    const framed = churnGraph(olumis) as unknown as { nodes: Array<Record<string, unknown>> };
+    framed.nodes[1]!.scale_frame = 100;
+    expect(computeAnalysisAffectingGraphHash(framed as unknown as GraphV3T)).not.toBe(base);
+  });
+
+  it('CONTRAST: label, extractionType and the review record stay out (hash unchanged)', () => {
     const base = computeAnalysisAffectingGraphHash(churnGraph(olumis));
     expect(computeAnalysisAffectingGraphHash(churnGraph(olumis, 'Churn per month'))).toBe(base);
-    expect(computeAnalysisAffectingGraphHash(churnGraph({ ...olumis, unit: 'percent' }))).toBe(base);
-    expect(computeAnalysisAffectingGraphHash(churnGraph({ ...olumis, raw_value: 3.2000001 }))).toBe(base);
+    expect(computeAnalysisAffectingGraphHash(churnGraph({ ...olumis, extractionType: 'explicit' }))).toBe(base);
+    expect(computeAnalysisAffectingGraphHash(churnGraph({ ...olumis, reviewed_by_user: { intent: 'confirm', at: '2026-09-29T00:40:00.000Z' } }))).toBe(base);
   });
 });
