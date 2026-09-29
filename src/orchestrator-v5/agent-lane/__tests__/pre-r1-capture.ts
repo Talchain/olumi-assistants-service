@@ -6,7 +6,8 @@
  * NEVER edited. To replay one through today's strict schema, this supplies exactly what admission itself does with such
  * a draft, and nothing else:
  *   · a goal with no `frame` → `frame: 'level'` (admission: an absent frame is a level, the candidate's own doc);
- *   · a limit framed `delta` (the pre-R1 prompt's "a CHANGE from today") → `change_abs` (`writtenLimitFrame`).
+ *   · a limit framed `delta` (the pre-R1 prompt's "a CHANGE from today") → `change_abs` (`writtenLimitFrame`);
+ *   · an option with no `brief_words` → `null` (drafted before option lineage asked for the brief's words: none named).
  * Every other key, and every value, is the capture's own. A copy is returned; the parsed capture is not mutated.
  */
 export function asCurrentDraft<T>(capture: T): T {
@@ -18,6 +19,8 @@ export function asCurrentDraft<T>(capture: T): T {
     for (const [k, x] of Object.entries(o)) out[k] = walk(x, k === 'constraints');
     if ('metric' in o && 'target_stated' in o && !('frame' in o)) out['frame'] = 'level';
     if (inConstraints && 'metric' in o && o['frame'] === 'delta') out['frame'] = 'change_abs';
+    // Option lineage (MG #72 5887699714): an option drafted before `brief_words` existed named no words (null).
+    if ('is_status_quo' in o && 'interventions' in o && !('brief_words' in o)) out['brief_words'] = null;
     return out;
   };
   return walk(capture, false) as T;

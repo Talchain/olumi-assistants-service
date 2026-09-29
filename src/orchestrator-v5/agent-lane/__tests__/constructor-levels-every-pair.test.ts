@@ -47,10 +47,10 @@ function c22() {
     goal: { metric: 'Delivery velocity', operator: '>=', target_stated: false, frame: 'level', value: null, unit: 'points per sprint', horizon_months: null, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null },
     constraints: [],
     options: [
-      { label: 'Hire Two Developers', provenance: 'explicit', is_status_quo: null, changes: ['Engineering delivery capacity', 'Hiring cost'], interventions: [] },
-      { label: 'Hire a Tech Lead', provenance: 'explicit', is_status_quo: null, changes: ['Technical leadership capacity', 'Hiring cost'], interventions: [] },
-      { label: 'Hire Both', provenance: 'ai_proposed', is_status_quo: null, changes: ['Engineering delivery capacity', 'Technical leadership capacity', 'Hiring cost'], interventions: [] },
-      { label: 'Continue Current Staffing', provenance: 'ai_proposed', is_status_quo: true, changes: [], interventions: [] },
+      { label: 'Hire Two Developers', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: ['Engineering delivery capacity', 'Hiring cost'], interventions: [] },
+      { label: 'Hire a Tech Lead', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: ['Technical leadership capacity', 'Hiring cost'], interventions: [] },
+      { label: 'Hire Both', provenance: 'ai_proposed', is_status_quo: null, brief_words: null, changes: ['Engineering delivery capacity', 'Technical leadership capacity', 'Hiring cost'], interventions: [] },
+      { label: 'Continue Current Staffing', provenance: 'ai_proposed', is_status_quo: true, brief_words: null, changes: [], interventions: [] },
     ] as Opt[],
     factors: [
       factor('Engineering delivery capacity', null, 100, 'story points'),
@@ -197,8 +197,8 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     const c = c22();
     c.factors = [factor('Engineering capacity', 40, 100, 'story points')];
     c.options = [
-      { label: 'Hire Two Developers', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [] },
-      { label: 'Continue Current Staffing', provenance: 'ai_proposed', is_status_quo: true, changes: [], interventions: [] },
+      { label: 'Hire Two Developers', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: [], interventions: [] },
+      { label: 'Continue Current Staffing', provenance: 'ai_proposed', is_status_quo: true, brief_words: null, changes: [], interventions: [] },
     ];
     c.links = [
       { from: 'Hire Two Developers', to: 'Engineering capacity', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
@@ -236,8 +236,8 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     c.factors = [factor('Developers', null, 50, 'people'), factor('Hiring cost', 0, 500000, 'GBP')];
     c.links = [{ from: 'Developers', to: 'Delivery velocity', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null }];
     c.options = [
-      { label: 'Hire Two Developers', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [{ factor_label: 'Developers', value: 2, value_kind: 'additional', unit: 'people', provenance: 'explicit' }] },
-      { label: 'Continue Current Staffing', provenance: 'ai_proposed', is_status_quo: true, changes: [], interventions: [] },
+      { label: 'Hire Two Developers', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: [], interventions: [{ factor_label: 'Developers', value: 2, value_kind: 'additional', unit: 'people', provenance: 'explicit' }] },
+      { label: 'Continue Current Staffing', provenance: 'ai_proposed', is_status_quo: true, brief_words: null, changes: [], interventions: [] },
     ];
     const p = prepareProvisionalCandidate(c as unknown as CandidateModel) as ReturnType<typeof prepareProvisionalCandidate> & { level_gaps?: unknown[]; baseline_gaps?: unknown[] };
     expect(p.additions_without_total).toEqual([expect.objectContaining({ option: 'Hire Two Developers', factor: 'Developers', reason: 'baseline_unknown' })]);
@@ -517,7 +517,7 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
    * OPTION_NEEDS_MAPPING, and every MISSING_OPTION_VALUE is still asked. Staging spends no retry here.
    */
   const declare = (d: ReturnType<typeof c22>, label: string, v: boolean | null): ReturnType<typeof c22> =>
-    ({ ...d, options: d.options.map((o) => (o.label === label ? { ...o, is_status_quo: v } : o)) });
+    ({ ...d, options: d.options.map((o) => (o.label === label ? { ...o, is_status_quo: v, brief_words: null } : o)) });
   const blockers = (g: Graph) => assessCanonicalAnalysisReadiness(g).blockingIssues.map((i) => `${i.code}: ${i.message}`);
   const gapCountOf = (d: ReturnType<typeof c22>) => {
     const p = prepareProvisionalCandidate(d as unknown as CandidateModel);

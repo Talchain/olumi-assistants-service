@@ -32,10 +32,10 @@ function draft() {
     goal: { metric: GOAL, operator: '>=', target_stated: false, value: null, unit: 'points per sprint', horizon_months: null, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null },
     constraints: [{ metric: 'Hiring cost', operator: '<=', value: 250000, unit: 'GBP', provenance: 'explicit', frame: 'level' }],
     options: [
-      { label: 'Hire Two Developers', provenance: 'explicit', is_status_quo: null, changes: [] as string[], interventions: [est('Engineering delivery capacity', 52, 'story points'), est('Hiring cost', 140000, 'GBP')] },
-      { label: 'Hire a Tech Lead', provenance: 'explicit', is_status_quo: null, changes: [] as string[], interventions: [est('Technical leadership capacity', 1.5, 'FTE'), est('Hiring cost', 110000, 'GBP')] },
-      { label: 'Hire Both', provenance: 'ai_proposed', is_status_quo: null, changes: [] as string[], interventions: [est('Engineering delivery capacity', 55, 'story points'), est('Technical leadership capacity', 1.5, 'FTE'), est('Hiring cost', 250000, 'GBP')] },
-      { label: 'Continue Current Staffing', provenance: 'ai_proposed', is_status_quo: true, changes: [] as string[], interventions: [] as ReturnType<typeof est>[] },
+      { label: 'Hire Two Developers', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: [] as string[], interventions: [est('Engineering delivery capacity', 52, 'story points'), est('Hiring cost', 140000, 'GBP')] },
+      { label: 'Hire a Tech Lead', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: [] as string[], interventions: [est('Technical leadership capacity', 1.5, 'FTE'), est('Hiring cost', 110000, 'GBP')] },
+      { label: 'Hire Both', provenance: 'ai_proposed', is_status_quo: null, brief_words: null, changes: [] as string[], interventions: [est('Engineering delivery capacity', 55, 'story points'), est('Technical leadership capacity', 1.5, 'FTE'), est('Hiring cost', 250000, 'GBP')] },
+      { label: 'Continue Current Staffing', provenance: 'ai_proposed', is_status_quo: true, brief_words: null, changes: [] as string[], interventions: [] as ReturnType<typeof est>[] },
     ],
     factors: [
       factor('Engineering delivery capacity', 40, 100, 'story points'),

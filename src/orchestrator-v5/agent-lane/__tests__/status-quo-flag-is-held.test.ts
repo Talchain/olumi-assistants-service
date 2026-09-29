@@ -32,7 +32,7 @@ type Opt = CandidateModel['options'][number] & { is_status_quo?: boolean | null 
 
 function hiring(statusQuo: Partial<Opt> & { label: string }, extra: Opt[] = []): CandidateModel {
   const lever = (label: string, factor: string, value: number): Opt => ({
-    label, provenance: 'explicit', changes: [], is_status_quo: null,
+    label, provenance: 'explicit', changes: [], is_status_quo: null, brief_words: null,
     interventions: [{ factor_label: factor, value, value_kind: 'absolute', unit: 'hires', provenance: 'explicit' } as never],
   });
   return {
@@ -41,7 +41,7 @@ function hiring(statusQuo: Partial<Opt> & { label: string }, extra: Opt[] = []):
     options: [
       lever('Hire a Tech Lead', 'Tech leads hired', 1),
       lever('Hire Two Developers', 'Developers hired', 2),
-      { provenance: 'ai_proposed', changes: [], interventions: [], is_status_quo: true, ...statusQuo },
+      { provenance: 'ai_proposed', changes: [], interventions: [], is_status_quo: true, brief_words: null, ...statusQuo },
       ...extra,
     ],
     factors: [
@@ -108,20 +108,20 @@ describe('the constructor declares the status quo, and admission holds it whatev
   });
 
   it('CONTROL: the idiom path is unchanged — an unflagged "Maintain current staffing" is still held', async () => {
-    const { graph } = await build(hiring({ label: 'Maintain current staffing', is_status_quo: null }));
+    const { graph } = await build(hiring({ label: 'Maintain current staffing', is_status_quo: null, brief_words: null }));
     expect(heldEdges(graph, 'maintain_current_staffing')).toHaveLength(2);
   });
 
   it('CONTROL: an unflagged, non-idiom inert option is NOT held — the flag, not the wording, is what counts', async () => {
-    const { graph } = await build(hiring({ label: 'Continue Current Staffing', is_status_quo: null }));
+    const { graph } = await build(hiring({ label: 'Continue Current Staffing', is_status_quo: null, brief_words: null }));
     expect(heldEdges(graph, 'continue_current_staffing')).toEqual([]);
     expect(noFactorEdgeIssues(graph)).toHaveLength(1);
   });
 
   it('CONTROL: two flagged options are never guessed between — neither is held', async () => {
-    const second: Opt = { label: 'Retain monolith', provenance: 'ai_proposed', changes: [], interventions: [], is_status_quo: true };
+    const second: Opt = { label: 'Retain monolith', provenance: 'ai_proposed', changes: [], interventions: [], is_status_quo: true, brief_words: null };
     // An inert idiom option too: two declarations are a contradiction, not a cue to fall back.
-    const idiom: Opt = { label: 'Status quo', provenance: 'ai_proposed', changes: [], interventions: [], is_status_quo: null };
+    const idiom: Opt = { label: 'Status quo', provenance: 'ai_proposed', changes: [], interventions: [], is_status_quo: null, brief_words: null };
     const { graph } = await build(hiring({ label: 'Continue Current Staffing' }, [second, idiom]));
     expect(heldEdges(graph, 'continue_current_staffing')).toEqual([]);
     expect(heldEdges(graph, 'retain_monolith')).toEqual([]);
@@ -129,7 +129,7 @@ describe('the constructor declares the status quo, and admission holds it whatev
   });
 
   it('CONTROL: a flag outranks an idiom — flagged "Continue Current Staffing" is held, an unflagged "Status quo" is not', async () => {
-    const idiom: Opt = { label: 'Status quo', provenance: 'ai_proposed', changes: [], interventions: [], is_status_quo: null };
+    const idiom: Opt = { label: 'Status quo', provenance: 'ai_proposed', changes: [], interventions: [], is_status_quo: null, brief_words: null };
     const { graph } = await build(hiring({ label: 'Continue Current Staffing' }, [idiom]));
     expect(heldEdges(graph, 'continue_current_staffing')).toHaveLength(2);
     expect(heldEdges(graph, 'status_quo')).toEqual([]);
@@ -141,8 +141,8 @@ describe('the constructor declares the status quo, and admission holds it whatev
    * against) falls back to the idiom list — exactly base's behaviour for that model.
    */
   it('B1 RED (misflag pair): a flagged ACTING option does not stop an idiom status quo being held', async () => {
-    const model = hiring({ label: 'Maintain current staffing', is_status_quo: null });
-    const misflagged = { ...model, options: model.options.map((o) => (o.label === 'Hire Two Developers' ? { ...o, is_status_quo: true } : o)) } as CandidateModel;
+    const model = hiring({ label: 'Maintain current staffing', is_status_quo: null, brief_words: null });
+    const misflagged = { ...model, options: model.options.map((o) => (o.label === 'Hire Two Developers' ? { ...o, is_status_quo: true, brief_words: null } : o)) } as CandidateModel;
     const { graph } = await build(misflagged);
     expect(heldEdges(graph, 'maintain_current_staffing')).toHaveLength(2);
     expect(assessCanonicalAnalysisReadiness(graph).blockingIssues.map((i) => i.code)).toEqual([]);
@@ -152,7 +152,7 @@ describe('the constructor declares the status quo, and admission holds it whatev
   });
 
   it('B1 control (same model, no misflag): the idiom status quo is held, as on base', async () => {
-    const { graph } = await build(hiring({ label: 'Maintain current staffing', is_status_quo: null }));
+    const { graph } = await build(hiring({ label: 'Maintain current staffing', is_status_quo: null, brief_words: null }));
     expect(heldEdges(graph, 'maintain_current_staffing')).toHaveLength(2);
     expect(assessCanonicalAnalysisReadiness(graph).blockingIssues.map((i) => i.code)).toEqual([]);
   });
@@ -237,7 +237,7 @@ describe('the constructor declares the status quo, and admission holds it whatev
     expect(node.is_baseline).toBe(true);
     expect(node).not.toHaveProperty('is_status_quo');
     expect(m.nodes.filter((n) => (n as { is_baseline?: unknown }).is_baseline === true).map((n) => n.id)).toEqual(['continue_current_staffing']);
-    const idiom = admitCandidateModel(hiring({ label: 'Maintain current staffing', is_status_quo: null }));
+    const idiom = admitCandidateModel(hiring({ label: 'Maintain current staffing', is_status_quo: null, brief_words: null }));
     expect(idiom.nodes.find((n) => n.id === 'maintain_current_staffing')).not.toHaveProperty('is_baseline');
   });
 

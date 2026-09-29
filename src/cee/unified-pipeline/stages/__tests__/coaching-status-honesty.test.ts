@@ -63,7 +63,7 @@ function makePackageCtx(opts: {
       // canonical-empty (the exact Codex F6 repro). Without it, package would
       // inject a baseline strengthen_item and the coaching would be "usable".
       nodes: [
-        { id: 'opt_sq', kind: 'option', label: 'Continue as-is', data: { is_status_quo: true } },
+        { id: 'opt_sq', kind: 'option', label: 'Continue as-is', data: { is_status_quo: true, brief_words: null } },
         { id: 'opt_a', kind: 'option', label: 'Contractor' },
         { id: 'fac_cost', kind: 'factor', label: 'Cost' },
       ],

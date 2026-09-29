@@ -56,11 +56,11 @@ function candidate(cut: Iv[], raise: Iv[], priceFactor: Partial<CandidateModel['
     goal: { metric: 'Market share', operator: '>=', value: 30, unit: '%', horizon_months: null, provenance: 'explicit', target_stated: true },
     constraints: [],
     options: [
-      { label: 'Cut List Price 15%', provenance: 'explicit', changes: [], is_status_quo: null, interventions: [
+      { label: 'Cut List Price 15%', provenance: 'explicit', changes: [], is_status_quo: null, brief_words: null, interventions: [
         ...cut, iv('Promo spend', 20000, 'GBP', 'ai_proposed'), iv('Sales headcount', 8, 'FTE', 'ai_proposed')] },
-      { label: 'Raise List Price 10%', provenance: 'explicit', changes: [], is_status_quo: null, interventions: [
+      { label: 'Raise List Price 10%', provenance: 'explicit', changes: [], is_status_quo: null, brief_words: null, interventions: [
         ...raise, iv('Promo spend', 5000, 'GBP', 'ai_proposed'), iv('Sales headcount', 6, 'FTE', 'ai_proposed')] },
-      { label: 'Keep current pricing', provenance: 'inferred', changes: [], is_status_quo: true, interventions: [] },
+      { label: 'Keep current pricing', provenance: 'inferred', changes: [], is_status_quo: true, brief_words: null, interventions: [] },
     ],
     factors: [
       { label: 'List price change', role: 'controllable', baseline_known: true, baseline_value: 0, unit: '%', provenance: 'inferred', plausible_max: 100, ...priceFactor },

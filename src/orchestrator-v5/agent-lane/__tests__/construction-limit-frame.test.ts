@@ -27,8 +27,8 @@ function candidate(frame?: unknown) {
     goal: { metric: 'Billing capability', operator: '>', target_stated: false, value: null, unit: null, horizon_months: 12, provenance: 'inferred' },
     constraints: [{ metric: 'Total first-year cost', operator: '<', value: 250000, unit: 'GBP', provenance: 'explicit', ...(frame === undefined ? {} : { frame }) }],
     options: [
-      { label: 'Build in-house', provenance: 'explicit', changes: ['Engineering spend'], interventions: [], is_status_quo: false },
-      { label: 'Buy a platform', provenance: 'explicit', changes: ['Platform fees'], interventions: [], is_status_quo: false },
+      { label: 'Build in-house', provenance: 'explicit', changes: ['Engineering spend'], interventions: [], is_status_quo: false, brief_words: null },
+      { label: 'Buy a platform', provenance: 'explicit', changes: ['Platform fees'], interventions: [], is_status_quo: false, brief_words: null },
     ],
     factors: [factor('Engineering spend'), factor('Platform fees')],
     risks: [],

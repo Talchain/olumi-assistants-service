@@ -26,8 +26,8 @@ function draft(release: { baseline_value: number | null; plausible_max: number; 
     goal: { metric: 'MRR', operator: '>=', target_stated: true, frame: 'level', value: 100000, unit: 'GBP', horizon_months: 12, provenance: 'explicit', baseline_known: true, baseline_value: 75000, baseline_provenance: 'explicit', scope: null },
     constraints: [{ metric: 'Monthly churn rate', operator: '<', value: 4, unit: '%', provenance: 'explicit', frame: 'level' }],
     options: [
-      { label: 'Raise Pro to £59 with the release', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [iv('Pro plan price', 59, 'GBP per month', 'explicit'), iv('Pro feature release delivered', 1, '')] },
-      { label: 'Keep £49', provenance: 'ai_proposed', is_status_quo: true, changes: [], interventions: [] },
+      { label: 'Raise Pro to £59 with the release', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: [], interventions: [iv('Pro plan price', 59, 'GBP per month', 'explicit'), iv('Pro feature release delivered', 1, '')] },
+      { label: 'Keep £49', provenance: 'ai_proposed', is_status_quo: true, brief_words: null, changes: [], interventions: [] },
     ],
     factors: [
       { label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP per month', provenance: 'explicit', plausible_max: 200 },

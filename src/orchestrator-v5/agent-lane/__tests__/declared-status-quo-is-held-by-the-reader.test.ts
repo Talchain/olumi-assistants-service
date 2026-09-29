@@ -287,10 +287,10 @@ describe('writer → reader: what admission mints for a declared status quo is w
     constraints: [],
     options: [
       {
-        label: 'Raise Pro to £59', provenance: 'explicit', changes: [], is_status_quo: null,
+        label: 'Raise Pro to £59', provenance: 'explicit', changes: [], is_status_quo: null, brief_words: null,
         interventions: [{ factor_label: 'Pro plan price', value: 59, value_kind: 'absolute', unit: '£/month', provenance: 'explicit' }],
       },
-      { label: KEEP_LABEL, provenance: 'explicit', changes: [], interventions: [], is_status_quo: true },
+      { label: KEEP_LABEL, provenance: 'explicit', changes: [], interventions: [], is_status_quo: true, brief_words: null },
     ],
     factors: [
       { label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: '£/month', provenance: 'explicit', plausible_max: 200 },

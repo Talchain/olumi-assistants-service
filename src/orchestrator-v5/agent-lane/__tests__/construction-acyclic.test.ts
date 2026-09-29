@@ -90,12 +90,12 @@ function servedCandidate(links: readonly Link[] = SERVED_LINKS): CandidateModel 
     },
     constraints: [{ metric: 'Monthly churn', operator: '<=', value: 10, unit: '%', provenance: 'explicit' }],
     options: [
-      { label: 'Keep £49 Price', provenance: 'inferred', changes: [], interventions: [], is_status_quo: true },
-      { label: 'Raise to £59', provenance: 'explicit', changes: [], is_status_quo: null, interventions: [
+      { label: 'Keep £49 Price', provenance: 'inferred', changes: [], interventions: [], is_status_quo: true, brief_words: null },
+      { label: 'Raise to £59', provenance: 'explicit', changes: [], is_status_quo: null, brief_words: null, interventions: [
         { factor_label: 'Pro plan price', value: 59, value_kind: 'absolute', unit: 'GBP/month', provenance: 'explicit' },
         { factor_label: 'AI feature availability', value: 1, value_kind: 'absolute', unit: 'release index', provenance: 'ai_proposed' },
       ] },
-      { label: 'Phased £54 Price', provenance: 'ai_proposed', changes: [], is_status_quo: null, interventions: [
+      { label: 'Phased £54 Price', provenance: 'ai_proposed', changes: [], is_status_quo: null, brief_words: null, interventions: [
         { factor_label: 'Pro plan price', value: 54, value_kind: 'absolute', unit: 'GBP/month', provenance: 'ai_proposed' },
         { factor_label: 'AI feature availability', value: 1, value_kind: 'absolute', unit: 'release index', provenance: 'ai_proposed' },
       ] },

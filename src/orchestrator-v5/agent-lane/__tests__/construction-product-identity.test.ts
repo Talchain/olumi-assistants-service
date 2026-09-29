@@ -70,10 +70,10 @@ function pricing(identities: Identity[] | undefined): Record<string, unknown> {
     },
     constraints: [{ metric: 'Monthly churn', operator: '<=', value: 10, unit: '%', provenance: 'explicit', frame: 'level' }],
     options: [
-      { label: 'Keep Pro at £49', provenance: 'explicit', is_status_quo: true, changes: [], interventions: [] },
-      { label: 'Raise Pro to £59', provenance: 'explicit', is_status_quo: null, changes: [],
+      { label: 'Keep Pro at £49', provenance: 'explicit', is_status_quo: true, brief_words: null, changes: [], interventions: [] },
+      { label: 'Raise Pro to £59', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: [],
         interventions: [{ factor_label: 'Pro plan price', value: 59, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] },
-      { label: 'Phase to £54', provenance: 'ai_proposed', is_status_quo: null, changes: [],
+      { label: 'Phase to £54', provenance: 'ai_proposed', is_status_quo: null, brief_words: null, changes: [],
         interventions: [{ factor_label: 'Pro plan price', value: 54, value_kind: 'absolute', unit: 'GBP', provenance: 'ai_proposed' }] },
     ],
     factors: [
@@ -120,9 +120,9 @@ function sameSign(): Record<string, unknown> {
     },
     constraints: [],
     options: [
-      { label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, changes: [], interventions: [] },
-      { label: 'Launch AI add-on', provenance: 'explicit', is_status_quo: null, changes: ['AI add-on uptake'], interventions: [] },
-      { label: 'Referral scheme', provenance: 'ai_proposed', is_status_quo: null, changes: ['Referral volume'], interventions: [] },
+      { label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, brief_words: null, changes: [], interventions: [] },
+      { label: 'Launch AI add-on', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: ['AI add-on uptake'], interventions: [] },
+      { label: 'Referral scheme', provenance: 'ai_proposed', is_status_quo: null, brief_words: null, changes: ['Referral volume'], interventions: [] },
     ],
     factors: [
       { label: 'AI add-on uptake', role: 'controllable', baseline_known: false, baseline_value: 0, unit: '%', provenance: 'ai_proposed', plausible_max: 100 },
@@ -157,9 +157,9 @@ function oneLever(): Record<string, unknown> {
   return {
     ...wire,
     options: [
-      { label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, changes: [], interventions: [] },
-      { label: 'Launch AI add-on', provenance: 'explicit', is_status_quo: null, changes: ['AI add-on uptake'], interventions: [] },
-      { label: 'Add-on to half the base', provenance: 'ai_proposed', is_status_quo: null, changes: [],
+      { label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, brief_words: null, changes: [], interventions: [] },
+      { label: 'Launch AI add-on', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: ['AI add-on uptake'], interventions: [] },
+      { label: 'Add-on to half the base', provenance: 'ai_proposed', is_status_quo: null, brief_words: null, changes: [],
         interventions: [{ factor_label: 'AI add-on uptake', value: 50, value_kind: 'absolute', unit: '%', provenance: 'ai_proposed' }] },
     ],
   };
@@ -185,7 +185,7 @@ function small(s: {
     },
     constraints: [],
     options: s.options.map((o) => ({
-      label: o.label, provenance: 'ai_proposed', is_status_quo: o.sq === true ? true : null, changes: o.changes ?? [],
+      label: o.label, provenance: 'ai_proposed', is_status_quo: o.sq === true ? true : null, brief_words: null, changes: o.changes ?? [],
       interventions: (o.levels ?? []).map(([factor_label, value]) => ({ factor_label, value, value_kind: 'absolute', unit: 'units', provenance: 'ai_proposed' })),
     })),
     factors: s.factors.map((f) => ({
@@ -741,10 +741,10 @@ function served({ without }: { without?: [string, string] } = {}): Record<string
     },
     constraints: [{ metric: 'Monthly churn', operator: '<=', value: 10, unit: '%', provenance: 'explicit', frame: 'level' }],
     options: [
-      { label: 'Keep £49 Price', provenance: 'ai_proposed', is_status_quo: true, changes: [], interventions: [] },
-      { label: 'Raise to £59', provenance: 'explicit', is_status_quo: null, changes: [],
+      { label: 'Keep £49 Price', provenance: 'ai_proposed', is_status_quo: true, brief_words: null, changes: [], interventions: [] },
+      { label: 'Raise to £59', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: [],
         interventions: [iv('Pro plan price', 59, 'GBP/month', 'explicit'), iv('AI feature availability', 1, 'release index', 'ai_proposed')] },
-      { label: 'Phased £54 Price', provenance: 'ai_proposed', is_status_quo: null, changes: [],
+      { label: 'Phased £54 Price', provenance: 'ai_proposed', is_status_quo: null, brief_words: null, changes: [],
         interventions: [iv('Pro plan price', 54, 'GBP/month', 'ai_proposed'), iv('AI feature availability', 1, 'release index', 'ai_proposed')] },
     ],
     factors: [
@@ -914,9 +914,9 @@ describe('rule 6 (B3): the rules the verification found unpinned', () => {
 
 describe('N-b: an option at today\'s level is not a lever', () => {
   const withOptions = (options: unknown[]) => ({ ...pricing([PRO_MRR_IDENTITY]), options });
-  const RAISE = { label: 'Raise Pro to £59', provenance: 'explicit', is_status_quo: null, changes: [],
+  const RAISE = { label: 'Raise Pro to £59', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: [],
     interventions: [{ factor_label: 'Pro plan price', value: 59, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] };
-  const at = (label: string, value: number, sq: boolean) => ({ label, provenance: 'explicit', is_status_quo: sq ? true : null, changes: [],
+  const at = (label: string, value: number, sq: boolean) => ({ label, provenance: 'explicit', is_status_quo: sq ? true : null, brief_words: null, changes: [],
     interventions: [{ factor_label: 'Pro plan price', value, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] });
 
   it('RED: the declared status quo that states today\'s price (£49) is never named', () => {
@@ -925,12 +925,12 @@ describe('N-b: an option at today\'s level is not a lever', () => {
   });
 
   it('RED: an unflagged option that sets today\'s price is never named either', () => {
-    const [m] = marks(withOptions([{ label: 'Keep Pro at £49', provenance: 'explicit', is_status_quo: true, changes: [], interventions: [] }, at('Hold at £49', 49, false), RAISE]));
+    const [m] = marks(withOptions([{ label: 'Keep Pro at £49', provenance: 'explicit', is_status_quo: true, brief_words: null, changes: [], interventions: [] }, at('Hold at £49', 49, false), RAISE]));
     expect(m?.options_not_sign_stable).toEqual(['raise_pro_to_59']);
   });
 
   it('RED: the declared status quo that names the price with NO level of its own is never named', () => {
-    const [m] = marks(withOptions([{ label: 'Keep Pro at £49', provenance: 'explicit', is_status_quo: true, changes: ['Pro plan price'], interventions: [] }, RAISE]));
+    const [m] = marks(withOptions([{ label: 'Keep Pro at £49', provenance: 'explicit', is_status_quo: true, brief_words: null, changes: ['Pro plan price'], interventions: [] }, RAISE]));
     expect(m?.options_not_sign_stable).toEqual(['raise_pro_to_59']);
   });
 

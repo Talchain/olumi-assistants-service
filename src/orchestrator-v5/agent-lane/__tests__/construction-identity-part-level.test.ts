@@ -32,9 +32,9 @@ function journeyC(subscribers: number | null, withProduct = true) {
     goal: { metric: 'MRR', operator: '>=', target_stated: true, frame: 'level', value: 100000, unit: 'GBP', horizon_months: 6, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'ai_proposed', scope: null },
     constraints: [],
     options: [
-      { label: 'Features and price rise', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [est('Pro plan price', 59, 'GBP per month', 'explicit')] },
-      { label: 'Additional advertising', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [est('Advertising spend', 10000, 'GBP')] },
-      { label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, changes: [], interventions: [] },
+      { label: 'Features and price rise', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: [], interventions: [est('Pro plan price', 59, 'GBP per month', 'explicit')] },
+      { label: 'Additional advertising', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: [], interventions: [est('Advertising spend', 10000, 'GBP')] },
+      { label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, brief_words: null, changes: [], interventions: [] },
     ],
     factors: [
       factor('Pro plan price', 49, 200, 'GBP per month', true),

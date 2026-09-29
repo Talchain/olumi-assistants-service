@@ -55,10 +55,10 @@ function c22() {
     goal: { metric: GOAL, operator: '>=', target_stated: false, frame: 'level', value: null, unit: 'points per sprint', horizon_months: null, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null },
     constraints: [] as Limit[],
     options: [
-      { label: 'Hire Two Developers', provenance: 'explicit', is_status_quo: null, changes: ['Engineering delivery capacity', 'Hiring cost'], interventions: [] },
-      { label: 'Hire a Tech Lead', provenance: 'explicit', is_status_quo: null, changes: ['Technical leadership capacity', 'Hiring cost'], interventions: [] },
-      { label: 'Hire Both', provenance: 'ai_proposed', is_status_quo: null, changes: ['Engineering delivery capacity', 'Technical leadership capacity', 'Hiring cost'], interventions: [] },
-      { label: 'Continue Current Staffing', provenance: 'ai_proposed', is_status_quo: true, changes: [], interventions: [] },
+      { label: 'Hire Two Developers', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: ['Engineering delivery capacity', 'Hiring cost'], interventions: [] },
+      { label: 'Hire a Tech Lead', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: ['Technical leadership capacity', 'Hiring cost'], interventions: [] },
+      { label: 'Hire Both', provenance: 'ai_proposed', is_status_quo: null, brief_words: null, changes: ['Engineering delivery capacity', 'Technical leadership capacity', 'Hiring cost'], interventions: [] },
+      { label: 'Continue Current Staffing', provenance: 'ai_proposed', is_status_quo: true, brief_words: null, changes: [], interventions: [] },
     ] as Opt[],
     factors: [
       factor('Engineering delivery capacity', null, 100, 'story points'),
@@ -731,9 +731,9 @@ describe('(4) B1\' (5845793528): a compaction may shed Olumi\'s option that reus
   function compact(): Draft {
     const d = c22();
     d.options = [
-      { label: SEVEN, provenance: 'explicit', is_status_quo: null, changes: [], interventions: [userSeven(), est('Hiring cost', 140000, 'GBP')] },
-      { label: 'Hire a Tech Lead', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [est('Technical leadership capacity', 1.5, 'FTE'), est('Hiring cost', 110000, 'GBP')] },
-      { label: 'Continue Current Staffing', provenance: 'ai_proposed', is_status_quo: true, changes: [], interventions: [] },
+      { label: SEVEN, provenance: 'explicit', is_status_quo: null, brief_words: null, changes: [], interventions: [userSeven(), est('Hiring cost', 140000, 'GBP')] },
+      { label: 'Hire a Tech Lead', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: [], interventions: [est('Technical leadership capacity', 1.5, 'FTE'), est('Hiring cost', 110000, 'GBP')] },
+      { label: 'Continue Current Staffing', provenance: 'ai_proposed', is_status_quo: true, brief_words: null, changes: [], interventions: [] },
     ];
     d.factors = [
       { ...factor(HEADCOUNT, 5, 20, 'developers'), baseline_known: true, provenance: 'explicit' },
@@ -750,7 +750,7 @@ describe('(4) B1\' (5845793528): a compaction may shed Olumi\'s option that reus
   }
   /** Olumi's "Hire Both", reusing the user's 7 on "Developer headcount" at the provenance given. */
   const hireBoth = (provenance: string, value = 7): Opt => ({
-    label: 'Hire Both', provenance: 'ai_proposed', is_status_quo: null, changes: [],
+    label: 'Hire Both', provenance: 'ai_proposed', is_status_quo: null, brief_words: null, changes: [],
     interventions: [{ ...userSeven(value), provenance }, est('Technical leadership capacity', 1.5, 'FTE'), est('Hiring cost', 250000, 'GBP')],
   });
   /** The oversized first draft (19 nodes): `compact()` plus Olumi's "Hire Both" and 10 speculative factors. */

@@ -90,9 +90,9 @@ function paul(opts: { identities?: Identity[]; churnLimit?: boolean } = {}): Rec
     options: [
       // The status quo states today's price, so the Run admits two different options (at today's level it is
       // never a lever — N-b).
-      { label: 'Keep Pro at £49', provenance: 'explicit', is_status_quo: true, changes: [],
+      { label: 'Keep Pro at £49', provenance: 'explicit', is_status_quo: true, brief_words: null, changes: [],
         interventions: [{ factor_label: 'Pro plan price', value: 49, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] },
-      { label: 'Raise Pro to £59', provenance: 'explicit', is_status_quo: null, changes: [],
+      { label: 'Raise Pro to £59', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: [],
         interventions: [{ factor_label: 'Pro plan price', value: 59, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] },
     ],
     factors: [
@@ -127,9 +127,9 @@ function additive(): Record<string, unknown> {
 }
 
 /** Carrying on as now states today's levels (never a lever, N-b), so the Run admits the options. */
-const CARRY_ON = { label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, changes: [],
+const CARRY_ON = { label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, brief_words: null, changes: [],
   interventions: [{ factor_label: 'AI add-on uptake', value: 0, value_kind: 'absolute', unit: '%', provenance: 'ai_proposed' }, { factor_label: 'Referral volume', value: 10, value_kind: 'absolute', unit: 'per month', provenance: 'ai_proposed' }] };
-const ADD_ON = { label: 'Launch AI add-on', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [{ factor_label: 'AI add-on uptake', value: 100, value_kind: 'absolute', unit: '%', provenance: 'ai_proposed' }] };
+const ADD_ON = { label: 'Launch AI add-on', provenance: 'explicit', is_status_quo: null, brief_words: null, changes: [], interventions: [{ factor_label: 'AI add-on uptake', value: 100, value_kind: 'absolute', unit: '%', provenance: 'ai_proposed' }] };
 
 /**
  * The detection's own shapes (`construction-product-identity.test.ts`): an add-on moves revenue per user AND
@@ -141,7 +141,7 @@ function sameSign(options?: unknown[]): Record<string, unknown> {
   return {
     goal, constraints: [],
     options: options ?? [CARRY_ON, ADD_ON,
-      { label: 'Referral scheme', provenance: 'ai_proposed', is_status_quo: null, changes: [], interventions: [{ factor_label: 'Referral volume', value: 20, value_kind: 'absolute', unit: 'per month', provenance: 'ai_proposed' }] },
+      { label: 'Referral scheme', provenance: 'ai_proposed', is_status_quo: null, brief_words: null, changes: [], interventions: [{ factor_label: 'Referral volume', value: 20, value_kind: 'absolute', unit: 'per month', provenance: 'ai_proposed' }] },
     ],
     factors: [
       { label: 'AI add-on uptake', role: 'controllable', baseline_known: false, baseline_value: 0, unit: '%', provenance: 'ai_proposed', plausible_max: 100 },
@@ -166,7 +166,7 @@ function sameSign(options?: unknown[]): Record<string, unknown> {
   };
 }
 const oneLever = () => sameSign([CARRY_ON, ADD_ON,
-  { label: 'Add-on to half the base', provenance: 'ai_proposed', is_status_quo: null, changes: [], interventions: [{ factor_label: 'AI add-on uptake', value: 50, value_kind: 'absolute', unit: '%', provenance: 'ai_proposed' }] },
+  { label: 'Add-on to half the base', provenance: 'ai_proposed', is_status_quo: null, brief_words: null, changes: [], interventions: [{ factor_label: 'AI add-on uptake', value: 50, value_kind: 'absolute', unit: '%', provenance: 'ai_proposed' }] },
 ]);
 
 type Graph = { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
@@ -413,9 +413,9 @@ describe('(b)+(c) run_analysis withholds the leader PLoT ranks first when its si
  * carrying on as now alone; and "Raise Pro to £59" (+ through Pro MRR, − through refunds) against keeping £49.
  */
 describe('(b) rule 7 on the Run: a leader whose routes through and around the product disagree is withheld', () => {
-  const SQ_TODAY = (levels: [string, number, string][]) => ({ label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, changes: [],
+  const SQ_TODAY = (levels: [string, number, string][]) => ({ label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, brief_words: null, changes: [],
     interventions: levels.map(([factor_label, value, unit]) => ({ factor_label, value, value_kind: 'absolute', unit, provenance: 'ai_proposed' })) });
-  const at = (label: string, factor_label: string, value: number, unit: string) => ({ label, provenance: 'ai_proposed', is_status_quo: null, changes: [],
+  const at = (label: string, factor_label: string, value: number, unit: string) => ({ label, provenance: 'ai_proposed', is_status_quo: null, brief_words: null, changes: [],
     interventions: [{ factor_label, value, value_kind: 'absolute', unit, provenance: 'ai_proposed' }] });
   function discount(direct: Dir, withReferral: boolean): Record<string, unknown> {
     return {
