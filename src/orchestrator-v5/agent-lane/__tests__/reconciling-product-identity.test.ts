@@ -16,6 +16,7 @@ import { Ajv } from 'ajv';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { withReconcilingProductIdentity } from '../reconciling-product.js';
 
 const GOAL = 'monthly_recurring_revenue';
 
@@ -110,6 +111,19 @@ describe('a goal whose stated level reconciles with its two stated parts is decl
       'Should we raise our Pro plan price from £49 to £59 a month? We have £75k MRR and want MRR above £85k within a year.',
     );
     expect(goal.nonlinear_identity ?? null).toBeNull();
+  });
+
+  // MG 5886660362: the 2/5 drafts that already declare it come out BYTE-IDENTICAL. The mint returns the SAME candidate
+  // object whenever it does not mint, so everything downstream of it is exactly today's path.
+  it('BYTE-IDENTICAL: every case that does not mint returns the very same candidate object', () => {
+    const declared = paulDraft({ identities: [{ outcome: 'Monthly recurring revenue', operation: 'product', factors: ['Pro plan price', 'Paying subscribers'], provenance: 'inferred' }] });
+    expect(withReconcilingProductIdentity(declared, PAUL)).toBe(declared);
+    const off = paulDraft({ goalLevel: 60000 });
+    expect(withReconcilingProductIdentity(off, PAUL.replace('£75k MRR', '£60k MRR'))).toBe(off);
+    const three = paulDraft({ extraFactor: true });
+    expect(withReconcilingProductIdentity(three, PAUL)).toBe(three);
+    const minted = paulDraft();
+    expect(withReconcilingProductIdentity(minted, PAUL)).not.toBe(minted);
   });
 
   it('CONTROL: a third parent into the goal → no identity (the product would not be the whole goal)', async () => {
