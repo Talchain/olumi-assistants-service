@@ -66,6 +66,8 @@ describe('briefGoalLevel: AIQ (b) — the sole same-terms figure, in the change\
       'Our support team costs £45,000 a month and we want to cut our cloud bill by 15%.', refused('£45,000')],
     ['"We spend £45k a month on support; we want to cut cloud costs by 20%"', 'Monthly cloud costs',
       'We spend £45k a month on support; we want to cut cloud costs by 20%.', refused('£45k')],
+    ['AIQ 5895823531: a PART is not the total ("Marketing spend is £45k/month; cut costs by 20%")', 'costs',
+      'Marketing spend is £45k/month; we want to cut costs by 20%.', refused('£45k')],
     ['named under-claim: the goal named by a word its name lacks ("Our AWS bill is £45k a month")', 'Monthly cloud costs',
       'Our AWS bill is £45k a month; we want to cut cloud costs by 20%.', refused('£45k')],
   ])('REFUSED (the figure is stated for another quantity): %s', (_why, metric, brief, expected) => {
@@ -75,6 +77,8 @@ describe('briefGoalLevel: AIQ (b) — the sole same-terms figure, in the change\
     ['the goal\'s own words ("Our cloud bill is £45k a month; cut it by 15%")', 'Monthly cloud bill', 'Our cloud bill is £45k a month; we want to cut it by 15%.', 'Our cloud bill is £45k a month'],
     ['one phrase for the level and its change ("cut our £45k monthly cloud spend by 20%")', 'Monthly cloud spend', 'We want to cut our £45k monthly cloud spend by 20%.', 'We want to cut our £45k monthly cloud spend by 20%'],
     ['no quantity named beside the figure ("We spend £45k a month; …cut costs by 20%")', 'costs', 'We spend £45k a month; we want to cut costs by 20%.', 'We spend £45k a month'],
+    ['AIQ 5895823531: the goal\'s own quantity after the figure ("We spend £45k a month on the cloud; cut cloud costs by 20%")', 'Monthly cloud costs',
+      'We spend £45k a month on the cloud; cut cloud costs by 20%.', 'We spend £45k a month on the cloud'],
   ])('ADOPTED (the phrase names the goal or nothing): %s', (_why, metric, brief, quote) => {
     expect(briefGoalLevel(draft({ metric, value: /15%/.test(brief) ? -15 : -20, unit: 'GBP per month' }), brief)).toMatchObject({ kind: 'adopt', value: 45000, quote });
   });
