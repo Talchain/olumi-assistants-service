@@ -45,8 +45,10 @@ describe('the unit-spelling class: a LEVEL in "% of <population>" is a percent',
   });
 
   it('[served 174453Z] OUTCOME: the admitted limit now carries churn\'s level as the baseline PLoT needs', () => {
-    expect([...levelLimitBaselineNodeIds(RUN.graph, RUN.graph.goal_constraints, RUN.goal_node_id)]).toEqual([]);
-    expect([...levelLimitBaselineNodeIds(RUN.graph, [admit()], RUN.goal_node_id)]).toEqual(['monthly_churn']);
+    // With the options the run scores (price and the release move churn on links Olumi sized in churn's unit).
+    const options = (RUN.graph.nodes as Array<Record<string, unknown>>).filter((n) => n.kind === 'option').map((n) => ({ interventions: n.interventions ?? {} }));
+    expect([...levelLimitBaselineNodeIds(RUN.graph, RUN.graph.goal_constraints, RUN.goal_node_id, options)]).toEqual([]);
+    expect([...levelLimitBaselineNodeIds(RUN.graph, [admit()], RUN.goal_node_id, options)]).toEqual(['monthly_churn']);
   });
 
   it('"percent of customers" is the same shape; percentLevelFrame agrees on a level and not on a delta', () => {

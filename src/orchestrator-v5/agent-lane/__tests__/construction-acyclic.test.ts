@@ -298,11 +298,17 @@ describe('SERVED 2-loop (factor <-> risk, both Olumi’s): withheld, said, and t
     const { calls, out, graph } = await build(servedCandidate(), repaired);
     expect(calls).toBe(2);
     expect(has(graph, DELAY, NEW_CONVERSIONS)).toBe(true);
-    expect(has(graph, AVAILABILITY, DELAY)).toBe(true);
     expect(has(graph, DELAY, AVAILABILITY)).toBe(false);
     expect(loopWithheld(out)).toEqual([]);
     expect(cycleFree(graph)).toBe(true);
-    expect(saidAbout(out, 'AI release delay')).toEqual([]);
+    // ⛔ ONE EFFECT, ONE ROUTE (`oneRoutePerEffect`, PR Review CR on #2276): the retry's delay → conversions (−) beside the
+    // served availability → delay (−) re-draws the served availability → conversions (+) the same way, so the machine-
+    // authored availability → delay link goes and is said once; the delay risk and its route on to conversions stay.
+    expect(has(graph, AVAILABILITY, NEW_CONVERSIONS), 'PRECONDITION: the direct link').toBe(true);
+    expect(has(graph, AVAILABILITY, DELAY)).toBe(false);
+    expect(saidAbout(out, 'AI release delay'), 'no LOOP line: the loop was repaired by the retry').toEqual([]);
+    const oneRoute = ((out.not_represented as string[]) ?? []).filter((x) => /would count that effect twice/.test(x));
+    expect(oneRoute).toEqual(['The link from "AI feature availability" to "AI release delay" was left out: "AI feature availability" already moves "New Pro conversions" straight, the same way, so a route through "AI release delay" would count that effect twice. "AI release delay" stays in the model as a risk to "New Pro conversions".']);
   });
 });
 

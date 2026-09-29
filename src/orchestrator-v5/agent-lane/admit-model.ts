@@ -17,6 +17,7 @@
  */
 
 import { REPAIR_CODES, type RepairEntry, type GoalThresholdFrameType, type QuantityFrameType } from '@talchain/schemas';
+import { oneRoutePerEffect } from './one-route-per-effect.js';
 import { isChangeFrame } from './limit-frame.js';
 import {
   CEE_GOAL_THRESHOLD_FRAME,
@@ -3557,7 +3558,14 @@ function admitOnce(
       severity: 'warn',
     });
   }
-  const mechanismEdges = causalEdges.filter((e) => !foldedShortcutPairs.has(`${e.from}::${e.to}`));
+  // ⛔ ONE EFFECT, ONE ROUTE (`oneRoutePerEffect`, PR Review CR on #2276): a machine-authored factor → risk link whose risk
+  // only re-draws that factor's own direct links, the same way, is left out and said; the risk stays.
+  const oneRoute = oneRoutePerEffect(
+    causalEdges.filter((e) => !foldedShortcutPairs.has(`${e.from}::${e.to}`)),
+    kindById as ReadonlyMap<string, unknown>, labelById as ReadonlyMap<string, unknown>, USER_AUTHORED_EDGE_SOURCES,
+  );
+  loss.push(...oneRoute.loss);
+  const mechanismEdges = oneRoute.edges;
 
   const causalLoss = linkResult.loss.filter((l) => {
     const m = /^edges\[(.+?)\]\./.exec(String(l.field_path ?? ''));
