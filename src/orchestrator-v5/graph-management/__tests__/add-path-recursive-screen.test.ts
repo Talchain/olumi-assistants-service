@@ -102,6 +102,8 @@ describe('the six zero-reader smuggle names — enumerated at the bytes', () => 
       'goal_deadline_as_stated',
       'goal_direction',
       'goal_horizon_months',
+      // + MG #2306 (29 Sep): Olumi's reading of a decrease target, written only by construction.
+      'goal_sense_reading',
       // + the three saved-example stamps, CEE-owned since the writer audit (2026-09-27): declared on
       // NodeV3 so writes keep them, so a producer must never be able to set them.
       'interventionkeys',
@@ -122,12 +124,12 @@ describe('the six zero-reader smuggle names — enumerated at the bytes', () => 
     expect(PIPELINE_OWNED_ROOTS.has('raw_value')).toBe(true);
   });
 
-  it('the J2 union adds five MORE names the same screen now kills (19 total with A6e + A5 + A6f + G1 + E-A2, not 13)', () => {
+  it('the J2 union adds five MORE names the same screen now kills (20 total with A6e + A5 + A6f + G1 + E-A2 + #2306, not 13)', () => {
     const all = [...PIPELINE_OWNED_ROOTS].filter((k) => !INTERVENTION_CONTRACT_KEYS.has(k)).sort();
     // 14 CEE-owned smuggle names (6 + A6e's `exists_defaulted` + A5's three saved-example stamps
-    // + A6f's `std_defaulted` + G1's `goal_direction` / `goal_horizon_months` + E-A2's `goal_deadline_as_stated`)
-    // + the 5 J2 names.
-    expect(all.length).toBe(19);
+    // + A6f's `std_defaulted` + G1's `goal_direction` / `goal_horizon_months` + E-A2's `goal_deadline_as_stated`
+    // + #2306's `goal_sense_reading`) + the 5 J2 names.
+    expect(all.length).toBe(20);
     expect(all.filter((k) => !SMUGGLE_NAMES.includes(k))).toEqual([
       'beliefexistssource',
       'directionsource',
