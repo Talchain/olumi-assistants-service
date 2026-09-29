@@ -11,6 +11,11 @@ import { PROVISIONAL_FIGURES_INSTRUCTION } from '../routing/route-with-tool-use.
 import { WITHHELD_DROPPED_DISPLAY_ANALYSIS_MEMBERS } from '../context/withheld-leader-projection.js';
 import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import nativeResearch from './fixtures/contextual-research-native-2026-09-08.json';
+import { rebindCapture } from '../../../tests/helpers/legacy-analysis-hash-v2.js';
+
+// Shared Data row 1 (projection v3): the capture's recorded hash, proven to be the pre-0.62.0 projection of its graph,
+// rebound to the current projection wherever it appears. Every fact built from the capture reads this copy.
+const REBOUND_RESEARCH = rebindCapture(nativeResearch, nativeResearch.graph, nativeResearch.analysis_result.computed_against_hash);
 vi.mock('../coaching/draft-coaching-log.js', async () => {
   const actual = await vi.importActual<
     typeof import('../coaching/draft-coaching-log.js')
@@ -462,24 +467,27 @@ describe('conversation advice reaches contextual reasoning', () => {
   });
 
   function useCapturedResearchScenario() {
-    const graph = GraphStateIngressSchema.parse(nativeResearch.graph);
-    expect(computeAnalysisAffectingGraphHash(graph)).toBe(nativeResearch.analysis_result.computed_against_hash);
-    mockState.persistedGraph = nativeResearch.graph;
-    mockState.persistedBriefText = nativeResearch.brief_text;
+    // Shared Data row 1 (projection v3): the capture's recorded hash is proven to be the pre-0.62.0 projection of its
+    // graph, then rebound to the current projection wherever it appears (tests/helpers/legacy-analysis-hash-v2.ts).
+    const captured = REBOUND_RESEARCH;
+    const graph = GraphStateIngressSchema.parse(captured.graph);
+    expect(computeAnalysisAffectingGraphHash(graph)).toBe(captured.analysis_result.computed_against_hash);
+    mockState.persistedGraph = captured.graph;
+    mockState.persistedBriefText = captured.brief_text;
     const fact = {
       fact_type: 'run_analysis', fact_version: 1, noop: false,
       result: {
-        ...nativeResearch.analysis_result,
-        scenario_id: nativeResearch.source.scenario_id,
-        graph_hash_at_run: nativeResearch.analysis_result.computed_against_hash,
-        computed_at: nativeResearch.analysis_state.run_state.computed_at,
+        ...captured.analysis_result,
+        scenario_id: captured.source.scenario_id,
+        graph_hash_at_run: captured.analysis_result.computed_against_hash,
+        computed_at: captured.analysis_state.run_state.computed_at,
       },
     };
     mockState.priorFacts = [fact];
     mockState.newestAnalysisFact = fact;
     mockState.priorTurns = [{ ...PRIOR_RUN_ANALYSIS_TURN,
-      scenario_id: nativeResearch.source.scenario_id,
-      user_message: 'Run analysis', assistant_message: nativeResearch.analysis_result.summary,
+      scenario_id: captured.source.scenario_id,
+      user_message: 'Run analysis', assistant_message: captured.analysis_result.summary,
     }];
     // The captured native request supplied neither graph_state nor analysis_state.
     // Exercise the real persisted-graph and selected-fact fallback, not UI ingress.
@@ -618,7 +626,7 @@ describe('conversation advice reaches contextual reasoning', () => {
         scenario_id: nativeResearch.source.scenario_id,
         // The capture names this `computed_against_hash`; the fact's field is
         // `graph_hash_at_run`. Mapped, not spread.
-        graph_hash_at_run: nativeResearch.analysis_result.computed_against_hash,
+        graph_hash_at_run: REBOUND_RESEARCH.analysis_result.computed_against_hash,
         computed_at: nativeResearch.analysis_state.run_state.computed_at,
         leading_option_id: nativeResearch.analysis_result.leading_option_id,
         summary: nativeResearch.analysis_result.summary,

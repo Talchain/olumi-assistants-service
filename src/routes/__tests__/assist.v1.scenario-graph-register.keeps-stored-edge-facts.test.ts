@@ -49,6 +49,7 @@ import { projectGraphForPersistence } from '../../orchestrator-v5/persisted-grap
 import { applyEdgeStrengthEdit } from '../../orchestrator-v5/system-events/edge-strength-edit.js';
 import { CEE_OWNED_EDGE_FIELDS, PIPELINE_OWNED_ROOTS } from '../../orchestrator-v5/graph-management/field-safety.js';
 import { EdgeV3 } from '../../schemas/cee-v3.js';
+import { legacyAnalysisHashV2, rebindRecordedAnalysisHash } from '../../../tests/helpers/legacy-analysis-hash-v2.js';
 
 type Rec = Record<string, unknown>;
 type Edge = Rec & { from: string; to: string; strength: { mean: number; std?: number } };
@@ -70,6 +71,10 @@ const CAPTURE = JSON.parse(
   readFileSync(join(process.cwd(), 'src/routes/__tests__/__fixtures__/register-erasure-dd456fe.json'), 'utf8'),
 ) as Capture;
 const SCENARIO = CAPTURE.scenario_id;
+// Shared Data row 1 (projection v3): the served hashes were computed under the pre-0.62.0 projection. Each is proven to
+// be that projection of its captured graph, then rebound (tests/helpers/legacy-analysis-hash-v2.ts). Under v3 the
+// erasure and the carry DIFFER in analysis space: edge `provenance.source` / `magnitude` are hash inputs now.
+const READ_AFTER_EDIT_HASH = rebindRecordedAnalysisHash(CAPTURE.read_after_edit.graph, CAPTURE.read_after_edit.graph_hash);
 const OWNER = '0f8a1b2c-3d4e-4f50-9a6b-7c8d9e0f1a2b';
 /** The edge the user edited, and the Olumi default nobody touched (the witness's TARGET and CONTRAST). */
 const TARGET = { from: 'fac_marketing', to: 'out_demand' } as const;
@@ -183,10 +188,11 @@ describe('the replay is the served witness (fidelity preconditions)', () => {
 
   it('the in-process register and edit reproduce the served bytes and hashes (captures 1 and 4)', async () => {
     const { first, beforeReregister } = await replayWitness();
-    expect(first.json().graph_hash).toBe(CAPTURE.register_response.graph_hash);
+    expect(first.json().graph_hash).toBe(rebindRecordedAnalysisHash(
+      projectGraphForPersistence(clone(CAPTURE.register_request.graph), { scenarioId: SCENARIO }), CAPTURE.register_response.graph_hash));
     expect(first.json().graph_identity_hash.value).toBe(CAPTURE.register_response.graph_identity_hash.value);
     expect(beforeReregister).toEqual(CAPTURE.read_after_edit.graph);
-    expect(analysisHashOf(beforeReregister)).toBe(CAPTURE.read_after_edit.graph_hash);
+    expect(analysisHashOf(beforeReregister)).toBe(READ_AFTER_EDIT_HASH);
     expect(identityOf(beforeReregister)).toBe(CAPTURE.read_after_edit.graph_identity_hash.value);
   });
 });
@@ -293,14 +299,18 @@ describe('(d) a field the caller sends is kept as sent, never overwritten', () =
 });
 
 describe('(e) the carry does not move the analysis hash; the identity returns to the pre-re-register identity', () => {
-  it('analysis hash = served f49ba1e65f9efc0c = the uncarried bytes; identity = the pre-re-register identity (a03eddd6…), not the served erasing one (fd474f78…)', async () => {
+  it('analysis hash = the pre-re-register hash (v3: the carry keeps it, the erasure would move it; served f49ba1e65f9efc0c under v2); identity = the pre-re-register identity (a03eddd6…), not the served erasing one (fd474f78…)', async () => {
     const { w, beforeReregister, second } = await replayWitness();
     const uncarried = projectGraphForPersistence(clone(CAPTURE.ui_reregister_request.graph), { scenarioId: SCENARIO });
 
-    // Analysis space: unmoved by the carry (the analysis projection is a whitelist that excludes every carried field).
-    expect(second.json().graph_hash).toBe(CAPTURE.ui_reregister_response.graph_hash);
-    expect(analysisHashOf(w.stored())).toBe(analysisHashOf(uncarried));
-    expect(analysisHashOf(w.stored())).toBe(CAPTURE.read_after_edit.graph_hash);
+    // Analysis space. Served (pre-0.62.0 projection): the carry and the erasure hashed alike, f49ba1e65f9efc0c.
+    expect(legacyAnalysisHashV2(w.stored() as never)).toBe(CAPTURE.ui_reregister_response.graph_hash);
+    expect(legacyAnalysisHashV2(uncarried as never)).toBe(CAPTURE.ui_reregister_response.graph_hash);
+    // Projection v3: who sized a link is an analysis input, so the ERASURE would have moved the hash; the carry keeps
+    // the pre-re-register analysis hash exactly.
+    expect(second.json().graph_hash).toBe(READ_AFTER_EDIT_HASH);
+    expect(analysisHashOf(w.stored())).toBe(READ_AFTER_EDIT_HASH);
+    expect(analysisHashOf(uncarried)).not.toBe(READ_AFTER_EDIT_HASH);
 
     // Identity space: the stored graph is the pre-re-register graph again.
     expect(second.json().graph_identity_hash.value).toBe(CAPTURE.read_after_edit.graph_identity_hash.value);
