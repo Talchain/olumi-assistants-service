@@ -28,6 +28,8 @@ import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrat
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
+import { guardMemories } from '../orchestrator-v5/agent-lane/memory/memory-guard.js';
+import { byDeadline, mem0Client, recallMemories, rememberTurn, renderRecallItem, scenarioAllowed, subjectOf } from '../orchestrator-v5/agent-lane/memory/supplementary-memory.js';
 import { OPENAI_ONLY, assertProviderAllowed, providerLedgerTruncated, recordProviderUsage, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { RESEARCH_CHIP_PREFIX, approvedQueryOf, readResearchResponse, researchChipFor, researchReplyText, researchRequestBody, type ResearchOutcome } from '../orchestrator-v5/agent-lane/runtime/public-research.js';
 import { agentRequestIdentity, conversationPromptAlias } from '../orchestrator-v5/agent-lane/runtime/prompt-identity.js';
@@ -39,7 +41,7 @@ import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { collectTurnReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
 import { withCurrentGraphHash } from '../orchestrator-v5/agent-lane/analysis-freshness-stamp.js';
-import { BOARD_EDIT_PREFIX, HistoryStore, dropSupersededPairs, historyFromDurableTurns, needsDurableSeed, pruneSupersededToolOutputs } from '../orchestrator-v5/agent-lane/history-store.js';
+import { BOARD_EDIT_PREFIX, HistoryStore, dropSupersededPairs, historyFromDurableTurns, needsDurableSeed, pruneSupersededToolOutputs, questionBefore } from '../orchestrator-v5/agent-lane/history-store.js';
 import { contextBindingSecret, issueContextPacket } from '../orchestrator-v5/agent-lane/runtime/request-assembly.js';
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
@@ -203,7 +205,8 @@ function isConstructionTimeout(err: unknown): boolean {
 }
 
 /** The conversation of record stays Olumi's; this is a per-process cache. */
-const histories = new HistoryStore();
+// EXPERIMENT arm B (CEE_CONTEXT_INHOUSE_QA_PAIRING, default off): older words carry the question they answered.
+const histories = new HistoryStore(undefined, undefined, () => config.mem0.inhouseQaPairing);
 const proposals = new ProposalStore();
 /** The approval carrier each scenario and subject's latest answer row persisted — see `carrierForAnswerRow`. */
 const carriedProposals = new CarriedProposals();
@@ -334,7 +337,7 @@ const MUTATION_INSTRUCTION =
 /** Marks a board edit in the Agent's history — defined beside `needsDurableSeed`, which must recognise it. */
 export { BOARD_EDIT_PREFIX } from '../orchestrator-v5/agent-lane/history-store.js';
 
-const AGENT_INSTRUCTIONS = [
+export const AGENT_INSTRUCTIONS = [
   'You are Olumi, a strategic reasoning layer. Improve human strategic judgement rather than deciding for the user.',
   'Answer the user’s actual question directly and naturally.',
   'Never invent canonical facts. Each turn opens with a CURRENT MODEL STATE input: exactly what get_canonical_state returns, read by Olumi at the start of the turn. A tool result later in the same turn that APPLIED a change (mutated: true, the new entities, a new graph_revision, readiness_after) is newer and supersedes it for what it covers: describe the model from the latest applied result. A proposal\u2019s readiness_if_approved describes the model only IF the user approves, and never supersedes it. Call get_canonical_state only when that input is absent.',
@@ -2097,8 +2100,23 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * no packet: the tool stays offered, exactly as before.
        */
       let canonicalContext: Parameters<typeof runAgentTurn>[0]['canonicalContext'];
+      /**
+       * EXPERIMENT arm C (exp/mem0-context-spike-20260929; CEE_MEM0_CONTEXT_EXPERIMENT + key + scenario allowlist, all
+       * default off). Recall starts NOW, beside the state read, and is waited for at most `recallDeadlineMs` after the
+       * state is in: added critical-path time is bounded by construction. No state, a late or failed recall → no recall.
+       */
+      const mem0On = config.mem0.contextExperiment && config.mem0.apiKey !== undefined && config.mem0.apiKey !== ''
+        && scenarioAllowed(config.mem0.scenarioAllowlist, scenarioId);
+      const mem0Subject = subjectOf(userId);
+      const recallStartedAt = Date.now();
+      const recallPromise = mem0On
+        ? mem0Client(config.mem0.apiKey!).then((client) => recallMemories({ client, userId: mem0Subject, scenarioId, query: message }))
+          .catch((err: unknown) => ({ memories: [], ms: Date.now() - recallStartedAt, error: String(err).slice(0, 200) }))
+        : undefined;
+      let turnState: unknown;
       try {
         const st = await capabilities.getCanonicalState(toolCtx);
+        if (st.ok === true) turnState = st;
         const revision = (st as { graph_revision?: unknown }).graph_revision;
         /**
          * ⭐ C6-1b: AN EMPTY MODEL IS A KNOWN STATE, NOT AN UNKNOWN ONE. The graph read answers an empty scenario with
@@ -2142,11 +2160,31 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: turn state could not be read — the Agent will read it itself');
       }
+      let supplementaryRecall: string | undefined;
+      if (recallPromise !== undefined) {
+        const stateReadyAt = Date.now();
+        const recalled = turnState !== undefined ? await byDeadline(recallPromise, stateReadyAt + config.mem0.recallDeadlineMs) : undefined;
+        const guarded = recalled !== undefined ? guardMemories(recalled.memories, { scenarioId, userId: mem0Subject, state: turnState }) : undefined;
+        supplementaryRecall = guarded !== undefined ? renderRecallItem(scenarioId, guarded.kept, guarded.discrepancies) : undefined;
+        // Counts, reasons and timing only — never memory text.
+        log.info({
+          scenario_id: scenarioId,
+          mem0_recall: {
+            state_available: turnState !== undefined,
+            timed_out: turnState !== undefined && recalled === undefined,
+            search_ms: recalled?.ms, added_wait_ms: Date.now() - stateReadyAt, total_ms: Date.now() - recallStartedAt,
+            ...(recalled?.error !== undefined ? { error: recalled.error } : {}),
+            recalled: recalled?.memories.length ?? 0, kept: guarded?.kept.length ?? 0, unreconciled: guarded?.discrepancies.length ?? 0,
+            suppressed: guarded?.suppressed.map((x) => x.reason) ?? [], chars: supplementaryRecall?.length ?? 0,
+          },
+        }, 'agent-lane: mem0 recall (experiment)');
+      }
       result = await runAgentTurn(
         {
           ctx: toolCtx,
           history,
           message,
+          ...(supplementaryRecall !== undefined ? { supplementaryRecall } : {}),
           instructions: AGENT_INSTRUCTIONS,
           maxOutputTokens: budget.max_output_tokens,
           mode,
@@ -2690,6 +2728,21 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
 
     // A7: what of the brief the model does not carry — the final readback's own manifest, bound to its graph_hash.
     const notModelledCarrier = notModelledTurnCarrier(notModelled, graphHash);
+    /**
+     * EXPERIMENT arm C: remember what the user TYPED this turn (never a chip, a board edit, or Olumi's reply), with the
+     * one question it answered and the revision the model stood at when the turn ended. Fire-and-forget: the reply
+     * never waits on it, and a failure is only logged.
+     */
+    if (typedNow !== null && config.mem0.contextExperiment && config.mem0.apiKey !== undefined && config.mem0.apiKey !== ''
+      && scenarioAllowed(config.mem0.scenarioAllowlist, scenarioId)) {
+      const answeredQuestion = questionBefore(history, history.length);
+      void mem0Client(config.mem0.apiKey).then((client) => rememberTurn({
+        client, userId: subjectOf(userId), scenarioId, turnId: turnId ?? String(req.id), userWords: typedNow,
+        ...(answeredQuestion !== undefined ? { answeredQuestion } : {}),
+        ...(graphHash !== undefined ? { graphRevision: graphHash } : {}), saidAt: new Date().toISOString(),
+      })).then((r) => log.info({ scenario_id: scenarioId, mem0_remember: { ok: r.ok, chars: r.chars, ms: r.ms, ...(r.error !== undefined ? { error: r.error } : {}) } }, 'agent-lane: mem0 remember (experiment)'))
+        .catch(() => { /* never costs the turn */ });
+    }
     return reply.code(200).send({
       ...wireBody,
       /**

@@ -1510,6 +1510,20 @@ const ConfigSchema = z.object({
     browserProxyAllowedOrigins: z.string().optional(), // BROWSER_PROXY_ALLOWED_ORIGINS — comma-separated origin allowlist
     browserProxyTimeoutMs: z.coerce.number().int().min(5_000).max(300_000).default(125_000), // BROWSER_PROXY_TIMEOUT_MS — proxy-to-CEE timeout (5s headroom above DRAFT_REQUEST_BUDGET_MS=120s, must be < ROUTE_TIMEOUT_MS)
   }).default({}),
+
+  // EXPERIMENT (exp/mem0-context-spike-20260929) — Agent-lane conversational recall A/B. Every switch is OFF by
+  // default and forced OFF in production (createEnvEnforcedBoolean); an experiment exception to the no-dark-launch
+  // ruling because it needs an external service and a key. Canonical state stays authoritative: recall is typed,
+  // non-authoritative context only (agent-lane/memory/*).
+  mem0: z.object({
+    contextExperiment: createEnvEnforcedBoolean(false, "CEE_MEM0_CONTEXT_EXPERIMENT"), // CEE_MEM0_CONTEXT_EXPERIMENT — arm C: Mem0 recall
+    inhouseQaPairing: createEnvEnforcedBoolean(false, "CEE_CONTEXT_INHOUSE_QA_PAIRING"), // CEE_CONTEXT_INHOUSE_QA_PAIRING — arm B: older words carry the question they answered
+    apiKey: z.string().optional(), // MEM0_API_KEY — named `apiKey` so logger redaction (CREDENTIAL_FIELDS) covers it
+    // CEE_MEM0_SCENARIO_ALLOWLIST — comma-separated scenario ids. EMPTY MEANS NOTHING IS SENT OR READ: only
+    // allowlisted test/PoC scenarios ever reach Mem0.
+    scenarioAllowlist: z.string().optional(),
+    recallDeadlineMs: z.coerce.number().int().min(50).max(2_000).default(300), // CEE_MEM0_RECALL_DEADLINE_MS — added critical-path ceiling
+  }).default({}),
 }).superRefine((data, ctx) => {
   // CEE_REQUIRE_USER_JWT=true requires configured service auth, in every
   // environment. The user-identity carve-out (src/orchestrator/user-identity.ts)
@@ -1917,6 +1931,13 @@ function parseConfig(): Config {
       proxyV5Target: env.PROXY_V5_TARGET,
       browserProxyAllowedOrigins: env.BROWSER_PROXY_ALLOWED_ORIGINS,
       browserProxyTimeoutMs: env.BROWSER_PROXY_TIMEOUT_MS,
+    },
+    mem0: {
+      contextExperiment: env.CEE_MEM0_CONTEXT_EXPERIMENT,
+      inhouseQaPairing: env.CEE_CONTEXT_INHOUSE_QA_PAIRING,
+      apiKey: env.MEM0_API_KEY,
+      scenarioAllowlist: env.CEE_MEM0_SCENARIO_ALLOWLIST,
+      recallDeadlineMs: env.CEE_MEM0_RECALL_DEADLINE_MS,
     },
   };
 

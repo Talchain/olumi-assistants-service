@@ -111,6 +111,13 @@ export interface AgentTurnInput {
   readonly composeReply?: (tool: string, args: unknown, result: ToolResult) => string | null;
   /** Injected for deterministic tests; defaults to the wall clock. */
   readonly now?: () => number;
+  /**
+   * EXPERIMENT (exp/mem0-context-spike-20260929): the rendered, guarded recall envelope (`renderRecallItem`). It goes in
+   * as ONE user-role item (the user's own words keep the user's authority, never a developer item's), BEFORE the state
+   * item so the current model and the live message come last, and — like the state item — it is never handed on into
+   * history: the next turn recalls afresh. Absent → the request is byte-identical to today.
+   */
+  readonly supplementaryRecall?: string;
 }
 
 /**
@@ -278,13 +285,18 @@ export async function runAgentTurn(
     && eligibility.omitted.some((o) => o.name === 'get_canonical_state')
     ? { role: 'developer', content: [{ type: 'input_text', text: `${CURRENT_MODEL_STATE_PREFIX}${JSON.stringify(input.canonicalContext.packet.state)}` }] }
     : undefined;
+  const recallItem = input.supplementaryRecall !== undefined && input.supplementaryRecall !== ''
+    ? { role: 'user', content: [{ type: 'input_text', text: input.supplementaryRecall }] }
+    : undefined;
   const items: unknown[] = [
     ...input.history,
+    ...(recallItem !== undefined ? [recallItem] : []),
     ...(stateItem !== undefined ? [stateItem] : []),
     { role: 'user', content: [{ type: 'input_text', text: input.message }] },
   ];
-  /** What this turn hands on as history: everything but the state it was given. */
-  const handedOn = (): unknown[] => (stateItem === undefined ? items : items.filter((i) => i !== stateItem));
+  /** What this turn hands on as history: everything but the state (and any recall) it was given. */
+  const handedOn = (): unknown[] => (stateItem === undefined && recallItem === undefined
+    ? items : items.filter((i) => i !== stateItem && i !== recallItem));
   const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; conflict_fields?: readonly string[]; rejected_levels?: readonly RejectedLevel[]; incomplete_reason?: string }[] = [];
   const toolResults: ToolResult[] = [];
   let mutated = false;

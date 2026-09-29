@@ -60,6 +60,19 @@
 | `SHARE_REVIEW_ENABLED` | `false` | assist.share.ts, v1.status.ts | Commented | |
 | `ENABLE_LEGACY_SSE` | `false` | assist.draft-graph.ts, auth.ts | No | Legacy SSE path |
 
+## Experiments (exp/mem0-context-spike-20260929 only — not for staging or production)
+
+An **exception** to the no-dark-launch ruling: these need an external service (Mem0) and a key, and they exist only to answer a keep/kill question. All default OFF and are forced OFF in production (`createEnvEnforcedBoolean`). Canonical state stays authoritative; recall is typed, non-authoritative context (`agent-lane/memory/*`). Results: `tools/mem0-spike/RESULTS.md`.
+
+| Env var | Config path | Default | Effect |
+|---------|-------------|---------|--------|
+| `CEE_MEM0_CONTEXT_EXPERIMENT` | `mem0.contextExperiment` | false (prod: forced false) | Arm C: guarded Mem0 recall on `/agent/v1/turn`, placed before the canonical state item; remembers what the user typed after the reply |
+| `CEE_CONTEXT_INHOUSE_QA_PAIRING` | `mem0.inhouseQaPairing` | false (prod: forced false) | Arm B: the user's older words carry the question they answered |
+| `MEM0_API_KEY` | `mem0.apiKey` | unset | Hosted Mem0 key (redacted by `CREDENTIAL_FIELDS`) |
+| `CEE_MEM0_SCENARIO_ALLOWLIST` | `mem0.scenarioAllowlist` | unset = nothing sent or read | Comma-separated scenario ids allowed to reach Mem0 |
+| `CEE_MEM0_RECALL_DEADLINE_MS` | `mem0.recallDeadlineMs` | 300 | Maximum wait for recall after the state read |
+| `MEM0_TELEMETRY` | (read by the SDK) | SDK default on | Set `false`: the SDK otherwise reports method names and payload keys to its vendor analytics |
+
 ## Orchestrator
 
 | Env Var | Default | Consumed In | `.env.example` | Notes |

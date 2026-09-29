@@ -71,21 +71,58 @@ const textOf = (item: unknown): string | undefined => {
  * fit in `OLDER_WORDS_MAX_CHARS`, in the order written, with how many are not shown. Olumi's prose, tool items, chip
  * texts and board-edit notes never enter it (the caller passes only what the user typed).
  */
-export function olderWordsItem(words: readonly string[], maxChars = OLDER_WORDS_MAX_CHARS): unknown | undefined {
+export function olderWordsItem(
+  words: readonly string[],
+  maxChars = OLDER_WORDS_MAX_CHARS,
+  questions?: readonly (string | undefined)[],
+): unknown | undefined {
   if (words.length === 0) return undefined;
   const [first, ...rest] = words;
+  /**
+   * EXPERIMENT (arm B, `CEE_CONTEXT_INHOUSE_QA_PAIRING`): with `questions`, each kept answer carries the question
+   * Olumi asked just before it, so a bare "It is moderate" still says WHAT is moderate. Absent → today's bytes.
+   */
+  const q = (k: number): string | undefined => questions?.[k + 1];
+  const line = (w: string, question: string | undefined) => (question !== undefined ? `- Olumi asked: "${question}" → user: "${w}"` : `- "${w}"`);
   const kept: string[] = [];
   let used = 0;
   for (let k = rest.length - 1; k >= 0; k -= 1) {
     const w = rest[k]!;
-    if (used + w.length > maxChars) break;
-    kept.unshift(w);
-    used += w.length;
+    const cost = w.length + (q(k)?.length ?? 0);
+    if (used + cost > maxChars) break;
+    kept.unshift(line(w, q(k)));
+    used += cost;
   }
   const hidden = rest.length - kept.length;
-  const quote = (w: string) => `- "${w}"`;
-  const lines = [OLDER_WORDS_LABEL, quote(first!), ...(hidden > 0 ? [`[${hidden} earlier message${hidden === 1 ? '' : 's'} not shown]`] : []), ...kept.map(quote)];
+  const lines = [OLDER_WORDS_LABEL, line(first!, questions?.[0]), ...(hidden > 0 ? [`[${hidden} earlier message${hidden === 1 ? '' : 's'} not shown]`] : []), ...kept];
   return { role: 'user', content: [{ type: 'input_text', text: lines.join('\n') }] };
+}
+
+/** How much of the question an older answer replied to is carried (arm B). */
+const ANSWERED_QUESTION_MAX_CHARS = 200;
+
+/**
+ * The last question Olumi's reply asked, or undefined: the final `?`-terminated sentence of `text`, capped. Pure.
+ * Used by arm B and by the Mem0 arm (the question an answer replied to is stored with it, never the reply itself).
+ */
+export function lastQuestionOf(text: string | undefined): string | undefined {
+  if (text === undefined) return undefined;
+  const sentences = text.replace(/\s+/g, ' ').match(/[^.!?\n]*\?/g);
+  const last = sentences?.[sentences.length - 1]?.trim();
+  if (last === undefined || last.length < 3) return undefined;
+  return last.length > ANSWERED_QUESTION_MAX_CHARS ? `…${last.slice(-ANSWERED_QUESTION_MAX_CHARS)}` : last;
+}
+
+const isAssistantMessage = (item: unknown): boolean =>
+  typeof item === 'object' && item !== null && (item as { role?: unknown }).role === 'assistant';
+
+/** The question the user message at `index` answered: the last assistant message before it (within `items`). */
+export function questionBefore(items: readonly unknown[], index: number): string | undefined {
+  for (let k = index - 1; k >= 0; k -= 1) {
+    if (isUserMessage(items[k])) return undefined;
+    if (isAssistantMessage(items[k])) return lastQuestionOf(textOf(items[k]));
+  }
+  return undefined;
 }
 
 /**
@@ -488,15 +525,20 @@ export class HistoryStore {
   private readonly typed = new Map<string, string[]>();
   /** The user's typed words from turns the window has dropped, in the order written (`olderWordsItem`). */
   private readonly older = new Map<string, string[]>();
+  /** The question each `older` entry answered, index-aligned (arm B). Always kept; rendered only when paired. */
+  private readonly olderQuestions = new Map<string, (string | undefined)[]>();
 
   constructor(
     private readonly maxSessions = DEFAULT_MAX_SESSIONS,
     private readonly maxTurns = DEFAULT_MAX_TURNS,
+    /** EXPERIMENT arm B (`CEE_CONTEXT_INHOUSE_QA_PAIRING`). Read per call; absent → false → today's bytes. */
+    private readonly pairQuestions: () => boolean = () => false,
   ) {}
 
   get(sessionId: string): unknown[] {
     const items = dropDanglingCalls(this.items.get(sessionId) ?? []);
-    const older = olderWordsItem(this.older.get(sessionId) ?? []);
+    const older = olderWordsItem(this.older.get(sessionId) ?? [], OLDER_WORDS_MAX_CHARS,
+      this.pairQuestions() ? this.olderQuestions.get(sessionId) ?? [] : undefined);
     return older === undefined ? items : [older, ...items];
   }
 
@@ -520,16 +562,20 @@ export class HistoryStore {
       const dropped = items.slice(0, cut);
       // Only what the user TYPED (`recordTyped`): a chip's words, a board-edit note or a reseeded row never qualify.
       const typed = new Set(this.typed.get(sessionId) ?? []);
-      const words = dropped.filter(isUserMessage).map(textOf)
-        .filter((t): t is string => t !== undefined && t.trim() !== '' && typed.has(t));
-      if (words.length > 0) this.older.set(sessionId, [...(this.older.get(sessionId) ?? []), ...words]);
+      const pairs = dropped.map((item, i) => ({ item, i })).filter(({ item }) => isUserMessage(item))
+        .map(({ item, i }) => ({ text: textOf(item), question: questionBefore(dropped, i) }))
+        .filter((p): p is { text: string; question: string | undefined } => p.text !== undefined && p.text.trim() !== '' && typed.has(p.text));
+      if (pairs.length > 0) {
+        this.older.set(sessionId, [...(this.older.get(sessionId) ?? []), ...pairs.map((p) => p.text)]);
+        this.olderQuestions.set(sessionId, [...(this.olderQuestions.get(sessionId) ?? []), ...pairs.map((p) => p.question)]);
+      }
       this.items.set(sessionId, [...pendingProposalPair(dropped), ...kept]);
     } else {
       this.items.set(sessionId, kept);
     }
     if (this.older.size > this.maxSessions) {
       const oldest = this.older.keys().next().value;
-      if (oldest !== undefined) this.older.delete(oldest);
+      if (oldest !== undefined) { this.older.delete(oldest); this.olderQuestions.delete(oldest); }
     }
   }
 
