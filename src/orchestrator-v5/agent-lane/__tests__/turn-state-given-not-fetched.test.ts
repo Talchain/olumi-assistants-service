@@ -343,7 +343,7 @@ describe('an applied proposal and an earlier approval are not kept in the histor
  *   - BOTH: no constraint probabilities (until B5 per_limit lands), and a run the model has moved past says so.
  */
 describe('the kept run is compacted by its own permission, and marked stale once the model moves', () => {
-  type Readback = { analysisState?: unknown; analysisResult?: unknown };
+  type Readback = { scenarioId?: string; analysisState?: unknown; analysisResult?: unknown };
   type Prune = (items: readonly unknown[], approvalsThisTurn?: readonly unknown[], readback?: Readback) => unknown[];
   const prune = (items: readonly unknown[], readback?: Readback) =>
     (historyStore as unknown as { pruneSupersededToolOutputs: Prune }).pruneSupersededToolOutputs(items, [], readback);
@@ -364,8 +364,8 @@ describe('the kept run is compacted by its own permission, and marked stale once
     : v !== null && typeof v === 'object' ? Object.entries(v).flatMap(([k, x]) => [k, ...keysOf(x)]) : [];
   /** R&C's pinned KEY set, verbatim; `decision_sensitivity` is the one matching key AIQ keeps. */
   const RC_KEYS = /confidence|near_tie|goal_fit|separation|alternative_winner|win_probabilit|sensitivity|evpi|enrichment/i;
-  /** AIQ's named withheld drops the pinned set does not match: outcome means, goal probabilities, conditional winners, flips. */
-  const AIQ_KEYS = ['mean', 'gap', 'probability_of_goal', 'probability_of_joint_goal', 'all_limits_hold_probability', 'conditional_winners', 'flip_thresholds', 'run_delta'];
+  /** AIQ's new ruling keeps the recorded outcome range, including its mean, while dropping ranking and chances. */
+  const AIQ_KEYS = ['gap', 'probability_of_goal', 'probability_of_joint_goal', 'all_limits_hold_probability', 'conditional_winners', 'flip_thresholds', 'run_delta'];
   const reRankingKeys = (v: unknown) => keysOf(v).filter((k) => (RC_KEYS.test(k) && k !== 'decision_sensitivity') || AIQ_KEYS.includes(k));
   const namesConstraintProbability = (k: string) => /constraint/i.test(k) && /probabilit/i.test(k);
   const RAW = RUN_RESULT.result as Record<string, any>;
@@ -388,7 +388,8 @@ describe('the kept run is compacted by its own permission, and marked stale once
     // The run AS THE AGENT GETS IT (`analysisResultForAgent`): the limits-only joint is `all_limits_hold_probability`, and the
     // brief's `goal_fit` (the leader's joint) is already gone (DL 5888327580) — so those two are not families to probe for.
     for (const k of ['enrichment', 'win_probabilities', 'win_probability', 'confidence', 'near_tie', 'gap', 'alternative_winner_label',
-      'mean', 'probability_of_goal', 'all_limits_hold_probability', 'conditional_winners', 'flip_thresholds']) expect(raw, `control: the served run carries ${k}`).toContain(k);
+      'probability_of_goal', 'all_limits_hold_probability', 'conditional_winners', 'flip_thresholds']) expect(raw, `control: the served run carries ${k}`).toContain(k);
+    expect(keysOf(RUN_RESULT), 'control: the served run carries its measured outcome mean').toContain('mean');
     for (const k of ['goal_fit', 'probability_of_joint_goal']) expect(raw, `the Agent never gets ${k}`).not.toContain(k);
     expect(reRankingKeys(viaRunChip(RUN_RESULT)), 'control: the fast path’s readback carries the leader claim’s separation').toContain('separation');
     for (const [label, run] of [['the Agent’s own call', RUN_RESULT], ['the Run chip’s fast path', viaRunChip(RUN_RESULT)]] as const) {
@@ -400,6 +401,8 @@ describe('the kept run is compacted by its own permission, and marked stale once
       expect(kept.result.computed_against_hash, `${label}: stamped with the hash it was computed against`).toBe(STAMP);
       expect(kept.result.option_comparison.map((o: { label: string }) => o.label), `${label}: each option's label`)
         .toEqual(RAW.enrichment.option_comparison.map((o: { label: string }) => o.label));
+      expect(kept.result.option_comparison.map((o: { outcome: unknown }) => o.outcome), `${label}: each recorded outcome, in order`)
+        .toEqual(RAW.enrichment.option_comparison.map((o: { outcome: unknown }) => o.outcome));
       expect(kept.options, `${label}: each option's label and levels`).toEqual(RUN_RESULT.options);
       expect(kept.claim_permissions, `${label}: the leader withheld, with its reason`).toEqual(RUN_RESULT.claim_permissions);
       expect(kept.claim_permissions.withheld_reason).toBe('nonlinear_identity_sign_unproven');
@@ -510,12 +513,10 @@ describe('the kept run is compacted by its own permission, and marked stale once
     expect(reRankingKeys(JSON.parse(outputOf(pruned, 'call_run2')))).toEqual([]);
   });
 
-  /**
-   * SIZE, on the served A02 run: the floor sits under the measurement, so keeping any one heavy field turns it red.
-   */
-  it('RED (row 5): the kept WITHHELD run shrinks by at least 70% in bytes', () => {
+  /** The new outcome ranges cost bytes; the withheld projection still drops the large ranking carriers. */
+  it('RED (row 5): the kept WITHHELD run is materially smaller than the full output', () => {
     const raw = Buffer.byteLength(outputOf(afterRun(RUN_RESULT), 'call_run'), 'utf8');
     const kept = Buffer.byteLength(outputOf(prune(afterRun(RUN_RESULT), SERVED_READBACK), 'call_run'), 'utf8');
-    expect(kept, `withheld: ${raw} → ${kept} bytes`).toBeLessThanOrEqual(raw * 0.3);
+    expect(kept, `withheld: ${raw} → ${kept} bytes`).toBeLessThan(raw * 0.5);
   });
 });
