@@ -89,11 +89,14 @@ describe('the issue point: a Run offers the card once per revision', () => {
     expect(r1).not.toHaveProperty('identity_card');
   });
 
-  it('once offered on this revision, a later Run does not offer it again', async () => {
+  it('a later Run on the SAME unconfirmed revision offers it again: the same proposal, never a dead end (R3 run k)', async () => {
     const w = world(served(0));
-    await w.caps.proposeIdentity!(ctxSaying('Is MRR price times subscribers?'));
+    const first = await w.caps.proposeIdentity!(ctxSaying('Is MRR price times subscribers?')) as Json;
     const again = await w.caps.runAnalysis(ctxSaying('Run it'), { reason: 'Run it.' }) as Json;
-    expect(again).not.toHaveProperty('identity_card');
+    expect(again.identity_card).toEqual(expect.objectContaining({ available: true }));
+    const reissued = await w.caps.proposeIdentity!(ctxSaying('Run it')) as Json;
+    expect(reissued.proposal_id).toBe(first.proposal_id);
+    expect(w.s.writes).toBe(0);
   });
 });
 
@@ -108,6 +111,12 @@ describe('the route issues the card when the Agent did not (served 3727537: 0/3 
       (id) => ({ proposal: w.store.get(id), result: issued as never }));
     expect(chips[0]).toEqual(expect.objectContaining({ label: 'Yes, calculate it that way', detail: proposeProductIdentity(served(1))!.words }));
     expect(w.s.writes).toBe(0);
+  });
+
+  it('the draft turn: a build whose automatic first analysis says a card is waiting → the route issues it (R3 run k)', () => {
+    expect(identityCardToIssue([{ name: 'build_model_from_brief' }], [{ ok: true, first_analysis: { identity_card: { available: true, note: 'x' } } }])).toBe(true);
+    expect(identityCardToIssue([{ name: 'build_model_from_brief' }, { name: 'propose_identity' }], [{ first_analysis: { identity_card: { available: true } } }])).toBe(false);
+    expect(identityCardToIssue([{ name: 'build_model_from_brief' }], [{ first_analysis: { ran: true } }])).toBe(false);
   });
 
   it('not when the Agent already proposed it, not on an approval turn, not when no card is waiting', async () => {
