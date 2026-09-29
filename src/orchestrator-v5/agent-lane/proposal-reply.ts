@@ -18,6 +18,7 @@
  */
 import { formatFactorValue } from '../compose/format-factor-value.js';
 import { sayFigureExactly } from './say-figure.js';
+import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (x: unknown): Rec | undefined => (x !== null && typeof x === 'object' && !Array.isArray(x) ? (x as Rec) : undefined);
@@ -248,10 +249,104 @@ function limitChangeReply(r: Rec): string | null {
   return reply(subjectOf(r.public_label), ['The new figure is the one you gave.'], question(undefined));
 }
 
+/** Argument keys that QUOTE the user's words: a figure inside a quote is carried into no reply. */
+const QUOTE_KEY = /(?:^|_)(?:words|quote|rationale|basis|reason)$/;
+
+/** A number an argument carries, with the unit written beside it in the same object (if any). */
+type Carried = { readonly value: number; readonly unit: string | null };
+
+/** Every number (with its sibling `unit`) and string an argument carries, outside quotes of the user's own words. */
+function carriedBy(value: unknown, key: string, into: { nums: Carried[]; strs: string[] }, unit: string | null): void {
+  if (QUOTE_KEY.test(key)) return;
+  if (typeof value === 'number' && Number.isFinite(value)) into.nums.push({ value, unit });
+  else if (typeof value === 'string') into.strs.push(value);
+  else if (Array.isArray(value)) for (const v of value) carriedBy(v, key, into, unit);
+  else if (value !== null && typeof value === 'object') {
+    const o = value as Record<string, unknown>;
+    const own = typeof o.unit === 'string' ? o.unit : null;
+    for (const [k, v] of Object.entries(o)) carriedBy(v, k, into, own);
+  }
+}
+
+const PERCENT_UNIT = /%|percent|pct|fraction|ratio|proportion/i;
+const MONEY_UNIT = /£|\$|€|\bGBP\b|\bUSD\b|\bEUR\b|pound|dollar|euro/i;
+/** The currency a carried unit names (null when it names none): compared with the written amount's `currencyCode`. */
+const currencyOf = (unit: string | null): string | null => unit === null ? null
+  : /£|\bGBP\b|pound/i.test(unit) ? 'GBP' : /\$|\bUSD\b|dollar/i.test(unit) ? 'USD' : /€|\bEUR\b|euro/i.test(unit) ? 'EUR' : null;
+const sameNumber = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+
+/**
+ * Whether ONE carried number evidences ONE written amount, by value AND by quantity kind (Codex CHANGES_REQUIRED on
+ * #2263: `{ value: 4, unit: 'GBP' }` must not carry both "£4" and "4%"). `unit` = the carried unit says the same kind;
+ * `bare` = no unit beside it, so it may stand for the amount but only once; null = not this amount.
+ */
+function evidences(c: Carried, a: { readonly magnitude: number; readonly kind?: unknown; readonly currencyCode?: string }): 'unit' | 'bare' | null {
+  const money = c.unit !== null && MONEY_UNIT.test(c.unit);
+  const percent = c.unit !== null && PERCENT_UNIT.test(c.unit);
+  if (a.kind === 'percent') {
+    if (money || !(sameNumber(c.value, a.magnitude) || sameNumber(c.value, a.magnitude / 100))) return null;
+    return c.unit === null ? 'bare' : percent ? 'unit' : null;
+  }
+  if (!sameNumber(c.value, a.magnitude)) return null;
+  if (c.unit === null) return 'bare';
+  // Codex CR #2 on #2263: USD 4 never carries the user's £4 — the written amount's currency identity, not "some money".
+  if (a.kind === 'currency') return money && !percent && (a.currencyCode === undefined || currencyOf(c.unit) === a.currencyCode) ? 'unit' : null;
+  return money || percent ? null : 'unit';
+}
+
+/**
+ * ⛔ A FIGURE THE USER WROTE THAT THE CALL DOES NOT CARRY IS SOMETHING ELSE TO ACKNOWLEDGE (served journey-A C3, real-role
+ * replay 28 Sep, 15 served turns): "price sensitivity is very high, and we've seen our churn increase by 15% when we made
+ * our last price increase. That was only £4." — the model called the link-strength proposal `whole_request: true` on
+ * 11/15, and the reply composed from the result named the user's +15% / £4 on 4/15. Each figure the repo's one extractor
+ * (`findStatedAmounts`) reads in the message needs its OWN evidence in the call: a carried number of the same quantity
+ * kind (a percent may be carried as its fraction), each number standing for one figure only, or the figure's own text
+ * in a non-quote argument. Otherwise the turn keeps its narrating call, for any model.
+ */
+export function userFiguresTheCallLeaves(args: unknown, userMessage: string): string[] {
+  if (typeof userMessage !== 'string' || userMessage === '') return [];
+  const c: { nums: Carried[]; strs: string[] } = { nums: [], strs: [] };
+  carriedBy(args, '', c, null);
+  const used = new Set<number>();
+  // Codex CR #2 on #2263: text evidence is one-to-one too — each written occurrence consumes one occurrence of its text
+  // (whole figures only: "£4" is not inside "£45"), so one "£4" in a label never carries two written "£4"s.
+  const textUsed = new Map<string, number>();
+  const occurrences = (s: string, text: string): number => {
+    const esc = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return (s.match(new RegExp(`(?<![\\d.,])${esc}(?![\\d]|[.,]\\d)`, 'g')) ?? []).length;
+  };
+  const amounts = findStatedAmounts(userMessage);
+  /**
+   * ⛔ A UNITLESS VALUE THAT COULD BE TWO KINDS CARRIES NEITHER (AIQ meaning 5880894832, Codex CR #3 on #2263): with
+   * "£4 and 4%" written, a bare `4` is £4 or 4%, so it is ambiguous. It evidences neither, and the turn narrates (asks)
+   * rather than guessing which. A bare value whose written candidates share ONE kind and currency is not ambiguous.
+   */
+  const identity = (x: { kind?: unknown; currencyCode?: string }): string => `${String(x.kind)}|${x.currencyCode ?? ''}`;
+  c.nums.forEach((n, i) => {
+    if (n.unit !== null) return;
+    const kinds = new Set(amounts.filter((x) => evidences(n, x as { magnitude: number; kind?: unknown; currencyCode?: string }) === 'bare')
+      .map((x) => identity(x as { kind?: unknown; currencyCode?: string })));
+    if (kinds.size > 1) used.add(i);
+  });
+  const left: string[] = [];
+  for (const a of amounts) {
+    const text = a.matchedText.trim();
+    const amount = a as { magnitude: number; kind?: unknown; currencyCode?: string };
+    const pick = (want: 'unit' | 'bare'): number => c.nums.findIndex((n, i) => !used.has(i) && evidences(n, amount) === want);
+    const i = pick('unit') >= 0 ? pick('unit') : pick('bare');
+    if (i >= 0) { used.add(i); continue; }
+    const s = c.strs.findIndex((str, k) => occurrences(str, text) > (textUsed.get(`${k}|${text}`) ?? 0));
+    if (s >= 0) { textUsed.set(`${s}|${text}`, (textUsed.get(`${s}|${text}`) ?? 0) + 1); continue; }
+    left.push(text);
+  }
+  return left;
+}
+
 export function composeProposalReply(tool: string, args: unknown, result: unknown, userMessage: string): string | null {
   // The model's own typed word that this call is the WHOLE request: a message asking for two things never loses one.
   if (recordOf(args)?.whole_request !== true) return null;
   if (typeof userMessage === 'string' && userMessage.includes('?')) return null;
+  if (userFiguresTheCallLeaves(args, userMessage).length > 0) return null;
   const r = recordOf(result);
   if (r === undefined || r.ok !== true || r.mutated !== false || !nonEmpty(r.proposal_id)) return null;
   const allowed = tool === 'propose_new_option' ? NEW_OPTION_KEYS : tool === 'propose_link_strength' ? LINK_KEYS

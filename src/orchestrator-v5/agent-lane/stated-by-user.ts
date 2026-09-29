@@ -100,14 +100,63 @@ function moneyUnitScale(unit: unknown): number {
 /** A number the text writes in words ("three engineers"), read by the repo's one cardinal grammar; a fraction refuses. */
 const CARDINAL_PHRASE = new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})${CARDINAL_FRACTION_CONTINUATION}\\b`, 'gi');
 
-/** Whether the brief states `value` as today's level: `figureTheUserWrote`, a number written in words, or "zero". */
-function baselineTheBriefStates(value: number, unit: unknown, brief: string): boolean {
+/**
+ * Whether the brief states `value` as today's level: `figureTheUserWrote`, else a number written in words or "zero"
+ * that COUNTS THIS FACTOR (AIQ 5881132458). The fallback used to ground ANY same-valued cardinal phrase and ANY "zero":
+ * "hire three engineers" made an unstated 3% churn the user's, "zero downtime" an unstated 0 enterprise customers.
+ *  · A number in words grounds a PLAIN count only — "two" is never £2 or 2% (`amountIs`'s own family rule).
+ *  · "zero" is 0 in any unit, so it takes no family rule.
+ *  · Either grounds the factor only when the words right after it name it (`wordsNameThisFactor`).
+ * Every miss under-claims: the figure reads as Olumi's.
+ */
+function baselineTheBriefStates(value: number, unit: unknown, brief: string, label: unknown): boolean {
   if (figureTheUserWrote(value, unit, brief)) return true;
-  if (value === 0) return /\bzero\b/i.test(brief);
+  if (value === 0) return [...brief.matchAll(/\bzero\b/gi)].some((m) => wordsNameThisFactor(brief, m, label, unit));
+  const family = unitPhraseFamily(unit);
+  if (family === 'currency' || family === 'percent') return false;
   return [...brief.matchAll(CARDINAL_PHRASE)].some((m) => {
     const v = parseCardinalAmount(m[0]);
-    return v !== null && same(v, value);
+    return v !== null && same(v, value) && wordsNameThisFactor(brief, m, label, unit);
   });
+}
+
+/** Words that name no quantity: they cannot tie "three … each month" to a factor measured per month. */
+const NOT_A_NAME = new Set([
+  'the', 'and', 'our', 'its', 'are', 'have', 'has', 'with', 'for', 'per', 'more', 'new', 'today', 'now', 'currently',
+  'each', 'every', 'day', 'week', 'month', 'quarter', 'year', 'daily', 'weekly', 'monthly', 'quarterly', 'annual',
+  'annually', 'yearly', 'total', 'count', 'number', 'level',
+]);
+
+/** A text's naming words: lower-case, three letters or more, a plural "s" dropped, time and filler words out. */
+function namingWords(text: unknown): string[] {
+  if (typeof text !== 'string') return [];
+  return (text.toLowerCase().match(/[a-z]{3,}/g) ?? []).filter((w) => !NOT_A_NAME.has(w)).map((w) => w.replace(/s$/, ''));
+}
+
+/** Words that end the counted noun phrase: what follows them names another quantity ("three engineers FOR enterprise customers"). */
+const PHRASE_BREAK = new Set([
+  'for', 'of', 'to', 'in', 'on', 'at', 'with', 'by', 'from', 'into', 'across', 'over', 'under', 'within', 'per', 'than',
+  'and', 'or', 'but', 'while', 'which', 'that', 'who', 'as', 'so', 'if', 'when', 'before', 'after', 'because',
+]);
+
+/**
+ * Whether the COUNTED NOUN PHRASE right after the amount at `m` names the factor and nothing else: every naming word of
+ * the (up to three) words before the first preposition or conjunction (PR Review 5881529306: "three engineers for
+ * enterprise customers" counts engineers) is in the factor's label or unit.
+ */
+function wordsNameThisFactor(brief: string, m: RegExpMatchArray, label: unknown, unit: unknown): boolean {
+  if (typeof m.index !== 'number') return false;
+  const window = /^\s+((?:[A-Za-z][A-Za-z-]*\s*){1,3})/.exec(brief.slice(m.index + m[0].length))?.[1] ?? '';
+  const words = window.trim().split(/\s+/);
+  const cut = words.findIndex((w) => PHRASE_BREAK.has(w.toLowerCase()));
+  const phrase = (cut === -1 ? words : words.slice(0, cut)).join(' ');
+  // EVERY naming word in the phrase must name the factor, or it withholds. What a number counts is not reliably the first
+  // word ("zero CUSTOMER complaints" counts complaints, PR Review 5881730098) nor the last (past a verb: "zero downtime
+  // affects ENTERPRISE", 5881612484), so any word naming something else makes the reading uncertain: it withholds. Filler
+  // adjectives ("new") are not naming words. A verb inside the window under-claims ("three developers joined"): safe.
+  const said = namingWords(phrase);
+  const names = new Set([...namingWords(label), ...namingWords(unit)]);
+  return said.length > 0 && said.every((w) => names.has(w));
 }
 
 /**
@@ -133,7 +182,7 @@ export function withdrawUnstatedBaselineStamps<N extends { readonly kind?: unkno
     // A signed change restated on "% of today" (`restateSignedPercentChanges`) is 100 today BY DEFINITION: the user's
     // "cut 15%" is measured from it (review 5835754404, row 4b). Admission wrote it; the brief's own framing states it.
     if (os.unit === TODAY_UNIT && figure === TODAY_LEVEL) return n;
-    if (typeof figure === 'number' && baselineTheBriefStates(figure, os.unit, brief)) return n;
+    if (typeof figure === 'number' && baselineTheBriefStates(figure, os.unit, brief, (n as { readonly label?: unknown }).label)) return n;
     // Not the user's, so Olumi's: the ONE author the disclosure ("I supplied N values"), the canvas label and the
     // level-limit carry (`levelHasAnAuthor`) all read. Source-less, it was nobody's (#2073 review F1, AIQ 5851906910).
     return { ...n, observed_state: { ...os, source: 'cee_inference' } };

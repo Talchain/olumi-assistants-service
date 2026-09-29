@@ -175,7 +175,7 @@ import {
 // headline ON them, and then discarded both — so this handler could only ever
 // emit the locked template on the one population that most needs the reason.
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
-import { resolveGoalDirection } from '../../goal-target/goal-direction.js';
+import { resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
 
 // `PLOT_SLOW_LIKELY_MS` lives in the shared `../../telemetry/turn-timings.js`
 // module so the turn-executor (error-path reconstruction) can apply the
@@ -1061,6 +1061,12 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           ? 'goal_direction read from the comparator the user stated for the goal and forwarded to PLoT'
           : 'goal_direction derived from the goal label and forwarded to PLoT',
       );
+    }
+    // ⭐ R1 S4 (B) (#72 5879602608): a HELD strict floor ("MRR above £85k") is scored strictly past its target — ISL
+    // `goal_threshold_strict` (ISL #209), forwarded by PLoT. Only where the run maximises and the goal carries a
+    // threshold (`resolveGoalThresholdStrict`, the rule admission reads too); otherwise no key, byte-identical.
+    if (resolveGoalThresholdStrict(graphForAnalysis, snapshot.goal_node_id)) {
+      plotPayload.goal_threshold_strict = true;
     }
     // Lane 28 — brief pipeline seam 3: flag-gated brief leg
     // (CEE_SEND_BRIEF_TO_PLOT, default OFF — doctrine ask D5 is Paul-gated;

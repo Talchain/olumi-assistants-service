@@ -22,6 +22,7 @@ import { BUILD_INSTRUCTIONS, buildCandidateSchema, buildModelFromBrief, retrySch
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
+import { resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 
 const GOAL = 'monthly_recurring_revenue';
@@ -51,7 +52,7 @@ function pricing(goal: Partial<CandidateModel['goal']> = {}): CandidateModel {
 /** The production contract: the candidate must pass the real strict schema, as the model's output would. */
 const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
 
-async function registeredGoal(model: CandidateModel) {
+async function registeredGoal(model: CandidateModel, brief = 'Should we raise the Pro plan price? MRR is £16,000 today; we want £20,000.') {
   const wire = { ...model, unknowns: [], decision_question: null };
   expect(strict(wire), JSON.stringify(strict.errors)).toBe(true);
   let graph: unknown = null;
@@ -63,7 +64,7 @@ async function registeredGoal(model: CandidateModel) {
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief('77777777-7777-4777-8777-777777777777', 'Should we raise the Pro plan price? MRR is £16,000 today; we want £20,000.', d, call) as Record<string, unknown>;
+  const out = await buildModelFromBrief('77777777-7777-4777-8777-777777777777', brief, d, call) as Record<string, unknown>;
   expect(out.ok, JSON.stringify(out)).toBe(true);
   const parsed = GraphV3.parse(graph);
   const goal = parsed.nodes.find((n) => n.id === GOAL);
@@ -184,12 +185,34 @@ describe('the goal carries its current level, in the shape ISL reads', () => {
     }
   });
 
-  it('RED (meaning, strict >): "grow MRR ABOVE £20k; £20k now" carries no baseline to admission or to the analysis input', async () => {
-    const { goal, graph, out } = await registeredGoal(pricing({ operator: '>', baseline_known: true, baseline_value: 20000 }));
+  // ⭐ R1 S4 (B) (#72 5879602608): a strict goal whose `'>'` the goal node HOLDS is scored strictly (`goal_threshold_strict`,
+  // ISL #209), so its stated level is carried; the equality guard this row used to be is now the flag itself.
+  it('RED (meaning, strict >, held): "grow MRR ABOVE £20k; £16k now" carries the baseline AND the analysis input is scored strictly', async () => {
+    const { goal, graph } = await registeredGoal(pricing({ operator: '>', baseline_known: true, baseline_value: 16000 }));
+    expect(goal.goal_direction).toBe('>');
+    expect(goal.observed_state).toMatchObject({ baseline: 0.64, raw_value: 16000, source: 'brief_extraction' });
+    const run = resolveRunAdmission(graph);
+    expect(run.canonicalGraph, 'the comparison itself still runs').not.toBeNull();
+    expect(resolveGoalThresholdStrict(run.canonicalGraph, GOAL), 'equality is not met: the run sends goal_threshold_strict').toBe(true);
+  });
+
+  it('RED (meaning, strict > at equality, held): "£20k now; above £20k" carries £20k, and the run scores reaching £20k as NOT met', async () => {
+    const { goal, graph } = await registeredGoal(
+      pricing({ operator: '>', baseline_known: true, baseline_value: 20000 }),
+      'Should we raise the Pro plan price? MRR is £20,000 today; we want it above £20,000.',
+    );
+    expect(goal.observed_state).toMatchObject({ baseline: 0.8, raw_value: 20000, source: 'brief_extraction' });
+    expect(resolveGoalThresholdStrict(resolveRunAdmission(graph).canonicalGraph, GOAL)).toBe(true);
+  });
+
+  it('RED (meaning, strict >, NOT held): a ">" target the brief never writes carries no baseline to admission or to the analysis input', async () => {
+    // "above £21k" is not a figure the brief writes (it writes £20,000), so no comparator is held and nothing is scored strictly.
+    const { goal, graph, out } = await registeredGoal(pricing({ operator: '>', value: 21000, baseline_known: true, baseline_value: 16000 }));
+    expect(goal).not.toHaveProperty('goal_direction');
     expect(goal).not.toHaveProperty('observed_state');
     const said = (out.not_represented as string[]).filter((x) => x.includes('strictly above'));
     expect(said).toHaveLength(1);
-    expect(said[0]).toContain('say the goal is "at least 20000"');
+    expect(said[0]).toContain('say the goal is "at least 21000"');
     // Through the Run admission: the graph the analysis receives has no goal baseline,
     // so no Goal fit can count equality as meeting a strict goal.
     const run = resolveRunAdmission(graph);
@@ -197,6 +220,7 @@ describe('the goal carries its current level, in the shape ISL reads', () => {
     const analysed = (run.canonicalGraph as { nodes: { id: string; observed_state?: unknown }[] }).nodes.find((n) => n.id === GOAL);
     expect(analysed).toBeDefined();
     expect(analysed).not.toHaveProperty('observed_state');
+    expect(resolveGoalThresholdStrict(run.canonicalGraph, GOAL)).toBe(false);
   });
 
   it('CONTROL (equality on "at least"): £20k now against "at least £20k" reaches the analysis input as a baseline', async () => {
