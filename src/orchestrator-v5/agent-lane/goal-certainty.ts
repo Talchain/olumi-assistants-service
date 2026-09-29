@@ -14,6 +14,11 @@
  *     ("about 88 of your 1,500", never a figure the user did not give);
  *   · sum identity: the margin |projected-if-held − T|, in the goal's unit;
  *   · no identity: no exact break-even, so "can't yet say how likely: it depends on …, which isn't sized".
+ * No exact break-even is typed (`no_break_even`, AI Quality 5883228443), so an audit can tell why.
+ *
+ * ⛔ THE GOAL'S PARENTS ARE EXACTLY ITS OPERANDS, OR NOTHING IS EARNED THROUGH THE IDENTITY (PR Review 5883209483; R3
+ * 5883225699). ISL reads every DECLARED operand, but the walk reaches the goal only along links: an operand with no link
+ * into the goal hides every unsized path into it, so a certainty through it is unearned and has no figure (fail closed).
  * No engine run and no new carrier: everything is on CEE's own graph and the run's per-option P(goal). Pure.
  */
 import { sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
@@ -44,9 +49,20 @@ export interface GoalCertaintyDecision {
     /** product: `fraction` of the operand's level, only where that level is the user's own figure. */
     readonly operand_count?: number;
   };
+  /** Why an UNEARNED certainty has no `break_even` (AI Quality 5883228443). Absent when earned or when it has one. */
+  readonly no_break_even?: NoBreakEven;
   /** The one sentence for an UNEARNED certainty. Absent when earned: every surface says the result as it does today. */
   readonly say?: string;
 }
+
+/**
+ * Why there is no exact break-even: the goal declares no identity · this run did not evaluate it · ISL's level came from
+ * the operands, not the stated level (no k) · the identity has addends · the goal has a parent outside its operands ·
+ * an operand has no link into the goal · or the figure itself cannot be formed (no stated level, an operand at 0 …).
+ */
+export type NoBreakEven =
+  | 'not_an_identity' | 'identity_not_evaluated' | 'level_from_inputs' | 'addends' | 'extra_goal_parent'
+  | 'operand_not_parent' | 'no_exact_figure';
 
 const CERTAIN = 1e-9;
 const userOwns = (source: unknown): boolean =>
@@ -99,8 +115,21 @@ export function goalCertaintyDecisions(
     .filter((e) => e.evaluated === true && typeof e.node_id === 'string')
     .map((e) => [e.node_id as string, e] as const));
   const evaluated = (id: unknown): boolean => typeof id === 'string' && evaluations.has(id);
-  const identity = isRec(goal.nonlinear_identity) && evaluated(goal.id) ? goal.nonlinear_identity : undefined;
+  const declared = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
+  const identity = declared !== undefined && evaluated(goal.id) ? declared : undefined;
   const operands = new Set(Array.isArray(identity?.factor_ids) ? identity!.factor_ids.filter((x): x is string => typeof x === 'string') : []);
+  // Set EQUALITY, both ways (PR Review 5883209483): the goal's parents (options and the decision aside) and its operands.
+  const parents = new Set(edges.filter((e) => e.to === goal.id).map((e) => e.from)
+    .filter((f): f is string => typeof f === 'string' && byId.get(f)?.kind !== 'option' && byId.get(f)?.kind !== 'decision'));
+  const unlinkedOperand = identity === undefined ? undefined : [...operands].find((id) => !parents.has(id));
+  const evaluation = evaluations.get(goal.id);
+  const noExact: NoBreakEven | undefined = declared === undefined ? 'not_an_identity'
+    : identity === undefined ? 'identity_not_evaluated'
+      : evaluation?.level_source !== 'stated_level' ? 'level_from_inputs'
+        : (Array.isArray(identity.addends) ? identity.addends.length > 0 : identity.addends !== undefined) ? 'addends'
+          : unlinkedOperand !== undefined ? 'operand_not_parent'
+            : [...parents].some((id) => !operands.has(id)) ? 'extra_goal_parent'
+              : undefined;
   const sized = sizedLinkTest(nodes);
   const exact = (e: Rec): boolean => {
     const to = byId.get(e.to);
@@ -121,15 +150,29 @@ export function goalCertaintyDecisions(
     // The goal would move AWAY from its target (P = 1) or TOWARDS it (P = 0) to reverse the certainty.
     const reversing = certainty === 1 ? -good : good;
     let found: { from: string; through: string; move: number } | undefined;
-    for (const [factorId, set] of Object.entries(iv)) {
-      if (found !== undefined) break;
-      if (!byId.has(factorId)) continue;
+    // The factors the option moves. A factor set at the level it holds moves nothing, so no path from it can reverse
+    // anything. An unknown move is read as either way (0: "could reverse").
+    const moved = Object.entries(iv).flatMap(([factorId, set]) => {
+      if (!byId.has(factorId)) return [];
       const now = levelOf(byId.get(factorId));
       const to = interventionLevel(set);
-      // A factor set at the level it holds moves nothing, so no path from it can reverse anything. An unknown move is
-      // read as either way (0 below: "could reverse").
-      const move = to.value !== undefined && now.value !== undefined ? Math.sign(to.value - now.value) : 0;
-      if (move === 0 && to.value !== undefined && now.value !== undefined) continue;
+      const known = to.value !== undefined && now.value !== undefined;
+      const move = known ? Math.sign(to.value! - now.value!) : 0;
+      return move === 0 && known ? [] : [{ factorId, move }];
+    });
+    // ⛔ An operand with no link into the goal: the walk cannot see what reaches it, so nothing moved is earned.
+    if (unlinkedOperand !== undefined && moved.length > 0) {
+      found = { from: moved[0]!.factorId, through: unlinkedOperand, move: moved[0]!.move };
+      out.push({
+        option_id: optionId, probability_of_goal: certainty, earned: false,
+        unsized_path: { from: found.from, enters_goal_through: found.through },
+        no_break_even: 'operand_not_parent',
+        say: sayUnlinked(certainty, option, goal, byId, found),
+      });
+      continue;
+    }
+    for (const { factorId, move } of moved) {
+      if (found !== undefined) break;
       // Every simple path from the moved factor to the goal, through factors, outcomes and risks.
       const walk = (at: string, sign: number, allExact: boolean, seen: Set<string>): void => {
         if (found !== undefined) return;
@@ -154,15 +197,13 @@ export function goalCertaintyDecisions(
       out.push({ option_id: optionId, probability_of_goal: certainty, earned: true });
       continue;
     }
-    const breakEven = exactBreakEven(goal, identity, operands, edges, byId, evaluations.get(goal.id))
-      ? breakEvenOf(goal, identity, operands, byId, iv, found.through)
-      : undefined;
+    const breakEven = noExact === undefined ? breakEvenOf(goal, identity, operands, byId, iv, found.through) : undefined;
     out.push({
       option_id: optionId,
       probability_of_goal: certainty,
       earned: false,
       unsized_path: { from: found.from, enters_goal_through: found.through },
-      ...(breakEven !== undefined ? { break_even: breakEven } : {}),
+      ...(breakEven !== undefined ? { break_even: breakEven } : { no_break_even: noExact ?? 'no_exact_figure' }),
       say: sayUnearned(certainty, reversing, option, goal, byId, found, breakEven),
     });
   }
@@ -173,26 +214,10 @@ export function goalCertaintyDecisions(
  * R3 5882943255 (CODE-READ ISL `robustness_analyzer_v2.py`): ISL evaluates goal = k × Π(operands) + addends + L, with
  * k set from the goal's STATED level. `today × Π(now ÷ was)` is ISL's own projection only when (1) this run evaluated
  * the identity from the stated level (`level_source: 'stated_level'`; `'identity_inputs'` has no k), (2) the identity
- * has no addends, and (3) the goal has no parent outside the identity's operands (L = 0). Otherwise there is no exact
- * break-even, and the decision says "can't yet say how likely" (fail closed: never a wrong figure).
+ * has no addends, and (3) the goal's parents are EXACTLY the identity's operands (L = 0, and no operand unlinked). Otherwise
+ * there is no exact break-even (`noExact`, typed), and the decision says "can't yet say how likely" (fail closed: never a
+ * wrong figure).
  */
-function exactBreakEven(
-  goal: Rec,
-  identity: Rec | undefined,
-  operands: ReadonlySet<string>,
-  edges: readonly Rec[],
-  byId: ReadonlyMap<unknown, Rec>,
-  evaluation: Rec | undefined,
-): boolean {
-  if (identity === undefined || evaluation?.level_source !== 'stated_level') return false;
-  if (Array.isArray(identity.addends) ? identity.addends.length > 0 : identity.addends !== undefined) return false;
-  return edges.every((e) => {
-    if (e.to !== goal.id) return true;
-    const k = byId.get(e.from)?.kind;
-    return k === 'option' || k === 'decision' || (typeof e.from === 'string' && operands.has(e.from));
-  });
-}
-
 function breakEvenOf(
   goal: Rec,
   identity: Rec | undefined,
@@ -220,6 +245,34 @@ function breakEvenOf(
   const operand = levelOf(byId.get(through));
   const count = operand.raw !== undefined && userOwns(operand.source) ? Math.round(fraction * operand.raw) : undefined;
   return { kind: 'product', projected_if_held: projected, threshold, fraction, operand_id: through, ...(count !== undefined ? { operand_count: count } : {}) };
+}
+
+/** The sentence when an operand has no link into the goal: the model cannot follow the option through it. */
+function sayUnlinked(
+  certainty: 0 | 1,
+  option: Rec | undefined,
+  goal: Rec,
+  byId: ReadonlyMap<unknown, Rec>,
+  found: { from: string; through: string },
+): string {
+  const label = (id: unknown): string => text(byId.get(id)?.label) ?? String(id);
+  const opt = `‘${text(option?.label) ?? String(option?.id ?? '')}’`;
+  return `Olumi can’t yet say how likely ${opt} is to ${certainty === 1 ? 'meet' : 'miss'} the goal: ‘${label(goal.id)}’ is worked `
+    + `out from ‘${label(found.through)}’, but the model has no link from it to ‘${label(goal.id)}’, so it can’t follow what `
+    + `‘${label(found.from)}’ does through it.`;
+}
+
+/**
+ * ⭐ THE ONE INPUT PATH FROM A STORED RUN (DL 5883245872; PR Review 5883209483): a reply or panel reads a Run's
+ * decision from the STORED fact — `result.enrichment`, PLoT's `/v2/run` response kept whole, carries both the per-option
+ * `option_comparison[].probability_of_goal` and ISL's `identity_evaluations[]` (with `level_source`) — never from the
+ * transport keep-list, which carries neither the evaluations nor their `level_source`. Anything missing fails closed.
+ */
+export function goalCertaintyOfStoredResult(graph: unknown, result: unknown): GoalCertaintyDecision[] {
+  const enrichment = isRec(result) && isRec(result.enrichment) ? result.enrichment : undefined;
+  const options = Array.isArray(enrichment?.option_comparison) ? enrichment!.option_comparison.filter(isRec) : [];
+  const evaluations = Array.isArray(enrichment?.identity_evaluations) ? enrichment!.identity_evaluations : undefined;
+  return goalCertaintyDecisions(graph, options, evaluations);
 }
 
 function sayUnearned(
