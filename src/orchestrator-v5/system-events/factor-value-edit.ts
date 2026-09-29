@@ -93,6 +93,16 @@ function lookupOrUndefined(graph: GraphV3T): GraphLookup | undefined {
  */
 const SCALE_CONSISTENCY_TOLERANCE = 1e-6;
 
+/**
+ * The SAME stored number, allowing only float noise (a figure re-derived through a division can differ in the last
+ * bit). Deliberately far tighter than `SCALE_CONSISTENCY_TOLERANCE`: this decides "did the user change the value?",
+ * where £1 on £1.2bn is a change.
+ */
+function sameStoredNumber(actual: unknown, expected: number): boolean {
+  if (typeof actual !== 'number' || !Number.isFinite(actual) || !Number.isFinite(expected)) return false;
+  return Math.abs(actual - expected) <= 1e-12 * Math.max(1, Math.abs(actual), Math.abs(expected));
+}
+
 function scaleValuesAgree(actual: unknown, expected: number): boolean {
   if (typeof actual !== 'number' || !Number.isFinite(actual) || !Number.isFinite(expected)) {
     return false;
@@ -699,6 +709,11 @@ export async function applyFactorValueEdit(
     // it rather than applied here — this file deliberately contains no
     // `node.observed_state = …` (see the module header).
     ...(appliedProvenance !== undefined ? { appliedProvenance } : {}),
+    // ⭐ THE INTENT RULE (schemas 0.62.0 `factor_value_edit.intent`; AIQ #72 5881405845, DL 5881485082). `confirm_current`
+    // or an ABSENT intent (today's canvas confirm-as-is sends none) is review: when the resolved value equals the
+    // PERSISTED one, the single writer keeps whose it is and records `reviewed_by_user`. An explicit `set` is
+    // authorship even for the same number. A confirm that would MOVE the value is refused below.
+    unchangedValueIsReview: (event as { readonly intent?: unknown }).intent !== 'set',
   };
 
   let outcome;
@@ -812,6 +827,28 @@ export async function applyFactorValueEdit(
       `I couldn't confirm the scale of that value, so I haven't changed anything. ` +
         `Please tell me the amount and unit you mean.`,
     );
+  }
+
+  // ⭐ A CONFIRM NEVER BECOMES A SET (Shared Data row 1 — Canonical #72 5881225605; AIQ 5881277231 / 5881405845). The
+  // value was resolved above EXACTLY as a set would resolve it, so capped, capless and percent confirms read one rule,
+  // against the PERSISTED node (`targetNode`, never a client copy — DL 5881485082). "The same" is near-exact (float noise
+  // only), never the scale-consistency tolerance: £1 on £1,234,565,000 is a move. A kept value was already written as
+  // review by the single writer (`unchangedValueIsReview`, above).
+  if ((event as { readonly intent?: unknown }).intent === 'confirm_current') {
+    const before = targetNode.observed_state as { value?: unknown; raw_value?: unknown } | undefined;
+    const after = mergedParse.data.nodes.find((n) => n.id === event.target_id)?.observed_state as
+      | { value?: unknown; raw_value?: unknown }
+      | undefined;
+    const sameValue = typeof before?.value === 'number' && sameStoredNumber(after?.value, before.value)
+      && (typeof before.raw_value !== 'number' || sameStoredNumber(after?.raw_value, before.raw_value));
+    if (appliedProvenance !== undefined || !sameValue) {
+      return refuse(
+        payload,
+        'confirm_value_moved',
+        `That confirmation doesn't match the value in the model, so I haven't changed anything. ` +
+          `To change the figure, type the new value instead.`,
+      );
+    }
   }
 
   // The SAME composer the NL lane uses — this is what maps the

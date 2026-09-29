@@ -15,6 +15,7 @@ import { readFileSync } from 'node:fs';
 import { runTurnCoaching, type CapturedAnalysis, type RunTurnCoachingFinal } from '../analysis-coaching-pass-through.js';
 import { ELICITATION_CLOSE, RUN_TURN_COACHING_CONTRACT } from '../../coaching/fragile-link-challenge.js';
 import { composeUntestedOptionCard } from '../../coaching/untested-option-card.js';
+import { rebindCapture } from '../../../../tests/helpers/legacy-analysis-hash-v2.js';
 
 type Option = { option_id: string; label: string; status: string };
 type Served = {
@@ -26,9 +27,12 @@ type Served = {
   served_card_signal_id: string;
 };
 // Verbatim wire fields of the served re-run turn (dloop2x-1 04h-rerun2).
-const served = JSON.parse(readFileSync(
+// Shared Data row 1 (projection v3): the recorded hash is proven to be the pre-0.62.0 projection of the draft graph,
+// then rebound to the current projection wherever it appears (tests/helpers/legacy-analysis-hash-v2.ts).
+const servedRaw = JSON.parse(readFileSync(
   new URL('../../coaching/__tests__/fixtures/served-rerun-untested-option-20260927.json', import.meta.url), 'utf8',
 )) as Served;
+const served = rebindCapture(servedRaw, servedRaw.draft_graph, servedRaw.graph_hash);
 const ADDED = 'Keep the price at £49 and launch a retention programme';
 
 const run = (opts: { ready?: Served['analysis_ready']; result?: Served['analysis_result']; trigger?: 'explicit_run' | 'auto_first_pass' } = {}) => {

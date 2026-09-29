@@ -218,7 +218,13 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // `quantity_frame` is new) and NONE names a strength, band, intent or
     // magnitude; the fixtures add only `quantity_frame` and `frame_verdict`.
     // Control: `package.json` differs between the tarballs. The member is untouched.
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.61.0');
+    //
+    // 0.61.0 → 0.62.0 (schemas #70, main `c9aee435`, Shared Data row 1), RE-DERIVED on 29 Sep against the PUBLISHED
+    // tarball (sha1 `da4eee3a…`): the FILE SET naming `edge_strength_edit` is identical (the same six files). Every
+    // changed line that names a strength or band is an IMPORT LIST (`turn-payload.js` appends `FactorValueEditIntent`;
+    // `fixtures/index.js` appends `ObservedStateReviewSchema`); `turn-payload.d.ts`'s 2441 changed lines name none
+    // (they inline `reviewed_by_user` into every node's observed_state). The member, its intents and `band` are untouched.
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.62.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {
