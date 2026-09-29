@@ -1,0 +1,420 @@
+{
+ "_source": "Real drafter outputs (gpt-5.6-terra, strict json_schema) of Paul's MRR brief, MG live in-process arm carrier-paul (CEE bbbc1db2 + the fold), 29 Sep ~10:55Z. Not edited.",
+ "brief": "Should we raise our Pro plan price from £49 to £59 a month? We have 1,500 paying subscribers and £75k MRR. Monthly churn must stay below 5%, and we want MRR above £85k within a year.",
+ "drafts": [
+  {
+   "rep": 3,
+   "scenario": "83f41878-1bd4-42fb-a289-e9907ad04772",
+   "candidate": {
+    "goal": {
+     "metric": "MRR",
+     "operator": ">",
+     "target_stated": true,
+     "value": 85000,
+     "unit": "GBP/month",
+     "horizon_months": 12,
+     "provenance": "explicit",
+     "frame": "level",
+     "baseline_known": true,
+     "baseline_value": 75000,
+     "baseline_provenance": "explicit",
+     "scope": {
+      "modelled": "total MRR across plans",
+      "alternative": "Pro plan MRR only",
+      "stated_in_brief": false
+     }
+    },
+    "constraints": [
+     {
+      "metric": "Monthly Pro churn",
+      "operator": "<",
+      "value": 5,
+      "unit": "%",
+      "provenance": "explicit",
+      "frame": "level"
+     }
+    ],
+    "options": [
+     {
+      "label": "Keep current price",
+      "provenance": "ai_proposed",
+      "changes": [],
+      "interventions": [],
+      "is_status_quo": true
+     },
+     {
+      "label": "Raise price to £59",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Monthly Pro price",
+        "value": 59,
+        "value_kind": "absolute",
+        "unit": "GBP/subscriber/month",
+        "provenance": "explicit"
+       }
+      ],
+      "is_status_quo": null
+     },
+     {
+      "label": "Raise price to £54",
+      "provenance": "ai_proposed",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Monthly Pro price",
+        "value": 54,
+        "value_kind": "absolute",
+        "unit": "GBP/subscriber/month",
+        "provenance": "ai_proposed"
+       }
+      ],
+      "is_status_quo": null
+     }
+    ],
+    "factors": [
+     {
+      "label": "Monthly Pro price",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_value": 49,
+      "unit": "GBP/subscriber/month",
+      "provenance": "explicit",
+      "plausible_max": 200
+     },
+     {
+      "label": "Monthly Pro churn",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_value": 3,
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "plausible_max": 100
+     },
+     {
+      "label": "Monthly gross Pro additions",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_value": 60,
+      "unit": "subscribers/month",
+      "provenance": "ai_proposed",
+      "plausible_max": 500
+     },
+     {
+      "label": "Pro paying subscribers",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_value": 1500,
+      "unit": "subscribers",
+      "provenance": "explicit",
+      "plausible_max": 5000
+     },
+     {
+      "label": "Other-plan MRR",
+      "role": "external",
+      "baseline_known": true,
+      "baseline_value": 1500,
+      "unit": "GBP/month",
+      "provenance": "inferred",
+      "plausible_max": 50000
+     }
+    ],
+    "risks": [],
+    "outcomes": [
+     {
+      "label": "Pro plan MRR",
+      "provenance": "inferred"
+     }
+    ],
+    "links": [
+     {
+      "from": "Monthly Pro price",
+      "to": "Monthly Pro churn",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": 0.75,
+      "effect_per_source_change": 10,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Monthly Pro price",
+      "to": "Monthly gross Pro additions",
+      "direction": "negative",
+      "provenance": "ai_proposed",
+      "effect_amount": -6,
+      "effect_per_source_change": 10,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Monthly Pro price",
+      "to": "Pro plan MRR",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 15000,
+      "effect_per_source_change": 10,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Monthly Pro churn",
+      "to": "Pro paying subscribers",
+      "direction": "negative",
+      "provenance": "ai_proposed",
+      "effect_amount": -120,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Monthly gross Pro additions",
+      "to": "Pro paying subscribers",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": 10,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Pro paying subscribers",
+      "to": "Pro plan MRR",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 49,
+      "effect_per_source_change": 1,
+      "effect_provenance": "inferred"
+     },
+     {
+      "from": "Pro plan MRR",
+      "to": "MRR",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "inferred"
+     },
+     {
+      "from": "Other-plan MRR",
+      "to": "MRR",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "inferred"
+     }
+    ],
+    "identities": [
+     {
+      "outcome": "Pro plan MRR",
+      "operation": "product",
+      "factors": [
+       "Monthly Pro price",
+       "Pro paying subscribers"
+      ],
+      "provenance": "inferred"
+     }
+    ],
+    "unknowns": [
+     "The current monthly Pro churn rate is not stated; 3% is a provisional modelling assumption.",
+     "The current rate of monthly gross Pro additions is not stated; 60 subscribers/month is a provisional modelling assumption.",
+     "The estimated effect of a £10 price rise on churn, gross additions, and subscriber levels at 12 months needs validation with historical pricing, cohort, or experiment data.",
+     "The model treats the £1,500 difference between £75,000 total MRR and £73,500 implied Pro MRR as other-plan MRR held constant. Confirm whether MRR means total MRR across plans or Pro plan MRR only.",
+     "The 12-month subscriber effects assume the stated monthly churn and gross-addition rates persist through the year."
+    ],
+    "decision_question": "Should we raise our Pro plan price from £49 to £59 a month?"
+   }
+  },
+  {
+   "rep": 6,
+   "scenario": "94bf7514-dda1-464a-97cf-52447cc2036d",
+   "candidate": {
+    "goal": {
+     "metric": "MRR",
+     "operator": ">",
+     "target_stated": true,
+     "value": 85000,
+     "unit": "£/month",
+     "horizon_months": 12,
+     "provenance": "explicit",
+     "frame": "level",
+     "baseline_known": true,
+     "baseline_value": 75000,
+     "baseline_provenance": "explicit",
+     "scope": {
+      "modelled": "all plans together",
+      "alternative": "the Pro plan only",
+      "stated_in_brief": false
+     }
+    },
+    "constraints": [
+     {
+      "metric": "Monthly churn",
+      "operator": "<",
+      "value": 5,
+      "unit": "%",
+      "provenance": "explicit",
+      "frame": "level"
+     }
+    ],
+    "options": [
+     {
+      "label": "Keep £49 price",
+      "provenance": "ai_proposed",
+      "changes": [],
+      "interventions": [],
+      "is_status_quo": true
+     },
+     {
+      "label": "Raise to £59",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Pro plan price",
+        "value": 59,
+        "value_kind": "absolute",
+        "unit": "£ per subscriber per month",
+        "provenance": "explicit"
+       }
+      ],
+      "is_status_quo": null
+     },
+     {
+      "label": "Raise to £54",
+      "provenance": "ai_proposed",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Pro plan price",
+        "value": 54,
+        "value_kind": "absolute",
+        "unit": "£ per subscriber per month",
+        "provenance": "ai_proposed"
+       }
+      ],
+      "is_status_quo": null
+     }
+    ],
+    "factors": [
+     {
+      "label": "Pro plan price",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_value": 49,
+      "unit": "£ per subscriber per month",
+      "provenance": "explicit",
+      "plausible_max": 200
+     },
+     {
+      "label": "Pro paying subscribers",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_value": 1500,
+      "unit": "subscribers",
+      "provenance": "explicit",
+      "plausible_max": 5000
+     },
+     {
+      "label": "Monthly churn",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_value": 3,
+      "unit": "%",
+      "provenance": "ai_proposed",
+      "plausible_max": 100
+     },
+     {
+      "label": "Other-plan MRR",
+      "role": "external",
+      "baseline_known": false,
+      "baseline_value": 1500,
+      "unit": "£/month",
+      "provenance": "inferred",
+      "plausible_max": 100000
+     }
+    ],
+    "risks": [],
+    "outcomes": [
+     {
+      "label": "Pro plan MRR",
+      "provenance": "inferred"
+     }
+    ],
+    "links": [
+     {
+      "from": "Pro plan price",
+      "to": "Monthly churn",
+      "direction": "positive",
+      "provenance": "ai_proposed",
+      "effect_amount": 0.08,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Monthly churn",
+      "to": "Pro paying subscribers",
+      "direction": "negative",
+      "provenance": "ai_proposed",
+      "effect_amount": -15,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Pro plan price",
+      "to": "Pro plan MRR",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 1500,
+      "effect_per_source_change": 1,
+      "effect_provenance": "inferred"
+     },
+     {
+      "from": "Pro paying subscribers",
+      "to": "Pro plan MRR",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 49,
+      "effect_per_source_change": 1,
+      "effect_provenance": "inferred"
+     },
+     {
+      "from": "Pro plan MRR",
+      "to": "MRR",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "inferred"
+     },
+     {
+      "from": "Other-plan MRR",
+      "to": "MRR",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "inferred"
+     }
+    ],
+    "identities": [
+     {
+      "outcome": "Pro plan MRR",
+      "operation": "product",
+      "factors": [
+       "Pro plan price",
+       "Pro paying subscribers"
+      ],
+      "provenance": "inferred"
+     }
+    ],
+    "unknowns": [
+     "Does “MRR” mean all plans together or the Pro plan only? The model provisionally treats it as all plans together.",
+     "What is current monthly churn? A 3% starting estimate is used only for provisional calculation.",
+     "How much does each £1 monthly Pro price increase change monthly churn? The model provisionally assumes +0.08 percentage points per £1.",
+     "Are all 1,500 paying subscribers on the Pro plan? The model provisionally treats them as Pro subscribers.",
+     "The stated £75k MRR exceeds £49 × 1,500 = £73.5k. The model provisionally treats the £1.5k difference as Other-plan MRR; please reconcile these figures.",
+     "What subscriber acquisition and retention trajectory should apply over the 12-month horizon? The churn-to-subscriber link is a provisional monthly approximation."
+    ],
+    "decision_question": "Should we raise our Pro plan price from £49 to £59 a month?"
+   }
+  }
+ ]
+}

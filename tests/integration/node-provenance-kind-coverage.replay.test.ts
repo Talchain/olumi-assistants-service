@@ -620,6 +620,10 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "goal_deadline_as_stated",
       "goal_direction",
       "goal_horizon_months",
+      // MG, 29 Sep (R3-B #72 5893233864, AIQ 5893340150 / 5893587951) — THE VALUE-BEARING DECISION: `goal_sense_reading`
+      // is NOT value-bearing. It is Olumi's reading of the goal's SENSE (minimise) and the words that say so; its
+      // `threshold` is a staleness key copied from `goal_threshold_raw`, never a level of the goal metric of its own.
+      "goal_sense_reading",
       "goal_threshold",
       "goal_threshold_cap",
       "goal_threshold_cap_provenance",
@@ -645,6 +649,13 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "nonlinear_identity",
       "observed_state",
       "prior",
+      // MG #2295, 29 Sep (DL #72 5888551510) — THE VALUE-BEARING DECISION: `proposed_by` is NOT value-bearing and must
+      // NOT join `carriesValue` (nor `NODE_QUANTITY_FIELDS`). It says WHO put the option forward (`'olumi'`, written
+      // only for an option Olumi added), never HOW MUCH: the sibling of `provenance` and `threshold_source`. An option
+      // carrying the mark keeps its levels in `interventions`, exactly as before; joining would let authorship read as
+      // a level and skip the label binding for Olumi's own option. It IS written on OPTION nodes, so this loop can
+      // meet it: the semantic answer above is the reason, not scope.
+      "proposed_by",
       "provenance",
       // R1 S4-core, 28 Sep (`@talchain/schemas` 0.61.0) — THE VALUE-BEARING DECISION: `quantity_frame` is NOT
       // value-bearing and must NOT join `carriesValue` (nor `NODE_QUANTITY_FIELDS`). It says WHAT the node's value

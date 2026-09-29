@@ -19,6 +19,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { resolveGoalDirection } from '../../goal-target/goal-direction.js';
+import { withGoalSenseReading } from '../goal-sense-reading.js';
 
 const SCENARIO = '99999999-9999-4999-8999-999999999999';
 const BRIEF = 'Our monthly cloud bill is currently £45,000. We need to cut it by 15% within 6 months. Should we move steady workloads to reserved instances, or renegotiate our contract?';
@@ -232,5 +233,131 @@ describe('S4G — the held comparator is the direction of a TYPED change', () =>
 
   it('S4G-11: a typed change FLOOR ("grow by 10%", held >=) sends nothing new — the maximiser, as before', () => {
     expect(resolveGoalDirection(graph('change_rel', '>='), 'goal_bill')?.direction).not.toBe('minimise');
+  });
+});
+
+// ⛔ R3-B #72 5893233864 / DL 5893260041 (served, release blocker): "cut costs by 20%" MAXIMISED spend — "Stay on AWS"
+// crowned, 100% "reaches the target" — because the "20%" beside "costs" was given to another node labelled "cost", so no
+// comparator was held. AIQ 5893340150: a typed DECREASE is Olumi's reading of the sense — typed on the goal
+// (`goal_sense_reading`, MG 5893383773), said, and sent as `minimise` — never when the drafter's own comparator is a floor.
+describe('Olumi\'s typed reading of a decrease target (the served "cut costs" inversion)', () => {
+  const CLOUD = 'Should we switch our cloud provider from AWS to GCP? Monthly spend is £45k; we want to cut costs by 20% without more than 2 weeks of migration downtime risk.';
+  const WORDS = 'Olumi reads ‘Monthly spend’ as a target to bring it DOWN by at least 20% from today.';
+  const COST_NODES = ['GCP workload share', 'Monthly cloud-cost reduction'];
+  const cloud = (factors: string[], goal: Record<string, unknown> = {}) => {
+    const c = candidate({ metric: 'Monthly spend', value: -20, unit: 'GBP per month', baseline_value: 45000, horizon_months: null, ...goal }) as Record<string, any>;
+    c.options = [
+      { label: 'Switch to GCP', provenance: 'explicit', changes: [factors[0]], interventions: [], is_status_quo: false },
+      { label: 'Stay on AWS', provenance: 'explicit', changes: [], interventions: [], is_status_quo: true },
+    ];
+    c.factors = factors.map((l) => ({ label: l, role: 'controllable', baseline_known: false, baseline_value: null, unit: null, provenance: 'inferred', plausible_max: 100 }));
+    c.links = factors.map((l) => link(l, 'Monthly spend'));
+    return c;
+  };
+  const sent = async (payload: unknown, brief = CLOUD) => {
+    const { r, registered } = await run(payload, brief);
+    const g = goalOf(registered);
+    return { r, g, wire: resolveGoalDirection(registered, g.id) };
+  };
+  it.each([
+    ['another node labelled "cost" ("Monthly cloud-cost reduction")', COST_NODES],
+    ['another node labelled "cost" ("Migration remediation cost")', ['GCP workload share', 'Migration remediation cost']],
+  ])('RED (served shape): %s — no comparator held, yet Olumi\'s reading is typed, said, and the run minimises', async (_why, factors) => {
+    const { r, g, wire } = await sent(cloud(factors));
+    expect(g['goal_threshold_frame'], 'PRECONDITION: typed as a change').toBe('change_rel');
+    expect(g['goal_threshold']).toBe(-0.2);
+    expect(Object.keys(g), 'PRECONDITION: the served failure — no comparator held').not.toContain('goal_direction');
+    expect(g['goal_sense_reading']).toEqual({ sense: 'minimise', basis: 'typed_change_sign', threshold: -0.2, threshold_frame: 'change_rel', words: WORDS });
+    expect(wire).toEqual({ direction: 'minimise', provenance: 'typed_change_sign' });
+    expect(r.not_represented, 'AIQ (a): the reading is said in the reply').toContain(WORDS);
+  });
+  it('FLOOR GUARD (AIQ (b)): the same served shape with the drafter\'s comparator a FLOOR (>=) — no reading, nothing sent', async () => {
+    const { g, wire } = await sent(cloud(COST_NODES, { operator: '>=' }));
+    expect(g['goal_threshold']).toBe(-0.2);
+    expect(Object.keys(g)).not.toContain('goal_direction');
+    expect(Object.keys(g)).not.toContain('goal_sense_reading');
+    expect(wire).toBeUndefined();
+  });
+  it('CONTROL: with no "cost" node the user\'s comparator is held and speaks first — no Olumi reading is written', async () => {
+    const { g, wire } = await sent(cloud(['GCP workload share']));
+    expect(g['goal_direction']).toBe('<=');
+    expect(Object.keys(g)).not.toContain('goal_sense_reading');
+    expect(wire).toEqual({ direction: 'minimise', provenance: 'stated_comparator' });
+  });
+  it('CONTROL: a typed INCREASE ("grow MRR by 10%", +0.10) — no reading, nothing sent (the maximiser, exactly as today)', async () => {
+    const brief = 'Our MRR is £75,000. We want to grow MRR by 10% within a year. Should we raise the Pro price or add a Teams plan?';
+    const payload = cloud(['Pro price'], { metric: 'MRR', value: 10, operator: '>=', baseline_value: 75000 }) as Record<string, any>;
+    payload.options = [{ label: 'Raise Pro price', provenance: 'explicit', changes: ['Pro price'], interventions: [], is_status_quo: false }, { label: 'Add Teams plan', provenance: 'explicit', changes: [], interventions: [], is_status_quo: false }];
+    payload.links = [link('Pro price', 'MRR')];
+    const { g, wire } = await sent(payload, brief);
+    expect(g['goal_threshold']).toBe(0.1);
+    expect(Object.keys(g)).not.toContain('goal_sense_reading');
+    expect(wire).toBeUndefined();
+  });
+  it('CONTROL: a graph saved BEFORE the reading (typed −0.2, nothing held, no reading) reads exactly as before', () => {
+    const graph = { nodes: [{ id: 'monthly_spend', kind: 'goal', label: 'Monthly spend', goal_threshold: -0.2, goal_threshold_raw: -0.2, goal_threshold_frame: 'change_rel' }] };
+    expect(resolveGoalDirection(graph, 'monthly_spend')).toBeUndefined();
+  });
+  it('the reading speaks only while the typed sign is negative: an edit to +0.1 keeps the stale field but sends nothing', () => {
+    const graph = { nodes: [{ id: 'monthly_spend', kind: 'goal', label: 'Monthly spend', goal_threshold: 0.1, goal_threshold_raw: 0.1, goal_threshold_frame: 'change_rel',
+      goal_sense_reading: { sense: 'minimise', basis: 'typed_change_sign', threshold: -0.2, threshold_frame: 'change_rel', words: WORDS } }] };
+    expect(resolveGoalDirection(graph, 'monthly_spend')).toBeUndefined();
+  });
+
+  // ⛔ PR Review 5894041769: a SAVED graph keeps the reading across later edits (every write keeps a CEE-owned field), so
+  // the Run decision binds to the exact target it read and never overrules a comparator held since. Each row starts from
+  // the graph construction REGISTERED on the served shape (a real −20% ceiling reading), then edits only the target.
+  describe('SAVED GRAPH: the reading is bound to the exact target it read', () => {
+    const saved = async () => {
+      const { g } = await sent(cloud(COST_NODES));
+      expect(g['goal_sense_reading'], 'PRECONDITION: construction wrote the −20% ceiling reading').toMatchObject({ threshold: -0.2, threshold_frame: 'change_rel' });
+      expect(resolveGoalDirection({ nodes: [g] }, g.id), 'PRECONDITION: before the edit the run minimises').toEqual({ direction: 'minimise', provenance: 'typed_change_sign' });
+      return g;
+    };
+    const after = (g: Record<string, any>, edit: Record<string, unknown>) => resolveGoalDirection({ nodes: [{ ...g, ...edit }] }, g.id);
+    it('RED: an edit to a −10% FLOOR ("keep spend from falling more than 10%", held >=) keeps the old reading → no minimise', async () => {
+      const g = await saved();
+      expect(after(g, { goal_threshold: -0.1, goal_threshold_raw: -0.1, goal_direction: '>=' })).toBeUndefined();
+    });
+    it('RED: a FLOOR held since on the SAME −20% target → no minimise (a held comparator is never overruled by Olumi\'s reading)', async () => {
+      const g = await saved();
+      expect(after(g, { goal_direction: '>=' })).toBeUndefined();
+      expect(after(g, { goal_direction: '>' })).toBeUndefined();
+    });
+    it('RED: another NEGATIVE target (−10%) with no fresh reading cannot use the stale −20% reading → nothing sent', async () => {
+      const g = await saved();
+      expect(after(g, { goal_threshold: -0.1, goal_threshold_raw: -0.1 })).toBeUndefined();
+    });
+    it('RED: the same figure re-typed in ANOTHER frame (change_abs) cannot use the change_rel reading → nothing sent', async () => {
+      const g = await saved();
+      expect(after(g, { goal_threshold_frame: 'change_abs' })).toBeUndefined();
+    });
+    it('CONTROL: a user CEILING held since speaks as the user\'s own (stated_comparator), never as Olumi\'s reading', async () => {
+      const g = await saved();
+      expect(after(g, { goal_direction: '<=' })).toEqual({ direction: 'minimise', provenance: 'stated_comparator' });
+    });
+    it('CONTROL: an unrelated edit (the label) leaves the target, and the reading, exactly as read → still minimise', async () => {
+      const g = await saved();
+      expect(after(g, { label: 'Monthly cloud spend' })).toEqual({ direction: 'minimise', provenance: 'typed_change_sign' });
+    });
+  });
+});
+
+describe('withGoalSenseReading (pure)', () => {
+  const goalNode = (over: Record<string, unknown> = {}) => ({ id: 'g', kind: 'goal', label: 'Monthly spend', goal_threshold_frame: 'change_rel', goal_threshold_raw: -0.2, ...over });
+  it('a strict ceiling says "more than"; a change_abs says the amount in its unit', () => {
+    expect((withGoalSenseReading([goalNode()], { operator: '<' })[0] as Record<string, any>).goal_sense_reading.words)
+      .toBe('Olumi reads ‘Monthly spend’ as a target to bring it DOWN by more than 20% from today.');
+    const abs = withGoalSenseReading([goalNode({ goal_threshold_frame: 'change_abs', goal_threshold_raw: -5000, goal_threshold_unit: 'GBP per month' })], { operator: '<=' });
+    expect((abs[0] as Record<string, any>).goal_sense_reading.words).toMatch(/DOWN by at least £5,000/);
+  });
+  it.each([
+    ['a floor', [goalNode()], { operator: '>=' }],
+    ['a held user comparator', [goalNode({ goal_direction: '<=' })], { operator: '<=' }],
+    ['an increase', [goalNode({ goal_threshold_raw: 0.1 })], { operator: '<=' }],
+    ['a level target', [goalNode({ goal_threshold_frame: 'level', goal_threshold_raw: 36000 })], { operator: '<=' }],
+    ['two goals', [goalNode(), goalNode({ id: 'h' })], { operator: '<=' }],
+  ])('NO READING: %s → the very same array', (_why, nodes, goal) => {
+    expect(withGoalSenseReading(nodes, goal)).toBe(nodes);
   });
 });

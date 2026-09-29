@@ -296,6 +296,25 @@ export const NodeV3 = z.object({
    */
   goal_deadline_as_stated: z.string().max(60).refine((s) => s.trim() !== '').optional().catch(undefined),
   /**
+   * ⛔ OLUMI'S READING OF THE GOAL'S SENSE (goal nodes only; R3-B #72 5893233864, AIQ 5893340150, MG 5893383773). Written
+   * ONLY by construction (`goal-sense-reading.ts`), and only when the target is typed as a DECREASE from today
+   * ("cut costs by 20%" → `change_rel` −0.2), the drafter's OWN comparator is a ceiling (`<=` | `<`; AIQ's floor guard:
+   * "keep MRR from falling more than 10%" is also −0.10 but a floor), and no user comparator (`goal_direction`) is held.
+   * `resolveGoalDirection` sends `minimise` from it (`typed_change_sign`) only while the node holds no `goal_direction`
+   * and its target is still exactly `goal_threshold_raw === threshold` in `goal_threshold_frame === threshold_frame`
+   * (the staleness key: an edited target never speaks old words; PR Review 5894041769). `threshold_frame` is the
+   * warrant of `threshold` (the value-warrant guard's FIELD qualifier). It is OLUMI'S reading, never the user's:
+   * `words` say so wherever the direction is shown (AIQ condition (a)). The same G1 contract as the fields above: kept by every write, CEE-owned (`field-safety.ts`), and a
+   * malformed value is absence, never a refused graph.
+   */
+  goal_sense_reading: z.object({
+    sense: z.literal('minimise'),
+    basis: z.literal('typed_change_sign'),
+    threshold: z.number().finite(),
+    threshold_frame: z.enum(['change_rel', 'change_abs']),
+    words: z.string().min(1).max(300),
+  }).optional().catch(undefined),
+  /**
    * ⛔ THE SAVED-EXAMPLE STAMPS (the UI's register writes them on the nodes of a loaded saved example).
    *
    * THIS DECLARATION IS LOAD-BEARING, for the same reason as `threshold_source` above. The UI registers
@@ -425,6 +444,12 @@ export const NodeV3 = z.object({
   interventions: z.record(z.string(), z.any()).optional(),
   /** Marks the status-quo / baseline option node (option-kind nodes only, v191+). */
   is_baseline: z.boolean().optional(),
+  /** ⭐ An option OLUMI added rather than the user (option-kind nodes only; MG `olumi-option-marker.ts`, DL #72
+   *  5887489508 / 5887534233 / 5887755959). Written at construction ONLY as `'olumi'`, never as `'user'`, so a graph
+   *  with no Olumi option is unchanged. Read by the Run's proposed-option filter, the analysis hash and the intake
+   *  reconciliation (typed extras), never re-derived from the brief. Declared here because `NodeV3` strips undeclared
+   *  keys: without it the mark would be lost on the register write. Adopting the option removes it. */
+  proposed_by: z.literal('olumi').optional(),
   /** UI display vocabulary for the node's origin. Set by the V3 transform from
    *  `extractionType`: `explicit`/`observed` → `from_brief`,
    *  `inferred`/`range` → `ai_inferred`, absent/unknown → `ai_inferred`.

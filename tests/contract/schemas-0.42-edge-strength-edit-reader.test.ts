@@ -228,7 +228,12 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // 0.62.0 → 0.63.0 (schemas #71, main `855a53b4`, goal certainty), RE-DERIVED on 29 Sep against the PUBLISHED
     // tarball (sha1 `0089b2c3…`): the FILE SET naming `edge_strength_edit` is identical (the same six files), and no
     // changed line in any changed file names a strength or a band (contrast: `handler-results.js` gains `goal_certainty`).
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.63.0');
+    //
+    // 0.63.0 → 0.64.0 (schemas #73, main `5eb351c7`, node `proposed_by` in the hash vocabulary), RE-DERIVED on 29 Sep
+    // against the PUBLISHED tarballs (sha1 `0089b2c3…` → `26500d2b…`): the FILE SET naming `edge_strength_edit` is
+    // identical (the same six files), and 0 changed lines name a strength or a band (the diff is the node vocabulary,
+    // the generated constants, the adoption manifest and package.json).
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.64.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {
