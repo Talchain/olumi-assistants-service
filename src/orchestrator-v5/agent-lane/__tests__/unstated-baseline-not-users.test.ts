@@ -156,6 +156,19 @@ describe('a number in words, or "zero", grounds only the factor it counts', () =
     expect(sourceOf('Three engineers support enterprise customers.', factor('Enterprise customers', 3, 'customers'))).toBe('cee_inference');
   });
 
+  // PR Review 5881730098: nor inside a COMPOUND noun, where the counted thing is the head, not the first word.
+  it('RED: "zero customer complaints" does not state 0 enterprise customers', () => {
+    expect(sourceOf('We logged zero customer complaints last quarter.', factor('Enterprise customers', 0, 'customers'))).toBe('cee_inference');
+  });
+
+  it('RED: "three customer support engineers" does not state 3 enterprise customers', () => {
+    expect(sourceOf('We have three customer support engineers.', factor('Enterprise customers', 3, 'customers'))).toBe('cee_inference');
+  });
+
+  it('KNOWN UNDER-CLAIM (safe direction): a word inside the window that names something else withholds, even a verb', () => {
+    expect(sourceOf('Three developers joined us.', factor('Developers hired', 3, 'hires'))).toBe('cee_inference');
+  });
+
   it('CONTROL: "three enterprise customers" and "zero enterprise customers" state them', () => {
     expect(sourceOf('We have three enterprise customers today.', factor('Enterprise customers', 3, 'customers'))).toBe('brief_extraction');
     expect(sourceOf('We have zero enterprise customers today.', factor('Enterprise customers', 0, 'customers'))).toBe('brief_extraction');

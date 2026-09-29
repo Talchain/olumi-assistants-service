@@ -140,9 +140,9 @@ const PHRASE_BREAK = new Set([
 ]);
 
 /**
- * Whether the COUNTED NOUN right after the amount at `m` names the factor: the first naming word of the (up to three)
- * words before the first preposition or conjunction (PR Review 5881529306: "three engineers for enterprise customers"
- * counts engineers) is in the factor's label or unit.
+ * Whether the COUNTED NOUN PHRASE right after the amount at `m` names the factor and nothing else: every naming word of
+ * the (up to three) words before the first preposition or conjunction (PR Review 5881529306: "three engineers for
+ * enterprise customers" counts engineers) is in the factor's label or unit.
  */
 function wordsNameThisFactor(brief: string, m: RegExpMatchArray, label: unknown, unit: unknown): boolean {
   if (typeof m.index !== 'number') return false;
@@ -150,10 +150,13 @@ function wordsNameThisFactor(brief: string, m: RegExpMatchArray, label: unknown,
   const words = window.trim().split(/\s+/);
   const cut = words.findIndex((w) => PHRASE_BREAK.has(w.toLowerCase()));
   const phrase = (cut === -1 ? words : words.slice(0, cut)).join(' ');
-  // Only the FIRST naming word counts: it heads what the number counts. A later word can sit past a verb in another
-  // quantity ("zero downtime AFFECTS enterprise customers", PR Review 5881612484); a filler adjective ("new") is skipped.
-  const first = namingWords(phrase)[0];
-  return first !== undefined && new Set([...namingWords(label), ...namingWords(unit)]).has(first);
+  // EVERY naming word in the phrase must name the factor, or it withholds. What a number counts is not reliably the first
+  // word ("zero CUSTOMER complaints" counts complaints, PR Review 5881730098) nor the last (past a verb: "zero downtime
+  // affects ENTERPRISE", 5881612484), so any word naming something else makes the reading uncertain: it withholds. Filler
+  // adjectives ("new") are not naming words. A verb inside the window under-claims ("three developers joined"): safe.
+  const said = namingWords(phrase);
+  const names = new Set([...namingWords(label), ...namingWords(unit)]);
+  return said.length > 0 && said.every((w) => names.has(w));
 }
 
 /**
