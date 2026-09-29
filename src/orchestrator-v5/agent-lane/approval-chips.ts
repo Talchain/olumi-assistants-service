@@ -36,6 +36,8 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_link_strength: { label: 'Record this link', message: 'Yes, record that.' },
   // A set of link strengths: ONE button records the whole set, as one commit (DL #72 5871594233).
   propose_link_strengths: { label: 'Record these links', message: 'Yes, record those.' },
+  // The user's own stated effect on one link ("every £1 loses us about 50"), written through the level door's link_effect.
+  propose_link_effect: { label: 'Record your figure', message: 'Yes, record that.' },
   // The goal's success target the user stated, written through the product's typed target writer.
   propose_goal_target: { label: 'Set this target', message: 'Yes, set that target.' },
   // SLICE C2: a new risk, held on the product's own seam like the add-option (`gmh_`, the product's words on the button).

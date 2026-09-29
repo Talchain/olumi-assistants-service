@@ -18,11 +18,13 @@ import { dispatchTool } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { linkEffectEdgeToken } from '../../system-events/link-effect-edit.js';
+import { approvalChipsFor, approvalChipIdFor } from '../approval-chips.js';
 
 type Json = Record<string, any>;
 const served = (f: string): Json => (JSON.parse(readFileSync(new URL(`./fixtures/${f}`, import.meta.url), 'utf8')) as { graph: Json }).graph;
 const C = served('served-journey-c-price-subscribers-unsized-5411da8.json');
 const A = served('served-journey-a-price-churn-0df78f4.json');
+const BEYOND = served('served-price-subscribers-beyond-range-0df78f4-d2.json');
 const ctxSaying = (user_text: string) => ({ scenario_id: '550e8400-e29b-41d4-a716-4466554400a7', authenticated_user_id: null, request_id: 'r', user_text });
 
 function world(graph: Json) {
@@ -101,6 +103,29 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     expect(edge.effect_direction ?? Math.sign(edge.strength?.mean)).not.toBe('positive'); // precondition: served link runs negative
     expect(r).toEqual(expect.objectContaining({ ok: false, refusal: 'sign_conflict' }));
     expect(String(r.detail)).toMatch(/propose_link_strength/);
+  });
+
+  it('RED (live replay on served C + 0929 D2, 29 Sep: 6/6 prepared, 0 chips): the prepared change is OFFERED — one approve chip for it', async () => {
+    const { caps } = world(C);
+    const r = await caps.proposeLinkEffect!(ctxSaying(SUBS_SAID), SUBS_ARGS) as Json;
+    const chips = approvalChipsFor([{ name: 'propose_link_effect', ok: true, mutated: false, proposal_id: String(r.proposal_id) }]);
+    const approve = chips.filter((c) => c.id.startsWith('agent-approve-proposal:'));
+    expect(approve.map((c) => c.id)).toEqual([approvalChipIdFor(String(r.proposal_id))]);
+    expect(approve[0]!.label).toBe('Record your figure');
+  });
+
+  it('REFUSED (served 0df78f4 D2, live replay 3/3): a figure beyond what the link can carry is said in the sizer\'s own terms, with its question', async () => {
+    const { caps, store } = world(BEYOND);
+    const said = 'From our last two price changes: every £1 on the Pro price loses us about 50 paying subscribers.';
+    const r = await caps.proposeLinkEffect!(ctxSaying(said), {
+      from_label: 'Pro plan price', to_label: 'Pro paying subscribers', amount: -50, amount_unit: 'subscribers',
+      per_source_change: 1, per_source_change_unit: 'GBP/month', quote: 'every £1 on the Pro price loses us about 50 paying subscribers',
+    }) as Json;
+    expect(r).toEqual(expect.objectContaining({ ok: false, refusal: 'not_representable' }));
+    expect(String(r.detail)).toMatch(/more than the analysis can represent on the ranges/);
+    expect(String(r.detail)).toMatch(/Is that the size they meant\?/);
+    expect(String(r.detail)).not.toMatch(/not_representable|not representable/); // never the raw code
+    expect(store.size()).toBe(0);
   });
 
   it('FAIL CLOSED without the level door: approving writes nothing and says so (never a strength-only or register fallback)', async () => {
