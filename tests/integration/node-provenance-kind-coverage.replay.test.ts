@@ -645,6 +645,13 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "nonlinear_identity",
       "observed_state",
       "prior",
+      // MG #2295, 29 Sep (DL #72 5888551510) — THE VALUE-BEARING DECISION: `proposed_by` is NOT value-bearing and must
+      // NOT join `carriesValue` (nor `NODE_QUANTITY_FIELDS`). It says WHO put the option forward (`'olumi'`, written
+      // only for an option Olumi added), never HOW MUCH: the sibling of `provenance` and `threshold_source`. An option
+      // carrying the mark keeps its levels in `interventions`, exactly as before; joining would let authorship read as
+      // a level and skip the label binding for Olumi's own option. It IS written on OPTION nodes, so this loop can
+      // meet it: the semantic answer above is the reason, not scope.
+      "proposed_by",
       "provenance",
       // R1 S4-core, 28 Sep (`@talchain/schemas` 0.61.0) — THE VALUE-BEARING DECISION: `quantity_frame` is NOT
       // value-bearing and must NOT join `carriesValue` (nor `NODE_QUANTITY_FIELDS`). It says WHAT the node's value
