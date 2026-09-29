@@ -27,7 +27,7 @@ describe('M1 count population scope at the real admission payload boundary', () 
     expect(graph.edges.some((e) => e.from === count!.id || e.to === count!.id)).toBe(false);
     expect(result.open_questions).toContain('Does "have 1,500 paying subscribers" refer to "Pro plan paying subscribers", or a wider group?');
     expect(result.open_questions).toContain('Does your "MRR" goal cover all plans together or the Pro plan only?');
-    expect(graph.nodes.find((n) => n.kind === 'goal')?.derivation).toBeUndefined();
+    expect(graph.nodes.find((n) => n.kind === 'goal')?.nonlinear_identity).toBeUndefined();
   });
 
   it.each(['neutral', 'all-Pro'] as const)('preserves an actually stated %s population', async (control) => {
