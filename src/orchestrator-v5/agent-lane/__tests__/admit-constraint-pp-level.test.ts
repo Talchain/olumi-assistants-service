@@ -82,11 +82,18 @@ describe('F-C: a LEVEL limit in percentage points is a percent', () => {
     });
   });
 
-  it('[served run 2] OUTCOME: the admitted limit now carries churn\'s current level as the baseline PLoT needed', () => {
-    const served = levelLimitBaselineNodeIds(RUN2.graph, RUN2.graph.goal_constraints, RUN2.goal_node_id);
+  it('[served run 2] OUTCOME (the scale proof, no option in play): the admitted limit carries churn\'s current level', () => {
+    const served = levelLimitBaselineNodeIds(RUN2.graph, RUN2.graph.goal_constraints, RUN2.goal_node_id, []);
     expect([...served]).toEqual([]);
-    const admitted = levelLimitBaselineNodeIds(RUN2.graph, [admit(RUN2)], RUN2.goal_node_id);
+    const admitted = levelLimitBaselineNodeIds(RUN2.graph, [admit(RUN2)], RUN2.goal_node_id, []);
     expect([...admitted]).toEqual(['monthly_churn']);
+  });
+
+  it('[served run 2] R-c (AI Quality 5882087383): with the run\'s options it carries NOTHING — price also reaches churn through the unsized risk node', () => {
+    const options = (RUN2.graph.nodes as Array<Record<string, unknown>>).filter((n) => n.kind === 'option').map((n) => ({ interventions: n.interventions ?? {} }));
+    const unsized = (RUN2.graph.edges as Array<Record<string, any>>).filter((e) => e.to === 'monthly_churn' && e.provenance?.magnitude === undefined).map((e) => e.from);
+    expect(unsized).toContain('price_sensitivity_risk');
+    expect([...levelLimitBaselineNodeIds(RUN2.graph, [admit(RUN2)], RUN2.goal_node_id, options)]).toEqual([]);
   });
 
   it('[served run 1] contrast: "percent per month" is relabelled exactly as it was served', () => {

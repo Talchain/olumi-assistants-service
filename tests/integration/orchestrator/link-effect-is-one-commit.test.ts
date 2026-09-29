@@ -8,7 +8,7 @@ import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { GraphV3 } from '../../../src/schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../../src/orchestrator-v5/persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
-import { linkEffectEdgeToken } from '../../../src/orchestrator-v5/system-events/link-effect-edit.js';
+import { linkEffectEdgeToken, linkEffectReadingToken } from '../../../src/orchestrator-v5/system-events/link-effect-edit.js';
 
 const SCENARIO_ID = '64c5eccc-0000-4000-8000-0000000000e1';
 
@@ -91,12 +91,17 @@ describe('⭐ a user-stated link effect is ONE commit through the real level doo
     rows.clear();
   });
 
-  const input = (over: Record<string, unknown> = {}) => ({
-    scenario_id: SCENARIO_ID, base_graph_hash: baseHash(), turn_id: 'agent-authorise:le-1', links: [], levels: [],
-    link_effect: { from: 'price', to: 'subs', effect: { amount: -50, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: '£' },
-      edge_token: linkEffectEdgeToken(persisted, 'price', 'subs')!, quote: 'every £1 on the price loses us about 50 subscribers' },
-    ...over,
-  }) as never;
+  /** The approval carries the token of the reading its card SHOWED (AIQ 5885290014); here, of exactly the write asked. */
+  const input = (over: Record<string, unknown> = {}) => {
+    const i = {
+      scenario_id: SCENARIO_ID, base_graph_hash: baseHash(), turn_id: 'agent-authorise:le-1', links: [], levels: [],
+      link_effect: { from: 'price', to: 'subs', effect: { amount: -50, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: '£' },
+        edge_token: linkEffectEdgeToken(persisted, 'price', 'subs')!, quote: 'every £1 on the price loses us about 50 subscribers' },
+      ...over,
+    } as Record<string, any>;
+    const le = i.link_effect;
+    return (le !== undefined && !Object.hasOwn(le, 'reading_token') ? { ...i, link_effect: { ...le, reading_token: linkEffectReadingToken(le) } } : i) as never;
+  };
 
   it('RED: commits ONE append — the link is the user\'s size, with its natural effect, the quote on the receipt, and the revision moves', async () => {
     const before = baseHash();
@@ -112,6 +117,16 @@ describe('⭐ a user-stated link effect is ONE commit through the real level doo
     expect(facts[0]!.result.after.stated_quote).toBe('every £1 on the price loses us about 50 subscribers');
     expect(res.status === 'committed' ? res.graph_hash : null).toBe(baseHash());
     expect(baseHash()).not.toBe(before);
+  });
+
+  it('an approval with NO reading shown (no token) is refused at the real door — `user_stated` is never stamped', async () => {
+    const res = await commitOptionLevelsInProcess(input({ link_effect: { from: 'price', to: 'subs',
+      effect: { amount: -50, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: '£' },
+      edge_token: linkEffectEdgeToken(persisted, 'price', 'subs')!, quote: 'every £1 on the price loses us about 50 subscribers',
+      reading_token: undefined } }), 'req-le-6');
+    expect(res).toMatchObject({ status: 'refused', reason: 'link_reading_not_confirmed', link: { from: 'price', to: 'subs' } });
+    expect(rows.size).toBe(0);
+    expect(edgeOf('price', 'subs').strength.mean).toBe(-0.3);
   });
 
   it('a stale base is `stale` and writes nothing', async () => {

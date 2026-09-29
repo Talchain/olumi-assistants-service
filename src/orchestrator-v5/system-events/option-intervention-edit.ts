@@ -543,6 +543,8 @@ export interface ApprovedLinkEffect {
   readonly edge_token: string;
   /** The user's verbatim words (1..400), carried on the receipt. */
   readonly quote: string;
+  /** `linkEffectReadingToken` of the reading the approval card SHOWED; the writer refuses a write it does not match. */
+  readonly reading_token: string;
 }
 
 /** The members of a link the canonical link writer owns: its size, direction and whose size it is. Nothing else. */
@@ -785,6 +787,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
     const written = applyLinkEffectEdit({ persistedGraph: before, from: linkEffect.from, to: linkEffect.to, effect: linkEffect.effect,
       expected: { graph_hash: input.expectedGraphHash, edge_token: linkEffect.edge_token }, quote: linkEffect.quote,
+      reading_token: linkEffect.reading_token,
       lastRunIdentityUse: input.lastRunIdentityUse ?? null });
     if (written.kind === 'refused') return { kind: 'refused', reason: `link_${written.reason}`, linkIndex: 0 };
     const graph = projectGraphForPersistence(written.mutatedGraph);
