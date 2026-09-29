@@ -48,7 +48,7 @@ import {
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js';
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
-import { figureTheUserWrote, holdStatedGoalAttributes, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
+import { figureTheUserWrote, goalLevelTheUserWrote, holdStatedGoalAttributes, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
@@ -1205,7 +1205,7 @@ export async function buildModelFromBrief(
   const firstCandidate = candidate;
   let preparation = prepareProvisionalCandidate(candidate);
   candidate = preparation.candidate;
-  let admitted = admitCandidateModel(candidate, {}, brief);
+  let admitted = admitCandidateModel(candidate, {}, brief, goalLevelTheUserWrote(candidate, brief));
   preparation = gapsOnRegisteredOptions(preparation, firstCandidate, admitted);
 
   /**
@@ -1322,7 +1322,7 @@ export async function buildModelFromBrief(
         );
         const retryPrepared = prepareProvisionalCandidate(retryRaw);
         const retryCandidate = retryPrepared.candidate;
-        const retryAdmitted = admitCandidateModel(retryCandidate, {}, brief);
+        const retryAdmitted = admitCandidateModel(retryCandidate, {}, brief, goalLevelTheUserWrote(retryCandidate, brief));
         // ⛔ Leave out only what the FIRST draft never registered: withholding a registered option never closes its gaps in the count (adversarial verify of 843c0960).
         const firstGone = new Set((admitted.options_withheld ?? []).map((w) => canonicalLabel(w.option)));
         const firstRegistered = new Set(firstCandidate.options.map((o) => canonicalLabel(o.label)).filter((l) => !firstGone.has(l)));

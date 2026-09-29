@@ -142,6 +142,45 @@ describe('S4G — WIRE: a change goal reaches /graph/register in the contract\'s
     expect(Object.keys(g)).not.toContain('goal_threshold');
   });
 
+  // PR Review CHANGES_REQUIRED on #2262 @ 338e4268: the drafter's "known" + "explicit" is its word, not the brief's.
+  it('S4G-8 RED: a FALSELY explicit current level (the brief states no bill) is never the base — no threshold, no base, said', async () => {
+    const { r, registered } = await run(candidate({}),
+      'Cut our monthly cloud bill by 15% within 6 months. Should we move steady workloads to reserved instances, or renegotiate our contract?');
+    const g = goalOf(registered);
+    expect(g['goal_threshold_frame'], 'PRECONDITION: the change is still written').toBe('change_rel');
+    expect(Object.keys(g)).not.toContain('observed_state');
+    expect(Object.keys(g)).not.toContain('goal_threshold');
+    expect(JSON.stringify(r)).toMatch(/is not a figure your brief states for it/);
+  });
+  it('S4G-8b RED: the same £45,000 stated for ANOTHER quantity (support costs) is not the cloud bill\'s base', async () => {
+    const { registered } = await run(candidate({}),
+      'Our support team costs £45,000 a month. Cut our monthly cloud bill by 15% within 6 months. Should we move steady workloads to reserved instances, or renegotiate our contract?');
+    const g = goalOf(registered);
+    expect(Object.keys(g)).not.toContain('observed_state');
+    expect(Object.keys(g)).not.toContain('goal_threshold');
+  });
+  it('S4G-8c CONTROL: the brief states the cloud bill\'s £45,000 → the base is written (the valid control beside 8/8b)', async () => {
+    const { registered } = await run(candidate({}));
+    const g = goalOf(registered);
+    expect((g['observed_state'] as { raw_value: number; source: string })).toMatchObject({ raw_value: 45000, source: 'brief_extraction' });
+  });
+  // Read with the model's own labels, as every chat door reads a goal target (`scopeIn`): a quantity the model does not
+  // hold names nothing, so "cut it by 15%" stays the user's (S4G-9b) — the scope rule's stated limit, not this door's.
+  it('S4G-9 RED: a "15%" the brief writes about ANOTHER quantity does not hold the goal\'s change target as the user\'s', async () => {
+    const { registered } = await run(candidate({}),
+      'Our reserved share grew 15% this year. Our monthly cloud bill is currently £45,000 and we need it lower within 6 months. Should we move steady workloads to reserved instances, or renegotiate our contract?');
+    const g = goalOf(registered);
+    expect(g['goal_threshold_frame'], 'PRECONDITION: the change is still written').toBe('change_rel');
+    expect(Object.keys(g)).not.toContain('threshold_source');
+    expect(Object.keys(g)).not.toContain('goal_direction');
+  });
+
+  it('S4G-9b CONTROL: "cut it by 15%" (a clause naming no quantity) holds the change target as the user\'s', async () => {
+    const { registered } = await run(candidate({}));
+    const g = goalOf(registered);
+    expect(g).toMatchObject({ threshold_source: 'brief_extraction', goal_direction: '<=' });
+  });
+
   it('S4G-7: CONTROL — a level goal ("to £40,000") registers exactly as before', async () => {
     const { registered } = await run(candidate({ value: 40000, frame: 'level' }));
     const g = goalOf(registered);
