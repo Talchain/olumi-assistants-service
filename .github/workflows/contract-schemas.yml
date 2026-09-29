@@ -1,0 +1,75 @@
+name: Contract schemas
+# ⛔ PUSH FIRES ONLY ON PROTECTED/DEPLOYMENT BRANCHES.
+#
+# Release Control HOLD on the first version of this PR (#1717): normalising
+# push + pull_request into ONE concurrency group means whichever event starts
+# second cancels the other — and the two runs are NOT equivalent evidence. The
+# pull_request run is evaluated in PR/merge-ref context, the push run in
+# branch-head context. If the push run wins the race and cancels the PR run, the
+# gate may be left unsatisfied.
+#
+# That risk is REAL, not theoretical: a `cancelled` required check leaves
+# mergeStateStatus BLOCKED. Measured on #1698 at 0364182ccb — required
+# "Lint, TypeCheck, Unit Tests" = COMPLETED/CANCELLED, PR state BLOCKED.
+#
+# ⭐ AND HISTORY CANNOT DISCHARGE IT. I searched 40 recent PRs for a head SHA
+# carrying BOTH a success and a cancelled instance of the required check — the
+# exact natural experiment. It does not exist (only success+success,
+# cancelled+cancelled and failure+cancelled). So the reviewer is right that only
+# a live experiment could license cross-event cancellation.
+#
+# So this takes the reviewer's safer design instead of running that experiment:
+# separate the TRIGGERS rather than cancelling across events. A PR gets exactly
+# one run because only `pull_request` fires for feature work; `push` fires only
+# for protected/deployment branches, where #1713's non-cancellation invariant
+# already protects the deploy gate. No cross-event race exists to reason about.
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+    branches: [main, staging]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/staging' && github.ref != 'refs/heads/main' }}
+
+jobs:
+  check-schemas:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+      - name: Guard — registry @talchain/schemas requires package-read token
+        # Sentinel: passes as a no-op while @talchain/schemas is vendored (file:);
+        # fails loudly only if it switches to a registry spec while
+        # NPM_PACKAGES_TOKEN is missing. See Docs/v5/v5-schemas-ci-auth-readiness.md.
+        run: bash scripts/ci/guard-schemas-registry-token.sh
+        env:
+          NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
+      - run: pnpm install --frozen-lockfile
+        env:
+          NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
+      - run: npx tsx scripts/export-schemas.ts
+      - name: Verify committed schemas match generated output (modified files)
+        run: git diff --exit-code contracts/
+      - name: Verify no untracked / uncommitted schema files (close the drift blind spot)
+        # `git diff --exit-code` only compares TRACKED files, so a NEW schema
+        # emitted by export-schemas.ts (a newly-exported contract, or a stray
+        # file under contracts/) is invisible to it — the job would go green
+        # while a required contract sits uncommitted. `git status --porcelain`
+        # reports untracked (`??`) and modified (` M`) paths alike; any output
+        # here means contracts/ is not fully committed. Fail loud.
+        shell: bash
+        run: |
+          PORCELAIN="$(git status --porcelain contracts/)"
+          if [[ -n "$PORCELAIN" ]]; then
+            echo "::error::export-schemas.ts left untracked/uncommitted files under contracts/ — regenerate and commit them:"
+            echo "$PORCELAIN"
+            exit 1
+          fi
+          echo "contracts/ is fully committed — no drift, no untracked files."

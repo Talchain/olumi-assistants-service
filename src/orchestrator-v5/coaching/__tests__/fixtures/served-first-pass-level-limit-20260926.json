@@ -1,0 +1,189 @@
+{
+ "nodes": [
+  {
+   "id": "decision_mrr",
+   "kind": "decision",
+   "label": "Decision: MRR"
+  },
+  {
+   "id": "mrr",
+   "kind": "goal",
+   "label": "MRR"
+  },
+  {
+   "id": "raise_pro_to_59",
+   "kind": "option",
+   "label": "Raise Pro to \u00a359"
+  },
+  {
+   "id": "hold_49_with_ai_release",
+   "kind": "option",
+   "label": "Hold \u00a349 with AI release"
+  },
+  {
+   "id": "raise_pro_to_54",
+   "kind": "option",
+   "label": "Raise Pro to \u00a354"
+  },
+  {
+   "id": "continue_as_now",
+   "kind": "option",
+   "label": "Continue as now"
+  },
+  {
+   "id": "pro_plan_price",
+   "kind": "factor",
+   "label": "Pro plan price",
+   "observed_state": {
+    "cap": 200,
+    "unit": "GBP/month",
+    "value": 0.245,
+    "source": "brief_extraction",
+    "raw_value": 49,
+    "declared_scale": "unit_interval"
+   }
+  },
+  {
+   "id": "ai_feature_availability",
+   "kind": "factor",
+   "label": "AI feature availability"
+  },
+  {
+   "id": "pro_paying_subscribers",
+   "kind": "factor",
+   "label": "Pro paying subscribers"
+  },
+  {
+   "id": "monthly_churn",
+   "kind": "factor",
+   "label": "Monthly churn"
+  },
+  {
+   "id": "price_sensitivity",
+   "kind": "risk",
+   "label": "Price sensitivity"
+  }
+ ],
+ "edges": [
+  {
+   "from": "decision_mrr",
+   "to": "raise_pro_to_59"
+  },
+  {
+   "from": "decision_mrr",
+   "to": "hold_49_with_ai_release"
+  },
+  {
+   "from": "decision_mrr",
+   "to": "raise_pro_to_54"
+  },
+  {
+   "from": "decision_mrr",
+   "to": "continue_as_now"
+  },
+  {
+   "from": "raise_pro_to_59",
+   "to": "pro_plan_price"
+  },
+  {
+   "from": "raise_pro_to_59",
+   "to": "ai_feature_availability"
+  },
+  {
+   "from": "hold_49_with_ai_release",
+   "to": "pro_plan_price"
+  },
+  {
+   "from": "hold_49_with_ai_release",
+   "to": "ai_feature_availability"
+  },
+  {
+   "from": "raise_pro_to_54",
+   "to": "pro_plan_price"
+  },
+  {
+   "from": "raise_pro_to_54",
+   "to": "ai_feature_availability"
+  },
+  {
+   "from": "continue_as_now",
+   "to": "pro_plan_price"
+  },
+  {
+   "from": "continue_as_now",
+   "to": "ai_feature_availability"
+  },
+  {
+   "from": "pro_plan_price",
+   "to": "mrr"
+  },
+  {
+   "from": "pro_plan_price",
+   "to": "price_sensitivity"
+  },
+  {
+   "from": "price_sensitivity",
+   "to": "monthly_churn"
+  },
+  {
+   "from": "ai_feature_availability",
+   "to": "pro_paying_subscribers"
+  },
+  {
+   "from": "ai_feature_availability",
+   "to": "monthly_churn"
+  },
+  {
+   "from": "monthly_churn",
+   "to": "pro_paying_subscribers"
+  },
+  {
+   "from": "pro_paying_subscribers",
+   "to": "mrr"
+  }
+ ],
+ "goal_constraints": [
+  {
+   "unit": "%",
+   "label": "Monthly churn",
+   "value": 10,
+   "node_id": "monthly_churn",
+   "operator": "<=",
+   "provenance": "explicit",
+   "value_frame": "level",
+   "constraint_id": "agent-lane:monthly_churn:<=",
+   "provenance_unit_relabelled": {
+    "rule": "agent_lane_limit_unit_v1",
+    "pre_normalisation_unit": "percent",
+    "pre_normalisation_value": 10
+   }
+  }
+ ],
+ "options": [
+  {
+   "id": "raise_pro_to_59",
+   "interventions": {
+    "pro_plan_price": 0.295,
+    "ai_feature_availability": 1
+   }
+  },
+  {
+   "id": "hold_49_with_ai_release",
+   "interventions": {
+    "pro_plan_price": 0.245,
+    "ai_feature_availability": 1
+   }
+  },
+  {
+   "id": "raise_pro_to_54",
+   "interventions": {
+    "pro_plan_price": 0.27,
+    "ai_feature_availability": 1
+   }
+  },
+  {
+   "id": "continue_as_now",
+   "interventions": {}
+  }
+ ]
+}

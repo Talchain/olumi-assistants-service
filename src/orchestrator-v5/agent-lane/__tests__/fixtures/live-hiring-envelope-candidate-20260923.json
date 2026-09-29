@@ -1,0 +1,243 @@
+{
+  "_provenance": {
+    "captured": "2026-09-23, live gpt-5.6-terra via /v1/responses, buildCandidateSchema() at the Path A contract, brief: Should I hire a Tech lead or two developers to increase velocity? First call of draw r2-hiring-1, byte-for-byte model output (re-serialised with indentation).",
+    "why_banked": "It restates option changes as links (4 option->factor duplicates) and was refused as 32 links before admission de-duplicated them."
+  },
+  "candidate": {
+    "goal": {
+      "metric": "Velocity",
+      "operator": ">",
+      "value": 0,
+      "unit": "change from current level",
+      "horizon_months": null,
+      "provenance": "explicit"
+    },
+    "constraints": [],
+    "options": [
+      {
+        "label": "Hire a Tech Lead",
+        "provenance": "explicit",
+        "changes": [
+          "Technical direction quality",
+          "Onboarding workload",
+          "Coordination overhead"
+        ],
+        "interventions": [
+          {
+            "factor_label": "Tech leads hired",
+            "value": 1,
+            "unit": "hires",
+            "provenance": "explicit"
+          }
+        ]
+      },
+      {
+        "label": "Hire Two Developers",
+        "provenance": "explicit",
+        "changes": [
+          "Onboarding workload",
+          "Coordination overhead"
+        ],
+        "interventions": [
+          {
+            "factor_label": "Developers hired",
+            "value": 2,
+            "unit": "hires",
+            "provenance": "explicit"
+          }
+        ]
+      },
+      {
+        "label": "Maintain Current Staffing",
+        "provenance": "ai_proposed",
+        "changes": [
+          "Existing team continuity"
+        ],
+        "interventions": []
+      },
+      {
+        "label": "Pilot Developer Hire",
+        "provenance": "ai_proposed",
+        "changes": [
+          "Developers hired",
+          "Onboarding workload",
+          "Coordination overhead"
+        ],
+        "interventions": []
+      }
+    ],
+    "factors": [
+      {
+        "label": "Tech leads hired",
+        "role": "controllable",
+        "baseline_known": false,
+        "baseline_value": null,
+        "unit": "hires",
+        "provenance": "explicit",
+        "plausible_max": 10
+      },
+      {
+        "label": "Developers hired",
+        "role": "controllable",
+        "baseline_known": false,
+        "baseline_value": null,
+        "unit": "hires",
+        "provenance": "explicit",
+        "plausible_max": 20
+      },
+      {
+        "label": "Technical direction quality",
+        "role": "controllable",
+        "baseline_known": false,
+        "baseline_value": null,
+        "unit": "score out of 100",
+        "provenance": "inferred",
+        "plausible_max": 100
+      },
+      {
+        "label": "Onboarding workload",
+        "role": "controllable",
+        "baseline_known": false,
+        "baseline_value": null,
+        "unit": "score out of 100",
+        "provenance": "ai_proposed",
+        "plausible_max": 100
+      },
+      {
+        "label": "Coordination overhead",
+        "role": "controllable",
+        "baseline_known": false,
+        "baseline_value": null,
+        "unit": "score out of 100",
+        "provenance": "ai_proposed",
+        "plausible_max": 100
+      },
+      {
+        "label": "Existing team continuity",
+        "role": "controllable",
+        "baseline_known": false,
+        "baseline_value": null,
+        "unit": "score out of 100",
+        "provenance": "ai_proposed",
+        "plausible_max": 100
+      }
+    ],
+    "risks": [
+      {
+        "label": "Hiring delay",
+        "provenance": "ai_proposed"
+      }
+    ],
+    "outcomes": [],
+    "links": [
+      {
+        "from": "Hire a Tech Lead",
+        "to": "Tech leads hired",
+        "direction": "positive",
+        "provenance": "explicit"
+      },
+      {
+        "from": "Hire Two Developers",
+        "to": "Developers hired",
+        "direction": "positive",
+        "provenance": "explicit"
+      },
+      {
+        "from": "Pilot Developer Hire",
+        "to": "Developers hired",
+        "direction": "positive",
+        "provenance": "ai_proposed"
+      },
+      {
+        "from": "Maintain Current Staffing",
+        "to": "Existing team continuity",
+        "direction": "positive",
+        "provenance": "ai_proposed"
+      },
+      {
+        "from": "Tech leads hired",
+        "to": "Technical direction quality",
+        "direction": "positive",
+        "provenance": "inferred"
+      },
+      {
+        "from": "Tech leads hired",
+        "to": "Onboarding workload",
+        "direction": "negative",
+        "provenance": "ai_proposed"
+      },
+      {
+        "from": "Tech leads hired",
+        "to": "Coordination overhead",
+        "direction": "negative",
+        "provenance": "ai_proposed"
+      },
+      {
+        "from": "Developers hired",
+        "to": "Velocity",
+        "direction": "positive",
+        "provenance": "inferred"
+      },
+      {
+        "from": "Developers hired",
+        "to": "Onboarding workload",
+        "direction": "positive",
+        "provenance": "ai_proposed"
+      },
+      {
+        "from": "Developers hired",
+        "to": "Coordination overhead",
+        "direction": "positive",
+        "provenance": "ai_proposed"
+      },
+      {
+        "from": "Technical direction quality",
+        "to": "Velocity",
+        "direction": "positive",
+        "provenance": "inferred"
+      },
+      {
+        "from": "Onboarding workload",
+        "to": "Velocity",
+        "direction": "negative",
+        "provenance": "ai_proposed"
+      },
+      {
+        "from": "Coordination overhead",
+        "to": "Velocity",
+        "direction": "negative",
+        "provenance": "ai_proposed"
+      },
+      {
+        "from": "Existing team continuity",
+        "to": "Velocity",
+        "direction": "positive",
+        "provenance": "ai_proposed"
+      },
+      {
+        "from": "Tech leads hired",
+        "to": "Hiring delay",
+        "direction": "positive",
+        "provenance": "ai_proposed"
+      },
+      {
+        "from": "Developers hired",
+        "to": "Hiring delay",
+        "direction": "positive",
+        "provenance": "ai_proposed"
+      },
+      {
+        "from": "Hiring delay",
+        "to": "Velocity",
+        "direction": "negative",
+        "provenance": "ai_proposed"
+      }
+    ],
+    "unknowns": [
+      "How do you measure velocity, and what increase would make this hire successful?",
+      "Over what time horizon do you need velocity to increase?",
+      "What is the current team size, delivery bottleneck, and technical leadership coverage?",
+      "How long would it take to recruit and onboard a Tech Lead versus developers?"
+    ]
+  }
+}

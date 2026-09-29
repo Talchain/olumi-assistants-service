@@ -1,0 +1,2292 @@
+{
+ "brief_text": "We+re deciding whether to move our 40-person support team to a 4-day week next quarter. Current annual support cost is £1.8m and our CSAT is 87%. Do not let CSAT drop below 85% — that is a hard limit for the board. Total implementation spend must not exceed £250,000. Our ops lead thinks productivity will fall 10-15%, but the pilot data from our Manchester office showed a 4% rise. We+d keep hiring flat either way. Success = a 4-day week that holds CSAT at or above 85% and lands within the £250,000 implementation budget. Go ahead.",
+ "graph": {
+  "meta": {
+   "roots": [
+    "dec_4day",
+    "fac_market_labour",
+    "fac_productivity",
+    "fac_support_cost"
+   ],
+   "leaves": [
+    "goal_4day_success"
+   ],
+   "source": "assistant"
+  },
+  "edges": [
+   {
+    "to": "opt_full_rollout",
+    "from": "dec_4day",
+    "origin": "ai",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "opt_phased",
+    "from": "dec_4day",
+    "origin": "ai",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "opt_status_quo",
+    "from": "dec_4day",
+    "origin": "ai",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "out_csat",
+    "from": "fac_4day_adoption",
+    "origin": "ai",
+    "strength": {
+     "std": 0.1,
+     "mean": 0.12
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "validation": {
+     "pass1": {
+      "strength_std": 0.1,
+      "strength_mean": 0.12,
+      "exists_probability": 0.72
+     },
+     "pass2": {
+      "basis": "domain_prior",
+      "reasoning": "Flexible schedules generally yield small CSAT gains through happier staff but context is unclear.",
+      "strength_std": 0.1,
+      "strength_mean": 0.1,
+      "lint_corrected": false,
+      "needs_user_input": true,
+      "exists_probability": 0.9
+     },
+     "status": "agreed",
+     "evoi_rank": null,
+     "was_shown": false,
+     "evoi_impact": null,
+     "resolved_by": "default",
+     "user_action": "pending",
+     "pass2_missing": false,
+     "sign_unstable": false,
+     "max_divergence": 0.30000000000000004,
+     "pass2_adjusted": {
+      "strength_std": 0.12,
+      "strength_mean": 0.27,
+      "exists_probability": 0.85
+     },
+     "resolved_value": null,
+     "bias_correction": {
+      "strength_std_offset": 0.01999999999999999,
+      "strength_mean_offset": 0.16999999999999998,
+      "exists_probability_offset": -0.050000000000000044
+     },
+     "distance_to_goal": 1,
+     "contested_reasons": [],
+     "validation_lint_log": []
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.72,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "out_staff_retention",
+    "from": "fac_4day_adoption",
+    "origin": "ai",
+    "strength": {
+     "std": 0.15,
+     "mean": 0.55
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "validation": {
+     "pass1": {
+      "strength_std": 0.15,
+      "strength_mean": 0.55,
+      "exists_probability": 0.85
+     },
+     "pass2": {
+      "basis": "domain_prior",
+      "reasoning": "Four-day weeks typically boost retention through improved work–life balance.",
+      "strength_std": 0.15,
+      "strength_mean": 0.25,
+      "lint_corrected": false,
+      "needs_user_input": true,
+      "exists_probability": 0.9
+     },
+     "status": "agreed",
+     "evoi_rank": null,
+     "was_shown": false,
+     "evoi_impact": null,
+     "resolved_by": "default",
+     "user_action": "pending",
+     "pass2_missing": false,
+     "sign_unstable": false,
+     "max_divergence": 0.2600000000000001,
+     "pass2_adjusted": {
+      "strength_std": 0.16999999999999998,
+      "strength_mean": 0.42,
+      "exists_probability": 0.85
+     },
+     "resolved_value": null,
+     "bias_correction": {
+      "strength_std_offset": 0.01999999999999999,
+      "strength_mean_offset": 0.16999999999999998,
+      "exists_probability_offset": -0.050000000000000044
+     },
+     "distance_to_goal": 1,
+     "contested_reasons": [],
+     "validation_lint_log": []
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.85,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "risk_productivity_drop",
+    "from": "fac_4day_adoption",
+    "origin": "ai",
+    "strength": {
+     "std": 0.18,
+     "mean": 0.38
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "validation": {
+     "pass1": {
+      "strength_std": 0.18,
+      "strength_mean": 0.38,
+      "exists_probability": 0.8
+     },
+     "pass2": {
+      "basis": "weak_guess",
+      "reasoning": "Impact of full adoption on productivity risk is ambiguous given pilot gains versus ops concerns.",
+      "strength_std": 0.15,
+      "strength_mean": 0.16831683168316833,
+      "lint_corrected": true,
+      "needs_user_input": true,
+      "exists_probability": 0.5
+     },
+     "status": "contested",
+     "evoi_rank": null,
+     "was_shown": false,
+     "evoi_impact": null,
+     "resolved_by": "default",
+     "user_action": "pending",
+     "pass2_missing": false,
+     "sign_unstable": false,
+     "max_divergence": 0.6666666666666666,
+     "pass2_adjusted": {
+      "strength_std": 0.16999999999999998,
+      "strength_mean": 0.3383168316831683,
+      "exists_probability": 0.44999999999999996
+     },
+     "resolved_value": null,
+     "bias_correction": {
+      "strength_std_offset": 0.01999999999999999,
+      "strength_mean_offset": 0.16999999999999998,
+      "exists_probability_offset": -0.050000000000000044
+     },
+     "distance_to_goal": 1,
+     "contested_reasons": [
+      "existence_boundary_crossing"
+     ],
+     "validation_lint_log": [
+      {
+       "code": "LINT_BUDGET_RESCALE",
+       "after": 0.16831683168316833,
+       "before": 0.17,
+       "edge_key": "fac_4day_adoption->risk_productivity_drop"
+      }
+     ]
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "risk_budget_overrun",
+    "from": "fac_impl_spend",
+    "origin": "ai",
+    "strength": {
+     "std": 0.12,
+     "mean": 0.6
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "validation": {
+     "pass1": {
+      "strength_std": 0.12,
+      "strength_mean": 0.6,
+      "exists_probability": 0.9
+     },
+     "pass2": {
+      "basis": "structural_inference",
+      "reasoning": "Higher implementation spend mechanically increases chance of budget overrun.",
+      "strength_std": 0.05,
+      "strength_mean": 0.82,
+      "lint_corrected": false,
+      "needs_user_input": false,
+      "exists_probability": 0.99
+     },
+     "status": "contested",
+     "evoi_rank": null,
+     "was_shown": false,
+     "evoi_impact": null,
+     "resolved_by": "default",
+     "user_action": "pending",
+     "pass2_missing": false,
+     "sign_unstable": false,
+     "max_divergence": 0.78,
+     "pass2_adjusted": {
+      "strength_std": 0.06999999999999999,
+      "strength_mean": 0.99,
+      "exists_probability": 0.94
+     },
+     "resolved_value": null,
+     "bias_correction": {
+      "strength_std_offset": 0.01999999999999999,
+      "strength_mean_offset": 0.16999999999999998,
+      "exists_probability_offset": -0.050000000000000044
+     },
+     "distance_to_goal": 1,
+     "contested_reasons": [
+      "confidence_band_change",
+      "existence_boundary_crossing"
+     ],
+     "validation_lint_log": []
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.9,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "out_staff_retention",
+    "from": "fac_market_labour",
+    "origin": "ai",
+    "strength": {
+     "std": 0.14,
+     "mean": 0.28
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "validation": {
+     "pass1": {
+      "strength_std": 0.14,
+      "strength_mean": 0.28,
+      "exists_probability": 0.68
+     },
+     "pass2": {
+      "basis": "domain_prior",
+      "reasoning": "Tight labor markets tend to reduce retention as employees have more alternatives.",
+      "strength_std": 0.15,
+      "strength_mean": -0.3,
+      "lint_corrected": false,
+      "needs_user_input": true,
+      "exists_probability": 0.9
+     },
+     "status": "contested",
+     "evoi_rank": null,
+     "was_shown": false,
+     "evoi_impact": null,
+     "resolved_by": "default",
+     "user_action": "pending",
+     "pass2_missing": false,
+     "sign_unstable": true,
+     "max_divergence": 1,
+     "pass2_adjusted": {
+      "strength_std": 0.16999999999999998,
+      "strength_mean": -0.13,
+      "exists_probability": 0.85
+     },
+     "resolved_value": null,
+     "bias_correction": {
+      "strength_std_offset": 0.01999999999999999,
+      "strength_mean_offset": 0.16999999999999998,
+      "exists_probability_offset": -0.050000000000000044
+     },
+     "distance_to_goal": 1,
+     "contested_reasons": [
+      "sign_flip",
+      "existence_boundary_crossing"
+     ],
+     "validation_lint_log": []
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.68,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "risk_productivity_drop",
+    "from": "fac_market_labour",
+    "origin": "ai",
+    "strength": {
+     "std": 0.1,
+     "mean": 0.15
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "validation": {
+     "pass1": {
+      "strength_std": 0.1,
+      "strength_mean": 0.15,
+      "exists_probability": 0.6
+     },
+     "pass2": {
+      "basis": "domain_prior",
+      "reasoning": "Challenging labor markets raise the risk of productivity shortfalls through staffing gaps.",
+      "strength_std": 0.15,
+      "strength_mean": 0.16831683168316833,
+      "lint_corrected": true,
+      "needs_user_input": true,
+      "exists_probability": 0.9
+     },
+     "status": "contested",
+     "evoi_rank": null,
+     "was_shown": false,
+     "evoi_impact": null,
+     "resolved_by": "default",
+     "user_action": "pending",
+     "pass2_missing": false,
+     "sign_unstable": false,
+     "max_divergence": 0.3766336633663366,
+     "pass2_adjusted": {
+      "strength_std": 0.16999999999999998,
+      "strength_mean": 0.3383168316831683,
+      "exists_probability": 0.85
+     },
+     "resolved_value": null,
+     "bias_correction": {
+      "strength_std_offset": 0.01999999999999999,
+      "strength_mean_offset": 0.16999999999999998,
+      "exists_probability_offset": -0.050000000000000044
+     },
+     "distance_to_goal": 1,
+     "contested_reasons": [
+      "strength_band_change",
+      "existence_boundary_crossing"
+     ],
+     "validation_lint_log": [
+      {
+       "code": "LINT_BUDGET_RESCALE",
+       "after": 0.16831683168316833,
+       "before": 0.17,
+       "edge_key": "fac_market_labour->risk_productivity_drop"
+      }
+     ]
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.6,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "out_csat",
+    "from": "fac_productivity",
+    "origin": "ai",
+    "strength": {
+     "std": 0.14,
+     "mean": 0.42
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "validation": {
+     "pass1": {
+      "strength_std": 0.14,
+      "strength_mean": 0.42,
+      "exists_probability": 0.88
+     },
+     "pass2": {
+      "basis": "domain_prior",
+      "reasoning": "Higher productivity generally improves CSAT via faster resolution.",
+      "strength_std": 0.1,
+      "strength_mean": 0.1,
+      "lint_corrected": false,
+      "needs_user_input": true,
+      "exists_probability": 0.9
+     },
+     "status": "agreed",
+     "evoi_rank": null,
+     "was_shown": false,
+     "evoi_impact": null,
+     "resolved_by": "default",
+     "user_action": "pending",
+     "pass2_missing": false,
+     "sign_unstable": false,
+     "max_divergence": 0.29999999999999993,
+     "pass2_adjusted": {
+      "strength_std": 0.12,
+      "strength_mean": 0.27,
+      "exists_probability": 0.85
+     },
+     "resolved_value": null,
+     "bias_correction": {
+      "strength_std_offset": 0.01999999999999999,
+      "strength_mean_offset": 0.16999999999999998,
+      "exists_probability_offset": -0.050000000000000044
+     },
+     "distance_to_goal": 1,
+     "contested_reasons": [],
+     "validation_lint_log": []
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.88,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "risk_productivity_drop",
+    "from": "fac_productivity",
+    "origin": "ai",
+    "strength": {
+     "std": 0.12,
+     "mean": -0.35
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "validation": {
+     "pass1": {
+      "strength_std": 0.12,
+      "strength_mean": -0.35,
+      "exists_probability": 0.85
+     },
+     "pass2": {
+      "basis": "structural_inference",
+      "reasoning": "Increases in productivity directly reduce the risk of a productivity shortfall.",
+      "strength_std": 0.1,
+      "strength_mean": -0.6633663366336634,
+      "lint_corrected": true,
+      "needs_user_input": false,
+      "exists_probability": 0.99
+     },
+     "status": "contested",
+     "evoi_rank": null,
+     "was_shown": false,
+     "evoi_impact": null,
+     "resolved_by": "default",
+     "user_action": "pending",
+     "pass2_missing": false,
+     "sign_unstable": false,
+     "max_divergence": 0.3333333333333333,
+     "pass2_adjusted": {
+      "strength_std": 0.12,
+      "strength_mean": -0.4933663366336634,
+      "exists_probability": 0.94
+     },
+     "resolved_value": null,
+     "bias_correction": {
+      "strength_std_offset": 0.01999999999999999,
+      "strength_mean_offset": 0.16999999999999998,
+      "exists_probability_offset": -0.050000000000000044
+     },
+     "distance_to_goal": 1,
+     "contested_reasons": [
+      "existence_boundary_crossing"
+     ],
+     "validation_lint_log": [
+      {
+       "code": "LINT_BUDGET_RESCALE",
+       "after": -0.6633663366336634,
+       "before": -0.67,
+       "edge_key": "fac_productivity->risk_productivity_drop"
+      }
+     ]
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.85,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "risk_budget_overrun",
+    "from": "fac_support_cost",
+    "origin": "ai",
+    "strength": {
+     "std": 0.1,
+     "mean": 0.22
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "validation": {
+     "pass1": {
+      "strength_std": 0.1,
+      "strength_mean": 0.22,
+      "exists_probability": 0.78
+     },
+     "pass2": {
+      "basis": "domain_prior",
+      "reasoning": "Higher ongoing support cost eats into the budget, raising overrun risk.",
+      "strength_std": 0.1,
+      "strength_mean": 0.18,
+      "lint_corrected": false,
+      "needs_user_input": true,
+      "exists_probability": 0.9
+     },
+     "status": "contested",
+     "evoi_rank": null,
+     "was_shown": false,
+     "evoi_impact": null,
+     "resolved_by": "default",
+     "user_action": "pending",
+     "pass2_missing": false,
+     "sign_unstable": false,
+     "max_divergence": 0.3333333333333333,
+     "pass2_adjusted": {
+      "strength_std": 0.12,
+      "strength_mean": 0.35,
+      "exists_probability": 0.85
+     },
+     "resolved_value": null,
+     "bias_correction": {
+      "strength_std_offset": 0.01999999999999999,
+      "strength_mean_offset": 0.16999999999999998,
+      "exists_probability_offset": -0.050000000000000044
+     },
+     "distance_to_goal": 1,
+     "contested_reasons": [
+      "strength_band_change"
+     ],
+     "validation_lint_log": []
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.78,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "fac_4day_adoption",
+    "from": "opt_full_rollout",
+    "origin": "ai",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "fac_impl_spend",
+    "from": "opt_full_rollout",
+    "origin": "ai",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "fac_4day_adoption",
+    "from": "opt_phased",
+    "origin": "ai",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "fac_impl_spend",
+    "from": "opt_phased",
+    "origin": "ai",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "fac_4day_adoption",
+    "from": "opt_status_quo",
+    "origin": "ai",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "fac_impl_spend",
+    "from": "opt_status_quo",
+    "origin": "ai",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "goal_4day_success",
+    "from": "out_csat",
+    "origin": "ai",
+    "strength": {
+     "std": 0.1,
+     "mean": 0.55
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "validation": {
+     "pass1": {
+      "strength_std": 0.1,
+      "strength_mean": 0.55,
+      "exists_probability": 0.95
+     },
+     "pass2": {
+      "basis": "structural_inference",
+      "reasoning": "Meeting the CSAT floor is critical to defining success.",
+      "strength_std": 0.1,
+      "strength_mean": 0.35,
+      "lint_corrected": true,
+      "needs_user_input": false,
+      "exists_probability": 0.95
+     },
+     "status": "contested",
+     "evoi_rank": null,
+     "was_shown": false,
+     "evoi_impact": null,
+     "resolved_by": "default",
+     "user_action": "pending",
+     "pass2_missing": false,
+     "sign_unstable": false,
+     "max_divergence": 0.3333333333333333,
+     "pass2_adjusted": {
+      "strength_std": 0.12,
+      "strength_mean": 0.52,
+      "exists_probability": 0.8999999999999999
+     },
+     "resolved_value": null,
+     "bias_correction": {
+      "strength_std_offset": 0.01999999999999999,
+      "strength_mean_offset": 0.16999999999999998,
+      "exists_probability_offset": -0.050000000000000044
+     },
+     "distance_to_goal": 0,
+     "contested_reasons": [
+      "existence_boundary_crossing"
+     ],
+     "validation_lint_log": [
+      {
+       "code": "LINT_BUDGET_RESCALE",
+       "after": 0.35,
+       "before": 0.7,
+       "edge_key": "out_csat->goal_4day_success"
+      }
+     ]
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.95,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "goal_4day_success",
+    "from": "out_staff_retention",
+    "origin": "ai",
+    "strength": {
+     "std": 0.1,
+     "mean": 0.22
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "validation": {
+     "pass1": {
+      "strength_std": 0.1,
+      "strength_mean": 0.22,
+      "exists_probability": 0.8
+     },
+     "pass2": {
+      "basis": "structural_inference",
+      "reasoning": "Better retention may support success indirectly but is not in the goal definition.",
+      "strength_std": 0.04000000000000001,
+      "strength_mean": 0.05,
+      "lint_corrected": true,
+      "needs_user_input": true,
+      "exists_probability": 0.6
+     },
+     "status": "contested",
+     "evoi_rank": null,
+     "was_shown": false,
+     "evoi_impact": null,
+     "resolved_by": "default",
+     "user_action": "pending",
+     "pass2_missing": false,
+     "sign_unstable": false,
+     "max_divergence": 0.3333333333333333,
+     "pass2_adjusted": {
+      "strength_std": 0.06,
+      "strength_mean": 0.21999999999999997,
+      "exists_probability": 0.5499999999999999
+     },
+     "resolved_value": null,
+     "bias_correction": {
+      "strength_std_offset": 0.01999999999999999,
+      "strength_mean_offset": 0.16999999999999998,
+      "exists_probability_offset": -0.050000000000000044
+     },
+     "distance_to_goal": 0,
+     "contested_reasons": [
+      "existence_boundary_crossing"
+     ],
+     "validation_lint_log": [
+      {
+       "code": "LINT_BUDGET_RESCALE",
+       "after": 0.05,
+       "before": 0.1,
+       "edge_key": "out_staff_retention->goal_4day_success"
+      },
+      {
+       "code": "LINT_STD_CLAMPED",
+       "after": 0.04000000000000001,
+       "before": 0.1,
+       "edge_key": "out_staff_retention->goal_4day_success"
+      }
+     ]
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "goal_4day_success",
+    "from": "risk_budget_overrun",
+    "origin": "ai",
+    "strength": {
+     "std": 0.12,
+     "mean": -0.4
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "validation": {
+     "pass1": {
+      "strength_std": 0.12,
+      "strength_mean": -0.4,
+      "exists_probability": 0.9
+     },
+     "pass2": {
+      "basis": "structural_inference",
+      "reasoning": "Budget overruns directly violate the success budget constraint.",
+      "strength_std": 0.1,
+      "strength_mean": -0.4,
+      "lint_corrected": true,
+      "needs_user_input": false,
+      "exists_probability": 0.95
+     },
+     "status": "contested",
+     "evoi_rank": null,
+     "was_shown": false,
+     "evoi_impact": null,
+     "resolved_by": "default",
+     "user_action": "pending",
+     "pass2_missing": false,
+     "sign_unstable": false,
+     "max_divergence": 0.33999999999999997,
+     "pass2_adjusted": {
+      "strength_std": 0.12,
+      "strength_mean": -0.23000000000000004,
+      "exists_probability": 0.8999999999999999
+     },
+     "resolved_value": null,
+     "bias_correction": {
+      "strength_std_offset": 0.01999999999999999,
+      "strength_mean_offset": 0.16999999999999998,
+      "exists_probability_offset": -0.050000000000000044
+     },
+     "distance_to_goal": 0,
+     "contested_reasons": [
+      "strength_band_change"
+     ],
+     "validation_lint_log": [
+      {
+       "code": "LINT_BUDGET_RESCALE",
+       "after": -0.4,
+       "before": -0.8,
+       "edge_key": "risk_budget_overrun->goal_4day_success"
+      }
+     ]
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.9,
+    "provenance_display": "ai_inferred"
+   },
+   {
+    "to": "goal_4day_success",
+    "from": "risk_productivity_drop",
+    "origin": "ai",
+    "strength": {
+     "std": 0.12,
+     "mean": -0.35
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "validation": {
+     "pass1": {
+      "strength_std": 0.12,
+      "strength_mean": -0.35,
+      "exists_probability": 0.88
+     },
+     "pass2": {
+      "basis": "structural_inference",
+      "reasoning": "Productivity shortfalls threaten CSAT and thereby success.",
+      "strength_std": 0.1,
+      "strength_mean": -0.2,
+      "lint_corrected": true,
+      "needs_user_input": true,
+      "exists_probability": 0.9
+     },
+     "status": "contested",
+     "evoi_rank": null,
+     "was_shown": false,
+     "evoi_impact": null,
+     "resolved_by": "default",
+     "user_action": "pending",
+     "pass2_missing": false,
+     "sign_unstable": false,
+     "max_divergence": 0.6666666666666666,
+     "pass2_adjusted": {
+      "strength_std": 0.12,
+      "strength_mean": -0.030000000000000027,
+      "exists_probability": 0.85
+     },
+     "resolved_value": null,
+     "bias_correction": {
+      "strength_std_offset": 0.01999999999999999,
+      "strength_mean_offset": 0.16999999999999998,
+      "exists_probability_offset": -0.050000000000000044
+     },
+     "distance_to_goal": 0,
+     "contested_reasons": [
+      "strength_band_change"
+     ],
+     "validation_lint_log": [
+      {
+       "code": "LINT_BUDGET_RESCALE",
+       "after": -0.2,
+       "before": -0.4,
+       "edge_key": "risk_productivity_drop->goal_4day_success"
+      }
+     ]
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.88,
+    "provenance_display": "ai_inferred"
+   }
+  ],
+  "nodes": [
+   {
+    "id": "dec_4day",
+    "kind": "decision",
+    "label": "4-Day Work Week for Support Team",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "fac_4day_adoption",
+    "kind": "factor",
+    "label": "4-Day Week Adoption Level",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "encoding_map": {
+     "0": "No 4-day week",
+     "1": "Full rollout",
+     "0.5": "Partial rollout"
+    },
+    "display_value": "Low (0)",
+    "observed_state": {
+     "value": 0,
+     "source": "cee_inference",
+     "factor_type": "other",
+     "extractionType": "inferred",
+     "uncertainty_drivers": [
+      "Not provided"
+     ]
+    }
+   },
+   {
+    "id": "fac_impl_spend",
+    "kind": "factor",
+    "label": "Implementation Spend",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "display_value": "£0",
+    "observed_state": {
+     "cap": 250000,
+     "unit": "£",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "factor_type": "cost",
+     "extractionType": "inferred",
+     "uncertainty_drivers": [
+      "Not provided"
+     ]
+    }
+   },
+   {
+    "id": "fac_market_labour",
+    "kind": "factor",
+    "label": "Labour Market Conditions",
+    "prior": {
+     "range_max": 0.7,
+     "range_min": 0.3,
+     "distribution": "uniform"
+    },
+    "category": "external",
+    "provenance": "ai_inferred",
+    "display_value": "0.3 to 0.7"
+   },
+   {
+    "id": "fac_productivity",
+    "kind": "factor",
+    "label": "Team Productivity Change",
+    "prior": {
+     "range_max": 0.75,
+     "range_min": 0.25,
+     "distribution": "uniform"
+    },
+    "category": "external",
+    "provenance": "ai_inferred",
+    "display_value": "0.25 to 0.75 scale",
+    "extractionType": "inferred"
+   },
+   {
+    "id": "fac_support_cost",
+    "kind": "factor",
+    "label": "Annual Support Cost",
+    "prior": {
+     "range_max": 1,
+     "range_min": 0.36,
+     "distribution": "uniform"
+    },
+    "category": "external",
+    "provenance": "ai_inferred",
+    "display_value": "£0.4 to £1",
+    "extractionType": "inferred"
+   },
+   {
+    "id": "goal_4day_success",
+    "kind": "goal",
+    "label": "Deliver 4-Day Week Within Budget and CSAT Floor",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "opt_full_rollout",
+    "kind": "option",
+    "label": "Full 4-Day Week Rollout",
+    "provenance": "ai_inferred",
+    "is_baseline": false,
+    "interventions": {
+     "fac_impl_spend": {
+      "unit": "£",
+      "value": 1,
+      "source": "cee_hypothesis",
+      "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+      "target_match": {
+       "node_id": "fac_impl_spend",
+       "confidence": "high",
+       "match_type": "exact_id"
+      },
+      "value_confidence": "low"
+     },
+     "fac_4day_adoption": {
+      "value": 1,
+      "source": "cee_hypothesis",
+      "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+      "target_match": {
+       "node_id": "fac_4day_adoption",
+       "confidence": "high",
+       "match_type": "exact_id"
+      },
+      "value_confidence": "low"
+     }
+    }
+   },
+   {
+    "id": "opt_phased",
+    "kind": "option",
+    "label": "Phased Rollout (Pilot then Scale)",
+    "provenance": "ai_inferred",
+    "is_baseline": false,
+    "interventions": {
+     "fac_impl_spend": {
+      "unit": "£",
+      "value": 0.6,
+      "source": "cee_hypothesis",
+      "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+      "target_match": {
+       "node_id": "fac_impl_spend",
+       "confidence": "high",
+       "match_type": "exact_id"
+      },
+      "value_confidence": "low"
+     },
+     "fac_4day_adoption": {
+      "value": 0.5,
+      "source": "cee_hypothesis",
+      "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+      "target_match": {
+       "node_id": "fac_4day_adoption",
+       "confidence": "high",
+       "match_type": "exact_id"
+      },
+      "value_confidence": "low"
+     }
+    }
+   },
+   {
+    "id": "opt_status_quo",
+    "kind": "option",
+    "label": "Keep 5-Day Week (Status Quo)",
+    "provenance": "ai_inferred",
+    "is_baseline": true,
+    "interventions": {
+     "fac_impl_spend": {
+      "unit": "£",
+      "value": 0,
+      "source": "cee_hypothesis",
+      "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+      "target_match": {
+       "node_id": "fac_impl_spend",
+       "confidence": "high",
+       "match_type": "exact_id"
+      },
+      "value_confidence": "low"
+     },
+     "fac_4day_adoption": {
+      "value": 0,
+      "source": "cee_hypothesis",
+      "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+      "target_match": {
+       "node_id": "fac_4day_adoption",
+       "confidence": "high",
+       "match_type": "exact_id"
+      },
+      "value_confidence": "low"
+     }
+    }
+   },
+   {
+    "id": "out_csat",
+    "kind": "outcome",
+    "label": "Customer Satisfaction Score",
+    "provenance": "from_brief",
+    "observed_state": {
+     "cap": 100,
+     "unit": "%",
+     "value": 0.87,
+     "source": "brief_extraction",
+     "raw_value": 87,
+     "factor_type": "quality",
+     "extractionType": "explicit"
+    }
+   },
+   {
+    "id": "out_staff_retention",
+    "kind": "outcome",
+    "label": "Staff Retention and Wellbeing",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "risk_budget_overrun",
+    "kind": "risk",
+    "label": "Implementation Budget Overrun",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "risk_productivity_drop",
+    "kind": "risk",
+    "label": "Productivity Shortfall",
+    "provenance": "ai_inferred"
+   }
+  ],
+  "trace": {
+   "engine": {
+    "model": "claude-sonnet-4-6",
+    "version": "1.12.0",
+    "provider": "anthropic"
+   },
+   "pipeline": {
+    "enrich": {
+     "source": "unified_pipeline",
+     "called_count": 1,
+     "factors_added": 0,
+     "extraction_mode": "v4_complete_skip",
+     "factors_skipped": 0,
+     "factors_enhanced": 0
+    },
+    "repair": {
+     "edge_restore": {
+      "restoredCount": 0
+     },
+     "deterministic_sweep": {
+      "sweep_ran": true,
+      "status_quo": {
+       "fixed": false,
+       "marked_droppable": false
+      },
+      "edge_format": "V1_FLAT",
+      "graph_delta": {
+       "edges_after": 22,
+       "nodes_after": 14,
+       "edges_before": 22,
+       "nodes_before": 14
+      },
+      "rescue_score": 17,
+      "repairs_count": 7,
+      "sweep_version": "v3",
+      "bucket_summary": {
+       "a": 0,
+       "b": 4,
+       "c": 0
+      },
+      "violations_after": 0,
+      "llm_repair_needed": false,
+      "violations_before": 4,
+      "factor_goal_splits": 0,
+      "unreachable_factors": {
+       "reclassified": [
+        "fac_market_labour",
+        "fac_productivity",
+        "fac_support_cost"
+       ],
+       "marked_droppable": []
+      },
+      "complexity_cap_pruned": 0,
+      "goal_threshold_stripped": 0,
+      "disconnected_options_after": [],
+      "disconnected_options_before": [],
+      "option_goal_shortcuts_removed": 0,
+      "option_goal_shortcuts_skipped": 0,
+      "option_risk_shortcuts_removed": 0,
+      "option_risk_shortcuts_skipped": 0,
+      "option_goal_shortcuts_rerouted": 0,
+      "option_risk_shortcuts_rerouted": 0,
+      "disconnected_observables_pruned": [],
+      "goal_threshold_possibly_inferred": 0,
+      "option_outcome_shortcuts_removed": 0,
+      "option_outcome_shortcuts_skipped": 0,
+      "remaining_forbidden_edges_removed": 0
+     },
+     "deterministic_enforcement": {
+      "ran": true,
+      "blocked": false,
+      "total_repairs": 0,
+      "nodes_rescaled": 0,
+      "bridge_chains_removed": 0,
+      "bridge_goal_edges_added": 0,
+      "edges_skipped_non_finite": 0,
+      "post_validation_error_count": 0,
+      "post_validation_warning_count": 0
+     }
+    },
+    "status": "success",
+    "llm_raw": {
+     "text": "{\"nodes\":[{\"id\":\"dec_4day\",\"kind\":\"decision\",\"label\":\"4-Day Work Week for Support Team\"},{\"id\":\"opt_full_rollout\",\"kind\":\"option\",\"label\":\"Full 4-Day Week Rollout\",\"data\":{\"value\":1,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_4day_adoption\",\"value\":1},{\"factor_id\":\"fac_impl_spend\",\"value\":1.0}]},\"is_baseline\":false},{\"id\":\"opt_phased\",\"kind\":\"option\",\"label\":\"Phased Rollout (Pilot then Scale)\",\"data\":{\"value\":1,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_4day_adoption\",\"value\":0.5},{\"factor_id\":\"fac_impl_spend\",\"value\":0.6}]},\"is_baseline\":false},{\"id\":\"opt_status_quo\",\"kind\":\"option\",\"label\":\"Keep 5-Day Week (Status Quo)\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_4day_adoption\",\"value\":0},{\"factor_id\":\"fac_impl_spend\",\"value\":0}]},\"is_baseline\":true},{\"id\":\"fac_4day_adoption\",\"kind\":\"factor\",\"label\":\"4-Day Week Adoption Level\",\"category\":\"controllable\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"encoding_map\":\"{\\\"0\\\": \\\"No 4-day week\\\", \\\"0.5\\\": \\\"Partial rollout\\\", \\\"1\\\": \\\"Full rollout\\\"}\",\"is_baseline\":false},\"prior\":null},{\"id\":\"fac_impl_spend\",\"kind\":\"factor\",\"label\":\"Implementation Spend\",\"category\":\"controllable\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"cost\",\"raw_value\":0,\"unit\":\"£\",\"cap\":250000,\"is_baseline\":false}},{\"id\":\"fac_productivity\",\"kind\":\"factor\",\"label\":\"Team Productivity Change\",\"category\":\"observable\",\"data\":{\"value\":0.5,\"extractionType\":\"inferred\",\"factor_type\":\"quality\",\"raw_value\":50,\"unit\":\"scale\",\"is_baseline\":false}},{\"id\":\"fac_support_cost\",\"kind\":\"factor\",\"label\":\"Annual Support Cost\",\"category\":\"observable\",\"data\":{\"value\":0.72,\"extractionType\":\"explicit\",\"factor_type\":\"cost\",\"raw_value\":1800000,\"unit\":\"£\",\"cap\":2500000}},{\"id\":\"fac_market_labour\",\"kind\":\"factor\",\"label\":\"Labour Market Conditions\",\"category\":\"external\",\"prior\":{\"distribution\":\"uniform\",\"range_min\":0.3,\"range_max\":0.7}},{\"id\":\"out_csat\",\"kind\":\"outcome\",\"label\":\"Customer Satisfaction Score\",\"data\":{\"value\":0.87,\"extractionType\":\"explicit\",\"factor_type\":\"quality\",\"raw_value\":87,\"unit\":\"%\",\"cap\":100}},{\"id\":\"out_staff_retention\",\"kind\":\"outcome\",\"label\":\"Staff Retention and Wellbeing\"},{\"id\":\"risk_productivity_drop\",\"kind\":\"risk\",\"label\":\"Productivity Shortfall\"},{\"id\":\"risk_budget_overrun\",\"kind\":\"risk\",\"label\":\"Implementation Budget Overrun\"},{\"id\":\"goal_4day_success\",\"kind\":\"goal\",\"label\":\"Deliver 4-Day Week Within Budget and CSAT Floor\"}],\"edges\":[{\"from\":\"dec_4day\",\"to\":\"opt_full_rollout\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"dec_4day\",\"to\":\"opt_phased\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"dec_4day\",\"to\":\"opt_status_quo\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_full_rollout\",\"to\":\"fac_4day_adoption\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_full_rollout\",\"to\":\"fac_impl_spend\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_phased\",\"to\":\"fac_4day_adoption\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_phased\",\"to\":\"fac_impl_spend\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_status_quo\",\"to\":\"fac_4day_adoption\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_status_quo\",\"to\":\"fac_impl_spend\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"fac_4day_adoption\",\"to\":\"out_csat\",\"strength\":{\"mean\":0.12,\"std\":0.10},\"exists_probability\":0.72,\"effect_direction\":\"positive\"},{\"from\":\"fac_4day_adoption\",\"to\":\"out_staff_retention\",\"strength\":{\"mean\":0.55,\"std\":0.15},\"exists_probability\":0.85,\"effect_direction\":\"positive\"},{\"from\":\"fac_4day_adoption\",\"to\":\"risk_productivity_drop\",\"strength\":{\"mean\":0.38,\"std\":0.18},\"exists_probability\":0.80,\"effect_direction\":\"positive\"},{\"from\":\"fac_impl_spend\",\"to\":\"risk_budget_overrun\",\"strength\":{\"mean\":0.60,\"std\":0.12},\"exists_probability\":0.90,\"effect_direction\":\"positive\"},{\"from\":\"fac_productivity\",\"to\":\"out_csat\",\"strength\":{\"mean\":0.42,\"std\":0.14},\"exists_probability\":0.88,\"effect_direction\":\"positive\"},{\"from\":\"fac_productivity\",\"to\":\"risk_productivity_drop\",\"strength\":{\"mean\":-0.35,\"std\":0.12},\"exists_probability\":0.85,\"effect_direction\":\"negative\"},{\"from\":\"fac_support_cost\",\"to\":\"risk_budget_overrun\",\"strength\":{\"mean\":0.22,\"std\":0.10},\"exists_probability\":0.78,\"effect_direction\":\"positive\"},{\"from\":\"fac_market_labour\",\"to\":\"out_staff_retention\",\"strength\":{\"mean\":0.28,\"std\":0.14},\"exists_probability\":0.68,\"effect_direction\":\"positive\"},{\"from\":\"fac_market_labour\",\"to\":\"risk_productivity_drop\",\"strength\":{\"mean\":0.15,\"std\":0.10},\"exists_probability\":0.60,\"effect_direction\":\"positive\"},{\"from\":\"out_csat\",\"to\":\"goal_4day_success\",\"strength\":{\"mean\":0.55,\"std\":0.10},\"exists_probability\":0.95,\"effect_direction\":\"positive\"},{\"from\":\"out_staff_retention\",\"to\":\"goal_4day_success\",\"strength\":{\"mean\":0.22,\"std\":0.10},\"exists_probability\":0.80,\"effect_direction\":\"positive\"},{\"from\":\"risk_productivity_drop\",\"to\":\"goal_4day_success\",\"strength\":{\"mean\":-0.35,\"std\":0.12},\"exists_probability\":0.88,\"effect_direction\":\"negative\"},{\"from\":\"risk_budget_overrun\",\"to\":\"goal_4day_success\",\"strength\":{\"mean\":-0.40,\"std\":0.12},\"exists_probability\":0.90,\"effect_direction\":\"negative\"}],\"goal_constraints\":[{\"constraint_id\":\"gc_csat_floor\",\"node_id\":\"out_csat\",\"operator\":\">=\",\"value\":0.85,\"label\":\"CSAT must not drop below 85%\",\"unit\":\"%\",\"source_quote\":\"Do not let CSAT drop below 85% — that is a hard limit for the board\",\"confidence\":1.0,\"provenance\":\"explicit\"},{\"constraint_id\":\"gc_budget_cap\",\"node_id\":\"risk_budget_overrun\",\"operator\":\"<=\",\"value\":1.0,\"label\":\"Implementation spend must not exceed £250,000\",\"unit\":\"£\",\"source_quote\":\"Total implementation spend must not exceed £250,000\",\"confidence\":1.0,\"provenance\":\"explicit\"}]}",
+     "truncated": true,
+     "char_count": 6257,
+     "output_hash": "3524cd988d736b7286c4b41238b8eaa4fd50b673e9f2b61571903790ba0a977d",
+     "output_preview": "{\"nodes\":[{\"id\":\"dec_4day\",\"kind\":\"decision\",\"label\":\"4-Day Work Week for Support Team\"},{\"id\":\"opt_full_rollout\",\"kind\":\"option\",\"label\":\"Full 4-Day Week Rollout\",\"data\":{\"value\":1,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_4day_adoption\",\"value\":1},{\"factor_id\":\"fac_impl_spend\",\"value\":1.0}]},\"is_baseline\":false},{\"id\":\"opt_phased\",\"kind\":\"option\",\"label\":\"Phased Rollout (Pilot then Scale)\",\"data\":{\"value\":1,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_4day_adoption\",\"value\":0.5},{\"factor_id\":\"fac_impl_spend\",\"value\":0.6}]},\"is_baseline\":false},{\"id\":\"opt_status_quo\",\"kind\":\"option\",\"label\":\"Keep 5-Day Week (Status Quo)\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_4day_adoption\",\"value\":0},{\"factor_id\":\"fac_impl_spend\",\"value\":0}]},\"is_baseline\":true},{\"id\":\"fac_4day_adoption\",\"kind\":\"factor\",\"label\":\"4-Day Week Adoption Level\",\"category\":\"controllable\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"encoding_map\":\"{\\\"0\\\": \\\"No 4-day week\\\", \\\"0.5\\\": \\\"Partial rollout\\\", \\\"1\\\": \\\"Full rollout\\\"}\",\"is_baseline\":false},\"prior\":null},{\"id\":\"fac_impl_spend\",\"kind\":\"factor\",\"label\":\"Implementation Spend\",\"category\":\"controllable\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"cost\",\"raw_value\":0,\"unit\":\"£\",\"cap\":250000,\"is_baseline\":false}},{\"id\":\"fac_productivity\",\"kind\":\"factor\",\"label\":\"Team Productivity Change\",\"category\":\"observable\",\"data\":{\"value\":0.5,\"extractionType\":\"inferred\",\"factor_type\":\"quality\",\"raw_value\":50,\"unit\":\"scale\",\"is_baseline\":false}},{\"id\":\"fac_support_cost\",\"kind\":\"factor\",\"label\":\"Annual Support Cost\",\"category\":\"observable\",\"data\":{\"value\":0.72,\"extractionType\":\"explicit\",\"factor_type\":\"cost\",\"raw_value\":1800000,\"unit\":\"£\",\"cap\":2500000}},{\"id\":\"fac_market_labour\",\"kind\":\"factor\",\"label\":\"Labour Market Conditions\",\"category\":\"external\",\"prior\":{\"distribution\":\"unifor",
+     "output_edge_count": 22,
+     "output_node_count": 14,
+     "full_output_available": true
+    },
+    "final_graph": {
+     "edge_count": 22,
+     "node_count": 14,
+     "node_kinds": [
+      "decision",
+      "factor",
+      "goal",
+      "option",
+      "outcome",
+      "risk"
+     ]
+    },
+    "llm_quality": {
+     "risk_coefficient_corrections": 0
+    },
+    "llm_metadata": {
+     "seed": 17,
+     "model": "claude-sonnet-4-6",
+     "streamed": true,
+     "max_tokens": 8470,
+     "duration_ms": 26594,
+     "instance_id": "2e02854f",
+     "prompt_hash": "152998b447819c2e9e797b1727f8e05b34480486dca6f672a5d2839facd2353f",
+     "temperature": 0,
+     "token_usage": {
+      "total_tokens": 2336,
+      "prompt_tokens": 301,
+      "completion_tokens": 2035
+     },
+     "cache_age_ms": 1509,
+     "cache_status": "fresh",
+     "finish_reason": "end_turn",
+     "prompt_version": "draft_graph_default@v195 (staging)",
+     "response_chars": 6257,
+     "time_to_edges_ms": 14635,
+     "use_staging_mode": true,
+     "prompt_text_version": "v195",
+     "runaway_abort_count": 0,
+     "runaway_abort_triggers": [],
+     "structured_outputs_used": true,
+     "salvaged_from_truncation": false
+    },
+    "cee_provenance": {
+     "model": "claude-sonnet-4-6",
+     "commit": "32f06dd",
+     "version": "1.12.0",
+     "model_id": "claude-sonnet-4-6",
+     "capability": "draft_graph",
+     "prompt_hash": "152998b447819c2e9e797b1727f8e05b34480486dca6f672a5d2839facd2353f",
+     "context_hash": "36e88c08a0a5",
+     "pipeline_path": "unified",
+     "prompt_source": "supabase",
+     "prompt_version": "draft_graph_default@v195 (staging)",
+     "build_timestamp": "2026-08-10T22:19:06.917Z",
+     "prompt_store_version": 195,
+     "model_override_active": false,
+     "prompt_override_active": false,
+     "engine_base_url_configured": false
+    },
+    "llm_call_count": 1,
+    "repair_summary": {
+     "status_quo": {
+      "fixed": false,
+      "marked_droppable": false
+     },
+     "graph_delta": {
+      "edges_after": 22,
+      "nodes_after": 14,
+      "edges_before": 22,
+      "nodes_before": 14
+     },
+     "bucket_summary": {
+      "a": 0,
+      "b": 4,
+      "c": 0
+     },
+     "llm_repair_needed": false,
+     "status_quo_action": "none",
+     "unreachable_factors": {
+      "reclassified": [
+       "fac_market_labour",
+       "fac_productivity",
+       "fac_support_cost"
+      ],
+      "marked_droppable": []
+     },
+     "edge_format_detected": "V1_FLAT",
+     "deterministic_repairs": [
+      {
+       "code": "CONTROLLABLE_MISSING_DATA",
+       "path": "nodes[fac_4day_adoption].data",
+       "action": "Populated missing required fields with defaults"
+      },
+      {
+       "code": "CONTROLLABLE_MISSING_DATA",
+       "path": "nodes[fac_impl_spend].data",
+       "action": "Populated missing required fields with defaults"
+      },
+      {
+       "code": "OBSERVABLE_EXTRA_DATA",
+       "path": "nodes[fac_productivity].data",
+       "action": "Removed factor_type, uncertainty_drivers, and empty interventions sentinel (extra for observable)"
+      },
+      {
+       "code": "OBSERVABLE_EXTRA_DATA",
+       "path": "nodes[fac_support_cost].data",
+       "action": "Removed factor_type, uncertainty_drivers, and empty interventions sentinel (extra for observable)"
+      },
+      {
+       "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+       "path": "nodes[fac_market_labour].category",
+       "action": "Reclassified unreachable factor \"Labour Market Conditions\" to external"
+      },
+      {
+       "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+       "path": "nodes[fac_productivity].category",
+       "action": "Reclassified unreachable factor \"Team Productivity Change\" to external with synthesised prior [0.25, 0.75]",
+       "prior_synthesised": true,
+       "synthesised_range": {
+        "range_max": 0.75,
+        "range_min": 0.25
+       }
+      },
+      {
+       "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+       "path": "nodes[fac_support_cost].category",
+       "action": "Reclassified unreachable factor \"Annual Support Cost\" to external with synthesised prior [0.36, 1]",
+       "prior_synthesised": true,
+       "synthesised_range": {
+        "range_max": 1,
+        "range_min": 0.36
+       }
+      }
+     ],
+     "deterministic_sweep_ran": true,
+     "remaining_violation_codes": [],
+     "remaining_violations_count": 0,
+     "deterministic_repairs_count": 7,
+     "deterministic_sweep_version": "v3",
+     "risk_coefficient_corrections": []
+    },
+    "field_deletions": {
+     "count": 6,
+     "events": [
+      {
+       "field": "data.factor_type",
+       "stage": "deterministic-sweep",
+       "reason": "OBSERVABLE_EXTRA_DATA",
+       "node_id": "fac_productivity"
+      },
+      {
+       "field": "data.factor_type",
+       "stage": "deterministic-sweep",
+       "reason": "OBSERVABLE_EXTRA_DATA",
+       "node_id": "fac_support_cost"
+      },
+      {
+       "field": "data.value",
+       "stage": "unreachable-factors",
+       "reason": "UNREACHABLE_FACTOR_RECLASSIFIED",
+       "node_id": "fac_productivity"
+      },
+      {
+       "field": "data",
+       "stage": "unreachable-factors",
+       "reason": "UNREACHABLE_FACTOR_RECLASSIFIED",
+       "node_id": "fac_productivity"
+      },
+      {
+       "field": "data.value",
+       "stage": "unreachable-factors",
+       "reason": "UNREACHABLE_FACTOR_RECLASSIFIED",
+       "node_id": "fac_support_cost"
+      },
+      {
+       "field": "data",
+       "stage": "unreachable-factors",
+       "reason": "UNREACHABLE_FACTOR_RECLASSIFIED",
+       "node_id": "fac_support_cost"
+      }
+     ],
+     "stages": [
+      "deterministic-sweep",
+      "unreachable-factors"
+     ],
+     "reasons": [
+      "OBSERVABLE_EXTRA_DATA",
+      "UNREACHABLE_FACTOR_RECLASSIFIED"
+     ]
+    },
+    "plan_annotation": {
+     "plan_id": "3b6ed0f3-b8c7-4169-b481-8e84d8a229a8",
+     "model_id": "claude-sonnet-4-6",
+     "plan_hash": "9129b48eebc8",
+     "confidence": {
+      "overall": 0.85,
+      "structure": 1,
+      "parameters": 1
+     },
+     "open_questions": [],
+     "prompt_version": "draft_graph_default@v195 (staging)",
+     "context_hash_v0": "94a82f8d5831",
+     "stage3_rationales": []
+    },
+    "stage_snapshots": {
+     "stage_1_parse": {
+      "goal_node_id": "goal_4day_success",
+      "goal_threshold": "absent",
+      "goal_threshold_cap": "absent",
+      "goal_threshold_raw": "absent",
+      "goal_threshold_unit": "absent",
+      "goal_constraints_count": 0
+     },
+     "stage_3_enrich": {
+      "goal_node_id": "goal_4day_success",
+      "goal_threshold": "absent",
+      "goal_threshold_cap": "absent",
+      "goal_threshold_raw": "absent",
+      "goal_threshold_unit": "absent",
+      "goal_constraints_count": 0
+     },
+     "stage_4_repair": {
+      "goal_node_id": "goal_4day_success",
+      "goal_threshold": "absent",
+      "goal_threshold_cap": "absent",
+      "goal_threshold_raw": "absent",
+      "goal_threshold_unit": "absent",
+      "goal_constraints_count": 1
+     },
+     "stage_5_package": {
+      "goal_node_id": "goal_4day_success",
+      "goal_threshold": "absent",
+      "goal_threshold_cap": "absent",
+      "goal_threshold_raw": "absent",
+      "goal_threshold_unit": "absent",
+      "goal_constraints_count": 1
+     },
+     "stage_4b_threshold_sweep": {
+      "goal_node_id": "goal_4day_success",
+      "goal_threshold": "absent",
+      "goal_threshold_cap": "absent",
+      "goal_threshold_raw": "absent",
+      "goal_threshold_unit": "absent",
+      "goal_constraints_count": 1
+     }
+    },
+    "threshold_sweep": {
+     "ran": true,
+     "codes": [],
+     "duration_ms": 0,
+     "goals_checked": 1,
+     "strips_applied": 0,
+     "warnings_emitted": 0
+    },
+    "diagnostic_checks": {
+     "cee_trace_present": true,
+     "llm_raw_available": true,
+     "intercept_populated": false,
+     "is_baseline_present": true,
+     "confidence_unique_values": [
+      0.6,
+      0.68,
+      0.72,
+      0.78,
+      0.8,
+      0.85,
+      0.88,
+      0.9,
+      0.95
+     ],
+     "confidence_differentiated": true
+    },
+    "total_duration_ms": 60415,
+    "validation_summary": {
+     "model_notes": [],
+     "bias_offsets": {
+      "strength_std": 0.01999999999999999,
+      "strength_mean": 0.16999999999999998,
+      "exists_probability": -0.050000000000000044
+     },
+     "contested_count": 10,
+     "lint_corrections": 8,
+     "pass2_latency_ms": 32814,
+     "total_edges_validated": 13,
+     "total_pipeline_latency_ms": 32818
+    },
+    "pipeline_checkpoints": [
+     {
+      "stage": "post_adapter_normalisation",
+      "edge_count": 22,
+      "node_count": 14,
+      "sample_edges": [
+       {
+        "to": "opt_full_rollout",
+        "from": "dec_4day",
+        "strength_std": 0.01,
+        "belief_exists": 1,
+        "strength_mean": 1,
+        "effect_direction": "positive"
+       },
+       {
+        "to": "out_csat",
+        "from": "fac_4day_adoption",
+        "strength_std": 0.1,
+        "belief_exists": 0.72,
+        "strength_mean": 0.12,
+        "effect_direction": "positive"
+       },
+       {
+        "to": "goal_4day_success",
+        "from": "out_csat",
+        "strength_std": 0.1,
+        "belief_exists": 0.95,
+        "strength_mean": 0.55,
+        "effect_direction": "positive"
+       }
+      ],
+      "edge_field_presence": {
+       "weight": 0,
+       "strength_std": 22,
+       "belief_exists": 22,
+       "strength_mean": 22,
+       "effect_direction": 22
+      },
+      "node_field_presence": {
+       "option_nodes_total": 3,
+       "options_with_interventions": 3
+      },
+      "nested_strength_detected": true
+     },
+     {
+      "stage": "post_stabilisation",
+      "edge_count": 22,
+      "node_count": 14,
+      "sample_edges": [
+       {
+        "to": "opt_full_rollout",
+        "from": "dec_4day",
+        "strength_std": 0.01,
+        "belief_exists": 1,
+        "strength_mean": 1,
+        "effect_direction": "positive"
+       },
+       {
+        "to": "out_csat",
+        "from": "fac_4day_adoption",
+        "strength_std": 0.1,
+        "belief_exists": 0.72,
+        "strength_mean": 0.12,
+        "effect_direction": "positive"
+       },
+       {
+        "to": "goal_4day_success",
+        "from": "out_csat",
+        "strength_std": 0.1,
+        "belief_exists": 0.95,
+        "strength_mean": 0.55,
+        "effect_direction": "positive"
+       }
+      ],
+      "edge_field_presence": {
+       "weight": 22,
+       "strength_std": 22,
+       "belief_exists": 22,
+       "strength_mean": 22,
+       "effect_direction": 22
+      },
+      "node_field_presence": {
+       "option_nodes_total": 3,
+       "options_with_interventions": 3
+      }
+     },
+     {
+      "stage": "pre_boundary",
+      "edge_count": 22,
+      "node_count": 14,
+      "sample_edges": [
+       {
+        "to": "opt_full_rollout",
+        "from": "dec_4day",
+        "strength_std": 0.01,
+        "belief_exists": 1,
+        "strength_mean": 1,
+        "effect_direction": "positive"
+       },
+       {
+        "to": "out_csat",
+        "from": "fac_4day_adoption",
+        "strength_std": 0.1,
+        "belief_exists": 0.72,
+        "strength_mean": 0.12,
+        "effect_direction": "positive"
+       },
+       {
+        "to": "goal_4day_success",
+        "from": "out_csat",
+        "strength_std": 0.1,
+        "belief_exists": 0.95,
+        "strength_mean": 0.55,
+        "effect_direction": "positive"
+       }
+      ],
+      "edge_field_presence": {
+       "weight": 22,
+       "strength_std": 22,
+       "belief_exists": 22,
+       "strength_mean": 22,
+       "effect_direction": 22
+      },
+      "node_field_presence": {
+       "option_nodes_total": 3,
+       "options_with_interventions": 3
+      }
+     }
+    ],
+    "pipeline_checkpoints_meta": {
+     "enabled": true,
+     "total_count": 3,
+     "adapter_count": 1,
+     "pipeline_count": 2
+    }
+   },
+   "request_id": "2b5e4534-bbdd-4fe9-9c97-ed13aa405e95",
+   "correlation_id": "2b5e4534-bbdd-4fe9-9c97-ed13aa405e95",
+   "repair_summary": {
+    "status_quo": {
+     "fixed": false,
+     "marked_droppable": false
+    },
+    "graph_delta": {
+     "edges_after": 22,
+     "nodes_after": 14,
+     "edges_before": 22,
+     "nodes_before": 14
+    },
+    "bucket_summary": {
+     "a": 0,
+     "b": 4,
+     "c": 0
+    },
+    "llm_repair_needed": false,
+    "status_quo_action": "none",
+    "unreachable_factors": {
+     "reclassified": [
+      "fac_market_labour",
+      "fac_productivity",
+      "fac_support_cost"
+     ],
+     "marked_droppable": []
+    },
+    "edge_format_detected": "V1_FLAT",
+    "deterministic_repairs": [
+     {
+      "code": "CONTROLLABLE_MISSING_DATA",
+      "path": "nodes[fac_4day_adoption].data",
+      "action": "Populated missing required fields with defaults"
+     },
+     {
+      "code": "CONTROLLABLE_MISSING_DATA",
+      "path": "nodes[fac_impl_spend].data",
+      "action": "Populated missing required fields with defaults"
+     },
+     {
+      "code": "OBSERVABLE_EXTRA_DATA",
+      "path": "nodes[fac_productivity].data",
+      "action": "Removed factor_type, uncertainty_drivers, and empty interventions sentinel (extra for observable)"
+     },
+     {
+      "code": "OBSERVABLE_EXTRA_DATA",
+      "path": "nodes[fac_support_cost].data",
+      "action": "Removed factor_type, uncertainty_drivers, and empty interventions sentinel (extra for observable)"
+     },
+     {
+      "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+      "path": "nodes[fac_market_labour].category",
+      "action": "Reclassified unreachable factor \"Labour Market Conditions\" to external"
+     },
+     {
+      "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+      "path": "nodes[fac_productivity].category",
+      "action": "Reclassified unreachable factor \"Team Productivity Change\" to external with synthesised prior [0.25, 0.75]",
+      "prior_synthesised": true,
+      "synthesised_range": {
+       "range_max": 0.75,
+       "range_min": 0.25
+      }
+     },
+     {
+      "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+      "path": "nodes[fac_support_cost].category",
+      "action": "Reclassified unreachable factor \"Annual Support Cost\" to external with synthesised prior [0.36, 1]",
+      "prior_synthesised": true,
+      "synthesised_range": {
+       "range_max": 1,
+       "range_min": 0.36
+      }
+     }
+    ],
+    "deterministic_sweep_ran": true,
+    "remaining_violation_codes": [],
+    "remaining_violations_count": 0,
+    "deterministic_repairs_count": 7,
+    "deterministic_sweep_version": "v3",
+    "risk_coefficient_corrections": []
+   },
+   "transform_defaults": {
+    "defaults": [],
+    "total_defaults": 0,
+    "defaulted_edge_count": 0
+   }
+  },
+  "options": [
+   {
+    "id": "opt_full_rollout",
+    "label": "Full 4-Day Week Rollout",
+    "status": "ready",
+    "provenance": {
+     "source": "brief_extraction"
+    },
+    "is_baseline": false,
+    "interventions": {
+     "fac_impl_spend": {
+      "unit": "£",
+      "value": 1,
+      "source": "cee_hypothesis",
+      "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+      "target_match": {
+       "node_id": "fac_impl_spend",
+       "confidence": "high",
+       "match_type": "exact_id"
+      },
+      "value_confidence": "low"
+     },
+     "fac_4day_adoption": {
+      "value": 1,
+      "source": "cee_hypothesis",
+      "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+      "target_match": {
+       "node_id": "fac_4day_adoption",
+       "confidence": "high",
+       "match_type": "exact_id"
+      },
+      "value_confidence": "low"
+     }
+    }
+   },
+   {
+    "id": "opt_phased",
+    "label": "Phased Rollout (Pilot then Scale)",
+    "status": "ready",
+    "provenance": {
+     "source": "brief_extraction"
+    },
+    "is_baseline": false,
+    "interventions": {
+     "fac_impl_spend": {
+      "unit": "£",
+      "value": 0.6,
+      "source": "cee_hypothesis",
+      "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+      "target_match": {
+       "node_id": "fac_impl_spend",
+       "confidence": "high",
+       "match_type": "exact_id"
+      },
+      "value_confidence": "low"
+     },
+     "fac_4day_adoption": {
+      "value": 0.5,
+      "source": "cee_hypothesis",
+      "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+      "target_match": {
+       "node_id": "fac_4day_adoption",
+       "confidence": "high",
+       "match_type": "exact_id"
+      },
+      "value_confidence": "low"
+     }
+    }
+   },
+   {
+    "id": "opt_status_quo",
+    "label": "Keep 5-Day Week (Status Quo)",
+    "status": "ready",
+    "provenance": {
+     "source": "brief_extraction"
+    },
+    "is_baseline": true,
+    "interventions": {
+     "fac_impl_spend": {
+      "unit": "£",
+      "value": 0,
+      "source": "cee_hypothesis",
+      "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+      "target_match": {
+       "node_id": "fac_impl_spend",
+       "confidence": "high",
+       "match_type": "exact_id"
+      },
+      "value_confidence": "low"
+     },
+     "fac_4day_adoption": {
+      "value": 0,
+      "source": "cee_hypothesis",
+      "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+      "target_match": {
+       "node_id": "fac_4day_adoption",
+       "confidence": "high",
+       "match_type": "exact_id"
+      },
+      "value_confidence": "low"
+     }
+    }
+   }
+  ],
+  "quality": {
+   "safety": 8,
+   "overall": 9,
+   "coverage": 10,
+   "structure": 8,
+   "structural_proxy": 8
+  },
+  "_timings": {
+   "draft_graph": {
+    "parse_ms": 26611,
+    "total_ms": 60429,
+    "enrich_ms": 9,
+    "repair_ms": 80,
+    "package_ms": 16,
+    "boundary_ms": 12,
+    "normalise_ms": 1,
+    "parse_llm_ms": 26594,
+    "repair_fired": false,
+    "repair_reason": null,
+    "repair_attempts": 0,
+    "coaching_pass_ms": 24057,
+    "threshold_sweep_ms": 4,
+    "validation_pipeline_ms": 32819
+   }
+  },
+  "coaching": {
+   "summary": "The decision is well-structured with clear constraints and a defined success criterion, but the causal chain between productivity change and CSAT needs more scrutiny, and the conflicting productivity signals deserve explicit treatment before moving forward.",
+   "bias_signals": [
+    {
+     "type": "overconfidence",
+     "detail": "The brief says 'Go ahead' after presenting directly contradictory productivity evidence ('ops lead thinks productivity will fall 10-15%' vs 'pilot data showed a 4% rise'), suggesting a conclusion may have been reached before the conflict is resolved.",
+     "target": "fac_productivity"
+    },
+    {
+     "type": "narrow_framing",
+     "detail": "Success is defined solely as 'a 4-day week that holds CSAT at or above 85% and lands within the £250,000 implementation budget', which frames the status quo option as a non-success by definition rather than as a genuine alternative to be evaluated on equal terms.",
+     "target": "opt_status_quo"
+    },
+    {
+     "type": "anchoring",
+     "detail": "The current CSAT of 87% and the £1.8m annual cost are stated as the baseline, and the hard floor of 85% is set just two points below — the proximity of the floor to the anchor may understate how little margin exists if productivity falls as the ops lead expects.",
+     "target": "out_csat"
+    }
+   ],
+   "widening_log": {
+    "elements_added": [],
+    "brief_completeness": "partial",
+    "elements_considered_but_excluded": [
+     "Customer response-time or queue-depth factor — relevant but not named in the brief, so excluded to avoid inventing structure",
+     "Regulatory or employment-law constraint — plausible but absent from the brief"
+    ]
+   },
+   "strengthen_items": [
+    {
+     "id": "resolve-productivity-conflict",
+     "label": "Surface the conflicting productivity evidence explicitly",
+     "detail": "The brief names two directly contradictory signals — the ops lead's expectation of a fall versus the Manchester pilot's rise — and the decision logic should force a deliberate reconciliation of these before any rollout option is evaluated, since productivity change flows directly into CSAT and the hard floor.",
+     "action_type": "add_risk",
+     "bias_category": "overconfidence"
+    },
+    {
+     "id": "link-productivity-to-impl-spend",
+     "label": "Connect productivity change to implementation spend",
+     "detail": "If productivity falls, mitigation measures (tooling, scheduling, overtime cover) would consume implementation budget, yet the current structure treats productivity change and implementation spend as independent paths — closing this gap would reveal whether the two hard constraints can be simultaneously satisfied.",
+     "action_type": "add_constraint",
+     "bias_category": "narrow_framing"
+    },
+    {
+     "id": "add-csat-mechanism",
+     "label": "Clarify how productivity change translates into CSAT movement",
+     "detail": "The brief states CSAT must not drop below 85% but does not specify the mechanism by which a productivity shortfall would move CSAT, so making that causal pathway explicit — e.g. through response times or resolution rates — would let you test whether the hard floor is genuinely at risk under each option.",
+     "action_type": "reframe_goal"
+    },
+    {
+     "id": "add-status-quo-cost-trajectory",
+     "label": "Examine what the status quo costs over time",
+     "detail": "The status quo option currently flows only into adoption level and implementation spend, but labour market conditions already influence staff retention — making the ongoing cost trajectory of staying on five days explicit would prevent the status quo from appearing artificially low-risk by comparison.",
+     "action_type": "add_option",
+     "bias_category": "status_quo_bias"
+    },
+    {
+     "id": "direction_unresolved_1",
+     "label": "Confirm the direction of the CSAT limit",
+     "detail": "You mentioned 85% for CSAT. I couldn't tell from the wording whether that's a floor (keep it at or above 85%) or a ceiling (keep it at or below 85%), so it isn't being enforced yet. Add it as a constraint to make it binding.",
+     "action_type": "add_constraint"
+    }
+   ]
+  },
+  "goal_node_id": "goal_4day_success",
+  "causal_claims": [
+   {
+    "to": "out_csat",
+    "from": "fac_productivity",
+    "type": "direct_effect",
+    "stated_strength": "strong"
+   },
+   {
+    "to": "risk_productivity_drop",
+    "from": "fac_productivity",
+    "type": "direct_effect",
+    "stated_strength": "strong"
+   },
+   {
+    "to": "out_csat",
+    "from": "fac_4day_adoption",
+    "type": "direct_effect",
+    "stated_strength": "moderate"
+   },
+   {
+    "to": "risk_productivity_drop",
+    "from": "fac_4day_adoption",
+    "type": "direct_effect",
+    "stated_strength": "moderate"
+   },
+   {
+    "to": "risk_budget_overrun",
+    "from": "fac_impl_spend",
+    "type": "direct_effect",
+    "stated_strength": "strong"
+   },
+   {
+    "to": "goal_4day_success",
+    "from": "out_csat",
+    "type": "direct_effect",
+    "stated_strength": "very_strong"
+   },
+   {
+    "to": "goal_4day_success",
+    "from": "risk_budget_overrun",
+    "type": "direct_effect",
+    "stated_strength": "strong"
+   },
+   {
+    "to": "goal_4day_success",
+    "from": "risk_productivity_drop",
+    "type": "direct_effect",
+    "stated_strength": "strong"
+   }
+  ],
+  "topology_plan": [],
+  "analysis_ready": {
+   "status": "ready",
+   "options": [
+    {
+     "id": "opt_full_rollout",
+     "label": "Full 4-Day Week Rollout",
+     "status": "ready",
+     "interventions": {
+      "fac_impl_spend": {
+       "value": 1,
+       "source": "cee_hypothesis",
+       "display_value": "£0"
+      },
+      "fac_4day_adoption": {
+       "value": 1,
+       "source": "cee_hypothesis",
+       "display_value": "Low (0)"
+      }
+     },
+     "status_reason": "2 intervention(s) ready for analysis",
+     "extraction_metadata": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+      "confidence": "low"
+     },
+     "intervention_details": {
+      "fac_impl_spend": {
+       "unit": "£",
+       "raw_value": 0,
+       "display_value": "£0",
+       "normalised_value": 1
+      },
+      "fac_4day_adoption": {
+       "display_value": "Low (0)",
+       "normalised_value": 1
+      }
+     }
+    },
+    {
+     "id": "opt_phased",
+     "label": "Phased Rollout (Pilot then Scale)",
+     "status": "ready",
+     "interventions": {
+      "fac_impl_spend": {
+       "value": 0.6,
+       "source": "cee_hypothesis",
+       "display_value": "£0"
+      },
+      "fac_4day_adoption": {
+       "value": 0.5,
+       "source": "cee_hypothesis",
+       "display_value": "Low (0)"
+      }
+     },
+     "status_reason": "2 intervention(s) ready for analysis",
+     "extraction_metadata": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+      "confidence": "low"
+     },
+     "intervention_details": {
+      "fac_impl_spend": {
+       "unit": "£",
+       "raw_value": 0,
+       "display_value": "£0",
+       "normalised_value": 0.6
+      },
+      "fac_4day_adoption": {
+       "display_value": "Low (0)",
+       "normalised_value": 0.5
+      }
+     }
+    },
+    {
+     "id": "opt_status_quo",
+     "label": "Keep 5-Day Week (Status Quo)",
+     "status": "ready",
+     "is_baseline": true,
+     "interventions": {
+      "fac_impl_spend": {
+       "value": 0,
+       "source": "cee_hypothesis",
+       "display_value": "£0"
+      },
+      "fac_4day_adoption": {
+       "value": 0,
+       "source": "cee_hypothesis",
+       "display_value": "Low (0)"
+      }
+     },
+     "status_reason": "2 intervention(s) ready for analysis",
+     "extraction_metadata": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+      "confidence": "low"
+     },
+     "intervention_details": {
+      "fac_impl_spend": {
+       "unit": "£",
+       "raw_value": 0,
+       "display_value": "£0",
+       "normalised_value": 0
+      },
+      "fac_4day_adoption": {
+       "display_value": "Low (0)",
+       "normalised_value": 0
+      }
+     }
+    }
+   ],
+   "goal_node_id": "goal_4day_success",
+   "bias_findings": [],
+   "model_adjustments": [
+    {
+     "code": "category_reclassified",
+     "field": "nodes[fac_market_labour].category",
+     "reason": "Reclassified unreachable factor \"Labour Market Conditions\" to external",
+     "source": "deterministic_sweep",
+     "node_id": "fac_market_labour"
+    },
+    {
+     "code": "category_reclassified",
+     "field": "nodes[fac_productivity].category",
+     "reason": "Reclassified unreachable factor \"Team Productivity Change\" to external with synthesised prior [0.25, 0.75]",
+     "source": "deterministic_sweep",
+     "node_id": "fac_productivity"
+    },
+    {
+     "code": "category_reclassified",
+     "field": "nodes[fac_support_cost].category",
+     "reason": "Reclassified unreachable factor \"Annual Support Cost\" to external with synthesised prior [0.36, 1]",
+     "source": "deterministic_sweep",
+     "node_id": "fac_support_cost"
+    }
+   ]
+  },
+  "draft_warnings": [
+   {
+    "id": "goal_no_baseline_value",
+    "edge_ids": [],
+    "fix_hint": "Set goal node's observed_state.value to establish baseline for comparison",
+    "node_ids": [
+     "goal_4day_success"
+    ],
+    "severity": "low",
+    "explanation": "Goal node has no observed_state.value set.",
+    "affected_edge_ids": [],
+    "affected_node_ids": [
+     "goal_4day_success"
+    ]
+   }
+  ],
+  "schema_version": "3.0",
+  "goal_constraints": [
+   {
+    "unit": "£",
+    "label": "Keep Total implementation spend at or below £250,000",
+    "value": 250000,
+    "node_id": "fac_impl_spend",
+    "operator": "<=",
+    "confidence": 0.85,
+    "provenance": "explicit",
+    "value_frame": "level",
+    "source_quote": "Total implementation spend must not exceed £250,000",
+    "constraint_id": "constraint_fac_impl_spend_max"
+   }
+  ],
+  "_pipeline_outcome": {
+   "warnings": [],
+   "llm_repair": {
+    "outcome": "skipped",
+    "attempts": 0,
+    "triggered": false,
+    "fallback_reason": null
+   },
+   "rescue_score": 17,
+   "graph_drafted": true,
+   "coaching_status": "complete",
+   "enrichment_status": "complete",
+   "repair_provenance": [
+    {
+     "code": "CONTROLLABLE_MISSING_DATA",
+     "rule": "CONTROLLABLE_MISSING_DATA",
+     "after": null,
+     "field": "graph",
+     "before": null,
+     "source": "fallback_default",
+     "node_or_edge_id": "nodes[fac_4day_adoption].data"
+    },
+    {
+     "code": "CONTROLLABLE_MISSING_DATA",
+     "rule": "CONTROLLABLE_MISSING_DATA",
+     "after": null,
+     "field": "graph",
+     "before": null,
+     "source": "fallback_default",
+     "node_or_edge_id": "nodes[fac_impl_spend].data"
+    },
+    {
+     "code": "OBSERVABLE_EXTRA_DATA",
+     "rule": "OBSERVABLE_EXTRA_DATA",
+     "after": null,
+     "field": "graph",
+     "before": null,
+     "source": "fallback_default",
+     "node_or_edge_id": "nodes[fac_productivity].data"
+    },
+    {
+     "code": "OBSERVABLE_EXTRA_DATA",
+     "rule": "OBSERVABLE_EXTRA_DATA",
+     "after": null,
+     "field": "graph",
+     "before": null,
+     "source": "fallback_default",
+     "node_or_edge_id": "nodes[fac_support_cost].data"
+    },
+    {
+     "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+     "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+     "after": null,
+     "field": "graph",
+     "before": null,
+     "source": "structure",
+     "node_or_edge_id": "nodes[fac_market_labour].category"
+    },
+    {
+     "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+     "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+     "after": null,
+     "field": "graph",
+     "before": null,
+     "source": "structure",
+     "node_or_edge_id": "nodes[fac_productivity].category"
+    },
+    {
+     "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+     "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+     "after": null,
+     "field": "graph",
+     "before": null,
+     "source": "structure",
+     "node_or_edge_id": "nodes[fac_support_cost].category"
+    }
+   ],
+   "validation_status": "passed",
+   "verification_status": "passed",
+   "factor_value_coverage": {
+    "total": 5,
+    "explicit": 0,
+    "fallback_default": 3,
+    "inferred_with_evidence": 2
+   },
+   "graph_structurally_valid": true,
+   "edge_strength_unique_count": 10,
+   "deterministic_sweep_violations": 0
+  },
+  "validation_warnings": [
+   {
+    "code": "OPTION_SIMILARITY",
+    "details": {
+     "jaccard": 1,
+     "optionA": "opt_full_rollout",
+     "optionB": "opt_phased"
+    },
+    "message": "Options \"Full 4-Day Week Rollout\" and \"Phased Rollout (Pilot then Scale)\" affect the same factors (Jaccard 1.00). Consider whether they represent genuinely different approaches.",
+    "severity": "info",
+    "suggestion": "Options affect the same factors — consider whether they represent genuinely different approaches"
+   },
+   {
+    "code": "OPTION_SIMILARITY",
+    "details": {
+     "jaccard": 1,
+     "optionA": "opt_full_rollout",
+     "optionB": "opt_status_quo"
+    },
+    "message": "Options \"Full 4-Day Week Rollout\" and \"Keep 5-Day Week (Status Quo)\" affect the same factors (Jaccard 1.00). Consider whether they represent genuinely different approaches.",
+    "severity": "info",
+    "suggestion": "Options affect the same factors — consider whether they represent genuinely different approaches"
+   }
+  ]
+ },
+ "_capture": {
+  "source": "lane-figsurv-a7f3 live_r1",
+  "cee_build": "32f06dd",
+  "captured_at": "2026-08-10T22:50Z",
+  "note": "unedited cold-read bytes; append-only evidence, never edit (trap 14b)"
+ }
+}

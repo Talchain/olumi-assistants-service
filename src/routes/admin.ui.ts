@@ -1,0 +1,3983 @@
+/**
+ * Admin UI Route
+ *
+ * Serves a lightweight Alpine.js-based admin interface for
+ * prompt management. Security-hardened with CSP headers.
+ *
+ * Security features:
+ * - Content Security Policy (CSP) header
+ * - X-Content-Type-Options: nosniff
+ * - X-Frame-Options: DENY
+ * - Alpine.js loaded with specific version from CDN
+ *
+ * Routes:
+ * - GET /admin - Admin dashboard UI
+ */
+
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { PROMPT_TASKS } from '../constants/prompt-tasks.js';
+import { verifyIPAllowed, verifyAdminKey } from '../middleware/admin-auth.js';
+import { ADMIN_TOAST_DURATION_MS } from '../config/timeouts.js';
+import { config } from '../config/index.js';
+
+/**
+ * Generate HTML options for task dropdown from the canonical PROMPT_TASKS
+ * registry, which is itself derived from `CeeTaskIdSchema`. This is the ONLY
+ * production consumer of PROMPT_TASKS, so it is the surface where registry
+ * drift became user-visible: a task absent here cannot be selected when
+ * creating a prompt, even though the API would accept it.
+ *
+ * Exported for tests/unit/prompt-tasks-registry.test.ts, which asserts the
+ * rendered dropdown covers every task the create endpoint accepts.
+ */
+export function generateTaskOptions(): string {
+  return PROMPT_TASKS.map(task => `<option value="${task}">${task}</option>`).join('\n                    ');
+}
+
+/**
+ * Generate HTML options for task filter dropdown (includes "All Tasks" option).
+ */
+function generateTaskFilterOptions(): string {
+  const allTasksOption = '<option value="">All Tasks</option>';
+  const taskOptions = PROMPT_TASKS.map(task => `<option value="${task}">${task}</option>`).join('\n                    ');
+  return `${allTasksOption}\n                    ${taskOptions}`;
+}
+
+/**
+ * Alpine.js CDN configuration
+ * Using specific version for stability and security
+ */
+const ALPINE_VERSION = '3.14.1';
+const ALPINE_CDN_URL = `https://cdn.jsdelivr.net/npm/alpinejs@${ALPINE_VERSION}/dist/cdn.min.js`;
+
+/**
+ * Content Security Policy for admin pages
+ * Restricts sources to minimize XSS attack surface
+ */
+const CSP_HEADER = [
+  "default-src 'self'",
+  // Allow Alpine.js from jsdelivr CDN only (pinned domain)
+  // Note: 'unsafe-inline' required for inline <script> tag with promptAdmin()
+  // Note: 'unsafe-eval' required for Alpine.js to evaluate x-data expressions
+  `script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net`,
+  // Allow inline styles for UI (required for dynamic styling)
+  "style-src 'self' 'unsafe-inline'",
+  // Prevent loading in frames (clickjacking protection)
+  "frame-ancestors 'none'",
+  // Restrict form submissions to same origin
+  "form-action 'self'",
+  // Restrict base URI
+  "base-uri 'self'",
+  // Block object/embed/applet
+  "object-src 'none'",
+].join('; ');
+
+/**
+ * Generate the admin UI HTML
+ */
+function generateAdminUI(): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Olumi Prompt Admin</title>
+  <!-- Alpine.js - pinned to specific version for security -->
+  <script defer src="${ALPINE_CDN_URL}"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+      line-height: 1.6;
+    }
+    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    header {
+      background: #1a1a2e;
+      color: white;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    header h1 { font-size: 1.5rem; }
+    header p { color: #aaa; font-size: 0.9rem; }
+    .card {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .card h2 { margin-bottom: 15px; color: #1a1a2e; font-size: 1.2rem; }
+    .btn {
+      display: inline-block;
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.8; }
+    .btn-primary { background: #4f46e5; color: white; }
+    .btn-secondary { background: #6b7280; color: white; }
+    .btn-danger { background: #dc2626; color: white; }
+    .btn-sm { padding: 4px 8px; font-size: 0.8rem; }
+    input, textarea, select {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 0.9rem;
+      margin-bottom: 10px;
+    }
+    textarea { min-height: 200px; font-family: monospace; }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 500;
+      font-size: 0.9rem;
+    }
+    .form-group { margin-bottom: 15px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid #eee;
+    }
+    th { background: #f9fafb; font-weight: 600; }
+    .status {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+    .status-draft { background: #fef3c7; color: #92400e; }
+    .status-staging { background: #dbeafe; color: #1e40af; }
+    .status-production { background: #d1fae5; color: #065f46; }
+    .status-archived { background: #f3f4f6; color: #6b7280; }
+    .tabs {
+      display: flex;
+      border-bottom: 2px solid #e5e7eb;
+      margin-bottom: 20px;
+    }
+    .tab {
+      padding: 10px 20px;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+      font-weight: 500;
+    }
+    .tab.active { border-bottom-color: #4f46e5; color: #4f46e5; }
+    .alert {
+      padding: 12px;
+      border-radius: 4px;
+      margin-bottom: 15px;
+    }
+    .alert-error { background: #fee2e2; color: #dc2626; }
+    .alert-success { background: #d1fae5; color: #065f46; }
+    .alert-warning { background: #fef3c7; color: #92400e; }
+    /* Harness fidelity disclosure — what a result here is, and is not, evidence
+       of. Sits directly under the PASSED/FAILED verdict because that verdict is
+       the thing being over-read. */
+    .harness-fidelity { border-left: 3px solid #d97706; font-size: 0.8rem; line-height: 1.45; }
+    .harness-fidelity strong { display: block; margin-bottom: 4px; }
+    .harness-fidelity .hf-divergence { margin-top: 6px; }
+    .harness-fidelity .hf-sent { margin-top: 6px; font-family: monospace; font-size: 0.72rem; opacity: 0.85; }
+    .modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    .modal-content {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      max-width: 800px;
+      width: 90%;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+    }
+    .close { cursor: pointer; font-size: 1.5rem; color: #666; }
+    .version-list { max-height: 200px; overflow-y: auto; }
+    .version-item {
+      padding: 10px;
+      border: 1px solid #eee;
+      border-radius: 4px;
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+    .version-item:hover { background: #f9fafb; }
+    .version-item.active { border-color: #4f46e5; background: #eef2ff; }
+    .flex { display: flex; gap: 10px; }
+    .flex-1 { flex: 1; }
+    .text-muted { color: #6b7280; font-size: 0.85rem; }
+    .mt-2 { margin-top: 10px; }
+    .mb-2 { margin-bottom: 10px; }
+    /* Toast notifications */
+    .toast-container {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 200;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .toast {
+      padding: 12px 20px;
+      border-radius: 6px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      animation: slideIn 0.3s ease;
+      max-width: 350px;
+    }
+    .toast-success { background: #065f46; color: white; }
+    .toast-error { background: #dc2626; color: white; }
+    .toast-warning { background: #d97706; color: white; }
+    .toast-info { background: #1e40af; color: white; }
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    .btn-warning { background: #d97706; color: white; }
+    .btn-staging { background: #f59e0b; color: white; }
+    .btn-staging:hover { background: #d97706; }
+    pre {
+      background: #f3f4f6;
+      padding: 15px;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 0.85rem;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    /* Test case styles */
+    .test-case-item {
+      padding: 12px;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      margin-bottom: 10px;
+      background: #fafafa;
+    }
+    .test-case-item:hover {
+      background: #f5f5f5;
+      border-color: #d1d5db;
+    }
+    .test-result-pass { color: #059669; font-weight: 600; }
+    .test-result-fail { color: #dc2626; font-weight: 600; }
+    .test-result-pending { color: #6b7280; }
+    /* Diff comparison styles */
+    .diff-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    .diff-panel {
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .diff-panel-header {
+      background: #f9fafb;
+      padding: 10px 15px;
+      border-bottom: 1px solid #e5e7eb;
+      font-weight: 600;
+    }
+    .diff-panel-content {
+      padding: 15px;
+      max-height: 400px;
+      overflow-y: auto;
+      background: white;
+    }
+    .diff-panel-content pre {
+      margin: 0;
+      background: transparent;
+      padding: 0;
+    }
+    .diff-stats {
+      display: flex;
+      gap: 20px;
+      margin-bottom: 15px;
+      padding: 10px;
+      background: #f9fafb;
+      border-radius: 6px;
+    }
+    .diff-stat {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .diff-stat-positive { color: #059669; }
+    .diff-stat-negative { color: #dc2626; }
+    .diff-stat-neutral { color: #6b7280; }
+    @media (max-width: 768px) {
+      .diff-container { grid-template-columns: 1fr; }
+    }
+    /* LLM Test Results Styles */
+    .llm-results {
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      margin-top: 12px;
+      background: white;
+    }
+    .llm-results-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 16px;
+      background: #f9fafb;
+      border-bottom: 1px solid #e5e7eb;
+      border-radius: 8px 8px 0 0;
+    }
+    .llm-results-body {
+      padding: 16px;
+    }
+    .llm-metric {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: #f3f4f6;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      margin-right: 8px;
+      margin-bottom: 6px;
+    }
+    .llm-metric-label { color: #6b7280; }
+    .llm-metric-value { font-weight: 600; color: #1f2937; }
+    .llm-metric-good { background: #d1fae5; }
+    .llm-metric-good .llm-metric-value { color: #065f46; }
+    .llm-metric-warn { background: #fef3c7; }
+    .llm-metric-warn .llm-metric-value { color: #92400e; }
+    .llm-metric-bad { background: #fee2e2; }
+    .llm-metric-bad .llm-metric-value { color: #dc2626; }
+    .collapsible-section {
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      margin-top: 12px;
+      overflow: hidden;
+    }
+    .collapsible-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      background: #f9fafb;
+      cursor: pointer;
+      font-weight: 500;
+      font-size: 0.9rem;
+    }
+    .collapsible-header:hover { background: #f3f4f6; }
+    .collapsible-content {
+      padding: 12px;
+      max-height: 300px;
+      overflow-y: auto;
+      border-top: 1px solid #e5e7eb;
+    }
+    .collapsible-content pre {
+      margin: 0;
+      font-size: 0.75rem;
+      background: transparent;
+      padding: 0;
+      white-space: pre-wrap;
+    }
+    .repairs-list {
+      margin: 0;
+      padding-left: 20px;
+    }
+    .repairs-list li {
+      font-size: 0.85rem;
+      margin-bottom: 4px;
+    }
+    .stage-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 10px;
+      background: #f9fafb;
+      border-radius: 4px;
+      margin-bottom: 4px;
+      font-size: 0.85rem;
+    }
+    .stage-name { font-weight: 500; }
+    .stage-status { font-size: 0.75rem; padding: 2px 6px; border-radius: 3px; }
+    .stage-status-success { background: #d1fae5; color: #065f46; }
+    .stage-status-success_with_repairs { background: #fef3c7; color: #92400e; }
+    .stage-status-failed { background: #fee2e2; color: #dc2626; }
+    .stage-status-skipped { background: #f3f4f6; color: #6b7280; }
+    /* Validation Issues Styles */
+    .validation-issues-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .validation-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .validation-badge-error { background: #fee2e2; color: #dc2626; }
+    .validation-badge-warning { background: #fef3c7; color: #d97706; }
+    .validation-badge-info { background: #dbeafe; color: #2563eb; }
+    .validation-filter {
+      font-size: 0.75rem;
+      padding: 4px 8px;
+      border: 1px solid #e5e7eb;
+      border-radius: 4px;
+      background: white;
+      cursor: pointer;
+    }
+    .validation-issue {
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      border-radius: 6px;
+      border-left: 4px solid;
+      font-size: 0.85rem;
+    }
+    .validation-issue.severity-error {
+      border-left-color: #dc2626;
+      background: #fef2f2;
+    }
+    .validation-issue.severity-warning {
+      border-left-color: #d97706;
+      background: #fffbeb;
+    }
+    .validation-issue.severity-info {
+      border-left-color: #2563eb;
+      background: #eff6ff;
+    }
+    .validation-issue-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+    .validation-issue-icon {
+      font-weight: bold;
+      font-size: 0.9rem;
+    }
+    .validation-issue-icon.error { color: #dc2626; }
+    .validation-issue-icon.warning { color: #d97706; }
+    .validation-issue-icon.info { color: #2563eb; }
+    .validation-issue-code {
+      font-family: monospace;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #374151;
+    }
+    .validation-issue-copy {
+      margin-left: auto;
+      padding: 2px 6px;
+      font-size: 0.7rem;
+      background: #f3f4f6;
+      border: 1px solid #e5e7eb;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    .validation-issue-copy:hover { background: #e5e7eb; }
+    .validation-issue-message {
+      color: #4b5563;
+      margin-bottom: 4px;
+    }
+    .validation-issue-details {
+      font-size: 0.75rem;
+      color: #6b7280;
+    }
+    .validation-issue-suggestion {
+      font-size: 0.75rem;
+      color: #059669;
+      margin-top: 4px;
+    }
+    .validation-issue-stage {
+      font-size: 0.7rem;
+      color: #9ca3af;
+      margin-top: 4px;
+    }
+    .validation-regression { color: #dc2626; font-weight: 600; }
+    .validation-improvement { color: #059669; font-weight: 600; }
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid #e5e7eb;
+      border-top-color: #4f46e5;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .btn-llm {
+      background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+      color: white;
+    }
+    .btn-llm:hover { opacity: 0.9; }
+    .progress-bar {
+      height: 4px;
+      background: #e5e7eb;
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #4f46e5, #8b5cf6);
+      transition: width 0.3s ease;
+    }
+    .batch-summary {
+      padding: 16px;
+      background: #f9fafb;
+      border-radius: 8px;
+      margin-top: 12px;
+    }
+    .batch-summary-stat {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 0;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .batch-summary-stat:last-child { border-bottom: none; }
+    .history-item {
+      padding: 12px;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+    .history-item:hover { background: #f9fafb; }
+    .version-compare-results {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 16px;
+    }
+    @media (max-width: 768px) {
+      .version-compare-results { grid-template-columns: 1fr; }
+    }
+    .compare-panel {
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .compare-panel-header {
+      padding: 10px 14px;
+      background: #f9fafb;
+      border-bottom: 1px solid #e5e7eb;
+      font-weight: 600;
+    }
+    .compare-panel-body { padding: 12px; }
+    .compare-delta {
+      font-size: 0.75rem;
+      padding: 2px 6px;
+      border-radius: 3px;
+      margin-left: 8px;
+    }
+    .compare-delta-better { background: #d1fae5; color: #065f46; }
+    .compare-delta-worse { background: #fee2e2; color: #dc2626; }
+    .compare-delta-same { background: #f3f4f6; color: #6b7280; }
+  </style>
+</head>
+<body>
+  <div x-data="promptAdmin()" x-init="init()">
+    <!-- Toast Notifications -->
+    <div class="toast-container">
+      <template x-for="toast in toasts" :key="toast.id">
+        <div class="toast" :class="'toast-' + toast.type" x-text="toast.message"></div>
+      </template>
+    </div>
+
+    <header>
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <h1>Olumi Prompt Admin</h1>
+          <p>Manage prompts, versions, and experiments</p>
+        </div>
+        <template x-if="authenticated">
+          <button class="btn btn-secondary" @click="logout()" style="margin-left: auto;">Logout</button>
+        </template>
+      </div>
+    </header>
+
+    <div class="container">
+      <!-- Auth -->
+      <template x-if="!authenticated">
+        <div class="card">
+          <h2>Authentication Required</h2>
+          <div class="form-group">
+            <label>Admin API Key</label>
+            <input type="password" x-model="apiKey" placeholder="Enter admin API key" @keyup.enter="authenticate()">
+          </div>
+          <button class="btn btn-primary" @click="authenticate()">Login</button>
+          <template x-if="error">
+            <div class="alert alert-error mt-2" x-text="error"></div>
+          </template>
+        </div>
+      </template>
+
+      <template x-if="authenticated">
+        <div>
+          <!-- Tabs -->
+          <div class="tabs">
+            <div class="tab" :class="{ active: tab === 'prompts' }" @click="tab = 'prompts'">Prompts</div>
+            <div class="tab" :class="{ active: tab === 'testcases' }" @click="tab = 'testcases'; loadPrompts()">Test Cases</div>
+            <div class="tab" :class="{ active: tab === 'experiments' }" @click="tab = 'experiments'">Experiments</div>
+          </div>
+
+          <!-- Alerts -->
+          <template x-if="error">
+            <div class="alert alert-error" x-text="error"></div>
+          </template>
+          <template x-if="success">
+            <div class="alert alert-success" x-text="success"></div>
+          </template>
+
+          <!-- Prompts Tab -->
+          <template x-if="tab === 'prompts'">
+            <div>
+              <div class="card">
+                <div class="flex" style="justify-content: space-between; align-items: center;">
+                  <h2>Prompts</h2>
+                  <button class="btn btn-primary" @click="showCreateModal = true">+ New Prompt</button>
+                </div>
+
+                <div class="flex mt-2 mb-2">
+                  <select x-model="filter.taskId" @change="loadPrompts()" style="width: auto;">
+                    ${generateTaskFilterOptions()}
+                  </select>
+                  <select x-model="filter.status" @change="loadPrompts()" style="width: auto;">
+                    <option value="">All Statuses</option>
+                    <option value="draft">Draft</option>
+                    <option value="staging">Staging</option>
+                    <option value="production">Production</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                </div>
+
+                <template x-if="loading">
+                  <p class="text-muted">Loading...</p>
+                </template>
+
+                <template x-if="!loading && prompts.length === 0">
+                  <p class="text-muted">No prompts found. Create one to get started.</p>
+                </template>
+
+                <template x-if="!loading && prompts.length > 0">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Task</th>
+                        <th>Status</th>
+                        <th>Revision</th>
+                        <th>Design Version</th>
+                        <th>Updated</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="prompt in prompts" :key="prompt.id">
+                        <tr>
+                          <td x-text="prompt.id"></td>
+                          <td x-text="prompt.taskId"></td>
+                          <td>
+                            <span class="status" :class="'status-' + prompt.status" x-text="prompt.status"></span>
+                          </td>
+                          <td x-text="prompt.activeVersion"></td>
+                          <td x-text="prompt.designVersion || '-'"></td>
+                          <td x-text="formatDate(prompt.updatedAt)"></td>
+                          <td>
+                            <button class="btn btn-secondary btn-sm" @click="viewPrompt(prompt)">View</button>
+                            <button class="btn btn-secondary btn-sm" @click="editPrompt(prompt)">Edit</button>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </template>
+              </div>
+            </div>
+          </template>
+
+          <!-- Test Cases Tab -->
+          <template x-if="tab === 'testcases'">
+            <div>
+              <div class="card">
+                <div class="flex" style="justify-content: space-between; align-items: center;">
+                  <h2>Test Cases</h2>
+                </div>
+                <p class="text-muted mt-2 mb-2">Manage golden tests for prompt versions. Select a prompt to view and edit its test cases. <em>Note: Test results (pass/fail) are session-local and not persisted.</em></p>
+
+                <div class="form-group">
+                  <label>Select Prompt</label>
+                  <select x-model="selectedTestPromptId" @change="loadTestCasesForPrompt()">
+                    <option value="">-- Select a prompt --</option>
+                    <template x-for="prompt in prompts" :key="prompt.id">
+                      <option :value="prompt.id" x-text="prompt.name + ' (' + prompt.id + ')'"></option>
+                    </template>
+                  </select>
+                </div>
+
+                <template x-if="selectedTestPromptId && selectedTestPrompt">
+                  <div>
+                    <div class="flex mb-2" style="justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                      <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                        <div>
+                          <label>Version</label>
+                          <select x-model="selectedTestVersionNum" @change="loadTestCasesForVersion()" style="width: auto; margin-left: 10px;">
+                            <template x-for="v in selectedTestPrompt.versions" :key="v.version">
+                              <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (production)' : '') + (selectedTestPrompt.stagingVersion && v.version === selectedTestPrompt.stagingVersion ? ' (staging)' : '')"></option>
+                            </template>
+                          </select>
+                        </div>
+                        <template x-if="selectedTestPrompt.stagingVersion && parseInt(selectedTestVersionNum, 10) === selectedTestPrompt.stagingVersion && parseInt(selectedTestVersionNum, 10) !== selectedTestPrompt.activeVersion">
+                          <div style="font-size: 0.8rem; padding: 4px 8px; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 4px; color: #92400e;">
+                            Testing v<span x-text="selectedTestVersionNum"></span> (staging version) - this version will be used in staging environment
+                          </div>
+                        </template>
+                        <template x-if="parseInt(selectedTestVersionNum, 10) !== selectedTestPrompt.activeVersion && (!selectedTestPrompt.stagingVersion || parseInt(selectedTestVersionNum, 10) !== selectedTestPrompt.stagingVersion)">
+                          <div style="font-size: 0.8rem; padding: 4px 8px; background: #e5e7eb; border: 1px solid #9ca3af; border-radius: 4px; color: #4b5563;">
+                            Testing v<span x-text="selectedTestVersionNum"></span> (draft) - not in use anywhere
+                          </div>
+                        </template>
+                        <template x-if="parseInt(selectedTestVersionNum, 10) === selectedTestPrompt.activeVersion">
+                          <div style="font-size: 0.8rem; padding: 4px 8px; background: #dcfce7; border: 1px solid #22c55e; border-radius: 4px; color: #166534;">
+                            Testing v<span x-text="selectedTestVersionNum"></span> (production version) - this version is live
+                          </div>
+                        </template>
+                      </div>
+                      <div class="flex" style="gap: 8px; flex-wrap: wrap;">
+                        <button class="btn btn-primary btn-sm" @click="showTestCaseModal = true; resetTestCaseForm()">+ Add Test Case</button>
+                        <template x-if="currentTestCases.length > 0">
+                          <button class="btn btn-llm btn-sm" @click="runAllTestCasesWithLLM()" :disabled="llmBatchRunning || llmRateLimitCooldown > 0">
+                            <template x-if="llmBatchRunning">
+                              <span><span class="spinner"></span> Running...</span>
+                            </template>
+                            <template x-if="!llmBatchRunning && llmRateLimitCooldown > 0">
+                              <span>Wait <span x-text="llmRateLimitCooldown"></span>s</span>
+                            </template>
+                            <template x-if="!llmBatchRunning && llmRateLimitCooldown === 0">
+                              <span>Run All with LLM</span>
+                            </template>
+                          </button>
+                        </template>
+                        <button class="btn btn-secondary btn-sm" @click="openLLMCompareModal()">Compare Versions (LLM)</button>
+                        <button class="btn btn-secondary btn-sm" @click="showHistoryModal = true; loadTestHistory()">History</button>
+                      </div>
+
+                      <!-- LLM Testing Options -->
+                      <div class="mt-2" style="padding: 10px; background: #f8fafc; border-radius: 6px; border: 1px solid #e2e8f0;">
+                        <div class="flex" style="gap: 15px; flex-wrap: wrap; align-items: center;">
+                          <div style="display: flex; align-items: center; gap: 6px;">
+                            <label style="font-size: 0.85rem; font-weight: 500;">Model:</label>
+                            <select x-model="llmModelOverride" style="padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;" @focus="loadAvailableModels()" @change="saveModelPreference()">
+                              <option value="">Default</option>
+                              <template x-for="m in llmAvailableModels" :key="m.id">
+                                <option :value="m.id" x-text="m.id + ' (' + m.provider + ')'"></option>
+                              </template>
+                            </select>
+                            <button type="button" @click="openModelAvailabilityModal()" class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 0.75rem;" title="Check model availability from providers">
+                              Verify
+                            </button>
+                          </div>
+                          <!-- Reasoning Effort (only for OpenAI reasoning models) -->
+                          <template x-if="isReasoningModelSelected()">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                              <label style="font-size: 0.85rem; font-weight: 500;">Reasoning Effort:</label>
+                              <select x-model="llmReasoningEffort" style="padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
+                              </select>
+                            </div>
+                          </template>
+                          <!-- Extended Thinking Budget (only for Anthropic models with extended thinking) -->
+                          <template x-if="supportsExtendedThinkingSelected()">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                              <label style="font-size: 0.85rem; font-weight: 500;">Thinking Budget:</label>
+                              <input type="number" x-model.number="llmBudgetTokens" placeholder="none" min="1024" max="128000" step="1024"
+                                     style="width: 100px; padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                              <span style="font-size: 0.75rem; color: #6b7280;">tokens</span>
+                            </div>
+                          </template>
+                          <!-- Temperature (only for non-reasoning models) -->
+                          <template x-if="supportsTemperature()">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                              <label style="font-size: 0.85rem; font-weight: 500;">Temperature:</label>
+                              <input type="number" x-model.number="llmTemperature" min="0" max="2" step="0.1" placeholder="0"
+                                     style="width: 70px; padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                            </div>
+                          </template>
+                          <!-- Max Tokens Override -->
+                          <div style="display: flex; align-items: center; gap: 6px;">
+                            <label style="font-size: 0.85rem; font-weight: 500;">Max Tokens:</label>
+                            <input type="number" x-model.number="llmMaxTokensOverride" placeholder="default" min="100" max="32768"
+                                   style="width: 90px; padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                          </div>
+                          <!-- Seed (for reproducibility) -->
+                          <div style="display: flex; align-items: center; gap: 6px;">
+                            <label style="font-size: 0.85rem; font-weight: 500;">Seed:</label>
+                            <input type="number" x-model.number="llmSeed" placeholder="random" min="0" max="2147483647"
+                                   style="width: 110px; padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                          </div>
+                          <!-- Top P (nucleus sampling) - only for non-reasoning models -->
+                          <template x-if="supportsTemperature()">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                              <label style="font-size: 0.85rem; font-weight: 500;">Top P:</label>
+                              <input type="number" x-model.number="llmTopP" placeholder="1.0" min="0" max="1" step="0.05"
+                                     style="width: 70px; padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                            </div>
+                          </template>
+                          <div style="display: flex; align-items: center; gap: 6px;">
+                            <input type="checkbox" id="skipRepairs" x-model="llmSkipRepairs" style="width: 16px; height: 16px;">
+                            <label for="skipRepairs" style="font-size: 0.85rem;">Skip repairs (raw LLM output)</label>
+                          </div>
+                          <template x-if="llmRateLimitCooldown > 0">
+                            <div style="font-size: 0.85rem; color: #dc2626;">
+                              Rate limit: <span x-text="llmRateLimitCooldown"></span>s remaining
+                            </div>
+                          </template>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Batch Progress -->
+                    <template x-if="llmBatchRunning">
+                      <div class="mt-2 mb-2">
+                        <div class="text-muted" style="font-size: 0.85rem;">
+                          Running test <span x-text="llmBatchProgress.current"></span> of <span x-text="llmBatchProgress.total"></span>...
+                        </div>
+                        <div class="progress-bar">
+                          <div class="progress-bar-fill" :style="'width: ' + (llmBatchProgress.total > 0 ? (llmBatchProgress.current / llmBatchProgress.total * 100) : 0) + '%'"></div>
+                        </div>
+                      </div>
+                    </template>
+
+                    <!-- Batch Summary -->
+                    <template x-if="llmBatchResults.length > 0 && !llmBatchRunning">
+                      <div class="batch-summary">
+                        <h4 style="margin-bottom: 10px;">Batch Results Summary</h4>
+                        <div class="batch-summary-stat">
+                          <span>Total Tests:</span>
+                          <span x-text="llmBatchResults.length"></span>
+                        </div>
+                        <div class="batch-summary-stat">
+                          <span>Passed:</span>
+                          <span class="test-result-pass" x-text="llmBatchResults.filter(r => r.success).length"></span>
+                        </div>
+                        <div class="batch-summary-stat">
+                          <span>Failed:</span>
+                          <span class="test-result-fail" x-text="llmBatchResults.filter(r => !r.success).length"></span>
+                        </div>
+                        <div class="batch-summary-stat">
+                          <span>Validation Issues:</span>
+                          <span>
+                            <span class="validation-badge validation-badge-error" x-text="'● ' + llmBatchResults.reduce((sum, r) => sum + (r.validationErrors || 0), 0)"></span>
+                            <span class="validation-badge validation-badge-warning" x-text="'⚠ ' + llmBatchResults.reduce((sum, r) => sum + (r.validationWarnings || 0), 0)"></span>
+                          </span>
+                        </div>
+                        <div class="batch-summary-stat">
+                          <span>Avg Node Count:</span>
+                          <span x-text="Math.round(llmBatchResults.filter(r => r.nodeCount).reduce((a, b) => a + b.nodeCount, 0) / llmBatchResults.filter(r => r.nodeCount).length) || 'N/A'"></span>
+                        </div>
+                        <div class="batch-summary-stat">
+                          <span>Avg Latency:</span>
+                          <span x-text="Math.round(llmBatchResults.filter(r => r.latencyMs).reduce((a, b) => a + b.latencyMs, 0) / llmBatchResults.filter(r => r.latencyMs).length) + 'ms' || 'N/A'"></span>
+                        </div>
+                        <div class="batch-summary-stat">
+                          <span>Tests Requiring Repairs:</span>
+                          <span x-text="llmBatchResults.filter(r => r.repairsApplied > 0).length"></span>
+                        </div>
+                        <button class="btn btn-secondary btn-sm mt-2" @click="llmBatchResults = []">Clear Summary</button>
+                      </div>
+                    </template>
+
+                    <template x-if="currentTestCases.length === 0">
+                      <p class="text-muted">No test cases for this version. Add one to get started.</p>
+                    </template>
+
+                    <template x-for="(tc, idx) in currentTestCases" :key="tc.id">
+                      <div class="test-case-item">
+                        <div class="flex" style="justify-content: space-between; align-items: flex-start;">
+                          <div>
+                            <strong x-text="tc.name"></strong>
+                            <span class="text-muted" x-text="' (' + tc.id + ')'"></span>
+                            <template x-if="tc.lastResult">
+                              <span :class="'test-result-' + tc.lastResult" x-text="' [' + tc.lastResult.toUpperCase() + ']'"></span>
+                            </template>
+                            <template x-if="tc.llmResult">
+                              <span :class="tc.llmResult.success ? 'test-result-pass' : 'test-result-fail'" x-text="' [LLM: ' + (tc.llmResult.success ? 'PASS' : 'FAIL') + ']'"></span>
+                            </template>
+                          </div>
+                          <div class="flex" style="gap: 5px; flex-wrap: wrap;">
+                            <button class="btn btn-secondary btn-sm" @click="runSingleTestCase(tc)">Run (Dry)</button>
+                            <button class="btn btn-llm btn-sm" @click="runSingleTestCaseWithLLM(tc)" :disabled="tc.llmRunning || llmRateLimitCooldown > 0">
+                              <template x-if="tc.llmRunning">
+                                <span><span class="spinner"></span></span>
+                              </template>
+                              <template x-if="!tc.llmRunning && llmRateLimitCooldown > 0">
+                                <span>Wait <span x-text="llmRateLimitCooldown"></span>s</span>
+                              </template>
+                              <template x-if="!tc.llmRunning && llmRateLimitCooldown === 0">
+                                <span>Run with LLM</span>
+                              </template>
+                            </button>
+                            <button class="btn btn-secondary btn-sm" @click="editTestCase(tc)">Edit</button>
+                            <button class="btn btn-danger btn-sm" @click="deleteTestCase(idx)">Delete</button>
+                          </div>
+                        </div>
+                        <div class="text-muted mt-2" style="font-size: 0.85rem;">
+                          <strong>Input:</strong> <span x-text="tc.input.substring(0, 100) + (tc.input.length > 100 ? '...' : '')"></span>
+                        </div>
+                        <template x-if="tc.expectedOutput">
+                          <div class="text-muted" style="font-size: 0.85rem;">
+                            <strong>Expected:</strong> <span x-text="tc.expectedOutput.substring(0, 100) + (tc.expectedOutput.length > 100 ? '...' : '')"></span>
+                          </div>
+                        </template>
+                        <!-- Dry-Run Test Output Display -->
+                        <template x-if="tc.lastOutput">
+                          <div class="mt-2" style="border-top: 1px solid #e5e7eb; padding-top: 8px;">
+                            <div class="flex" style="justify-content: space-between; align-items: center;">
+                              <strong style="font-size: 0.85rem;">Dry-Run Output:</strong>
+                              <span class="text-muted" style="font-size: 0.75rem;" x-text="tc.lastOutput.timestamp"></span>
+                            </div>
+                            <template x-if="tc.lastOutput.error">
+                              <div class="alert alert-error mt-2" style="padding: 8px; font-size: 0.85rem;" x-text="tc.lastOutput.error"></div>
+                            </template>
+                            <template x-if="tc.lastOutput.compiled">
+                              <div class="mt-2">
+                                <div class="text-muted" style="font-size: 0.8rem;">
+                                  <span x-text="tc.lastOutput.charCount + ' chars'"></span>
+                                  <template x-if="tc.lastOutput.validation && tc.lastOutput.validation.issues && tc.lastOutput.validation.issues.length > 0">
+                                    <span class="test-result-fail" x-text="' | ' + tc.lastOutput.validation.issues.length + ' issue(s)'"></span>
+                                  </template>
+                                </div>
+                                <pre style="max-height: 150px; overflow-y: auto; font-size: 0.75rem; margin-top: 5px; background: #f9fafb; padding: 8px; border-radius: 4px;" x-text="tc.lastOutput.compiled.substring(0, 500) + (tc.lastOutput.compiled.length > 500 ? '\\n... (truncated)' : '')"></pre>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
+
+                        <!-- LLM Test Results Display -->
+                        <template x-if="tc.llmResult">
+                          <div class="llm-results">
+                            <div class="llm-results-header">
+                              <div>
+                                <strong>LLM Test Result</strong>
+                                <span :class="tc.llmResult.success ? 'test-result-pass' : 'test-result-fail'" x-text="' — ' + (tc.llmResult.success ? 'PASSED' : 'FAILED')"></span>
+                              </div>
+                              <span class="text-muted" style="font-size: 0.75rem;" x-text="tc.llmResult.timestamp"></span>
+                            </div>
+                            <div class="llm-results-body">
+                              <!--
+                                HARNESS FIDELITY DISCLOSURE.
+                                Rendered from the SERVER's payload
+                                (harness_fidelity), never restated here: a copy in
+                                this file would drift from the route the first time
+                                the route changed, and a stale disclosure reads as
+                                current. Placed ABOVE the error/success split on
+                                purpose — a failed run is exactly when a
+                                composition gap gets misread as a bad prompt.
+                              -->
+                              <template x-if="tc.llmResult.fullResponse?.harness_fidelity">
+                                <div class="alert alert-warning harness-fidelity" style="padding: 10px;">
+                                  <strong>What this result is evidence of</strong>
+                                  <div x-text="tc.llmResult.fullResponse.harness_fidelity.notice"></div>
+                                  <template x-for="d in (tc.llmResult.fullResponse.harness_fidelity.divergences || [])" :key="d">
+                                    <div class="hf-divergence" x-text="d"></div>
+                                  </template>
+                                  <div class="hf-sent"
+                                       x-text="'sent: ' + (tc.llmResult.fullResponse.harness_fidelity.system_blocks_sent ?? '?') + ' system block(s) · structured-outputs grammar: ' + (tc.llmResult.fullResponse.harness_fidelity.structured_outputs_grammar_sent === undefined ? '?' : (tc.llmResult.fullResponse.harness_fidelity.structured_outputs_grammar_sent ? 'yes' : 'no')) + ' · reply parsed as: ' + tc.llmResult.fullResponse.harness_fidelity.output_parsed_as"></div>
+                                </div>
+                              </template>
+
+                              <!-- Error Display -->
+                              <template x-if="tc.llmResult.error">
+                                <div class="alert alert-error" style="padding: 10px; font-size: 0.85rem;" x-text="tc.llmResult.error"></div>
+                              </template>
+
+                              <!-- Success Metrics -->
+                              <template x-if="!tc.llmResult.error">
+                                <div>
+                                  <!-- Key Metrics -->
+                                  <div style="margin-bottom: 12px;">
+                                    <div class="llm-metric" :class="tc.llmResult.nodeCount >= 3 ? 'llm-metric-good' : 'llm-metric-warn'">
+                                      <span class="llm-metric-label">Nodes:</span>
+                                      <span class="llm-metric-value" x-text="tc.llmResult.nodeCount"></span>
+                                    </div>
+                                    <div class="llm-metric">
+                                      <span class="llm-metric-label">Edges:</span>
+                                      <span class="llm-metric-value" x-text="tc.llmResult.edgeCount"></span>
+                                    </div>
+                                    <div class="llm-metric" :class="tc.llmResult.repairsApplied === 0 ? 'llm-metric-good' : 'llm-metric-warn'">
+                                      <span class="llm-metric-label">Repairs:</span>
+                                      <span class="llm-metric-value" x-text="tc.llmResult.repairsApplied"></span>
+                                    </div>
+                                    <div class="llm-metric">
+                                      <span class="llm-metric-label">Latency:</span>
+                                      <span class="llm-metric-value" x-text="tc.llmResult.latencyMs + 'ms'"></span>
+                                    </div>
+                                    <template x-if="tc.llmResult.tokenUsage">
+                                      <div class="llm-metric">
+                                        <span class="llm-metric-label">Tokens:</span>
+                                        <span class="llm-metric-value" x-text="tc.llmResult.tokenUsage.total"></span>
+                                      </div>
+                                    </template>
+                                    <template x-if="tc.llmResult.model">
+                                      <div class="llm-metric">
+                                        <span class="llm-metric-label">Model:</span>
+                                        <span class="llm-metric-value" x-text="tc.llmResult.model"></span>
+                                      </div>
+                                    </template>
+                                    <!--
+                                      FINISH REASON. On the response envelope all
+                                      along and rendered nowhere, so a reply cut
+                                      off at max_tokens and a genuinely poor prompt
+                                      looked identical: both arrive as a short or
+                                      unparseable draft. Warn-coloured on anything
+                                      that is not a clean stop, because that is the
+                                      case where the prompt is not the culprit.
+                                    -->
+                                    <template x-if="tc.llmResult.finishReason">
+                                      <div class="llm-metric" :class="['end_turn', 'stop'].includes(tc.llmResult.finishReason) ? 'llm-metric-good' : 'llm-metric-warn'">
+                                        <span class="llm-metric-label">Finish:</span>
+                                        <span class="llm-metric-value" x-text="tc.llmResult.finishReason"></span>
+                                      </div>
+                                    </template>
+                                  </div>
+
+                                  <!-- Pipeline Stages -->
+                                  <template x-if="tc.llmResult.stages && tc.llmResult.stages.length > 0">
+                                    <div class="collapsible-section">
+                                      <div class="collapsible-header" @click="tc.llmResult.showStages = !tc.llmResult.showStages">
+                                        <span>Pipeline Stages (<span x-text="tc.llmResult.stages.length"></span>)</span>
+                                        <span x-text="tc.llmResult.showStages ? '▼' : '▶'"></span>
+                                      </div>
+                                      <template x-if="tc.llmResult.showStages">
+                                        <div class="collapsible-content">
+                                          <template x-for="stage in tc.llmResult.stages" :key="stage.name">
+                                            <div class="stage-item">
+                                              <span class="stage-name" x-text="stage.name"></span>
+                                              <div>
+                                                <span class="stage-status" :class="'stage-status-' + stage.status" x-text="stage.status"></span>
+                                                <span class="text-muted" style="font-size: 0.75rem; margin-left: 8px;" x-text="stage.duration_ms + 'ms'"></span>
+                                              </div>
+                                            </div>
+                                          </template>
+                                        </div>
+                                      </template>
+                                    </div>
+                                  </template>
+
+                                  <!-- Validation Issues -->
+                                  <template x-if="tc.llmResult.fullResponse?.result?.validation?.issues?.length > 0">
+                                    <div class="collapsible-section">
+                                      <div class="collapsible-header" @click="tc.llmResult.showValidation = !tc.llmResult.showValidation" :class="tc.llmResult.fullResponse.result.validation.error_count > 0 ? 'validation-has-errors' : ''">
+                                        <div class="validation-issues-header">
+                                          <span>Validation Issues</span>
+                                          <span class="validation-badge validation-badge-error" x-show="tc.llmResult.fullResponse.result.validation.error_count > 0">
+                                            ● <span x-text="tc.llmResult.fullResponse.result.validation.error_count"></span>
+                                          </span>
+                                          <span class="validation-badge validation-badge-warning" x-show="tc.llmResult.fullResponse.result.validation.warning_count > 0">
+                                            ⚠ <span x-text="tc.llmResult.fullResponse.result.validation.warning_count"></span>
+                                          </span>
+                                          <span class="validation-badge validation-badge-info" x-show="tc.llmResult.fullResponse.result.validation.info_count > 0">
+                                            ℹ <span x-text="tc.llmResult.fullResponse.result.validation.info_count"></span>
+                                          </span>
+                                        </div>
+                                        <div style="display: flex; align-items: center; gap: 8px;">
+                                          <select class="validation-filter" x-model="tc.llmResult.validationFilter" @click.stop>
+                                            <option value="all">All</option>
+                                            <option value="error">Errors</option>
+                                            <option value="warning">Warnings</option>
+                                            <option value="info">Info</option>
+                                          </select>
+                                          <span x-text="tc.llmResult.showValidation ? '▼' : '▶'"></span>
+                                        </div>
+                                      </div>
+                                      <template x-if="tc.llmResult.showValidation">
+                                        <div class="collapsible-content">
+                                          <template x-for="issue in tc.llmResult.fullResponse.result.validation.issues.filter(i => (tc.llmResult.validationFilter || 'all') === 'all' || i.severity === tc.llmResult.validationFilter)" :key="issue.code + (issue.affected_node_id || '') + (issue.affected_edge_id || '')">
+                                            <div class="validation-issue" :class="'severity-' + issue.severity">
+                                              <div class="validation-issue-header">
+                                                <span class="validation-issue-icon" :class="issue.severity" x-text="issue.severity === 'error' ? '●' : issue.severity === 'warning' ? '⚠' : 'ℹ'"></span>
+                                                <span class="validation-issue-code" x-text="issue.code"></span>
+                                                <button class="validation-issue-copy" @click="copyValidationIssue(issue)" title="Copy as JSON">Copy</button>
+                                              </div>
+                                              <div class="validation-issue-message" x-text="issue.message"></div>
+                                              <template x-if="issue.affected_node_id || issue.affected_edge_id">
+                                                <div class="validation-issue-details">
+                                                  Affected: <span x-text="issue.affected_edge_id || issue.affected_node_id"></span>
+                                                </div>
+                                              </template>
+                                              <template x-if="issue.suggestion">
+                                                <div class="validation-issue-suggestion">
+                                                  Fix: <span x-text="issue.suggestion"></span>
+                                                </div>
+                                              </template>
+                                              <template x-if="issue.stage">
+                                                <div class="validation-issue-stage">
+                                                  Stage: <span x-text="issue.stage"></span>
+                                                </div>
+                                              </template>
+                                            </div>
+                                          </template>
+                                        </div>
+                                      </template>
+                                    </div>
+                                  </template>
+
+                                  <!-- Raw Output -->
+                                  <template x-if="tc.llmResult.rawOutputPreview || tc.llmResult.rawOutputFull">
+                                    <div class="collapsible-section">
+                                      <div class="collapsible-header" @click="tc.llmResult.showRaw = !tc.llmResult.showRaw">
+                                        <span>Raw LLM Output</span>
+                                        <span x-text="tc.llmResult.showRaw ? '▼' : '▶'"></span>
+                                      </div>
+                                      <template x-if="tc.llmResult.showRaw">
+                                        <div class="collapsible-content">
+                                          <div style="margin-bottom: 8px; display: flex; gap: 8px; align-items: center;">
+                                            <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                                              <input type="checkbox" x-model="tc.llmResult.showFullOutput" style="cursor: pointer;">
+                                              <span>Show Full Output</span>
+                                            </label>
+                                            <template x-if="tc.llmResult.rawOutputFull">
+                                              <span style="color: #6b7280; font-size: 0.85rem;" x-text="'(' + tc.llmResult.rawOutputFull.length + ' chars)'"></span>
+                                            </template>
+                                            <button class="btn btn-secondary btn-sm" @click="navigator.clipboard.writeText(tc.llmResult.rawOutputFull || tc.llmResult.rawOutputPreview); $dispatch('toast', {message: 'Copied to clipboard', type: 'success'})" style="margin-left: auto;">Copy</button>
+                                          </div>
+                                          <pre style="max-height: 500px; overflow: auto;" x-text="tc.llmResult.showFullOutput ? tc.llmResult.rawOutputFull : tc.llmResult.rawOutputPreview"></pre>
+                                        </div>
+                                      </template>
+                                    </div>
+                                  </template>
+
+                                  <!-- Full Trace -->
+                                  <template x-if="tc.llmResult.fullTrace">
+                                    <div class="collapsible-section">
+                                      <div class="collapsible-header" @click="tc.llmResult.showTrace = !tc.llmResult.showTrace">
+                                        <span>Full Trace</span>
+                                        <span x-text="tc.llmResult.showTrace ? '▼' : '▶'"></span>
+                                      </div>
+                                      <template x-if="tc.llmResult.showTrace">
+                                        <div class="collapsible-content">
+                                          <pre x-text="JSON.stringify(tc.llmResult.fullTrace, null, 2)"></pre>
+                                        </div>
+                                      </template>
+                                    </div>
+                                  </template>
+
+                                  <!-- Graph Summary -->
+                                  <template x-if="tc.llmResult.graphSummary">
+                                    <div class="collapsible-section">
+                                      <div class="collapsible-header" @click="tc.llmResult.showGraph = !tc.llmResult.showGraph">
+                                        <span>Validated Graph</span>
+                                        <span x-text="tc.llmResult.showGraph ? '▼' : '▶'"></span>
+                                      </div>
+                                      <template x-if="tc.llmResult.showGraph">
+                                        <div class="collapsible-content">
+                                          <pre x-text="JSON.stringify(tc.llmResult.graphSummary, null, 2)"></pre>
+                                        </div>
+                                      </template>
+                                    </div>
+                                  </template>
+                                </div>
+                              </template>
+                            </div>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+
+          <!-- Experiments Tab -->
+          <template x-if="tab === 'experiments'">
+            <div class="card">
+              <div class="flex" style="justify-content: space-between; align-items: center;">
+                <h2>A/B Experiments</h2>
+                <button class="btn btn-primary" @click="showExperimentModal = true">+ New Experiment</button>
+              </div>
+              <p class="text-muted mt-2">Experiments are tracked locally and optionally in Braintrust.</p>
+            </div>
+          </template>
+        </div>
+      </template>
+
+      <!-- Create Prompt Modal -->
+      <template x-if="showCreateModal">
+        <div class="modal" @click.self="showCreateModal = false">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h2>Create New Prompt</h2>
+              <span class="close" @click="showCreateModal = false">&times;</span>
+            </div>
+
+            <div class="form-group">
+              <label>ID (e.g., draft_graph_system_v1)</label>
+              <input type="text" x-model="newPrompt.id" placeholder="lowercase-with-dashes">
+            </div>
+
+            <div class="form-group">
+              <label>Name</label>
+              <input type="text" x-model="newPrompt.name" placeholder="Human-readable name">
+            </div>
+
+            <div class="form-group">
+              <label>Task</label>
+              <select x-model="newPrompt.taskId">
+                ${generateTaskOptions()}
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label>Content</label>
+              <textarea x-model="newPrompt.content" placeholder="Prompt content with {{variables}}"></textarea>
+            </div>
+
+            <div class="form-group">
+              <label>Change Note (optional)</label>
+              <input type="text" x-model="newPrompt.changeNote" placeholder="Initial version">
+            </div>
+
+            <div class="flex">
+              <button class="btn btn-secondary" @click="showCreateModal = false">Cancel</button>
+              <button class="btn btn-primary" @click="createPrompt()">Create Prompt</button>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- View/Edit Prompt Modal -->
+      <template x-if="selectedPrompt">
+        <div class="modal" @click.self="selectedPrompt = null">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h2 x-text="selectedPrompt.name"></h2>
+              <span class="close" @click="selectedPrompt = null">&times;</span>
+            </div>
+
+            <div class="flex">
+              <div class="flex-1">
+                <p class="text-muted">ID: <span x-text="selectedPrompt.id"></span></p>
+                <p class="text-muted">Task: <span x-text="selectedPrompt.taskId"></span></p>
+                <p class="text-muted">Status:
+                  <span class="status" :class="'status-' + selectedPrompt.status" x-text="selectedPrompt.status"></span>
+                </p>
+                <p class="text-muted">Design Version:
+                  <span x-text="selectedPrompt.designVersion || '-'"></span>
+                </p>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 8px;">
+                <select x-model="selectedPrompt.status" @change="updatePromptStatus()">
+                  <option value="draft">Draft</option>
+                  <option value="staging">Staging</option>
+                  <option value="production">Production</option>
+                  <option value="archived">Archived</option>
+                </select>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <input type="text" x-model="selectedPrompt.designVersion" placeholder="e.g., v22"
+                         style="width: 80px; padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                  <button class="btn btn-secondary btn-sm" @click="updateDesignVersion()">Save</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Model Configuration -->
+            <div class="mt-2 mb-2" style="padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
+              <h4 style="margin: 0 0 10px 0; font-size: 0.9rem; color: #475569;">Model Configuration</h4>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div>
+                  <label style="font-size: 0.8rem; color: #64748b; display: block; margin-bottom: 4px;">Staging Model</label>
+                  <select x-model="selectedPrompt.modelConfig.staging" @change="updateModelConfig()"
+                          style="width: 100%; padding: 6px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                    <option value="">Use task default</option>
+                    <template x-for="m in llmAvailableModels" :key="m.id">
+                      <option :value="m.id" x-text="m.id + ' (' + m.provider + ')'"></option>
+                    </template>
+                  </select>
+                </div>
+                <div>
+                  <label style="font-size: 0.8rem; color: #64748b; display: block; margin-bottom: 4px;">Production Model</label>
+                  <select x-model="selectedPrompt.modelConfig.production" @change="updateModelConfig()"
+                          style="width: 100%; padding: 6px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid #d1d5db;">
+                    <option value="">Use task default</option>
+                    <template x-for="m in llmAvailableModels" :key="m.id">
+                      <option :value="m.id" x-text="m.id + ' (' + m.provider + ')'"></option>
+                    </template>
+                  </select>
+                </div>
+              </div>
+              <p style="margin: 8px 0 0 0; font-size: 0.75rem; color: #94a3b8;">
+                Set environment-specific models. Leave empty to use task defaults.
+              </p>
+            </div>
+
+            <h3 class="mt-2 mb-2">Versions</h3>
+            <div class="version-list">
+              <template x-for="version in selectedPrompt.versions.slice().reverse()" :key="version.version">
+                <div class="version-item" :class="{ active: version.version === selectedVersionNum }"
+                     @click="selectVersion(version.version)">
+                  <div class="flex" style="justify-content: space-between;">
+                    <strong x-text="'v' + version.version"></strong>
+                    <span class="text-muted" x-text="formatDate(version.createdAt)"></span>
+                  </div>
+                  <div class="text-muted" x-text="version.changeNote || 'No change note'"></div>
+                  <div class="text-muted" x-text="'by ' + version.createdBy"></div>
+                  <div class="flex" style="gap: 5px; margin-top: 5px; flex-wrap: wrap;">
+                    <template x-if="version.version === selectedPrompt.activeVersion">
+                      <span class="status status-production">Production</span>
+                    </template>
+                    <template x-if="selectedPrompt.stagingVersion && version.version === selectedPrompt.stagingVersion">
+                      <span class="status status-staging">Staging</span>
+                    </template>
+                    <template x-if="version.requiresApproval && version.approvedBy">
+                      <span class="status status-approved" x-text="'Approved by ' + version.approvedBy"></span>
+                    </template>
+                    <template x-if="version.requiresApproval && !version.approvedBy">
+                      <span class="status status-draft">Needs Approval</span>
+                    </template>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <h3 class="mt-2 mb-2">Content (v<span x-text="selectedVersionNum"></span>)</h3>
+            <pre x-text="getVersionContent(selectedVersionNum)"></pre>
+
+            <!-- Version status badges -->
+            <div class="flex mt-2 mb-2" style="gap: 8px;">
+              <template x-if="selectedVersionNum == selectedPrompt.activeVersion">
+                <span style="background: #22c55e; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem;">PRODUCTION</span>
+              </template>
+              <template x-if="selectedPrompt.stagingVersion && selectedVersionNum == selectedPrompt.stagingVersion">
+                <span style="background: #f59e0b; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem;">STAGING</span>
+              </template>
+            </div>
+
+            <div class="flex mt-2" style="flex-wrap: wrap;">
+              <button class="btn btn-secondary" @click="openNewVersionWithContent()">+ New Version</button>
+              <template x-if="selectedPrompt.versions.length >= 2">
+                <button class="btn btn-secondary" @click="openCompareModal()">Compare Versions</button>
+              </template>
+              <!-- Set as Staging: available for any version not currently staging -->
+              <template x-if="selectedVersionNum != selectedPrompt.stagingVersion">
+                <button class="btn btn-staging" @click="setAsStaging()">
+                  Set v<span x-text="selectedVersionNum"></span> as Staging
+                </button>
+              </template>
+              <!-- Promote to Production: available for staging version or any newer version -->
+              <template x-if="selectedVersionNum != selectedPrompt.activeVersion && (selectedVersionNum == selectedPrompt.stagingVersion || selectedVersionNum > selectedPrompt.activeVersion)">
+                <button class="btn btn-primary" @click="promoteToProduction()">
+                  Promote to Production
+                </button>
+              </template>
+              <!-- Rollback: only for older versions not in staging -->
+              <template x-if="selectedVersionNum < selectedPrompt.activeVersion && selectedVersionNum != selectedPrompt.stagingVersion">
+                <button class="btn btn-warning" @click="rollbackToVersion()">
+                  Rollback to v<span x-text="selectedVersionNum"></span>
+                </button>
+              </template>
+              <template x-if="getSelectedVersion()?.requiresApproval && !getSelectedVersion()?.approvedBy">
+                <button class="btn btn-primary" @click="approveSelectedVersion()">
+                  Approve v<span x-text="selectedVersionNum"></span>
+                </button>
+              </template>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- New Version Modal -->
+      <template x-if="showNewVersionModal">
+        <div class="modal" @click.self="showNewVersionModal = false">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h2>Create New Version</h2>
+              <span class="close" @click="showNewVersionModal = false">&times;</span>
+            </div>
+
+            <div class="form-group">
+              <label>Content</label>
+              <textarea x-model="newVersion.content"></textarea>
+            </div>
+
+            <div class="form-group">
+              <label>Change Note</label>
+              <input type="text" x-model="newVersion.changeNote" placeholder="What changed?">
+            </div>
+
+            <div class="flex">
+              <button class="btn btn-secondary" @click="showNewVersionModal = false">Cancel</button>
+              <button class="btn btn-primary" @click="createVersion()">Create Version</button>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- Approval Modal -->
+      <template x-if="showApprovalModal && pendingApproval">
+        <div class="modal" @click.self="showApprovalModal = false; pendingApproval = null;">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h2>Approval Required</h2>
+              <span class="close" @click="showApprovalModal = false; pendingApproval = null;">&times;</span>
+            </div>
+
+            <div class="alert alert-warning" style="background: #fef3c7; color: #92400e; margin-bottom: 15px;">
+              <strong>This version requires approval before promotion to production.</strong>
+              <p class="mt-2">Version <span x-text="pendingApproval.version"></span> of prompt "<span x-text="pendingApproval.promptId"></span>" is flagged as requiring approval.</p>
+            </div>
+
+            <p class="text-muted mb-2">By approving, you confirm that this prompt version has been reviewed and is safe for production use.</p>
+
+            <div class="flex">
+              <button class="btn btn-secondary" @click="showApprovalModal = false; pendingApproval = null;">Cancel</button>
+              <button class="btn btn-primary" @click="approveVersion()">Approve for Production</button>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- Test Case Modal -->
+      <template x-if="showTestCaseModal">
+        <div class="modal" @click.self="showTestCaseModal = false">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h2 x-text="editingTestCase ? 'Edit Test Case' : 'Add Test Case'"></h2>
+              <span class="close" @click="showTestCaseModal = false">&times;</span>
+            </div>
+
+            <div class="form-group">
+              <label>Test ID</label>
+              <input type="text" x-model="testCaseForm.id" placeholder="unique-test-id" :disabled="editingTestCase">
+            </div>
+
+            <div class="form-group">
+              <label>Name</label>
+              <input type="text" x-model="testCaseForm.name" placeholder="Human-readable test name">
+            </div>
+
+            <div class="form-group">
+              <label>Input (Brief)</label>
+              <textarea x-model="testCaseForm.input" placeholder="Test input/brief content" style="min-height: 100px;"></textarea>
+            </div>
+
+            <div class="form-group">
+              <label>Expected Output (optional)</label>
+              <textarea x-model="testCaseForm.expectedOutput" placeholder="Expected patterns or keywords in output" style="min-height: 80px;"></textarea>
+            </div>
+
+            <div class="form-group">
+              <label>Variables (JSON, optional)</label>
+              <input type="text" x-model="testCaseForm.variablesJson" placeholder='{"maxNodes": 50, "maxEdges": 200}'>
+            </div>
+
+            <div class="flex">
+              <button class="btn btn-secondary" @click="showTestCaseModal = false">Cancel</button>
+              <button class="btn btn-primary" @click="saveTestCase()" x-text="editingTestCase ? 'Update Test Case' : 'Add Test Case'"></button>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- Compare Modal -->
+      <template x-if="showCompareModal && selectedPrompt">
+        <div class="modal" @click.self="showCompareModal = false">
+          <div class="modal-content" style="max-width: 1000px;">
+            <div class="modal-header">
+              <h2>Compare Versions</h2>
+              <span class="close" @click="showCompareModal = false">&times;</span>
+            </div>
+
+            <div class="flex mb-2" style="gap: 20px;">
+              <div class="form-group flex-1">
+                <label>Version A</label>
+                <select x-model="compareVersionA" @change="loadComparison()">
+                  <template x-for="v in selectedPrompt.versions" :key="v.version">
+                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedPrompt.activeVersion ? ' (production)' : '') + (selectedPrompt.stagingVersion && v.version === selectedPrompt.stagingVersion ? ' (staging)' : '')"></option>
+                  </template>
+                </select>
+              </div>
+              <div class="form-group flex-1">
+                <label>Version B</label>
+                <select x-model="compareVersionB" @change="loadComparison()">
+                  <template x-for="v in selectedPrompt.versions" :key="v.version">
+                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedPrompt.activeVersion ? ' (production)' : '') + (selectedPrompt.stagingVersion && v.version === selectedPrompt.stagingVersion ? ' (staging)' : '')"></option>
+                  </template>
+                </select>
+              </div>
+            </div>
+
+            <template x-if="comparisonData">
+              <div>
+                <div class="diff-stats">
+                  <div class="diff-stat">
+                    <span>Lines:</span>
+                    <span :class="comparisonData.changes.linesDelta > 0 ? 'diff-stat-positive' : (comparisonData.changes.linesDelta < 0 ? 'diff-stat-negative' : 'diff-stat-neutral')"
+                          x-text="(comparisonData.changes.linesDelta > 0 ? '+' : '') + comparisonData.changes.linesDelta"></span>
+                  </div>
+                  <div class="diff-stat">
+                    <span>Characters:</span>
+                    <span :class="comparisonData.changes.charsDelta > 0 ? 'diff-stat-positive' : (comparisonData.changes.charsDelta < 0 ? 'diff-stat-negative' : 'diff-stat-neutral')"
+                          x-text="(comparisonData.changes.charsDelta > 0 ? '+' : '') + comparisonData.changes.charsDelta"></span>
+                  </div>
+                </div>
+
+                <div class="diff-container">
+                  <div class="diff-panel">
+                    <div class="diff-panel-header">
+                      Version <span x-text="comparisonData.versionA.version"></span>
+                      <span class="text-muted" x-text="' (' + comparisonData.versionA.lineCount + ' lines)'"></span>
+                    </div>
+                    <div class="diff-panel-content">
+                      <pre x-text="comparisonData.contentA"></pre>
+                    </div>
+                  </div>
+                  <div class="diff-panel">
+                    <div class="diff-panel-header">
+                      Version <span x-text="comparisonData.versionB.version"></span>
+                      <span class="text-muted" x-text="' (' + comparisonData.versionB.lineCount + ' lines)'"></span>
+                    </div>
+                    <div class="diff-panel-content">
+                      <pre x-text="comparisonData.contentB"></pre>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <div class="flex mt-2">
+              <button class="btn btn-secondary" @click="showCompareModal = false">Close</button>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- LLM Compare Modal -->
+      <template x-if="showLLMCompareModal && selectedTestPrompt">
+        <div class="modal" @click.self="showLLMCompareModal = false">
+          <div class="modal-content" style="max-width: 1200px;">
+            <div class="modal-header">
+              <h2>Compare Prompt Versions with LLM</h2>
+              <span class="close" @click="showLLMCompareModal = false">&times;</span>
+            </div>
+
+            <!-- Rate limit indicator -->
+            <template x-if="llmRateLimitCooldown > 0">
+              <div class="alert alert-warning" style="margin-bottom: 16px; padding: 12px;">
+                <strong>Rate limit active:</strong> Please wait <span x-text="llmRateLimitCooldown"></span> seconds before running more tests.
+              </div>
+            </template>
+
+            <div class="flex mb-2" style="gap: 20px; flex-wrap: wrap;">
+              <div class="form-group flex-1">
+                <label>Version A</label>
+                <select x-model="llmCompareVersionA">
+                  <template x-for="v in selectedTestPrompt.versions" :key="v.version">
+                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (production)' : '') + (selectedTestPrompt.stagingVersion && v.version === selectedTestPrompt.stagingVersion ? ' (staging)' : '')"></option>
+                  </template>
+                </select>
+              </div>
+              <div class="form-group flex-1">
+                <label>Version B</label>
+                <select x-model="llmCompareVersionB">
+                  <template x-for="v in selectedTestPrompt.versions" :key="v.version">
+                    <option :value="v.version" x-text="'v' + v.version + (v.version === selectedTestPrompt.activeVersion ? ' (production)' : '') + (selectedTestPrompt.stagingVersion && v.version === selectedTestPrompt.stagingVersion ? ' (staging)' : '')"></option>
+                  </template>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Test Brief</label>
+              <textarea x-model="llmCompareBrief" placeholder="Enter a test brief to run against both versions" style="min-height: 100px;"></textarea>
+            </div>
+
+            <div class="flex mb-2" style="gap: 10px;">
+              <button class="btn btn-llm" @click="runLLMComparison()" :disabled="llmCompareRunning || !llmCompareBrief || llmCompareVersionA === llmCompareVersionB || llmRateLimitCooldown > 0">
+                <template x-if="llmCompareRunning">
+                  <span><span class="spinner"></span> Running comparison...</span>
+                </template>
+                <template x-if="!llmCompareRunning && llmRateLimitCooldown > 0">
+                  <span>Wait <span x-text="llmRateLimitCooldown"></span>s</span>
+                </template>
+                <template x-if="!llmCompareRunning && llmRateLimitCooldown === 0">
+                  <span>Run Comparison</span>
+                </template>
+              </button>
+            </div>
+
+            <template x-if="llmCompareResults">
+              <div>
+                <!-- Prompt Hash Comparison -->
+                <div class="mb-2" style="padding: 10px; background: #f0fdf4; border: 1px solid #22c55e; border-radius: 6px;">
+                  <template x-if="llmCompareResults.promptsAreDifferent">
+                    <div style="color: #166534;">
+                      <strong>&#10003; Different prompt versions confirmed</strong> - Content hashes are different.
+                    </div>
+                  </template>
+                  <template x-if="!llmCompareResults.promptsAreDifferent">
+                    <div style="color: #dc2626;">
+                      <strong>&#10007; Warning:</strong> Same prompt hash for both versions - versions may have identical content.
+                    </div>
+                  </template>
+                </div>
+
+                <!--
+                  HARNESS FIDELITY DISCLOSURE (comparison view). This panel is
+                  where prompt-iteration verdicts get drawn — "version B is
+                  better" — so the composition limit belongs here too, not only in
+                  the single-run panel. Rendered from whichever arm returned a
+                  payload; both arms run the same harness, so either is
+                  representative. Server prose, not a local copy.
+                -->
+                <template x-if="llmCompareResults.versionA.harnessFidelity || llmCompareResults.versionB.harnessFidelity">
+                  <div class="alert alert-warning harness-fidelity" style="padding: 10px; margin-bottom: 12px;">
+                    <strong>What this comparison is evidence of</strong>
+                    <div x-text="(llmCompareResults.versionA.harnessFidelity || llmCompareResults.versionB.harnessFidelity).notice"></div>
+                    <template x-for="d in ((llmCompareResults.versionA.harnessFidelity || llmCompareResults.versionB.harnessFidelity).divergences || [])" :key="d">
+                      <div class="hf-divergence" x-text="d"></div>
+                    </template>
+                  </div>
+                </template>
+
+                <div class="version-compare-results">
+                  <!-- Version A Results -->
+                  <div class="compare-panel">
+                    <div class="compare-panel-header">
+                      Version <span x-text="llmCompareResults.versionA.versionNum || llmCompareVersionA"></span>
+                      <template x-if="llmCompareResults.versionA.success">
+                        <span class="test-result-pass"> (Success)</span>
+                      </template>
+                      <template x-if="!llmCompareResults.versionA.success">
+                        <span class="test-result-fail"> (Failed)</span>
+                      </template>
+                    </div>
+                    <div class="compare-panel-body">
+                      <template x-if="llmCompareResults.versionA.error">
+                        <div class="alert alert-error" x-text="llmCompareResults.versionA.error"></div>
+                      </template>
+                      <template x-if="!llmCompareResults.versionA.error">
+                        <div>
+                          <div class="llm-metric" style="margin-bottom: 8px;">
+                            <span class="llm-metric-label">Prompt Hash:</span>
+                            <span class="llm-metric-value" style="font-family: monospace; font-size: 0.75rem;" x-text="(llmCompareResults.versionA.promptHash || '').substring(0, 12) + '...'"></span>
+                          </div>
+                          <template x-if="llmCompareResults.versionA.model">
+                            <div class="llm-metric">
+                              <span class="llm-metric-label">Model:</span>
+                              <span class="llm-metric-value" x-text="llmCompareResults.versionA.model"></span>
+                            </div>
+                          </template>
+                          <div class="llm-metric">
+                            <span class="llm-metric-label">Nodes:</span>
+                            <span class="llm-metric-value" x-text="llmCompareResults.versionA.nodeCount"></span>
+                          </div>
+                          <div class="llm-metric">
+                            <span class="llm-metric-label">Edges:</span>
+                            <span class="llm-metric-value" x-text="llmCompareResults.versionA.edgeCount"></span>
+                          </div>
+                          <div class="llm-metric">
+                            <span class="llm-metric-label">Repairs:</span>
+                            <span class="llm-metric-value" x-text="llmCompareResults.versionA.repairsApplied"></span>
+                          </div>
+                          <div class="llm-metric">
+                            <span class="llm-metric-label">Latency:</span>
+                            <span class="llm-metric-value" x-text="llmCompareResults.versionA.latencyMs + 'ms'"></span>
+                          </div>
+                          <!--
+                            A truncated arm and a worse prompt look identical in
+                            node/edge counts. Show why the reply stopped.
+                          -->
+                          <template x-if="llmCompareResults.versionA.finishReason">
+                            <div class="llm-metric" :class="['end_turn', 'stop'].includes(llmCompareResults.versionA.finishReason) ? 'llm-metric-good' : 'llm-metric-warn'">
+                              <span class="llm-metric-label">Finish:</span>
+                              <span class="llm-metric-value" x-text="llmCompareResults.versionA.finishReason"></span>
+                            </div>
+                          </template>
+                          <template x-if="llmCompareResults.versionA.tokenUsage">
+                            <div class="llm-metric">
+                              <span class="llm-metric-label">Tokens:</span>
+                              <span class="llm-metric-value" x-text="llmCompareResults.versionA.tokenUsage.total"></span>
+                            </div>
+                          </template>
+                          <div class="llm-metric">
+                            <span class="llm-metric-label">Validation:</span>
+                            <span>
+                              <span class="validation-badge validation-badge-error" x-text="'● ' + (llmCompareResults.versionA.validationErrors || 0)"></span>
+                              <span class="validation-badge validation-badge-warning" x-text="'⚠ ' + (llmCompareResults.versionA.validationWarnings || 0)"></span>
+                            </span>
+                          </div>
+                          <!-- Expandable validation issues -->
+                          <template x-if="llmCompareResults.versionA.validationIssues?.length > 0">
+                            <div class="collapsible-section" style="margin-top: 8px;">
+                              <div class="collapsible-header" @click="llmCompareResults.versionA.showValidation = !llmCompareResults.versionA.showValidation" style="cursor: pointer; padding: 4px 8px; background: #f3f4f6; border-radius: 4px;">
+                                <span x-text="llmCompareResults.versionA.showValidation ? '▼' : '▶'"></span>
+                                <span style="margin-left: 4px;">Show Issues</span>
+                              </div>
+                              <template x-if="llmCompareResults.versionA.showValidation">
+                                <div style="margin-top: 8px; font-size: 0.85rem;">
+                                  <template x-for="issue in llmCompareResults.versionA.validationIssues" :key="issue.code + (issue.affected_node_id || '')">
+                                    <div class="validation-issue" :class="'severity-' + issue.severity" style="padding: 6px; margin-bottom: 4px; border-left: 3px solid; border-radius: 2px;">
+                                      <div style="font-weight: 600;"><span x-text="issue.severity === 'error' ? '●' : '⚠'"></span> <span x-text="issue.code"></span></div>
+                                      <div x-text="issue.message" style="margin-top: 2px;"></div>
+                                      <template x-if="issue.suggestion">
+                                        <div style="color: #059669; margin-top: 2px;">Fix: <span x-text="issue.suggestion"></span></div>
+                                      </template>
+                                    </div>
+                                  </template>
+                                </div>
+                              </template>
+                            </div>
+                          </template>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+
+                  <!-- Version B Results -->
+                  <div class="compare-panel">
+                    <div class="compare-panel-header">
+                      Version <span x-text="llmCompareResults.versionB.versionNum || llmCompareVersionB"></span>
+                      <template x-if="llmCompareResults.versionB.success">
+                        <span class="test-result-pass"> (Success)</span>
+                      </template>
+                      <template x-if="!llmCompareResults.versionB.success">
+                        <span class="test-result-fail"> (Failed)</span>
+                      </template>
+                    </div>
+                    <div class="compare-panel-body">
+                      <template x-if="llmCompareResults.versionB.error">
+                        <div class="alert alert-error" x-text="llmCompareResults.versionB.error"></div>
+                      </template>
+                      <template x-if="!llmCompareResults.versionB.error">
+                        <div>
+                          <div class="llm-metric" style="margin-bottom: 8px;">
+                            <span class="llm-metric-label">Prompt Hash:</span>
+                            <span class="llm-metric-value" style="font-family: monospace; font-size: 0.75rem;" x-text="(llmCompareResults.versionB.promptHash || '').substring(0, 12) + '...'"></span>
+                          </div>
+                          <template x-if="llmCompareResults.versionB.model">
+                            <div class="llm-metric">
+                              <span class="llm-metric-label">Model:</span>
+                              <span class="llm-metric-value" x-text="llmCompareResults.versionB.model"></span>
+                            </div>
+                          </template>
+                          <div class="llm-metric">
+                            <span class="llm-metric-label">Nodes:</span>
+                            <span class="llm-metric-value" x-text="llmCompareResults.versionB.nodeCount"></span>
+                            <template x-if="llmCompareResults.deltas.nodeCount !== 0">
+                              <span class="compare-delta" :class="llmCompareResults.deltas.nodeCount > 0 ? 'compare-delta-better' : 'compare-delta-worse'" x-text="(llmCompareResults.deltas.nodeCount > 0 ? '+' : '') + llmCompareResults.deltas.nodeCount"></span>
+                            </template>
+                          </div>
+                          <div class="llm-metric">
+                            <span class="llm-metric-label">Edges:</span>
+                            <span class="llm-metric-value" x-text="llmCompareResults.versionB.edgeCount"></span>
+                            <template x-if="llmCompareResults.deltas.edgeCount !== 0">
+                              <span class="compare-delta" :class="llmCompareResults.deltas.edgeCount > 0 ? 'compare-delta-better' : 'compare-delta-worse'" x-text="(llmCompareResults.deltas.edgeCount > 0 ? '+' : '') + llmCompareResults.deltas.edgeCount"></span>
+                            </template>
+                          </div>
+                          <div class="llm-metric">
+                            <span class="llm-metric-label">Repairs:</span>
+                            <span class="llm-metric-value" x-text="llmCompareResults.versionB.repairsApplied"></span>
+                            <template x-if="llmCompareResults.deltas.repairs !== 0">
+                              <span class="compare-delta" :class="llmCompareResults.deltas.repairs < 0 ? 'compare-delta-better' : 'compare-delta-worse'" x-text="(llmCompareResults.deltas.repairs > 0 ? '+' : '') + llmCompareResults.deltas.repairs"></span>
+                            </template>
+                          </div>
+                          <div class="llm-metric">
+                            <span class="llm-metric-label">Latency:</span>
+                            <span class="llm-metric-value" x-text="llmCompareResults.versionB.latencyMs + 'ms'"></span>
+                            <template x-if="llmCompareResults.deltas.latency !== 0">
+                              <span class="compare-delta" :class="llmCompareResults.deltas.latency < 0 ? 'compare-delta-better' : 'compare-delta-worse'" x-text="(llmCompareResults.deltas.latency > 0 ? '+' : '') + llmCompareResults.deltas.latency + 'ms'"></span>
+                            </template>
+                          </div>
+                          <!--
+                            A truncated arm and a worse prompt look identical in
+                            node/edge counts. Show why the reply stopped.
+                          -->
+                          <template x-if="llmCompareResults.versionB.finishReason">
+                            <div class="llm-metric" :class="['end_turn', 'stop'].includes(llmCompareResults.versionB.finishReason) ? 'llm-metric-good' : 'llm-metric-warn'">
+                              <span class="llm-metric-label">Finish:</span>
+                              <span class="llm-metric-value" x-text="llmCompareResults.versionB.finishReason"></span>
+                            </div>
+                          </template>
+                          <template x-if="llmCompareResults.versionB.tokenUsage">
+                            <div class="llm-metric">
+                              <span class="llm-metric-label">Tokens:</span>
+                              <span class="llm-metric-value" x-text="llmCompareResults.versionB.tokenUsage.total"></span>
+                              <template x-if="llmCompareResults.deltas.tokens !== 0">
+                                <span class="compare-delta" :class="llmCompareResults.deltas.tokens < 0 ? 'compare-delta-better' : 'compare-delta-worse'" x-text="(llmCompareResults.deltas.tokens > 0 ? '+' : '') + llmCompareResults.deltas.tokens"></span>
+                              </template>
+                            </div>
+                          </template>
+                          <div class="llm-metric">
+                            <span class="llm-metric-label">Validation:</span>
+                            <span>
+                              <span class="validation-badge validation-badge-error" x-text="'● ' + (llmCompareResults.versionB.validationErrors || 0)"></span>
+                              <span class="validation-badge validation-badge-warning" x-text="'⚠ ' + (llmCompareResults.versionB.validationWarnings || 0)"></span>
+                              <template x-if="llmCompareResults.deltas?.validationErrors !== 0">
+                                <span :class="llmCompareResults.deltas?.validationErrors > 0 ? 'validation-regression' : 'validation-improvement'"
+                                  x-text="(llmCompareResults.deltas?.validationErrors > 0 ? '▲ ' : '▼ ') + Math.abs(llmCompareResults.deltas?.validationErrors || 0) + ' errors'">
+                                </span>
+                              </template>
+                            </span>
+                          </div>
+                          <!-- Expandable validation issues -->
+                          <template x-if="llmCompareResults.versionB.validationIssues?.length > 0">
+                            <div class="collapsible-section" style="margin-top: 8px;">
+                              <div class="collapsible-header" @click="llmCompareResults.versionB.showValidation = !llmCompareResults.versionB.showValidation" style="cursor: pointer; padding: 4px 8px; background: #f3f4f6; border-radius: 4px;">
+                                <span x-text="llmCompareResults.versionB.showValidation ? '▼' : '▶'"></span>
+                                <span style="margin-left: 4px;">Show Issues</span>
+                              </div>
+                              <template x-if="llmCompareResults.versionB.showValidation">
+                                <div style="margin-top: 8px; font-size: 0.85rem;">
+                                  <template x-for="issue in llmCompareResults.versionB.validationIssues" :key="issue.code + (issue.affected_node_id || '')">
+                                    <div class="validation-issue" :class="'severity-' + issue.severity" style="padding: 6px; margin-bottom: 4px; border-left: 3px solid; border-radius: 2px;">
+                                      <div style="font-weight: 600;"><span x-text="issue.severity === 'error' ? '●' : '⚠'"></span> <span x-text="issue.code"></span></div>
+                                      <div x-text="issue.message" style="margin-top: 2px;"></div>
+                                      <template x-if="issue.suggestion">
+                                        <div style="color: #059669; margin-top: 2px;">Fix: <span x-text="issue.suggestion"></span></div>
+                                      </template>
+                                    </div>
+                                  </template>
+                                </div>
+                              </template>
+                            </div>
+                          </template>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <div class="flex mt-2">
+              <button class="btn btn-secondary" @click="showLLMCompareModal = false">Close</button>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- History Modal -->
+      <template x-if="showHistoryModal">
+        <div class="modal" @click.self="showHistoryModal = false">
+          <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+              <h2>Test History</h2>
+              <span class="close" @click="showHistoryModal = false">&times;</span>
+            </div>
+
+            <template x-if="testHistory.length === 0">
+              <p class="text-muted">No test history available. Run some LLM tests to see history.</p>
+            </template>
+
+            <template x-if="testHistory.length > 0">
+              <div>
+                <div class="batch-summary mb-2">
+                  <div class="batch-summary-stat">
+                    <span>Total Tests:</span>
+                    <span x-text="testHistory.length"></span>
+                  </div>
+                  <div class="batch-summary-stat">
+                    <span>Pass Rate:</span>
+                    <span x-text="Math.round(testHistory.filter(h => h.success).length / testHistory.length * 100) + '%'"></span>
+                  </div>
+                  <div class="batch-summary-stat">
+                    <span>Avg Latency:</span>
+                    <span x-text="Math.round(testHistory.filter(h => h.latencyMs).reduce((a, b) => a + b.latencyMs, 0) / testHistory.filter(h => h.latencyMs).length) + 'ms' || 'N/A'"></span>
+                  </div>
+                </div>
+
+                <div style="max-height: 400px; overflow-y: auto;">
+                  <template x-for="(item, idx) in testHistory.slice().reverse()" :key="idx">
+                    <div class="history-item">
+                      <div class="flex" style="justify-content: space-between; align-items: center;">
+                        <div>
+                          <strong x-text="item.testName"></strong>
+                          <span :class="item.success ? 'test-result-pass' : 'test-result-fail'" x-text="' [' + (item.success ? 'PASS' : 'FAIL') + ']'"></span>
+                        </div>
+                        <span class="text-muted" style="font-size: 0.75rem;" x-text="item.timestamp"></span>
+                      </div>
+                      <div class="text-muted" style="font-size: 0.85rem; margin-top: 4px;">
+                        <span x-text="'v' + item.version"></span> |
+                        <span x-text="item.nodeCount + ' nodes'"></span> |
+                        <span x-text="item.latencyMs + 'ms'"></span>
+                        <template x-if="item.repairsApplied > 0">
+                          <span x-text="' | ' + item.repairsApplied + ' repairs'"></span>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+
+                <div class="flex mt-2">
+                  <button class="btn btn-secondary btn-sm" @click="clearTestHistory()">Clear History</button>
+                </div>
+              </div>
+            </template>
+
+            <div class="flex mt-2">
+              <button class="btn btn-secondary" @click="showHistoryModal = false">Close</button>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- Model Availability Modal -->
+      <template x-if="showModelAvailabilityModal">
+        <div class="modal" @click.self="showModelAvailabilityModal = false">
+          <div class="modal-content" style="max-width: 900px; max-height: 80vh; overflow-y: auto;">
+            <div class="flex justify-between align-center mb-2">
+              <h2>Model Availability</h2>
+              <span class="close" @click="showModelAvailabilityModal = false">&times;</span>
+            </div>
+
+            <template x-if="modelAvailabilityLoading">
+              <div class="text-center p-4">
+                <span class="spinner"></span> Loading model availability from providers...
+              </div>
+            </template>
+
+            <template x-if="!modelAvailabilityLoading">
+              <div>
+                <!-- Error Summary -->
+                <template x-if="modelErrorSummary && modelErrorSummary.potential_deprecations.length > 0">
+                  <div style="background: #fef2f2; border: 1px solid #ef4444; border-radius: 6px; padding: 12px; margin-bottom: 16px;">
+                    <h4 style="color: #dc2626; margin-bottom: 8px;">Potential Deprecations Detected</h4>
+                    <p style="font-size: 0.85rem; color: #7f1d1d;">
+                      The following models have had recent errors that may indicate deprecation:
+                    </p>
+                    <ul style="margin: 8px 0; padding-left: 20px;">
+                      <template x-for="model in modelErrorSummary.potential_deprecations" :key="model">
+                        <li style="color: #dc2626;" x-text="model"></li>
+                      </template>
+                    </ul>
+                  </div>
+                </template>
+
+                <!-- OpenAI Models -->
+                <div style="margin-bottom: 20px;">
+                  <h3 style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 2px solid #10b981;">
+                    OpenAI Models
+                    <template x-if="modelAvailabilityData.openai">
+                      <span style="font-weight: normal; font-size: 0.85rem; color: #6b7280;">
+                        (fetched <span x-text="new Date(modelAvailabilityData.openai.fetched_at).toLocaleTimeString()"></span>)
+                      </span>
+                    </template>
+                  </h3>
+
+                  <template x-if="modelAvailabilityData.openai && modelAvailabilityData.openai.registry_status">
+                    <div>
+                      <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                        <thead>
+                          <tr style="background: #f3f4f6;">
+                            <th style="padding: 8px; text-align: left; border-bottom: 1px solid #e5e7eb;">Model ID</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">Registry</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">Provider</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <template x-for="m in modelAvailabilityData.openai.registry_status" :key="m.model_id">
+                            <tr :style="m.status === 'missing_from_provider' ? 'background: #fef2f2;' : (m.status === 'not_in_registry' ? 'background: #fffbeb;' : '')">
+                              <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; font-family: monospace;" x-text="m.model_id"></td>
+                              <td style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">
+                                <span x-text="m.in_registry ? (m.enabled ? '✓ Enabled' : '○ Disabled') : '–'"></span>
+                              </td>
+                              <td style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">
+                                <span x-text="m.available_from_provider ? '✓ Available' : '✗ Not Found'"></span>
+                              </td>
+                              <td style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">
+                                <span :class="getModelStatusClass(m.status)" x-text="getModelStatusText(m.status)"></span>
+                              </td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </div>
+                  </template>
+
+                  <template x-if="!modelAvailabilityData.openai">
+                    <p class="text-muted">Failed to fetch OpenAI models. Check API key configuration.</p>
+                  </template>
+                </div>
+
+                <!-- Anthropic Models -->
+                <div>
+                  <h3 style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 2px solid #8b5cf6;">
+                    Anthropic Models
+                    <span style="font-weight: normal; font-size: 0.85rem; color: #6b7280;">(curated list - no API available)</span>
+                  </h3>
+
+                  <template x-if="modelAvailabilityData.anthropic && modelAvailabilityData.anthropic.registry_status">
+                    <div>
+                      <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                        <thead>
+                          <tr style="background: #f3f4f6;">
+                            <th style="padding: 8px; text-align: left; border-bottom: 1px solid #e5e7eb;">Model ID</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">Registry</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">Known Model</th>
+                            <th style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <template x-for="m in modelAvailabilityData.anthropic.registry_status" :key="m.model_id">
+                            <tr :style="m.status === 'missing_from_provider' ? 'background: #fef2f2;' : (m.status === 'not_in_registry' ? 'background: #fffbeb;' : '')">
+                              <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; font-family: monospace;" x-text="m.model_id"></td>
+                              <td style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">
+                                <span x-text="m.in_registry ? (m.enabled ? '✓ Enabled' : '○ Disabled') : '–'"></span>
+                              </td>
+                              <td style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">
+                                <span x-text="m.available_from_provider ? '✓ Known' : '? Unknown'"></span>
+                              </td>
+                              <td style="padding: 8px; text-align: center; border-bottom: 1px solid #e5e7eb;">
+                                <span :class="getModelStatusClass(m.status)" x-text="getModelStatusText(m.status)"></span>
+                              </td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </div>
+                  </template>
+
+                  <template x-if="!modelAvailabilityData.anthropic">
+                    <p class="text-muted">Failed to fetch Anthropic models.</p>
+                  </template>
+                </div>
+
+                <!-- Legend -->
+                <div style="margin-top: 16px; padding: 10px; background: #f9fafb; border-radius: 6px; font-size: 0.8rem;">
+                  <strong>Status Legend:</strong>
+                  <span class="validation-badge validation-badge-info" style="margin-left: 8px;">OK</span> - Model is registered and available
+                  <span class="validation-badge validation-badge-error" style="margin-left: 8px;">NOT FOUND</span> - Model in registry but not available from provider (may be deprecated)
+                  <span class="validation-badge validation-badge-warning" style="margin-left: 8px;">New</span> - Model available from provider but not in registry
+                  <span class="validation-badge" style="margin-left: 8px;">Disabled</span> - Model in registry but disabled
+                </div>
+              </div>
+            </template>
+
+            <div class="flex mt-2" style="gap: 8px;">
+              <button class="btn btn-primary" @click="openModelAvailabilityModal()" :disabled="modelAvailabilityLoading">
+                <template x-if="modelAvailabilityLoading"><span class="spinner"></span></template>
+                Refresh
+              </button>
+              <button class="btn btn-secondary" @click="showModelAvailabilityModal = false">Close</button>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <script>
+    function promptAdmin() {
+      return {
+        // Auth
+        authenticated: false,
+        apiKey: '',
+
+        // UI state
+        tab: 'prompts',
+        loading: false,
+        error: null,
+        success: null,
+        toasts: [],
+        toastId: 0,
+
+        // Prompts
+        prompts: [],
+        filter: { taskId: '', status: '' },
+        selectedPrompt: null,
+        selectedVersionNum: 1,
+        showCreateModal: false,
+        showNewVersionModal: false,
+        showExperimentModal: false,
+        showApprovalModal: false,
+        pendingApproval: null,
+
+        // Test case management
+        showTestCaseModal: false,
+        selectedTestPromptId: '',
+        selectedTestPrompt: null,
+        selectedTestVersionNum: 1,
+        currentTestCases: [],
+        editingTestCase: null,
+        testCaseForm: {
+          id: '',
+          name: '',
+          input: '',
+          expectedOutput: '',
+          variablesJson: '{}',
+        },
+
+        // Compare versions
+        showCompareModal: false,
+        compareVersionA: 1,
+        compareVersionB: 1,
+        comparisonData: null,
+
+        // LLM Testing
+        llmTestRunning: false,
+        llmBatchRunning: false,
+        llmBatchProgress: { current: 0, total: 0 },
+        llmBatchResults: [],
+        showLLMCompareModal: false,
+        llmCompareVersionA: 1,
+        llmCompareVersionB: 1,
+        llmCompareBrief: '',
+        llmCompareRunning: false,
+        llmCompareResults: null,
+        testHistory: [],
+        showHistoryModal: false,
+        // LLM Testing options
+        llmModelOverride: '',
+        llmSkipRepairs: false,
+        llmAvailableModels: [],
+        // LLM parameter overrides (null = use model default)
+        llmReasoningEffort: 'medium',
+        llmBudgetTokens: null, // Anthropic extended thinking budget
+        llmTemperature: null,
+        llmMaxTokensOverride: null,
+        llmSeed: null,
+        llmTopP: null,
+        // Rate limit handling
+        llmRateLimitCooldown: 0,
+        llmRateLimitTimer: null,
+        // Model availability checking
+        showModelAvailabilityModal: false,
+        modelAvailabilityLoading: false,
+        modelAvailabilityData: { openai: null, anthropic: null },
+        modelErrorSummary: null,
+        // Abort controllers for cancellation
+        llmAbortController: null,
+
+        // Form data
+        newPrompt: {
+          id: '',
+          name: '',
+          taskId: 'draft_graph',
+          content: '',
+          changeNote: '',
+          createdBy: 'admin-ui'
+        },
+        newVersion: {
+          content: '',
+          changeNote: '',
+          createdBy: 'admin-ui'
+        },
+
+        // Toast notification system
+        showToast(message, type = 'info', duration = ${ADMIN_TOAST_DURATION_MS}) {
+          const id = ++this.toastId;
+          this.toasts.push({ id, message, type });
+          setTimeout(() => {
+            this.toasts = this.toasts.filter(t => t.id !== id);
+          }, duration);
+        },
+
+        // Copy validation issue as JSON
+        copyValidationIssue(issue) {
+          const json = JSON.stringify(issue, null, 2);
+          navigator.clipboard.writeText(json).then(() => {
+            this.showToast('Copied issue to clipboard', 'success', 2000);
+          }).catch((e) => {
+            console.error('copy_to_clipboard failed:', e);
+            this.showToast('Failed to copy', 'error');
+          });
+        },
+
+        // Initialize - check for saved session and restore preferences
+        init() {
+          const savedKey = sessionStorage.getItem('adminApiKey');
+          if (savedKey) {
+            this.apiKey = savedKey;
+            this.authenticate();
+          }
+          // Restore saved model preference
+          const savedModel = localStorage.getItem('admin_llm_model_preference');
+          if (savedModel) {
+            this.llmModelOverride = savedModel;
+          }
+        },
+
+        // Save model preference to localStorage when changed
+        saveModelPreference() {
+          if (this.llmModelOverride) {
+            localStorage.setItem('admin_llm_model_preference', this.llmModelOverride);
+          } else {
+            localStorage.removeItem('admin_llm_model_preference');
+          }
+        },
+
+        async authenticate() {
+          this.error = null;
+          try {
+            const res = await fetch('/admin/prompts', {
+              headers: { 'X-Admin-Key': this.apiKey }
+            });
+            if (res.ok) {
+              this.authenticated = true;
+              sessionStorage.setItem('adminApiKey', this.apiKey);
+              this.showToast('Logged in successfully', 'success');
+              this.loadPrompts();
+              this.loadAvailableModels(); // Pre-load models so saved preference displays correctly
+            } else {
+              sessionStorage.removeItem('adminApiKey');
+              const data = await res.json();
+              this.error = data.message || 'Authentication failed';
+            }
+          } catch (e) {
+            console.error('authenticate failed:', e);
+            this.error = 'Failed to connect to server';
+          }
+        },
+
+        logout() {
+          sessionStorage.removeItem('adminApiKey');
+          this.authenticated = false;
+          this.apiKey = '';
+          this.prompts = [];
+          this.selectedPrompt = null;
+          this.tab = 'prompts';
+          this.showToast('Logged out', 'info');
+        },
+
+        async loadPrompts() {
+          this.loading = true;
+          this.error = null;
+          try {
+            let url = '/admin/prompts?';
+            if (this.filter.taskId) url += 'taskId=' + this.filter.taskId + '&';
+            if (this.filter.status) url += 'status=' + this.filter.status + '&';
+
+            const res = await fetch(url, {
+              headers: { 'X-Admin-Key': this.apiKey }
+            });
+            if (res.ok) {
+              const data = await res.json();
+              this.prompts = data.prompts;
+            } else {
+              const data = await res.json();
+              this.error = data.message || 'Failed to load prompts';
+            }
+          } catch (e) {
+            console.error('load_prompts failed:', e);
+            this.error = 'Failed to load prompts';
+          }
+          this.loading = false;
+        },
+
+        async createPrompt() {
+          this.error = null;
+          try {
+            const res = await fetch('/admin/prompts', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify(this.newPrompt)
+            });
+            if (res.ok) {
+              this.showCreateModal = false;
+              this.newPrompt = { id: '', name: '', taskId: 'draft_graph', content: '', changeNote: '', createdBy: 'admin-ui' };
+              this.showToast('Prompt created successfully', 'success');
+              this.loadPrompts();
+            } else {
+              const data = await res.json();
+              this.showToast(data.message || 'Failed to create prompt', 'error');
+            }
+          } catch (e) {
+            console.error('create_prompt failed:', e);
+            this.showToast('Failed to create prompt', 'error');
+          }
+        },
+
+        viewPrompt(prompt) {
+          // Clone the prompt and store previous status for potential revert
+          // Ensure modelConfig is initialized for the UI
+          this.selectedPrompt = {
+            ...prompt,
+            _previousStatus: prompt.status,
+            modelConfig: prompt.modelConfig || { staging: '', production: '' }
+          };
+          // Default to staging version if set, otherwise production version
+          // This encourages testing staging versions first in the admin UI
+          this.selectedVersionNum = prompt.stagingVersion || prompt.activeVersion;
+          // Load available models for the model config dropdowns
+          this.loadAvailableModels();
+        },
+
+        editPrompt(prompt) {
+          // Open view modal AND pre-fill new version with current content for editing
+          // Ensure modelConfig is initialized for the UI
+          this.selectedPrompt = {
+            ...prompt,
+            _previousStatus: prompt.status,
+            modelConfig: prompt.modelConfig || { staging: '', production: '' }
+          };
+          // Default to staging version if set, otherwise production version
+          this.selectedVersionNum = prompt.stagingVersion || prompt.activeVersion;
+          // Load available models for the model config dropdowns
+          this.loadAvailableModels();
+          // Pre-fill the new version form with current content (from selected version)
+          const currentContent = this.getVersionContent(this.selectedVersionNum);
+          this.newVersion = {
+            content: currentContent,
+            changeNote: '',
+            createdBy: 'admin-ui'
+          };
+          // Open the new version modal directly for editing
+          this.showNewVersionModal = true;
+        },
+
+        selectVersion(num) {
+          this.selectedVersionNum = num;
+        },
+
+        getSelectedVersion() {
+          if (!this.selectedPrompt) return null;
+          return this.selectedPrompt.versions.find(v => v.version === this.selectedVersionNum);
+        },
+
+        getVersionContent(num) {
+          if (!this.selectedPrompt) return '';
+          const version = this.selectedPrompt.versions.find(v => v.version === num);
+          return version ? version.content : '';
+        },
+
+        openNewVersionWithContent() {
+          // Pre-fill the new version form with currently selected version's content
+          const currentContent = this.getVersionContent(this.selectedVersionNum);
+          this.newVersion = {
+            content: currentContent,
+            changeNote: '',
+            createdBy: 'admin-ui'
+          };
+          this.showNewVersionModal = true;
+        },
+
+        async approveSelectedVersion() {
+          if (!this.selectedPrompt) return;
+          this.error = null;
+          try {
+            const res = await fetch('/admin/prompts/' + this.selectedPrompt.id + '/approve', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify({
+                version: parseInt(this.selectedVersionNum, 10),
+                approvedBy: 'admin-ui',
+                notes: 'Approved via admin UI'
+              })
+            });
+            if (res.ok) {
+              this.showToast('Version ' + this.selectedVersionNum + ' approved', 'success');
+              // Reload the prompt to get updated approval status
+              const promptRes = await fetch('/admin/prompts/' + this.selectedPrompt.id, {
+                headers: { 'X-Admin-Key': this.apiKey }
+              });
+              if (promptRes.ok) {
+                const updated = await promptRes.json();
+                this.selectedPrompt = { ...updated, _previousStatus: updated.status };
+              }
+              this.loadPrompts();
+            } else {
+              const data = await res.json();
+              this.showToast(data.message || 'Failed to approve version', 'error');
+            }
+          } catch (e) {
+            console.error('approve_version failed:', e);
+            this.showToast('Failed to approve version', 'error');
+          }
+        },
+
+        async updatePromptStatus() {
+          this.error = null;
+          const previousStatus = this.selectedPrompt._previousStatus || this.selectedPrompt.status;
+          try {
+            const res = await fetch('/admin/prompts/' + this.selectedPrompt.id, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify({ status: this.selectedPrompt.status })
+            });
+            if (res.ok) {
+              this.showToast('Status updated to ' + this.selectedPrompt.status, 'success');
+              this.loadPrompts();
+            } else {
+              const data = await res.json();
+              // Handle approval required error
+              if (data.error === 'approval_required') {
+                this.pendingApproval = {
+                  promptId: this.selectedPrompt.id,
+                  version: this.selectedPrompt.activeVersion,
+                  targetStatus: 'production'
+                };
+                this.showApprovalModal = true;
+                this.showToast('This version requires approval before promotion', 'warning', 6000);
+                // Revert the status in UI
+                this.selectedPrompt.status = previousStatus;
+              } else {
+                this.showToast(data.message || 'Failed to update status', 'error');
+              }
+            }
+          } catch (e) {
+            console.error('update_status failed:', e);
+            this.showToast('Failed to update status', 'error');
+          }
+        },
+
+        async updateDesignVersion() {
+          this.error = null;
+          try {
+            const res = await fetch('/admin/prompts/' + this.selectedPrompt.id, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify({ designVersion: this.selectedPrompt.designVersion || null })
+            });
+            if (res.ok) {
+              this.showToast('Design version updated to ' + (this.selectedPrompt.designVersion || '(none)'), 'success');
+              this.loadPrompts();
+            } else {
+              const data = await res.json();
+              this.showToast(data.message || 'Failed to update design version', 'error');
+            }
+          } catch (e) {
+            console.error('update_design_version failed:', e);
+            this.showToast('Failed to update design version', 'error');
+          }
+        },
+
+        async updateModelConfig() {
+          this.error = null;
+          try {
+            // Clean up modelConfig - convert empty strings to undefined
+            const modelConfig = {
+              staging: this.selectedPrompt.modelConfig?.staging || undefined,
+              production: this.selectedPrompt.modelConfig?.production || undefined
+            };
+            // If both are undefined, send null to clear the config
+            const payload = (modelConfig.staging || modelConfig.production)
+              ? { modelConfig }
+              : { modelConfig: null };
+
+            const res = await fetch('/admin/prompts/' + this.selectedPrompt.id, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify(payload)
+            });
+            if (res.ok) {
+              const stagingModel = modelConfig.staging || 'task default';
+              const prodModel = modelConfig.production || 'task default';
+              this.showToast('Model config updated: staging=' + stagingModel + ', production=' + prodModel, 'success');
+              this.loadPrompts();
+            } else {
+              const data = await res.json();
+              this.showToast(data.message || 'Failed to update model config', 'error');
+            }
+          } catch (e) {
+            console.error('update_model_config failed:', e);
+            this.showToast('Failed to update model config', 'error');
+          }
+        },
+
+        async approveVersion() {
+          if (!this.pendingApproval) return;
+          this.error = null;
+          try {
+            const res = await fetch('/admin/prompts/' + this.pendingApproval.promptId + '/approve', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify({
+                version: this.pendingApproval.version,
+                approvedBy: 'admin-ui',
+                notes: 'Approved via admin UI'
+              })
+            });
+            if (res.ok) {
+              this.showApprovalModal = false;
+              this.showToast('Version ' + this.pendingApproval.version + ' approved! You can now promote to production.', 'success', 5000);
+              // Reload the prompt to get updated approval status
+              const promptRes = await fetch('/admin/prompts/' + this.pendingApproval.promptId, {
+                headers: { 'X-Admin-Key': this.apiKey }
+              });
+              if (promptRes.ok) {
+                this.selectedPrompt = await promptRes.json();
+              }
+              this.pendingApproval = null;
+              this.loadPrompts();
+            } else {
+              const data = await res.json();
+              this.showToast(data.message || 'Failed to approve version', 'error');
+            }
+          } catch (e) {
+            console.error('approve_and_promote failed:', e);
+            this.showToast('Failed to approve version', 'error');
+          }
+        },
+
+        async createVersion() {
+          this.error = null;
+
+          // Prevent creating duplicate version with unchanged content
+          const currentContent = this.getVersionContent(this.selectedPrompt.activeVersion);
+          if (this.newVersion.content.trim() === currentContent.trim()) {
+            this.showToast('No changes detected. Content is identical to the current version.', 'warning');
+            return;
+          }
+
+          try {
+            const res = await fetch('/admin/prompts/' + this.selectedPrompt.id + '/versions', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify(this.newVersion)
+            });
+            if (res.ok) {
+              const updated = await res.json();
+              this.selectedPrompt = updated;
+              this.selectedVersionNum = updated.versions[updated.versions.length - 1].version;
+              this.showNewVersionModal = false;
+              this.newVersion = { content: '', changeNote: '', createdBy: 'admin-ui' };
+              this.showToast('Version ' + this.selectedVersionNum + ' created', 'success');
+              this.loadPrompts();
+            } else {
+              const data = await res.json();
+              this.showToast(data.message || 'Failed to create version', 'error');
+            }
+          } catch (e) {
+            console.error('create_version failed:', e);
+            this.showToast('Failed to create version', 'error');
+          }
+        },
+
+        async setAsStaging() {
+          if (!confirm('Set version ' + this.selectedVersionNum + ' as the staging version?\\n\\nThis will NOT affect production traffic.')) return;
+
+          this.error = null;
+          try {
+            const res = await fetch('/admin/prompts/' + this.selectedPrompt.id, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify({
+                stagingVersion: this.selectedVersionNum
+              })
+            });
+            if (res.ok) {
+              const updated = await res.json();
+              this.selectedPrompt = updated;
+              this.showToast('v' + this.selectedVersionNum + ' is now the staging version', 'success');
+              this.loadPrompts();
+            } else {
+              const data = await res.json();
+              this.showToast(data.message || 'Failed to set staging version', 'error');
+            }
+          } catch (e) {
+            console.error('set_staging_version failed:', e);
+            this.showToast('Failed to set staging version', 'error');
+          }
+        },
+
+        async promoteToProduction() {
+          // Stronger confirmation for production promotion
+          const currentProd = this.selectedPrompt.activeVersion;
+          const newProd = this.selectedVersionNum;
+
+          const confirmMsg = 'PROMOTE TO PRODUCTION\\n\\n' +
+            'Current production: v' + currentProd + '\\n' +
+            'New production: v' + newProd + '\\n\\n' +
+            'This will IMMEDIATELY affect ALL live traffic.\\n\\n' +
+            'Type "PROMOTE" to confirm:';
+
+          const userInput = prompt(confirmMsg);
+          if (userInput !== 'PROMOTE') {
+            if (userInput !== null) {
+              this.showToast('Promotion cancelled - confirmation text did not match', 'warning');
+            }
+            return;
+          }
+
+          this.error = null;
+          try {
+            const res = await fetch('/admin/prompts/' + this.selectedPrompt.id + '/rollback', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify({
+                targetVersion: this.selectedVersionNum,
+                rolledBackBy: 'admin-ui',
+                reason: 'Promoted to production via admin UI'
+              })
+            });
+            if (res.ok) {
+              const updated = await res.json();
+              this.selectedPrompt = updated;
+              this.showToast('v' + this.selectedVersionNum + ' is now in PRODUCTION', 'success');
+              this.loadPrompts();
+            } else {
+              const data = await res.json();
+              this.showToast(data.message || 'Failed to promote to production', 'error');
+            }
+          } catch (e) {
+            console.error('promote_to_production failed:', e);
+            this.showToast('Failed to promote to production', 'error');
+          }
+        },
+
+        // Legacy function - kept for backwards compatibility
+        async activateVersion() {
+          return this.promoteToProduction();
+        },
+
+        async rollbackToVersion() {
+          if (!confirm('Rollback to version ' + this.selectedVersionNum + '? This will revert to an older version.')) return;
+
+          this.error = null;
+          try {
+            const res = await fetch('/admin/prompts/' + this.selectedPrompt.id + '/rollback', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify({
+                targetVersion: this.selectedVersionNum,
+                rolledBackBy: 'admin-ui',
+                reason: 'Rollback via admin UI'
+              })
+            });
+            if (res.ok) {
+              const updated = await res.json();
+              this.selectedPrompt = updated;
+              this.showToast('Rolled back to v' + this.selectedVersionNum, 'success');
+              this.loadPrompts();
+            } else {
+              const data = await res.json();
+              this.showToast(data.message || 'Failed to rollback', 'error');
+            }
+          } catch (e) {
+            console.error('rollback failed:', e);
+            this.showToast('Failed to rollback', 'error');
+          }
+        },
+
+        // ========== Test Case Management ==========
+        async loadTestCasesForPrompt(preserveVersion = false) {
+          if (!this.selectedTestPromptId) {
+            this.selectedTestPrompt = null;
+            this.currentTestCases = [];
+            return;
+          }
+          // Save current version if we need to preserve it (convert to number for comparison)
+          const currentVersion = preserveVersion ? parseInt(this.selectedTestVersionNum, 10) : null;
+          try {
+            const res = await fetch('/admin/prompts/' + this.selectedTestPromptId, {
+              headers: { 'X-Admin-Key': this.apiKey }
+            });
+            if (res.ok) {
+              this.selectedTestPrompt = await res.json();
+              // Use $nextTick to wait for Alpine to render the dropdown options
+              // before setting the selected version, avoiding race conditions
+              this.$nextTick(() => {
+                // If preserving version, keep the current selection
+                // Otherwise default to staging version (if set), then production version
+                // This encourages testing staging versions first
+                if (currentVersion !== null && !isNaN(currentVersion)) {
+                  // Validate the version still exists (compare numbers)
+                  const versionExists = this.selectedTestPrompt.versions.some(v => v.version === currentVersion);
+                  this.selectedTestVersionNum = versionExists ? currentVersion : (this.selectedTestPrompt.stagingVersion || this.selectedTestPrompt.activeVersion);
+                } else {
+                  // Default to staging version if set, otherwise production
+                  this.selectedTestVersionNum = this.selectedTestPrompt.stagingVersion || this.selectedTestPrompt.activeVersion;
+                }
+                this.loadTestCasesForVersion();
+              });
+            } else {
+              this.showToast('Failed to load prompt', 'error');
+            }
+          } catch (e) {
+            console.error('refresh_prompt failed:', e);
+            this.showToast('Failed to load prompt', 'error');
+          }
+        },
+
+        loadTestCasesForVersion() {
+          if (!this.selectedTestPrompt) return;
+          // Convert to number for comparison (Alpine.js select may return string)
+          const versionNum = parseInt(this.selectedTestVersionNum, 10);
+          const version = this.selectedTestPrompt.versions.find(v => v.version === versionNum);
+          this.currentTestCases = version?.testCases || [];
+        },
+
+        resetTestCaseForm() {
+          this.editingTestCase = null;
+          this.testCaseForm = {
+            id: '',
+            name: '',
+            input: '',
+            expectedOutput: '',
+            variablesJson: '{}',
+          };
+        },
+
+        editTestCase(tc) {
+          this.editingTestCase = tc;
+          this.testCaseForm = {
+            id: tc.id,
+            name: tc.name,
+            input: tc.input,
+            expectedOutput: tc.expectedOutput || '',
+            variablesJson: JSON.stringify(tc.variables || {}),
+          };
+          this.showTestCaseModal = true;
+        },
+
+        async saveTestCase() {
+          if (!this.testCaseForm.id || !this.testCaseForm.name || !this.testCaseForm.input) {
+            this.showToast('ID, Name, and Input are required', 'error');
+            return;
+          }
+
+          let variables = {};
+          try {
+            variables = JSON.parse(this.testCaseForm.variablesJson || '{}');
+          } catch (e) {
+            console.error('parse_test_variables failed:', e);
+            this.showToast('Invalid JSON for variables', 'error');
+            return;
+          }
+
+          const newTestCase = {
+            id: this.testCaseForm.id,
+            name: this.testCaseForm.name,
+            input: this.testCaseForm.input,
+            expectedOutput: this.testCaseForm.expectedOutput || undefined,
+            variables,
+            enabled: true,
+          };
+
+          // Update the test cases array
+          let updatedTestCases;
+          if (this.editingTestCase) {
+            updatedTestCases = this.currentTestCases.map(tc =>
+              tc.id === this.editingTestCase.id ? newTestCase : tc
+            );
+          } else {
+            // Check for duplicate ID
+            if (this.currentTestCases.some(tc => tc.id === newTestCase.id)) {
+              this.showToast('Test case ID already exists', 'error');
+              return;
+            }
+            updatedTestCases = [...this.currentTestCases, newTestCase];
+          }
+
+          // Save to backend
+          try {
+            const res = await fetch('/admin/prompts/' + this.selectedTestPromptId + '/test-cases', {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify({
+                version: parseInt(this.selectedTestVersionNum, 10),
+                testCases: updatedTestCases,
+              })
+            });
+            if (res.ok) {
+              this.currentTestCases = updatedTestCases;
+              this.showTestCaseModal = false;
+              this.showToast(this.editingTestCase ? 'Test case updated' : 'Test case added', 'success');
+              // Reload the prompt to get updated data, preserving the current version
+              await this.loadTestCasesForPrompt(true);
+            } else {
+              const data = await res.json();
+              this.showToast(data.message || 'Failed to save test case', 'error');
+            }
+          } catch (e) {
+            console.error('save_test_case failed:', e);
+            this.showToast('Failed to save test case', 'error');
+          }
+        },
+
+        async deleteTestCase(idx) {
+          if (!confirm('Delete this test case?')) return;
+
+          const updatedTestCases = this.currentTestCases.filter((_, i) => i !== idx);
+
+          try {
+            const res = await fetch('/admin/prompts/' + this.selectedTestPromptId + '/test-cases', {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify({
+                version: parseInt(this.selectedTestVersionNum, 10),
+                testCases: updatedTestCases,
+              })
+            });
+            if (res.ok) {
+              this.currentTestCases = updatedTestCases;
+              this.showToast('Test case deleted', 'success');
+            } else {
+              const data = await res.json();
+              this.showToast(data.message || 'Failed to delete test case', 'error');
+            }
+          } catch (e) {
+            console.error('delete_test_case failed:', e);
+            this.showToast('Failed to delete test case', 'error');
+          }
+        },
+
+        async runSingleTestCase(tc) {
+          // Guard: Require prompt selection before running test
+          if (!this.selectedTestPromptId || !this.selectedTestPrompt) {
+            this.showToast('Please select a prompt before running tests', 'warning');
+            return;
+          }
+
+          this.showToast('Running test...', 'info');
+          try {
+            const res = await fetch('/admin/prompts/' + this.selectedTestPromptId + '/test', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey
+              },
+              body: JSON.stringify({
+                version: parseInt(this.selectedTestVersionNum, 10),
+                input: { brief: tc.input },
+                variables: tc.variables || {},
+                dry_run: true,
+              })
+            });
+            if (res.ok) {
+              const data = await res.json();
+              // Store test output for display
+              tc.lastOutput = {
+                compiled: data.compiled_content ?? data.compiled_prompt ?? null,
+                charCount: data.char_count ?? 0,
+                validation: data.validation ?? {},
+                timestamp: new Date().toISOString(),
+              };
+              if (data.validation.valid) {
+                tc.lastResult = 'pass';
+                this.showToast('Test passed - ' + data.char_count + ' chars compiled', 'success');
+              } else {
+                tc.lastResult = 'fail';
+                this.showToast('Test failed: ' + (data.validation.issues || []).join(', '), 'error');
+              }
+            } else {
+              tc.lastResult = 'fail';
+              const data = await res.json();
+              tc.lastOutput = { error: data.message || 'Unknown error', timestamp: new Date().toISOString() };
+              this.showToast(data.message || 'Test failed', 'error');
+            }
+          } catch (e) {
+            console.error('run_test_case failed:', e);
+            tc.lastResult = 'fail';
+            tc.lastOutput = { error: 'Network or server error', timestamp: new Date().toISOString() };
+            this.showToast('Test execution failed', 'error');
+          }
+        },
+
+        // ========== LLM Testing ==========
+
+        // Load available models from the new endpoint
+        async loadAvailableModels() {
+          try {
+            const res = await fetch('/admin/v1/test-prompt-llm/models', {
+              headers: { 'X-Admin-Key': this.apiKey },
+            });
+            if (res.ok) {
+              const data = await res.json();
+              this.llmAvailableModels = data.models || [];
+            }
+          } catch (e) {
+            console.warn('Failed to load available models:', e);
+          }
+        },
+
+        // Check if currently selected model is a reasoning model
+        isReasoningModelSelected() {
+          if (!this.llmModelOverride) return false;
+          if (!Array.isArray(this.llmAvailableModels)) return false;
+          const model = this.llmAvailableModels.find(m => m && m.id === this.llmModelOverride);
+          return model?.is_reasoning ?? false;
+        },
+
+        // Check if currently selected model supports temperature
+        supportsTemperature() {
+          if (!this.llmModelOverride) return true; // Default models support temperature
+          if (!Array.isArray(this.llmAvailableModels)) return true;
+          const model = this.llmAvailableModels.find(m => m && m.id === this.llmModelOverride);
+          return model?.supports_temperature ?? true;
+        },
+
+        // Check if currently selected model supports extended thinking (Anthropic)
+        supportsExtendedThinkingSelected() {
+          if (!this.llmModelOverride) return false;
+          if (!Array.isArray(this.llmAvailableModels)) return false;
+          const model = this.llmAvailableModels.find(m => m && m.id === this.llmModelOverride);
+          return model?.supports_extended_thinking ?? false;
+        },
+
+        // Open model availability modal and fetch data
+        async openModelAvailabilityModal() {
+          this.showModelAvailabilityModal = true;
+          this.modelAvailabilityLoading = true;
+          this.modelAvailabilityData = { openai: null, anthropic: null };
+          this.modelErrorSummary = null;
+
+          try {
+            // Fetch OpenAI, Anthropic availability, and error summary in parallel
+            const [openaiRes, anthropicRes, errorsRes] = await Promise.all([
+              fetch('/admin/v1/available-models/openai', {
+                headers: { 'X-Admin-Key': this.apiKey },
+              }),
+              fetch('/admin/v1/available-models/anthropic', {
+                headers: { 'X-Admin-Key': this.apiKey },
+              }),
+              fetch('/admin/v1/model-errors', {
+                headers: { 'X-Admin-Key': this.apiKey },
+              }),
+            ]);
+
+            if (openaiRes.ok) {
+              this.modelAvailabilityData.openai = await openaiRes.json();
+            }
+            if (anthropicRes.ok) {
+              this.modelAvailabilityData.anthropic = await anthropicRes.json();
+            }
+            if (errorsRes.ok) {
+              this.modelErrorSummary = await errorsRes.json();
+            }
+          } catch (e) {
+            console.error('Failed to fetch model availability:', e);
+            this.showToast('Failed to fetch model availability', 'error');
+          } finally {
+            this.modelAvailabilityLoading = false;
+          }
+        },
+
+        // Get status badge class for model availability
+        getModelStatusClass(status) {
+          switch (status) {
+            case 'ok': return 'validation-badge validation-badge-info';
+            case 'missing_from_provider': return 'validation-badge validation-badge-error';
+            case 'not_in_registry': return 'validation-badge validation-badge-warning';
+            case 'disabled': return 'validation-badge';
+            default: return 'validation-badge';
+          }
+        },
+
+        // Get human-readable status text
+        getModelStatusText(status) {
+          switch (status) {
+            case 'ok': return 'OK';
+            case 'missing_from_provider': return 'NOT FOUND';
+            case 'not_in_registry': return 'New (not in registry)';
+            case 'disabled': return 'Disabled';
+            default: return status;
+          }
+        },
+
+        // Cancel current LLM test
+        cancelLLMTest() {
+          if (this.llmAbortController) {
+            this.llmAbortController.abort();
+            this.llmAbortController = null;
+            this.showToast('Test cancelled', 'info');
+          }
+        },
+
+        // Handle rate limit with countdown
+        startRateLimitCooldown(retryAfterSeconds) {
+          this.llmRateLimitCooldown = retryAfterSeconds;
+          if (this.llmRateLimitTimer) clearInterval(this.llmRateLimitTimer);
+          this.llmRateLimitTimer = setInterval(() => {
+            this.llmRateLimitCooldown--;
+            if (this.llmRateLimitCooldown <= 0) {
+              clearInterval(this.llmRateLimitTimer);
+              this.llmRateLimitTimer = null;
+            }
+          }, 1000);
+        },
+
+        async runSingleTestCaseWithLLM(tc) {
+          // Debug: log function entry
+          console.log('runSingleTestCaseWithLLM called', { tc, selectedTestPromptId: this.selectedTestPromptId, selectedTestPrompt: this.selectedTestPrompt });
+
+          if (!tc) {
+            this.showToast('Error: Test case not found', 'error');
+            console.error('tc is undefined');
+            return;
+          }
+
+          if (!this.selectedTestPromptId || !this.selectedTestPrompt) {
+            this.showToast('Please select a prompt before running tests', 'warning');
+            return;
+          }
+
+          // Check rate limit cooldown
+          if (this.llmRateLimitCooldown > 0) {
+            this.showToast('Rate limit cooldown active. Wait ' + this.llmRateLimitCooldown + 's before retrying.', 'warning');
+            return;
+          }
+
+          tc.llmRunning = true;
+          this.showToast('Running LLM test (this may take up to 2 minutes)...', 'info');
+
+          // Create AbortController for cancellation
+          const controller = new AbortController();
+          this.llmAbortController = controller;
+          const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+          try {
+            // Build request for new admin endpoint
+            // Ensure version is a number (Alpine.js select may convert to string)
+            const requestBody = {
+              prompt_id: this.selectedTestPromptId,
+              version: parseInt(this.selectedTestVersionNum, 10),
+              brief: tc.input,
+              options: {},
+            };
+
+            // Add model override if set
+            if (this.llmModelOverride) {
+              requestBody.options.model = this.llmModelOverride;
+            }
+
+            // Add skip repairs option
+            if (this.llmSkipRepairs) {
+              requestBody.options.skip_repairs = true;
+            }
+
+            // Add reasoning effort for OpenAI reasoning models
+            if (this.isReasoningModelSelected() && this.llmReasoningEffort) {
+              requestBody.options.reasoning_effort = this.llmReasoningEffort;
+            }
+
+            // Add budget_tokens for Anthropic extended thinking models
+            if (this.supportsExtendedThinkingSelected() && this.llmBudgetTokens !== null && this.llmBudgetTokens > 0) {
+              requestBody.options.budget_tokens = Number(this.llmBudgetTokens);
+            }
+
+            // Add temperature for non-reasoning models (null means use default, but 0 is valid)
+            if (this.supportsTemperature() && this.llmTemperature !== null && this.llmTemperature !== '') {
+              requestBody.options.temperature = Number(this.llmTemperature);
+            }
+
+            // Add max tokens override if specified
+            if (this.llmMaxTokensOverride !== null && this.llmMaxTokensOverride !== '' && this.llmMaxTokensOverride > 0) {
+              requestBody.options.max_tokens = Number(this.llmMaxTokensOverride);
+            }
+
+            // Add seed for reproducibility if specified
+            if (this.llmSeed !== null && this.llmSeed !== '' && this.llmSeed >= 0) {
+              requestBody.options.seed = Number(this.llmSeed);
+            }
+
+            // Add top_p for non-reasoning models if specified
+            if (this.supportsTemperature() && this.llmTopP !== null && this.llmTopP !== '') {
+              requestBody.options.top_p = Number(this.llmTopP);
+            }
+
+            const res = await fetch('/admin/v1/test-prompt-llm', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Key': this.apiKey,
+              },
+              body: JSON.stringify(requestBody),
+              signal: controller.signal,
+            });
+
+            clearTimeout(timeoutId);
+            this.llmAbortController = null;
+
+            const requestId = res.headers.get('X-Request-ID');
+
+            // Handle 429 rate limit with Retry-After
+            if (res.status === 429) {
+              const retryAfter = parseInt(res.headers.get('Retry-After') || '60', 10);
+              this.startRateLimitCooldown(retryAfter);
+
+              tc.llmResult = {
+                success: false,
+                timestamp: new Date().toISOString(),
+                requestId,
+                error: 'Rate limit exceeded. Please wait ' + retryAfter + ' seconds before running more tests.',
+                isRateLimited: true,
+              };
+              this.showToast('Rate limit exceeded. Cooldown: ' + retryAfter + 's', 'error');
+              return;
+            }
+
+            const data = await res.json();
+
+            if (res.ok && data.success) {
+              const pipeline = data.pipeline || {};
+              const stages = pipeline.stages || [];
+              const llmData = data.llm || {};
+              const result = data.result || {};
+              const promptData = data.prompt || {};
+
+              // Count repairs from stages
+              const repairsApplied = (pipeline.repairs_applied || []).length;
+
+              tc.llmResult = {
+                success: true,
+                timestamp: new Date().toISOString(),
+                requestId: data.request_id,
+                nodeCount: result.graph?.nodes?.length ?? 0,
+                edgeCount: result.graph?.edges?.length ?? 0,
+                repairsApplied,
+                latencyMs: pipeline.total_duration_ms ?? llmData.duration_ms ?? 0,
+                tokenUsage: llmData.token_usage,
+                // Truncation vs a bad prompt: indistinguishable without this.
+                finishReason: llmData.finish_reason,
+                model: llmData.model,
+                provider: llmData.provider,
+                stages,
+                rawOutputPreview: (llmData.raw_output || '').substring(0, 2000),
+                rawOutputFull: llmData.raw_output,
+                promptHash: promptData.content_hash,
+                promptPreview: promptData.content_preview,
+                fullResponse: data,
+                graphSummary: {
+                  node_count: result.graph?.nodes?.length,
+                  edge_count: result.graph?.edges?.length,
+                  node_kinds: [...new Set((result.graph?.nodes || []).map(n => n.kind))],
+                  node_counts: pipeline.node_counts,
+                },
+                showStages: false,
+                showRaw: false,
+                showFullOutput: false,
+                showTrace: false,
+                showGraph: false,
+                showValidation: result.validation?.error_count > 0, // Auto-expand if errors
+                validationFilter: 'all',
+              };
+
+              this.showToast('LLM test passed - ' + tc.llmResult.nodeCount + ' nodes, ' + tc.llmResult.latencyMs + 'ms', 'success');
+
+              // Save to history
+              this.saveTestToHistory({
+                testId: tc.id,
+                testName: tc.name,
+                promptId: this.selectedTestPromptId,
+                version: this.selectedTestVersionNum,
+                promptHash: promptData.content_hash,
+                model: llmData.model,
+                success: true,
+                nodeCount: tc.llmResult.nodeCount,
+                edgeCount: tc.llmResult.edgeCount,
+                repairsApplied,
+                latencyMs: tc.llmResult.latencyMs,
+                timestamp: tc.llmResult.timestamp,
+              });
+            } else {
+              tc.llmResult = {
+                success: false,
+                timestamp: new Date().toISOString(),
+                requestId: data.request_id || requestId,
+                error: data.message || data.error || 'Unknown error',
+                fullResponse: data,
+              };
+              this.showToast('LLM test failed: ' + tc.llmResult.error, 'error');
+
+              // Save failure to history
+              this.saveTestToHistory({
+                testId: tc.id,
+                testName: tc.name,
+                promptId: this.selectedTestPromptId,
+                version: this.selectedTestVersionNum,
+                success: false,
+                error: tc.llmResult.error,
+                timestamp: tc.llmResult.timestamp,
+              });
+            }
+          } catch (e) {
+            console.error('run_llm_test failed:', e);
+            clearTimeout(timeoutId);
+            const isTimeout = e.name === 'AbortError';
+            tc.llmResult = {
+              success: false,
+              timestamp: new Date().toISOString(),
+              error: isTimeout
+                ? 'Request timed out after 2 minutes. The LLM may be under heavy load.'
+                : 'Network error: ' + (e.message || 'Unknown error'),
+              isTimeout,
+            };
+            this.showToast('LLM test failed: ' + tc.llmResult.error, 'error');
+          } finally {
+            tc.llmRunning = false;
+          }
+        },
+
+        async runAllTestCasesWithLLM() {
+          if (!this.selectedTestPromptId || this.currentTestCases.length === 0) {
+            this.showToast('No test cases to run', 'warning');
+            return;
+          }
+
+          this.llmBatchRunning = true;
+          this.llmBatchProgress = { current: 0, total: this.currentTestCases.length };
+          this.llmBatchResults = [];
+
+          for (let i = 0; i < this.currentTestCases.length; i++) {
+            this.llmBatchProgress.current = i + 1;
+            const tc = this.currentTestCases[i];
+            await this.runSingleTestCaseWithLLM(tc);
+
+            this.llmBatchResults.push({
+              testId: tc.id,
+              testName: tc.name,
+              success: tc.llmResult?.success ?? false,
+              nodeCount: tc.llmResult?.nodeCount ?? 0,
+              edgeCount: tc.llmResult?.edgeCount ?? 0,
+              repairsApplied: tc.llmResult?.repairsApplied ?? 0,
+              latencyMs: tc.llmResult?.latencyMs ?? 0,
+              error: tc.llmResult?.error,
+              validationErrors: tc.llmResult?.fullResponse?.result?.validation?.error_count ?? 0,
+              validationWarnings: tc.llmResult?.fullResponse?.result?.validation?.warning_count ?? 0,
+            });
+
+            // Small delay between tests to avoid overwhelming the server
+            if (i < this.currentTestCases.length - 1) {
+              await new Promise(resolve => setTimeout(resolve, 500));
+            }
+          }
+
+          this.llmBatchRunning = false;
+          const passCount = this.llmBatchResults.filter(r => r.success).length;
+          const failCount = this.llmBatchResults.filter(r => !r.success).length;
+          this.showToast('Batch complete: ' + passCount + ' passed, ' + failCount + ' failed', passCount === this.llmBatchResults.length ? 'success' : 'warning');
+        },
+
+        openLLMCompareModal() {
+          if (!this.selectedTestPrompt || this.selectedTestPrompt.versions.length < 2) {
+            this.showToast('Need at least 2 versions to compare', 'warning');
+            return;
+          }
+          this.llmCompareVersionA = this.selectedTestPrompt.versions[0].version;
+          this.llmCompareVersionB = this.selectedTestPrompt.activeVersion;
+          this.llmCompareBrief = '';
+          this.llmCompareResults = null;
+          this.showLLMCompareModal = true;
+        },
+
+        async runLLMComparison() {
+          if (!this.llmCompareBrief || this.llmCompareVersionA === this.llmCompareVersionB) {
+            this.showToast('Please enter a brief and select different versions', 'warning');
+            return;
+          }
+
+          // Check rate limit cooldown
+          if (this.llmRateLimitCooldown > 0) {
+            this.showToast('Rate limit cooldown active. Wait ' + this.llmRateLimitCooldown + 's before retrying.', 'warning');
+            return;
+          }
+
+          this.llmCompareRunning = true;
+          this.llmCompareResults = null;
+
+          const runForVersion = async (version) => {
+            // Create AbortController with 2-minute timeout
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+            // Ensure version is a number (Alpine.js select converts to string)
+            const versionNum = parseInt(version, 10);
+
+            try {
+              // Use new admin endpoint with actual version specification
+              const requestBody = {
+                prompt_id: this.selectedTestPromptId,
+                version: versionNum,
+                brief: this.llmCompareBrief,
+                options: {},
+              };
+
+              // Add model override if set
+              if (this.llmModelOverride) {
+                requestBody.options.model = this.llmModelOverride;
+              }
+
+              // Add reasoning effort for OpenAI reasoning models
+              if (this.isReasoningModelSelected() && this.llmReasoningEffort) {
+                requestBody.options.reasoning_effort = this.llmReasoningEffort;
+              }
+
+              // Add budget_tokens for Anthropic extended thinking models
+              if (this.supportsExtendedThinkingSelected() && this.llmBudgetTokens !== null && this.llmBudgetTokens > 0) {
+                requestBody.options.budget_tokens = Number(this.llmBudgetTokens);
+              }
+
+              // Add temperature for non-reasoning models
+              if (this.supportsTemperature() && this.llmTemperature !== null && this.llmTemperature !== '') {
+                requestBody.options.temperature = Number(this.llmTemperature);
+              }
+
+              // Add max tokens override if specified
+              if (this.llmMaxTokensOverride !== null && this.llmMaxTokensOverride !== '' && this.llmMaxTokensOverride > 0) {
+                requestBody.options.max_tokens = Number(this.llmMaxTokensOverride);
+              }
+
+              // Add seed for reproducibility if specified
+              if (this.llmSeed !== null && this.llmSeed !== '' && this.llmSeed >= 0) {
+                requestBody.options.seed = Number(this.llmSeed);
+              }
+
+              // Add top_p for non-reasoning models if specified
+              if (this.supportsTemperature() && this.llmTopP !== null && this.llmTopP !== '') {
+                requestBody.options.top_p = Number(this.llmTopP);
+              }
+
+              const res = await fetch('/admin/v1/test-prompt-llm', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Admin-Key': this.apiKey,
+                },
+                body: JSON.stringify(requestBody),
+                signal: controller.signal,
+              });
+
+              clearTimeout(timeoutId);
+
+              // Handle 429 rate limit with Retry-After
+              if (res.status === 429) {
+                const retryAfter = parseInt(res.headers.get('Retry-After') || '60', 10);
+                this.startRateLimitCooldown(retryAfter);
+                return {
+                  success: false,
+                  error: 'Rate limit exceeded. Wait ' + retryAfter + 's.',
+                  isRateLimited: true,
+                };
+              }
+
+              const data = await res.json();
+
+              if (res.ok && data.success) {
+                const pipeline = data.pipeline || {};
+                const llmData = data.llm || {};
+                const result = data.result || {};
+                const promptData = data.prompt || {};
+
+                return {
+                  success: true,
+                  version: version,
+                  promptHash: promptData.content_hash,
+                  promptPreview: promptData.content_preview,
+                  nodeCount: result.graph?.nodes?.length ?? 0,
+                  edgeCount: result.graph?.edges?.length ?? 0,
+                  repairsApplied: (pipeline.repairs_applied || []).length,
+                  latencyMs: pipeline.total_duration_ms ?? llmData.duration_ms ?? 0,
+                  tokenUsage: llmData.token_usage,
+                  finishReason: llmData.finish_reason,
+                  // The comparison panel is where prompt-iteration verdicts get
+                  // drawn, so it needs the same disclosure the single-run panel
+                  // shows. Carried from the payload, not restated.
+                  harnessFidelity: data.harness_fidelity,
+                  model: llmData.model,
+                  provider: llmData.provider,
+                  nodeCounts: pipeline.node_counts,
+                  validationErrors: result.validation?.error_count ?? 0,
+                  validationWarnings: result.validation?.warning_count ?? 0,
+                  validationIssues: result.validation?.issues || [],
+                  showValidation: false,
+                };
+              } else {
+                // Prefer detailed message over generic error type
+                const errorMsg = data.message || data.error || 'Unknown error';
+                return {
+                  success: false,
+                  version: version,
+                  error: errorMsg,
+                };
+              }
+            } catch (e) {
+              console.error('run_comparison_test failed:', e);
+              clearTimeout(timeoutId);
+              const isTimeout = e.name === 'AbortError';
+              return {
+                success: false,
+                version: version,
+                error: isTimeout
+                  ? 'Request timed out after 2 minutes.'
+                  : 'Network error: ' + (e.message || 'Unknown'),
+                isTimeout,
+              };
+            }
+          };
+
+          this.showToast('Running comparison (this may take 2-4 minutes)...', 'info');
+
+          // Run both versions sequentially to respect rate limits
+          const resultA = await runForVersion(this.llmCompareVersionA);
+
+          // Small delay between runs
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
+          const resultB = await runForVersion(this.llmCompareVersionB);
+
+          // Check if prompts are actually different
+          const promptsAreDifferent = resultA.promptHash !== resultB.promptHash;
+
+          // Use version from result objects (captured at call time) to avoid any async timing issues
+          this.llmCompareResults = {
+            versionA: { ...resultA, versionNum: resultA.version },
+            versionB: { ...resultB, versionNum: resultB.version },
+            promptsAreDifferent,
+            deltas: {
+              nodeCount: (resultB.nodeCount ?? 0) - (resultA.nodeCount ?? 0),
+              edgeCount: (resultB.edgeCount ?? 0) - (resultA.edgeCount ?? 0),
+              repairs: (resultB.repairsApplied ?? 0) - (resultA.repairsApplied ?? 0),
+              latency: (resultB.latencyMs ?? 0) - (resultA.latencyMs ?? 0),
+              tokens: ((resultB.tokenUsage?.total ?? 0) - (resultA.tokenUsage?.total ?? 0)),
+              validationErrors: (resultB.validationErrors ?? 0) - (resultA.validationErrors ?? 0),
+              validationWarnings: (resultB.validationWarnings ?? 0) - (resultA.validationWarnings ?? 0),
+            },
+          };
+
+          this.llmCompareRunning = false;
+
+          if (promptsAreDifferent) {
+            this.showToast('Comparison complete - different prompt versions confirmed', 'success');
+          } else {
+            this.showToast('Warning: Same prompt hash for both versions', 'warning');
+          }
+        },
+
+        loadTestHistory() {
+          try {
+            const stored = localStorage.getItem('cee_test_history_' + this.selectedTestPromptId);
+            this.testHistory = stored ? JSON.parse(stored) : [];
+          } catch (e) {
+            console.error('load_test_history failed:', e);
+            this.testHistory = [];
+          }
+        },
+
+        saveTestToHistory(item) {
+          try {
+            const key = 'cee_test_history_' + this.selectedTestPromptId;
+            let history = [];
+            try {
+              history = JSON.parse(localStorage.getItem(key) || '[]');
+            } catch (e) {
+              console.error('persist_test_history failed:', e);
+            }
+
+            history.push(item);
+
+            // Keep only last 100 entries
+            if (history.length > 100) {
+              history = history.slice(-100);
+            }
+
+            localStorage.setItem(key, JSON.stringify(history));
+            this.testHistory = history;
+          } catch (e) {
+            console.warn('Failed to save test history:', e);
+          }
+        },
+
+        clearTestHistory() {
+          if (!confirm('Clear all test history for this prompt?')) return;
+          localStorage.removeItem('cee_test_history_' + this.selectedTestPromptId);
+          this.testHistory = [];
+          this.showToast('History cleared', 'success');
+        },
+
+        // ========== Version Comparison ==========
+        openCompareModal() {
+          if (!this.selectedPrompt || this.selectedPrompt.versions.length < 2) {
+            this.showToast('Need at least 2 versions to compare', 'warning');
+            return;
+          }
+          this.compareVersionA = this.selectedPrompt.versions[0].version;
+          this.compareVersionB = this.selectedPrompt.activeVersion;
+          this.comparisonData = null;
+          this.showCompareModal = true;
+          this.loadComparison();
+        },
+
+        async loadComparison() {
+          if (!this.selectedPrompt || this.compareVersionA === this.compareVersionB) {
+            this.comparisonData = null;
+            return;
+          }
+          try {
+            const res = await fetch(
+              '/admin/prompts/' + this.selectedPrompt.id + '/diff?versionA=' + this.compareVersionA + '&versionB=' + this.compareVersionB,
+              { headers: { 'X-Admin-Key': this.apiKey } }
+            );
+            if (res.ok) {
+              this.comparisonData = await res.json();
+            } else {
+              this.showToast('Failed to load comparison', 'error');
+              this.comparisonData = null;
+            }
+          } catch (e) {
+            console.error('load_comparison failed:', e);
+            this.showToast('Failed to load comparison', 'error');
+            this.comparisonData = null;
+          }
+        },
+
+        formatDate(iso) {
+          if (!iso) return '';
+          const d = new Date(iso);
+          return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+      };
+    }
+  </script>
+</body>
+</html>`;
+}
+
+/**
+ * Generate the admin dashboard HTML.
+ * Displays prompt status, model routing, and environment info.
+ * Calls /admin/prompts/verify and /admin/models/routing internally via fetch.
+ */
+function generateDashboardUI(): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Olumi Admin Dashboard</title>
+  <script defer src="${ALPINE_CDN_URL}"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+      line-height: 1.6;
+    }
+    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    header {
+      background: #1a1a2e;
+      color: white;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    header h1 { font-size: 1.5rem; }
+    header p { color: #aaa; font-size: 0.9rem; margin-top: 4px; }
+    header nav { margin-top: 12px; }
+    header nav a { color: #a5b4fc; font-size: 0.9rem; text-decoration: none; margin-right: 16px; }
+    header nav a:hover { color: white; }
+    .card {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .card h2 { margin-bottom: 15px; color: #1a1a2e; font-size: 1.2rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+    th { background: #f9fafb; font-weight: 600; }
+    tr:last-child td { border-bottom: none; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+    .badge-store { background: #dbeafe; color: #1e40af; }
+    .badge-default { background: #f3f4f6; color: #6b7280; }
+    .badge-env { background: #d1fae5; color: #065f46; }
+    .badge-openai { background: #fef3c7; color: #92400e; }
+    .badge-anthropic { background: #ede9fe; color: #5b21b6; }
+    .badge-unknown { background: #fee2e2; color: #dc2626; }
+    .badge-on { background: #d1fae5; color: #065f46; }
+    .badge-off { background: #f3f4f6; color: #6b7280; }
+    .form-row { display: flex; gap: 10px; margin-bottom: 15px; align-items: flex-end; }
+    input {
+      padding: 8px 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 0.9rem;
+      flex: 1;
+    }
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .btn-primary { background: #4f46e5; color: white; }
+    .btn-primary:hover { opacity: 0.85; }
+    .error { color: #dc2626; font-size: 0.9rem; margin-top: 8px; }
+    .loading { color: #6b7280; font-size: 0.9rem; }
+    .meta { font-size: 0.78rem; color: #9ca3af; margin-top: 8px; }
+    .env-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 12px;
+    }
+    .env-item {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      padding: 10px 14px;
+    }
+    .env-item .label { font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; }
+    .env-item .value { font-size: 0.9rem; margin-top: 2px; }
+    code { font-family: monospace; background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container">
+      <h1>Olumi Admin Dashboard</h1>
+      <p>Prompt status &bull; Model routing &bull; Environment</p>
+      <nav>
+        <a href="/admin">Prompt Manager</a>
+        <a href="/admin/dashboard">Dashboard</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="container" x-data="dashboard()">
+
+    <!-- Auth -->
+    <div class="card" x-show="!loaded">
+      <h2>Admin Key</h2>
+      <div class="form-row">
+        <input type="password" x-model="apiKey" placeholder="X-Admin-Key" @keydown.enter="load()" />
+        <button class="btn btn-primary" @click="load()">Load</button>
+      </div>
+      <div class="error" x-show="authError" x-text="authError"></div>
+    </div>
+
+    <template x-if="loaded">
+      <div>
+
+        <!-- Environment info -->
+        <div class="card">
+          <h2>Environment</h2>
+          <div class="env-grid">
+            <div class="env-item">
+              <div class="label">NODE_ENV</div>
+              <div class="value"><code x-text="env.node_env || '—'"></code></div>
+            </div>
+            <template x-for="flag in env.feature_flags" :key="flag.name">
+              <div class="env-item">
+                <div class="label" x-text="flag.name"></div>
+                <div class="value">
+                  <span class="badge" :class="flag.enabled ? 'badge-on' : 'badge-off'" x-text="flag.enabled ? 'on' : 'off'"></span>
+                </div>
+              </div>
+            </template>
+          </div>
+          <div class="meta" x-text="'Loaded at ' + env.timestamp"></div>
+        </div>
+
+        <!-- Model routing -->
+        <div class="card">
+          <h2>Model Routing</h2>
+          <div x-show="modelsLoading" class="loading">Loading…</div>
+          <div x-show="modelsError" class="error" x-text="modelsError"></div>
+          <template x-if="!modelsLoading && !modelsError">
+            <div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Task</th>
+                    <th>Model</th>
+                    <th>Provider</th>
+                    <th>Source</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="row in models.tasks" :key="row.task">
+                    <tr>
+                      <td><code x-text="row.task"></code></td>
+                      <td x-text="row.model"></td>
+                      <td>
+                        <span class="badge"
+                          :class="row.provider === 'anthropic' ? 'badge-anthropic' : row.provider === 'openai' ? 'badge-openai' : 'badge-unknown'"
+                          x-text="row.provider"></span>
+                      </td>
+                      <td>
+                        <span class="badge"
+                          :class="row.source === 'env_override' ? 'badge-env' : 'badge-default'"
+                          x-text="row.source === 'env_override' ? 'env override' : 'default'"></span>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+              <div class="meta">Default provider: <code x-text="models.default_provider"></code> &bull; <span x-text="models.timestamp"></span></div>
+            </div>
+          </template>
+        </div>
+
+        <!-- Prompt status -->
+        <div class="card">
+          <h2>Prompt Status</h2>
+          <div x-show="promptsLoading" class="loading">Loading…</div>
+          <div x-show="promptsError" class="error" x-text="promptsError"></div>
+          <template x-if="!promptsLoading && !promptsError">
+            <div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Prompt ID</th>
+                    <th>Source</th>
+                    <th>Store Version</th>
+                    <th>Content Hash</th>
+                    <th>Length</th>
+                    <th>Loaded At</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="p in prompts.prompts" :key="p.prompt_id">
+                    <tr>
+                      <td><code x-text="p.prompt_id"></code></td>
+                      <td>
+                        <span class="badge"
+                          :class="p.source === 'store' ? 'badge-store' : 'badge-default'"
+                          x-text="p.source"></span>
+                      </td>
+                      <td x-text="p.store_version ?? '—'"></td>
+                      <td><code x-text="p.content_hash ? p.content_hash.slice(0, 12) + '…' : '—'"></code></td>
+                      <td x-text="p.content_length ?? '—'"></td>
+                      <td x-text="p.loaded_at ? formatDate(p.loaded_at) : '—'"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+              <div class="meta" x-text="'Snapshot at ' + prompts.snapshot_at"></div>
+            </div>
+          </template>
+        </div>
+
+      </div>
+    </template>
+  </div>
+
+  <script>
+    function dashboard() {
+      return {
+        apiKey: '',
+        loaded: false,
+        authError: '',
+
+        env: {},
+        models: {},
+        prompts: {},
+        modelsLoading: false,
+        modelsError: '',
+        promptsLoading: false,
+        promptsError: '',
+
+        async load() {
+          this.authError = '';
+          if (!this.apiKey) { this.authError = 'Enter admin key'; return; }
+          await Promise.all([this.loadEnv(), this.loadModels(), this.loadPrompts()]);
+          if (!this.authError) this.loaded = true;
+        },
+
+        async loadEnv() {
+          try {
+            const res = await fetch('/admin/dashboard/env', {
+              headers: { 'X-Admin-Key': this.apiKey }
+            });
+            if (res.status === 401 || res.status === 403) {
+              this.authError = 'Invalid admin key';
+              return;
+            }
+            this.env = await res.json();
+          } catch (e) {
+            this.authError = 'Failed to load environment info';
+          }
+        },
+
+        async loadModels() {
+          this.modelsLoading = true;
+          this.modelsError = '';
+          try {
+            const res = await fetch('/admin/models/routing', {
+              headers: { 'X-Admin-Key': this.apiKey }
+            });
+            if (!res.ok) { this.modelsError = 'Failed to load model routing (' + res.status + ')'; return; }
+            this.models = await res.json();
+          } catch (e) {
+            this.modelsError = 'Network error loading models';
+          } finally {
+            this.modelsLoading = false;
+          }
+        },
+
+        async loadPrompts() {
+          this.promptsLoading = true;
+          this.promptsError = '';
+          try {
+            const res = await fetch('/admin/prompts/verify', {
+              headers: { 'X-Admin-Key': this.apiKey }
+            });
+            if (!res.ok) { this.promptsError = 'Failed to load prompt status (' + res.status + ')'; return; }
+            this.prompts = await res.json();
+          } catch (e) {
+            this.promptsError = 'Network error loading prompts';
+          } finally {
+            this.promptsLoading = false;
+          }
+        },
+
+        formatDate(iso) {
+          if (!iso) return '';
+          const d = new Date(iso);
+          return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+      };
+    }
+  </script>
+</body>
+</html>`;
+}
+
+/**
+ * Admin UI routes
+ */
+export async function adminUIRoutes(app: FastifyInstance): Promise<void> {
+  /**
+   * GET /admin - Admin dashboard
+   *
+   * Security headers:
+   * - CSP: Restricts script/style sources
+   * - X-Content-Type-Options: Prevents MIME sniffing
+   * - X-Frame-Options: Prevents clickjacking
+   * - Referrer-Policy: Limits referrer information
+   *
+   * Security: IP allowlist check (same as admin API routes)
+   */
+  app.get('/admin', async (request: FastifyRequest, reply: FastifyReply) => {
+    // Verify IP is allowed before serving admin UI
+    if (!verifyIPAllowed(request, reply)) return;
+
+    return reply
+      .type('text/html')
+      .header('Content-Security-Policy', CSP_HEADER)
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('X-Frame-Options', 'DENY')
+      .header('Referrer-Policy', 'strict-origin-when-cross-origin')
+      .header('X-XSS-Protection', '1; mode=block')
+      .send(generateAdminUI());
+  });
+
+  /**
+   * GET /admin/dashboard - Prompt & model status dashboard
+   *
+   * Visual dashboard showing active prompt metadata, model routing per task,
+   * and key feature flag status. Requires admin key via Alpine.js prompt.
+   */
+  app.get('/admin/dashboard', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!verifyIPAllowed(request, reply)) return;
+
+    return reply
+      .type('text/html')
+      .header('Content-Security-Policy', CSP_HEADER)
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('X-Frame-Options', 'DENY')
+      .header('Referrer-Policy', 'strict-origin-when-cross-origin')
+      .header('X-XSS-Protection', '1; mode=block')
+      .header('Cache-Control', 'no-store')
+      .send(generateDashboardUI());
+  });
+
+  /**
+   * GET /admin/dashboard/env - Environment info for dashboard
+   *
+   * Returns NODE_ENV and key feature flags read from config (not raw env).
+   * Requires admin key.
+   */
+  app.get('/admin/dashboard/env', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!verifyAdminKey(request, reply, 'read')) return;
+
+    let nodeEnv: string;
+    let dskEnabled: boolean;
+    let anthropicPromptCacheEnabled: boolean;
+    let zone2RegistryEnabled: boolean;
+
+    try {
+      nodeEnv = config.server.nodeEnv ?? 'unknown';
+      dskEnabled = config.features.dskEnabled ?? false;
+      anthropicPromptCacheEnabled = config.promptCache.anthropicEnabled ?? false;
+      zone2RegistryEnabled = config.features.zone2Registry ?? false;
+    } catch {
+      nodeEnv = 'unknown';
+      dskEnabled = false;
+      anthropicPromptCacheEnabled = false;
+      zone2RegistryEnabled = false;
+    }
+
+    return reply
+      .header('Cache-Control', 'no-store')
+      .status(200)
+      .send({
+      node_env: nodeEnv,
+      feature_flags: [
+        { name: 'DSK_ENABLED', enabled: dskEnabled },
+        { name: 'ANTHROPIC_PROMPT_CACHE_ENABLED', enabled: anthropicPromptCacheEnabled },
+        { name: 'CEE_ZONE2_REGISTRY_ENABLED', enabled: zone2RegistryEnabled },
+      ],
+      timestamp: new Date().toISOString(),
+    });
+  });
+}

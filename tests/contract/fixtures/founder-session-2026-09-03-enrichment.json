@@ -1,0 +1,279 @@
+{
+  "_provenance": {
+    "capture": "olumi-programme-docs artefacts/manual-test-2026-09-03/olumi-debug-f2e2df1b-20260903.json",
+    "scenario_id": "7826c742-2939-4584-917c-f1286a663ae4",
+    "captured": "2026-09-03T13:33Z-14:03Z",
+    "cee_build": "f4c8f501",
+    "ui_build": "86786efb",
+    "note": "HISTORIC RECORD - append only. These are bytes the deployed product actually produced on 3 Sep 2026. Do not edit them to keep a test green (CLAUDE.md trap 14b); if this fixture must change, that is a finding to report."
+  },
+  "factor_evppi": [
+    {
+      "factor_id": "26fbdff5",
+      "evppi": 1e-05,
+      "evppi_raw": 1e-05,
+      "baseline_max_expected_utility": -0.098727,
+      "conditional_max_expected_utility": -0.098717,
+      "units": "outcome",
+      "method": "regression_evppi_v1",
+      "regression_degree": 4,
+      "n_samples": 10000,
+      "clamped_low": false,
+      "clamped_high": false,
+      "noise_floor": 2.2e-05,
+      "status": "below_resolution",
+      "correlation_active": false
+    }
+  ],
+  "inference_warnings": [
+    {
+      "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+      "message": "4 edge E-value entries were omitted from edge_e_values: 4 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+      "severity": "info"
+    },
+    {
+      "code": "ROOT_NODE_DEFAULT_VALUE",
+      "message": "No observed value provided for root node '16ec3d64'; defaulted to 0.0. Results for downstream nodes may be unreliable.",
+      "severity": "info",
+      "field": "nodes[16ec3d64].observed_state.value"
+    },
+    {
+      "code": "ROOT_NODE_DEFAULT_VALUE",
+      "message": "No observed value provided for root node '422ceee7'; defaulted to 0.0. Results for downstream nodes may be unreliable.",
+      "severity": "info",
+      "field": "nodes[422ceee7].observed_state.value"
+    },
+    {
+      "code": "ROOT_NODE_DEFAULT_VALUE",
+      "message": "No observed value provided for root node '7dc44ba7'; defaulted to 0.0. Results for downstream nodes may be unreliable.",
+      "severity": "info",
+      "field": "nodes[7dc44ba7].observed_state.value"
+    },
+    {
+      "code": "GOAL_ANCESTOR_DATA_GAP",
+      "message": "Goal node '552bd1c0' is scored from its forward-propagated outcome distribution, but root ancestor(s) '16ec3d64', '422ceee7', '7dc44ba7' carry no observed value or ParameterUncertainty and defaulted to 0.0 \u2014 goal-level probabilities partially rest on placeholder zeros (insufficient data).",
+      "severity": "info",
+      "field": "nodes[552bd1c0]"
+    }
+  ],
+  "factor_sensitivity": [
+    {
+      "factor_id": "16ec3d64",
+      "factor_label": "ICP Clarity",
+      "influence_score": 1,
+      "influence_rank": 1,
+      "sensitivity_score": -0.375,
+      "elasticity": 1,
+      "direction": "negative",
+      "importance_rank": 1,
+      "value_of_information": 0,
+      "confidence": 0.5,
+      "confidence_source": "plot_unified_from_graph",
+      "confidence_provenance": {
+        "computation_source": "plot_unified_from_graph",
+        "formula_version": "plot_unified_v2",
+        "is_provisional": true,
+        "calibration_status": "provisional_pending_pilot_calibration",
+        "input_quality": "degenerate_fallback"
+      },
+      "confidence_components": {
+        "structural_certainty": 0.5,
+        "sampling_stability": null
+      },
+      "source": "graph",
+      "flip_risk_category": "correlated",
+      "importance_basis": "graph_structural",
+      "driver_label": "biggest",
+      "evpi_percentage_points": 0,
+      "evpi_method": "heuristic",
+      "evidence_hint": false
+    },
+    {
+      "factor_id": "26fbdff5",
+      "factor_label": "We've heard from three churned customers that they left because of missing integrations, not price \u2014 so we think product gaps mediate the relationship between customer satisfaction and churn",
+      "influence_score": 0.7333333333333334,
+      "influence_rank": 2,
+      "sensitivity_score": -0.275,
+      "elasticity": 0.7333333333333334,
+      "direction": "negative",
+      "importance_rank": 2,
+      "value_of_information": 0,
+      "confidence": 0.5835,
+      "confidence_source": "plot_unified_from_isl_bootstrap",
+      "confidence_provenance": {
+        "computation_source": "plot_unified_from_isl_bootstrap",
+        "formula_version": "plot_unified_v3",
+        "is_provisional": true,
+        "calibration_status": "provisional_pending_pilot_calibration",
+        "input_quality": "standard"
+      },
+      "confidence_components": {
+        "structural_certainty": 0.8,
+        "sampling_stability": 0.25
+      },
+      "source": "graph",
+      "flip_risk_category": "correlated",
+      "attribution_stability": "low",
+      "rank_flip_rate": 0,
+      "value_source": "cee_inference",
+      "value_extraction_type": "inferred",
+      "importance_basis": "graph_structural",
+      "driver_label": "strong",
+      "evpi_percentage_points": 0,
+      "evpi_method": "heuristic",
+      "evidence_hint": false
+    },
+    {
+      "factor_id": "422ceee7",
+      "factor_label": "which we believe is partly driven by product quality and partly by how much attention each trial gets from the founder",
+      "influence_score": 0.4691358024691357,
+      "influence_rank": 3,
+      "sensitivity_score": 0.1759259259259259,
+      "elasticity": 0.4691358024691357,
+      "direction": "positive",
+      "importance_rank": 3,
+      "value_of_information": 0,
+      "confidence": 0.5,
+      "confidence_source": "plot_unified_from_graph",
+      "confidence_provenance": {
+        "computation_source": "plot_unified_from_graph",
+        "formula_version": "plot_unified_v2",
+        "is_provisional": true,
+        "calibration_status": "provisional_pending_pilot_calibration",
+        "input_quality": "degenerate_fallback"
+      },
+      "confidence_components": {
+        "structural_certainty": 0.5,
+        "sampling_stability": null
+      },
+      "source": "graph",
+      "flip_risk_category": "correlated",
+      "importance_basis": "graph_structural",
+      "driver_label": "moderate",
+      "evpi_percentage_points": 0,
+      "evpi_method": "heuristic",
+      "evidence_hint": false
+    },
+    {
+      "factor_id": "7dc44ba7",
+      "factor_label": "Competitive Pressure",
+      "influence_score": 0.28148148148148144,
+      "influence_rank": 5,
+      "sensitivity_score": 0.10555555555555554,
+      "elasticity": 0.28148148148148144,
+      "direction": "positive",
+      "importance_rank": 4,
+      "value_of_information": 0,
+      "confidence": 0.5,
+      "confidence_source": "plot_unified_from_graph",
+      "confidence_provenance": {
+        "computation_source": "plot_unified_from_graph",
+        "formula_version": "plot_unified_v2",
+        "is_provisional": true,
+        "calibration_status": "provisional_pending_pilot_calibration",
+        "input_quality": "degenerate_fallback"
+      },
+      "confidence_components": {
+        "structural_certainty": 0.5,
+        "sampling_stability": null
+      },
+      "source": "graph",
+      "flip_risk_category": "negligible",
+      "importance_basis": "graph_structural",
+      "driver_label": "moderate",
+      "evpi_percentage_points": 0,
+      "evpi_method": "heuristic",
+      "evidence_hint": false
+    },
+    {
+      "factor_id": "27c23ebb",
+      "factor_label": "hiring would free this up for product, which we believe indirectly affects retention through product quality improvements",
+      "influence_score": 0.33,
+      "influence_rank": 4,
+      "sensitivity_score": 0,
+      "elasticity": 0,
+      "direction": "negative",
+      "importance_rank": 5,
+      "value_of_information": 0,
+      "confidence": 0.3,
+      "confidence_source": "plot_unified_from_isl_bootstrap",
+      "confidence_provenance": {
+        "computation_source": "plot_unified_from_isl_bootstrap",
+        "formula_version": "plot_unified_v3",
+        "is_provisional": true,
+        "calibration_status": "provisional_pending_pilot_calibration",
+        "input_quality": "standard"
+      },
+      "confidence_components": {
+        "structural_certainty": 0.5,
+        "sampling_stability": 0
+      },
+      "zero_reason": "intervention_override",
+      "source": "graph",
+      "flip_risk_category": "correlated",
+      "attribution_stability": "negligible",
+      "rank_flip_rate": 0,
+      "importance_basis": "graph_structural",
+      "driver_label": "moderate",
+      "range_derivation_source": "default"
+    },
+    {
+      "factor_id": "919d7f50",
+      "factor_label": "Sales Headcount Investment",
+      "influence_score": 0.21728395061728398,
+      "influence_rank": 6,
+      "sensitivity_score": 0,
+      "elasticity": 0,
+      "direction": "negative",
+      "importance_rank": 6,
+      "value_of_information": 0,
+      "confidence": 0.3,
+      "confidence_source": "plot_unified_from_isl_bootstrap",
+      "confidence_provenance": {
+        "computation_source": "plot_unified_from_isl_bootstrap",
+        "formula_version": "plot_unified_v3",
+        "is_provisional": true,
+        "calibration_status": "provisional_pending_pilot_calibration",
+        "input_quality": "standard"
+      },
+      "confidence_components": {
+        "structural_certainty": 0.5,
+        "sampling_stability": 0
+      },
+      "zero_reason": "intervention_override",
+      "source": "graph",
+      "flip_risk_category": "isolated",
+      "attribution_stability": "negligible",
+      "rank_flip_rate": 0,
+      "value_source": "user_override",
+      "value_extraction_type": "explicit",
+      "importance_basis": "graph_structural",
+      "driver_label": "moderate",
+      "range_derivation_source": "default"
+    }
+  ],
+  "decision_evpi": 0.059971525751371255,
+  "confidence_tier": "needs_work",
+  "decision_review": {
+    "evidence_enhancements": {
+      "16ec3d64": {
+        "specific_action": "Interview at least 10 current and churned customers to define the ICP and document concrete qualification criteria.",
+        "rationale": "Clarity on ICP would reduce uncertainty driving both churn and acquisition cost, affecting which sales model works best.",
+        "evidence_type": "customer_research",
+        "decision_hygiene": "Estimate likely ICP segments before reviewing new customer insights."
+      },
+      "26fbdff5": {
+        "specific_action": "Map which integrations prospects ask for and tally their influence on closed/lost deals using CRM and qualitative calls.",
+        "rationale": "Customer feedback on integrations mediates satisfaction and churn, so addressing this clarifies the churn dynamic across options.",
+        "evidence_type": "customer_research",
+        "decision_hygiene": "Draft a hypothesis on key integrations before looking at customer data."
+      },
+      "422ceee7": {
+        "specific_action": "Analyse trial-to-paid conversions segmented by trial attention level and product quality indicators over the past 6 months.",
+        "rationale": "Understanding the conversion link to founder attention and product will inform whether scaling sales is viable without harming conversions.",
+        "evidence_type": "internal_data",
+        "decision_hygiene": "Blindly benchmark conversion rates before checking segment-specific trial handling."
+      }
+    }
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "brief_id": "12-flip-effect-direction",
+  "model": "gpt-4.1",
+  "prompt_hash": "sha256:2d6fcbc9d09869a271bc93df1b5bbb450a4a5ee3053d9395c3143b810c973cc5",
+  "response": {
+    "model_id": "gpt-4.1",
+    "brief_id": "12-flip-effect-direction",
+    "status": "success",
+    "raw_text": "{\n  \"operations\": [\n    {\n      \"op\": \"update_edge\",\n      \"path\": \"/edges/fac_competition->out_market_share/strength.mean\",\n      \"value\": 0.3,\n      \"old_value\": -0.3,\n      \"impact\": \"moderate\",\n      \"rationale\": \"Changing the direction of the competitive intensity effect from negative to positive reflects a shift where competition now drives market share growth via innovation.\"\n    },\n    {\n      \"op\": \"update_edge\",\n      \"path\": \"/edges/fac_competition->out_market_share/effect_direction\",\n      \"value\": \"positive\",\n      \"old_value\": \"negative\",\n      \"impact\": \"low\",\n      \"rationale\": \"Effect direction set to positive to align with updated mean, ensuring internal causal consistency.\"\n    }\n  ],\n  \"removed_edges\": [],\n  \"warnings\": [\n    \"This update reverses the causal impact of competition on market share. The absolute strength is unchanged, so the risk of exceeding range limits is low, but you may wish to review if an even stronger effect now applies.\"\n  ],\n  \"coaching\": {\n    \"summary\": \"Competition now increases market share growth instead of hindering it. This changes the causal story from risk to opportunity. If innovation can have an even greater effect, consider increasing the strength further.\",\n    \"rerun_recommended\": true\n  }\n}",
+    "parsed_graph": {
+      "operations": [
+        {
+          "op": "update_edge",
+          "path": "/edges/fac_competition->out_market_share/strength.mean",
+          "value": 0.3,
+          "old_value": -0.3,
+          "impact": "moderate",
+          "rationale": "Changing the direction of the competitive intensity effect from negative to positive reflects a shift where competition now drives market share growth via innovation."
+        },
+        {
+          "op": "update_edge",
+          "path": "/edges/fac_competition->out_market_share/effect_direction",
+          "value": "positive",
+          "old_value": "negative",
+          "impact": "low",
+          "rationale": "Effect direction set to positive to align with updated mean, ensuring internal causal consistency."
+        }
+      ],
+      "removed_edges": [],
+      "warnings": [
+        "This update reverses the causal impact of competition on market share. The absolute strength is unchanged, so the risk of exceeding range limits is low, but you may wish to review if an even stronger effect now applies."
+      ],
+      "coaching": {
+        "summary": "Competition now increases market share growth instead of hindering it. This changes the causal story from risk to opportunity. If innovation can have an even greater effect, consider increasing the strength further.",
+        "rerun_recommended": true
+      }
+    },
+    "extraction_attempted": false,
+    "latency_ms": 3002,
+    "input_tokens": 5069,
+    "output_tokens": 291,
+    "est_cost_usd": 0.012466,
+    "pricing_source": "api_usage",
+    "parsed_json": {
+      "operations": [
+        {
+          "op": "update_edge",
+          "path": "/edges/fac_competition->out_market_share/strength.mean",
+          "value": 0.3,
+          "old_value": -0.3,
+          "impact": "moderate",
+          "rationale": "Changing the direction of the competitive intensity effect from negative to positive reflects a shift where competition now drives market share growth via innovation."
+        },
+        {
+          "op": "update_edge",
+          "path": "/edges/fac_competition->out_market_share/effect_direction",
+          "value": "positive",
+          "old_value": "negative",
+          "impact": "low",
+          "rationale": "Effect direction set to positive to align with updated mean, ensuring internal causal consistency."
+        }
+      ],
+      "removed_edges": [],
+      "warnings": [
+        "This update reverses the causal impact of competition on market share. The absolute strength is unchanged, so the risk of exceeding range limits is low, but you may wish to review if an even stronger effect now applies."
+      ],
+      "coaching": {
+        "summary": "Competition now increases market share growth instead of hindering it. This changes the causal story from risk to opportunity. If innovation can have an even greater effect, consider increasing the strength further.",
+        "rerun_recommended": true
+      }
+    }
+  },
+  "scores": {
+    "valid_json": true,
+    "correct_shape": true,
+    "operation_types_correct": false,
+    "topology_compliant": true,
+    "has_impact_rationale": true,
+    "correct_ordering": true,
+    "empty_ops_handled": true,
+    "coaching_present": true,
+    "path_syntax_valid": false
+  },
+  "overall": 0.8,
+  "captured_at": "2026-03-14T16:39:41.327Z"
+}

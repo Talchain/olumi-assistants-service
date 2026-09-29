@@ -1,0 +1,462 @@
+/**
+ * ⛔ WHAT WAS SAVED IS STATED BY THE SERVER, FROM THE TOOL RESULTS — NEVER BY THE MODEL.
+ *
+ * Release Control, 23 Sep 2026 (olumi-programme-docs#63 5788648244): the route
+ * returned the model's `assistant_text` essentially verbatim, so a
+ * model-authored "Saved…" survived on a turn where nothing was written. The
+ * instructions already said not to claim an unrecorded change twice; a served
+ * witness showed that is not a boundary.
+ *
+ * Two structural rules:
+ *   1. When a write tool ran, the SERVER composes the write-status line from the
+ *      authoritative results — version from the receipts, `already_applied`,
+ *      refusal — and appends it. The model's own numbers are never the source.
+ *   2. On EVERY turn (not only when no write landed — see narrateWriteOutcome), a
+ *      sentence that asserts a completed write
+ *      is removed. The claim shape is derived from REAL served replies
+ *      (output/paul-test-20260923/repro, construction-witness/raw,
+ *      openai-agent-lane/evidence): every success claim in that corpus OPENS
+ *      with the past-tense verb — "Applied proposal `prop_…` successfully.",
+ *      "Added: **A → B** (positive).", "Updated: all **8 assumptions** were
+ *      adopted.", "Recorded assumptions:" — or says the effect "is now
+ *      recorded / represented". The negations in the same corpus ("Nothing has
+ *      been changed yet.", "I haven't added a duplicate.", "Proposed — not
+ *      applied:", "Approve this specific link if you want it added.") do not
+ *      match and survive.
+ */
+
+import type { ToolResult } from './runtime/agent-tools.js';
+import { proposalsAwaitingApproval } from './approval-chips.js';
+
+/** Tools whose result is a WRITE to the user's model. Proposers change nothing. */
+export const WRITE_TOOLS: readonly string[] = ['authorise_change', 'build_model_from_brief'];
+
+const CLAIM_OPENER =
+  /^(?:[-•*>#\s]*)(?:\*\*)?(?:Applied|Added|Updated|Saved|Recorded|Adopted|Linked)(?:\*\*)?(?:\s*:|\s+(?:(?:the|all|a|an|your|this|that|these|those|both|every|each|proposal|assumptions?|levels?|values?|it|them)\b|\*\*|`|\d))/i;
+const NOW_EFFECT = /\b(?:is|are)\s+now\s+(?:recorded|represented|saved|applied|in the model)\b|\b(?:was|were)\s+(?:recorded|applied|saved|added|adopted)\b/i;
+const I_DID = /\bI(?:'|’)?(?:ve| have)\s+(?:applied|added|saved|recorded|updated|linked|adopted)\b/i;
+const NEGATION = /\b(?:not|no|nothing|never|yet|haven(?:'|’)t|hasn(?:'|’)t|didn(?:'|’)t|won(?:'|’)t|cannot|can(?:'|’)t|once|if|until|when)\b|n(?:'|’)t\b/i;
+
+/** Does this sentence ASSERT that a write happened? Exported for its own tests. */
+export function assertsCompletedWrite(sentence: string): boolean {
+  const s = sentence.trim();
+  if (s.length === 0) return false;
+  if (CLAIM_OPENER.test(s)) return true;
+  if (NEGATION.test(s)) return false;
+  return NOW_EFFECT.test(s) || I_DID.test(s);
+}
+
+const versionsOf = (r: ToolResult): number[] => {
+  const receipts = Array.isArray(r.receipts) ? (r.receipts as { version?: unknown }[]) : [];
+  return receipts.map((x) => x.version).filter((v): v is number => typeof v === 'number').sort((a, b) => a - b);
+};
+const versionPhrase = (vs: number[]): string =>
+  vs.length === 0 ? '' : vs.length === 1 ? ` as version ${vs[0]}` : ` as versions ${vs[0]}–${vs[vs.length - 1]}`;
+
+const REFUSAL_WORDS: Record<string, string> = {
+  superseded: 'the model changed after this was proposed, so it was not applied — ask me to propose it again',
+  unknown_proposal: 'that proposal is no longer available, so nothing was changed — ask me to suggest it again and approve the new one',
+  not_authorised: 'that proposal belongs to a different conversation',
+  integrity_failed: 'the stored proposal could not be verified',
+  partially_applied: 'only part of it was saved',
+  not_applied: 'none of it was applied',
+  model_changed_while_proposing: 'the model changed while it was being put together',
+  model_already_exists: 'a model already exists for this decision',
+  read_only_preview: 'this preview cannot change the model',
+  // ⛔ A REFUSED BUILD, IN WORDS WITH A NEXT STEP (served `785185b7`, scenario
+  // `03b93536`): the user read "it was refused (model_too_large)" — a code, no
+  // reason, nothing to do next. Every refusal `runtime/build-model.ts` returns.
+  model_too_large: 'it came back larger than a first model can be, even after one attempt to make it more compact — ask me to build it again, or tell me which options and factors matter most',
+  no_structured_output: 'the model builder returned nothing usable this time — ask me to try again',
+  construction_failed: 'the model builder could not produce a usable model this time — ask me to try again',
+  admitted_graph_invalid: 'what came back did not form a valid model, so nothing was saved — ask me to try again',
+  registration_refused: 'it could not be saved to this decision — ask me to try again',
+  option_name_ambiguous: 'your brief uses one name for an option and for something else in the model, so they could not be told apart and nothing was saved — tell me what the option changes, in different words, and ask me to build it again',
+  /**
+   * ⛔ EVERY CODE A WRITE TOOL RETURNS HAS WORDS (fix/agent-never-shows-instructions-or-codes). Until now these fell
+   * through to "the change was refused (<code>)": `authoriseChange` / `confirmHeld` (`not_found`), `applyCompound`
+   * (`unsupported_compound`), `dispatchTool` (`unparsable_arguments`, `unknown_tool`), the Agent loop's withheld call
+   * (`withheld_on_chip_turn`) and `buildModelFromBrief` (`construction_unavailable`, `empty_brief`). A compound part's
+   * `reason` reads through this same map (`unresolved_effect_relationship` is the option-level writer's refusal).
+   */
+  not_found: 'Olumi could not read this decision’s model, so nothing was changed — ask me to try again',
+  unsupported_compound: 'this proposal mixes changes that cannot be applied together, so nothing was changed — ask me to propose them one at a time',
+  unparsable_arguments: 'the request could not be read, so nothing was changed — ask me again',
+  unknown_tool: 'that change cannot be made here, so nothing was changed',
+  withheld_on_chip_turn: 'a suggestion button cannot approve a change — approving has its own button',
+  construction_unavailable: 'building a model is not available right now — ask me to try again later',
+  empty_brief: 'there was no description of the decision to build it from — tell me what you are deciding',
+  unresolved_effect_relationship: 'the option does not act on that factor, so no level could be set for it',
+};
+
+/**
+ * ⛔ A CHANGE OLUMI COULD NOT CONFIRM IS NEVER "NOT SAVED", AND NEVER "REFUSED" (code-read, this fix). Each of these
+ * arrives when the write was SENT and may well have landed — `not_verified` even carries `mutated: true` (the held
+ * add-option's own response showed it applied, then the model moved before the read-back), and `not_confirmed` /
+ * `model_not_readable_after_write` mean the read-back itself failed. The user read "Partly saved: the change was
+ * refused (not_verified)." for an option that DID land. Said as what is true: sent, not confirmed, and how to check.
+ */
+const UNCONFIRMED_WORDS: Record<string, string> = {
+  not_verified: 'The change was sent, but it could not be confirmed: the model may have changed again straight afterwards, so Olumi cannot yet say what it now holds. Look at the model, or ask me to check it.',
+  not_confirmed: 'The change was sent, but it could not be confirmed: Olumi could not read the model back afterwards. Ask me to check whether it was recorded.',
+  model_not_readable_after_write: 'The model could not be confirmed: Olumi could not read it back after building it. Ask me to check whether it was saved.',
+};
+
+/**
+ * ⛔ NO RAW CODE REACHES THE USER, EVEN ONE NOBODY HAS WORDED YET. The fallbacks used to print the code itself
+ * ("it was refused (model_too_large)", served `785185b7`; "the change was refused (not_verified)"). A code is for the
+ * Agent (it reads the result's `refusal` and `detail`); the user reads one plain sentence with a next step.
+ */
+const GENERIC_NOT_SAVED = 'the change could not be made this time — ask me to try again';
+const GENERIC_PARTLY_SAVED = 'not all of the change could be made — ask me what is still missing';
+const GENERIC_NOT_BUILT = 'something went wrong while building it — ask me to try again';
+
+/**
+ * ⛔ WHAT THE USER READS IS NEVER AN INSTRUCTION TO THE AGENT (served f2, CEE `af719a1`, scenario `bdba963b`, journey Q
+ * witness). One click on "Record this link" showed the capability's `follow_up` verbatim: "Recorded as the user's own
+ * estimate: … Offer to run the analysis again so they can see what it changes." A capability result is read by TWO
+ * audiences — the Agent (every field, on the loop path) and the user (only `follow_up`, shown verbatim by the
+ * typed-approval fast path, where no model reads the result). Guidance for the Agent belongs in `note` / `detail`;
+ * this is the boundary that holds when a producer forgets.
+ *
+ * A sentence is the Agent's when it names the reader in the third person ("the user" — Olumi says "you"), opens with
+ * an instruction to the Agent ("Offer…", "Say so", "Tell the user…", "Call…", "Read the model…"), speaks of the
+ * proposal's id, or names a code (a snake_case tool, field or refusal) outside a quoted label. Such a sentence is
+ * dropped whole, never rewritten; the corpus it is tested on is the capability's own `note`/`detail` register and the
+ * served f2 and d3 follow-ups (`agent-never-shows-instructions-or-codes.test.ts`).
+ */
+const AGENT_READER = /\bthe user(?:['’]s)?\b/i;
+const AGENT_IMPERATIVE = /^(?:[-•*>\s]*)(?:Offer\b|Say (?:so|that|it|plainly)\b|Tell (?:the user|them)\b|Ask (?:the user|them)\b|Call\b|Relay\b|Report\b|Read (?:the|it) (?:model|state|result)|Read it again\b|Do not (?:describe|say|claim|invent)\b|Don['’]t (?:describe|say|claim|invent)\b)/;
+const AGENT_ID = /\bnever the id\b|\bproposal[ _]id\b/i;
+const CODE_TOKEN = /\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/;
+const QUOTED = /"[^"]*"|“[^”]*”/g;
+/** A quoted span, held aside while the sentence is judged: private-use delimiters no label or rule can contain. */
+const HELD_SPAN = /(\d+)/g;
+
+/**
+ * ⛔ A LABEL IS THE USER'S DATA, NEVER AN INSTRUCTION (round-2 review of this fix, blocker 3). The rules above ran over
+ * UNQUOTED factor labels in the held add-option's follow-up, so "Size of the user base" (reads as "the user"), a
+ * snake_case label such as `cost_per_hire`, or the id the producer falls back to dropped BOTH of its sentences, and one
+ * click showed only "Saved." — losing what was added and the C2 disclosure that a level is Olumi's estimate. So every
+ * producer quotes each label (`agent-capabilities.ts`), and here every quoted span is held aside BEFORE the text is
+ * split into sentences (a label holding ". " — "Acme Inc. price" — split mid-label and left a fragment, review
+ * non-blocking 2) and before any rule runs. Only the words OUTSIDE a label can make a sentence the Agent's.
+ */
+export function withoutAgentDirections(text: string): { readonly text: string; readonly dropped: readonly string[] } {
+  const dropped: string[] = [];
+  const kept = text
+    .split('\n')
+    .map((line) => {
+      const spans: string[] = [];
+      const masked = line.replace(QUOTED, (span) => { spans.push(span); return `${spans.length - 1}`; });
+      const unmask = (s: string): string => s.replace(HELD_SPAN, (_held, i: string) => spans[Number(i)] ?? '');
+      const sentences = masked.split(/(?<=[.!?])\s+/);
+      const keep = sentences.filter((s) => {
+        const agents = AGENT_READER.test(s) || AGENT_IMPERATIVE.test(s.trim()) || AGENT_ID.test(s) || CODE_TOKEN.test(s);
+        if (agents) dropped.push(unmask(s).trim());
+        return !agents;
+      });
+      return keep.length === sentences.length ? line : unmask(keep.join(' '));
+    })
+    .join('\n')
+    .trim();
+  return { text: dropped.length === 0 ? text : kept, dropped };
+}
+
+/** Each part a compound approval reports, named for the user (one, many). A part nobody has named is "a change". */
+const PART_NAMES: Record<string, readonly [string, string]> = {
+  values: ['starting value', 'starting values'],
+  option_levels: ['option level', 'option levels'],
+  // #2004 B1: a link written before its level is its own part — said as a link, never the vague "changes".
+  links: ['link', 'links'],
+};
+const UNNAMED_PART: readonly [string, string] = ['change', 'changes'];
+
+/**
+ * A compound approval (#1712) reports each part: what was recorded, out of how
+ * many, and with which receipts. State exactly that — "Saved 6 of 6 starting
+ * values as version 2. Saved 1 of 2 option levels; 1 was not saved (…)." — never
+ * a vague "part of it".
+ *
+ * ⛔ EACH COUNT UNDER ITS OWN WORD (round-2 review of fix/agent-never-shows-instructions-or-codes, blocker 1).
+ * `recorded_count` is what LANDED. It was printed under "Not saved:", so a starting point whose third level stopped
+ * read "Not saved: 2 of 3 option levels" when 2 of the 3 WERE saved and 1 was not — and on the one-click path this
+ * line is all the user reads. What landed is said as saved, what did not as not saved, each with its own count.
+ */
+function partsLine(r: ToolResult): string | null {
+  const parts = Array.isArray(r.parts) ? (r.parts as ToolResult[]) : null;
+  if (parts === null || parts.length === 0) return null;
+  const bits = parts.map((p) => {
+    const [one, many] = PART_NAMES[String(p.part)] ?? UNNAMED_PART;
+    const rec = typeof p.recorded_count === 'number' ? p.recorded_count : null;
+    const req = typeof p.requested_count === 'number' ? p.requested_count : null;
+    const versions = versionPhrase(versionsOf(p));
+    if (p.ok === true) return `Saved ${rec !== null && req !== null ? `${rec} of ${req} ` : ''}${many}${versions}.`;
+    // A reason nobody has worded is left out rather than shown as a code.
+    const words = REFUSAL_WORDS[String(p.reason ?? p.refusal ?? '')];
+    const why = words !== undefined ? ` (${words})` : '';
+    if (rec === null || req === null) return `Not saved: ${many}${why}.`;
+    const missing = req - rec;
+    if (rec > 0) {
+      return missing > 0
+        ? `Saved ${rec} of ${req} ${many}${versions}; ${missing} ${missing === 1 ? 'was' : 'were'} not saved${why}.`
+        : `Saved ${rec} of ${req} ${many}${versions}.`;
+    }
+    return req === 1 ? `Not saved: the ${one}${why}.` : `Not saved: none of the ${req} ${many}${why}.`;
+  });
+  // A part the chain never reached is still not saved — say so.
+  if (r.ok !== true && r.refusal === 'partially_applied' && parts.every((p) => p.part !== 'option_levels') && parts.some((p) => p.part === 'values')) {
+    bits.push('Not saved: option levels (stopped before they were written).');
+  }
+  return bits.join(' ');
+}
+
+/**
+ * ⭐ COMPACTION MUST NOT QUIETLY SHRINK THE THINKING (Paul, 23 Sep: "Olumi pushes
+ * beyond the current model … surfaces missing factors and perspectives").
+ * `build_model_from_brief` keeps the first model readable (#1710) and returns what
+ * a compact retry left out; until now only the Agent was told, so a model that
+ * skipped it dropped the disclosure silently (Panel N7). The server states it, as
+ * ideas the user can bring back — never as deletions they must discover.
+ */
+const LEFT_OUT_SHOWN = 5;
+function leftOutLine(r: ToolResult): string {
+  const items = Array.isArray(r.left_out_to_stay_compact) ? (r.left_out_to_stay_compact as { label?: unknown }[]) : [];
+  const labels = items.map((i) => String(i.label ?? '').trim()).filter((l) => l !== '');
+  if (labels.length === 0) return '';
+  const shown = labels.slice(0, LEFT_OUT_SHOWN).join('; ');
+  const more = labels.length > LEFT_OUT_SHOWN ? `; and ${labels.length - LEFT_OUT_SHOWN} more` : '';
+  return ` To keep it readable, I left out: ${shown}${more}. Ask me to add any of them back.`;
+}
+
+/** Factors held as context because no option changes them — stated, so the user can say which option should. */
+function contextFactorsLine(r: ToolResult): string {
+  const labels = Array.isArray(r.treated_as_context) ? (r.treated_as_context as unknown[]).map((l) => String(l).trim()).filter((l) => l !== '') : [];
+  if (labels.length === 0) return '';
+  return ` No option changes ${labels.join(' or ')}, so I held ${labels.length === 1 ? 'it' : 'them'} as fixed context rather than ${labels.length === 1 ? 'a lever' : 'levers'} \u2014 tell me if one of the options should change ${labels.length === 1 ? 'it' : 'them'}.`;
+}
+
+/**
+ * ⭐ AX2 (DL #70 5850471417; measured on the served first reply, `f-20260926T201724Z/01`): 144 of its 315 words were
+ * this line, five whole questions, and the model had written 104. The reply now carries the TWO priority slots the
+ * producers fill on purpose — the goal-scope question first (`construction-goal-scope-is-named`), the withheld-option
+ * step after the deadline question (`construction-no-identical-options`) — and offers the rest. None is lost: the
+ * whole list stays on the tool result the Agent answers from, and on the wire as `_agent.open_questions`.
+ */
+const OPEN_QUESTIONS_SHOWN = 2;
+
+/** The questions the build parked instead of modelling — what to examine next, not answers. */
+function openQuestionsLine(r: ToolResult): string {
+  const qs = openQuestionsOf(r);
+  if (qs.length === 0) return '';
+  // Each question kept whole, so it still reads as a question the team can take up.
+  const shown = qs.slice(0, OPEN_QUESTIONS_SHOWN).map((q) => (/[?.!]$/.test(q) ? q : `${q}?`)).join(' ');
+  const rest = qs.length - OPEN_QUESTIONS_SHOWN;
+  // DL #70 5851835121: no promise the Agent does not keep ("Ask me for the other N" — asked, it summarised). The count
+  // alone is true on every surface: the UI's disclosure lists all of them (`_agent.open_questions`); raw text says how many.
+  const more = rest > 0 ? ` (${OPEN_QUESTIONS_SHOWN} of ${qs.length} shown.)` : '';
+  return ` Questions this model does not answer yet: ${shown}${more}`;
+}
+
+/** Every question a build parked, in the producer's order — the complete list, for the wire. */
+export function openQuestionsOf(r: ToolResult | undefined): string[] {
+  return Array.isArray(r?.open_questions) ? (r.open_questions as unknown[]).map((q) => String(q).trim()).filter((q) => q !== '') : [];
+}
+
+/**
+ * ⛔ A SAVED BUILD MUST NOT READ AS SAVED FIGURES (Paul's test on served `d5d5839`, #69 5832088673).
+ * The reply said "These are starting assumptions, not measurements. Shall I record them?" and Olumi
+ * then said "The model was saved as version 1." The build really was saved; the figures were not —
+ * but the line read as if they had been recorded before he agreed. So when the SAME turn leaves a
+ * proposal awaiting approval after the build, the line says what was saved and what was not.
+ *
+ * Derived from the turn's own tool results by the approve chip's own rule (`proposalsAwaitingApproval`),
+ * never from the model's prose. An authorisation refused before it named any proposal (a call withheld
+ * on a chip turn, a read-only refusal) consumed nothing, so it is not an unknown identity here.
+ */
+const FIGURE_PROPOSERS: readonly string[] = ['propose_starting_point', 'propose_assumptions', 'propose_option_interventions'];
+type AwaitingApproval = 'figures' | 'change' | null;
+function awaitingApproval(toolCalls: readonly { name: string }[], toolResults: readonly ToolResult[]): AwaitingApproval {
+  const calls = toolCalls
+    .map((c, i) => {
+      const r = toolResults[i];
+      return { name: c.name, ok: r?.ok === true, mutated: r?.mutated === true, ...(typeof r?.proposal_id === 'string' ? { proposal_id: r.proposal_id } : {}) };
+    })
+    .filter((c) => !(c.name === 'authorise_change' && !c.ok && !c.mutated && c.proposal_id === undefined));
+  const waiting = [...proposalsAwaitingApproval(calls).values()];
+  if (waiting.length === 0) return null;
+  return waiting.every((t) => FIGURE_PROPOSERS.includes(t)) ? 'figures' : 'change';
+}
+
+/** One authoritative line per write the turn attempted. */
+function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = null, versioned = true): string {
+  if (name === 'build_model_from_brief') {
+    const v = (r.model_version as { version_number?: unknown } | undefined)?.version_number;
+    const vs = typeof v === 'number' ? ` (version ${v})` : '';
+    if (r.ok === true && r.replayed === true) return `This model had already been built${vs}; nothing was built twice.`;
+    if (r.ok === true && r.mutated === true) {
+      const at = typeof v === 'number' ? ` as version ${v}` : '';
+      const saved = pending === null
+        ? `The model was saved${at}.`
+        // ⛔ MG sweep (#70 5851155478 b, DL 5851162511 item 3): "The figures above are not recorded until you approve
+        // them" was FALSE on Paul's path — Olumi's 300 subscribers and 7% churn were already saved and run on. Say what
+        // is saved (Olumi's estimates, beside the user's own figures) and what approval changes (they become the user's
+        // starting assumptions) — true whether a proposed figure is already in the model or not yet.
+        : `I saved the model I drafted${at}. ${pending === 'figures'
+          // F3 (DL 5851710093): the goal clause outranks this line, so it says the same two truths in fewer words.
+          ? 'Figures you did not give me are Olumi\u2019s estimates; the ones I proposed become yours when you approve them.'
+          : 'What I proposed above is not made until you approve it.'}`;
+      return `${saved}${leftOutLine(r)}${openQuestionsLine(r)}${contextFactorsLine(r)}`;
+    }
+    const unconfirmed = UNCONFIRMED_WORDS[String(r.refusal)];
+    if (unconfirmed !== undefined) return unconfirmed;
+    return `The model was not built: ${REFUSAL_WORDS[String(r.refusal)] ?? GENERIC_NOT_BUILT}.`;
+  }
+  const perPart = partsLine(r);
+  if (perPart !== null) return perPart;
+  if (r.ok === true && r.already_applied === true) {
+    const vs = versionsOf(r);
+    return `That change was already saved${vs.length > 0 ? ` (version ${vs[vs.length - 1]})` : ''}; nothing was written again.`;
+  }
+  if (r.ok === true && r.applied === true) {
+    const vs = versionsOf(r);
+    const partial = Array.isArray(r.failures) && r.failures.length > 0;
+    // ⛔ A GUEST'S SAVE IS NEVER VERSIONED (the guest store policy), so "no version number was recorded" read as a
+    // fault on every guest approval (Paul's test 1a298d6d; matrix C14). For a guest the confirmed save is the whole
+    // truth; for a signed-in user a missing version is still worth saying.
+    const head = vs.length > 0 ? `Saved${versionPhrase(vs)}.` : versioned ? 'Saved. No version number was recorded for it.' : 'Saved.';
+    return partial ? `${head} Some of it was not recorded — see above.` : head;
+  }
+  /**
+   * ⛔ A PARTIALLY ADDED OPTION SAYS WHAT LANDED AND WHAT REMAINS (independent review of #1788,
+   * 5806071796). The generic line said "the change was refused (unknown reason)" and dropped the
+   * named missing link. Composed only from the capability's readback-confirmed fields.
+   */
+  const opt = r.option as { label?: unknown; linked_to?: unknown } | undefined;
+  if (r.ok !== true && r.mutated === true && opt !== undefined && Array.isArray(r.not_linked) && r.not_linked.length > 0) {
+    const label = String(opt.label ?? 'The option');
+    const linkedTo = Array.isArray(opt.linked_to) ? opt.linked_to.map(String) : [];
+    const missing = (r.not_linked as { factor?: unknown }[]).map((n) => String(n.factor ?? ''));
+    const vs = versionsOf(r);
+    return `Partly saved${versionPhrase(vs)}: "${label}" was added${linkedTo.length > 0 ? ` and linked to ${linkedTo.join(', ')}` : ''}, `
+      + `but not yet linked to ${missing.join(', ')}. Approving the same change again will try only the missing ${missing.length === 1 ? 'link' : 'links'}; `
+      + 'if the model has changed since, you will be asked to confirm again.';
+  }
+  const code = String(r.refusal ?? '');
+  const unconfirmed = UNCONFIRMED_WORDS[code];
+  if (unconfirmed !== undefined) return unconfirmed;
+  const mutated = r.mutated === true;
+  return `${mutated ? 'Partly saved' : 'Not saved'}: ${REFUSAL_WORDS[code] ?? (mutated ? GENERIC_PARTLY_SAVED : GENERIC_NOT_SAVED)}.`;
+}
+
+export interface WriteOutcomeNarration {
+  /** The model's text with every completion claim removed — the server states what was saved. */
+  readonly text: string;
+  /** The server's own write-status line, or null when the turn neither wrote nor claimed to. */
+  readonly status: string | null;
+  /** Exactly what was removed, for the diagnostic trace. */
+  readonly stripped: readonly string[];
+}
+
+export function narrateWriteOutcome(
+  text: string,
+  toolCalls: readonly { name: string }[],
+  toolResults: readonly ToolResult[],
+  /** False for a guest, whose saves are never versioned: a save without a version is then not an anomaly. */
+  opts: { readonly versioned?: boolean } = {},
+): WriteOutcomeNarration {
+  const writes = toolCalls
+    .map((c, i) => ({ name: c.name, result: toolResults[i] }))
+    .filter((w): w is { name: string; result: ToolResult } => WRITE_TOOLS.includes(w.name) && w.result !== undefined);
+
+  const stripped: string[] = [];
+  let out = text;
+  /**
+   * ⛔ THE SERVER OWNS EVERY COMPLETION CLAIM ON EVERY TURN — not only when
+   * nothing landed. Independent pre-read of #1712/#1720 (PR #1720 comment
+   * 5790103315): a partial approval returns `mutated: true` (values landed,
+   * levels refused), so a model sentence "Saved all values and option levels"
+   * survived beside the server's own "Partly saved". A model-authored completion
+   * sentence is therefore always removed; the extent saved/refused is stated
+   * from the structured results below. Non-write reasoning is kept.
+   */
+  {
+    out = text
+      .split('\n')
+      .map((line) => {
+        const sentences = line.split(/(?<=[.!?])\s+/);
+        const kept = sentences.filter((s) => {
+          if (assertsCompletedWrite(s)) { stripped.push(s.trim()); return false; }
+          return true;
+        });
+        return kept.length === sentences.length ? line : kept.join(' ');
+      })
+      .filter((line, i, all) => !(line.trim() === '' && (all[i - 1] ?? '').trim() === ''))
+      .join('\n')
+      .trim();
+  }
+
+  const pending = awaitingApproval(toolCalls, toolResults);
+  const lines = writes.map((w) => statusLine(w.name, w.result, pending, opts.versioned ?? true));
+  const status = lines.length > 0
+    ? lines.join(' ')
+    : stripped.length > 0 ? 'Nothing was saved this turn.' : null;
+  return { text: out, status, stripped };
+}
+
+/** The user-visible text: the model's (checked) words, then the server's status line. */
+/**
+ * ⛔ WHAT A PROPOSAL LEAVES OUT IS SAID BY OLUMI, NOT LEFT TO THE MODEL (independent review of
+ * #1800, 5806926323 / 5807008891). A named input that cannot hold a value (a risk, an outcome) is
+ * dropped from the proposal; the one-click approval is generic, and a model reply that says only
+ * "here is a starting point" would offer consent while the user-named input was silently absent.
+ * This line is composed from the proposers' own results and rides with the status line, so the
+ * response itself names every omission and why BEFORE the approval it accompanies.
+ */
+export function notAdoptedLine(
+  toolCalls: readonly { name: string }[],
+  toolResults: readonly ToolResult[],
+): string | null {
+  const PROPOSERS = ['propose_assumptions', 'propose_starting_point'];
+  const seen = new Set<string>();
+  const items: string[] = [];
+  toolCalls.forEach((c, i) => {
+    if (!PROPOSERS.includes(c.name)) return;
+    const r = toolResults[i] as { not_a_factor?: unknown; assumptions_refused?: { not_a_factor?: unknown } } | undefined;
+    const list = [
+      ...(Array.isArray(r?.not_a_factor) ? r!.not_a_factor : []),
+      ...(Array.isArray(r?.assumptions_refused?.not_a_factor) ? r!.assumptions_refused!.not_a_factor as unknown[] : []),
+    ] as { label?: unknown; kind?: unknown }[];
+    for (const n of list) {
+      const label = String(n?.label ?? '').trim();
+      if (label === '' || seen.has(label)) continue;
+      seen.add(label);
+      const kind = String(n?.kind ?? '').trim();
+      items.push(kind !== '' ? `${label} (${/^[aeiou]/i.test(kind) ? 'an' : 'a'} ${kind})` : label);
+    }
+  });
+  if (items.length === 0) return null;
+  return `Not included in this proposal: ${items.join('; ')}. Only a factor can hold a starting value, so ${items.length === 1 ? 'it was' : 'they were'} left out — approving adds nothing for ${items.length === 1 ? 'it' : 'them'}.`;
+}
+
+export function withWriteOutcome(body: string, status: string | null): string {
+  if (status === null) return body;
+  return body.trim().length > 0 ? `${body}\n\n${status}` : status;
+}
+
+/**
+ * ⭐ AN AUTHORISED REVISION SAYS WHAT IT DID TO THE RESULT ON SCREEN (R&C 5842738466; Delivery Lead 5842745019).
+ * Served on e3b0844: the user approved "Monthly churn 5% → 4%", and the reply was "Saved. … The analysis can run
+ * now." — never that the analysis on screen predates the change. Deterministic from THIS turn's typed readback only:
+ * `run_state` stale because the graph changed, and `requires_rerun`. "Run it again" only when the same verdict the
+ * Run control reads admits a run; otherwise the readiness sentence says why it cannot. Nothing about what a re-run
+ * will check (a limit may still be unchecked), and no figure.
+ */
+export function staleResultLine(analysisState: unknown, analysisReady: unknown): string | null {
+  const s = analysisState as { run_state?: { kind?: unknown; cause?: unknown }; requires_rerun?: unknown } | undefined;
+  if (s?.run_state?.kind !== 'complete_stale' || s.run_state.cause !== 'graph_changed' || s.requires_rerun !== true) return null;
+  const mayRun = (analysisReady as { may_run?: unknown } | undefined)?.may_run === true;
+  return mayRun
+    ? 'The analysis on screen was computed before this change; run it again to see the comparison with this change.'
+    : 'The analysis on screen was computed before this change.';
+}

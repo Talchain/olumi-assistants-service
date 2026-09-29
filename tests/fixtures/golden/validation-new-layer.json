@@ -1,0 +1,130 @@
+{
+  "name": "validation-new-layer",
+  "description": "Tests new Pre-Analysis Validation Layer codes: STRENGTH_CLUSTERING, SAME_LEVER_OPTIONS, MISSING_BASELINE, GOAL_NO_BASELINE_VALUE, EDGE_ORIGIN_DEFAULTED",
+  "brief": "Should we hire more engineers or contractors to accelerate delivery?",
+  "endpoint": "draft_graph",
+  "recorded_response": {
+    "graph": {
+      "version": "1",
+      "default_seed": 42,
+      "nodes": [
+        { "id": "decision_1", "kind": "decision", "label": "How should we accelerate delivery?" },
+        { "id": "opt_hire_engineers", "kind": "option", "label": "Hire full-time engineers" },
+        { "id": "opt_hire_contractors", "kind": "option", "label": "Hire contractors" },
+        { "id": "fac_team_size", "kind": "factor", "label": "Team Size", "category": "controllable" },
+        { "id": "fac_velocity", "kind": "factor", "label": "Development Velocity", "category": "controllable" },
+        { "id": "fac_cost", "kind": "factor", "label": "Monthly Costs", "category": "observable" },
+        { "id": "outcome_delivery", "kind": "outcome", "label": "Delivery Speed" },
+        { "id": "goal_1", "kind": "goal", "label": "Accelerate product delivery" }
+      ],
+      "edges": [
+        { "from": "decision_1", "to": "opt_hire_engineers", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "decision_1", "to": "opt_hire_contractors", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "opt_hire_engineers", "to": "fac_team_size", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "opt_hire_engineers", "to": "fac_velocity", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "opt_hire_contractors", "to": "fac_team_size", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "opt_hire_contractors", "to": "fac_velocity", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "fac_team_size", "to": "outcome_delivery", "strength_mean": 0.5, "strength_std": 0.15, "belief_exists": 0.85, "effect_direction": "positive" },
+        { "from": "fac_velocity", "to": "outcome_delivery", "strength_mean": 0.5, "strength_std": 0.15, "belief_exists": 0.85, "effect_direction": "positive" },
+        { "from": "fac_cost", "to": "outcome_delivery", "strength_mean": 0.5, "strength_std": 0.15, "belief_exists": 0.8, "effect_direction": "positive" },
+        { "from": "outcome_delivery", "to": "goal_1", "strength_mean": 0.5, "strength_std": 0.1, "belief_exists": 1, "effect_direction": "positive" }
+      ],
+      "meta": { "roots": [], "leaves": [], "suggested_positions": {}, "source": "assistant" }
+    },
+    "validation": {
+      "passed": true,
+      "errors": [],
+      "warnings": [
+        {
+          "code": "STRENGTH_CLUSTERING",
+          "severity": "warning",
+          "message": "Edge strengths have low coefficient of variation (CV < 0.3)",
+          "path": "edges",
+          "context": { "cv": 0.0, "threshold": 0.3, "affected_edges": 4 }
+        },
+        {
+          "code": "SAME_LEVER_OPTIONS",
+          "severity": "warning",
+          "message": "Options share >60% intervention targets",
+          "path": "options",
+          "context": {
+            "option_pairs": [
+              { "option1": "opt_hire_engineers", "option2": "opt_hire_contractors", "overlap_pct": 100 }
+            ]
+          }
+        },
+        {
+          "code": "MISSING_BASELINE",
+          "severity": "warning",
+          "message": "No status quo / baseline option detected",
+          "path": "options",
+          "context": { "option_count": 2 }
+        },
+        {
+          "code": "GOAL_NO_BASELINE_VALUE",
+          "severity": "warning",
+          "message": "Goal node has no observed_state.value set",
+          "path": "nodes.goal_1",
+          "context": { "goal_node_id": "goal_1" }
+        }
+      ],
+      "info": [
+        {
+          "code": "EDGE_ORIGIN_DEFAULTED",
+          "severity": "info",
+          "message": "Edge origin was not specified, defaulted to 'ai'",
+          "path": "edges",
+          "context": { "defaulted_count": 10 }
+        }
+      ]
+    },
+    "draft_warnings": [
+      {
+        "id": "strength_clustering",
+        "severity": "medium",
+        "node_ids": [],
+        "affected_edge_ids": ["edge_6", "edge_7", "edge_8", "edge_9"],
+        "explanation": "Edge strength CV is 0.00 (threshold: 0.30) — strengths are clustered.",
+        "fix_hint": "Review edge strengths — low variance suggests estimates may be rough approximations"
+      },
+      {
+        "id": "same_lever_options",
+        "severity": "medium",
+        "node_ids": ["opt_hire_engineers", "opt_hire_contractors"],
+        "affected_edge_ids": [],
+        "explanation": "1 option pair(s) share >60% intervention targets.",
+        "fix_hint": "Options share most intervention targets — consider differentiating approaches"
+      },
+      {
+        "id": "missing_baseline",
+        "severity": "low",
+        "node_ids": [],
+        "affected_edge_ids": [],
+        "explanation": "No status quo / baseline option detected.",
+        "fix_hint": "Add a status quo option to enable comparison with no action"
+      },
+      {
+        "id": "goal_no_baseline_value",
+        "severity": "low",
+        "node_ids": ["goal_1"],
+        "affected_edge_ids": [],
+        "explanation": "Goal node has no observed_state.value set.",
+        "fix_hint": "Set goal node's observed_state.value to establish baseline for comparison"
+      }
+    ]
+  },
+  "assertions": {
+    "has_decision_node": true,
+    "has_goal_node": true,
+    "option_count_gte": 2,
+    "validation_passes": true,
+    "validation_warning_count_gte": 3,
+    "validation_has_warning_codes": ["STRENGTH_CLUSTERING", "SAME_LEVER_OPTIONS", "MISSING_BASELINE", "GOAL_NO_BASELINE_VALUE"],
+    "draft_warnings_has": [
+      { "id": "strength_clustering", "severity": "medium" },
+      { "id": "same_lever_options", "severity": "medium" },
+      { "id": "missing_baseline", "severity": "low" },
+      { "id": "goal_no_baseline_value", "severity": "low" }
+    ]
+  }
+}

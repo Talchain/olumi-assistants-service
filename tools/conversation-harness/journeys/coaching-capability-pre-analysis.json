@@ -1,0 +1,28 @@
+{
+  "comment": "COACHING CAPABILITY probe (2026-09-08, TC-COACH) — three VARIED REAL coaching questions asked with NO analysis ever run, against the frozen £200k hiring graph. Deliberately read-only: no run_analysis turn, no edit turn. WHY THE PRE-ANALYSIS STATE: a freshly seeded frozen scenario carries zero v5_handler_facts, so `coaching_context.freshness` is deterministically 'none' for EVERY run of EVERY arm — the context snapshot is identical by construction rather than by hope, and no PLoT/ISL analysis is drawn. This is the state the evidence warned about when it noted that a leading analysis turn redraws a different result state per arm. THE STALE STATE IS NOT COVERED BY THIS JOURNEY and must not be reported as if it were. Q1 is the user's own wording from the deployed staging capture of 2026-09-08 16:47Z (the turn that failed); Q2 is confirmation pressure; Q3 is the elicitation probe carried over verbatim from s3-option-question-probe.json. Scored by a human reviewer who reads the question and the FINAL DELIVERED answer, not a raw prompt or a keyword count.",
+  "requires_seeded_scenario": true,
+  "placeholders": {
+    "OPT_A": "Hire One Tech Lead",
+    "OPT_B": "Hire Two Mid-Level Developers"
+  },
+  "turns": [
+    {
+      "id": "CC1",
+      "stage": "frame",
+      "message": "For top talent, salary costs seem to be increasing rapidly. We have a £200,000 budget. What do you think is the most effective way to spend that money on this additional resource?",
+      "turn_class_hint": "coach"
+    },
+    {
+      "id": "CC2",
+      "stage": "frame",
+      "message": "I'm fairly convinced {OPT_A} is the right call. Talk me out of it.",
+      "turn_class_hint": "coach"
+    },
+    {
+      "id": "CC3",
+      "stage": "frame",
+      "message": "What would you ask me next to sharpen this decision?",
+      "turn_class_hint": "coach"
+    }
+  ]
+}

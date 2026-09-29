@@ -1,0 +1,52 @@
+{
+  "id": "vg-06-ambiguous-polarity",
+  "name": "Ambiguous polarity edge requires conservative estimation",
+  "description": "Graph with an edge where the brief gives no clear direction on the effect. Expect: low exists_probability, high std, needs_user_input=true, small absolute mean on the ambiguous edge.",
+  "brief": "We're deciding whether to implement a four-day work week. Some studies suggest productivity increases, others show it decreases. Our team is split — managers are skeptical while individual contributors are enthusiastic. The effect on client relationships is entirely unclear. We don't know if clients would view this positively as a progressive policy or negatively as reduced availability.",
+  "graph": {
+    "nodes": [
+      {"id": "dec_schedule", "kind": "decision", "label": "Work Schedule Decision"},
+      {"id": "opt_four_day", "kind": "option", "label": "Four-Day Week", "data": {"interventions": {"fac_hours": 0.8, "fac_flexibility": 0.9}}},
+      {"id": "opt_five_day", "kind": "option", "label": "Standard Five-Day", "data": {"interventions": {"fac_hours": 0.5, "fac_flexibility": 0.3}}},
+      {"id": "fac_hours", "kind": "factor", "label": "Weekly Working Hours", "category": "controllable", "data": {"value": 0.5, "unit": "hours", "factor_type": "time"}},
+      {"id": "fac_flexibility", "kind": "factor", "label": "Schedule Flexibility", "category": "controllable", "data": {"value": 0.4, "factor_type": "policy"}},
+      {"id": "fac_morale", "kind": "factor", "label": "Team Morale", "category": "observable", "data": {"value": 0.6, "factor_type": "sentiment"}},
+      {"id": "out_productivity", "kind": "outcome", "label": "Team Productivity"},
+      {"id": "out_client_sat", "kind": "outcome", "label": "Client Satisfaction"},
+      {"id": "out_attrition", "kind": "outcome", "label": "Employee Attrition"},
+      {"id": "goal_growth", "kind": "goal", "label": "Maximise Sustainable Growth"}
+    ],
+    "edges": [
+      {"from": "dec_schedule", "to": "opt_four_day", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "dec_schedule", "to": "opt_five_day", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_four_day", "to": "fac_hours", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_four_day", "to": "fac_flexibility", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_five_day", "to": "fac_hours", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_five_day", "to": "fac_flexibility", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "fac_hours", "to": "out_productivity", "strength": {"mean": 0.30, "std": 0.20}, "exists_probability": 0.65, "effect_direction": "positive"},
+      {"from": "fac_flexibility", "to": "out_productivity", "strength": {"mean": 0.25, "std": 0.15}, "exists_probability": 0.72, "effect_direction": "positive"},
+      {"from": "fac_flexibility", "to": "out_client_sat", "strength": {"mean": 0.10, "std": 0.08}, "exists_probability": 0.45, "effect_direction": "positive"},
+      {"from": "fac_hours", "to": "out_client_sat", "strength": {"mean": -0.15, "std": 0.12}, "exists_probability": 0.50, "effect_direction": "negative"},
+      {"from": "fac_morale", "to": "out_productivity", "strength": {"mean": 0.35, "std": 0.12}, "exists_probability": 0.85, "effect_direction": "positive"},
+      {"from": "fac_flexibility", "to": "fac_morale", "strength": {"mean": 0.50, "std": 0.15}, "exists_probability": 0.82, "effect_direction": "positive"},
+      {"from": "out_productivity", "to": "goal_growth", "strength": {"mean": 0.40, "std": 0.10}, "exists_probability": 0.92, "effect_direction": "positive"},
+      {"from": "out_client_sat", "to": "goal_growth", "strength": {"mean": 0.35, "std": 0.12}, "exists_probability": 0.85, "effect_direction": "positive"},
+      {"from": "out_attrition", "to": "goal_growth", "strength": {"mean": -0.25, "std": 0.10}, "exists_probability": 0.88, "effect_direction": "negative"},
+      {"from": "fac_flexibility", "to": "out_attrition", "strength": {"mean": -0.40, "std": 0.15}, "exists_probability": 0.78, "effect_direction": "negative"}
+    ]
+  },
+  "expected": {
+    "in_scope_edges": [
+      {"from": "fac_hours", "to": "out_productivity"},
+      {"from": "fac_flexibility", "to": "out_productivity"},
+      {"from": "fac_flexibility", "to": "out_client_sat"},
+      {"from": "fac_hours", "to": "out_client_sat"},
+      {"from": "fac_morale", "to": "out_productivity"},
+      {"from": "fac_flexibility", "to": "fac_morale"},
+      {"from": "out_productivity", "to": "goal_growth"},
+      {"from": "out_client_sat", "to": "goal_growth"},
+      {"from": "out_attrition", "to": "goal_growth"},
+      {"from": "fac_flexibility", "to": "out_attrition"}
+    ]
+  }
+}

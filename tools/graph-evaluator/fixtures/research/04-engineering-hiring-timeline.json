@@ -1,0 +1,16 @@
+{
+  "id": "rt-04-engineering-hiring-timeline",
+  "name": "Engineering hiring timeline",
+  "description": "Query for typical time-to-hire benchmarks for senior software engineers",
+  "query": "What is the average time to hire a senior software engineer in 2024? Include time-to-fill benchmarks by company size and region.",
+  "context_hint": "Decision model for a headcount expansion decision. Need to calibrate the hiring_timeline factor.",
+  "target_factor": "Engineering Hiring Timeline",
+  "expected": {
+    "min_findings_length": 100,
+    "min_source_count": 1,
+    "must_contain_keywords": ["hire", "engineer"],
+    "expects_numeric_values": true,
+    "expects_confidence_note": true,
+    "forbidden_substrings": []
+  }
+}

@@ -1,0 +1,251 @@
+/**
+ * THE IDENTITY ASK — ISL's blocked 422 `IDENTITY_NOT_EVALUATED` said as the one question that unblocks it, never as
+ * "the analysis failed" (batch 7; R&C CLAIM #72 5860867216; AI Quality meaning spec #72 5860888736).
+ *
+ * ── WHY ───────────────────────────────────────────────────────────────────
+ * ISL #187 evaluates a declared accounting identity (MRR = price × subscribers) in user units, or WITHHOLDS the
+ * whole analysis rather than approximate it, when the decision depends on it. Before this module that honest
+ * refusal reached the user as the generic blocked copy ("Try simplifying options or constraints"), which names
+ * nothing the user can fix. What unblocks it is always one question about the figures that define the identity.
+ *
+ * ── WHAT IT READS (typed facts only — never the critique's prose message) ──
+ *   · the critique's typed `identity` block (R&C → CLOUD-1 #72 5860893532): `withheld_reason` and, for
+ *     `identity_inconsistent`, the `reconstructed` / `stated` figures ISL compared, in the target's user units;
+ *   · without it, only `affected_node_ids` (`[target, ...participants]`, typed today): the ask then names the
+ *     identity and makes NO numeric claim;
+ *   · CEE's OWN graph for the words: each node's `label`, the target's `nonlinear_identity` declaration (which
+ *     participants are operands; the rest are addends), whose figure the target's level is
+ *     (`classifyValueSource`, the one authority), and each participant's own level/unit.
+ * No figure is recomputed here: the only numbers said are the two ISL compared.
+ */
+import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
+import { sayLevel } from './bound-graph.js';
+import { sayFigure as sayLaneFigure } from '../agent-lane/say-figure.js';
+
+export const IDENTITY_NOT_EVALUATED_CODE = 'IDENTITY_NOT_EVALUATED';
+
+export const IDENTITY_WITHHELD_REASONS = [
+  'identity_inconsistent',
+  'identity_operand_missing',
+  'identity_zero_level',
+  'identity_frame_missing',
+] as const;
+export type IdentityWithheldReason = (typeof IDENTITY_WITHHELD_REASONS)[number];
+/** `unstated`: the critique carried no typed reason, so the ask names the identity and nothing more. */
+export type IdentityAskReason = IdentityWithheldReason | 'unstated';
+
+export interface IdentityAsk {
+  readonly reason: IdentityAskReason;
+  readonly node_id: string;
+  readonly assistant_text: string;
+  readonly chip_label: string;
+  readonly chip_message: string;
+}
+
+interface Withheld {
+  readonly nodeId: string;
+  readonly participants: readonly string[];
+  readonly reason: IdentityAskReason;
+  readonly reconstructed: number | null;
+  readonly stated: number | null;
+}
+
+type Rec = Record<string, unknown>;
+const rec = (v: unknown): Rec | null => (v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : null);
+const finite = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+const ids = (v: unknown): string[] | null =>
+  Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === 'string' && x.length > 0) ? (v as string[]) : null;
+
+function readWithheld(critique: Rec): Withheld | null {
+  const typed = rec(critique.identity);
+  if (typed !== null) {
+    const nodeId = typeof typed.node_id === 'string' && typed.node_id.length > 0 ? typed.node_id : null;
+    const participants = ids(typed.participants);
+    const reason = (IDENTITY_WITHHELD_REASONS as readonly unknown[]).includes(typed.withheld_reason)
+      ? (typed.withheld_reason as IdentityWithheldReason)
+      : null;
+    if (nodeId !== null && participants !== null && reason !== null) {
+      return { nodeId, participants, reason, reconstructed: finite(typed.reconstructed), stated: finite(typed.stated) };
+    }
+  }
+  const affected = ids(critique.affected_node_ids);
+  if (affected === null || affected.length < 2) return null;
+  return { nodeId: affected[0]!, participants: affected.slice(1), reason: 'unstated', reconstructed: null, stated: null };
+}
+
+/** The prefix symbol for an ISO currency code, from the ONE currency alphabet (never a hand-written `£$€`). */
+const CODE_TO_PREFIX_SYMBOL: ReadonlyMap<string, string> = (() => {
+  const out = new Map<string, string>();
+  for (const [symbol, code] of Object.entries(CURRENCY_SYMBOL_TO_CODE)) {
+    if (!/^[a-z]+$/i.test(symbol) && !out.has(code.toUpperCase())) out.set(code.toUpperCase(), symbol);
+  }
+  return out;
+})();
+
+/**
+ * A figure in its node's unit, as a person says it: "GBP MRR" on "MRR" → "£75,000"; "GBP per month" → "£49 per
+ * month"; "subscribers" → "1,500 subscribers". A currency code's remainder is dropped only when it repeats the
+ * node's own name ("MRR" on "MRR").
+ */
+export function sayFigure(value: number, unit: unknown, label: string): string {
+  const u = typeof unit === 'string' ? unit.trim() : '';
+  // The leading token up to a space OR a "/" (AIQ 5887805333: "GBP/subscriber/month" read as "49 GBP/subscriber/month").
+  const head = /^([^\s/]+)(.*)$/.exec(u);
+  const lead = head?.[1] ?? '';
+  const isMoney = CODE_TO_PREFIX_SYMBOL.has(lead.toUpperCase()) || [...CODE_TO_PREFIX_SYMBOL.values()].includes(lead);
+  if (!isMoney) return sayLevel(Math.round(value * 100) / 100, u);
+  const rest = (head?.[2] ?? '').trim();
+  // Money is said in whole units here (a reconstructed total, never pence), through the lane's ONE figure formatter.
+  return sayLaneFigure(Math.round(value), rest === '' || label.toLowerCase().includes(rest.toLowerCase()) ? lead : u);
+}
+
+const q = (label: string): string => `“${label}”`;
+const andList = (xs: readonly string[]): string =>
+  xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
+
+/**
+ * The ask for the first `IDENTITY_NOT_EVALUATED` critique, or null (no such critique; a node the graph does not
+ * hold or label — the caller then keeps the code's generic copy, which still never says "failed").
+ */
+export function composeIdentityNotEvaluatedAsk(critiques: unknown, graph: unknown): IdentityAsk | null {
+  const critique = (Array.isArray(critiques) ? critiques : []).map(rec).find((c) => c?.code === IDENTITY_NOT_EVALUATED_CODE);
+  if (critique === undefined || critique === null) return null;
+  const w = readWithheld(critique);
+  const nodes = rec(graph)?.nodes;
+  if (w === null || !Array.isArray(nodes)) return null;
+  const byId = new Map<string, Rec>();
+  for (const n of nodes.map(rec)) if (n !== null && typeof n.id === 'string') byId.set(n.id, n);
+  const labelOf = (id: string): string | null => {
+    const l = byId.get(id)?.label;
+    return typeof l === 'string' && l.trim() !== '' ? l.trim() : null;
+  };
+  const target = byId.get(w.nodeId);
+  const T = labelOf(w.nodeId);
+  const partLabels = w.participants.map(labelOf);
+  if (target === undefined || T === null || partLabels.some((l) => l === null)) return null;
+
+  // The formula from CEE's OWN declaration: its operands joined by the operation, the other participants added.
+  const declared = rec(target.nonlinear_identity);
+  const operation = declared?.operation === 'product' || declared?.operation === 'sum' ? declared.operation : null;
+  const declaredOperands = ids(declared?.factor_ids) ?? [];
+  const operands = w.participants.filter((p) => declaredOperands.includes(p));
+  const addends = w.participants.filter((p) => !operands.includes(p));
+  const say = (xs: readonly string[]): string[] => xs.map((id) => q(labelOf(id)!));
+  const formula = operation !== null && operands.length > 0
+    ? `${say(operands).join(operation === 'product' ? ' × ' : ' + ')}${addends.length > 0 ? ` + ${say(addends).join(' + ')}` : ''}`
+    : null;
+  // "as “P” × “S”" when CEE's declaration gives the formula; "from “P” and “S”" when it does not.
+  const asFormula = formula !== null ? `as ${formula}` : `from ${andList(say(w.participants))}`;
+  const levelOf = (id: string): number | null => {
+    const os = rec(byId.get(id)?.observed_state);
+    return finite(os?.raw_value) ?? finite(os?.value);
+  };
+
+  const unstated = (): IdentityAsk => ({
+    reason: 'unstated',
+    node_id: w.nodeId,
+    assistant_text:
+      `${q(T)} is worked out ${asFormula}, and it could not be worked out exactly from `
+      + 'the figures in the model, so Olumi held the analysis back rather than approximate it. '
+      + 'Which of these figures needs correcting?',
+    chip_label: 'Check the figures',
+    chip_message: `Help me check the figures that make up ${q(T)}.`,
+  });
+
+  switch (w.reason) {
+    case 'identity_inconsistent': {
+      if (w.reconstructed === null || w.stated === null || formula === null) return unstated();
+      const unit = rec(target.observed_state)?.unit;
+      const R = sayFigure(w.reconstructed, unit, T);
+      const S = sayFigure(w.stated, unit, T);
+      const owner = classifyValueSource(rec(target.observed_state)?.source);
+      const statedClause = owner === 'user_stated' || owner === 'user_ratified'
+        ? `you said ${q(T)} is ${S}`
+        : owner === 'ai_drafted' || owner === 'system_repaired'
+          ? `Olumi's estimate of ${q(T)} is ${S}`
+          : `the model has ${q(T)} at ${S}`;
+      return {
+        reason: w.reason,
+        node_id: w.nodeId,
+        assistant_text:
+          `The figures don't add up: ${formula} gives ${R}, but ${statedClause}. Which is right? `
+          + `Or is there more ${q(T)} from somewhere that isn't in the model?`,
+        chip_label: 'Check the figures',
+        chip_message: `The figures for ${q(T)} don't add up. Help me work out which one is right.`,
+      };
+    }
+    case 'identity_operand_missing': {
+      const missing = w.participants.filter((p) => levelOf(p) === null);
+      if (missing.length === 0) return unstated();
+      const one = missing.length === 1;
+      return {
+        reason: w.reason,
+        node_id: w.nodeId,
+        assistant_text: `To work out ${q(T)} ${asFormula}, I need ${andList(say(missing))}: `
+          + `what ${one ? 'is it' : 'are they'} today?`,
+        chip_label: one ? 'Give its value' : 'Give the values',
+        chip_message: `What ${one ? 'is' : 'are'} ${andList(say(missing))} today? Ask me for ${one ? 'it' : 'them'}.`,
+      };
+    }
+    case 'identity_zero_level': {
+      const zeros = w.participants.filter((p) => levelOf(p) === 0);
+      const zeroTarget = zeros.length === 0 && (w.stated === 0 || levelOf(w.nodeId) === 0);
+      if (zeros.length === 0 && !zeroTarget) return unstated();
+      const named = zeroTarget ? q(T) : andList(say(zeros));
+      const one = zeroTarget || zeros.length === 1;
+      return {
+        reason: w.reason,
+        node_id: w.nodeId,
+        assistant_text: `${named} ${one ? 'is' : 'are'} 0 today, so ${q(T)} can't be worked out ${asFormula}. `
+          + `Is 0 right, or what ${one ? 'is it' : 'are they'}?`,
+        chip_label: 'Check the zero',
+        chip_message: `Is 0 right for ${named}? Ask me what ${one ? 'it is' : 'they are'} today.`,
+      };
+    }
+    case 'identity_frame_missing': {
+      const hasUnit = (id: string): boolean => {
+        const n = byId.get(id);
+        const u = rec(n?.observed_state)?.unit ?? (id === w.nodeId ? n?.goal_threshold_unit : undefined);
+        return typeof u === 'string' && u.trim() !== '';
+      };
+      const unitless = w.participants.filter((p) => !hasUnit(p));
+      // ISL's rule 1 frames the identity NODE as well as its operands (R3 #72 5884883932, DL 5884896233). Every
+      // operand in its unit and the target in none → ask for the TARGET's, never again for units the user gave.
+      if (unitless.length === 0 && !hasUnit(w.nodeId)) {
+        // Only a GOAL has a target of its own; an outcome's unit comes from today's figure alone (AIQ 5885470243).
+        const aim = target.kind === 'goal' ? ' or what are you aiming for' : '';
+        return {
+          reason: w.reason,
+          node_id: w.nodeId,
+          assistant_text: `I can't work out ${q(T)} ${asFormula} without knowing what ${q(T)} is measured in: `
+            + `what unit is it in, and roughly what is it today${aim}?`,
+          chip_label: 'Give its unit',
+          chip_message: `Ask me which unit ${q(T)} is in.`,
+        };
+      }
+      const named = andList(say(unitless.length > 0 ? unitless : w.participants));
+      const one = (unitless.length > 0 ? unitless : w.participants).length === 1;
+      return {
+        reason: w.reason,
+        node_id: w.nodeId,
+        assistant_text: `I can't put ${named} on the same scale as ${q(T)}: what unit ${one ? 'is it' : 'is each of them'} in?`,
+        chip_label: 'Give the unit',
+        chip_message: `Ask me which unit ${named} ${one ? 'is' : 'are'} in.`,
+      };
+    }
+    default:
+      return unstated();
+  }
+}
+
+/** The composer's reader: a well-formed ask carried on a blocked failure's details, or null. */
+export function readIdentityAsk(v: unknown): IdentityAsk | null {
+  const r = rec(v);
+  if (r === null) return null;
+  const reasons: readonly unknown[] = [...IDENTITY_WITHHELD_REASONS, 'unstated'];
+  const s = (k: string): string | null => (typeof r[k] === 'string' && (r[k] as string).trim() !== '' ? (r[k] as string) : null);
+  const [text, label, message, nodeId] = [s('assistant_text'), s('chip_label'), s('chip_message'), s('node_id')];
+  if (!reasons.includes(r.reason) || text === null || label === null || message === null || nodeId === null) return null;
+  return { reason: r.reason as IdentityAskReason, node_id: nodeId, assistant_text: text, chip_label: label, chip_message: message };
+}

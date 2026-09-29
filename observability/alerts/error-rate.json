@@ -1,0 +1,19 @@
+{
+  "name": "Draft Graph Error Rate > 5%",
+  "type": "metric alert",
+  "query": "avg(last_10m):((sum:olumi.assistants.draft.sse.errors{*}.as_rate() / sum:olumi.assistants.draft.completed{*}.as_rate()) * 100) > 5",
+  "message": "## Draft Graph Error Rate Elevated\n\nThe error rate for draft-graph endpoint has exceeded 5%.\n\n**Current:** {{value}}%\n**Threshold:** 5%\n**Environment:** {{env.name}}\n\n**Impact:** Users experiencing failures when generating drafts.\n\n**Common Causes:**\n- Anthropic API errors or rate limiting\n- Engine validation failures\n- Network connectivity issues\n- Deployment regression\n\n**Actions:**\n1. Check error logs for patterns: `service:olumi-assistants env:{{env.name}} error`\n2. Verify Anthropic API status\n3. Check engine /v1/validate endpoint health\n4. Review recent deployments\n\n**Dashboard:** [Draft Service Metrics](https://app.datadoghq.com/dashboard/draft-service)\n\n@slack-olumi-alerts",
+  "tags": ["service:olumi-assistants", "team:olumi", "priority:p2"],
+  "options": {
+    "thresholds": {
+      "critical": 5,
+      "warning": 2
+    },
+    "notify_no_data": false,
+    "notify_audit": true,
+    "require_full_window": true,
+    "new_group_delay": 60,
+    "include_tags": true,
+    "evaluation_delay": 60
+  }
+}

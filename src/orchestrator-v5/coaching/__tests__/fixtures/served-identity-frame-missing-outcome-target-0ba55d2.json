@@ -1,0 +1,332 @@
+{
+ "_source": "Canvas #72 5885532009: served UI 15f59705 x CEE 0ba55d2, turn 1 (Run) reply chip chip_prompt_identity_identity_frame_missing; draft_graph verbatim",
+ "graph": {
+  "nodes": [
+   {
+    "id": "we_re_deciding_whether_to_keep_pro_free_or_start_charging_59_per_subscriber_per_month",
+    "kind": "decision",
+    "label": "We're deciding whether to keep…",
+    "provenance": "from_brief",
+    "description": "We're deciding whether to keep Pro free or start charging £59 per subscriber per month."
+   },
+   {
+    "id": "total_mrr",
+    "kind": "goal",
+    "label": "total MRR",
+    "provenance": "from_brief",
+    "goal_direction": ">=",
+    "goal_threshold": 0.8,
+    "threshold_source": "brief_extraction",
+    "goal_threshold_cap": 125000,
+    "goal_threshold_raw": 100000,
+    "goal_horizon_months": 12,
+    "goal_threshold_unit": "£ per month",
+    "goal_threshold_frame": "level",
+    "goal_threshold_cap_provenance": "target_derived_headroom"
+   },
+   {
+    "id": "keep_pro_free",
+    "kind": "option",
+    "label": "Keep Pro Free",
+    "provenance": "from_brief",
+    "is_baseline": true
+   },
+   {
+    "id": "charge_59",
+    "kind": "option",
+    "label": "Charge £59",
+    "provenance": "from_brief",
+    "interventions": {
+     "pro_price": {
+      "unit": "£ per subscriber per month",
+      "value": 0.295,
+      "source": "brief_extraction",
+      "raw_value": 59,
+      "target_match": {
+       "node_id": "pro_price",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "charge_29_50",
+    "kind": "option",
+    "label": "Charge £29.50",
+    "provenance": "ai_inferred",
+    "interventions": {
+     "pro_price": {
+      "unit": "£ per subscriber per month",
+      "value": 0.1475,
+      "source": "cee_hypothesis",
+      "raw_value": 29.5,
+      "target_match": {
+       "node_id": "pro_price",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "pro_price",
+    "kind": "factor",
+    "label": "Pro price",
+    "category": "controllable",
+    "provenance": "from_brief",
+    "observed_state": {
+     "cap": 200,
+     "unit": "£ per subscriber per month",
+     "value": 0,
+     "source": "brief_extraction",
+     "raw_value": 0,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "paying_pro_subscribers",
+    "kind": "factor",
+    "label": "Paying Pro subscribers",
+    "category": "observable",
+    "provenance": "from_brief",
+    "observed_state": {
+     "cap": 5000,
+     "unit": "subscribers",
+     "value": 0.2,
+     "source": "brief_extraction",
+     "raw_value": 1000,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "monthly_churn",
+    "kind": "factor",
+    "label": "Monthly churn",
+    "category": "observable",
+    "provenance": "ai_inferred",
+    "scale_frame": 100,
+    "observed_state": {
+     "unit": "%",
+     "value": 0.02,
+     "source": "cee_inference",
+     "raw_value": 2,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "other_mrr",
+    "kind": "factor",
+    "label": "Other MRR",
+    "category": "observable",
+    "provenance": "from_brief",
+    "observed_state": {
+     "cap": 500000,
+     "unit": "£ per month",
+     "value": 0.15,
+     "source": "brief_extraction",
+     "raw_value": 75000,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "pro_mrr",
+    "kind": "outcome",
+    "label": "Pro MRR",
+    "provenance": "from_brief",
+    "nonlinear_identity": {
+     "operation": "product",
+     "factor_ids": [
+      "pro_price",
+      "paying_pro_subscribers"
+     ],
+     "stated_in_brief": true
+    }
+   }
+  ],
+  "edges": [
+   {
+    "to": "keep_pro_free",
+    "from": "we_re_deciding_whether_to_keep_pro_free_or_start_charging_59_per_subscriber_per_month",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "charge_59",
+    "from": "we_re_deciding_whether_to_keep_pro_free_or_start_charging_59_per_subscriber_per_month",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "charge_29_50",
+    "from": "we_re_deciding_whether_to_keep_pro_free_or_start_charging_59_per_subscriber_per_month",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "pro_price",
+    "from": "charge_59",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "pro_price",
+    "from": "charge_29_50",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "pro_price",
+    "from": "keep_pro_free",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "pro_mrr",
+    "from": "pro_price",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "brief_extraction"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "pro_mrr",
+    "from": "paying_pro_subscribers",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "brief_extraction"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "monthly_churn",
+    "from": "pro_price",
+    "strength": {
+     "std": 0.04,
+     "mean": 0.08
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 0.04,
+      "amount_unit": "percentage points",
+      "strength_mean": 0.08,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "£ per subscriber per month"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "paying_pro_subscribers",
+    "from": "monthly_churn",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "total_mrr",
+    "from": "pro_mrr",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "brief_extraction"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "total_mrr",
+    "from": "other_mrr",
+    "strength": {
+     "std": 2,
+     "mean": 4
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "£ per month",
+      "strength_mean": 4,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "£ per month"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   }
+  ]
+ }
+}

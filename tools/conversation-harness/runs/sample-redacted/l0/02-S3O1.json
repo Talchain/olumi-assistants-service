@@ -1,0 +1,62 @@
+{
+  "label": "02-S3O1",
+  "captured_at": "2026-07-12T01:01:03.005Z",
+  "scenario_id": "231e6644-d484-410d-8c1a-a1ae770406a7",
+  "conversation_turns": [
+    {
+      "id": "3d05e933-c278-40f1-8b04-ea14944ae954",
+      "turn_id": "d7d93d29-ec49-4da2-9561-d972885f866c",
+      "turn_class": "handler",
+      "handler_id": "explain_results",
+      "response_emitted": true,
+      "llm_calls_used": 1,
+      "duration_ms": 15633,
+      "created_at": "2026-07-12T01:01:02.560684+00:00"
+    },
+    {
+      "id": "86138dfc-e23e-4c33-9555-ded238b33f10",
+      "turn_id": "f1635650-b3d8-44a0-b8ed-73f915a95d4c",
+      "turn_class": "handler",
+      "handler_id": "run_analysis",
+      "response_emitted": true,
+      "llm_calls_used": 1,
+      "duration_ms": 35762,
+      "created_at": "2026-07-12T01:00:43.344153+00:00"
+    }
+  ],
+  "handler_facts": [
+    {
+      "v5_conversation_turn_id": "3d05e933-c278-40f1-8b04-ea14944ae954",
+      "handler_id": "explain_results",
+      "action_type": "explain_results",
+      "noop": true,
+      "created_at": "2026-07-12T01:01:02.560684+00:00",
+      "fact_type": "explain_results",
+      "payload_sha256": "c5c35aa3f617c838a58c9fbd2854041082aafd92ff8696ed5ec4366650650c9e"
+    },
+    {
+      "v5_conversation_turn_id": "86138dfc-e23e-4c33-9555-ded238b33f10",
+      "handler_id": "run_analysis",
+      "action_type": "run_analysis",
+      "noop": false,
+      "created_at": "2026-07-12T01:00:43.344153+00:00",
+      "fact_type": "run_analysis",
+      "payload_sha256": "f241e895409feabe2a838d7de6fbbefb0e11a8fa22b98d4afe41d52b1e2d09fb"
+    }
+  ],
+  "graph": {
+    "sha256": "10bc555cc13d1e3e67bd8366a835a9c085737f0ec09fab0bf1d15b9f12d94932",
+    "node_count": 12,
+    "edge_count": 18
+  },
+  "brief": {
+    "sha256": "fb2fc246611b629ee0f77de5554a8ade63879326214f924b6f70f2cd1123b9a7",
+    "chars": 163,
+    "head": "Should we hire one tech lead or two mid-level developers? Budget is \u00a3200k and we need our AI features shipped within 6 m",
+    "stage": "frame",
+    "title": "harness_v0_demo_FROZEN harness graph (disposable)",
+    "updated_at": "2026-07-12T00:59:17.29328+00:00"
+  },
+  "scenario_row_error": null,
+  "decision_records": []
+}

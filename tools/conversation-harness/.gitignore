@@ -1,0 +1,15 @@
+# Run artifacts are NEVER committed wholesale — they can embed staging payloads
+# and served prompt content. One small REDACTED sample is kept as format
+# documentation (runs/sample-redacted/).
+runs/*
+!runs/sample-redacted
+
+# Real staging-parity values live locally only; commit the names-only
+# staging-parity.env.example, never the values.
+staging-parity.env
+
+# Built arm prompt stores mirror staging PMS content (served prompts) — local only.
+stores/
+
+# Local server logs
+*.log

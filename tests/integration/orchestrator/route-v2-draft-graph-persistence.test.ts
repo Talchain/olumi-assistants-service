@@ -1,0 +1,698 @@
+/**
+ * Integration tests — V5 draft_graph graph persistence contract.
+ *
+ * Exercises the full dispatchDraftGraph → commitDirectAnswer → SessionStore
+ * stack with a mocked session store. Does NOT mock dispatchDraftGraph itself
+ * (unlike route-v2-draft-graph.test.ts which mocks at the route boundary) —
+ * the focus here is the persistence contract: what lands in the store, what
+ * the dispatcher returns, and how atomic rollback behaves.
+ *
+ * The V4 unified pipeline (handleDraftGraph) IS mocked — LLM I/O is outside
+ * the scope of persistence contract tests.
+ *
+ * Five scenarios:
+ *  1. First-turn draft success: graph persisted atomically, stage='analyse', turn committed
+ *  2. Atomic commit failure: commitDirectAnswer throws → stage='frame', commitPerformed=false, route returns 500
+ *  3. No graphOutput produced: metadata.graph=undefined, scenarios.graph unchanged, stage='frame'
+ *  4. Second draft on same scenario: store called again with new graph (overwrite, not duplicate)
+ *  5. Commit ordering: store.append fires before readRecent; simulates build-turn-context observing
+ *     the draft turn on a subsequent run_analysis. Does NOT exercise chip-click routing.
+ */
+
+import { describe, it, expect, vi, beforeEach, type MockedFunction } from 'vitest';
+import type { FastifyRequest } from 'fastify';
+import type { PendingAction } from '../../../src/orchestrator-v5/session/pending-action.js';
+
+// ── Module-level mocks ────────────────────────────────────────────────────────
+
+vi.mock('../../../src/orchestrator/tools/draft-graph.js', () => ({
+  handleDraftGraph: vi.fn(),
+}));
+
+// Mock the session store factory so we control append behaviour per test.
+const appendMock = vi.fn();
+const readRecentMock = vi.fn().mockResolvedValue([]);
+const mockStore = {
+  append: appendMock,
+  readRecent: readRecentMock,
+  readMostRecentPendingActions: vi.fn<() => Promise<readonly PendingAction[]>>().mockResolvedValue([]),
+  readFactsFor: vi.fn().mockResolvedValue([]),
+  invalidateScoped: vi.fn().mockResolvedValue({ scope: { kind: 'structural' }, entries_invalidated: [] }),
+  invalidateAll: vi.fn().mockResolvedValue({ scope: { kind: 'structural' }, entries_invalidated: [] }),
+  ensureScenarioExists: vi.fn().mockResolvedValue({ user_id: 'user-1' }),
+  storeDraftGraph: vi.fn().mockResolvedValue(undefined),
+};
+
+vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
+  getSessionStore: () => mockStore,
+  resetSessionStoreForTests: vi.fn(),
+  SessionReadError: class SessionReadError extends Error {},
+}));
+
+// ── Imports after mocks ───────────────────────────────────────────────────────
+
+import { dispatchDraftGraph } from '../../../src/orchestrator-v5/handlers/draft-graph-dispatch.js';
+import { handleDraftGraph } from '../../../src/orchestrator/tools/draft-graph.js';
+import { StateCommitFailedError } from '../../../src/orchestrator-v5/session/store.js';
+import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
+import { projectGraphForPersistence } from '../../../src/orchestrator-v5/persisted-graph-projection.js';
+import { parsePendingAction } from '../../../src/orchestrator-v5/session/pending-action.js';
+import { PENDING_ACTION_ASK_TURN_TTL } from '../../../src/orchestrator-v5/session/pending-action.js';
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const TURN_ID_1 = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+const TURN_ID_2 = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+
+const MINIMAL_GRAPH_1 = {
+  nodes: [
+    { id: 'dec_launch', kind: 'decision', label: 'Launch product?' },
+    // `provenance: 'from_brief'` is what the projector stamps on a goal taken
+    // from the user's brief, and it is what the opener's quotation gate reads.
+    // Without it this is a shape the projector never emits, and the assertion
+    // below (that the goal IS quoted) would be testing an unreachable state.
+    { id: 'goal_revenue', kind: 'goal', provenance: 'from_brief', label: 'Revenue target' },
+    { id: 'factor_market', kind: 'factor', label: 'Market readiness' },
+  ],
+  edges: [
+    { from: 'dec_launch', to: 'goal_revenue' },
+    { from: 'factor_market', to: 'dec_launch' },
+  ],
+};
+
+const MINIMAL_GRAPH_2 = {
+  nodes: [
+    { id: 'dec_hire', kind: 'decision', label: 'Hire senior eng?' },
+    { id: 'goal_capacity', kind: 'goal', label: 'Team capacity' },
+  ],
+  edges: [{ from: 'dec_hire', to: 'goal_capacity' }],
+};
+
+function makePayload(turnId: string, overrides: Record<string, unknown> = {}) {
+  return {
+    kind: 'message' as const,
+    scenario_id: SCENARIO_ID,
+    turn_id: turnId,
+    stage: 'frame' as const,
+    message: 'Should we launch the product now or wait for Q3?',
+    turn_class: 'frame' as const,
+    source: 'composer' as const,
+    ...overrides,
+  };
+}
+
+function makeDraftResult(graphOutput: unknown = MINIMAL_GRAPH_1, assistantText?: string) {
+  return {
+    blocks: [],
+    assistantText: assistantText ?? `Drafted a decision graph with ${(graphOutput as { nodes?: unknown[] })?.nodes?.length ?? 0} nodes.`,
+    latencyMs: 800,
+    strengthenItems: [],
+    coachingSummary: null,
+    coachingWideningLog: null,
+    coachingBiasSignals: null,
+    draftWarnings: [],
+    graphOutput,
+  };
+}
+
+const STUB_REQUEST = {} as FastifyRequest;
+
+const MISSING_EFFECT_GRAPH = {
+  nodes: [
+    { id: 'goal_revenue', kind: 'goal', label: 'Revenue' },
+    { id: 'opt_keep', kind: 'option', label: 'Keep current approach', status: 'ready' },
+    { id: 'opt_expand', kind: 'option', label: 'Expand delivery', status: 'ready' },
+    { id: 'fac_capacity', kind: 'factor', label: 'Delivery capacity', observed_state: { value: 0.5 } },
+  ],
+  edges: [
+    { from: 'fac_capacity', to: 'goal_revenue', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+  ],
+  // Persistence reconciles this existing array with option nodes. The pending
+  // must describe those stored bytes, not the pipeline's pre-projection hash.
+  options: [],
+};
+
+const MISSING_EFFECT_READINESS = {
+  status: 'needs_user_input',
+  goal_node_id: 'goal_revenue',
+  options: [
+    { option_id: 'opt_keep', label: 'Keep current approach', status: 'ready', interventions: {} },
+    { option_id: 'opt_expand', label: 'Expand delivery', status: 'ready', interventions: {} },
+  ],
+  blockers: [
+    { blocker_type: 'missing_value', option_id: 'opt_keep', option_label: 'Keep current approach', factor_id: 'fac_capacity', factor_label: 'Delivery capacity' },
+    { blocker_type: 'missing_value', option_id: 'opt_expand', option_label: 'Expand delivery', factor_id: 'fac_capacity', factor_label: 'Delivery capacity' },
+  ],
+} satisfies NonNullable<Awaited<ReturnType<typeof handleDraftGraph>>['analysisReady']>;
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+describe('V5 draft_graph persistence integration', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    readRecentMock.mockResolvedValue([]);
+    mockStore.readMostRecentPendingActions.mockResolvedValue([]);
+  });
+
+  describe('the initial missing-effect question', () => {
+    beforeEach(() => {
+      vi.mocked(handleDraftGraph).mockResolvedValue({
+        ...makeDraftResult(MISSING_EFFECT_GRAPH),
+        analysisReady: MISSING_EFFECT_READINESS,
+      } as Awaited<ReturnType<typeof handleDraftGraph>>);
+      appendMock.mockResolvedValue({ id: 'row-asked-effect' });
+    });
+
+    it('persists the exact asked pair and projected graph in one atomic commit', async () => {
+      const result = await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1), requestId: 'req-asked-effect', request: STUB_REQUEST,
+      });
+
+      expect(result.commitPerformed).toBe(true);
+      expect(result.response.assistant_text).toContain('missing effect value for "Keep current approach" on "Delivery capacity"');
+      expect(result.response.suggested_actions).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: 'chip_prompt_repair_effect_value', message: expect.stringContaining('Keep current approach') }),
+      ]));
+      expect(appendMock).toHaveBeenCalledOnce();
+      const [stored] = appendMock.mock.calls[0];
+      const projected = projectGraphForPersistence(MISSING_EFFECT_GRAPH);
+      const projectedHash = computeAnalysisAffectingGraphHash(projected);
+      expect(projectedHash).not.toBe(computeAnalysisAffectingGraphHash(MISSING_EFFECT_GRAPH));
+      expect(stored.graph).toEqual(projected);
+      expect(stored.pending_actions).toHaveLength(1);
+      expect(parsePendingAction(stored.pending_actions[0])).toMatchObject({
+        scenario_id: SCENARIO_ID,
+        chip_id: 'chip_configure_option_clarify',
+        action: {
+          kind: 'elicit_option_effect', option_id: 'opt_keep', option_label: 'Keep current approach',
+          factor_id: 'fac_capacity', factor_label: 'Delivery capacity',
+        },
+        preconditions: { graph_hash: projectedHash },
+        // A recorded ASK, so the commit chokepoint stamps the ask window
+        // (session/pending-action.ts, two-dial note) rather than the offer
+        // default. It stayed 2 until 2026-08-31 and the question was routinely
+        // dead before the user could answer it.
+        expires_at_turn_count: PENDING_ACTION_ASK_TURN_TTL,
+      });
+    });
+
+    it('does not publish a successful question or perform a second write after atomic failure', async () => {
+      appendMock.mockRejectedValue(new StateCommitFailedError('atomic append refused'));
+      const result = await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1), requestId: 'req-asked-effect-failed', request: STUB_REQUEST,
+      });
+      expect(appendMock).toHaveBeenCalledOnce();
+      expect(result.commitPerformed).toBe(false);
+      expect(result.response.assistant_text).not.toContain('Next, choose the missing effect value');
+      expect(result.response.suggested_actions).toEqual([]);
+    });
+
+    it('preserves unrelated live pending state through the same atomic commit', async () => {
+      const graphHash = computeAnalysisAffectingGraphHash(projectGraphForPersistence(MISSING_EFFECT_GRAPH));
+      if (graphHash === null) throw new Error('fixture must have a graph hash');
+      mockStore.readMostRecentPendingActions.mockResolvedValue([{
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', scenario_id: SCENARIO_ID,
+        chip_id: 'previous-run-offer', action: { kind: 'run_analysis' },
+        preconditions: { graph_hash: graphHash }, expires_at_turn_count: 4,
+        emitted_at_iso: new Date().toISOString(),
+        expires_at_iso: new Date(Date.now() + 600_000).toISOString(),
+      }]);
+      await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1), requestId: 'req-asked-effect-carry', request: STUB_REQUEST,
+      });
+      expect(appendMock).toHaveBeenCalledOnce();
+      const pending = appendMock.mock.calls[0][0].pending_actions;
+      expect(pending).toHaveLength(2);
+      // The two halves of the two-dial rule in one assertion, deliberately:
+      // the recorded ASK gets the ask window, and the carried run_analysis
+      // OFFER is untouched (4, decremented once by carry-forward). If the
+      // widening ever leaked onto offers, the second line REDs.
+      expect(pending).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          chip_id: 'chip_configure_option_clarify',
+          expires_at_turn_count: PENDING_ACTION_ASK_TURN_TTL,
+        }),
+        expect.objectContaining({ chip_id: 'previous-run-offer', expires_at_turn_count: 3 }),
+      ]));
+    });
+
+    it('does not invent an effect question from a mapping status carrying the same blockers', async () => {
+      vi.mocked(handleDraftGraph).mockResolvedValue({
+        ...makeDraftResult(MISSING_EFFECT_GRAPH),
+        analysisReady: { ...MISSING_EFFECT_READINESS, status: 'needs_user_mapping' },
+      } as Awaited<ReturnType<typeof handleDraftGraph>>);
+      await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1), requestId: 'req-mapping-not-value', request: STUB_REQUEST,
+      });
+      expect(appendMock).toHaveBeenCalledOnce();
+      expect(appendMock.mock.calls[0][0].pending_actions).toEqual([]);
+    });
+  });
+
+  // ── Scenario 1: first-turn draft success ────────────────────────────────────
+
+  describe('Scenario 1 — first-turn draft: graph persisted atomically, stage advances to analyse', () => {
+    beforeEach(() => {
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(makeDraftResult(MINIMAL_GRAPH_1) as Awaited<ReturnType<typeof handleDraftGraph>>);
+      appendMock.mockResolvedValue({ id: 'row-turn-1' });
+    });
+
+    it('returns 200-shape response with stage_indicator=analyse', async () => {
+      const result = await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1),
+        requestId: 'req-scenario-1',
+        request: STUB_REQUEST,
+      });
+
+      expect(result.response.stage_indicator).toBe('analyse');
+      expect(result.response.response_version).toBe(2);
+    });
+
+    it('returns commitPerformed=true', async () => {
+      const result = await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1),
+        requestId: 'req-scenario-1',
+        request: STUB_REQUEST,
+      });
+
+      expect(result.commitPerformed).toBe(true);
+    });
+
+    it('calls store.append exactly once with p_graph = the graph output', async () => {
+      await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1),
+        requestId: 'req-scenario-1',
+        request: STUB_REQUEST,
+      });
+
+      expect(appendMock).toHaveBeenCalledOnce();
+      const [writeArg] = appendMock.mock.calls[0];
+      // The graph must be passed directly — not nested — so append_turn_atomic
+      // can write it atomically with the turn row via p_graph.
+      expect(writeArg.graph).toEqual(MINIMAL_GRAPH_1);
+      expect(writeArg.scenario_id).toBe(SCENARIO_ID);
+      expect(writeArg.turn_id).toBe(TURN_ID_1);
+    });
+
+    it('assistant_text is the deterministic post-draft coaching narrative', async () => {
+      const result = await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1),
+        requestId: 'req-scenario-1',
+        request: STUB_REQUEST,
+      });
+
+      // Decision-coach narrative: names the goal, surfaces the single factor,
+      // and ends with the canonical non-ready recovery because this fixture
+      // has no options and cannot yet run analysis.
+      // Handler narration is no longer surfaced — graph-shaped wording in
+      // the fixture is silently discarded.
+      const text = result.response.assistant_text;
+      expect(text).toContain("I've built a first decision model");
+      expect(text).toContain('"Revenue target"');
+      expect(text).toContain('Market readiness');
+      expect(text).toContain(
+        'Next, review the model and fill any gaps before comparing the options.',
+      );
+      expect(text).not.toContain('run the analysis');
+      expect(text).not.toContain('nodes');
+      expect(text).not.toContain('edges');
+    });
+
+    it('response contains empty blocks (graph is persisted via store, not in response body)', async () => {
+      const result = await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1),
+        requestId: 'req-scenario-1',
+        request: STUB_REQUEST,
+      });
+
+      expect(result.response.blocks).toEqual([]);
+    });
+  });
+
+  // ── Scenario 2: atomic commit failure ──────────────────────────────────────
+
+  describe('Scenario 2 — atomic commit failure: both graph and turn rolled back', () => {
+    beforeEach(() => {
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(makeDraftResult(MINIMAL_GRAPH_1) as Awaited<ReturnType<typeof handleDraftGraph>>);
+      // When append_turn_atomic throws, the PL/pgSQL transaction rolls back
+      // both the graph write and the turn insert. The dispatcher catches this
+      // and returns commitPerformed=false — no partial state exists.
+      appendMock.mockRejectedValue(
+        new StateCommitFailedError('append_turn_atomic RPC failed: connection timeout'),
+      );
+    });
+
+    it('does not throw — commit failure is non-fatal at the dispatcher level', async () => {
+      await expect(
+        dispatchDraftGraph({
+          payload: makePayload(TURN_ID_1),
+          requestId: 'req-scenario-2',
+          request: STUB_REQUEST,
+        }),
+      ).resolves.toBeDefined();
+    });
+
+    it('returns commitPerformed=false', async () => {
+      const result = await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1),
+        requestId: 'req-scenario-2',
+        request: STUB_REQUEST,
+      });
+
+      expect(result.commitPerformed).toBe(false);
+    });
+
+    it('keeps stage_indicator=frame (no advancement — graph not persisted)', async () => {
+      const result = await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1),
+        requestId: 'req-scenario-2',
+        request: STUB_REQUEST,
+      });
+
+      expect(result.response.stage_indicator).toBe('frame');
+    });
+
+    it('assistant_text uses pipeline narration — route discards response, client sees 500 INTERNAL_ERROR', async () => {
+      // commitPerformed=false causes route-v2.ts to return HTTP 500 BoundaryError
+      // (reason: 'draft_graph_commit_failed', retryable: true). The dispatcher's
+      // dg.response is never sent to the client on this path.
+      const result = await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1),
+        requestId: 'req-scenario-2',
+        request: STUB_REQUEST,
+      });
+
+      // Fallback narration from the pipeline — not a save-failure message.
+      expect(result.response.assistant_text).toContain('Drafted');
+    });
+
+    it('store.append was called exactly once (dispatcher attempted the commit)', async () => {
+      await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1),
+        requestId: 'req-scenario-2',
+        request: STUB_REQUEST,
+      }).catch(() => {});
+
+      // The dispatcher must have attempted append — it is not skipped.
+      expect(appendMock).toHaveBeenCalledOnce();
+    });
+  });
+
+  // ── Scenario 3: no graphOutput produced ────────────────────────────────────
+
+  describe('Scenario 3 — pipeline produced no graphOutput: scenarios.graph left unchanged', () => {
+    beforeEach(() => {
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(makeDraftResult(null, 'Could not draft a graph for that brief.') as Awaited<ReturnType<typeof handleDraftGraph>>);
+      // commitDirectAnswer still fires (turn is recorded), but with no graph.
+      appendMock.mockResolvedValue({ id: 'row-turn-3' });
+    });
+
+    it('passes graph=undefined to store.append — omits p_graph from RPC call', async () => {
+      await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1),
+        requestId: 'req-scenario-3',
+        request: STUB_REQUEST,
+      });
+
+      expect(appendMock).toHaveBeenCalledOnce();
+      const [writeArg] = appendMock.mock.calls[0];
+      // graph undefined → p_graph omitted from append_turn_atomic → scenarios.graph unchanged
+      expect(writeArg.graph).toBeUndefined();
+    });
+
+    it('stage_indicator stays at frame (no graph to fetch)', async () => {
+      const result = await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1),
+        requestId: 'req-scenario-3',
+        request: STUB_REQUEST,
+      });
+
+      expect(result.response.stage_indicator).toBe('frame');
+    });
+
+    it('commitPerformed=true (turn row was written, even without a graph)', async () => {
+      const result = await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1),
+        requestId: 'req-scenario-3',
+        request: STUB_REQUEST,
+      });
+
+      // The turn is still committed — only the graph is absent.
+      expect(result.commitPerformed).toBe(true);
+    });
+  });
+
+  // ── Scenario 4: second draft on same scenario (overwrite) ──────────────────
+
+  describe('Scenario 4 — second draft on same scenario: graph overwritten, not duplicated', () => {
+    it('first and second draft each call store.append once with their respective graph', async () => {
+      // First turn
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValueOnce(makeDraftResult(MINIMAL_GRAPH_1) as Awaited<ReturnType<typeof handleDraftGraph>>);
+      appendMock.mockResolvedValueOnce({ id: 'row-turn-first' });
+
+      await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1),
+        requestId: 'req-scenario-4a',
+        request: STUB_REQUEST,
+      });
+
+      // Second turn (new TURN_ID, same SCENARIO_ID)
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValueOnce(makeDraftResult(MINIMAL_GRAPH_2) as Awaited<ReturnType<typeof handleDraftGraph>>);
+      appendMock.mockResolvedValueOnce({ id: 'row-turn-second' });
+
+      await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_2),
+        requestId: 'req-scenario-4b',
+        request: STUB_REQUEST,
+      });
+
+      expect(appendMock).toHaveBeenCalledTimes(2);
+
+      const [firstWriteArg] = appendMock.mock.calls[0];
+      const [secondWriteArg] = appendMock.mock.calls[1];
+
+      // Each call carries its own graph — the atomic RPC overwrites scenarios.graph.
+      expect(firstWriteArg.graph).toEqual(MINIMAL_GRAPH_1);
+      expect(secondWriteArg.graph).toEqual(MINIMAL_GRAPH_2);
+
+      // Different turn_ids (not duplicated)
+      expect(firstWriteArg.turn_id).toBe(TURN_ID_1);
+      expect(secondWriteArg.turn_id).toBe(TURN_ID_2);
+
+      // Same scenario_id (overwrite on same scenario)
+      expect(firstWriteArg.scenario_id).toBe(SCENARIO_ID);
+      expect(secondWriteArg.scenario_id).toBe(SCENARIO_ID);
+    });
+
+    it('second draft returns stage_indicator=analyse when successful', async () => {
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValueOnce(makeDraftResult(MINIMAL_GRAPH_1) as Awaited<ReturnType<typeof handleDraftGraph>>)
+        .mockResolvedValueOnce(makeDraftResult(MINIMAL_GRAPH_2) as Awaited<ReturnType<typeof handleDraftGraph>>);
+      appendMock
+        .mockResolvedValueOnce({ id: 'row-turn-first' })
+        .mockResolvedValueOnce({ id: 'row-turn-second' });
+
+      await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1),
+        requestId: 'req-scenario-4a',
+        request: STUB_REQUEST,
+      });
+
+      const result = await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_2),
+        requestId: 'req-scenario-4b',
+        request: STUB_REQUEST,
+      });
+
+      expect(result.response.stage_indicator).toBe('analyse');
+    });
+  });
+
+  // ── Scenario 5: commit ordering and store readability ─────────────────────
+  // NOTE: this scenario does NOT exercise chip-click run_analysis routing.
+  // It verifies the store-layer contract: after dispatchDraftGraph calls
+  // store.append, a subsequent readRecent (as called by build-turn-context
+  // on a run_analysis turn) can observe the committed draft turn. A true
+  // two-turn route-level test (brief POST → chip-click POST) belongs in a
+  // separate end-to-end suite with full route injection.
+
+  describe('Scenario 5 — commit ordering: store.append fires before readRecent is possible', () => {
+    it('store.readRecent can observe the committed draft turn (simulates build-turn-context lookup)', async () => {
+      // The draft turn commits a row; subsequent readRecent should return it.
+      // We simulate the store returning the written row on the next read.
+      const committedTurn = {
+        id: 'row-turn-draft',
+        scenario_id: SCENARIO_ID,
+        turn_id: TURN_ID_1,
+        turn_class: 'direct_answer',
+        handler_id: null,
+        request_hash: 'sha256:abc123',
+        response_emitted: true,
+        llm_calls_used: 1,
+        duration_ms: 800,
+        created_at: new Date().toISOString(),
+        user_id: 'user-1',
+      };
+
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(makeDraftResult(MINIMAL_GRAPH_1) as Awaited<ReturnType<typeof handleDraftGraph>>);
+
+      appendMock.mockResolvedValueOnce({ id: 'row-turn-draft' });
+
+      // After the draft commit, store.readRecent returns the row.
+      readRecentMock.mockResolvedValueOnce([committedTurn]);
+
+      await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1),
+        requestId: 'req-scenario-5',
+        request: STUB_REQUEST,
+      });
+
+      // Simulate what run_analysis would do: read recent turns to build context.
+      const recentTurns = await mockStore.readRecent(SCENARIO_ID, 10);
+
+      // The draft turn must be findable — run_analysis can build context.
+      expect(recentTurns).toHaveLength(1);
+      expect(recentTurns[0].turn_id).toBe(TURN_ID_1);
+    });
+
+    it('append is called before readRecent can return the turn (commit ordering preserved)', async () => {
+      // Commit ordering invariant: append (RPC success) must precede any
+      // cache update. This test verifies the dispatcher calls append first
+      // and does not attempt out-of-order reads.
+      const callOrder: string[] = [];
+
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(makeDraftResult(MINIMAL_GRAPH_1) as Awaited<ReturnType<typeof handleDraftGraph>>);
+
+      appendMock.mockImplementation(async () => {
+        callOrder.push('append');
+        return { id: 'row-turn-ordering' };
+      });
+      readRecentMock.mockImplementation(async () => {
+        callOrder.push('readRecent');
+        return [];
+      });
+
+      await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1),
+        requestId: 'req-scenario-5-order',
+        request: STUB_REQUEST,
+      });
+
+      // dispatchDraftGraph must NOT call readRecent at all — that's the
+      // caller's (run_analysis) responsibility. append is the only store
+      // operation in the draft dispatcher.
+      expect(callOrder).toEqual(['append']);
+      expect(callOrder).not.toContain('readRecent');
+    });
+  });
+
+  // ── Scenario 6 — pipeline throws with typed metadata: NO commit attempted ───
+  //
+  // When handleDraftGraph throws (any throw, not just plain Error), the
+  // dispatcher's outer catch re-throws BEFORE the inner commit block runs.
+  // No row appended to scenarios.turn; no graph written to scenarios.graph.
+  // This is the load-bearing "no partial-graph persistence" contract that
+  // the Edit 3 normalise typed-fail path AND the legacy plain-Error path
+  // both must honour.
+  //
+  // The throw metadata (pipelineStatusCode etc., from Edit 1) survives the
+  // re-throw so the route boundary can emit a typed wire envelope.
+  describe('Scenario 6 — pipeline throws with typed metadata: no commit, metadata preserved (Tests 7c + 11)', () => {
+    it('typed pipeline throw → outer catch re-throws, append NOT called', async () => {
+      const typedErr = Object.assign(new Error('CEE_LLM_VALIDATION_FAILED'), {
+        pipelineStatusCode: 400,
+        pipelineErrorCode: 'CEE_LLM_VALIDATION_FAILED',
+        pipelineRecovery: {
+          suggestion: 'Provide a clearer brief.',
+          hints: ['List 2-3 options'],
+        },
+      });
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockRejectedValueOnce(typedErr);
+
+      await expect(
+        dispatchDraftGraph({
+          payload: makePayload(TURN_ID_1),
+          requestId: 'req-scenario-6-typed',
+          request: STUB_REQUEST,
+        }),
+      ).rejects.toMatchObject({
+        message: 'CEE_LLM_VALIDATION_FAILED',
+        pipelineStatusCode: 400,
+        pipelineErrorCode: 'CEE_LLM_VALIDATION_FAILED',
+      });
+
+      // The whole point: no partial graph persisted on a pipeline throw.
+      expect(appendMock).not.toHaveBeenCalled();
+    });
+
+    it('legacy plain-Error throw → outer catch re-throws, append NOT called', async () => {
+      // The pre-Edit-1 behaviour: handleDraftGraph throws a plain Error.
+      // Route-v2 falls back to the legacy draft_graph_pipeline_threw envelope.
+      // No commit attempted — must remain true.
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockRejectedValueOnce(new Error('pipeline exploded'));
+
+      await expect(
+        dispatchDraftGraph({
+          payload: makePayload(TURN_ID_1),
+          requestId: 'req-scenario-6-legacy',
+          request: STUB_REQUEST,
+        }),
+      ).rejects.toThrow('pipeline exploded');
+
+      expect(appendMock).not.toHaveBeenCalled();
+    });
+
+    it('typed 504 timeout throw with pipelineRecovery=null → no commit, null-recovery survives re-throw', async () => {
+      // Distinct from sub-test 1 above (which carries populated recovery):
+      // this pins the "metadata without recovery hints" branch — proves the
+      // dispatcher's outer catch re-throws without coercing the null field.
+      // Audit-fix A3: sub-test 1 covered the populated-recovery path; this
+      // sub-test covers the null-recovery path explicitly so both branches
+      // of `pipelineRecovery ?? null` in handleDraftGraph and the
+      // recovery-attach in route-v2 are exercised.
+      const typedErr = Object.assign(new Error('CEE_TIMEOUT'), {
+        pipelineStatusCode: 504,
+        pipelineErrorCode: 'CEE_TIMEOUT',
+        pipelineRecovery: null,
+      });
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockRejectedValueOnce(typedErr);
+
+      let caught: unknown;
+      try {
+        await dispatchDraftGraph({
+          payload: makePayload(TURN_ID_1),
+          requestId: 'req-scenario-6-timeout',
+          request: STUB_REQUEST,
+        });
+      } catch (err) {
+        caught = err;
+      }
+
+      // Explicit field assertion (not just toMatchObject which permits extra
+      // fields) — proves recovery=null survives intact, not deleted nor
+      // replaced with undefined.
+      expect(caught).toBeDefined();
+      const meta = caught as {
+        pipelineStatusCode?: number;
+        pipelineErrorCode?: string;
+        pipelineRecovery?: unknown;
+      };
+      expect(meta.pipelineStatusCode).toBe(504);
+      expect(meta.pipelineErrorCode).toBe('CEE_TIMEOUT');
+      expect(meta.pipelineRecovery).toBeNull();
+
+      expect(appendMock).not.toHaveBeenCalled();
+    });
+  });
+});

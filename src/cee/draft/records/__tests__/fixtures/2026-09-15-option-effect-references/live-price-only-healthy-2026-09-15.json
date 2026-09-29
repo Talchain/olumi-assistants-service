@@ -1,0 +1,194 @@
+{
+  "stated_items": [
+    {
+      "kind": "goal",
+      "source_quote": "reaching £20k MRR within 12 months",
+      "role": "target",
+      "is_baseline": false
+    },
+    {
+      "kind": "constraint",
+      "source_quote": "keeping monthly churn under 4%",
+      "direction": "ceiling",
+      "applies_to_stated": 0
+    },
+    {
+      "kind": "option",
+      "source_quote": "increase the Pro plan price from £49 to £59 per month",
+      "is_baseline": false
+    },
+    {
+      "kind": "figure",
+      "source_quote": "£49",
+      "value": 49,
+      "unit": "£/month"
+    },
+    {
+      "kind": "figure",
+      "source_quote": "£59",
+      "value": 59,
+      "unit": "£/month"
+    },
+    {
+      "kind": "figure",
+      "source_quote": "£20k MRR",
+      "value": 20000,
+      "unit": "£"
+    },
+    {
+      "kind": "figure",
+      "source_quote": "12 months",
+      "value": 12,
+      "unit": "months"
+    },
+    {
+      "kind": "figure",
+      "source_quote": "4%",
+      "value": 4,
+      "unit": "%"
+    }
+  ],
+  "claims": [
+    {
+      "claim_kind": "option_refinement",
+      "label": "Hold Price at £49",
+      "basis": [
+        2
+      ],
+      "is_baseline": true
+    },
+    {
+      "claim_kind": "factor",
+      "label": "Pro Plan Monthly Price",
+      "basis": [
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "claim_kind": "factor",
+      "label": "Price-Driven Churn Sensitivity",
+      "basis": [
+        2,
+        7
+      ]
+    },
+    {
+      "claim_kind": "factor",
+      "label": "ARPU Uplift",
+      "basis": [
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "claim_kind": "outcome",
+      "label": "Monthly Recurring Revenue",
+      "basis": [
+        0,
+        5
+      ]
+    },
+    {
+      "claim_kind": "risk",
+      "label": "Subscriber Churn Rate",
+      "basis": [
+        1,
+        7
+      ]
+    },
+    {
+      "claim_kind": "prior",
+      "label": "Price Elasticity of Demand",
+      "basis": [
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "claim_kind": "prior",
+      "label": "Current Subscriber Count",
+      "basis": [
+        0,
+        5
+      ]
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Raising price increases ARPU",
+      "from_stated": 2,
+      "to_claim": 3,
+      "effect": "positive",
+      "sets_to": 59
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Holding price keeps ARPU at baseline",
+      "from_claim": 0,
+      "to_claim": 3,
+      "effect": "positive",
+      "sets_to": 49
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Higher price increases churn sensitivity",
+      "from_stated": 2,
+      "to_claim": 2,
+      "effect": "positive",
+      "sets_to": 0.7
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Holding price keeps churn sensitivity low",
+      "from_claim": 0,
+      "to_claim": 2,
+      "effect": "positive",
+      "sets_to": 0.2
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "ARPU uplift drives MRR",
+      "from_claim": 3,
+      "to_claim": 4,
+      "effect": "positive"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Churn sensitivity drives subscriber churn rate",
+      "from_claim": 2,
+      "to_claim": 5,
+      "effect": "positive"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "MRR outcome contributes to goal",
+      "from_claim": 4,
+      "to_stated": 0,
+      "effect": "positive"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Subscriber churn rate threatens MRR goal",
+      "from_claim": 5,
+      "to_stated": 0,
+      "effect": "negative"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Price elasticity moderates MRR outcome",
+      "from_claim": 6,
+      "to_claim": 4,
+      "effect": "negative"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Current subscriber base sets MRR baseline",
+      "from_claim": 7,
+      "to_claim": 4,
+      "effect": "positive"
+    }
+  ]
+}

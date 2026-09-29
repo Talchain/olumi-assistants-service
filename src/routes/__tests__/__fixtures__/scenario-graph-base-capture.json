@@ -1,0 +1,136 @@
+{
+  "schema": "scenario_graph.v1",
+  "scenario_id": "a6ccf5cf-aab0-4f01-b889-e0d6c072067c",
+  "graph": {
+    "nodes": [
+      {
+        "id": "goal_growth",
+        "kind": "goal",
+        "label": "Revenue growth"
+      },
+      {
+        "id": "decision",
+        "kind": "decision",
+        "label": "Headcount"
+      },
+      {
+        "id": "fac_market",
+        "kind": "factor",
+        "label": "Market demand",
+        "category": "controllable",
+        "observed_state": {
+          "value": 0.5,
+          "cap": 1
+        }
+      },
+      {
+        "id": "opt_hire",
+        "kind": "option",
+        "label": "Hire a marketing manager",
+        "interventions": {
+          "fac_market": 0.4
+        }
+      },
+      {
+        "id": "opt_hold",
+        "kind": "option",
+        "label": "Hold headcount",
+        "interventions": {
+          "fac_market": 0.1
+        }
+      }
+    ],
+    "edges": [],
+    "options": []
+  },
+  "graph_present": true,
+  "brief_text": "Should we hire a marketing manager or hold headcount this year?",
+  "graph_identity_hash": {
+    "kind": "graph_identity_hash",
+    "value": "19d1d41db32ed0d84fc76db2fc0a06d591fbc79b8b21583ac322cf3641abbebe",
+    "algorithm": "sha256",
+    "projection_version": "identity.v1",
+    "graph_schema_version": "graph_v3",
+    "normaliser_version": "1"
+  },
+  "layout_present": false,
+  "not_modelled": {
+    "schema": "not_modelled.v1",
+    "status": "derived",
+    "unavailable_reason": null,
+    "scope": {
+      "searched": "quantities stated in the brief that carry a unit: money, percentages, counts with a unit word, calendar dates and fiscal periods",
+      "model_surface": [
+        "node and option values, caps, units, labels and encoding maps"
+      ],
+      "prose_surface": [
+        "coaching cards",
+        "draft warnings",
+        "validation warnings"
+      ],
+      "excluded_from_search": [
+        "bare numbers carrying no unit, currency or percent sign",
+        "everything in not_tracked"
+      ]
+    },
+    "quantities": {
+      "total": 0,
+      "in_model": 0,
+      "prose_only": 0,
+      "absent": 0,
+      "truncated": false,
+      "items": []
+    },
+    "stated_kinds": {
+      "status": "derived",
+      "tally": {
+        "goal": 0,
+        "option": 0,
+        "constraint": 0,
+        "figure": 0,
+        "evidence": 0,
+        "assumption": 0,
+        "disagreement": 0,
+        "correction": 0
+      },
+      "sourced": [
+        "constraint",
+        "figure"
+      ],
+      "unsourced": [
+        "goal",
+        "option",
+        "evidence",
+        "assumption",
+        "disagreement",
+        "correction"
+      ],
+      "producers": {
+        "figure": "extractStatedQuantities (this module) — quantities stated in the brief",
+        "constraint": "graph.goal_constraints[] with source_quote (draft/anthropic-graph-schema.ts:447-467)"
+      }
+    },
+    "declared_exclusions": {
+      "status": "not_recorded",
+      "items": []
+    },
+    "inferred_factors": {
+      "status": "derived",
+      "items": [
+        {
+          "node_id": "fac_market",
+          "label": "Market demand"
+        }
+      ]
+    },
+    "not_tracked": [
+      "competing_or_dissenting_proposals",
+      "corrections_and_second_thoughts",
+      "named_evidence_sources_and_their_pedigree",
+      "qualitative_constraints_and_rules",
+      "stated_confidence_and_self_flagged_weakness",
+      "statements_the_drafting_model_did_not_report_discarding"
+    ]
+  },
+  "request_id": "req-1"
+}

@@ -1,0 +1,41 @@
+{
+  "id": "vg-05-structural-skip",
+  "name": "Structural edges must be skipped",
+  "description": "Graph with full structural edges (decision to option, option to factor). Expect: output skips all structural edges, estimates causal/bridge only.",
+  "brief": "We're choosing between two office locations for our new headquarters. Downtown lease is $45/sqft for 10,000 sqft. Suburban lease is $28/sqft for 15,000 sqft. Employee commute times will differ — downtown averages 25 minutes vs suburban 45 minutes. We've surveyed employees and 65% prefer downtown. Talent retention is our primary concern as we've lost 3 senior engineers this quarter.",
+  "graph": {
+    "nodes": [
+      {"id": "dec_office", "kind": "decision", "label": "Office Location Decision"},
+      {"id": "opt_downtown", "kind": "option", "label": "Downtown Location", "data": {"interventions": {"fac_rent": 0.9, "fac_commute": 0.3}}},
+      {"id": "opt_suburban", "kind": "option", "label": "Suburban Location", "data": {"interventions": {"fac_rent": 0.4, "fac_commute": 0.8}}},
+      {"id": "fac_rent", "kind": "factor", "label": "Annual Lease Cost", "category": "controllable", "data": {"value": 0.5, "unit": "USD/sqft", "factor_type": "cost"}},
+      {"id": "fac_commute", "kind": "factor", "label": "Average Commute Time", "category": "controllable", "data": {"value": 0.5, "unit": "minutes", "factor_type": "time"}},
+      {"id": "fac_preference", "kind": "factor", "label": "Employee Location Preference", "category": "observable", "data": {"value": 0.65, "factor_type": "sentiment"}},
+      {"id": "out_retention", "kind": "outcome", "label": "Talent Retention Rate"},
+      {"id": "out_opex", "kind": "outcome", "label": "Annual Operating Cost"},
+      {"id": "goal_productivity", "kind": "goal", "label": "Maximise Team Productivity"}
+    ],
+    "edges": [
+      {"from": "dec_office", "to": "opt_downtown", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "dec_office", "to": "opt_suburban", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_downtown", "to": "fac_rent", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_downtown", "to": "fac_commute", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_suburban", "to": "fac_rent", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_suburban", "to": "fac_commute", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "fac_rent", "to": "out_opex", "strength": {"mean": 0.70, "std": 0.10}, "exists_probability": 0.95, "effect_direction": "positive"},
+      {"from": "fac_commute", "to": "out_retention", "strength": {"mean": -0.45, "std": 0.15}, "exists_probability": 0.80, "effect_direction": "negative"},
+      {"from": "fac_preference", "to": "out_retention", "strength": {"mean": 0.40, "std": 0.15}, "exists_probability": 0.78, "effect_direction": "positive"},
+      {"from": "out_retention", "to": "goal_productivity", "strength": {"mean": 0.60, "std": 0.12}, "exists_probability": 0.92, "effect_direction": "positive"},
+      {"from": "out_opex", "to": "goal_productivity", "strength": {"mean": -0.40, "std": 0.15}, "exists_probability": 0.85, "effect_direction": "negative"}
+    ]
+  },
+  "expected": {
+    "in_scope_edges": [
+      {"from": "fac_rent", "to": "out_opex"},
+      {"from": "fac_commute", "to": "out_retention"},
+      {"from": "fac_preference", "to": "out_retention"},
+      {"from": "out_retention", "to": "goal_productivity"},
+      {"from": "out_opex", "to": "goal_productivity"}
+    ]
+  }
+}

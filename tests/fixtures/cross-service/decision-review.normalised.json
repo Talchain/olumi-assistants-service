@@ -1,0 +1,98 @@
+{
+  "brief": "Hire 3 senior engineers in London (50K total, 6-month onboarding ramp) versus offshoring to Bangalore (180K total, 3-month onboarding). Goal: ship compliance feature in 4 months without compromising platform stability.",
+  "brief_hash": "24a98b07f573d39e2d8383f224636ff758e31a9f2b188f3d161827dea7fa1b24",
+  "graph": {
+    "nodes": [
+      {
+        "id": "goal_compliance",
+        "label": "Hit compliance deadline"
+      },
+      {
+        "id": "fac_revenue_capture",
+        "label": "Revenue capture",
+        "data": {
+          "unit": "GBP/month"
+        }
+      },
+      {
+        "id": "fac_onboarding_ramp",
+        "label": "Onboarding ramp",
+        "data": {
+          "unit": "months"
+        }
+      },
+      {
+        "id": "fac_team_size",
+        "label": "Team size",
+        "data": {
+          "unit": "headcount"
+        }
+      }
+    ]
+  },
+  "isl_results": {
+    "factor_sensitivity": [
+      {
+        "factor_id": "fac_revenue_capture",
+        "factor_label": "Revenue capture",
+        "elasticity": 0.42,
+        "importance_rank": 1
+      },
+      {
+        "factor_id": "fac_onboarding_ramp",
+        "factor_label": "Onboarding ramp",
+        "elasticity": -0.31,
+        "importance_rank": 2
+      }
+    ],
+    "fragile_edges": [
+      {
+        "edge_id": "fac_revenue_capture->goal_compliance",
+        "from_label": "Revenue capture",
+        "to_label": "Hit compliance deadline",
+        "switch_probability": 0.21
+      }
+    ]
+  },
+  "deterministic_coaching": {},
+  "winner": {
+    "id": "opt_london_hire",
+    "label": "Hire 3 senior engineers in London",
+    "win_probability": 0.62,
+    "outcome_mean": 0.71
+  },
+  "runner_up": {
+    "id": "opt_offshore_bangalore",
+    "label": "Offshore to Bangalore (6-person team)",
+    "win_probability": 0.34,
+    "outcome_mean": 0.55
+  },
+  "flip_threshold_data": [
+    {
+      "factor_id": "fac_revenue_capture",
+      "factor_label": "Revenue capture",
+      "current_value": 12000,
+      "flip_value": 7800,
+      "direction": "decrease",
+      "unit": "GBP/month"
+    },
+    {
+      "factor_id": "fac_onboarding_ramp",
+      "factor_label": "Onboarding ramp",
+      "current_value": 6,
+      "flip_value": 9.5,
+      "direction": "increase",
+      "unit": "months"
+    }
+  ],
+  "_meta": {
+    "input_shape_version": "v5-normalised",
+    "flip_threshold_count": 2,
+    "factor_sensitivity_count": 2,
+    "fragile_edge_count": 1,
+    "model_critique_count": 0,
+    "has_deterministic_coaching": false,
+    "margin": 0.28,
+    "robustness_level": "moderate"
+  }
+}

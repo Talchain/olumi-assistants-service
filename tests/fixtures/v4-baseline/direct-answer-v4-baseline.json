@@ -1,0 +1,126 @@
+{
+  "_meta": {
+    "fixture_id": "V4-BASELINE-DIRECT-ANSWER-d8d0cab0",
+    "source_bundle_request_id": "d8d0cab0-52ff-4f96-91ba-44e9e1ec031e",
+    "source_scenario_id": "9ebe43e4-43a7-4b52-b017-b0e024fc08f4",
+    "source_cee_build": "26dab62",
+    "source_environment": "staging",
+    "capture_date": "2026-04-16",
+    "contract_version_v4": "response_version:2",
+    "selection_rationale": "d8d0cab0 is the cleanest direct_answer bundle in Paul's handover: blocks:[], turn_plan.routing:'llm', executed_tools:[], selected_tool:null. No PLoT/ISL calls this turn. All envelope fields populated.",
+    "assertion_mode": "structural — shape-match and Zod-validate each element; count-exact only on invariant fields (see test file)",
+    "note_a1": "A1 does NOT replay the V4 pipeline — that requires the full staging round-trip. This fixture is a frozen V4 contract snapshot. The test asserts the snapshot itself satisfies the invariants Paul locked in constraint 8. If a future change to V4 envelope shape lands, this test fails loudly."
+  },
+  "request_payload": {
+    "scenario_id": "9ebe43e4-43a7-4b52-b017-b0e024fc08f4",
+    "message": "Run a pre-mortem on the leading option."
+  },
+  "recorded_response": {
+    "turn_id": "1b3204f6-9dd5-4c9c-a403-c54e2d5d302a",
+    "assistant_text": "Imagine it's six months from now and Accelerate Acquisition didn't get you to £20k MRR. What went wrong? Here are the most likely failure modes based on your model's structure. New subscriber acquisition stalls. This is the single biggest risk. The model shows acquisition rate driving 100% of the outcome sensitivity. If your acquisition channel hits a ceiling, gets more expensive, or faces increased competition, the whole strategy unravels. What's your current acquisition channel, and how confident are you it can scale? Churn erodes the gains. Bringing in new subscribers only works if you keep them. If price sensitivity is higher than assumed, or if the product doesn't retain at scale, net subscriber growth could disappoint even with strong acquisition numbers. The £20k target requires more subscribers than the timeline allows. At £49/month, you need roughly 409 subscribers to hit £20k MRR. If you're starting from a low base, the maths may simply not work within six months regardless of the acquisition strategy.",
+    "blocks": [],
+    "suggested_actions": [
+      {
+        "label": "How confident in New Subscriber Acquisition",
+        "prompt": "How confident are you in New Subscriber Acquisition Rate? What would change your view?",
+        "role": "facilitator",
+        "action_type": "set_factor_value",
+        "parameters": { "chip_id": "calibrate_new_subscriber_acquisition_rate", "chip_type": "calibrate" }
+      },
+      {
+        "label": "Compare the options",
+        "prompt": "Compare the leading options in detail.",
+        "role": "facilitator",
+        "action_type": "compare_options",
+        "parameters": { "chip_id": "explain_compare", "chip_type": "explain" }
+      },
+      {
+        "label": "Calibrate New Subscriber Acquisition Rate",
+        "prompt": "Help me calibrate New Subscriber Acquisition Rate. What value would you expect?",
+        "role": "facilitator",
+        "action_type": "set_factor_value",
+        "parameters": { "chip_id": "gi_832204cb4d982ed4", "chip_type": "calibrate" }
+      }
+    ],
+    "lineage": {
+      "context_hash": "3f29a2da4636dffed33cc1e69645e4ddfb464f43b868452830a7b3bff27bb74a"
+    },
+    "turn_plan": {
+      "selected_tool": null,
+      "routing": "llm",
+      "long_running": false,
+      "tool_latency_ms": 11468,
+      "executed_tools": [],
+      "deferred_tools": []
+    },
+    "stage_indicator": {
+      "stage": "evaluate",
+      "confidence": "high",
+      "source": "inferred"
+    },
+    "response_version": 2,
+    "guidance_items": [
+      {
+        "item_id": "gi_832204cb4d982ed4",
+        "signal_code": "DEFAULT_NODE_CONFIDENCE",
+        "category": "should_fix",
+        "source": "structural",
+        "title": "\"New Subscriber Acquisition Rate\" has default confidence",
+        "detail": "This high-connectivity node uses the default existence probability. Calibrate it for more accurate results.",
+        "primary_action": { "type": "open_inspector", "node_id": "fac_acquisition_rate" },
+        "target_object": { "type": "node", "id": "fac_acquisition_rate", "label": "New Subscriber Acquisition Rate" },
+        "priority": 70
+      },
+      {
+        "item_id": "gi_2a6b7d865140056f",
+        "signal_code": "DEFAULT_NODE_CONFIDENCE",
+        "category": "should_fix",
+        "source": "structural",
+        "title": "\"Pro Plan Monthly Price\" has default confidence",
+        "detail": "This high-connectivity node uses the default existence probability. Calibrate it for more accurate results.",
+        "primary_action": { "type": "open_inspector", "node_id": "fac_price" },
+        "target_object": { "type": "node", "id": "fac_price", "label": "Pro Plan Monthly Price" },
+        "priority": 70
+      },
+      {
+        "item_id": "gi_33ba9e8aade8a858",
+        "signal_code": "DEFAULT_NODE_CONFIDENCE",
+        "category": "should_fix",
+        "source": "structural",
+        "title": "\"Monthly Recurring Revenue\" has default confidence",
+        "detail": "This high-connectivity node uses the default existence probability. Calibrate it for more accurate results.",
+        "primary_action": { "type": "open_inspector", "node_id": "out_mrr" },
+        "target_object": { "type": "node", "id": "out_mrr", "label": "Monthly Recurring Revenue" },
+        "priority": 70
+      },
+      {
+        "item_id": "gi_a661e46afa70104c",
+        "signal_code": "COMPLEXITY_CHECK",
+        "category": "could_fix",
+        "source": "structural",
+        "title": "Model has 12 nodes. Consider simplifying",
+        "detail": "\"Current Pro Subscriber Count\" has low connectivity (degree 1). Removing weakly-connected nodes can improve clarity.",
+        "primary_action": { "type": "open_inspector", "node_id": "fac_subscriber_count" },
+        "target_object": { "type": "node", "id": "fac_subscriber_count", "label": "Current Pro Subscriber Count" },
+        "priority": 30
+      }
+    ],
+    "updated_session_state": {
+      "prediction": null,
+      "calibrations_provided": ["fac_acquisition_rate"],
+      "plays_fired": [],
+      "questions_asked": [],
+      "accepted_patches": 0,
+      "dismissed_patches": 0,
+      "last_chip_ids_shown": ["calibrate_new_subscriber_acquisition_rate", "explain_compare", "gi_832204cb4d982ed4"],
+      "chip_ids_shown_prev_turn": ["challenge_premortem"],
+      "chip_ids_clicked": ["set_factor_value_qualitative_1"],
+      "last_question_turn": 0,
+      "preferred_option": null,
+      "convergence_signal": "narrowing",
+      "analysis_graph_hash": null,
+      "analysis_scenario_id": null,
+      "prior_analysis_envelope": null
+    }
+  }
+}

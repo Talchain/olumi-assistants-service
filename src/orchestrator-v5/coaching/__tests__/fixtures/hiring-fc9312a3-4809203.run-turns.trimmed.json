@@ -1,0 +1,463 @@
+{
+  "_provenance": {
+    "source_file": "~/Documents/GitHub/output/paul-test-20260923/construction-witness/browser/bw-5f8d9095-4809203-hiring/turns.jsonl",
+    "source_sha256": "495da9d150578a5f8c030083dc3bab526d35b1d8ef053a7128aeae758de6d6d6",
+    "turns_kept": [
+      "t1",
+      "t2"
+    ],
+    "source_line_index": {
+      "t1": 0,
+      "t2": 1
+    },
+    "served_build": "CEE 4809203 · UI 5f8d9095 (R&C witness, 25 Sep ~10:49Z)",
+    "route": "POST /agent/v1/turn (agent lane, served wire response, R&C browser witness)",
+    "why_this_fixture": "CONTROLS with no limit problem: the automatic first pass (t1) is withheld only because nobody asked (unrequested_analysis_withheld) and the explicit Run (t2) is a near tie (options_do_not_separate). Both served a fragile-link card, which must stay.",
+    "trimmed": true,
+    "trim_note": "Only the Run turns are kept, and of each only: graph_hash, analysis_state (whole), analysis_ready {status, may_run, goal_node_id, freshness, freshness_reason, graph_hash_at_run, current_graph_hash, computed_at, options[{option_id,label}]}, the single analysis_result block {type, computed_against_hash, leading_option_id, summary, win_probabilities, enrichment {robustness, confidence_tier, option_comparison_status, run_provenance, inference_warnings}}, the turn's tools_called, and the run-turn card signal_ids the served build emitted (served_run_turn_cards). Values are byte-identical to the source for every kept field.",
+    "capture_note": "The source holds the ROUTE response only, not the internal run response the Runtime hands to captureAnalysis; runTurnCase reconstructs the capture from the same turn (see fragile-link-challenge-fixtures.ts)."
+  },
+  "scenario_id": "fc9312a3-43e3-4567-b9d1-9914889091c9",
+  "turns": {
+    "t1": {
+      "tools_called": [
+        "get_canonical_state",
+        "build_model_from_brief"
+      ],
+      "graph_hash": "d06fe842d1150682",
+      "analysis_state": {
+        "run_state": {
+          "kind": "complete_current",
+          "computed_at": "2026-09-25T10:49:26.379Z"
+        },
+        "readiness": {
+          "status": "unknown",
+          "blockers": []
+        },
+        "leader_claim": {
+          "permitted": false,
+          "withheld_reason": "unrequested_analysis_withheld",
+          "separation": "near_tie"
+        },
+        "robustness": {},
+        "usable_for_prose": true,
+        "usable_for_chips": true,
+        "usable_for_followup": true,
+        "requires_rerun": false,
+        "blocked_unusable": false,
+        "contradictions": []
+      },
+      "analysis_ready": {
+        "status": "ready",
+        "may_run": true,
+        "goal_node_id": "development_velocity",
+        "freshness": "fresh",
+        "freshness_reason": "agent_readback_run_state_current",
+        "graph_hash_at_run": "d06fe842d1150682",
+        "current_graph_hash": "d06fe842d1150682",
+        "computed_at": "2026-09-25T10:49:26.379Z",
+        "options": [
+          {
+            "option_id": "hire_a_tech_lead",
+            "label": "Hire a Tech Lead"
+          },
+          {
+            "option_id": "hire_two_developers",
+            "label": "Hire Two Developers"
+          },
+          {
+            "option_id": "continue_as_now",
+            "label": "Continue as Now"
+          },
+          {
+            "option_id": "hire_one_developer",
+            "label": "Hire One Developer"
+          }
+        ]
+      },
+      "analysis_result": {
+        "type": "analysis_result",
+        "computed_against_hash": "d06fe842d1150682",
+        "leading_option_id": null,
+        "summary": "Olumi ran a first pass on the model it had just drafted. Nothing in it is confirmed yet, so no option is put forward and no result is called reliable. Use it to find what is wrong.",
+        "enrichment": {
+          "robustness": {
+            "near_tie": {
+              "gap": 0.06329999999999997,
+              "is_tie": true,
+              "threshold": 0.1
+            },
+            "robust_edges": [
+              {
+                "to_id": "effective_delivery_capacity",
+                "edge_id": "developer_ramp_up_effectiveness->effective_delivery_capacity",
+                "from_id": "developer_ramp_up_effectiveness",
+                "to_label": "Effective delivery capacity",
+                "from_label": "Developer ramp-up effectiveness",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "hiring_ramp_up_drag",
+                "edge_id": "development_capacity->hiring_ramp_up_drag",
+                "from_id": "development_capacity",
+                "to_label": "Hiring ramp-up drag",
+                "from_label": "Development capacity",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "work_flow_efficiency",
+                "edge_id": "engineering_coordination_load->work_flow_efficiency",
+                "from_id": "engineering_coordination_load",
+                "to_label": "Work flow efficiency",
+                "from_label": "Engineering coordination load",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "developer_ramp_up_effectiveness",
+                "edge_id": "hiring_ramp_up_drag->developer_ramp_up_effectiveness",
+                "from_id": "hiring_ramp_up_drag",
+                "to_label": "Developer ramp-up effectiveness",
+                "from_label": "Hiring ramp-up drag",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "developer_ramp_up_effectiveness",
+                "edge_id": "leadership_bottleneck->developer_ramp_up_effectiveness",
+                "from_id": "leadership_bottleneck",
+                "to_label": "Developer ramp-up effectiveness",
+                "from_label": "Leadership bottleneck",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "effective_delivery_capacity",
+                "edge_id": "rework_rate->effective_delivery_capacity",
+                "from_id": "rework_rate",
+                "to_label": "Effective delivery capacity",
+                "from_label": "Rework rate",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "quality_related_rework",
+                "edge_id": "rework_rate->quality_related_rework",
+                "from_id": "rework_rate",
+                "to_label": "Quality-related rework",
+                "from_label": "Rework rate",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "leadership_bottleneck",
+                "edge_id": "technical_leadership_capacity->leadership_bottleneck",
+                "from_id": "technical_leadership_capacity",
+                "to_label": "Leadership bottleneck",
+                "from_label": "Technical leadership capacity",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "rework_rate",
+                "edge_id": "work_prioritization_quality->rework_rate",
+                "from_id": "work_prioritization_quality",
+                "to_label": "Rework rate",
+                "from_label": "Work prioritization quality",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "work_flow_efficiency",
+                "edge_id": "work_prioritization_quality->work_flow_efficiency",
+                "from_id": "work_prioritization_quality",
+                "to_label": "Work flow efficiency",
+                "from_label": "Work prioritization quality",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              }
+            ],
+            "fragile_edges": [
+              {
+                "to_id": "development_velocity",
+                "edge_id": "effective_delivery_capacity->development_velocity",
+                "from_id": "effective_delivery_capacity",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "Development velocity",
+                "from_label": "Effective delivery capacity",
+                "switch_probability": 0.2692,
+                "alternative_winner_id": "hire_two_developers",
+                "alternative_winner_label": "Hire Two Developers",
+                "marginal_switch_probability": 0
+              },
+              {
+                "to_id": "effective_delivery_capacity",
+                "edge_id": "development_capacity->effective_delivery_capacity",
+                "from_id": "development_capacity",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "Effective delivery capacity",
+                "from_label": "Development capacity",
+                "switch_probability": 0.2392,
+                "alternative_winner_id": "hire_one_developer",
+                "alternative_winner_label": "Hire One Developer",
+                "marginal_switch_probability": 0.04
+              }
+            ]
+          },
+          "confidence_tier": "fair",
+          "option_comparison_status": "computed",
+          "run_provenance": {
+            "provisional": true,
+            "initiated_by": "auto_post_construction",
+            "construction_turn_id": "graph_registration:61c463f6-d7c1-46ba-94f7-a966e2f4298e"
+          },
+          "inference_warnings": [
+            {
+              "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+              "message": "6 edge E-value entries were omitted from edge_e_values: 6 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+              "severity": "info"
+            },
+            {
+              "code": "GOAL_DIRECTION_UNATTESTED",
+              "field": "goal_direction",
+              "message": "No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team's stated aim: if the goal is a quantity to reduce, or the aim is to land near a target rather than as high as possible, this ranking answers a different question. Send goal_direction to rank against the stated objective.",
+              "severity": "warning"
+            }
+          ]
+        }
+      },
+      "served_run_turn_cards": [
+        "coach:fragile_link:effective_delivery_capacity→development_velocity:d06fe842d1150682:2026-09-25T10:49:26.379Z:auto_first_pass"
+      ]
+    },
+    "t2": {
+      "tools_called": [
+        "run_analysis"
+      ],
+      "graph_hash": "d06fe842d1150682",
+      "analysis_state": {
+        "run_state": {
+          "kind": "complete_current",
+          "computed_at": "2026-09-25T10:49:47.362Z"
+        },
+        "readiness": {
+          "status": "unknown",
+          "blockers": []
+        },
+        "leader_claim": {
+          "permitted": false,
+          "withheld_reason": "options_do_not_separate",
+          "separation": "near_tie"
+        },
+        "robustness": {
+          "aggregate_level": "very_low"
+        },
+        "usable_for_prose": true,
+        "usable_for_chips": true,
+        "usable_for_followup": true,
+        "requires_rerun": false,
+        "blocked_unusable": false,
+        "contradictions": []
+      },
+      "analysis_ready": {
+        "status": "ready",
+        "may_run": true,
+        "goal_node_id": "development_velocity",
+        "freshness": "fresh",
+        "freshness_reason": "agent_readback_run_state_current",
+        "graph_hash_at_run": "d06fe842d1150682",
+        "current_graph_hash": "d06fe842d1150682",
+        "computed_at": "2026-09-25T10:49:47.362Z",
+        "options": [
+          {
+            "option_id": "hire_a_tech_lead",
+            "label": "Hire a Tech Lead"
+          },
+          {
+            "option_id": "hire_two_developers",
+            "label": "Hire Two Developers"
+          },
+          {
+            "option_id": "continue_as_now",
+            "label": "Continue as Now"
+          },
+          {
+            "option_id": "hire_one_developer",
+            "label": "Hire One Developer"
+          }
+        ]
+      },
+      "analysis_result": {
+        "type": "analysis_result",
+        "computed_against_hash": "d06fe842d1150682",
+        "leading_option_id": null,
+        "summary": "No single option can be put forward yet. The result is not yet robust — small changes could flip it. 'Continue as Now' was analysed as no change — the factors it compares against were held at the values your model records today. I supplied 6 of the values behind this, because your brief did not state them. They are mine rather than yours. Changing any of them changes what this model implies.",
+        "win_probabilities": {
+          "Continue as Now": 0.069475,
+          "Hire a Tech Lead": 0.451275,
+          "Hire One Developer": 0.091275,
+          "Hire Two Developers": 0.387975
+        },
+        "enrichment": {
+          "robustness": {
+            "level": "very_low",
+            "near_tie": {
+              "gap": 0.06329999999999997,
+              "is_tie": true,
+              "threshold": 0.1
+            },
+            "is_robust": false,
+            "confidence": 0.451275,
+            "robust_edges": [
+              {
+                "to_id": "effective_delivery_capacity",
+                "edge_id": "developer_ramp_up_effectiveness->effective_delivery_capacity",
+                "from_id": "developer_ramp_up_effectiveness",
+                "to_label": "Effective delivery capacity",
+                "from_label": "Developer ramp-up effectiveness",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "hiring_ramp_up_drag",
+                "edge_id": "development_capacity->hiring_ramp_up_drag",
+                "from_id": "development_capacity",
+                "to_label": "Hiring ramp-up drag",
+                "from_label": "Development capacity",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "work_flow_efficiency",
+                "edge_id": "engineering_coordination_load->work_flow_efficiency",
+                "from_id": "engineering_coordination_load",
+                "to_label": "Work flow efficiency",
+                "from_label": "Engineering coordination load",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "developer_ramp_up_effectiveness",
+                "edge_id": "hiring_ramp_up_drag->developer_ramp_up_effectiveness",
+                "from_id": "hiring_ramp_up_drag",
+                "to_label": "Developer ramp-up effectiveness",
+                "from_label": "Hiring ramp-up drag",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "developer_ramp_up_effectiveness",
+                "edge_id": "leadership_bottleneck->developer_ramp_up_effectiveness",
+                "from_id": "leadership_bottleneck",
+                "to_label": "Developer ramp-up effectiveness",
+                "from_label": "Leadership bottleneck",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "effective_delivery_capacity",
+                "edge_id": "rework_rate->effective_delivery_capacity",
+                "from_id": "rework_rate",
+                "to_label": "Effective delivery capacity",
+                "from_label": "Rework rate",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "quality_related_rework",
+                "edge_id": "rework_rate->quality_related_rework",
+                "from_id": "rework_rate",
+                "to_label": "Quality-related rework",
+                "from_label": "Rework rate",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "leadership_bottleneck",
+                "edge_id": "technical_leadership_capacity->leadership_bottleneck",
+                "from_id": "technical_leadership_capacity",
+                "to_label": "Leadership bottleneck",
+                "from_label": "Technical leadership capacity",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "rework_rate",
+                "edge_id": "work_prioritization_quality->rework_rate",
+                "from_id": "work_prioritization_quality",
+                "to_label": "Rework rate",
+                "from_label": "Work prioritization quality",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "work_flow_efficiency",
+                "edge_id": "work_prioritization_quality->work_flow_efficiency",
+                "from_id": "work_prioritization_quality",
+                "to_label": "Work flow efficiency",
+                "from_label": "Work prioritization quality",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              }
+            ],
+            "fragile_edges": [
+              {
+                "to_id": "development_velocity",
+                "edge_id": "effective_delivery_capacity->development_velocity",
+                "from_id": "effective_delivery_capacity",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "Development velocity",
+                "from_label": "Effective delivery capacity",
+                "switch_probability": 0.2692,
+                "alternative_winner_id": "hire_two_developers",
+                "alternative_winner_label": "Hire Two Developers",
+                "marginal_switch_probability": 0
+              },
+              {
+                "to_id": "effective_delivery_capacity",
+                "edge_id": "development_capacity->effective_delivery_capacity",
+                "from_id": "development_capacity",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "Effective delivery capacity",
+                "from_label": "Development capacity",
+                "switch_probability": 0.2392,
+                "alternative_winner_id": "hire_one_developer",
+                "alternative_winner_label": "Hire One Developer",
+                "marginal_switch_probability": 0.04
+              }
+            ],
+            "display_verdict": "fragile",
+            "confidence_basis": "recommendation_stability_uncalibrated",
+            "display_verdict_reason": "small changes to your assumptions could change which option is most likely to achieve your goal",
+            "recommended_option_compliance": "not_applicable",
+            "recommended_option_compliance_reason": "no limits were set for this decision"
+          },
+          "confidence_tier": "fair",
+          "option_comparison_status": "computed",
+          "inference_warnings": [
+            {
+              "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+              "message": "6 edge E-value entries were omitted from edge_e_values: 6 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+              "severity": "info"
+            },
+            {
+              "code": "GOAL_DIRECTION_UNATTESTED",
+              "field": "goal_direction",
+              "message": "No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team's stated aim: if the goal is a quantity to reduce, or the aim is to land near a target rather than as high as possible, this ranking answers a different question. Send goal_direction to rank against the stated objective.",
+              "severity": "warning"
+            }
+          ]
+        }
+      },
+      "served_run_turn_cards": [
+        "coach:fragile_link:effective_delivery_capacity→development_velocity:d06fe842d1150682:2026-09-25T10:49:47.362Z:explicit_run"
+      ]
+    }
+  }
+}

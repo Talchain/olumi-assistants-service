@@ -1,0 +1,1297 @@
+{
+  "_provenance": {
+    "captured": "2026-09-03",
+    "source": "Talchain/olumi-programme-docs artefacts/leg5-postrun-2026-09-03/B1-run-1/analysis_result.verbatim.json",
+    "note": "The four claim-bearing fields of an analysis_result block, copied VERBATIM from a live staging run; the block's `type` discriminant is the only field not carried, and `_provenance` is this header. The copied values are a historic record: append only, never edit (parent CLAUDE.md trap 14b) \u2014 they are what the product actually said on that date."
+  },
+  "summary": "Germany Pilot via Sponsored Customers came out ahead in 51% of runs of this model, but the analysis treats this as a close call. The result is not yet robust \u2014 small changes could flip it. 'Push Into Germany Next Year' was left out of this comparison because it has no values set. To include it, say 'Help me configure Push Into Germany Next Year.'",
+  "leading_option_id": "0dcc2a10",
+  "win_probabilities": {
+    "Germany Pilot via Sponsored Customers": 0.5058833333333335,
+    "Double Down on the UK": 0.027183333333333344,
+    "partner with a local player like Regnology instead of going direct": 0.4669333333333335
+  },
+  "enrichment": {
+    "option_comparison": [
+      {
+        "option_id": "0dcc2a10",
+        "option_label": "Germany Pilot via Sponsored Customers",
+        "id": "0dcc2a10",
+        "label": "Germany Pilot via Sponsored Customers",
+        "outcome": {
+          "mean": 0.10348397299611374,
+          "std": 0.20682672989367995,
+          "p10": -0.1226319672817898,
+          "p50": 0.08237018554667952,
+          "p90": 0.3708941995437934,
+          "n_samples": 10000,
+          "n_valid_samples": 10000,
+          "validity_ratio": 1,
+          "percentiles_source": "samples"
+        },
+        "status": "computed",
+        "win_probability": 0.5058833333333335,
+        "downside": {
+          "cvar_10": -0.22388441174411575,
+          "p05": -0.1838684448831771,
+          "expected_regret": 0.13716034437011915
+        }
+      },
+      {
+        "option_id": "191fb060",
+        "option_label": "Double Down on the UK",
+        "id": "191fb060",
+        "label": "Double Down on the UK",
+        "outcome": {
+          "mean": -0.2335116401453507,
+          "std": 0.3508191032625925,
+          "p10": -0.686014171814926,
+          "p50": -0.23361379115126454,
+          "p90": 0.21739979935636117,
+          "n_samples": 10000,
+          "n_valid_samples": 10000,
+          "validity_ratio": 1,
+          "percentiles_source": "samples"
+        },
+        "status": "computed",
+        "win_probability": 0.027183333333333344,
+        "downside": {
+          "cvar_10": -0.8387589890164274,
+          "p05": -0.8028402642430211,
+          "expected_regret": 0.4741559575115836
+        }
+      },
+      {
+        "option_id": "1d5333de",
+        "option_label": "partner with a local player like Regnology instead of going direct",
+        "id": "1d5333de",
+        "label": "partner with a local player like Regnology instead of going direct",
+        "outcome": {
+          "mean": 0.14050090394549564,
+          "std": 0.3405447608885216,
+          "p10": -0.30642987230541663,
+          "p50": 0.13811713214343158,
+          "p90": 0.5836260637014687,
+          "n_samples": 10000,
+          "n_valid_samples": 10000,
+          "validity_ratio": 1,
+          "percentiles_source": "samples"
+        },
+        "status": "computed",
+        "win_probability": 0.4669333333333335,
+        "downside": {
+          "cvar_10": -0.44299688208926397,
+          "p05": -0.4127856643488042,
+          "expected_regret": 0.10014341342073727
+        }
+      }
+    ],
+    "factor_sensitivity": [
+      {
+        "factor_id": "7355a203",
+        "factor_label": "UK Market Saturation",
+        "influence_score": 0.3940448855640322,
+        "influence_rank": 3,
+        "sensitivity_score": 0.2891304347826087,
+        "elasticity": 0.3940448855640322,
+        "direction": "positive",
+        "importance_rank": 1,
+        "value_of_information": 0,
+        "confidence": 0.4387,
+        "confidence_source": "plot_unified_from_isl_bootstrap",
+        "confidence_provenance": {
+          "computation_source": "plot_unified_from_isl_bootstrap",
+          "formula_version": "plot_unified_v3",
+          "is_provisional": true,
+          "calibration_status": "provisional_pending_pilot_calibration",
+          "input_quality": "standard"
+        },
+        "confidence_components": {
+          "structural_certainty": 0.5,
+          "sampling_stability": 0.25
+        },
+        "source": "graph",
+        "flip_risk_category": "negligible",
+        "attribution_stability": "low",
+        "rank_flip_rate": 0.25,
+        "importance_basis": "graph_structural",
+        "driver_label": "biggest",
+        "evpi_percentage_points": 0,
+        "evpi_method": "heuristic",
+        "evidence_hint": false,
+        "range_derivation_source": "default"
+      },
+      {
+        "factor_id": "5085e7e6",
+        "factor_label": "Partnership Route Activation",
+        "influence_score": 0.2265758091993185,
+        "influence_rank": 4,
+        "sensitivity_score": 0.16624999999999998,
+        "elasticity": 0.2265758091993185,
+        "direction": "positive",
+        "importance_rank": 2,
+        "value_of_information": 0,
+        "confidence": 0.5851,
+        "confidence_source": "plot_unified_from_isl_bootstrap",
+        "confidence_provenance": {
+          "computation_source": "plot_unified_from_isl_bootstrap",
+          "formula_version": "plot_unified_v3",
+          "is_provisional": true,
+          "calibration_status": "provisional_pending_pilot_calibration",
+          "input_quality": "standard"
+        },
+        "confidence_components": {
+          "structural_certainty": 0.8,
+          "sampling_stability": 0.25
+        },
+        "source": "graph",
+        "flip_risk_category": "negligible",
+        "attribution_stability": "low",
+        "rank_flip_rate": 0.2,
+        "importance_basis": "graph_structural",
+        "driver_label": "moderate",
+        "evpi_percentage_points": 0,
+        "evpi_method": "heuristic",
+        "evidence_hint": false,
+        "range_derivation_source": "default"
+      },
+      {
+        "factor_id": "099f7ecf",
+        "factor_label": "I honestly don't know whether the Germany window closes if we wait a year \u2014 two US competitors raised big rounds in Q2",
+        "influence_score": 0.19420783645655873,
+        "influence_rank": 5,
+        "sensitivity_score": 0.1425,
+        "elasticity": 0.19420783645655873,
+        "direction": "positive",
+        "importance_rank": 3,
+        "value_of_information": 0,
+        "confidence": 0.5,
+        "confidence_source": "plot_unified_from_graph",
+        "confidence_provenance": {
+          "computation_source": "plot_unified_from_graph",
+          "formula_version": "plot_unified_v2",
+          "is_provisional": true,
+          "calibration_status": "provisional_pending_pilot_calibration",
+          "input_quality": "degenerate_fallback"
+        },
+        "confidence_components": {
+          "structural_certainty": 0.5,
+          "sampling_stability": null
+        },
+        "source": "graph",
+        "flip_risk_category": "negligible",
+        "importance_basis": "graph_structural",
+        "driver_label": "minor",
+        "evpi_percentage_points": 0,
+        "evpi_method": "heuristic",
+        "evidence_hint": false,
+        "range_derivation_source": "default"
+      },
+      {
+        "factor_id": "4fcb676f",
+        "factor_label": "NRR is 112%",
+        "influence_score": 0.11328790459965925,
+        "influence_rank": 6,
+        "sensitivity_score": 0.08312499999999999,
+        "elasticity": 0.11328790459965925,
+        "direction": "positive",
+        "importance_rank": 4,
+        "value_of_information": 0,
+        "confidence": 0.5,
+        "confidence_source": "plot_unified_from_graph",
+        "confidence_provenance": {
+          "computation_source": "plot_unified_from_graph",
+          "formula_version": "plot_unified_v2",
+          "is_provisional": true,
+          "calibration_status": "provisional_pending_pilot_calibration",
+          "input_quality": "degenerate_fallback"
+        },
+        "confidence_components": {
+          "structural_certainty": 0.5,
+          "sampling_stability": null
+        },
+        "source": "graph",
+        "flip_risk_category": "negligible",
+        "importance_basis": "graph_structural",
+        "driver_label": "minor",
+        "evpi_percentage_points": 0,
+        "evpi_method": "heuristic",
+        "evidence_hint": false,
+        "range_derivation_source": "default"
+      },
+      {
+        "factor_id": "8b115373",
+        "factor_label": "Germany Direct Entry Investment",
+        "influence_score": 1,
+        "influence_rank": 1,
+        "sensitivity_score": 0,
+        "elasticity": 0,
+        "direction": "negative",
+        "importance_rank": 5,
+        "value_of_information": 0,
+        "confidence": 0.3,
+        "confidence_source": "plot_unified_from_isl_bootstrap",
+        "confidence_provenance": {
+          "computation_source": "plot_unified_from_isl_bootstrap",
+          "formula_version": "plot_unified_v3",
+          "is_provisional": true,
+          "calibration_status": "provisional_pending_pilot_calibration",
+          "input_quality": "standard"
+        },
+        "confidence_components": {
+          "structural_certainty": 0.5,
+          "sampling_stability": 0
+        },
+        "zero_reason": "intervention_override",
+        "source": "graph",
+        "flip_risk_category": "isolated",
+        "attribution_stability": "negligible",
+        "rank_flip_rate": 0.25,
+        "value_source": "cee_inference",
+        "value_extraction_type": "inferred",
+        "importance_basis": "graph_structural",
+        "driver_label": "strong",
+        "range_derivation_source": "inferred_spread"
+      },
+      {
+        "factor_id": "9d2cb92b",
+        "factor_label": "UK Market Depth Investment",
+        "influence_score": 0.5122583512332419,
+        "influence_rank": 2,
+        "sensitivity_score": 0,
+        "elasticity": 0,
+        "direction": "positive",
+        "importance_rank": 6,
+        "value_of_information": 0,
+        "confidence": 0.4351,
+        "confidence_source": "plot_unified_from_isl_bootstrap",
+        "confidence_provenance": {
+          "computation_source": "plot_unified_from_isl_bootstrap",
+          "formula_version": "plot_unified_v3",
+          "is_provisional": true,
+          "calibration_status": "provisional_pending_pilot_calibration",
+          "input_quality": "standard"
+        },
+        "confidence_components": {
+          "structural_certainty": 0.5,
+          "sampling_stability": 0.25
+        },
+        "zero_reason": "intervention_override",
+        "source": "graph",
+        "flip_risk_category": "negligible",
+        "attribution_stability": "low",
+        "rank_flip_rate": 0.05,
+        "value_source": "cee_inference",
+        "value_extraction_type": "inferred",
+        "importance_basis": "graph_structural",
+        "driver_label": "strong",
+        "range_derivation_source": "default"
+      }
+    ],
+    "robustness": {
+      "fragile_edges": [
+        {
+          "edge_id": "8b115373->84faedd3",
+          "from_id": "8b115373",
+          "to_id": "84faedd3",
+          "switch_probability": 0.5496,
+          "marginal_switch_probability": 0.22,
+          "alternative_winner_id": "1d5333de",
+          "from_label": "Germany Direct Entry Investment",
+          "to_label": "Cash Runway Strain",
+          "severity": "error",
+          "visible": true,
+          "alternative_winner_label": "partner with a local player like Regnology instead of going direct"
+        },
+        {
+          "edge_id": "8b115373->ef40a6f7",
+          "from_id": "8b115373",
+          "to_id": "ef40a6f7",
+          "switch_probability": 0.5256,
+          "marginal_switch_probability": 0.19,
+          "alternative_winner_id": "1d5333de",
+          "from_label": "Germany Direct Entry Investment",
+          "to_label": "Gross Margin Compression",
+          "severity": "error",
+          "visible": true,
+          "alternative_winner_label": "partner with a local player like Regnology instead of going direct"
+        },
+        {
+          "edge_id": "8b115373->42592978",
+          "from_id": "8b115373",
+          "to_id": "42592978",
+          "switch_probability": 0.5176240208877284,
+          "marginal_switch_probability": 0.27,
+          "alternative_winner_id": "1d5333de",
+          "from_label": "Germany Direct Entry Investment",
+          "to_label": "Engineering Cost Overrun",
+          "severity": "error",
+          "visible": true,
+          "alternative_winner_label": "partner with a local player like Regnology instead of going direct"
+        },
+        {
+          "edge_id": "8b115373->c28f3705",
+          "from_id": "8b115373",
+          "to_id": "c28f3705",
+          "switch_probability": 0.5148,
+          "marginal_switch_probability": 0.12,
+          "alternative_winner_id": "1d5333de",
+          "from_label": "Germany Direct Entry Investment",
+          "to_label": "Headcount Constraint Breach",
+          "severity": "error",
+          "visible": true,
+          "alternative_winner_label": "partner with a local player like Regnology instead of going direct"
+        },
+        {
+          "edge_id": "42592978->f18b6bee",
+          "from_id": "42592978",
+          "to_id": "f18b6bee",
+          "switch_probability": 0.4424,
+          "marginal_switch_probability": 0.02,
+          "alternative_winner_id": "1d5333de",
+          "from_label": "Engineering Cost Overrun",
+          "to_label": "get to \u00a320m ARR by end of FY28 without dropping gross margin below 78%",
+          "severity": "warning",
+          "visible": true,
+          "alternative_winner_label": "partner with a local player like Regnology instead of going direct"
+        },
+        {
+          "edge_id": "ef40a6f7->f18b6bee",
+          "from_id": "ef40a6f7",
+          "to_id": "f18b6bee",
+          "switch_probability": 0.4328,
+          "marginal_switch_probability": 0.22,
+          "alternative_winner_id": "1d5333de",
+          "from_label": "Gross Margin Compression",
+          "to_label": "get to \u00a320m ARR by end of FY28 without dropping gross margin below 78%",
+          "severity": "warning",
+          "visible": true,
+          "alternative_winner_label": "partner with a local player like Regnology instead of going direct"
+        },
+        {
+          "edge_id": "8b115373->99759761",
+          "from_id": "8b115373",
+          "to_id": "99759761",
+          "switch_probability": 0.4312,
+          "marginal_switch_probability": 0.28,
+          "alternative_winner_id": "1d5333de",
+          "from_label": "Germany Direct Entry Investment",
+          "to_label": "German Market ARR Contribution",
+          "severity": "warning",
+          "visible": true,
+          "alternative_winner_label": "partner with a local player like Regnology instead of going direct"
+        },
+        {
+          "edge_id": "c28f3705->f18b6bee",
+          "from_id": "c28f3705",
+          "to_id": "f18b6bee",
+          "switch_probability": 0.4284,
+          "marginal_switch_probability": 0.08,
+          "alternative_winner_id": "1d5333de",
+          "from_label": "Headcount Constraint Breach",
+          "to_label": "get to \u00a320m ARR by end of FY28 without dropping gross margin below 78%",
+          "severity": "warning",
+          "visible": true,
+          "alternative_winner_label": "partner with a local player like Regnology instead of going direct"
+        },
+        {
+          "edge_id": "84faedd3->f18b6bee",
+          "from_id": "84faedd3",
+          "to_id": "f18b6bee",
+          "switch_probability": 0.4228,
+          "marginal_switch_probability": 0.26,
+          "alternative_winner_id": "1d5333de",
+          "from_label": "Cash Runway Strain",
+          "to_label": "get to \u00a320m ARR by end of FY28 without dropping gross margin below 78%",
+          "severity": "warning",
+          "visible": true,
+          "alternative_winner_label": "partner with a local player like Regnology instead of going direct"
+        },
+        {
+          "edge_id": "99759761->f18b6bee",
+          "from_id": "99759761",
+          "to_id": "f18b6bee",
+          "switch_probability": 0.4116,
+          "marginal_switch_probability": 0.19,
+          "alternative_winner_id": "1d5333de",
+          "from_label": "German Market ARR Contribution",
+          "to_label": "get to \u00a320m ARR by end of FY28 without dropping gross margin below 78%",
+          "severity": "warning",
+          "visible": true,
+          "alternative_winner_label": "partner with a local player like Regnology instead of going direct"
+        }
+      ],
+      "robust_edges": [
+        {
+          "edge_id": "099f7ecf->99759761",
+          "from_id": "099f7ecf",
+          "to_id": "99759761",
+          "from_label": "I honestly don't know whether the Germany window closes if we wait a year \u2014 two US competitors raised big rounds in Q2",
+          "to_label": "German Market ARR Contribution",
+          "alternative_winner_id": null,
+          "alternative_winner_label": null
+        },
+        {
+          "edge_id": "4fcb676f->5085e7e6",
+          "from_id": "4fcb676f",
+          "to_id": "5085e7e6",
+          "from_label": "NRR is 112%",
+          "to_label": "Partnership Route Activation",
+          "alternative_winner_id": null,
+          "alternative_winner_label": null
+        },
+        {
+          "edge_id": "5085e7e6->99759761",
+          "from_id": "5085e7e6",
+          "to_id": "99759761",
+          "from_label": "Partnership Route Activation",
+          "to_label": "German Market ARR Contribution",
+          "alternative_winner_id": null,
+          "alternative_winner_label": null
+        },
+        {
+          "edge_id": "7355a203->878a2c59",
+          "from_id": "7355a203",
+          "to_id": "878a2c59",
+          "from_label": "UK Market Saturation",
+          "to_label": "UK Expansion ARR Uplift",
+          "alternative_winner_id": null,
+          "alternative_winner_label": null
+        },
+        {
+          "edge_id": "878a2c59->f18b6bee",
+          "from_id": "878a2c59",
+          "to_id": "f18b6bee",
+          "from_label": "UK Expansion ARR Uplift",
+          "to_label": "get to \u00a320m ARR by end of FY28 without dropping gross margin below 78%",
+          "alternative_winner_id": null,
+          "alternative_winner_label": null
+        },
+        {
+          "edge_id": "9d2cb92b->878a2c59",
+          "from_id": "9d2cb92b",
+          "to_id": "878a2c59",
+          "from_label": "UK Market Depth Investment",
+          "to_label": "UK Expansion ARR Uplift",
+          "alternative_winner_id": null,
+          "alternative_winner_label": null
+        }
+      ],
+      "is_robust": false,
+      "level": "very_low",
+      "confidence": 0.4552950000000001,
+      "confidence_basis": "recommendation_stability_uncalibrated",
+      "recommended_option_id": "0dcc2a10",
+      "recommended_option_label": "Germany Pilot via Sponsored Customers",
+      "recommended_option_compliance": "not_applicable",
+      "recommended_option_compliance_reason": "no limits were set for this decision",
+      "near_tie": {
+        "is_tie": true,
+        "top_option_id": "0dcc2a10",
+        "second_option_id": "1d5333de",
+        "tied_option_ids": [
+          "0dcc2a10",
+          "1d5333de"
+        ],
+        "gap": 0.038949999999999985,
+        "threshold": 0.1
+      },
+      "display_verdict": "fragile",
+      "display_verdict_reason": "small changes could flip this result"
+    },
+    "decision_review": {
+      "narrative_summary": "The size of the lead is not reported as a gap between options \u2014 the difference between two win frequencies is not a difference in outcome. Uncertainties around UK market saturation and German market timing keep this finely balanced.",
+      "story_headlines": {
+        "0dcc2a10": "Leads as it leverages existing UK customer sponsorship for German entry, offering a path with manageable risk, but only if the upfront investment and execution risks are contained.",
+        "1d5333de": "Could overtake if direct entry costs, margin compression, or local regulatory hurdles in Germany escalate, making partnership a safer and more scalable route for continental expansion."
+      },
+      "robustness_explanation": {
+        "summary": "The ordering holds in about 51% of variations, reflecting high uncertainty and several key links that could readily flip the result.",
+        "primary_risk": "The link from Germany Direct Entry Investment to Engineering Cost Overrun is a major tipping point for this decision.",
+        "stability_factors": [
+          "The pilot sponsorships from existing UK banks provide early German market access with some external validation.",
+          "Current profit stability and cash on hand set a hard boundary for direct expansion risk appetite."
+        ],
+        "fragility_factors": [
+          "The link from Germany Direct Entry Investment to Engineering Cost Overrun could flip outcome rankings if costs overrun.",
+          "The link from Germany Direct Entry Investment to Gross Margin Compression makes the result highly contingent if direct expansion squeezes margins."
+        ]
+      },
+      "readiness_rationale": "This remains unsettled, with outcome rankings hinging on whether direct entry to Germany strains engineering capacity or squeezes gross margins. UK market saturation and partnership feasibility are not yet well evidenced.",
+      "evidence_enhancements": {
+        "7355a203": {
+          "specific_action": "Commission updated UK regtech market penetration estimates from a sector specialist, supplementing industry reports with interviews targeting actual replacement cycles.",
+          "rationale": "Pinning down true UK market saturation is key to knowing whether further UK investment pays off or has diminishing returns.",
+          "evidence_type": "market_research",
+          "decision_hygiene": "Estimate your own best guess before seeing new evidence."
+        },
+        "099f7ecf": {
+          "specific_action": "Survey informed German market observers and consult with two local competitors to assess US players\u2019 entry timelines and the potential for the window closing.",
+          "rationale": "Understanding how long the German market window remains open is pivotal to timing expansion versus waiting.",
+          "evidence_type": "expert_input",
+          "decision_hygiene": "Write down how you believe timing risk matters before reviewing input."
+        },
+        "5085e7e6": {
+          "specific_action": "Initiate exploratory conversations with Regnology and similar local firms, probing partnership appetite and deal structures.",
+          "rationale": "Clarity on local partnership feasibility could make or break the direct entry risk calculus versus a shared route.",
+          "evidence_type": "market_research",
+          "decision_hygiene": "List pros and cons of partnership before engaging in talks."
+        }
+      },
+      "scenario_contexts": {
+        "8b115373->42592978": {
+          "trigger_description": "If Germany Direct Entry Investment results in higher than expected engineering cost overrun...",
+          "consequence": "...then partner with a local player like Regnology instead of going direct overtakes Germany Pilot via Sponsored Customers."
+        },
+        "ef40a6f7->f18b6bee": {
+          "trigger_description": "If Gross Margin Compression worsens due to direct Germany entry...",
+          "consequence": "...then partner with a local player like Regnology instead of going direct overtakes Germany Pilot via Sponsored Customers."
+        }
+      },
+      "flip_thresholds": [
+        {
+          "factor_id": "8b115373",
+          "factor_label": "Germany Direct Entry Investment",
+          "current_display": "853750",
+          "flip_display": "931925",
+          "narrative": "If Germany Direct Entry Investment increases from 853750 to 931925, the leading option changes."
+        },
+        {
+          "factor_id": "9d2cb92b",
+          "factor_label": "UK Market Depth Investment",
+          "current_display": "0",
+          "flip_display": "15%",
+          "narrative": "If UK Market Depth Investment moves from 0 to 15%, the leading option changes."
+        }
+      ],
+      "bias_findings": [],
+      "key_assumptions": [
+        "The link from Germany Direct Entry Investment to Engineering Cost Overrun assumes engineering reuse enters the 40\u221260% range.",
+        "UK Market Saturation is set at 70% based on a gut estimate, not market-validated data.",
+        "Pilot sponsorships from existing UK banks in Frankfurt proceed without delays or resource surprises."
+      ],
+      "decision_quality_prompts": [
+        {
+          "question": "What evidence would make you switch from Germany Pilot via Sponsored Customers to partnering with a local player like Regnology instead of going direct?",
+          "principle": "Consider-the-opposite",
+          "applies_because": "With the lead so narrow and results unstable, actively challenging modelled assumptions helps guard against motivated reasoning.",
+          "dsk_grounding": "general"
+        },
+        {
+          "question": "For UK Market Saturation, what is the best outside estimate from sector research or peer companies?",
+          "principle": "Outside view and reference class forecasting",
+          "applies_because": "Given uncertainties rest on UK market saturation rates and self-report may bias internal views, calibration against external comparables is warranted.",
+          "dsk_claim_id": "DSK-T-002",
+          "evidence_strength": "strong",
+          "dsk_protocol_id": "DSK-P-002",
+          "dsk_grounding": "attested"
+        }
+      ],
+      "pre_mortem": {
+        "failure_scenario": "The Germany Pilot via Sponsored Customers is derailed by unexpectedly high engineering costs and margin compression, forcing a late pivot to partnership after burning significant cash and board confidence.",
+        "warning_signs": [
+          "Engineering sprints fall behind or costs outpace forecast in first two quarters.",
+          "Gross margins slip below 78% threshold during pilot phase."
+        ],
+        "mitigation": "Design an early-stage pilot with explicit cost monitors and stage gates to catch overruns before major commitments.",
+        "grounded_in": [
+          "8b115373->42592978",
+          "ef40a6f7->f18b6bee"
+        ],
+        "review_trigger": "Reconvene if engineering cost tracking or margin KPIs break modelled ranges before launch."
+      },
+      "produced_at": "2026-09-03T14:18:57.000Z"
+    },
+    "option_comparison_status": "computed",
+    "edge_e_values": [
+      {
+        "edge_id": "42592978::f18b6bee",
+        "from_id": "42592978",
+        "to_id": "f18b6bee",
+        "from_label": "Engineering Cost Overrun",
+        "to_label": "get to \u00a320m ARR by end of FY28 without dropping gross margin below 78%",
+        "e_value": 1.808,
+        "flip_direction": "decrease",
+        "current_mean": -0.5,
+        "flip_mean": -0.903999,
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 4,
+          "band_min": -0.849045,
+          "band_median": -0.340821,
+          "band_max": 0.817256,
+          "band_width": 1.666301,
+          "seed_flip_means": [
+            null,
+            -0.531445,
+            -0.150197,
+            null,
+            null,
+            null,
+            null,
+            0.817256,
+            null,
+            -0.849045
+          ]
+        }
+      },
+      {
+        "edge_id": "84faedd3::f18b6bee",
+        "from_id": "84faedd3",
+        "to_id": "f18b6bee",
+        "from_label": "Cash Runway Strain",
+        "to_label": "get to \u00a320m ARR by end of FY28 without dropping gross margin below 78%",
+        "e_value": 1.3652,
+        "flip_direction": "decrease",
+        "current_mean": -0.5,
+        "flip_mean": -0.682611,
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 8,
+          "band_min": -0.936963,
+          "band_median": -0.592898,
+          "band_max": 0.022793,
+          "band_width": 0.9597559999999999,
+          "seed_flip_means": [
+            null,
+            -0.786572,
+            -0.638247,
+            -0.398694,
+            -0.304336,
+            -0.547549,
+            null,
+            0.022793,
+            -0.865635,
+            -0.936963
+          ]
+        }
+      },
+      {
+        "edge_id": "878a2c59::f18b6bee",
+        "from_id": "878a2c59",
+        "to_id": "f18b6bee",
+        "from_label": "UK Expansion ARR Uplift",
+        "to_label": "get to \u00a320m ARR by end of FY28 without dropping gross margin below 78%",
+        "e_value": 1,
+        "flip_direction": "decrease",
+        "current_mean": 0.7,
+        "flip_mean": 0.597124,
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 6,
+          "band_min": 0.017932,
+          "band_median": 0.591827,
+          "band_max": 0.910728,
+          "band_width": 0.892796,
+          "seed_flip_means": [
+            null,
+            0.910728,
+            0.64806,
+            0.183119,
+            null,
+            null,
+            0.017932,
+            null,
+            0.535593,
+            0.878178
+          ]
+        }
+      },
+      {
+        "edge_id": "8b115373::42592978",
+        "from_id": "8b115373",
+        "to_id": "42592978",
+        "from_label": "Germany Direct Entry Investment",
+        "to_label": "Engineering Cost Overrun",
+        "e_value": 1.808,
+        "flip_direction": "increase",
+        "current_mean": 0.3,
+        "flip_mean": 0.542399,
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 4,
+          "band_min": -0.924851,
+          "band_median": -0.098536,
+          "band_max": 0.707555,
+          "band_width": 1.632406,
+          "seed_flip_means": [
+            null,
+            0.707555,
+            null,
+            null,
+            -0.552963,
+            -0.924851,
+            null,
+            null,
+            0.35589,
+            null
+          ]
+        }
+      },
+      {
+        "edge_id": "8b115373::84faedd3",
+        "from_id": "8b115373",
+        "to_id": "84faedd3",
+        "from_label": "Germany Direct Entry Investment",
+        "to_label": "Cash Runway Strain",
+        "e_value": 1.3652,
+        "flip_direction": "increase",
+        "current_mean": 0.7,
+        "flip_mean": 0.955656,
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 4,
+          "band_min": -0.029882,
+          "band_median": 0.560977,
+          "band_max": 0.965092,
+          "band_width": 0.9949739999999999,
+          "seed_flip_means": [
+            null,
+            0.965092,
+            null,
+            null,
+            0.386868,
+            0.735086,
+            null,
+            -0.029882,
+            null,
+            null
+          ]
+        }
+      },
+      {
+        "edge_id": "8b115373::99759761",
+        "from_id": "8b115373",
+        "to_id": "99759761",
+        "from_label": "Germany Direct Entry Investment",
+        "to_label": "German Market ARR Contribution",
+        "e_value": 1,
+        "flip_direction": "decrease",
+        "current_mean": 0.4354166666666667,
+        "flip_mean": 0.22237,
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 7,
+          "band_min": -0.439597,
+          "band_median": -0.047823,
+          "band_max": 0.834588,
+          "band_width": 1.2741850000000001,
+          "seed_flip_means": [
+            null,
+            0.467294,
+            -0.047823,
+            -0.439597,
+            null,
+            0.754429,
+            -0.407872,
+            0.834588,
+            null,
+            -0.344617
+          ]
+        }
+      },
+      {
+        "edge_id": "8b115373::c28f3705",
+        "from_id": "8b115373",
+        "to_id": "c28f3705",
+        "from_label": "Germany Direct Entry Investment",
+        "to_label": "Headcount Constraint Breach",
+        "e_value": 1.581,
+        "flip_direction": "increase",
+        "current_mean": 0.55,
+        "flip_mean": 0.86957,
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 3,
+          "band_min": -0.558856,
+          "band_median": -0.117219,
+          "band_max": 0.965507,
+          "band_width": 1.5243630000000001,
+          "seed_flip_means": [
+            null,
+            0.965507,
+            null,
+            null,
+            null,
+            -0.117219,
+            null,
+            -0.558856,
+            null,
+            null
+          ]
+        }
+      },
+      {
+        "edge_id": "8b115373::ef40a6f7",
+        "from_id": "8b115373",
+        "to_id": "ef40a6f7",
+        "from_label": "Germany Direct Entry Investment",
+        "to_label": "Gross Margin Compression",
+        "e_value": 1.4648,
+        "flip_direction": "increase",
+        "current_mean": 0.5,
+        "flip_mean": 0.732414,
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 6,
+          "band_min": -0.101946,
+          "band_median": 0.342966,
+          "band_max": 0.929531,
+          "band_width": 1.031477,
+          "seed_flip_means": [
+            null,
+            0.601958,
+            0.484982,
+            null,
+            null,
+            0.00268,
+            null,
+            -0.101946,
+            0.200949,
+            0.929531
+          ]
+        }
+      },
+      {
+        "edge_id": "99759761::f18b6bee",
+        "from_id": "99759761",
+        "to_id": "f18b6bee",
+        "from_label": "German Market ARR Contribution",
+        "to_label": "get to \u00a320m ARR by end of FY28 without dropping gross margin below 78%",
+        "e_value": 1,
+        "flip_direction": "decrease",
+        "current_mean": 0.6,
+        "flip_mean": 0.306424,
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 2,
+          "band_min": -0.578761,
+          "band_median": -0.115727,
+          "band_max": 0.347307,
+          "band_width": 0.9260679999999999,
+          "seed_flip_means": [
+            null,
+            0.347307,
+            null,
+            null,
+            null,
+            null,
+            -0.578761,
+            null,
+            null,
+            null
+          ]
+        }
+      },
+      {
+        "edge_id": "9d2cb92b::878a2c59",
+        "from_id": "9d2cb92b",
+        "to_id": "878a2c59",
+        "from_label": "UK Market Depth Investment",
+        "to_label": "UK Expansion ARR Uplift",
+        "e_value": 1,
+        "flip_direction": "decrease",
+        "current_mean": 0.5369565217391304,
+        "flip_mean": 0.458042,
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 9,
+          "band_min": 0.015803,
+          "band_median": 0.596477,
+          "band_max": 0.99622,
+          "band_width": 0.980417,
+          "seed_flip_means": [
+            0.938793,
+            0.484811,
+            0.596477,
+            0.260109,
+            null,
+            0.99622,
+            0.015803,
+            0.872874,
+            0.588541,
+            0.864538
+          ]
+        }
+      },
+      {
+        "edge_id": "c28f3705::f18b6bee",
+        "from_id": "c28f3705",
+        "to_id": "f18b6bee",
+        "from_label": "Headcount Constraint Breach",
+        "to_label": "get to \u00a320m ARR by end of FY28 without dropping gross margin below 78%",
+        "e_value": 1.581,
+        "flip_direction": "decrease",
+        "current_mean": -0.4,
+        "flip_mean": -0.632414,
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 6,
+          "band_min": -0.674218,
+          "band_median": -0.255599,
+          "band_max": 0.606468,
+          "band_width": 1.280686,
+          "seed_flip_means": [
+            null,
+            -0.458467,
+            -0.05273,
+            null,
+            null,
+            0.092197,
+            null,
+            0.606468,
+            -0.555826,
+            -0.674218
+          ]
+        }
+      },
+      {
+        "edge_id": "ef40a6f7::f18b6bee",
+        "from_id": "ef40a6f7",
+        "to_id": "f18b6bee",
+        "from_label": "Gross Margin Compression",
+        "to_label": "get to \u00a320m ARR by end of FY28 without dropping gross margin below 78%",
+        "e_value": 1.4648,
+        "flip_direction": "decrease",
+        "current_mean": -0.55,
+        "flip_mean": -0.805656,
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 5,
+          "band_min": -0.725222,
+          "band_median": -0.503135,
+          "band_max": 0.102323,
+          "band_width": 0.827545,
+          "seed_flip_means": [
+            null,
+            -0.690059,
+            -0.725222,
+            -0.503135,
+            null,
+            -0.005553,
+            null,
+            0.102323,
+            null,
+            null
+          ]
+        }
+      }
+    ],
+    "inference_warnings": [
+      {
+        "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+        "message": "4 edge E-value entries were omitted from edge_e_values: 4 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+        "severity": "info"
+      },
+      {
+        "code": "ROOT_NODE_DEFAULT_VALUE",
+        "message": "No observed value provided for root node '099f7ecf'; defaulted to 0.0. Results for downstream nodes may be unreliable.",
+        "severity": "info",
+        "field": "nodes[099f7ecf].observed_state.value"
+      },
+      {
+        "code": "ROOT_NODE_DEFAULT_VALUE",
+        "message": "No observed value provided for root node '4fcb676f'; defaulted to 0.0. Results for downstream nodes may be unreliable.",
+        "severity": "info",
+        "field": "nodes[4fcb676f].observed_state.value"
+      },
+      {
+        "code": "GOAL_ANCESTOR_DATA_GAP",
+        "message": "Goal node 'f18b6bee' is scored from its forward-propagated outcome distribution, but root ancestor(s) '099f7ecf', '4fcb676f' carry no observed value or ParameterUncertainty and defaulted to 0.0 \u2014 goal-level probabilities partially rest on placeholder zeros (insufficient data).",
+        "severity": "info",
+        "field": "nodes[f18b6bee]"
+      }
+    ],
+    "confidence_tier": "fair",
+    "flip_thresholds": [
+      {
+        "factor_id": "7355a203",
+        "factor_label": "UK Market Saturation",
+        "current_value": 0.675,
+        "flip_value": null,
+        "alternative_winner_id": null,
+        "alternative_winner_label": null,
+        "flip_reason": "structurally_invariant",
+        "iterations_used": 0,
+        "probes_used": 0,
+        "no_flip_in_range": true
+      },
+      {
+        "factor_id": "8b115373",
+        "factor_label": "Germany Direct Entry Investment",
+        "current_value": 853750,
+        "flip_value": 931925,
+        "direction": "increase",
+        "alternative_winner_id": "0dcc2a10",
+        "alternative_winner_label": "Germany Pilot via Sponsored Customers",
+        "flip_reason": "found",
+        "iterations_used": 0,
+        "probes_used": 0
+      },
+      {
+        "factor_id": "9d2cb92b",
+        "factor_label": "UK Market Depth Investment",
+        "current_value": 0,
+        "flip_value": 0.147,
+        "direction": "increase",
+        "alternative_winner_id": "0dcc2a10",
+        "alternative_winner_label": "Germany Pilot via Sponsored Customers",
+        "flip_reason": "found",
+        "iterations_used": 0,
+        "probes_used": 0
+      }
+    ],
+    "decision_brief": {
+      "brief_id": "9b237a8d-9b39-424f-9cba-fd9250b14667",
+      "version": "1",
+      "created_at": "2026-09-03T14:18:47.910Z",
+      "headline": "Germany Pilot via Sponsored Customers currently leads, but the outcome is highly uncertain. However, the outcome is within model uncertainty, so the ranking could shift with new information. Define tie-breaker criteria or gather additional evidence.",
+      "options": [
+        {
+          "option_id": "0dcc2a10",
+          "label": "Germany Pilot via Sponsored Customers",
+          "win_probability": 0.5058833333333335,
+          "rank": 1
+        },
+        {
+          "option_id": "1d5333de",
+          "label": "partner with a local player like Regnology instead of going direct",
+          "win_probability": 0.4669333333333335,
+          "rank": 2
+        },
+        {
+          "option_id": "191fb060",
+          "label": "Double Down on the UK",
+          "win_probability": 0.027183333333333344,
+          "rank": 3
+        }
+      ],
+      "top_drivers": [
+        {
+          "factor_label": "UK Market Saturation",
+          "sensitivity": 0.3940448855640322,
+          "direction": "positive"
+        },
+        {
+          "factor_label": "Partnership Route Activation",
+          "sensitivity": 0.2265758091993185,
+          "direction": "positive"
+        },
+        {
+          "factor_label": "I honestly don't know whether the Germany window closes if we wait a year \u2014 two US competitors raised big rounds in Q2",
+          "sensitivity": 0.19420783645655873,
+          "direction": "positive"
+        },
+        {
+          "factor_label": "NRR is 112%",
+          "sensitivity": 0.11328790459965925,
+          "direction": "positive"
+        }
+      ],
+      "key_assumptions": [
+        "UK Market Saturation",
+        "I honestly don't know whether the Germany window closes if we wait a year \u2014 two US competitors raised big rounds in Q2",
+        "Partnership Route Activation"
+      ],
+      "what_would_change": [
+        "Engineering Cost Overrun \u2192 get to \u00a320m ARR by end of FY28 without dropping gross margin below 78%",
+        "Gross Margin Compression \u2192 get to \u00a320m ARR by end of FY28 without dropping gross margin below 78%",
+        "Headcount Constraint Breach \u2192 get to \u00a320m ARR by end of FY28 without dropping gross margin below 78%",
+        "Cash Runway Strain \u2192 get to \u00a320m ARR by end of FY28 without dropping gross margin below 78%",
+        "German Market ARR Contribution \u2192 get to \u00a320m ARR by end of FY28 without dropping gross margin below 78%"
+      ],
+      "robustness": "fragile",
+      "warnings": [
+        {
+          "code": "GOAL_ANCESTOR_DATA_GAP",
+          "message": "Goal node 'f18b6bee' is scored from its forward-propagated outcome distribution, but root ancestor(s) '099f7ecf', '4fcb676f' carry no observed value or ParameterUncertainty and defaulted to 0.0 \u2014 goal-level probabilities partially rest on placeholder zeros (insufficient data)",
+          "severity": "warning"
+        },
+        {
+          "code": "INFLUENTIAL_EXTERNALS",
+          "message": "External factors UK Market Saturation, Partnership Route Activation significantly affect your outcome but are inherently uncertain. How might you bound these?",
+          "severity": "warning"
+        },
+        {
+          "code": "M2_UNAVAILABLE",
+          "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+          "severity": "warning"
+        }
+      ],
+      "headline_banded": {
+        "text": "Germany Pilot via Sponsored Customers leads, but the top options are very close.",
+        "band": "very_close",
+        "leader_option_id": "0dcc2a10",
+        "leader_label": "Germany Pilot via Sponsored Customers",
+        "runner_up_option_id": "1d5333de",
+        "runner_up_label": "partner with a local player like Regnology instead of going direct",
+        "win_probability_gap": 0.038949999999999985,
+        "robustness_gated": false,
+        "doctrine": "provisional_doctrine_v0"
+      },
+      "defaulted_assumptions": [
+        {
+          "factor_label": null,
+          "note": "No observed value provided for root node '099f7ecf'; defaulted to 0.0. Results for downstream nodes may be unreliable.",
+          "source": "default_disclosure",
+          "code": "ROOT_NODE_DEFAULT_VALUE",
+          "doctrine": "provisional_doctrine_v0"
+        }
+      ],
+      "robustness_caveat": {
+        "text": "This ranking was fragile under the perturbations tested \u2014 small changes to assumptions could change which option leads.",
+        "basis": "is_robust",
+        "flip_evidence": {
+          "status": "partial_no_effect",
+          "text": "Changing at least one tested factor on its own could change which option leads; the other factors we could test could not."
+        },
+        "doctrine": "provisional_doctrine_v0"
+      },
+      "warning_codes": [],
+      "analysis_summary": {
+        "leading_option": "Germany Pilot via Sponsored Customers",
+        "win_probability": 0.5058833333333335,
+        "robustness_band": "fragile"
+      }
+    },
+    "factor_evppi": [
+      {
+        "factor_id": "5085e7e6",
+        "evppi": 0,
+        "evppi_raw": 0,
+        "baseline_max_expected_utility": 0.140501,
+        "conditional_max_expected_utility": 0.140501,
+        "units": "outcome",
+        "method": "regression_evppi_v1",
+        "regression_degree": 4,
+        "n_samples": 10000,
+        "clamped_low": false,
+        "clamped_high": false,
+        "noise_floor": 0,
+        "status": "below_resolution",
+        "correlation_active": false
+      },
+      {
+        "factor_id": "7355a203",
+        "evppi": 0,
+        "evppi_raw": 0,
+        "baseline_max_expected_utility": 0.140501,
+        "conditional_max_expected_utility": 0.140501,
+        "units": "outcome",
+        "method": "regression_evppi_v1",
+        "regression_degree": 4,
+        "n_samples": 10000,
+        "clamped_low": true,
+        "clamped_high": false,
+        "noise_floor": 0,
+        "status": "below_resolution",
+        "correlation_active": false
+      }
+    ],
+    "decision_evpi": 0.10014341342073727,
+    "p_win_sensitivity": [
+      {
+        "factor_id": "5085e7e6",
+        "p_win_delta": 0.000667,
+        "p_win_delta_percentage_points": 0.07,
+        "current_metric": 0.509833,
+        "perfect_metric": 0.5105,
+        "metric_type": "p_win_recommended",
+        "method": "p_win_delta_at_mean_v1",
+        "n_samples": 2000,
+        "status": "below_resolution",
+        "clamped": false,
+        "noise_floor": 0.03099,
+        "noise_floor_method": "z95_worst_case_bernoulli_diff",
+        "labelling_doctrine": "provisional_doctrine_v0"
+      },
+      {
+        "factor_id": "8b115373",
+        "p_win_delta": 0,
+        "p_win_delta_percentage_points": 0,
+        "current_metric": 0.509833,
+        "perfect_metric": 0.509,
+        "metric_type": "p_win_recommended",
+        "method": "p_win_delta_at_mean_v1",
+        "n_samples": 2000,
+        "status": "below_resolution",
+        "clamped": true,
+        "noise_floor": 0.03099,
+        "noise_floor_method": "z95_worst_case_bernoulli_diff",
+        "labelling_doctrine": "provisional_doctrine_v0"
+      },
+      {
+        "factor_id": "9d2cb92b",
+        "p_win_delta": 0,
+        "p_win_delta_percentage_points": 0,
+        "current_metric": 0.509833,
+        "perfect_metric": 0.4595,
+        "metric_type": "p_win_recommended",
+        "method": "p_win_delta_at_mean_v1",
+        "n_samples": 2000,
+        "status": "below_resolution",
+        "clamped": true,
+        "noise_floor": 0.03099,
+        "noise_floor_method": "z95_worst_case_bernoulli_diff",
+        "labelling_doctrine": "provisional_doctrine_v0"
+      },
+      {
+        "factor_id": "7355a203",
+        "p_win_delta": 0,
+        "p_win_delta_percentage_points": 0,
+        "current_metric": 0.509833,
+        "perfect_metric": 0.49475,
+        "metric_type": "p_win_recommended",
+        "method": "p_win_delta_at_mean_v1",
+        "n_samples": 2000,
+        "status": "below_resolution",
+        "clamped": true,
+        "noise_floor": 0.03099,
+        "noise_floor_method": "z95_worst_case_bernoulli_diff",
+        "labelling_doctrine": "provisional_doctrine_v0"
+      }
+    ],
+    "conditional_winners": [
+      {
+        "factor_id": "8b115373",
+        "factor_label": "Germany Direct Entry Investment",
+        "split_value": 854231.3640790522,
+        "low_bucket": {
+          "winner_id": "1d5333de",
+          "winner_label": "partner with a local player like Regnology instead of going direct",
+          "runner_up_id": "0dcc2a10",
+          "runner_up_label": "Germany Pilot via Sponsored Customers",
+          "win_probability": 0.508
+        },
+        "high_bucket": {
+          "winner_id": "0dcc2a10",
+          "winner_label": "Germany Pilot via Sponsored Customers",
+          "runner_up_id": "1d5333de",
+          "runner_up_label": "partner with a local player like Regnology instead of going direct",
+          "win_probability": 0.5488
+        },
+        "winner_flips": true
+      },
+      {
+        "factor_id": "9d2cb92b",
+        "factor_label": "UK Market Depth Investment",
+        "split_value": -0.0216940436073554,
+        "low_bucket": {
+          "winner_id": "1d5333de",
+          "winner_label": "partner with a local player like Regnology instead of going direct",
+          "runner_up_id": "0dcc2a10",
+          "runner_up_label": "Germany Pilot via Sponsored Customers",
+          "win_probability": 0.5832
+        },
+        "high_bucket": {
+          "winner_id": "0dcc2a10",
+          "winner_label": "Germany Pilot via Sponsored Customers",
+          "runner_up_id": "1d5333de",
+          "runner_up_label": "partner with a local player like Regnology instead of going direct",
+          "win_probability": 0.6212
+        },
+        "winner_flips": true
+      }
+    ]
+  }
+}

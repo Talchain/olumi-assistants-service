@@ -1,0 +1,40 @@
+{
+  "id": "rg-11-no-path-to-goal-pre-sweep",
+  "name": "NO_PATH_TO_GOAL — verify no bridge edge added (pre-sweep)",
+  "description": "An outcome has no inbound factor edge, so it cannot reach the goal. Repair must add a factor→outcome edge but must NOT add an outcome→goal bridge (pre-sweep state). The no_bridge_edges check verifies this.",
+  "brief": "We're deciding on our talent strategy. Customer satisfaction is an important outcome but currently has no causal path.",
+  "graph": {
+    "nodes": [
+      {"id": "dec_talent", "kind": "decision", "label": "Talent Strategy"},
+      {"id": "opt_upskill", "kind": "option", "label": "Upskill Current Team", "data": {"interventions": {"fac_training_budget": 1.0}}},
+      {"id": "opt_recruit", "kind": "option", "label": "Recruit Externally", "data": {"interventions": {"fac_training_budget": 0.2}}},
+      {"id": "fac_training_budget", "kind": "factor", "label": "Training Budget", "category": "controllable", "data": {"value": 0.4, "extractionType": "inferred", "factor_type": "cost", "uncertainty_drivers": ["Budget allocation TBD"]}},
+      {"id": "fac_employee_capability", "kind": "factor", "label": "Employee Capability", "category": "observable", "data": {"value": 0.55, "extractionType": "observed"}},
+      {"id": "out_delivery_perf", "kind": "outcome", "label": "Delivery Performance"},
+      {"id": "out_customer_satisfaction", "kind": "outcome", "label": "Customer Satisfaction"},
+      {"id": "goal_business_value", "kind": "goal", "label": "Deliver Business Value"}
+    ],
+    "edges": [
+      {"from": "dec_talent", "to": "opt_upskill", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "dec_talent", "to": "opt_recruit", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_upskill", "to": "fac_training_budget", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_recruit", "to": "fac_training_budget", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "fac_training_budget", "to": "fac_employee_capability", "strength": {"mean": 0.60, "std": 0.18}, "exists_probability": 0.80, "effect_direction": "positive"},
+      {"from": "fac_employee_capability", "to": "out_delivery_perf", "strength": {"mean": 0.65, "std": 0.18}, "exists_probability": 0.85, "effect_direction": "positive"},
+      {"from": "out_delivery_perf", "to": "goal_business_value", "strength": {"mean": 0.70, "std": 0.15}, "exists_probability": 0.90, "effect_direction": "positive"}
+    ]
+  },
+  "violations": [
+    {"code": "NO_PATH_TO_GOAL", "node_or_edge": "out_customer_satisfaction", "detail": "out_customer_satisfaction has no inbound edges and no path to goal_business_value."}
+  ],
+  "expected": {
+    "violations_addressed": ["NO_PATH_TO_GOAL"],
+    "preserve_node_ids": ["dec_talent", "opt_upskill", "opt_recruit", "fac_training_budget", "fac_employee_capability", "out_delivery_perf", "out_customer_satisfaction", "goal_business_value"],
+    "forbidden_edges": [{"from": "out_customer_satisfaction", "to": "goal_business_value"}],
+    "required_edges": [],
+    "no_bridge_edges": true,
+    "preserve_bidirected": false,
+    "check_external_prior": false,
+    "no_json_comments": true
+  }
+}

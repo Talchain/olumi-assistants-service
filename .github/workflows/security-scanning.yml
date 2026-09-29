@@ -1,0 +1,157 @@
+name: Security Scanning
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+    branches: [main, staging]
+  schedule:
+    # Run weekly on Mondays at 9 AM UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+# ⛔ SUPERSEDED RUNS MUST NOT HOLD RUNNERS.
+#
+# Measured 23 Sep 2026, 00:26 UTC: 63 workflow runs queued against 1 in
+# progress, with 25 open PRs. Nothing could go green, so nothing could merge,
+# so nothing could deploy — the queue, not any individual change, was the
+# binding constraint on shipping. Without a concurrency group every push
+# enqueues a fresh full set and the runs it superseded keep their place.
+#
+# ⚠ `cancel-in-progress` is FALSE on staging and main, deliberately. A run on a
+# protected branch is the deploy gate and part of the record; cancelling one
+# would destroy evidence of what was verified at that SHA. Only branch and PR
+# runs — where a newer push has already made the older run irrelevant — cancel.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/staging' && github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+  packages: read
+  security-events: write
+  pull-requests: write
+
+jobs:
+  codeql:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-and-quality
+          config: |
+            paths-ignore:
+              - 'dist/**'
+              - 'node_modules/**'
+              - 'tests/**'
+              - 'examples/**'
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
+
+  snyk:
+    name: Snyk Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
+
+      - name: Run Snyk to check for vulnerabilities
+        if: env.SNYK_TOKEN != ''
+        uses: snyk/actions/node@master
+        with:
+          args: --severity-threshold=high --all-projects --sarif-file-output=snyk.sarif
+          command: test
+
+      - name: Upload Snyk results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always() && hashFiles('snyk.sarif') != ''
+        with:
+          sarif_file: snyk.sarif
+
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    # Don't block PRs if Dependency graph isn't enabled (requires GitHub Advanced Security for private repos)
+    continue-on-error: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: moderate
+          deny-licenses: GPL-2.0, GPL-3.0
+
+  security-summary:
+    name: Security Scan Summary
+    runs-on: ubuntu-latest
+    needs: [codeql, snyk, dependency-review]
+    if: always() && github.event_name == 'pull_request'
+
+    steps:
+      - name: Post summary comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const codeqlResult = '${{ needs.codeql.result }}';
+            const snykResult = '${{ needs.snyk.result }}';
+            const depReviewResult = '${{ needs.dependency-review.result }}';
+
+            const emoji = (result) => result === 'success' ? '✅' : result === 'failure' ? '❌' : '⚠️';
+
+            const comment = `## 🛡️ Security Scan Results
+
+            | Scan | Status |
+            |------|--------|
+            | CodeQL Static Analysis | ${emoji(codeqlResult)} ${codeqlResult} |
+            | Snyk Vulnerability Scan | ${emoji(snykResult)} ${snykResult} |
+            | Dependency Review | ${emoji(depReviewResult)} ${depReviewResult} |
+
+            ${codeqlResult === 'failure' || snykResult === 'failure' || depReviewResult === 'failure'
+              ? '⚠️ **Security issues detected.** Please review the detailed results above.'
+              : '✅ **All security scans passed!**'}
+            `;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });

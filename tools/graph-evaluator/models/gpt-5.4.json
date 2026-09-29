@@ -1,0 +1,15 @@
+{
+  "id": "gpt-5.4",
+  "display_name": "GPT-5.4",
+  "provider": "openai",
+  "model": "gpt-5.4",
+  "snapshot": "gpt-5.4-2026-03-05",
+  "api_key_env": "OPENAI_API_KEY",
+  "params": {},
+  "target_mode": "deep",
+  "pricing": {
+    "input_per_1m": 75.00,
+    "output_per_1m": 150.00,
+    "source": "openai_api_docs_2026-03"
+  }
+}

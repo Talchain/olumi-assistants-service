@@ -1,0 +1,458 @@
+/**
+ * THE USER'S OWN FIGURES MUST NOT BE REPORTED AS OUR GUESSES.
+ *
+ * ── THE DEFECT THIS PINS, measured at the bytes on capture `d9c4066c`
+ * (19 Sep 2026). The user wrote *"conversion rate from trial to paid is 12%"*
+ * and *"Our churn rate is 4% monthly"*. Both reached the graph carrying exactly
+ * those figures and both were stamped `extractionType: "inferred"`, which
+ * `transforms/schema-v3.ts:458` publishes as `observed_state.source:
+ * "cee_inference"`. `brief_extraction` appeared on 0 of the capture's 6 valued
+ * factors, so the product told the user that every estimate behind the analysis
+ * was machine-authored — **a false sentence about two numbers they typed.**
+ *
+ * ── THE FIXTURES ARE THE REAL CAPTURE, NOT A CONVENIENCE
+ * `CAPTURED_BRIEF` is the user's own text and `capturedFactors()` reproduces
+ * the six valued factors at their captured levels. A corpus written from the
+ * author's head cannot see the class the author did not imagine (trap 22), and
+ * the sharpest case here — the competitor's `£5m`, which `inferLabel` really
+ * does label "Churn Rate" on this brief — was found by running the real text,
+ * not by inventing a case.
+ *
+ * ── WHAT EACH NEGATIVE IS FOR
+ * The predicate guards two opposite harms, so the cases come in both
+ * directions (trap 22b): a GAP silently withholds a badge the user earned; a
+ * LIE credits them with a number they never wrote — and a wrong credit here is
+ * not cosmetic, because `brief_extraction` counts as user-stated in the
+ * analysis-admission census and can license naming a leading option.
+ */
+
+import { describe, it, expect } from "vitest";
+import { creditUserTypedFigures } from "../enricher.js";
+import type { GraphT, NodeT } from "../../../schemas/graph.js";
+import { UNIT_SCALE_CLASS_TOKENS } from "../../draft/records/unit-scale-class.js";
+
+/** The user's own words, from capture `d9c4066c` (19 Sep 2026). */
+const CAPTURED_BRIEF = [
+  "We're a B2B SaaS company (£8k MRR, 120 customers) deciding whether to hire a dedicated sales team or continue with founder-led sales. Our goal is reaching £30k MRR within 18 months.",
+  "Key context:",
+  "* Current conversion rate from trial to paid is 12%, which we believe is partly driven by product quality and partly by how much attention each trial gets from the founder",
+  "* Our churn rate is 4% monthly, but we suspect churn and customer acquisition cost are both influenced by the same underlying factor: how well we understand our ICP (ideal customer profile), which we haven't formally validated",
+  "* We've heard from three churned customers that they left because of missing integrations, not price — so we think product gaps mediate the relationship between customer satisfaction and churn",
+  "* A competitor just raised £5m and is hiring aggressively, but we don't know their exact strategy",
+  "* If we hire sales, we'd need to spend £80-120k on the first hire plus £20k tooling, funded from our £200k runway",
+].join("\n");
+
+function factor(
+  id: string,
+  label: string,
+  value: number,
+  unit: string,
+  overrides: Partial<NodeT> = {},
+): NodeT {
+  return {
+    id,
+    kind: "factor",
+    label,
+    category: "observable",
+    data: { value, unit, extractionType: "inferred" },
+    ...overrides,
+  } as NodeT;
+}
+
+/** The six VALUED factors of capture `d9c4066c`, at their captured levels. */
+function capturedFactors(): NodeT[] {
+  return [
+    factor("50555008", "Trial-to-Paid Conversion Rate", 0.12, "%"),
+    factor("ab78e513", "Monthly Churn Rate", 0.04, "%"),
+    factor("5c05ae61", "Sales Headcount Cost", 0, "£"),
+    factor("65f6ae27", "Founder Time on Product", 0.4, "ratio"),
+    factor("897b32dc", "Runway Remaining", 0.4, "£"),
+    factor("cc057894", "Product Quality", 0.5, "scale"),
+  ];
+}
+
+function graphOf(nodes: NodeT[]): GraphT {
+  return { nodes, edges: [] } as unknown as GraphT;
+}
+
+/**
+ * What the wire will say. Bound to the ONE mapping that decides it
+ * (`schema-v3.ts:458`) rather than to `extractionType` directly, so these
+ * assertions are about what the USER is told, not about an internal token.
+ * ⚠ Note the default: an ABSENT `extractionType` reads `brief_extraction`, so
+ * a test asserting the defect must assert the literal `"inferred"` is present.
+ */
+function publishedSource(node: NodeT): "brief_extraction" | "cee_inference" {
+  const data = node.data as { extractionType?: string } | undefined;
+  return data?.extractionType === "inferred" ? "cee_inference" : "brief_extraction";
+}
+
+function byId(graph: GraphT, id: string): NodeT {
+  const found = graph.nodes.find((n) => n.id === id);
+  if (found === undefined) throw new Error(`fixture drift: node ${id} is not in the graph`);
+  return found;
+}
+
+describe("the figures the user typed are credited to the user", () => {
+  it("moves BOTH captured figures from machine-authored to user-stated, and nothing else", () => {
+    const graph = graphOf(capturedFactors());
+
+    // The defect, asserted before the fix runs — not inferred from the absence
+    // of a badge, but from the `inferred` stamp actually being there.
+    expect(publishedSource(byId(graph, "50555008"))).toBe("cee_inference");
+    expect(publishedSource(byId(graph, "ab78e513"))).toBe("cee_inference");
+
+    const credited = creditUserTypedFigures(graph, CAPTURED_BRIEF);
+
+    expect(credited).toBe(2);
+    expect(publishedSource(byId(graph, "50555008"))).toBe("brief_extraction");
+    expect(publishedSource(byId(graph, "ab78e513"))).toBe("brief_extraction");
+
+    // ⭐ THE SCOPE IS PART OF THE CLAIM. The other four valued factors carry
+    // model-normalised levels that match no figure in the brief, and crossing
+    // the material-parameters floor for them would be a lie. Named by IDENTITY,
+    // never by a count another set could satisfy (trap 19).
+    for (const id of ["5c05ae61", "65f6ae27", "897b32dc", "cc057894"]) {
+      expect(publishedSource(byId(graph, id))).toBe("cee_inference");
+    }
+  });
+
+  it("leaves the VALUES, units and labels of the credited factors untouched", () => {
+    const graph = graphOf(capturedFactors());
+    creditUserTypedFigures(graph, CAPTURED_BRIEF);
+
+    // Provenance only. A pass that may write a value is a different and far
+    // more dangerous thing than one that may write a badge.
+    expect(byId(graph, "50555008").data).toMatchObject({ value: 0.12, unit: "%" });
+    expect(byId(graph, "ab78e513").data).toMatchObject({ value: 0.04, unit: "%" });
+    expect(byId(graph, "ab78e513").label).toBe("Monthly Churn Rate");
+    expect(graph.nodes).toHaveLength(6);
+  });
+
+  /**
+   * ⭐⭐⭐ IDENTICAL NAKED NUMBERS ARE NOT IDENTICAL QUANTITIES.
+   *
+   * Every other limb of this pass can be satisfied without ever reading a
+   * unit: the span is the person's own bytes, the label matches, the tokens
+   * sit in the figure's sentence, and the identity test compares the number.
+   * So a node labelled "Monthly Churn Rate" holding `0.04` in POUNDS earned
+   * the same credit from *"Our churn rate is 4% monthly"* — and the projection
+   * kept that frame while stamping the figure as the person's own. They wrote
+   * a percentage; the node said four pence.
+   *
+   * This is not a badge defect. A credited figure counts toward
+   * `material_parameters_user_stated` in the admission census, so the false
+   * credit could lift a run over the admission floor on evidence that was
+   * never supplied.
+   *
+   * ⚠ THE TWIN IS THE WHOLE POINT (trap 22b). The positive above and the case
+   * below differ in ONE field. Without the twin, a pass that ignores units
+   * scores identically to one that checks them.
+   */
+  it("⭐ THE CONFLICTING-UNIT TWIN: the same figure in the wrong frame is NOT the person's", () => {
+    const graph = graphOf([
+      // Byte-identical to the credited positive except for the unit.
+      factor("ab78e513", "Monthly Churn Rate", 0.04, "£"),
+      factor("50555008", "Trial-to-Paid Conversion Rate", 0.12, "%"),
+    ]);
+
+    const credited = creditUserTypedFigures(graph, CAPTURED_BRIEF);
+
+    // The percentage node still earns it — the correction is a frame test, not
+    // a retreat from crediting.
+    expect(publishedSource(byId(graph, "50555008"))).toBe("brief_extraction");
+    // The pounds node does not.
+    expect(publishedSource(byId(graph, "ab78e513"))).toBe("cee_inference");
+    expect(credited).toBe(1);
+    // And nothing was rewritten to make that true.
+    expect(byId(graph, "ab78e513").data).toMatchObject({ value: 0.04, unit: "£" });
+  });
+
+  it("a unit missing on the node is not correspondence — it retains what it had", () => {
+    // Fails CLOSED. Declining to upgrade is a gap; upgrading on an
+    // unestablished frame is a false attribution, and only one of those two
+    // puts a number in the admission census that the person never wrote.
+    const graph = graphOf([
+      {
+        id: "ab78e513",
+        kind: "factor",
+        label: "Monthly Churn Rate",
+        category: "observable",
+        data: { value: 0.04, extractionType: "inferred" },
+      } as NodeT,
+    ]);
+
+    expect(creditUserTypedFigures(graph, CAPTURED_BRIEF)).toBe(0);
+    expect(publishedSource(byId(graph, "ab78e513"))).toBe("cee_inference");
+  });
+
+  it("a percent SPELLING still corresponds — the frame test is not a string test", () => {
+    // `classifyUnitScaleClass` is the authority, so "percent" and "%" are one
+    // frame. If this ever REDs, the fix is that authority, not a second unit
+    // vocabulary here.
+    const graph = graphOf([factor("ab78e513", "Monthly Churn Rate", 0.04, "percent")]);
+    expect(creditUserTypedFigures(graph, CAPTURED_BRIEF)).toBe(1);
+    expect(publishedSource(byId(graph, "ab78e513"))).toBe("brief_extraction");
+  });
+
+  it("percentage POINTS are a different frame, not a spelling of percent", () => {
+    const graph = graphOf([factor("ab78e513", "Monthly Churn Rate", 0.04, "pp")]);
+    expect(creditUserTypedFigures(graph, CAPTURED_BRIEF)).toBe(0);
+    expect(publishedSource(byId(graph, "ab78e513"))).toBe("cee_inference");
+  });
+
+  /**
+   * ⭐⭐⭐ THE REVIEW'S FINDING, AND THE ONE THE ABBREVIATION TWIN ABOVE CANNOT SEE.
+   *
+   * `"pp"` was refused for the RIGHT reason only by accident of spelling.
+   * `classifyUnitScaleClass` routes `pp`/`ppt`/`pps` to `percentage_points` but
+   * sends the SPELLED-OUT `"percentage point(s)"` to `percent` through its prefix
+   * layer — a rowed, deliberate one-way door in that file. So the shortcut
+   * credited the person with percentage points they never wrote, and the twin
+   * above scored green while it happened.
+   *
+   * ⚠ Trap 22b in one pair: `"pp"` and `"percentage points"` are the SAME
+   * quantity written two ways, and the original guard answered them differently.
+   * A twin that shares the defect's blind spot is not a twin.
+   */
+  it("⭐ the SPELLED-OUT twin: \"percentage points\" is not a spelling of percent either", () => {
+    const graph = graphOf([factor("ab78e513", "Monthly Churn Rate", 0.04, "percentage points")]);
+    expect(creditUserTypedFigures(graph, CAPTURED_BRIEF)).toBe(0);
+    expect(publishedSource(byId(graph, "ab78e513"))).toBe("cee_inference");
+  });
+
+  it("⭐ ...and the singular, which reaches `percent` by the same prefix", () => {
+    const graph = graphOf([factor("ab78e513", "Monthly Churn Rate", 0.04, "percentage point")]);
+    expect(creditUserTypedFigures(graph, CAPTURED_BRIEF)).toBe(0);
+    expect(publishedSource(byId(graph, "ab78e513"))).toBe("cee_inference");
+  });
+
+  /**
+   * ⛔ THE DOOR-CLOSING GUARD. This boundary derives its vocabulary from
+   * `UNIT_SCALE_CLASS_TOKENS`, which is the right way round — but derivation
+   * proves AGREEMENT and is structurally blind to the table being WRONG
+   * (trap 12d). The specific way it could go wrong here is someone closing the
+   * rowed one-way door in the PERMISSIVE direction by adding a spelled-out
+   * percentage-point token to the `percent` row. That is a legitimate product
+   * decision about display frames and a false-attribution defect at THIS seam,
+   * so it must not pass silently.
+   *
+   * This asserts the requirement directly against the table, not through the
+   * pass, so it REDs on the edit itself rather than on a downstream symptom.
+   */
+  it("⛔ no spelled-out percentage-point token may join the percent row", () => {
+    const percentRow = UNIT_SCALE_CLASS_TOKENS.find(([c]) => c === "percent");
+    expect(percentRow).toBeDefined();
+    const offending = percentRow![1].filter((tok) => /^percentage\s+point/i.test(tok.trim()));
+    expect(offending).toEqual([]);
+  });
+
+  /**
+   * The narrowing's own control. If this REDs, the exact-token read has stopped
+   * discriminating and every case above would pass for the wrong reason
+   * (trap 13b: a guard whose discrimination depends on something nothing pins).
+   */
+  it("the exact-token read still admits the percent family it is supposed to", () => {
+    const percentRow = UNIT_SCALE_CLASS_TOKENS.find(([c]) => c === "percent");
+    expect(percentRow![1]).toEqual(expect.arrayContaining(["%", "percent"]));
+    const pointsRow = UNIT_SCALE_CLASS_TOKENS.find(([c]) => c === "percentage_points");
+    expect(pointsRow![1]).toEqual(expect.arrayContaining(["pp"]));
+  });
+
+  it("credits a value the brief states for a DIFFERENT entity to NOBODY", () => {
+    // ⭐ THE CASE THE REAL TEXT FOUND. `inferLabel` labels the competitor's
+    // `£5m` "Churn Rate" — its window reaches back into the previous bullet —
+    // and a model-drafted node has no sentence of its own, so the existing span
+    // gate is vacuous here. Without `labelIsNamedInFigureSentence` this node is
+    // credited with 5,000,000 as the user's own churn figure.
+    const graph = graphOf([factor("x", "Monthly Churn Rate", 5_000_000, "£")]);
+
+    expect(creditUserTypedFigures(graph, CAPTURED_BRIEF)).toBe(0);
+    expect(publishedSource(byId(graph, "x"))).toBe("cee_inference");
+  });
+
+  it("credits a value the brief never states to NOBODY", () => {
+    const graph = graphOf([factor("x", "Monthly Churn Rate", 0.07, "%")]);
+
+    expect(creditUserTypedFigures(graph, CAPTURED_BRIEF)).toBe(0);
+    expect(publishedSource(byId(graph, "x"))).toBe("cee_inference");
+  });
+
+  it("credits an invented value that COINCIDES with a brief number to NOBODY", () => {
+    // 0.12 is genuinely in this brief — as the user's conversion rate. A
+    // product-quality factor the model set to 0.12 has nothing to do with it,
+    // and a value predicate alone cannot tell the two apart (trap 19).
+    const graph = graphOf([factor("x", "Product Quality", 0.12, "scale")]);
+
+    expect(creditUserTypedFigures(graph, CAPTURED_BRIEF)).toBe(0);
+    expect(publishedSource(byId(graph, "x"))).toBe("cee_inference");
+  });
+
+  it("refuses when the node's OWN stated sentence does not contain the figure", () => {
+    // The stated-node arm of the same question, and the one the shipped
+    // `enhanceWriteIsSpanContained` answers. The level is the user's 4% and the
+    // label matches, but the user wrote this node's sentence about a competitor.
+    const graph = graphOf([
+      factor("x", "Monthly Churn Rate", 0.04, "%", {
+        provenance: {
+          provenance_class: "stated",
+          source_quote: "A competitor just raised £5m and is hiring aggressively",
+        },
+      } as Partial<NodeT>),
+    ]);
+
+    expect(creditUserTypedFigures(graph, CAPTURED_BRIEF)).toBe(0);
+    expect(publishedSource(byId(graph, "x"))).toBe("cee_inference");
+  });
+
+  it("credits when the node's OWN stated sentence DOES contain the figure", () => {
+    // The discriminating twin of the case above: same node, same level, same
+    // brief — only the span moves. One of these alone proves nothing about the
+    // span gate; the pair proves the refusal is about the SPAN and not about
+    // some other limb quietly failing (trap 13b).
+    const graph = graphOf([
+      factor("x", "Monthly Churn Rate", 0.04, "%", {
+        provenance: {
+          provenance_class: "stated",
+          source_quote: "Our churn rate is 4% monthly",
+        },
+      } as Partial<NodeT>),
+    ]);
+
+    expect(creditUserTypedFigures(graph, CAPTURED_BRIEF)).toBe(1);
+    expect(publishedSource(byId(graph, "x"))).toBe("brief_extraction");
+  });
+
+  it("never touches a stamp that is not `inferred`", () => {
+    // The pass may only correct a machine-authored claim UPWARD. If it could
+    // rewrite `range` or `observed` it would be a provenance authority rather
+    // than a repair, and a repair is all that was reviewed.
+    const graph = graphOf([
+      { ...factor("r", "Monthly Churn Rate", 0.04, "%"), data: { value: 0.04, unit: "%", extractionType: "range" } } as NodeT,
+      { ...factor("o", "Monthly Churn Rate", 0.04, "%"), data: { value: 0.04, unit: "%", extractionType: "observed" } } as NodeT,
+    ]);
+
+    expect(creditUserTypedFigures(graph, CAPTURED_BRIEF)).toBe(0);
+    expect((byId(graph, "r").data as { extractionType?: string }).extractionType).toBe("range");
+    expect((byId(graph, "o").data as { extractionType?: string }).extractionType).toBe("observed");
+  });
+
+  it("refuses when TWO figures in the brief could be this level", () => {
+    // ⭐ THIS CASE EXISTS BECAUSE A MUTANT SURVIVED. Loosening the refusal from
+    // `!== 1` to `< 1` — i.e. "credit the first earner and stop asking" — left
+    // the whole suite green, so the branch was unpinned, and an unpinned branch
+    // is what a later tidy-up deletes without anything going red (trap 13b).
+    // Reached, not imagined: `extractFactors` reads this sentence as both
+    // `Rate` (inferLabel's fallback, which a node actually LABELLED "Rate"
+    // does not disqualify) and `Churn Rate`, at the same 0.04.
+    const brief = "Our churn rate is 4% and our refund rate is 4% across the same cohort.";
+    const graph = graphOf([factor("x", "Rate", 0.04, "%")]);
+
+    expect(creditUserTypedFigures(graph, brief)).toBe(0);
+    expect(publishedSource(byId(graph, "x"))).toBe("cee_inference");
+
+    // The discriminating twin: the SAME brief and the SAME level, with a label
+    // that only one figure earns. Without this, the refusal above could be some
+    // other limb quietly failing rather than the ambiguity rule (trap 13b).
+    const unambiguous = graphOf([factor("x", "Churn Rate", 0.04, "%")]);
+    expect(creditUserTypedFigures(unambiguous, brief)).toBe(1);
+  });
+
+  it("writes nothing when there is no brief to read", () => {
+    // "We had nothing to look in" is not "we looked and it is not there". Both
+    // decline, and declining on an empty brief must not depend on the extractor
+    // happening to return nothing.
+    for (const brief of ["", "   "]) {
+      const graph = graphOf(capturedFactors());
+      expect(creditUserTypedFigures(graph, brief)).toBe(0);
+      expect(publishedSource(byId(graph, "50555008"))).toBe("cee_inference");
+    }
+  });
+
+  it("⛔ NEVER CREDITS A NUMBER WE CALCULATED — a range's midpoint is ours, not the user's", () => {
+    // MEASURED, not imagined. Executing this repo's own `extractFactors` on
+    // this exact sentence at this head returns
+    //   { label: "Churn Rate", value: 0.04, matchedText: "3% to 5%",
+    //     extractionType: "range" }
+    // and the digit `4` appears NOWHERE in the brief — 0.04 is
+    // `rangePointEstimate`'s (3% + 5%) / 2. Every other limb passes: the span
+    // is the user's own bytes, the labels match, all three label tokens are in
+    // that sentence, and the node's level IS 0.04. Without limb (3a) this
+    // pass tells the user that a number this service computed is one they
+    // typed — the exact thing the provenance ruling forbids.
+    const brief = "Our monthly churn rate runs 3% to 5% depending on the cohort.";
+    const graph = graphOf([factor("x", "Churn Rate", 0.04, "%")]);
+
+    expect(creditUserTypedFigures(graph, brief)).toBe(0);
+    expect(publishedSource(byId(graph, "x"))).toBe("cee_inference");
+
+    // THE DISCRIMINATING TWIN: the same label and the same level, written by
+    // the user as a single figure rather than derived from a range. Without
+    // this, the refusal above could be any other limb failing on this brief
+    // (trap 13b) rather than the range rule.
+    const stated = graphOf([factor("x", "Churn Rate", 0.04, "%")]);
+    expect(creditUserTypedFigures(stated, "Our monthly churn rate is 4%.")).toBe(1);
+    expect(publishedSource(byId(stated, "x"))).toBe("brief_extraction");
+  });
+
+  it("⛔ BINDS THE FIGURE TO ITS OWN SENTENCE — a bare \"4%\" is not the \"14%\" in the line above", () => {
+    // ⭐ A LIE, MEASURED BY RUNNING BOTH ARMS, not imagined. The subject gate
+    // `labelIsNamedInFigureSentence` reads whichever sentence
+    // `briefSentenceContaining` returns, and that helper used to return the
+    // FIRST sentence whose text CONTAINED the figure. `"4%"` is a substring of
+    // `"14%"`, so the tooling figure below bound to the CHURN line — which of
+    // course names churn — and the gate this pass's docblock calls "the limb
+    // that closes this pass's one measured hole" waved it through.
+    //
+    // The label comes from the product, not from this test: `inferLabel`
+    // really does label the second bullet's `4%` "Churn Rate", reaching back
+    // into the previous bullet — the same behaviour that labelled a
+    // competitor's £5m "Churn Rate" on the captured brief.
+    //
+    // Executed at this head, pre-fix arm vs post-fix arm:
+    //   pre-fix : credited = 1, the churn factor stamped `brief_extraction`
+    //   post-fix: credited = 0, the churn factor left `cee_inference`
+    // So before the fix the product told the user that 4% of revenue spent on
+    // TOOLING was their stated CHURN RATE.
+    const brief = ["* Industry churn rate sits at 14% annually", "* We spend 4% on tooling"].join("\n");
+    const graph = graphOf([factor("x", "Churn Rate", 0.04, "%")]);
+
+    expect(creditUserTypedFigures(graph, brief)).toBe(0);
+    expect(publishedSource(byId(graph, "x"))).toBe("cee_inference");
+
+    // THE DISCRIMINATING TWIN, and it is the one that matters here: the SAME
+    // brief and the SAME label, at the level the user really did write on the
+    // churn line. It is credited in BOTH arms. Without it, the refusal above
+    // would be equally consistent with a fix that simply stopped crediting
+    // anything on this brief (trap 13b).
+    const genuine = graphOf([factor("x", "Churn Rate", 0.14, "%")]);
+    expect(creditUserTypedFigures(genuine, brief)).toBe(1);
+    expect(publishedSource(byId(genuine, "x"))).toBe("brief_extraction");
+  });
+
+  it("a figure's own sentence is found even when a longer number sits before it", () => {
+    // The boundary rule must skip a fragment occurrence WITHOUT losing the
+    // real one. Measured regression while writing it: a first cut treated any
+    // adjacent `,` as continuing a number, so `"… is 12%, which we believe …"`
+    // resolved to nothing and the captured 12% silently stopped being
+    // credited — the headline pin above went from 2 to 1. A separator only
+    // continues a number when digits sit on both sides of it.
+    const brief = "Trial conversion across the market is 12% typically. Our conversion rate is 2%.";
+    const graph = graphOf([factor("x", "Conversion Rate", 0.02, "%")]);
+
+    expect(creditUserTypedFigures(graph, brief)).toBe(1);
+    expect(publishedSource(byId(graph, "x"))).toBe("brief_extraction");
+  });
+
+  it("does not let a decimal point end a sentence", () => {
+    // CLAUDE.md trap 22: a guard was once handed a window cut at the first
+    // `[.!?]` — which is also the decimal point — so `£1.5 million` became `1`
+    // before the guard looked. This asserts the sentence scan survives a
+    // decimal inside the very figure it is placing.
+    const brief = "Our infrastructure spend is 12.5% of revenue. A competitor raised £5m.";
+    const graph = graphOf([factor("x", "Infrastructure Spend", 0.125, "%")]);
+
+    expect(creditUserTypedFigures(graph, brief)).toBe(1);
+    expect(publishedSource(byId(graph, "x"))).toBe("brief_extraction");
+  });
+});

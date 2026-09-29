@@ -1,0 +1,16 @@
+{
+  "analysis_status": "complete",
+  "meta": { "response_hash": "abc123" },
+  "option_comparison": [
+    { "option_id": "opt_1", "option_label": "Option A", "win_probability": 0.65 },
+    { "option_id": "opt_2", "option_label": "Option B", "win_probability": 0.35 }
+  ],
+  "robustness": { "is_robust": false, "level": "low", "recommendation_stability": 0.69 },
+  "factor_sensitivity": [
+    { "factor_id": "fac_1", "label": "Factor A", "sensitivity": 0.45 }
+  ],
+  "edge_sensitivity": [],
+  "critiques": [],
+  "flip_thresholds": [],
+  "drivers": []
+}

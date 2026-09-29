@@ -1,0 +1,939 @@
+{
+  "note": "SYNTHETIC RED. Turn 2 is licensed only to `quantified_provisional` and names a leading option in prose, in `leading_option_id`, and adds an option `rank` — plus a stability verdict. C1 must FAIL.",
+  "brief_sha256": "30ff141866aa69f5f763961ede5ae860776f21e427a8178892c040ae724073b6",
+  "expect": {
+    "exit_code": 1,
+    "criteria": {
+      "C1": "FAIL"
+    }
+  },
+  "turns": [
+    {
+      "index": 0,
+      "message": "(the verbatim brief — body only; the harness hashes the real file on a live run)",
+      "http_status": 200,
+      "body": {
+        "response_version": 2,
+        "assistant_text": "I have drafted your model: three courses of action, eleven factors and one goal. Nothing in it is confirmed yet — tell me what looks wrong.",
+        "blocks": [
+          {
+            "type": "draft_graph",
+            "graph": {
+              "nodes": [
+                {
+                  "id": "goal_mrr",
+                  "type": "goal",
+                  "label": "Reach £30k MRR within 18 months"
+                },
+                {
+                  "id": "opt_hire",
+                  "type": "option",
+                  "label": "Hire a dedicated sales team"
+                },
+                {
+                  "id": "opt_founder",
+                  "type": "option",
+                  "label": "Continue founder-led selling"
+                },
+                {
+                  "id": "opt_hybrid",
+                  "type": "option",
+                  "label": "Add one SDR beside founder-led selling"
+                },
+                {
+                  "id": "fac_sales_headcount",
+                  "type": "factor",
+                  "label": "Sales headcount investment",
+                  "value": 80,
+                  "unit": "£"
+                },
+                {
+                  "id": "fac_tooling",
+                  "type": "factor",
+                  "label": "Tooling spend",
+                  "value": 20000,
+                  "unit": "£"
+                },
+                {
+                  "id": "fac_cac",
+                  "type": "factor",
+                  "label": "Customer acquisition cost",
+                  "value": 500,
+                  "unit": "£"
+                },
+                {
+                  "id": "fac_churn",
+                  "type": "factor",
+                  "label": "Monthly churn",
+                  "value": 0.04
+                },
+                {
+                  "id": "fac_conversion",
+                  "type": "factor",
+                  "label": "Conversion rate",
+                  "value": 0.12
+                },
+                {
+                  "id": "fac_runway",
+                  "type": "factor",
+                  "label": "Runway",
+                  "value": 200000,
+                  "unit": "£"
+                },
+                {
+                  "id": "fac_founder_time",
+                  "type": "factor",
+                  "label": "Founder time on selling",
+                  "value": 0.6
+                },
+                {
+                  "id": "fac_customers",
+                  "type": "factor",
+                  "label": "Customers today",
+                  "value": 120
+                },
+                {
+                  "id": "fac_mrr",
+                  "type": "factor",
+                  "label": "MRR today",
+                  "value": 8000,
+                  "unit": "£"
+                },
+                {
+                  "id": "risk_runway",
+                  "type": "risk",
+                  "label": "Runway falls below six months"
+                },
+                {
+                  "id": "out_customers",
+                  "type": "outcome",
+                  "label": "New customers acquired"
+                }
+              ],
+              "edges": [
+                {
+                  "id": "edge_0",
+                  "from": "fac_sales_headcount",
+                  "to": "out_customers",
+                  "strength": 0.5
+                },
+                {
+                  "id": "edge_1",
+                  "from": "fac_tooling",
+                  "to": "out_customers",
+                  "strength": 0.5
+                },
+                {
+                  "id": "edge_2",
+                  "from": "fac_cac",
+                  "to": "out_customers",
+                  "strength": 0.5
+                },
+                {
+                  "id": "edge_3",
+                  "from": "fac_conversion",
+                  "to": "out_customers",
+                  "strength": 0.5
+                },
+                {
+                  "id": "edge_4",
+                  "from": "fac_churn",
+                  "to": "goal_mrr",
+                  "strength": 0.5
+                },
+                {
+                  "id": "edge_5",
+                  "from": "out_customers",
+                  "to": "goal_mrr",
+                  "strength": 0.5
+                },
+                {
+                  "id": "edge_6",
+                  "from": "fac_runway",
+                  "to": "risk_runway",
+                  "strength": 0.5
+                },
+                {
+                  "id": "edge_7",
+                  "from": "fac_founder_time",
+                  "to": "out_customers",
+                  "strength": 0.5
+                },
+                {
+                  "id": "edge_8",
+                  "from": "risk_runway",
+                  "to": "goal_mrr",
+                  "strength": 0.5
+                }
+              ],
+              "node_count": 15,
+              "edge_count": 9,
+              "goal_node_id": "goal_mrr"
+            }
+          }
+        ],
+        "draft_graph": {
+          "nodes": [
+            {
+              "id": "goal_mrr",
+              "type": "goal",
+              "label": "Reach £30k MRR within 18 months"
+            },
+            {
+              "id": "opt_hire",
+              "type": "option",
+              "label": "Hire a dedicated sales team"
+            },
+            {
+              "id": "opt_founder",
+              "type": "option",
+              "label": "Continue founder-led selling"
+            },
+            {
+              "id": "opt_hybrid",
+              "type": "option",
+              "label": "Add one SDR beside founder-led selling"
+            },
+            {
+              "id": "fac_sales_headcount",
+              "type": "factor",
+              "label": "Sales headcount investment",
+              "value": 80,
+              "unit": "£"
+            },
+            {
+              "id": "fac_tooling",
+              "type": "factor",
+              "label": "Tooling spend",
+              "value": 20000,
+              "unit": "£"
+            },
+            {
+              "id": "fac_cac",
+              "type": "factor",
+              "label": "Customer acquisition cost",
+              "value": 500,
+              "unit": "£"
+            },
+            {
+              "id": "fac_churn",
+              "type": "factor",
+              "label": "Monthly churn",
+              "value": 0.04
+            },
+            {
+              "id": "fac_conversion",
+              "type": "factor",
+              "label": "Conversion rate",
+              "value": 0.12
+            },
+            {
+              "id": "fac_runway",
+              "type": "factor",
+              "label": "Runway",
+              "value": 200000,
+              "unit": "£"
+            },
+            {
+              "id": "fac_founder_time",
+              "type": "factor",
+              "label": "Founder time on selling",
+              "value": 0.6
+            },
+            {
+              "id": "fac_customers",
+              "type": "factor",
+              "label": "Customers today",
+              "value": 120
+            },
+            {
+              "id": "fac_mrr",
+              "type": "factor",
+              "label": "MRR today",
+              "value": 8000,
+              "unit": "£"
+            },
+            {
+              "id": "risk_runway",
+              "type": "risk",
+              "label": "Runway falls below six months"
+            },
+            {
+              "id": "out_customers",
+              "type": "outcome",
+              "label": "New customers acquired"
+            }
+          ],
+          "edges": [
+            {
+              "id": "edge_0",
+              "from": "fac_sales_headcount",
+              "to": "out_customers",
+              "strength": 0.5
+            },
+            {
+              "id": "edge_1",
+              "from": "fac_tooling",
+              "to": "out_customers",
+              "strength": 0.5
+            },
+            {
+              "id": "edge_2",
+              "from": "fac_cac",
+              "to": "out_customers",
+              "strength": 0.5
+            },
+            {
+              "id": "edge_3",
+              "from": "fac_conversion",
+              "to": "out_customers",
+              "strength": 0.5
+            },
+            {
+              "id": "edge_4",
+              "from": "fac_churn",
+              "to": "goal_mrr",
+              "strength": 0.5
+            },
+            {
+              "id": "edge_5",
+              "from": "out_customers",
+              "to": "goal_mrr",
+              "strength": 0.5
+            },
+            {
+              "id": "edge_6",
+              "from": "fac_runway",
+              "to": "risk_runway",
+              "strength": 0.5
+            },
+            {
+              "id": "edge_7",
+              "from": "fac_founder_time",
+              "to": "out_customers",
+              "strength": 0.5
+            },
+            {
+              "id": "edge_8",
+              "from": "risk_runway",
+              "to": "goal_mrr",
+              "strength": 0.5
+            }
+          ],
+          "node_count": 15,
+          "edge_count": 9,
+          "goal_node_id": "goal_mrr"
+        },
+        "suggested_actions": [
+          {
+            "id": "chip_run",
+            "label": "Run analysis",
+            "message": "Run analysis."
+          }
+        ],
+        "graph_hash": "a0b1c2d3e4f50011",
+        "analysis_ready": {
+          "status": "needs_user_mapping",
+          "current_graph_hash": "a0b1c2d3e4f50011",
+          "graph_hash_at_run": "a0b1c2d3e4f50011",
+          "freshness": "fresh",
+          "analysis_admission": {
+            "structurally_analysable": true,
+            "missing_important_inputs": [],
+            "semantic_quality_sufficient": false,
+            "permitted_analysis_mode": "quantified_provisional",
+            "reasons": [
+              {
+                "field": "permitted_analysis_mode",
+                "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+                "message": "Every number this comparison rests on was written by Olumi, not by you. Set one of them yourself and the comparison can go further."
+              }
+            ],
+            "graph_hash": "00000000aaaa0000000000000000000000000000000000000000000000000000",
+            "semantic_signals": {
+              "confidence_parameters_total": 11,
+              "confidence_parameters_user_stated": 0,
+              "confidence_parameters_machine_authored": 11,
+              "confidence_parameters_unattributed": 0,
+              "material_parameters_total": 6,
+              "material_parameters_user_stated": 0,
+              "intervened_factor_baselines_total": 3,
+              "intervened_factor_baselines_user_stated": 0,
+              "goal_target_stated": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "index": 1,
+      "message": "What do you think I'm missing?",
+      "http_status": 200,
+      "body": {
+        "response_version": 2,
+        "assistant_text": "Three things are absent and each would change the shape of the answer: what a new hire costs you in month one, how long ramp takes, and what you would stop doing to pay for it.",
+        "blocks": [
+          {
+            "type": "coaching",
+            "block_id": "cb1",
+            "title": "Ramp time is unmodelled",
+            "body": "The model treats a new hire as productive immediately. Say how many months ramp takes and the comparison changes.",
+            "coaching_kind": "widening"
+          }
+        ],
+        "graph_hash": "a0b1c2d3e4f50011",
+        "analysis_ready": {
+          "status": "needs_user_mapping",
+          "current_graph_hash": "a0b1c2d3e4f50011",
+          "graph_hash_at_run": "a0b1c2d3e4f50011",
+          "freshness": "fresh",
+          "analysis_admission": {
+            "structurally_analysable": true,
+            "missing_important_inputs": [],
+            "semantic_quality_sufficient": false,
+            "permitted_analysis_mode": "quantified_provisional",
+            "reasons": [
+              {
+                "field": "permitted_analysis_mode",
+                "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+                "message": "Every number this comparison rests on was written by Olumi, not by you. Set one of them yourself and the comparison can go further."
+              }
+            ],
+            "graph_hash": "00000000aaaa0000000000000000000000000000000000000000000000000000",
+            "semantic_signals": {
+              "confidence_parameters_total": 11,
+              "confidence_parameters_user_stated": 0,
+              "confidence_parameters_machine_authored": 11,
+              "confidence_parameters_unattributed": 0,
+              "material_parameters_total": 6,
+              "material_parameters_user_stated": 0,
+              "intervened_factor_baselines_total": 3,
+              "intervened_factor_baselines_user_stated": 0,
+              "goal_target_stated": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "index": 2,
+      "message": "Run analysis.",
+      "http_status": 200,
+      "body": {
+        "response_version": 2,
+        "assistant_text": "Analysis complete. Hire a dedicated sales team currently leads with about 41% of futures reaching the goal, and the ranking is stable.",
+        "blocks": [
+          {
+            "type": "analysis_result",
+            "summary": "Hire a dedicated sales team leads.",
+            "leading_option_id": "opt_hire",
+            "win_probabilities": {
+              "opt_hire": 0.41,
+              "opt_founder": 0.33,
+              "opt_hybrid": 0.26
+            }
+          }
+        ],
+        "graph_hash": "a0b1c2d3e4f50011",
+        "analysis_ready": {
+          "status": "ready",
+          "current_graph_hash": "a0b1c2d3e4f50011",
+          "graph_hash_at_run": "a0b1c2d3e4f50011",
+          "freshness": "fresh",
+          "options": [
+            {
+              "option_id": "opt_hire",
+              "label": "Hire a dedicated sales team",
+              "win_probability": 0.41,
+              "rank": 1
+            },
+            {
+              "option_id": "opt_founder",
+              "label": "Continue founder-led selling",
+              "win_probability": 0.33
+            },
+            {
+              "option_id": "opt_hybrid",
+              "label": "Add one SDR beside founder-led selling",
+              "win_probability": 0.26
+            }
+          ],
+          "analysis_admission": {
+            "structurally_analysable": true,
+            "missing_important_inputs": [],
+            "semantic_quality_sufficient": false,
+            "permitted_analysis_mode": "quantified_provisional",
+            "reasons": [
+              {
+                "field": "permitted_analysis_mode",
+                "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+                "message": "Every number this comparison rests on was written by Olumi, not by you. Set one of them yourself and the comparison can go further."
+              }
+            ],
+            "graph_hash": "00000000aaaa0000000000000000000000000000000000000000000000000000",
+            "semantic_signals": {
+              "confidence_parameters_total": 11,
+              "confidence_parameters_user_stated": 0,
+              "confidence_parameters_machine_authored": 11,
+              "confidence_parameters_unattributed": 0,
+              "material_parameters_total": 6,
+              "material_parameters_user_stated": 0,
+              "intervened_factor_baselines_total": 3,
+              "intervened_factor_baselines_user_stated": 0,
+              "goal_target_stated": true
+            }
+          }
+        },
+        "analysis_state": {
+          "run_state": {
+            "kind": "complete_current"
+          },
+          "leader_claim": {
+            "permitted": false
+          }
+        }
+      }
+    },
+    {
+      "index": 3,
+      "message": "Explain the result.",
+      "http_status": 200,
+      "body": {
+        "response_version": 2,
+        "assistant_text": "The spread across the three routes is inside the noise of the simulation, so the honest reading is that the model cannot yet tell them apart.",
+        "blocks": [
+          {
+            "type": "explanation",
+            "narrative": "Customers acquired drives the goal, and every path into it carries the same assumed strength, so the three routes differ only through cost.",
+            "referenced_option_ids": [
+              "opt_hire",
+              "opt_founder",
+              "opt_hybrid"
+            ]
+          }
+        ],
+        "graph_hash": "a0b1c2d3e4f50011",
+        "analysis_ready": {
+          "status": "ready",
+          "current_graph_hash": "a0b1c2d3e4f50011",
+          "graph_hash_at_run": "a0b1c2d3e4f50011",
+          "freshness": "fresh",
+          "analysis_admission": {
+            "structurally_analysable": true,
+            "missing_important_inputs": [],
+            "semantic_quality_sufficient": false,
+            "permitted_analysis_mode": "quantified_provisional",
+            "reasons": [
+              {
+                "field": "permitted_analysis_mode",
+                "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+                "message": "Every number this comparison rests on was written by Olumi, not by you. Set one of them yourself and the comparison can go further."
+              }
+            ],
+            "graph_hash": "00000000aaaa0000000000000000000000000000000000000000000000000000",
+            "semantic_signals": {
+              "confidence_parameters_total": 11,
+              "confidence_parameters_user_stated": 0,
+              "confidence_parameters_machine_authored": 11,
+              "confidence_parameters_unattributed": 0,
+              "material_parameters_total": 6,
+              "material_parameters_user_stated": 0,
+              "intervened_factor_baselines_total": 3,
+              "intervened_factor_baselines_user_stated": 0,
+              "goal_target_stated": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "index": 4,
+      "message": "Why is the sales headcount investment £80? That doesn't seem right.",
+      "http_status": 200,
+      "body": {
+        "response_version": 2,
+        "assistant_text": "It should not be. I read £80–120k from your brief and recorded 80 without its scale, so the model is treating the hire as costing eighty pounds. Tell me the range and I will correct it.",
+        "blocks": [
+          {
+            "type": "text",
+            "content": "Sales headcount investment currently reads £80."
+          }
+        ],
+        "graph_hash": "a0b1c2d3e4f50011",
+        "analysis_ready": {
+          "status": "ready",
+          "current_graph_hash": "a0b1c2d3e4f50011",
+          "graph_hash_at_run": "a0b1c2d3e4f50011",
+          "freshness": "fresh",
+          "analysis_admission": {
+            "structurally_analysable": true,
+            "missing_important_inputs": [],
+            "semantic_quality_sufficient": false,
+            "permitted_analysis_mode": "quantified_provisional",
+            "reasons": [
+              {
+                "field": "permitted_analysis_mode",
+                "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+                "message": "Every number this comparison rests on was written by Olumi, not by you. Set one of them yourself and the comparison can go further."
+              }
+            ],
+            "graph_hash": "00000000aaaa0000000000000000000000000000000000000000000000000000",
+            "semantic_signals": {
+              "confidence_parameters_total": 11,
+              "confidence_parameters_user_stated": 0,
+              "confidence_parameters_machine_authored": 11,
+              "confidence_parameters_unattributed": 0,
+              "material_parameters_total": 6,
+              "material_parameters_user_stated": 0,
+              "intervened_factor_baselines_total": 3,
+              "intervened_factor_baselines_user_stated": 0,
+              "goal_target_stated": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "index": 5,
+      "message": "Can you update it with the correct range?",
+      "http_status": 200,
+      "body": {
+        "response_version": 2,
+        "assistant_text": "Updated Sales headcount investment from £80 to £100,000.",
+        "blocks": [
+          {
+            "type": "graph_patch",
+            "status": "applied",
+            "operation": "set_factor_value",
+            "target_id": "fac_sales_headcount",
+            "before": {
+              "value": 80,
+              "unit": "£"
+            },
+            "after": {
+              "value": 100000,
+              "unit": "£"
+            }
+          }
+        ],
+        "graph_hash": "b1c2d3e4f5a61122",
+        "analysis_ready": {
+          "status": "ready",
+          "current_graph_hash": "b1c2d3e4f5a61122",
+          "graph_hash_at_run": "b1c2d3e4f5a61122",
+          "freshness": "fresh",
+          "analysis_admission": {
+            "structurally_analysable": true,
+            "missing_important_inputs": [],
+            "semantic_quality_sufficient": false,
+            "permitted_analysis_mode": "quantified_provisional",
+            "reasons": [
+              {
+                "field": "permitted_analysis_mode",
+                "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+                "message": "Every number this comparison rests on was written by Olumi, not by you. Set one of them yourself and the comparison can go further."
+              }
+            ],
+            "graph_hash": "11111111bbbb1111111111111111111111111111111111111111111111111111",
+            "semantic_signals": {
+              "confidence_parameters_total": 11,
+              "confidence_parameters_user_stated": 1,
+              "confidence_parameters_machine_authored": 10,
+              "confidence_parameters_unattributed": 0,
+              "material_parameters_total": 6,
+              "material_parameters_user_stated": 1,
+              "intervened_factor_baselines_total": 3,
+              "intervened_factor_baselines_user_stated": 1,
+              "goal_target_stated": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "index": 6,
+      "message": "Rerun.",
+      "http_status": 200,
+      "body": {
+        "response_version": 2,
+        "assistant_text": "Rerun complete. With the hire priced at £100,000, continuing founder-led selling comes out ahead on the goal in most of the simulated futures.",
+        "blocks": [
+          {
+            "type": "analysis_result",
+            "summary": "Continue founder-led selling leads on reaching £30k MRR within 18 months.",
+            "leading_option_id": "opt_founder",
+            "win_probabilities": {
+              "opt_hire": 0.18,
+              "opt_founder": 0.61,
+              "opt_hybrid": 0.21
+            }
+          }
+        ],
+        "graph_hash": "b1c2d3e4f5a61122",
+        "analysis_ready": {
+          "status": "ready",
+          "current_graph_hash": "b1c2d3e4f5a61122",
+          "graph_hash_at_run": "b1c2d3e4f5a61122",
+          "freshness": "fresh",
+          "options": [
+            {
+              "option_id": "opt_founder",
+              "label": "Continue founder-led selling",
+              "win_probability": 0.61
+            },
+            {
+              "option_id": "opt_hybrid",
+              "label": "Add one SDR beside founder-led selling",
+              "win_probability": 0.21
+            },
+            {
+              "option_id": "opt_hire",
+              "label": "Hire a dedicated sales team",
+              "win_probability": 0.18
+            }
+          ],
+          "analysis_admission": {
+            "structurally_analysable": true,
+            "missing_important_inputs": [],
+            "semantic_quality_sufficient": true,
+            "permitted_analysis_mode": "comparative_leader",
+            "reasons": [],
+            "graph_hash": "11111111bbbb1111111111111111111111111111111111111111111111111111",
+            "semantic_signals": {
+              "confidence_parameters_total": 11,
+              "confidence_parameters_user_stated": 1,
+              "confidence_parameters_machine_authored": 10,
+              "confidence_parameters_unattributed": 0,
+              "material_parameters_total": 6,
+              "material_parameters_user_stated": 1,
+              "intervened_factor_baselines_total": 3,
+              "intervened_factor_baselines_user_stated": 1,
+              "goal_target_stated": true
+            }
+          }
+        },
+        "analysis_state": {
+          "run_state": {
+            "kind": "complete_current"
+          },
+          "leader_claim": {
+            "permitted": true
+          }
+        }
+      }
+    },
+    {
+      "index": 7,
+      "message": "How has the update changed the analysis?",
+      "http_status": 200,
+      "body": {
+        "response_version": 2,
+        "assistant_text": "Before the correction the three routes were indistinguishable. Pricing the hire at £100,000 instead of £80 moved founder-led selling from 33% to 61% of futures reaching the goal, and hiring from 41% to 18%.",
+        "blocks": [
+          {
+            "type": "explanation",
+            "narrative": "The correction changed one number — Sales headcount investment — and it is the only input the three routes differ on, so the whole movement is attributable to it.",
+            "referenced_option_ids": [
+              "opt_founder",
+              "opt_hire"
+            ]
+          }
+        ],
+        "graph_hash": "b1c2d3e4f5a61122",
+        "analysis_ready": {
+          "status": "ready",
+          "current_graph_hash": "b1c2d3e4f5a61122",
+          "graph_hash_at_run": "b1c2d3e4f5a61122",
+          "freshness": "fresh",
+          "analysis_admission": {
+            "structurally_analysable": true,
+            "missing_important_inputs": [],
+            "semantic_quality_sufficient": true,
+            "permitted_analysis_mode": "comparative_leader",
+            "reasons": [],
+            "graph_hash": "11111111bbbb1111111111111111111111111111111111111111111111111111",
+            "semantic_signals": {
+              "confidence_parameters_total": 11,
+              "confidence_parameters_user_stated": 1,
+              "confidence_parameters_machine_authored": 10,
+              "confidence_parameters_unattributed": 0,
+              "material_parameters_total": 6,
+              "material_parameters_user_stated": 1,
+              "intervened_factor_baselines_total": 3,
+              "intervened_factor_baselines_user_stated": 1,
+              "goal_target_stated": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "index": 8,
+      "message": "Why are all of the outcome and risk strengths 50%?",
+      "http_status": 200,
+      "body": {
+        "response_version": 2,
+        "assistant_text": "Because nothing has been said about them yet. Every link into the outcome and the risk carries the same default strength, which means the model is not yet expressing any belief about which of them matters more.",
+        "blocks": [
+          {
+            "type": "text",
+            "content": "Nine links, all at 0.5."
+          }
+        ],
+        "graph_hash": "b1c2d3e4f5a61122",
+        "analysis_ready": {
+          "status": "ready",
+          "current_graph_hash": "b1c2d3e4f5a61122",
+          "graph_hash_at_run": "b1c2d3e4f5a61122",
+          "freshness": "fresh",
+          "analysis_admission": {
+            "structurally_analysable": true,
+            "missing_important_inputs": [],
+            "semantic_quality_sufficient": true,
+            "permitted_analysis_mode": "comparative_leader",
+            "reasons": [],
+            "graph_hash": "11111111bbbb1111111111111111111111111111111111111111111111111111",
+            "semantic_signals": {
+              "confidence_parameters_total": 11,
+              "confidence_parameters_user_stated": 1,
+              "confidence_parameters_machine_authored": 10,
+              "confidence_parameters_unattributed": 0,
+              "material_parameters_total": 6,
+              "material_parameters_user_stated": 1,
+              "intervened_factor_baselines_total": 3,
+              "intervened_factor_baselines_user_stated": 1,
+              "goal_target_stated": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "index": 9,
+      "message": "Run a pre-mortem.",
+      "http_status": 200,
+      "body": {
+        "response_version": 2,
+        "assistant_text": "Imagine it is eighteen months from now and you did not reach £30k MRR. Here are the three most likely stories.",
+        "blocks": [
+          {
+            "type": "exercise",
+            "title": "Pre-mortem",
+            "body": "Ramp took nine months, not three. Churn rose as the SDR sold to a worse-fit segment. Runway ran out in month seven."
+          }
+        ],
+        "graph_hash": "b1c2d3e4f5a61122",
+        "analysis_ready": {
+          "status": "ready",
+          "current_graph_hash": "b1c2d3e4f5a61122",
+          "graph_hash_at_run": "b1c2d3e4f5a61122",
+          "freshness": "fresh",
+          "analysis_admission": {
+            "structurally_analysable": true,
+            "missing_important_inputs": [],
+            "semantic_quality_sufficient": true,
+            "permitted_analysis_mode": "comparative_leader",
+            "reasons": [],
+            "graph_hash": "11111111bbbb1111111111111111111111111111111111111111111111111111",
+            "semantic_signals": {
+              "confidence_parameters_total": 11,
+              "confidence_parameters_user_stated": 1,
+              "confidence_parameters_machine_authored": 10,
+              "confidence_parameters_unattributed": 0,
+              "material_parameters_total": 6,
+              "material_parameters_user_stated": 1,
+              "intervened_factor_baselines_total": 3,
+              "intervened_factor_baselines_user_stated": 1,
+              "goal_target_stated": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "index": 10,
+      "message": "What would you do next?",
+      "http_status": 200,
+      "body": {
+        "response_version": 2,
+        "assistant_text": "Price the ramp. Everything above rests on a new hire producing from day one, and that single assumption is doing more work than the cost you just corrected.",
+        "blocks": [
+          {
+            "type": "text",
+            "content": "Next: state how many months ramp takes."
+          }
+        ],
+        "graph_hash": "b1c2d3e4f5a61122",
+        "analysis_ready": {
+          "status": "ready",
+          "current_graph_hash": "b1c2d3e4f5a61122",
+          "graph_hash_at_run": "b1c2d3e4f5a61122",
+          "freshness": "fresh",
+          "analysis_admission": {
+            "structurally_analysable": true,
+            "missing_important_inputs": [],
+            "semantic_quality_sufficient": true,
+            "permitted_analysis_mode": "comparative_leader",
+            "reasons": [],
+            "graph_hash": "11111111bbbb1111111111111111111111111111111111111111111111111111",
+            "semantic_signals": {
+              "confidence_parameters_total": 11,
+              "confidence_parameters_user_stated": 1,
+              "confidence_parameters_machine_authored": 10,
+              "confidence_parameters_unattributed": 0,
+              "material_parameters_total": 6,
+              "material_parameters_user_stated": 1,
+              "intervened_factor_baselines_total": 3,
+              "intervened_factor_baselines_user_stated": 1,
+              "goal_target_stated": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "index": 11,
+      "message": "Where did we get to?",
+      "http_status": 200,
+      "body": {
+        "response_version": 2,
+        "assistant_text": "You corrected the hire cost from £80 to £100,000 and reran. Founder-led selling now reaches the goal in most futures. The open question is ramp time.",
+        "blocks": [
+          {
+            "type": "explanation",
+            "narrative": "One correction, one rerun, one open question.",
+            "referenced_option_ids": [
+              "opt_founder"
+            ]
+          }
+        ],
+        "graph_hash": "b1c2d3e4f5a61122",
+        "analysis_ready": {
+          "status": "ready",
+          "current_graph_hash": "b1c2d3e4f5a61122",
+          "graph_hash_at_run": "b1c2d3e4f5a61122",
+          "freshness": "fresh",
+          "analysis_admission": {
+            "structurally_analysable": true,
+            "missing_important_inputs": [],
+            "semantic_quality_sufficient": true,
+            "permitted_analysis_mode": "comparative_leader",
+            "reasons": [],
+            "graph_hash": "11111111bbbb1111111111111111111111111111111111111111111111111111",
+            "semantic_signals": {
+              "confidence_parameters_total": 11,
+              "confidence_parameters_user_stated": 1,
+              "confidence_parameters_machine_authored": 10,
+              "confidence_parameters_unattributed": 0,
+              "material_parameters_total": 6,
+              "material_parameters_user_stated": 1,
+              "intervened_factor_baselines_total": 3,
+              "intervened_factor_baselines_user_stated": 1,
+              "goal_target_stated": true
+            }
+          }
+        }
+      }
+    }
+  ]
+}

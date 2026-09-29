@@ -1,0 +1,608 @@
+/**
+ * V5 D1 — `adjust_edge_strength` handler.
+ *
+ * Mutates an edge's `strength.mean` (and optionally `strength.std`) on a
+ * graph identified by composite `from→to` (the V3 schema has no stable
+ * edge.id — edges are keyed by the (from, to) tuple).
+ *
+ * Per correction #4: accepts both Unicode arrow `from→to` and ASCII
+ * `from->to`. Falls back to PARAMETER_INVALID with user guidance when
+ * the format is unrecognised.
+ *
+ * Operators: set, increase, decrease, multiply. All results clamped to
+ * [-1, +1]. After clamp, `effect_direction` follows the sign of a non-zero
+ * mean. At exactly zero the strict structured adapter may supply direction on
+ * HandlerInvocation's trusted side band; natural-language callers retain the
+ * legacy positive default and cannot self-authorise by inventing a parameter.
+ *
+ * Confirmation language uses `edgeBandFromMagnitude` (the one edge-strength table) so the user-visible
+ * text says "moderate to strong" (not "0.4 to 0.7"). Sign reversal is
+ * surfaced explicitly.
+ */
+
+import { z } from 'zod';
+
+import { AdjustEdgeStrengthHandlerFactSchema } from '@talchain/schemas/orchestrator';
+import type { AdjustEdgeStrengthHandlerFact } from '@talchain/schemas/orchestrator';
+
+import { DEFAULT_STRENGTH_STD } from '../../../cee/constants.js';
+import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
+import { definitionalLinkInUse, definitionalLinkRefusalText, identityRunUseFromFacts } from '../../compose/definitional-links.js';
+import { parseEdgeAddress } from '../../compose/edge-address.js';
+import { edgeBandFromMagnitude, edgeBandStd } from '../../format/edge-strength-bands.js';
+import { sanitiseUserFacingText } from '../../../orchestrator/shared/output-safety.js';
+import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
+import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
+import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
+import { runD1Handler } from './d1-shared/error-boundary.js';
+import { D1HandlerError } from './d1-shared/errors.js';
+import {
+  formatEdgeAdjustment,
+  formatEdgeStrengthUnchanged,
+} from './d1-shared/format-confirmation.js';
+import { ADJUST_EDGE_STRENGTH_USER_GUIDANCE } from './d1-shared/user-guidance.js';
+
+export const AdjustEdgeStrengthSchema = z.number().min(-1).max(1);
+/**
+ * The top of a link's std on this writer — the bound `AdjustEdgeStrengthStdSchema` has always enforced, named once so
+ * the spread this writer derives itself (`olumiSpreadForMean`) is held to the same bound, not a second copy of it.
+ */
+export const ADJUST_EDGE_STRENGTH_STD_MAX = 0.5;
+// V5 D1 (P1-6 follow-up): EdgeStrengthV3.std requires `.positive()`,
+// so a value of 0 would pass parameter validation but fail the
+// post-mutation `GraphV3.parse`, surfacing as a misleading
+// GRAPH_INVARIANT_VIOLATED. Match the canonical schema's lower
+// bound here so the user-visible error is the right class.
+export const AdjustEdgeStrengthStdSchema = z.number().gt(0).max(ADJUST_EDGE_STRENGTH_STD_MAX);
+
+/**
+ * ⭐ A6f — OLUMI'S SPREAD, CARRIED TO THE MEAN THE USER WROTE (AIQ N1 on #2096, 5856128077).
+ *
+ * An exact figure states a mean and no range, so the link's std stays Olumi's. It must not stay Olumi's ABSOLUTE std:
+ * that was sized for Olumi's mean. Paul's `price_sensitivity → monthly_churn` (captures `17d1cd3a` / `08bf9a1f`) kept
+ * std 0.00375 — sized for 0.0075 — on the user's 0.85, a CV of 0.4 %, so the analysis ran near-certain on a spread
+ * nobody chose. Olumi's RELATIVE spread is kept instead: std × |new| / |old| (0.00375 → 0.425, CV 0.5 either side).
+ *
+ *  - The magnitude did not move (a confirm, or a sign flip): the std is returned exactly — nothing to rescale.
+ *  - |old| > 0 and a finite std: the relative spread, computed CV-first so an exact ratio stays exact, held to the
+ *    writer's own top bound (`ADJUST_EDGE_STRENGTH_STD_MAX`).
+ *  - Otherwise — Olumi's mean was 0 (no relative spread exists), the stored std is unusable, or the new mean is 0 (a
+ *    relative spread of 0 breaks `EdgeStrengthV3.std > 0`): the estate's default spread, `DEFAULT_STRENGTH_STD`.
+ */
+export function olumiSpreadForMean(args: {
+  readonly oldMean: number;
+  readonly oldStd: number;
+  readonly newMean: number;
+}): number {
+  const oldAbs = Math.abs(args.oldMean);
+  const newAbs = Math.abs(args.newMean);
+  const usableStd = Number.isFinite(args.oldStd) && args.oldStd > 0;
+  if (usableStd && newAbs === oldAbs) return args.oldStd;
+  if (usableStd && Number.isFinite(oldAbs) && oldAbs > 0) {
+    const relative = (args.oldStd / oldAbs) * newAbs;
+    if (Number.isFinite(relative) && relative > 0) return Math.min(relative, ADJUST_EDGE_STRENGTH_STD_MAX);
+  }
+  return DEFAULT_STRENGTH_STD;
+}
+/**
+ * Optional explicit direction for callers whose intent cannot be represented
+ * by the sign of the numeric strength — specifically a zero-strength edge.
+ * Natural-language proposals may omit it and retain the legacy sign-derived
+ * behaviour; strict structured adapters resolve and supply it.
+ */
+export const AdjustEdgeStrengthDirectionSchema = z.enum(['positive', 'negative']);
+
+const STRENGTH_CLAMP_MIN = -1;
+const STRENGTH_CLAMP_MAX = 1;
+const EDGE_FACT_ENDPOINT_LABEL_MAX_CHARS = 80;
+
+/**
+ * Resolve one endpoint label for the durable mutation fact.
+ *
+ * The mutation-time graph is the historical authority: a later rename must
+ * not rewrite what this edit targeted. The label is nevertheless prompt-bound
+ * data, so duplicate/missing identities, raw-ID labels, residual entity-ID
+ * tokens and overlong values all fail closed. The existing user receipt keeps
+ * its current formatter/fallback; this helper governs only the new fact fields.
+ */
+function resolveSafeFactEndpointLabel(graph: GraphV3T, nodeId: string): string | null {
+  const matches = graph.nodes.filter((node) => node.id === nodeId);
+  if (matches.length !== 1) return null;
+
+  const node = matches[0]!;
+  const raw = node.label.replace(/\s+/gu, ' ').trim();
+  if (
+    raw.length === 0 ||
+    raw.length > EDGE_FACT_ENDPOINT_LABEL_MAX_CHARS ||
+    raw === node.id
+  ) {
+    return null;
+  }
+
+  // Historical identity must never be produced by replacing an ID with some
+  // other node's label. Any recognised entity token therefore rejects the
+  // label outright; only the original normalised bytes may be persisted.
+  if (
+    graph.nodes.some((candidate) => raw.includes(candidate.id)) ||
+    sanitiseUserFacingText(raw, graph).matches.length > 0 ||
+    sanitiseUserFacingText(raw, null).matches.length > 0
+  ) {
+    return null;
+  }
+  return raw;
+}
+
+/**
+ * Parse `from→to` or `from->to` into `{ from, to }`. Trims whitespace
+ * around each side. Returns null on malformed input.
+ */
+export function parseEdgeId(id: string): { from: string; to: string } | null {
+  // DELEGATED, NOT RE-IMPLEMENTED. The address vocabulary has ONE owner
+  // (`orchestrator-v5/compose/edge-address.ts`); this body moved there verbatim
+  // so the graph-edit path and the Phase 3 lookup can never disagree about what
+  // an edge address IS. Same acceptance, same `::` rejection, unchanged.
+  return parseEdgeAddress(id);
+}
+
+function clamp(n: number): number {
+  if (n > STRENGTH_CLAMP_MAX) return STRENGTH_CLAMP_MAX;
+  if (n < STRENGTH_CLAMP_MIN) return STRENGTH_CLAMP_MIN;
+  return n;
+}
+
+function applyOperator(
+  current: number,
+  operator: 'set' | 'increase' | 'decrease' | 'multiply' | undefined,
+  rhs: number,
+): number {
+  switch (operator) {
+    case undefined:
+    case 'set':
+      return rhs;
+    case 'increase':
+      return current + rhs;
+    case 'decrease':
+      return current - rhs;
+    case 'multiply':
+      return current * rhs;
+  }
+}
+
+export function createAdjustEdgeStrengthHandler(): HandlerFn {
+  return async function adjustEdgeStrengthHandler(
+    invocation: HandlerInvocation,
+  ): Promise<HandlerOutcome> {
+    return runD1Handler('adjust_edge_strength', async () => {
+      const proposal = invocation.proposal;
+      if (!proposal) {
+        throw new HandlerInvocationFailedError(
+          'adjust_edge_strength invoked without a proposal',
+          {
+            cause_kind: 'parameter_invalid_at_execute',
+            retryable: false,
+            details: { handler_id: 'adjust_edge_strength' },
+          },
+        );
+      }
+
+      const rawGraph = invocation.graphForTurn ?? invocation.context.persistedGraph ?? null;
+      if (!rawGraph) {
+        throw new D1HandlerError(
+          'PRECONDITION_UNMET',
+          'adjust_edge_strength requires a graph — none was supplied for this turn.',
+          {
+            details: { handler_id: 'adjust_edge_strength' },
+            userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
+          },
+        );
+      }
+      const graphParse = GraphV3.safeParse(rawGraph);
+      if (!graphParse.success) {
+        throw new D1HandlerError(
+          'GRAPH_INVARIANT_VIOLATED',
+          'adjust_edge_strength: ingress graph failed schema validation.',
+          {
+            details: {
+              handler_id: 'adjust_edge_strength',
+              first_issue: graphParse.error.issues[0]?.message,
+            },
+            userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
+          },
+        );
+      }
+      const graph = graphParse.data;
+
+      // The strict structured adapter has already resolved an exact persisted
+      // pair, so keep those bytes intact. Natural-language callers retain the
+      // legacy composite-id parser (including its whitespace trimming); they
+      // cannot populate this invocation-only authority through parameters.
+      const parsed =
+        invocation.edgeStrengthEndpointAuthority ??
+        parseEdgeId(proposal.entity.id);
+      if (!parsed) {
+        throw new D1HandlerError(
+          'PARAMETER_INVALID',
+          `Edge id "${proposal.entity.id}" is malformed.`,
+          {
+            details: {
+              handler_id: 'adjust_edge_strength',
+              entity_id: proposal.entity.id,
+            },
+            // P1.2 follow-up — replaced jargon-heavy guidance ("Edge ID
+            // should be in format ...") with the canonical handler-level
+            // phrase. Format details belong in internal logs, not user copy.
+            userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
+          },
+        );
+      }
+
+      const targetEdge = graph.edges.find(
+        (e) => e.from === parsed.from && e.to === parsed.to,
+      );
+      if (!targetEdge) {
+        throw new D1HandlerError(
+          'ENTITY_NOT_FOUND',
+          `No edge from "${parsed.from}" to "${parsed.to}" in the graph.`,
+          {
+            details: {
+              handler_id: 'adjust_edge_strength',
+              from: parsed.from,
+              to: parsed.to,
+            },
+            userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
+          },
+        );
+      }
+
+      // R3-9 (AIQ #72 5866734772, DL 5866746362): a link a declared identity DEFINES is not a belief the analysis
+      // reads; storing an edit to it would be silently ignored. Refused for every caller of this handler (the canvas
+      // adapter refuses first, in the same words). Read off the RAW graph, which keeps an identity `NodeV3` drops.
+      // Only while the identity is IN USE (AIQ 5867435409 (1)): a Run that withdrew it used this strength.
+      const runUse = invocation.identityRunUseAuthority !== undefined
+        ? invocation.identityRunUseAuthority
+        : identityRunUseFromFacts(invocation.context.prior_facts ?? []);
+      const definition = definitionalLinkInUse(rawGraph, parsed.from, parsed.to, runUse);
+      if (definition !== null) {
+        throw new D1HandlerError(
+          'PRECONDITION_UNMET',
+          `adjust_edge_strength: ${parsed.from}→${parsed.to} is defined by the identity on "${definition.carrier_id}".`,
+          {
+            details: {
+              handler_id: 'adjust_edge_strength',
+              reason: 'definitional_link',
+              carrier_id: definition.carrier_id,
+              from: parsed.from,
+              to: parsed.to,
+            },
+            userGuidance: definitionalLinkRefusalText(rawGraph, definition),
+          },
+        );
+      }
+
+      // Resolve labels for confirmation text.
+      const fromLabel = graph.nodes.find((n) => n.id === parsed.from)?.label ?? parsed.from;
+      const toLabel = graph.nodes.find((n) => n.id === parsed.to)?.label ?? parsed.to;
+      const safeFromFactLabel = resolveSafeFactEndpointLabel(graph, parsed.from);
+      const safeToFactLabel = resolveSafeFactEndpointLabel(graph, parsed.to);
+      const factEndpointLabels =
+        safeFromFactLabel !== null &&
+        safeToFactLabel !== null &&
+        safeFromFactLabel !== safeToFactLabel
+          ? { from_label: safeFromFactLabel, to_label: safeToFactLabel }
+          : {};
+
+      const strengthParam = proposal.parameters.find((p) => p.name === 'strength');
+      if (!strengthParam) {
+        throw new D1HandlerError(
+          'PARAMETER_INVALID',
+          'adjust_edge_strength requires a "strength" parameter.',
+          {
+            details: { handler_id: 'adjust_edge_strength' },
+            userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
+          },
+        );
+      }
+      const strengthParse = AdjustEdgeStrengthSchema.safeParse(strengthParam.value);
+      if (!strengthParse.success) {
+        throw new D1HandlerError(
+          'PARAMETER_INVALID',
+          'adjust_edge_strength: strength must be a number in [-1, 1].',
+          {
+            details: {
+              handler_id: 'adjust_edge_strength',
+              received: strengthParam.value,
+            },
+            userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
+          },
+        );
+      }
+      const operator = strengthParam.operator ?? 'set';
+      const beforeMean = targetEdge.strength.mean;
+      const newMean = clamp(applyOperator(beforeMean, operator, strengthParse.data));
+
+      // Optional std parameter — set only.
+      const stdParam = proposal.parameters.find((p) => p.name === 'std');
+      let newStd: number | undefined;
+      if (stdParam) {
+        const stdParse = AdjustEdgeStrengthStdSchema.safeParse(stdParam.value);
+        if (!stdParse.success) {
+          throw new D1HandlerError(
+            'PARAMETER_INVALID',
+            'adjust_edge_strength: std must be a number in [0, 0.5].',
+            {
+              details: { handler_id: 'adjust_edge_strength', received: stdParam.value },
+              userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
+            },
+          );
+        }
+        newStd = stdParse.data;
+      }
+
+      const beforeSnapshot = {
+        from: targetEdge.from,
+        to: targetEdge.to,
+        ...factEndpointLabels,
+        strength: { ...targetEdge.strength },
+        effect_direction: targetEdge.effect_direction,
+      };
+      // Direction at numeric zero is authority-sensitive. It therefore rides
+      // the invocation side band stamped by the strict system-event adapter,
+      // never the model-authored proposal bag. Before this guard, exposing an
+      // `effect_direction` parameter would have let an inferred/default NL
+      // proposal choose a zero direction the user never stated.
+      const untrustedDirectionParam = proposal.parameters.find(
+        (p) => p.name === 'effect_direction',
+      );
+      if (untrustedDirectionParam !== undefined) {
+        throw new D1HandlerError(
+          'PARAMETER_INVALID',
+          'adjust_edge_strength: effect direction is reserved for a verified structured edit.',
+          {
+            details: {
+              handler_id: 'adjust_edge_strength',
+              parameter: 'effect_direction',
+            },
+            userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
+          },
+        );
+      }
+      const directionAuthority = invocation.edgeStrengthDirectionAuthority;
+      let newDirection: 'positive' | 'negative' =
+        newMean < 0 ? 'negative' : 'positive';
+      if (directionAuthority !== undefined) {
+        const directionParse = AdjustEdgeStrengthDirectionSchema.safeParse(
+          directionAuthority,
+        );
+        if (!directionParse.success) {
+          throw new D1HandlerError(
+            'PARAMETER_INVALID',
+            'adjust_edge_strength: effect direction must be positive or negative.',
+            {
+              details: {
+                handler_id: 'adjust_edge_strength',
+                received: directionAuthority,
+              },
+              userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
+            },
+          );
+        }
+        const signDirection =
+          newMean < 0 ? 'negative' : newMean > 0 ? 'positive' : null;
+        if (
+          signDirection !== null &&
+          directionParse.data !== signDirection
+        ) {
+          throw new D1HandlerError(
+            'PARAMETER_INVALID',
+            'adjust_edge_strength: non-zero strength and effect direction disagree.',
+            {
+              details: {
+                handler_id: 'adjust_edge_strength',
+                received: directionParse.data,
+              },
+              userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
+            },
+          );
+        }
+        newDirection = directionParse.data;
+      }
+      // ⭐ A6e — A NAMED BAND STATES A RANGE, SO ITS SPREAD IS THE LINK'S STD (AIQ #70 5855345225, 5855430153).
+      // The band rides the trusted side band, set only when the approval that sent this write carried the band the
+      // user named for this exact link (`stated-link-band-context.ts`). The std is the band of the RESULTING |mean|,
+      // whether the mean moved to the band's midpoint (`set`) or was kept (`confirm_current`); a band that does not
+      // contain the result is a contradiction and refuses rather than storing a spread for the wrong range.
+      const bandAuthority = invocation.edgeStrengthBandAuthority;
+      let bandStd: number | undefined;
+      if (bandAuthority !== undefined) {
+        if (edgeBandFromMagnitude(Math.abs(newMean)) !== bandAuthority) {
+          throw new D1HandlerError(
+            'PARAMETER_INVALID',
+            'adjust_edge_strength: the stated band does not contain the resulting strength.',
+            {
+              details: { handler_id: 'adjust_edge_strength', received: bandAuthority },
+              userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
+            },
+          );
+        }
+        bandStd = edgeBandStd(bandAuthority);
+      }
+      // EdgeStrengthV3 requires std > 0 (positive). A band or an explicit std states the spread. An exact figure states
+      // none, so the spread stays OLUMI'S — carried to the new mean as Olumi's relative spread, never the stale absolute
+      // std sized for Olumi's mean (A6f, AIQ N1 on #2096) — and is flagged as Olumi's below (`std_defaulted`).
+      const statedStd = bandStd ?? newStd;
+      const finalStd =
+        statedStd ??
+        olumiSpreadForMean({
+          oldMean: beforeMean,
+          oldStd: targetEdge.strength.std,
+          newMean,
+        });
+      const afterSnapshot = {
+        from: targetEdge.from,
+        to: targetEdge.to,
+        ...factEndpointLabels,
+        strength: { mean: newMean, std: finalStd },
+        effect_direction: newDirection,
+      };
+      // R11: the strength the user would author is unchanged (mean and direction as stored), so this write is a review.
+      const reviewOnly = newMean === beforeMean && newDirection === targetEdge.effect_direction;
+
+      const result = applyAndValidateMutation(rawGraph, (clone) => {
+        const edge = clone.edges.find(
+          (e) => e.from === parsed.from && e.to === parsed.to,
+        );
+        if (!edge) {
+          throw new D1HandlerError(
+            'ENTITY_NOT_FOUND',
+            `Edge ${parsed.from}→${parsed.to} disappeared during clone.`,
+            { userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE },
+          );
+        }
+        edge.strength = { mean: newMean, std: finalStd };
+        edge.effect_direction = newDirection;
+
+        // ⭐ R11 — A CONFIRMATION IS REVIEW, NOT AUTHORSHIP (AIQ #72 5872082179, adopted by the DL; storage by the
+        // Canonical lead, accepted in the #2235 verdict). A write whose result keeps the current strength — the canvas
+        // `confirm_current`, an in-band pick, or a `set` to the value already stored — changed nothing the user
+        // authored, so it earns no credit (`obligation-provenance.ts` `earnsAuthorshipCredit`, 20 Sep ruling). Every
+        // byte of who-authored-what stays exactly as it was: `provenance.source`, `magnitude`, `natural_effect`,
+        // `reasoning`, `provenance_display`, `defaulted` / `exists_defaulted` / `std_defaulted`. The act is RECORDED
+        // (`provenance.reviewed_by_user`, on the `.passthrough()` provenance — no schema change), with the band when the
+        // user named one; a band confirm still stores that band's spread (A6f/A6e, above). An edge with no provenance
+        // has no source to keep, and none may be invented, so nothing is recorded on it.
+        if (reviewOnly) {
+          if (edge.provenance !== undefined) {
+            edge.provenance = {
+              ...edge.provenance,
+              reviewed_by_user: {
+                intent: 'confirm',
+                at: new Date().toISOString(),
+                ...(bandAuthority !== undefined ? { band: bandAuthority } : {}),
+              },
+            } as typeof edge.provenance;
+          }
+          return {
+            before: beforeSnapshot as Record<string, unknown>,
+            after: afterSnapshot as Record<string, unknown>,
+          };
+        }
+
+        // V5 D1 golden-path closure (A3.1 Task 3): stamp provenance so
+        // downstream consumers know the strength was user-set.
+        // EdgeV3.provenance.source enum is
+        // 'brief_extraction' | 'cee_hypothesis' | 'domain_knowledge' |
+        // 'user_specified' — closest semantic match is 'user_specified'.
+        // EdgeV3.provenance_display enum supports 'user_set' directly;
+        // the V3 transform usually maps source → display, but we set
+        // both explicitly so downstream consumers don't need to wait
+        // for the next round-trip through transformResponseToV3.
+        // Olumi's sizing of the OLD strength goes with it (magnitude contract; R&C 5845818897): `natural_effect` said
+        // that β in natural units and `magnitude` said who chose it — neither describes the user's own value.
+        // ⭐ A6c — and so does Olumi's `reasoning`, on EVERY user write including a confirm. Kept under the user's
+        // stamp, the model's WHY for the link was read back as the user's: decision review presents it as "the
+        // producer's stated reason" (`decision-review-graph-projection.ts` `readEdgeReasoning`).
+        const adopted = invocation.edgeStrengthAdoptedEstimateAuthority;
+        if (adopted !== undefined) {
+          // ⭐ OLUMI'S BAND, AGREED (DL ruling 5873648311 on #2255; AIQ R11 5872082179): agreement is REVIEW, not authorship.
+          // The link's provenance stays byte-identical (`source`, `magnitude`, `reasoning`, `provenance_display`) and
+          // `defaulted` is kept below, so every reader still reads a figure the user has not authored. Only `natural_effect`
+          // goes: it restated the OLD size in natural units. The agreement IS recorded, as review (R11, the same record a
+          // confirm writes above, with Olumi's band): the user's settled view, so the magnitude contract never re-sizes
+          // the band they just agreed to (`sizedByOlumi`; Canonical seam check 5874263009, DL 5874274221).
+          const { natural_effect: _oldNaturalEffect, ...keptProvenance } = (edge.provenance ?? {}) as Record<string, unknown>;
+          const reviewed: Record<string, unknown> = {
+            ...keptProvenance,
+            reviewed_by_user: { intent: 'confirm', at: new Date().toISOString(), band: adopted.band },
+          };
+          edge.provenance = reviewed as typeof edge.provenance;
+        } else {
+          const {
+            natural_effect: _naturalEffect,
+            magnitude: _magnitude,
+            reasoning: _reasoning,
+            ...existingProvenance
+          } = (edge.provenance ?? {}) as Record<string, unknown>;
+          edge.provenance = {
+            ...existingProvenance,
+            source: 'user_specified',
+          } as typeof edge.provenance;
+          edge.provenance_display = 'user_set';
+        }
+        // The same stamp ends Olumi's default: `defaulted: true` says a default
+        // strength was applied (EdgeV3), and this write makes the strength the
+        // user's. Left in place, the Agent's canonical view, admissibility and
+        // coaching read the user's own strength as a placeholder (served (F) F8,
+        // fd4c483).
+        // ⭐ A6e — but `defaulted` is WHOLE-EDGE, and this write adopts only the strength: `exists_probability` is
+        // untouched and still Olumi's. Deleting the flag alone lost that, so the edge read as entirely the user's.
+        // The per-field half is kept (`exists_defaulted`, Canonical #70 5855416983).
+        // ⛔ NOT for Olumi's band, adopted (DL R11 question on #2255, 5873588605; AIQ R11 5872082179): every figure on the
+        // link is still this system's, so `defaulted` stays and every reader of it — the placeholder caveats, the coaching
+        // card's authorship — reads exactly what it read before the approval. Only a value the user wrote ends it.
+        if (invocation.edgeStrengthAdoptedEstimateAuthority === undefined) {
+          if (edge.defaulted === true) edge.exists_defaulted = true;
+          delete edge.defaulted;
+        }
+        // ⭐ A6f — and the SPREAD is the same kind of fact (AIQ N1 on #2096, 5856128077). A write that states it (a named
+        // band, an explicit std) makes it the user's; an exact figure states none, so the std above is still Olumi's
+        // and says so per field, as existence does. Every user write sets the flag's state, so a stale one never
+        // survives a later write that changed who chose the spread.
+        if (statedStd === undefined) edge.std_defaulted = true;
+        else delete edge.std_defaulted;
+
+        return {
+          before: beforeSnapshot as Record<string, unknown>,
+          after: afterSnapshot as Record<string, unknown>,
+        };
+      });
+
+      const noop =
+        beforeSnapshot.strength.mean === afterSnapshot.strength.mean &&
+        beforeSnapshot.strength.std === afterSnapshot.strength.std &&
+        beforeSnapshot.effect_direction === afterSnapshot.effect_direction;
+
+      const targetIdNormal = `${parsed.from}→${parsed.to}`;
+      const fact: AdjustEdgeStrengthHandlerFact = {
+        fact_type: 'adjust_edge_strength',
+        fact_version: 1,
+        noop,
+        result: {
+          target_id: targetIdNormal,
+          status: noop ? 'noop' : 'applied',
+          before: beforeSnapshot as Record<string, unknown>,
+          after: afterSnapshot as Record<string, unknown>,
+        },
+      };
+
+      const factCheck = AdjustEdgeStrengthHandlerFactSchema.safeParse(fact);
+      if (!factCheck.success) {
+        throw new HandlerResultInvalidError(
+          'AdjustEdgeStrengthHandlerFact failed schema validation',
+          factCheck.error,
+        );
+      }
+
+      // Gate-1 claim integrity: same divergence set_factor_value had —
+      // `noop` was computed for the fact above but the narration always
+      // claimed an adjustment, yielding "Adjusted the link between A and
+      // B from moderate to moderate." on a turn that changed nothing.
+      const assistantText = noop
+        ? formatEdgeStrengthUnchanged({ fromLabel, toLabel, mean: newMean })
+        : formatEdgeAdjustment({
+            fromLabel,
+            toLabel,
+            beforeMean,
+            afterMean: newMean,
+            beforeDirection: beforeSnapshot.effect_direction,
+            afterDirection: afterSnapshot.effect_direction,
+          });
+
+      return {
+        assistant_text: assistantText,
+        handler_facts: [factCheck.data],
+        llm_calls_used: 0,
+        mutated_graph: result.mutatedGraph,
+      };
+    });
+  };
+}

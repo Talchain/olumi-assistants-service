@@ -1,0 +1,24 @@
+{
+  "prompt_version": "v16r",
+  "fixture": "03-needs-evidence",
+  "arm": 2,
+  "model": "claude-sonnet-5",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 17107,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 1288,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "service_tier": "standard",
+    "inference_geo": "global"
+  },
+  "latency_s": 12.3,
+  "text": "{\n  \"narrative_summary\": \"Rebuild In House produced the best outcome in 58% of runs of this model, and Extend Vendor Contract produced the best outcome in 42%. The link from Engineering Capacity to Total Cost of Ownership is not yet evidence backed.\",\n  \"story_headlines\": {\n    \"opt_rebuild\": \"Rebuild In House depends on engineering capacity holding up as modelled over time.\",\n    \"opt_extend\": \"Extend Vendor Contract would need the vendor price path to stay favourable to lead here.\"\n  },\n  \"robustness_explanation\": {\n    \"summary\": \"The ordering holds in about 61% of variations, based on current estimates given the low overall confidence.\",\n    \"primary_risk\": \"The link from Engineering Capacity to Total Cost of Ownership is fragile and could flip which option this model points to.\",\n    \"stability_factors\": [],\n    \"fragility_factors\": [\n      \"The link from Engineering Capacity to Total Cost of Ownership could shift the comparison if capacity assumptions change.\"\n    ]\n  },\n  \"readiness_rationale\": \"Two gaps still hold this back: engineering capacity is asserted rather than evidenced, and confidence in that factor and in the vendor price path remains low.\",\n  \"evidence_enhancements\": {\n    \"fac_eng_capacity\": {\n      \"specific_action\": \"Run a capacity audit against current engineering commitments to test the assumption behind this comparison.\",\n      \"rationale\": \"This factor is asserted rather than evidenced, and the comparison is sensitive to it.\",\n      \"evidence_type\": \"internal_data\",\n      \"decision_hygiene\": \"Estimate the likely capacity shortfall before looking at the audit results.\"\n    },\n    \"fac_vendor_price\": {\n      \"specific_action\": \"Request a multi-year price commitment or cap from the vendor to firm up this input.\",\n      \"rationale\": \"The vendor price path feeds Total Cost of Ownership and is only moderately evidenced.\",\n      \"evidence_type\": \"market_research\",\n      \"decision_hygiene\": \"Write down the expected price range before opening vendor negotiations.\"\n    }\n  },\n  \"scenario_contexts\": {},\n  \"flip_thresholds\": [],\n  \"bias_findings\": [\n    {\n      \"type\": \"unsupported_link\",\n      \"source\": \"structural\",\n      \"description\": \"Engineering capacity is asserted rather than evidenced, yet it shapes the comparison. Is that assumption tested enough to lean on?\",\n      \"affected_elements\": [\n        \"edge_capacity_tco\"\n      ],\n      \"suggested_action\": \"Validate engineering capacity assumptions with a concrete audit before committing.\",\n      \"linked_critique_code\": \"unsupported_link\"\n    }\n  ],\n  \"key_assumptions\": [\n    \"The link from Engineering Capacity to Total Cost of Ownership assumes current team capacity estimates are accurate.\",\n    \"The link from Vendor Price Path to Total Cost of Ownership assumes pricing trends continue as currently expected.\",\n    \"The framing assumes billing platform direction is decided primarily on cost rather than other operational factors.\"\n  ],\n  \"decision_quality_prompts\": [\n    {\n      \"question\": \"What is the base rate for efforts like Rebuild In House delivering on their engineering capacity assumptions?\",\n      \"principle\": \"Outside View (Kahneman)\",\n      \"applies_because\": \"Overall confidence in this comparison is low, so grounding the estimate in comparable past efforts helps test it.\"\n    },\n    {\n      \"question\": \"Who will argue that Engineering Capacity matters less than Total Cost of Ownership modelling suggests?\",\n      \"principle\": \"Structured dissent\",\n      \"applies_because\": \"A critique flagged that engineering capacity is asserted rather than evidenced, so surfacing dissent tests that assumption directly.\"\n    }\n  ]\n}"
+}

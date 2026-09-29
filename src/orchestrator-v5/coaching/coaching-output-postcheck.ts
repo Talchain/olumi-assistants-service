@@ -1,0 +1,1275 @@
+/**
+ * V5 Coaching Context Pack v1 — deterministic output post-check.
+ *
+ * This is the HARD enforcement of the lane's core boundary: deterministic code
+ * owns truth; the LLM only expresses it. The flag-gated prompt instruction
+ * (route-with-tool-use.ts) is soft guidance — for the STATE-CONDITIONAL rules
+ * (an existing result presented as current) this module is the enforcement
+ * backstop.
+ *
+ * ## Known limitations (honesty — review r3, FIX 5)
+ *
+ * The PRE-ANALYSIS `fabricated_result_reference` rule is BEST-EFFORT
+ * deterministic mitigation, NOT a complete guarantee. Regex disqualifiers are
+ * brittle against paraphrase (the ROADMAP 1.81 dossier finding); a semantic
+ * check is the phase-② candidate. Accepted-miss classes, deliberately not
+ * pattern-chased further:
+ *   - "your model shows X wins" — 'model' collides with legitimate structure
+ *     talk ("your decision model"), so it is not a result-noun here;
+ *   - bare comparative result language with no attribution anchor — "higher
+ *     expected value", "the stronger play";
+ *   - a bare unattributed figure — "there is a 72% probability X is right" —
+ *     lexically indistinguishable from the user's own echoed framing
+ *     ("that 30% chance of churn"), so it ships (r3 FIX 1 chose the
+ *     over-suppression direction as the greater harm: it recreates the
+ *     conversational dead-end #450 fixes);
+ *   - paraphrased attribution via pronouns or novel verbs outside the
+ *     alternations ("it points that way", "the numbers lean enterprise");
+ *   - modal/future-bridged attribution — "the analysis will/would/should/…
+ *     show X" — is EXCLUDED BY DESIGN (2026-07-14 live re-verify: the
+ *     tense-blind bridge false-fired on ~43% of genuine pre-analysis answers;
+ *     a modal bridge usually describes a future run, the honest coaching
+ *     #450 protects). The residue this exclusion ACCEPTS — shapes that fired
+ *     pre-exclusion and now ship (adversarial review of PR #451, executed
+ *     against both builds): modal + that-clause directional assertion ("the
+ *     analysis will show that X wins"); hedged-present claims ("our
+ *     simulation would suggest Enterprise"); modal-perfect with a listed
+ *     verb ("the analysis may/would have found that churn dominates");
+ *     capability framing ("the analysis can show us that X wins"). All are
+ *     directional-without-number — the bare-comparative class above — and a
+ *     specific NUMBER stays caught by arm (d) ("wins with N%" / attributed
+ *     "N% probability") regardless of tense. Re-catch the epistemic-perfect
+ *     sub-class ("may/might/could have <listed-verb>") only if observed
+ *     live, not pre-widened. (The counterfactual "would have shown that X
+ *     won" also ships, but that was a miss BEFORE this exclusion too —
+ *     "shown" is not a listed verb.)
+ * The screened arms also accept hypothetical / offer / user-own-analysis
+ * contexts by design (r3 FIX 4), which a determined paraphrase could exploit.
+ *
+ * It inspects LLM-authored coaching prose (the `coach` / `text_only`→converse
+ * compose branches) against the SAME canonical `CoachingStatePack` the prompt
+ * received, and reports a {@link CoachingViolation} when the prose crosses the
+ * boundary. The caller degrades to a deterministic safe response
+ * ({@link buildCoachingDegradeResponse}) — it never rewrites the model's prose
+ * into something that merely pretends to be safe.
+ *
+ * ## The most important firing case
+ *
+ * Not the literal word "fresh". The dangerous output is confident DIRECTIONAL
+ * or SUPERLATIVE advice issued while the deterministic state is stale / unknown
+ * / absent / blocked / unusable — "you should choose X", "X is the best
+ * option", "go with X", "X remains the winner" — even when the prose never
+ * claims the analysis is fresh. {@link checkCoachingOutput} gates that case on
+ * `stateUnsafe`, independent of any freshness wording. When the state IS fresh
+ * and usable, directional advice is allowed — normal coaching is never degraded.
+ *
+ * ## Boundaries respected
+ *
+ *   - Value/unit: the pack carries NO values, and #296 owns value/unit
+ *     resolution. This module only DETECTS unsafe raw value/unit narration
+ *     (currency / explicit units — the #296 "£0.3" mutation-value shape) and
+ *     degrades; it never formats, normalises or interprets a value.
+ *   - Claim-safety (evidence / confidence / provenance / bias / science): no
+ *     such field exists in the pack (Tier-3 claim-safety contract is future
+ *     work), so any such claim in coaching prose is unsupported by construction.
+ *
+ * Pure: no I/O, no telemetry (the caller emits `v5.coaching.output_postcheck`),
+ * no config read (the caller gates on the flag). Mirrors the
+ * `applyEgressForbiddenPhraseGuard` shape.
+ */
+
+import type { CoachingStatePack } from '../context/canonical-analysis-state.js';
+import {
+  filterLivePendingActions,
+  type PendingAction,
+} from '../session/pending-action.js';
+import {
+  buildAnalysisAbsentTemplate,
+  buildAnalysisDegradedTemplate,
+  buildAnalysisStaleTemplate,
+  buildAnalysisUnconfirmedTemplate,
+} from '../tools/handlers/no-op-helpers.js';
+import {
+  RENDER_SAFE_LABEL_FALLBACK,
+  sanitisePublicCopyOrFallback,
+} from '../compose/proposed-change.js';
+import { hasFabricatedResultReference } from '../routing/fabricated-result-reference.js';
+import {
+  RERUN_ACTION,
+  type StaleRerunSuggestedAction,
+} from '../routing/stale-rerun-guard.js';
+import type {
+  ReadinessRecoveryInput,
+  ReadinessRecoveryNode,
+} from './readiness-recovery.js';
+
+/** Closed set of coaching-output boundary violations. Telemetry-safe enum. */
+export type CoachingViolation =
+  | 'internal_field_exposed'
+  | 'invented_mutation_success'
+  | 'value_change_narration'
+  | 'unsupported_evidence_or_confidence_claim'
+  | 'confident_advice_under_unsafe_state'
+  | 'stale_presented_as_fresh'
+  // Pre-analysis fabricated RESULT: the prose attributes a result to an
+  // analysis / simulation that has not run (no successful fact exists). The
+  // fabricated-result honesty guarantee — distinct from `stale_presented_as_fresh`,
+  // which is about an EXISTING result presented as current. See
+  // FABRICATED_RESULT_REFERENCE_PATTERNS and checkCoachingOutput.
+  | 'fabricated_result_reference'
+  | 'mutation_proposal_on_non_mutating_question'
+  | 'run_availability_claim_after_refusal';
+
+export interface CoachingPostcheckResult {
+  readonly safe: boolean;
+  /** Present iff `safe === false`. The first matched rule, in severity order. */
+  readonly violation?: CoachingViolation;
+}
+
+/**
+ * Internal / debug field exposure — NARROW on purpose. The product's
+ * `findEditInternalsHit` bars bare decision words ("graph", "node", "edge",
+ * "path", "option") because its caller (the edit no-op preservation gate) pays
+ * nothing for a false positive. Here a false positive degrades a whole coaching
+ * answer, and legitimate coaching says "your decision model" / "the options" /
+ * "this factor". So we detect only the genuinely-internal shapes: long hex
+ * digests (graph hashes), snake_case identifiers (`fac_price`, `graph_hash`,
+ * `fact_type`, `rerun_required`), dotted internal paths (`node.id`), raw edge
+ * arrows (`a->b`), and hard pipeline jargon.
+ */
+const INTERNAL_EXPOSURE_PATTERNS: readonly RegExp[] = [
+  // Long hex digest with at least one a–f letter (so pure decimal numbers — a
+  // separate value concern — do not trip this leak rule).
+  /\b(?=[0-9a-f]*[a-f])[0-9a-f]{12,}\b/i,
+  // snake_case internal identifier / field name (≥1 underscore, word-ish parts).
+  /\b[a-z][a-z0-9]*_[a-z0-9_]+\b/i,
+  // Dotted internal path — ≥2 chars each side so "e.g."/"i.e."/sentence ends miss.
+  /\b[a-z_]{2,}\.[a-z_]{2,}\b/i,
+  // Raw ASCII edge arrow.
+  /->/,
+  // Hard pipeline / debug jargon.
+  /\b(?:handler|schema|validator|dispatcher|orchestrator|zod|tool[_ ]?call|context[_ ]?pack|fact[_ ]?type|graph[_ ]?hash|analysis[_ ]?status|raw[_ ]?value|json)\b/i,
+];
+
+function hasInternalExposure(text: string): boolean {
+  return INTERNAL_EXPOSURE_PATTERNS.some((re) => re.test(text));
+}
+
+/**
+ * Graph / model mutation OBJECTS — the nouns a real mutation claim acts on.
+ * Used (with a determiner) to disambiguate genuine mutation-success claims from
+ * ordinary coaching that happens to use a completion verb on a non-graph noun
+ * ("I've created a summary", "Created a comparison of your options").
+ */
+const GRAPH_MUTATION_OBJECT =
+  '(?:graph|model|factor|option|constraint|edge|node|link|weight|driver|assumption|parameter|value|scenario)s?';
+
+/** Past/perfective completion verbs that, on a non-execute coaching turn, would
+ *  falsely assert a change. Shared by the mutation-claim + value-change rules.
+ *  `creat(e|ed)` is included: it is safe here because the mutation-claim rule
+ *  additionally requires a GRAPH/MODEL object, so "created a summary" stays safe
+ *  while "created a new option" / "the graph was created" degrade. */
+const MUTATION_VERB =
+  '(?:updated?|chang(?:e|ed)|set|added?|creat(?:e|ed)|remov(?:e|ed)|delet(?:e|ed)|edit(?:ed)?|adjust(?:ed)?|modif(?:y|ied)|appl(?:y|ied)|increas(?:e|ed)|decreas(?:e|ed)|rais(?:e|ed)|lower(?:ed)?|reduc(?:e|ed))';
+
+/** First-person completed-action claim prefix ("I've", "I have", "I", "we…",
+ *  "successfully"). Anchors the change to a CLAIM the model made, so
+ *  hypotheticals ("I'd set X to Y", "if you increase X to Y") never match. */
+const CLAIM_SUBJECT = "(?:i['’]ve|i\\s+have|i|we['’]ve|we\\s+have|we|successfully)";
+
+/**
+ * Genuine graph/model mutation-success claim — a first-person completion verb
+ * acting (via a determiner) on a graph/model object: "I've updated the budget
+ * factor", "I changed the option value", "Done — I changed the graph", "I
+ * updated the model". A determiner is required so idioms with no object
+ * determiner ("I've added value") and non-graph objects ("I've created a
+ * summary") stay safe. Replaces the egress-tuned `findSuccessClaimHit`, whose
+ * bare "All set" / "Done." / "Created X" patterns over-fire on coaching prose.
+ */
+const COACHING_MUTATION_CLAIM_ACTIVE = new RegExp(
+  `\\b${CLAIM_SUBJECT}\\s+(?:just\\s+|now\\s+|already\\s+)?${MUTATION_VERB}\\b\\s+` +
+    // `[\w-]+` (not `\w+`) so hyphenated modifiers ("the high-priority factor")
+    // are tolerated between the determiner and the graph object.
+    `(?:the|a|an|your|that|this|its|my|our|both|two|all)\\s+(?:[\\w-]+\\s+){0,2}?${GRAPH_MUTATION_OBJECT}\\b`,
+  'i',
+);
+
+/** Passive mutation claim — "the model has been updated", "your high-priority
+ *  factor was changed". Object precedes the verb, so it needs its own pattern. */
+const COACHING_MUTATION_CLAIM_PASSIVE = new RegExp(
+  `\\b(?:the|your|that|this|its|my|our)\\s+(?:[\\w-]+\\s+){0,2}?${GRAPH_MUTATION_OBJECT}\\b\\s+` +
+    `(?:has\\s+been|have\\s+been|was|were|is\\s+now|are\\s+now)\\s+` +
+    `(?:updated|chang(?:e|ed)|set|added|created|remov(?:e|ed)|delet(?:e|ed)|edit(?:ed)?|adjust(?:ed)?|modif(?:y|ied)|appl(?:y|ied)|saved|committed)\\b`,
+  'i',
+);
+
+/**
+ * Directly-named graph-entity mutation — "I created Option A", "We updated
+ * Factor 3", "I removed Node X". A named entity (a Capitalised graph noun + a
+ * Capital/number label) needs no determiner, so this complements the
+ * determiner-gated active pattern. CASE-SENSITIVE (no `i` flag): the
+ * capitalised noun + label is the named-entity signal, so ordinary lowercase
+ * prose ("between option a and b", "I changed option settings") does NOT match.
+ */
+const COACHING_MUTATION_CLAIM_NAMED =
+  /\b(?:[Ii]|[Ww]e)(?:['’]ve|\s+have)?\s+(?:just\s+|now\s+|already\s+)?(?:[Uu]pdated?|[Cc]hanged?|[Cc]reated?|[Ss]et|[Aa]dded?|[Rr]emoved?|[Dd]eleted?|[Aa]djusted?|[Mm]odified|[Aa]pplied)\s+(?:Option|Factor|Node|Edge|Constraint|Driver|Assumption|Parameter|Weight|Link|Goal|Scenario|Model|Graph)\s+["“]?[A-Z0-9]/;
+
+function isMutationSuccessClaim(text: string): boolean {
+  return (
+    COACHING_MUTATION_CLAIM_ACTIVE.test(text) ||
+    COACHING_MUTATION_CLAIM_PASSIVE.test(text) ||
+    COACHING_MUTATION_CLAIM_NAMED.test(text)
+  );
+}
+
+/**
+ * Value-CHANGE narration — a first-person completion verb that asserts a value
+ * was moved: "I set the budget to £50k", "I changed the timeline from 12 months
+ * to 18 months", "I updated churn to 5%", "I increased the budget by £50k", "I
+ * set the budget at £50k". Keyed on the claim subject + change verb + a
+ * `to`/`from`/`by`/`at` + a number, so DESCRIPTIVE mentions of display-safe
+ * values ("Your budget is £50k", "An 18 month timeline", "A 5% churn
+ * assumption") — which the LLM legitimately receives via `display_graph`'s
+ * `display_value` — are NOT degraded, and hypotheticals ("I'd set X to £50k",
+ * "increasing churn to 5% would…") never match. Lexical DETECTION only; all
+ * value/unit formatting / normalisation stays owned by #296 — resolves nothing.
+ */
+// A VALUE shape (not just any digit): currency, a number+unit, or a bare
+// decimal ratio (the "£0.3" set-defect shape). This deliberately EXCLUDES
+// clock times ("5pm", "5am") and unit-less integers ("at 5pm", "at 3 today")
+// so the rule stays value-change-only, not "any number after a preposition".
+const VALUE_SHAPE =
+  '(?:[£$€]\\s?\\d|\\d+(?:[.,]\\d+)?\\s?%|\\d+(?:[.,]\\d+)?\\s?(?:percent|pp|bps|k|m|bn|gbp|usd|eur|dollars?|pounds?|euros?|months?|years?|weeks?|days?|hours?|hrs?|mins?|minutes?|kg|km|miles?|tonnes?|litres?|units?|x)\\b|\\d+\\.\\d+(?!\\s?[ap]m\\b))';
+// A bare integer that is NOT a clock time ("5pm", "5:30", "5 o'clock"). Allowed
+// after `to`/`from`/`by`, where "set headcount to 10" / "from 12 to 18" /
+// "increased headcount by 5" are genuine value changes; NOT after `at` (which
+// takes clock times, so "changed my mind at 5pm" stays safe).
+const BARE_INT_NOT_TIME = "\\d+(?![:.]\\d)(?!\\s?[ap]m\\b)(?!\\s?o['’]?clock\\b)";
+const COACHING_VALUE_CHANGE = new RegExp(
+  `\\b${CLAIM_SUBJECT}\\s+(?:just\\s+|now\\s+|already\\s+)?${MUTATION_VERB}\\b[^.!?]{0,40}?` +
+    `(?:\\b(?:to|from|by)\\b\\s+(?:about\\s+|around\\s+|roughly\\s+|approximately\\s+)?(?:${VALUE_SHAPE}|${BARE_INT_NOT_TIME})` +
+    `|\\bat\\b\\s+(?:about\\s+|around\\s+|roughly\\s+|approximately\\s+)?${VALUE_SHAPE})`,
+  'i',
+);
+
+/**
+ * Evidence / provenance / scientific-confidence / cognitive-bias claims. None
+ * of these is a pack field (Tier-3 claim-safety contract does not exist yet),
+ * so any such claim in coaching prose is unsupported by construction. Scoped to
+ * science-claim shapes — not the bare word "confident" (a coach may be
+ * "confident this helps you think it through").
+ */
+const EVIDENCE_CONFIDENCE_PATTERN =
+  /\b(?:peer[- ]reviewed|statistically\s+significant|p\s*[<=]\s*0?\.\d|confidence\s+interval|scientifically\s+(?:proven|valid|sound|rigorous)|the\s+evidence\s+(?:shows|suggests|strongly|clearly|supports|indicates)|strong\s+evidence|robust\s+evidence|provenance|cognitive\s+bias|confirmation\s+bias|anchoring\s+bias|availability\s+bias|with\s+high\s+confidence|high(?:ly)?\s+confiden(?:t|ce))\b/i;
+
+/** Proposal language is harmless in ordinary coaching but violates an
+ * explicit non-mutating analytical turn.  Scoped by the caller option below. */
+const NON_MUTATING_TURN_PROPOSAL_PATTERN =
+  /(?:\b(?:setting|changing|editing|updating|adding|removing)\b[^.!?]{0,100}\b(?:would|could|looks?\s+like|help)\b|\b(?:tell\s+me|say\s+the\s+word)\b[^.!?]{0,100}\b(?:change|edit|apply|make\s+it)\b)/i;
+
+/** Narrow B2 proposal detector, independently usable when the broader
+ * flag-gated coaching state pack is unavailable. */
+export function hasMutationProposalOnNonMutatingTurn(text: string): boolean {
+  return NON_MUTATING_TURN_PROPOSAL_PATTERN.test(text);
+}
+
+/**
+ * Confident DIRECTIONAL / SUPERLATIVE advice about an OPTION — the brief's
+ * primary firing case under unsafe state (independent of freshness wording, and
+ * even when paired with a caveat). See {@link isDirectionalOptionAdvice}; this
+ * is split into two tiers so generic recommendation language is directional
+ * ONLY when it points at an option, and recovery/rerun guidance — the DESIRED
+ * unsafe-state behaviour — is never a violation.
+ *
+ * Tier 1 — unambiguous option judgement (fires on its own): a superlative + an
+ * option NOUN ("the best/better/preferable… option/choice"), or a copula + an
+ * inherently-option judgement ("is preferable/superior/the winner/better").
+ * `(?!\s+to\b)` keeps process advice ("it is better TO wait") out; superlatives
+ * with no option noun ("this is the best WAY") never reach here.
+ */
+const UNAMBIGUOUS_OPTION_ADVICE =
+  /\b(?:the\s+(?:best|strongest|safest|optimal|right|winning|leading|preferable|better|superior|preferred)\s+(?:option|choice|bet|move|pick|call|one)|(?:is|are|remains?|stays?|seems?|looks?)\s+(?:clearly\s+|by\s+far\s+|obviously\s+|still\s+|the\s+)?(?:preferable|superior|winner|front[- ]runner|leader|better|stronger|safer)\b(?!\s+to\b)|clearly\s+the\s+winner|your\s+best\s+(?:option|bet|choice))\b/i;
+
+/**
+ * Tier 2 — recommendation / selection language ("I('d/ would) recommend/suggest/
+ * advise/go with/choose/pick…", "you/we should choose…", "my advice…", "go with
+ * X"). Directional ONLY when {@link OPTION_SELECTION_SIGNAL} is also present, so
+ * "I recommend re-running the analysis" / "my advice is to re-run" / "I'd go
+ * with re-running" are NOT classified as option-selection advice.
+ */
+const RECOMMENDATION_VERB =
+  /\b(?:(?:i|we)(?:['’]d)?\s+(?:would\s+|really\s+|strongly\s+|definitely\s+)?(?:recommend|suggest|advise|favou?r|propose|go\s+with|choose|pick|opt\s+for|select|prefer|lean)|my\s+(?:recommendation|advice|suggestion|pick|choice)|(?:you|we)\s+(?:should|['’]d|ought\s+to|could|may\s+want\s+to|need\s+to|must)\s+(?:choose|pick|go\s+with|select|opt\s+for|prefer|favou?r)|go\s+with\s+\w+|opt\s+for\s+\w+|stick\s+with\s+\w+)\b/i;
+
+/** Explicit option-selection signal — an option/choice noun or an enumerated
+ *  pick. NOT the selection verbs themselves (those are recovery-agnostic). */
+const OPTION_SELECTION_SIGNAL =
+  /\b(?:options?|choices?|the\s+(?:first|second|third|former|latter)\b)/i;
+
+/**
+ * Is the prose confident directional advice about an OPTION? Tier-1 judgements
+ * fire on their own; recommendation language (tier 2) fires only with an
+ * option-selection signal — so recovery/rerun guidance ("I recommend re-running
+ * the analysis") is never a violation.
+ */
+function isDirectionalOptionAdvice(text: string): boolean {
+  if (UNAMBIGUOUS_OPTION_ADVICE.test(text)) return true;
+  return RECOMMENDATION_VERB.test(text) && OPTION_SELECTION_SIGNAL.test(text);
+}
+
+// ---------------------------------------------------------------------------
+// Label-aware detection — the type-noun patterns above know "option"/"factor",
+// but not the graph's ACTUAL display labels ("Plan A", "Pricing"). The caller
+// supplies the live option/factor/node labels so "I recommend Plan A" (option)
+// and "I updated Pricing" (factor) degrade. Pure: the labels are deterministic
+// graph state; no #296 resolver logic, no value formatting.
+// ---------------------------------------------------------------------------
+
+/**
+ * CASE-SENSITIVE label detectors built from the supplied decision labels. Case
+ * sensitivity is the disambiguator: a Title-Case label ("Value", "Pricing")
+ * matches a named reference but NOT the lowercase idiom ("added value").
+ * Trivial (<3 char) labels are skipped as too noisy. Returns null when nothing
+ * usable remains. Three forms:
+ *   - `verbObject`  — label as the direct object of a verb (tested against the
+ *     post-verb slice; tolerates a leading quote, e.g. `recommend "Plan A"`);
+ *   - `subjectMut`  — label as the subject of a PASSIVE mutation ("Pricing was
+ *     updated", "Plan A has been changed");
+ *   - `subjectJudge`— label as the subject of an option JUDGEMENT ("Plan A is
+ *     the best", "Plan A is our top choice") — only superlatives that are
+ *     option-shaped (followed by an option noun, or clause-final) so "Pricing
+ *     is the best metric" stays safe.
+ */
+interface LabelDetectors {
+  readonly verbObject: RegExp;
+  readonly subjectMut: RegExp;
+  readonly subjectJudge: RegExp;
+}
+function buildLabelDetectors(labels: readonly string[] | undefined): LabelDetectors | null {
+  if (!labels || labels.length === 0) return null;
+  const escaped = Array.from(
+    new Set(
+      labels
+        .filter((l): l is string => typeof l === 'string')
+        .map((l) => l.trim())
+        .filter((l) => l.length >= 3),
+    ),
+  ).map((l) => l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  if (escaped.length === 0) return null;
+  escaped.sort((a, b) => b.length - a.length); // longest-first: specific wins
+  const alt = escaped.join('|');
+  const label = `(?:${alt})`;
+  // All CASE-SENSITIVE (no `i` flag): the label casing is the named-reference signal.
+  return {
+    verbObject: new RegExp(`^["“”'‘’]?${label}(?![\\w])`),
+    subjectMut: new RegExp(
+      // Two subject forms: an ATTACHED contraction ("Pricing's been updated",
+      // "Plans've been changed"), or a SPACED auxiliary ("Pricing was/got/has
+      // been/is being updated"). Both then take a passive mutation verb.
+      `(?:(?<![\\w])["“”'‘’]?${label}['’](?:s|ve)\\s+been` +
+        `|(?<![\\w])["“”'‘’]?${label}["“”'‘’]?(?![\\w])\\s+(?:has\\s+been|have\\s+been|was|were|got|is\\s+now|are\\s+now|is\\s+being|are\\s+being))\\s+` +
+        `(?:updated|chang(?:e|ed)|set|added|created|remov(?:e|ed)|delet(?:e|ed)|edit(?:ed)?|adjust(?:ed)?|modif(?:y|ied)|appl(?:y|ied)|saved|committed)\\b`,
+    ),
+    subjectJudge: new RegExp(
+      `(?<![\\w])["“”'‘’]?${label}["“”'‘’]?(?![\\w])\\s+(?:is|are|['’]s|remains?|stays?|seems?|looks?|would\\s+be)\\s+` +
+        `(?:clearly\\s+|by\\s+far\\s+|the\\s+|our\\s+|my\\s+|your\\s+|a\\s+)*` +
+        `(?:(?:best|strongest|top|optimal|winning|leading|safest|preferred|ideal|right)\\s+(?:choice|option|pick|one|bet|move|call)` +
+        `|(?:best|strongest|top|optimal|winning|leading|safest|preferred|ideal|winner)(?=[\\s]*[.,!?;:]|\\s*$))`,
+    ),
+  };
+}
+
+/** Claim-subject + mutation verb + optional determiner; global so we can scan
+ *  the slice that follows each occurrence for a known label. */
+const MUTATION_VERB_CONTEXT = new RegExp(
+  `\\b${CLAIM_SUBJECT}\\s+(?:just\\s+|now\\s+|already\\s+)?${MUTATION_VERB}\\b\\s+` +
+    `(?:the\\s+|a\\s+|an\\s+|your\\s+|its\\s+|my\\s+|our\\s+|that\\s+|this\\s+)?`,
+  'ig',
+);
+
+/** Recommendation / selection verb (incl. "let's", bare imperative, "lean
+ *  towards"), + optional "going with"/"the"; global so we can scan the
+ *  following slice for a known option label. */
+const RECOMMEND_VERB_CONTEXT = new RegExp(
+  `\\b(?:(?:i|we)(?:['’]d)?\\s+(?:would\\s+|really\\s+|strongly\\s+|definitely\\s+)?` +
+    `(?:recommend|suggest|advise|propose|go\\s+with|choose|pick|opt\\s+for|select|prefer|favou?r|lean\\s+towards?)` +
+    `|(?:let['’]?s|let\\s+us)\\s+(?:go\\s+with|choose|pick|opt\\s+for|select)` +
+    `|(?:you|we)\\s+(?:should|['’]d|ought\\s+to|could|may\\s+want\\s+to|need\\s+to|must)\\s+` +
+    `(?:choose|pick|go\\s+with|select|opt\\s+for|prefer|favou?r)` +
+    `|(?:go\\s+with|go\\s+for|opt\\s+for|stick\\s+with|choose|pick|select))\\b\\s+` +
+    `(?:(?:going\\s+with|opting\\s+for|sticking\\s+with|the)\\s+)?`,
+  'ig',
+);
+
+/** True when a known label is the direct object of a verb match (the label is
+ *  matched case-sensitively at the start of the slice following the verb). */
+function labelIsVerbObject(
+  text: string,
+  contextRegex: RegExp,
+  labelMatcher: RegExp,
+): boolean {
+  contextRegex.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = contextRegex.exec(text)) !== null) {
+    if (labelMatcher.test(text.slice(m.index + m[0].length))) return true;
+    if (m.index === contextRegex.lastIndex) contextRegex.lastIndex += 1; // guard
+  }
+  return false;
+}
+
+/** Label-aware mutation claim: a mutation verb whose object is a known label,
+ *  OR a known label as the subject of a passive mutation ("Pricing was updated"). */
+function isLabelMutationClaim(text: string, det: LabelDetectors): boolean {
+  return (
+    labelIsVerbObject(text, MUTATION_VERB_CONTEXT, det.verbObject) || det.subjectMut.test(text)
+  );
+}
+
+/** Label-aware directional advice: a recommendation whose object is a known
+ *  label, OR a known label as the subject of an option judgement. */
+function isLabelDirectionalAdvice(text: string, det: LabelDetectors): boolean {
+  return (
+    labelIsVerbObject(text, RECOMMEND_VERB_CONTEXT, det.verbObject) || det.subjectJudge.test(text)
+  );
+}
+
+/**
+ * Presenting an analysis RESULT as current — probabilities, win/lead/ahead
+ * claims. Under `stateUnsafe` AND with no staleness caveat, this is
+ * stale-as-fresh. (A result presented WITH a caveat is the desired behaviour,
+ * so the staleness-signal check exempts it.)
+ */
+const RESULT_PRESENTATION_PATTERN =
+  /\b(?:\d{1,3}\s?%|wins?\b|leads?\b|ahead\b|out[- ]?performs?|comes?\s+out\s+ahead|highest\s+(?:chance|probability)|best\s+chance|most\s+likely\s+to\s+(?:win|succeed)|expected\s+(?:value|outcome))\b/i;
+
+/** Staleness caveat / rerun nudge — text signal that the prose flagged currency. */
+const STALENESS_SIGNAL_PATTERN =
+  /\b(?:stale|out[- ]of[- ]date|re[- ]?run|refresh|since\s+(?:the\s+)?(?:last\s+|latest\s+)?analysis|may\s+be\s+out\s+of\s+date|model\s+has\s+changed|no\s+longer\s+reflects?|can(?:'|’)?t\s+confirm|cannot\s+confirm)\b/i;
+
+/**
+ * Claims that a run is currently available or would produce a result. These
+ * are ordinary prose on a ready/successful path, but contradict a structured
+ * latest-attempt refusal. Kept semantic and bounded to run/result predicates;
+ * it does not reject general discussion of why analysis is useful.
+ */
+const RUN_AVAILABILITY_AFTER_REFUSAL_PATTERNS: readonly RegExp[] = [
+  /\brunning(?:\s+(?:the\s+)?analysis|\s+now)?\s+(?:is|would\s+be)\s+safe\b/i,
+  /\b(?:it|the\s+(?:model|analysis))\s+is\s+safe\s+to\s+(?:run|analyse)\b/i,
+  /\b(?:running|re[- ]?running)\s+(?:the\s+)?analysis\s+(?:would|will|can)\s+(?:show|produce|yield|give)\b/i,
+  /\b(?:the\s+)?(?:analysis|simulation|current\s+model)\s+(?:would|will|can)\s+(?:show|produce|yield|give)\b/i,
+  /\benough\s+to\s+(?:produce|yield|give)\s+(?:a\s+)?(?:worthwhile\s+)?result\b/i,
+];
+
+function hasRunAvailabilityClaimAfterRefusal(text: string): boolean {
+  return RUN_AVAILABILITY_AFTER_REFUSAL_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+/**
+ * Pre-analysis fabricated-RESULT reference (review r2) — the detector now
+ * lives in `../routing/fabricated-result-reference.js` so the explanation
+ * validator polices the SAME class with the SAME rules (it previously had no
+ * fabricated-result policing at all). Behaviour here is unchanged: it stays an
+ * ALWAYS-ON rule that fires ONLY when no analysis result exists. See that
+ * module for the arms, the #450 narrowing and the r3 screens.
+ */
+
+/**
+ * Is the deterministic state unsafe for confident current-result coaching?
+ * Stale / unknown ("unconfirmed") / absent / blocked / not chip-usable, OR a
+ * rerun is required. Mirrors the live `deriveAnalysisFreshness` verdict carried
+ * in the pack — the harness A1 gate and this runtime check read one truth.
+ */
+function isStateUnsafe(pack: CoachingStatePack): boolean {
+  return (
+    pack.rerun_required ||
+    !pack.usable_for_chips ||
+    pack.freshness === 'stale' ||
+    pack.freshness === 'unknown' ||
+    pack.freshness === 'none' ||
+    pack.blocked
+  );
+}
+
+/**
+ * Narrow structured inputs available at the coaching egress seam.  This is a
+ * projection interface rather than a second context-pack contract: callers
+ * pass the existing readiness, analysis and graph objects verbatim and this
+ * composer reads only attested labels, blocker descriptions and topology.
+ */
+export interface SourceBoundAnalyticalRecoveryInput {
+  readonly message: string;
+  readonly latestRunAttemptRefused?: boolean;
+  readonly readiness?: {
+    readonly status?: unknown;
+    readonly open_items?: readonly unknown[];
+  };
+  readonly analysis?: {
+    readonly top_drivers?: readonly unknown[];
+    readonly evidence_gaps?: readonly unknown[];
+  } | null;
+  readonly graph?: {
+    readonly nodes?: readonly unknown[];
+    readonly edges?: readonly unknown[];
+  } | null;
+}
+
+interface RecoveryNode {
+  readonly id: string;
+  readonly label: string;
+  readonly kind: string | null;
+}
+
+function recoveryRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function recoveryString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+function recoveryNodes(graph: SourceBoundAnalyticalRecoveryInput['graph']): RecoveryNode[] {
+  const result: RecoveryNode[] = [];
+  for (const raw of graph?.nodes ?? []) {
+    const node = recoveryRecord(raw);
+    if (node === null) continue;
+    const id = recoveryString(node.id);
+    const label = recoveryString(node.label);
+    if (id === null || label === null) continue;
+    result.push({ id, label, kind: recoveryString(node.kind) });
+  }
+  return result;
+}
+
+function requestedLabel(message: string, nodes: readonly RecoveryNode[]): string | null {
+  const lower = message.toLocaleLowerCase('en-GB');
+  const matches = nodes
+    .filter((node) => lower.includes(node.label.toLocaleLowerCase('en-GB')))
+    .sort((a, b) => b.label.length - a.label.length);
+  if (matches.length > 0) return matches[0]!.label;
+
+  // A precise limitation must preserve the user's referent even when it is
+  // absent from canonical state.  This extracts only the explicit
+  // "refer specifically to …" slot; it does not treat arbitrary prose as a
+  // model fact.
+  const explicit = /\brefer\s+specifically\s+to\s+(.+?)(?:\s+and\s+unknown\b|\s+and\s+explain\b|[,.;?!]|$)/i.exec(message);
+  return explicit?.[1]?.trim() || null;
+}
+
+function factorLabel(raw: unknown): string | null {
+  const record = recoveryRecord(raw);
+  return record === null ? null : recoveryString(record.factor_label);
+}
+
+function causalPath(
+  graph: SourceBoundAnalyticalRecoveryInput['graph'],
+  startLabel: string,
+): readonly string[] | null {
+  const nodes = recoveryNodes(graph);
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const start = nodes.find(
+    (node) => node.label.toLocaleLowerCase('en-GB') === startLabel.toLocaleLowerCase('en-GB'),
+  );
+  if (start === undefined) return null;
+  const goalIds = new Set(nodes.filter((node) => node.kind === 'goal').map((node) => node.id));
+  if (goalIds.size === 0) return null;
+
+  const outgoing = new Map<string, string[]>();
+  for (const raw of graph?.edges ?? []) {
+    const edge = recoveryRecord(raw);
+    if (edge === null) continue;
+    const from = recoveryString(edge.from) ?? recoveryString(edge.from_id);
+    const to = recoveryString(edge.to) ?? recoveryString(edge.to_id);
+    if (from === null || to === null || !byId.has(from) || !byId.has(to)) continue;
+    const targets = outgoing.get(from) ?? [];
+    targets.push(to);
+    outgoing.set(from, targets);
+  }
+
+  const queue: Array<readonly string[]> = [[start.id]];
+  const seen = new Set<string>([start.id]);
+  while (queue.length > 0) {
+    const ids = queue.shift()!;
+    const last = ids[ids.length - 1]!;
+    if (goalIds.has(last) && ids.length > 1) {
+      return ids.map((id) => byId.get(id)!.label);
+    }
+    // A short path is enough to answer the causal question and prevents a
+    // pathological graph consuming unbounded work at egress.
+    if (ids.length >= 6) continue;
+    for (const next of outgoing.get(last) ?? []) {
+      if (seen.has(next)) continue;
+      seen.add(next);
+      queue.push([...ids, next]);
+    }
+  }
+  return null;
+}
+
+function readinessDescription(
+  readiness: SourceBoundAnalyticalRecoveryInput['readiness'],
+): string | null {
+  const first = readiness?.open_items?.[0];
+  const record = recoveryRecord(first);
+  const description = record === null ? null : recoveryString(record.description);
+  return description?.replace(/[.!?]+$/u, '') ?? null;
+}
+
+/**
+ * Build the deterministic recovery used only after an unsafe analytical
+ * answer has been withheld.  It never invents evidence: it either composes a
+ * because-clause from canonical readiness / analysis / graph facts, or names
+ * the exact missing carrier and asks for one useful input.
+ */
+export function buildSourceBoundAnalyticalRecovery(
+  input: SourceBoundAnalyticalRecoveryInput,
+): string {
+  const message = input.message ?? '';
+  const nodes = recoveryNodes(input.graph);
+  const referent = requestedLabel(message, nodes);
+  const lower = message.toLocaleLowerCase('en-GB');
+  const isSafetyQuestion = /\b(?:safe|safest)\b/i.test(message);
+  const status = recoveryString(input.readiness?.status);
+  const refusalSuffix = input.latestRunAttemptRefused === true
+    ? ' The latest analysis attempt was refused before computation, so no newer result or option probabilities can be claimed until that run blocker is resolved.'
+    : '';
+
+  if (isSafetyQuestion) {
+    if (input.latestRunAttemptRefused === true) {
+      return (
+        'No — the latest analysis attempt was refused before computation, so it is not safe to claim that the current model can produce a result yet. ' +
+        'Resolve the run blocker named in that refusal, then try the analysis again.'
+      );
+    }
+    const blocker = readinessDescription(input.readiness);
+    if (status !== null && status !== 'ready') {
+      if (blocker !== null) {
+        return `No — the current model is not ready to run because ${blocker}. Resolve that input before treating an analysis as decision-ready.`;
+      }
+      return (
+        `No — the current model is not ready to run because readiness is ${status.replaceAll('_', ' ')} ` +
+        'and no specific blocker description is available. Ask which current model input is still unresolved.'
+      );
+    }
+    if (status === 'ready') {
+      const subject = referent ?? 'the named uncertainty';
+      return (
+        `It is safe to run the current model as an exploratory analysis, but not to treat the result as settled because ` +
+        `the structured facts do not attest evidence quality for ${subject}. Provide a source or plausible range for ${subject} before acting.`
+      );
+    }
+    return (
+      `I cannot verify that it is safe to run because the current readiness facts are unavailable. ` +
+      'Provide the unresolved factor or reload the model readiness before running analysis.'
+    );
+  }
+
+  const primary = referent;
+  if (primary !== null) {
+    const drivers = input.analysis?.top_drivers ?? [];
+    const driverIndex = drivers.findIndex(
+      (driver) => factorLabel(driver)?.toLocaleLowerCase('en-GB') === primary.toLocaleLowerCase('en-GB'),
+    );
+    const evidenceGap = (input.analysis?.evidence_gaps ?? []).some(
+      (gap) => factorLabel(gap)?.toLocaleLowerCase('en-GB') === primary.toLocaleLowerCase('en-GB'),
+    );
+    const path = causalPath(input.graph, primary);
+
+    if (driverIndex >= 0 && path !== null) {
+      const lead = driverIndex === 0
+        ? `The strongest source-bound challenge is ${primary}`
+        : `A source-bound challenge is ${primary}`;
+      return (
+        `${lead} because the current analysis identifies it as a top driver and the current model links ` +
+        `${path.join(' → ')}. The structured facts do not attest the evidence quality behind that path; provide a source or plausible range for ${primary} before acting.${refusalSuffix}`
+      );
+    }
+    if (evidenceGap && path !== null) {
+      return (
+        `The next fact to gather is ${primary} because the current analysis identifies it as an evidence gap and the current model links ` +
+        `${path.join(' → ')}. Provide an observed value or defensible range before acting.${refusalSuffix}`
+      );
+    }
+    if (path !== null) {
+      return (
+        `The clearest current-model challenge is ${primary} because the model links ${path.join(' → ')}. ` +
+        `The current analysis does not attest how sensitive the result is to that path; provide an observed value or plausible range for ${primary}.${refusalSuffix}`
+      );
+    }
+  }
+
+  const subject = primary ?? (/\b(?:challenge|critique|misleading)\b/i.test(message)
+    ? 'the requested factor'
+    : 'the requested evidence');
+  const requestedAction = /\b(?:fact|evidence|gather)\b/i.test(lower)
+    ? 'Provide the factor label and the observation or source you can gather.'
+    : 'Tell me which current factor-to-outcome connection you want inspected.';
+  return (
+    `I cannot give a source-bound causal challenge for ${subject} because the current structured facts do not carry ` +
+    `an attested path or analysis signal for it. ${requestedAction}${refusalSuffix}`
+  );
+}
+
+/** Optional detection context for {@link checkCoachingOutput}. */
+export interface CheckCoachingOutputOptions {
+  /**
+   * The turn's live decision labels (option / factor / node display labels),
+   * supplied by the caller from deterministic graph state. Lets the post-check
+   * recognise the graph's ACTUAL labels ("I recommend Plan A", "I updated
+   * Pricing"), not just the type nouns ("option", "factor"). Omitted ⇒
+   * type-noun / named-entity detection only.
+   */
+  readonly decisionLabels?: readonly string[];
+  /** The user requested analysis only and explicitly/semantically no edit. */
+  readonly enforceNonMutationAnswer?: boolean;
+}
+
+/**
+ * Inspect coaching prose against the deterministic pack. Returns the first
+ * violation in severity order, or `{ safe: true }`. Pure.
+ */
+export function checkCoachingOutput(
+  prose: string,
+  pack: CoachingStatePack,
+  opts: CheckCoachingOutputOptions = {},
+): CoachingPostcheckResult {
+  const text = prose ?? '';
+  if (text.trim().length === 0) return { safe: true };
+  const labelDet = buildLabelDetectors(opts.decisionLabels);
+
+  // Always-unsafe rules (independent of freshness): the pack never supplies
+  // internal fields, mutation outcomes, value-changes, or science claims.
+  if (hasInternalExposure(text)) {
+    return { safe: false, violation: 'internal_field_exposed' };
+  }
+  if (
+    isMutationSuccessClaim(text) ||
+    (labelDet !== null && isLabelMutationClaim(text, labelDet))
+  ) {
+    // Coaching turns dispatch no mutation — a claim that the graph/model was
+    // changed is false by construction (no handler fact backs it). Descriptive
+    // coaching ("I've created a summary") is NOT a mutation claim. A mutation
+    // verb acting on a KNOWN label ("I updated Pricing") also degrades.
+    return { safe: false, violation: 'invented_mutation_success' };
+  }
+  if (COACHING_VALUE_CHANGE.test(text)) {
+    // A first-person value-change claim ("I set the budget to £50k") on a
+    // non-execute turn is unsourced. Descriptive mentions of display-safe
+    // values are allowed (they reach the LLM via display_graph.display_value).
+    return { safe: false, violation: 'value_change_narration' };
+  }
+  if (EVIDENCE_CONFIDENCE_PATTERN.test(text)) {
+    return { safe: false, violation: 'unsupported_evidence_or_confidence_claim' };
+  }
+  if (
+    opts.enforceNonMutationAnswer === true &&
+    hasMutationProposalOnNonMutatingTurn(text)
+  ) {
+    return { safe: false, violation: 'mutation_proposal_on_non_mutating_question' };
+  }
+  if (
+    pack.latest_run_attempt_refused === true &&
+    hasRunAvailabilityClaimAfterRefusal(text)
+  ) {
+    return { safe: false, violation: 'run_availability_claim_after_refusal' };
+  }
+
+  // State-conditional rules: only when the analysis is not safe to present as
+  // current. When state IS fresh + usable, directional advice and result
+  // presentation are allowed — ordinary coaching is never degraded.
+  //
+  // These rules protect the integrity of an EXISTING analysis RESULT — they
+  // stop the model presenting a stale / unknown / blocked / unusable result as
+  // though it were current. They are meaningful ONLY when a successful analysis
+  // actually exists. PRE-ANALYSIS (no successful run_analysis fact —
+  // `!analysis_present` / freshness 'none') there is no result to misrepresent:
+  // ordinary early-conversation coaching legitimately weighs the options, names
+  // the risks, and echoes the user's own numbers ("your ~3% churn"). Degrading
+  // that here produced the conversational dead-end where a genuine coaching
+  // answer — the model WAS invoked (converse/coach path) — was clobbered by the
+  // canned "No analysis has been run… run the analysis?" nudge
+  // (behavioural-retest T1/T2). So gate the state-conditional rules on a result
+  // actually existing. The always-unsafe rules above still fire pre-analysis,
+  // so a fabricated evidence / confidence / mutation / value claim is still
+  // caught by construction; a user who explicitly asks to explain a not-yet-run
+  // analysis is still nudged by the explanation handler / no-analysis guard,
+  // which is a different code path, not this post-check.
+  const analysisResultExists = pack.analysis_present && pack.freshness !== 'none';
+
+  // Always-on (pre-analysis) — no fabricated RESULT reference (review r2).
+  // The #450 narrowing above must NOT let the model attribute a result to an
+  // analysis / simulation that never ran. Fires only pre-analysis (no result
+  // exists to legitimately present); attribution-anchored so it never trips on
+  // the user's own echoed figures. Placed AFTER the always-unsafe rules so a
+  // genuine mutation / value / evidence claim keeps its more-specific verdict.
+  if (!analysisResultExists && hasFabricatedResultReference(text)) {
+    return { safe: false, violation: 'fabricated_result_reference' };
+  }
+
+  // State-conditional rules protect an EXISTING analysis result from being
+  // presented as current. They fire when such a result exists AND is unsafe
+  // (stale / unknown / blocked / unusable). The `|| pack.blocked` restores the
+  // guard for a FAILED-run / FACT-LOSS state — `analysis_present` is false yet
+  // the scenario/UI still asserts a (blocked, unusable) result — which the bare
+  // `analysisResultExists` gate would have wrongly disarmed. Genuine
+  // pre-analysis (freshness 'none', not blocked) stays exempt (the #450 fix).
+  if ((analysisResultExists || pack.blocked) && isStateUnsafe(pack)) {
+    if (
+      isDirectionalOptionAdvice(text) ||
+      (labelDet !== null && isLabelDirectionalAdvice(text, labelDet))
+    ) {
+      // Fires regardless of any caveat — confident directional advice under
+      // unsafe state is the dangerous case, independent of freshness wording.
+      // A recommendation pointing at a KNOWN option label ("I recommend Plan A")
+      // also degrades. Recovery/rerun guidance is exempt (the desired behaviour).
+      return { safe: false, violation: 'confident_advice_under_unsafe_state' };
+    }
+    if (
+      RESULT_PRESENTATION_PATTERN.test(text) &&
+      !STALENESS_SIGNAL_PATTERN.test(text)
+    ) {
+      return { safe: false, violation: 'stale_presented_as_fresh' };
+    }
+  }
+
+  return { safe: true };
+}
+
+/**
+ * F-HELD fix 3b — the live held offer the degrade path must restate instead
+ * of stomping it with a competing analysis offer. Copy fields are the
+ * pending's persisted PUBLIC copy (emit-time safety-filtered); `chip_id` is
+ * the proposal ref so the re-rendered chip replays exactly the offer the
+ * bare-confirm resumer (consent-priority) resolves.
+ */
+export interface HeldOfferForDegrade {
+  readonly chip_id: string;
+  readonly label: string;
+  readonly message: string;
+}
+
+/** Minimal chip shape for the held confirm re-offer (assignable to SuggestedAction). */
+export interface HeldConfirmSuggestedAction {
+  readonly id: string;
+  readonly label: string;
+  readonly message: string;
+  /**
+   * Deliberately absent: the held confirm chip is a plain replay chip ("Yes")
+   * that the bare-confirm resumer resolves via consent-priority — it must
+   * NOT carry an executable action_type of its own. Declared (as undefined)
+   * so the union with StaleRerunSuggestedAction stays discriminable by
+   * property access.
+   */
+  readonly action_type?: undefined;
+}
+
+export interface CoachingDegradeResponse {
+  readonly assistant_text: string;
+  readonly suggested_actions: ReadonlyArray<
+    StaleRerunSuggestedAction | HeldConfirmSuggestedAction
+  >;
+}
+
+export interface BuildCoachingDegradeOptions {
+  /** Graph option count, for the "no analysis yet" absent copy. Defaults to 0. */
+  readonly optionCount?: number;
+  /** Full canonical readiness used to avoid status-literal reconstruction. */
+  readonly analysisReady?: ReadinessRecoveryInput;
+  readonly readinessNodes?: readonly ReadinessRecoveryNode[];
+  /** Direct, source-bound analytical recovery composed from current facts. */
+  readonly sourceBoundRecovery?: string;
+  /**
+   * The person's own words for this turn, used ONLY to name back the subject
+   * they asked about when the neutral copy fires. Never parsed for intent,
+   * never quoted. Omit for the unchanged copy.
+   */
+  readonly question?: string;
+  /**
+   * F-HELD fix 3b — when a live confirmation-expecting hold exists, the
+   * state-unsafe degrade restates the held offer + its confirm chip instead
+   * of the #298 trust template + rerun chip. Wire capture 13c is the RED
+   * fixture: the absent template stomped a direct answer to the assistant's
+   * own disambiguation question AND minted the competing run_analysis offer
+   * that the next bare "yes" bound to — hijacking the consent flow. Omit for
+   * the unchanged no-hold behaviour.
+   */
+  readonly liveHold?: HeldOfferForDegrade;
+  /**
+   * WHICH boundary the output crossed, so the degrade can say what it held
+   * back instead of holding back everything.
+   *
+   * Read for exactly one decision — see {@link CLAIM_PERMISSION_NOTE}. It is
+   * never narrated, never mapped to copy for any other member, and a member
+   * this builder does not recognise leaves the bytes unchanged. Omit for the
+   * unchanged copy.
+   */
+  readonly violation?: CoachingViolation;
+}
+
+/**
+ * ⭐⭐⭐ WHAT WAS HELD BACK, AND WHAT IS STILL ON OFFER.
+ *
+ * ── THE WITNESS. Deployed staging 19 Sep 2026, scenario `7cb3cd1c`, 18:49:58Z,
+ * trace `a01280f1`. The person typed "What would you advise?", waited 12.2
+ * seconds while the model composed a real answer, and received the stale
+ * caveat and the re-run offer as the ENTIRE turn. Render carries the reason:
+ * `v5.coaching.output_postcheck`, violation
+ * `confident_advice_under_unsafe_state`, freshness `stale`, `blocked: false`.
+ *
+ * ── THE RULE THAT FIRED IS CORRECT AND IS NOT TOUCHED. It bars exactly one
+ * thing — confident DIRECTIONAL advice toward an option — while a result
+ * cannot be treated as current, and it exempts recovery guidance by design.
+ * `blocked: false` says the result exists and is usable; it is only out of
+ * date. The model was rightly stopped from saying "go with X".
+ *
+ * ── WHAT WAS WRONG WAS THE DEGRADE. One barred claim class became total
+ * silence, so the reasoning and the assumptions — which rest on nothing
+ * current, and which the very same rule still permits — died alongside the one
+ * sentence that was unsafe. The person was told neither what had been withheld
+ * nor that anything else remained, and did not ask again.
+ *
+ * ── SCOPE, DELIBERATELY NARROW. Emitted only for the violation that earns it,
+ * and only where the sentence is TRUE: a result that exists but whose currency
+ * is in doubt (stale, or unconfirmed). A blocked or absent analysis has no
+ * figures being held back, so claiming otherwise would be a fresh false
+ * statement — the controls pin both directions.
+ *
+ * British English; carries no value, unit, hash, option label or freshness
+ * claim, and states no figure.
+ */
+export const CLAIM_PERMISSION_NOTE =
+  ' I\u2019ve held back from pointing you to one option over another, because ' +
+  'that would rest on a result I can\u2019t treat as current. Ask me about the ' +
+  'reasoning or the assumptions behind it and I\u2019ll answer from what\u2019s ' +
+  'in the model.';
+
+/**
+ * The one violation whose reason the degrade may state.
+ *
+ * A function rather than an inline comparison so the narrowness is visible at
+ * the call site and a widening has to be written down here, next to the
+ * sentence whose truth conditions it would be widening.
+ */
+function statesWhatWasHeldBack(violation: CoachingViolation | undefined): boolean {
+  return violation === 'confident_advice_under_unsafe_state';
+}
+
+/**
+ * F-HELD fix 3b — deterministic held-aware degrade copy. Mirrors the swept
+ * GM_HELD_ASSISTANT_TEXT wording ("holding … Nothing in the model moves
+ * until you confirm") so the copy family stays within the
+ * provisional_doctrine_v0 language that edit-graph-referee-gate.test.ts
+ * already sweeps against the egress guards. No values, hashes, labels or
+ * internal tokens; no LLM text.
+ */
+export const HELD_AWARE_DEGRADE_TEXT =
+  "I'm still holding a change to your model rather than applying it straight " +
+  'away. Nothing in the model moves until you confirm. Reply yes to continue ' +
+  'with it, or tell me what to adjust instead.';
+
+/**
+ * CONSENT-CLARITY AMENDMENT (Paul, 2026-07-11) — doctrine (a): the degrade
+ * RE-ASK names the hold it restates. The hold's persisted public label is
+ * render-sanitised first; a label that sanitises away, or one of the
+ * generic legacy/fallback labels (which would read "the change to continue
+ * with this change"), falls back to the unnamed swept copy above.
+ */
+export function buildHeldAwareDegradeText(label: string | null | undefined): string {
+  const safe = sanitisePublicCopyOrFallback(label ?? undefined, '');
+  if (
+    safe.length === 0 ||
+    safe === RENDER_SAFE_LABEL_FALLBACK ||
+    // Legacy GM hold chip label (edit-graph-referee-gate GM_HELD_CHIP_LABEL,
+    // stated literally to keep this module referee-gate-free).
+    safe === 'Continue with this change'
+  ) {
+    return HELD_AWARE_DEGRADE_TEXT;
+  }
+  const subject = safe.charAt(0).toLowerCase() + safe.slice(1);
+  return (
+    `I'm still holding the change to ${subject} rather than applying it straight ` +
+    'away. Nothing in the model moves until you confirm. Reply yes to continue ' +
+    'with it, or tell me what to adjust instead.'
+  );
+}
+
+/**
+ * F-HELD round 2 (FIXUP 3) — select the live hold the degrade may restate.
+ *
+ * Selection rules:
+ *   - live per the shared read-time liveness predicate (wall TTL + turn TTL);
+ *   - `expires_at_turn_count > 1` REQUIRED: a hold read at 1 lapses at THIS
+ *     turn's commit (the carry-forward decrements 1 → 0), so restating it
+ *     with a confirm chip in the SAME message that carries the lapse notice
+ *     would contradict itself and ship a dead chip;
+ *   - standard variant with persisted public copy only (a legacy no-copy
+ *     hold has nothing safe to restate);
+ *   - newest emitted wins when several qualify (the read side places the
+ *     freshest offer first; the sort makes it order-independent).
+ *
+ * Pure; clock injected. Lives here (not in the TurnExecutor closure) so the
+ * same-commit-lapse contradiction guard is unit-testable next to the
+ * degrade template it feeds.
+ */
+export function selectLiveHoldForDegrade(
+  pendings: readonly PendingAction[] | undefined,
+  nowMs: number,
+): HeldOfferForDegrade | undefined {
+  const holds = filterLivePendingActions(pendings ?? [], nowMs).filter(
+    (pa) =>
+      pa.action.kind === 'apply_proposed_change' &&
+      pa.expires_at_turn_count > 1 &&
+      typeof pa.action.public_label === 'string' &&
+      pa.action.public_label.length > 0 &&
+      typeof pa.action.public_message === 'string' &&
+      pa.action.public_message.length > 0,
+  );
+  if (holds.length === 0) return undefined;
+  const newest = [...holds].sort(
+    (a, b) => Date.parse(b.emitted_at_iso) - Date.parse(a.emitted_at_iso),
+  )[0]!;
+  const action = newest.action;
+  // Redundant with the filter above, but keeps this branch cast-free and
+  // fail-closed under future refactors.
+  if (
+    action.kind !== 'apply_proposed_change' ||
+    typeof action.public_label !== 'string' ||
+    typeof action.public_message !== 'string'
+  ) {
+    return undefined;
+  }
+  return {
+    chip_id: newest.chip_id,
+    label: action.public_label,
+    message: action.public_message,
+  };
+}
+
+/**
+ * Neutral safe copy for an always-on violation (internal field / mutation /
+ * value-change / evidence claim) that fired while the analysis state is itself
+ * FRESH and usable. Using a stale/missing/degraded trust template here would
+ * MISSTATE a healthy analysis, so we say only that the response was withheld.
+ * British English; carries no value, unit, hash, option label or freshness claim.
+ */
+export const NEUTRAL_DEGRADE_TEXT =
+  'Something in that response was not safe to show as-is. ' +
+  'Please ask me what you’d like to inspect or change next.';
+
+/**
+ * ⭐⭐⭐ THE SAME WITHHOLD, NAMING WHAT IT WAS ASKED ABOUT.
+ *
+ * ── THE WITNESS. Deployed staging 19 Sep 2026, scenario `26b908ee`, 18:59:05.
+ * The person clicked "How likely is this?" on the risk **Dilution and Control
+ * Risk**, waited 12.7s, and got {@link NEUTRAL_DEGRADE_TEXT} and nothing else.
+ * They never asked about that risk again. From their seat the product had not
+ * declined — it had shown no sign of having read the question.
+ *
+ * ⚠ THE WITHHOLD IS UNCHANGED AND IS NOT THE DEFECT. An always-on post-check
+ * fired on a FRESH analysis, and this arm exists precisely so a healthy
+ * analysis is not misdescribed as stale. What was wrong is that the SUBJECT
+ * was dropped, so a refusal about one risk reads identically to a refusal
+ * about nothing.
+ *
+ * ⛔ THE BAN IS PRESERVED EXACTLY AS WRITTEN. This copy still carries no value,
+ * unit, hash, OPTION LABEL or freshness claim. An option label is banned BY
+ * NAME because naming a leading option injects the residue the egress alarm
+ * measures — so {@link resolveDegradeSubject} refuses every `option` node, and
+ * refuses on ambiguity rather than guessing.
+ */
+const subjectBoundDegradeText = (subject: string): string =>
+  `Something in my answer about “${subject}” was not safe to show as-is. ` +
+  'Please ask me what you’d like to inspect or change next.';
+
+/**
+ * ⭐⭐⭐ THE ANSWER TO A QUESTION THE MODEL CANNOT ANSWER — the one violation
+ * where "ask me something else" is the wrong reply.
+ *
+ * MEASURED, staging 19 Sep, scenario `26b908ee`, 18:59:05, request `90854480`.
+ * The person clicked the product's OWN chip — **"How likely is this?"** — on
+ * the risk *Dilution and Control Risk*:
+ *
+ *     v5.post_analysis_advice_gate  matched=false  unmatched_reason=no_advice_signal
+ *     v5.coaching.output_postcheck  violation=unsupported_evidence_or_confidence_claim
+ *                                   freshness=fresh  usable_for_chips=true  blocked=false
+ *
+ * The advice gate has no class for a likelihood question, so the turn fell to
+ * the model, which invented a confidence claim, which this post-check correctly
+ * barred. Every guard worked. And the person, having pressed a button the
+ * product offered them, was told that something was unsafe and invited to ask
+ * about something else. **They never asked again.**
+ *
+ * ⚠ WHY THIS IS NOT THE SAME AS THE SWEPT COPY ABOVE. For every other
+ * always-on violation, "that response was not safe as-is" is the whole honest
+ * story: the model said something it should not have, and the person's next
+ * move is genuinely open. For THIS violation the person asked a specific,
+ * answerable-sounding question and the product declined it. Handing them a
+ * blank prompt makes the decline read as a malfunction rather than as a limit,
+ * and it wastes the one thing the turn definitely established.
+ *
+ * ⛔ WHAT THIS COPY MAY NOT DO, and each ban is a defect this estate has
+ * already paid for:
+ *
+ *   · IT MAY NOT SAY THE QUANTITY IS ABSENT. Risk nodes in the captures carry
+ *     `data: {}`, so the temptation is "there is no likelihood recorded". But
+ *     {@link ReadinessRecoveryNode} is `{ id, kind, label }` — this function
+ *     CANNOT SEE a node's data, so that sentence would be an absence claim from
+ *     an instrument that cannot observe presence (trap 13). What is genuinely
+ *     known here is the VIOLATION: the answer would have outrun the evidence.
+ *     The copy is warranted by that and by nothing else.
+ *
+ *   · IT MAY NOT PROMISE TO RECORD THE PERSON'S ESTIMATE. "Tell me and I'll
+ *     save it against the risk" is the obvious warm ending and it would be the
+ *     RESEARCH CTA REBUILT (CLAUDE.md: a visible affordance that terminates in
+ *     refusal). Whether a probability can be persisted onto a risk node is
+ *     Core's question and is not settled. So the invitation is to REASON from
+ *     their view, which this turn can genuinely do, not to store it.
+ *
+ *   · IT MAY NOT NAME AN OPTION, carry a value, unit, hash or freshness claim.
+ *     Unchanged from the swept copy — {@link resolveDegradeSubject} refuses
+ *     every `option` node and refuses on ambiguity.
+ *
+ * Both endings offer moves that WORK on the very next turn with no new
+ * capability: state a belief, or ask what the model does hold.
+ */
+const OUTRAN_THE_EVIDENCE_TAIL =
+  'Tell me what you already believe about it and we can reason from that, ' +
+  'or ask me what the model does record about it.';
+
+const evidenceClaimDegradeText = (subject: string | undefined): string =>
+  subject === undefined
+    ? 'My answer would have claimed more than the model supports, so I\u2019ve held it back. ' +
+      OUTRAN_THE_EVIDENCE_TAIL
+    : `My answer about \u201c${subject}\u201d would have claimed more than the model ` +
+      `supports, so I\u2019ve held it back. ${OUTRAN_THE_EVIDENCE_TAIL}`;
+
+/**
+ * The ONE entity the question names, or `undefined`.
+ *
+ * ⚠ IT IS A CONTAINMENT TEST OVER LABELS THE GRAPH ALREADY CARRIES, not a
+ * parser and not an intent classifier — the module docstring bans a
+ * natural-language predicate at this seam and that ban stands. It reads only
+ * `readinessNodes`, which the executor already passes.
+ *
+ * ⛔ OPTIONS ARE EXCLUDED BY KIND, and ambiguity refuses. Two matches is a
+ * question, not a fact; one option match is the one thing this copy may never
+ * say. Both fall back to the unchanged sentence, so the failure direction is
+ * "says less", never "says something it may not".
+ */
+function resolveDegradeSubject(
+  question: string | undefined,
+  nodes: readonly ReadinessRecoveryNode[] | undefined,
+): string | undefined {
+  if (typeof question !== 'string' || question.trim().length === 0) return undefined;
+  if (nodes === undefined || nodes.length === 0) return undefined;
+  const haystack = question.toLowerCase();
+  const named: string[] = [];
+  for (const node of nodes) {
+    const label = typeof node.label === 'string' ? node.label.trim() : '';
+    if (label.length < 3) continue;
+    if (!haystack.includes(label.toLowerCase())) continue;
+    // An option named in the question ends the resolution outright — it must
+    // not be named, and it must not be stepped over to reach a sibling either.
+    if (node.kind === 'option') return undefined;
+    if (!named.includes(label)) named.push(label);
+  }
+  return named.length === 1 ? named[0] : undefined;
+}
+
+/**
+ * Deterministic degrade-to-safe response for a fired post-check. State-aware:
+ *   - state UNSAFE → a #298 trust template (so the explanation path, this
+ *     post-check and the harness speak ONE trust language) + the existing
+ *     `chip_action_rerun_analysis` chip (no new chip behaviour):
+ *       · no analysis / freshness 'none' → "no analysis run yet"  (absent);
+ *       · blocked / trust-downgraded     → "no usable result"      (degraded);
+ *       · stale                          → "results may be out of date" (stale);
+ *       · unknown ("unconfirmed")        → "can't confirm currency" (unconfirmed).
+ *   - state FRESH + usable (an always-on rule fired) → NEUTRAL copy, no rerun
+ *     chip — the analysis is fine; only the prose was unsafe.
+ * It never narrates a value, unit, freshness reason, hash or option label.
+ */
+export function buildCoachingDegradeResponse(
+  pack: CoachingStatePack,
+  opts: BuildCoachingDegradeOptions = {},
+): CoachingDegradeResponse {
+  // Fresh + usable: the violation was an always-on prose issue, NOT a state
+  // problem. Do not claim the analysis is stale / missing / degraded. This
+  // outranks the held-aware branch: with a fine analysis there is no
+  // competing rerun offer to suppress, and neutral copy misstates nothing.
+  if (!isStateUnsafe(pack)) {
+    if (opts.sourceBoundRecovery?.trim()) {
+      return { assistant_text: opts.sourceBoundRecovery, suggested_actions: [] };
+    }
+    // A real answer outranks naming the subject; naming the subject outranks
+    // saying nothing about it. See `subjectBoundDegradeText`.
+    const subject = resolveDegradeSubject(opts.question, opts.readinessNodes);
+    // ONE violation gets its own ending, because for that one the swept copy's
+    // "ask me something else" is the wrong reply to a question the person was
+    // invited to ask. Every other violation is byte-identical.
+    if (opts.violation === 'unsupported_evidence_or_confidence_claim') {
+      return {
+        assistant_text: evidenceClaimDegradeText(subject),
+        suggested_actions: [],
+      };
+    }
+    return {
+      assistant_text: subject === undefined ? NEUTRAL_DEGRADE_TEXT : subjectBoundDegradeText(subject),
+      suggested_actions: [],
+    };
+  }
+  // F-HELD fix 3b — a live hold outranks every state-unsafe trust template.
+  // Rationale: each of those templates ships the rerun chip, which mints the
+  // competing consent offer (13c). While the user has an unanswered hold, the
+  // honest degrade is to restate that offer and its confirm chip; the trust
+  // language returns as soon as the hold resolves or lapses.
+  if (opts.liveHold !== undefined) {
+    return {
+      // CONSENT-CLARITY AMENDMENT — the re-ask names the hold it restates
+      // (falls back to the unnamed swept copy for legacy/fallback labels).
+      assistant_text: buildHeldAwareDegradeText(opts.liveHold.label),
+      suggested_actions: [
+        {
+          id: opts.liveHold.chip_id,
+          label: opts.liveHold.label,
+          message: opts.liveHold.message,
+        },
+      ],
+    };
+  }
+  if (opts.sourceBoundRecovery?.trim()) {
+    return { assistant_text: opts.sourceBoundRecovery, suggested_actions: [] };
+  }
+  const optionCount = opts.optionCount ?? 0;
+  let assistant_text: string;
+  if (!pack.analysis_present || pack.freshness === 'none') {
+    // No analysis fact at all → "no analysis run yet".
+    assistant_text = buildAnalysisAbsentTemplate(
+      optionCount,
+      pack.readiness_status ?? undefined,
+      [],
+      opts.analysisReady,
+      opts.readinessNodes,
+    );
+  } else if (pack.blocked) {
+    // A fact exists but is unusable (blocked / hard contradiction) → honest
+    // "no usable result", never a fabricated current answer. Checked before
+    // freshness so a blocked-and-stale fact does not claim "the model changed".
+    assistant_text = buildAnalysisDegradedTemplate();
+  } else if (pack.freshness === 'stale') {
+    // APPENDED, never prepended: `explain-results` and the golden-path
+    // contract both anchor on this caveat OPENING the turn.
+    assistant_text =
+      buildAnalysisStaleTemplate()
+      + (statesWhatWasHeldBack(opts.violation) ? CLAIM_PERMISSION_NOTE : '');
+  } else if (pack.freshness === 'unknown') {
+    assistant_text =
+      buildAnalysisUnconfirmedTemplate()
+      + (statesWhatWasHeldBack(opts.violation) ? CLAIM_PERMISSION_NOTE : '');
+  } else {
+    // Fact present + fresh but trust-downgraded (e.g. ready-with-actionable-
+    // blockers) → honest "no usable result".
+    assistant_text = buildAnalysisDegradedTemplate();
+  }
+  return { assistant_text, suggested_actions: [RERUN_ACTION] };
+}

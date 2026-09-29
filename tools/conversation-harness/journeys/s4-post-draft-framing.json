@@ -1,0 +1,9 @@
+{
+  "comment": "S4 post-draft framing — FRESH scenario (client-minted id, no seed): brief -> draft -> what the coach does unprompted on a contentless ack. The scorer records draft display-value presence per node (draft_display_values on the S4D1 row) and the draft envelope's unprompted coaching is scored like any other turn. Dims: D3, D4, D1.",
+  "requires_seeded_scenario": false,
+  "dims": ["D3", "D4", "D1"],
+  "turns": [
+    { "id": "S4D1", "stage": "frame", "message": "Should we hire one tech lead or two mid-level developers? Budget is £200k and we need our AI features shipped within 6 months. The goal is faster feature delivery.", "turn_class_hint": "draft" },
+    { "id": "S4K1", "stage": "frame", "message": "Ok.", "turn_class_hint": "coach" }
+  ]
+}

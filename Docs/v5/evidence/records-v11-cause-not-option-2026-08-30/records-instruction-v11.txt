@@ -1,0 +1,179 @@
+## OUTPUT SHAPE FOR THIS REQUEST
+
+Do not emit a graph. Emit two lists instead.
+
+**stated_items** — one entry for each thing the user actually said that bears on
+the decision. `source_quote` is REQUIRED and must be copied VERBATIM from the
+brief: do not paraphrase, tidy, translate or summarise it. Use `kind`:
+- `goal` — the result the user wants, not the move they are weighing to get
+  there. Quote the span naming what is at stake: the quantity, position or state
+  that will tell them the decision went well. A course of action is an
+  `option`, however settled the user sounds about it and however early the brief
+  puts it. Never file one span as both a `goal` and an `option`: if the words
+  name something the user might DO, they are the option, and the goal is
+  elsewhere.
+  Check your pick against the alternatives. Every option, including carrying on
+  as they are, has to be a candidate route TO the goal. If the goal you chose is
+  one of those alternatives, or takes one of them as given, the others cannot be
+  weighed against it and the whole model is built to justify a move the user has
+  not finished making.
+  Most briefs never state an objective outright — they open with a decision
+  already taken, a symptom, or a question. Do not fall back to the sentence that
+  frames the choice: that sentence is the decision, not its purpose. Quote
+  instead the span naming what the options are trying to move — the measure that
+  is going wrong, the position under threat, the quantity everyone is arguing
+  about. Set `role` to `baseline` when that span gives where they are now
+  rather than where they want to be.
+  When the user HAS said what they are trying to achieve, that is the goal.
+  Quote it, even if it is unquantified, modest or awkwardly worded, and even if
+  you can see a sharper objective behind it. Theirs is the one that counts.
+- `option` — a course of action the user named: something they could DO.
+  An option is something you can CARRY OUT. If the span is instead something
+  that can be TRUE or FALSE, it is not an option however much it is shaped like
+  one: "cut our list price by 15%" is an act, "the product has fallen behind
+  competitors" is a claim about the world.
+  Quote the span that NAMES the action, not the sentence it sits in. A shorter
+  span is still verbatim, and that span is what the reader sees on the node.
+  "the events budget, which everyone loves but I've never seen a deal come out
+  of one" names one option — "the events budget" — and then comments on it:
+  quote the option, and put the comment in a `claim` if it bears on the
+  decision.
+  The question the user is deciding is not an option. It is the decision, and
+  the options are its branches. Neither is something they say they do not know,
+  something that already happened, nor a description of how things work today:
+  those belong in a `figure` or a `claim`, or nowhere. Every option is put on
+  the graph to be scored and ranked against the others, so a span that is not a
+  course of action is compared with the user's real alternatives as though it
+  were one of them.
+  A proposed CAUSE is the case this catches most often. When a brief reports
+  what people believe is behind a problem — "some think the product has fallen
+  behind", "the CFO believes we raised prices too aggressively" — each of those
+  spans answers WHY, and an answer is true or false rather than something the
+  user carries out. File each as a `claim`: what it says varies is a
+  `factor`, and what it says threatens the goal is a `risk`. A brief can
+  disagree about causes and name no course of action at all; when it does, the
+  options are what the user could DO about the problem, and the disagreement
+  itself is a `claim`, never the alternatives.
+  Who said it makes no difference. "Sales says cut the price, product says hold
+  and ship the integrations" names two real acts, and both are options.
+- `constraint` — a limit the user set. Set `direction` to `floor` when the
+  value is a minimum the user must stay above, `ceiling` when it is a maximum
+  they must stay below.
+- `figure` — a quantity the user stated
+Set `value` and `unit` when the user gave a number. Do not invent a number the
+user did not state, and do not round or rescale one they did.
+On a `goal` carrying a number, set `role` to `target` when the number is what
+the user wants to REACH, and `baseline` when it is where they are NOW. That one
+word decides whether the number is registered as the success threshold, so an
+unstated `role` on a current reading is read as a target and inverts the goal.
+On an `option` that is the status quo — doing nothing, continuing as-is,
+deferring without action, or keeping the current course — set
+`is_baseline: true`, whatever its wording. Set `is_baseline: false` on the
+others. Users write this option themselves more often than not ("keep what we
+have", "hold price and push volume instead"), and it must be flagged even when
+the brief only lists named alternatives.
+
+**claims** — one entry for each thing YOU are adding that the user did not say.
+Use `claim_kind`:
+- `factor` — something that varies and that an option can move or that bears on
+  what happens
+- `outcome` — a result the decision produces. Higher is better.
+- `risk` — something that could go wrong, or a downside the decision carries.
+  Higher is worse.
+- `causal_link` — one thing affecting another
+- `option_refinement` — a sharper version of an option
+- `prior` — what you believe about a quantity, and how sure you are
+
+Name a result an `outcome` and a downside a `risk`. Do not file either as a
+`factor`: a factor is something that VARIES on the way to a result, and calling
+a result a factor loses the distinction the analysis needs to compare options.
+
+Set `basis` to the array positions of the stated_items your claim
+builds on. If a claim rests on nothing the user said, leave `basis` empty — that
+is a legitimate and expected answer, and marking it honestly is more useful than
+attaching a basis that does not hold.
+
+Reference other records by ARRAY POSITION, and say WHICH ARRAY you mean by
+choosing the field. A `causal_link` needs exactly one `from_` and one `to_`:
+- `from_stated` / `to_stated` — a position in `stated_items`. `0` is the
+  first thing the user said.
+- `from_claim` / `to_claim` — a position in `claims`. `0` is your first
+  claim.
+Never set both `from_stated` and `from_claim` on one link, or both `to_`
+fields: they point into different lists and the pair contradicts itself.
+
+Emit only what the brief supports. An empty `claims` list is a valid response.
+
+## CONNECT WHAT YOU EMIT
+
+A decision only holds together if its parts join up, so state the connections as
+`causal_link` claims. They are claims like any other — yours, not the user's —
+and `basis` still records whatever the user said that you built them on.
+
+- Every option needs a chain that reaches the `goal`: a `causal_link` FROM the
+  option TO a factor it changes, then onward from that factor to an `outcome`
+  or a `risk`, and from there to the goal. An option whose chain stops short
+  cannot be compared with any other option.
+- **An `outcome` and a `risk` are where a chain ENDS.** A factor may point at
+  one; the only link LEAVING one goes to the goal. Do not link an outcome or a
+  risk to another outcome, risk or factor. If two results feel connected, say so
+  by linking them to the goal separately, or make the upstream one a `factor`.
+- Point a factor at an `outcome` or a `risk` rather than at the goal directly.
+  A factor linked straight to the goal has to be bridged for you, and the bridge
+  is then the machine's guess at what the result was, not yours.
+- The goal is a `stated_item`, so a link that reaches it sets `to_stated`. The
+  goal is never one of your `claims`, so `to_claim` cannot reach it: a link that
+  tries lands on a factor instead, and every record behind it is dropped for not
+  reaching the goal.
+- **Chain the option the USER named.** When you add an `option_refinement` that
+  spells out one of the user's own options, start the chain at the user's option
+  (`from_stated`), not at your refinement — the two are one alternative and the
+  refinement's `basis` already records which option it belongs to. Give a
+  refinement its OWN chain only when it is a genuinely different alternative the
+  user did not name.
+- Count your alternatives: the user's stated options plus any `option_refinement`
+  that introduces a NEW alternative should come to six or fewer. Prefer a few
+  well-connected options over many bare ones.
+- Nothing points INTO an option. An option is where a chain starts. If something
+  bears on whether an option is viable, connect it to a factor on that option's
+  chain, or to the goal.
+- The factor an option acts on is where a chain STARTS. Draw links onward from
+  it — to another factor, or to the goal. Do not draw a link INTO it: if
+  something else bears on that factor, connect that influence to a factor
+  further along the chain, or to the goal.
+- Every other factor needs at least one `causal_link` onward, and the chain
+  must end at the `goal`. A factor that leads nowhere is not part of the
+  decision.
+- If a stated figure or constraint bears on the goal, say so with a
+  `causal_link` from it to the goal, or into the chain that reaches the goal.
+- Set `effect` to `positive` or `negative` on every `causal_link`. On the link
+  from an `outcome` to the goal that is normally `positive`; from a `risk` to
+  the goal it is normally `negative`. Never store a good thing as a `risk`.
+
+Do not emit a factor you cannot connect. But never drop something the user
+stated: keep it in `stated_items`, and connect it if it bears on the goal.
+
+## HOW MUCH EACH OPTION MOVES WHAT IT CHANGES
+
+On a `causal_link` FROM an option TO a factor, set `sets_to` to the value that
+factor would take if that option were chosen, in the same unit the factor is
+measured in.
+
+Set it on every option→factor link you emit. It is the only number the analysis
+has for what an option actually does, so a link without one leaves that option
+with nothing to compare — and the user is asked to supply a value for every
+option and factor by hand before anything can be analysed at all.
+
+Where the brief gives you the figure — a number the user stated, or a change they
+described — use that, and set `basis` to the stated_items it came from. Where
+the brief does not give you a figure, give your best estimate, reasoned from what
+the brief does tell you: the scale of the numbers already in it, and the
+direction and rough size of the change this option describes. Keep the factor's
+own unit, and keep your estimates consistent across the options, so the
+comparison between them means something.
+
+Leave `sets_to` out only where you genuinely cannot form a defensible estimate
+even from the brief's own scale. That is a truthful answer, and it also stops the
+analysis running on that option — so do not reach for it merely because you are
+unsure of the exact number. An estimate you can defend is worth more to the user
+than a gap they must fill before they can see anything at all.

@@ -1,0 +1,53 @@
+{
+  "_provenance": {
+    "source": "VERBATIM wire capture from deployed staging, 2026-09-02 ~21:37Z",
+    "endpoint": "POST https://staging--olumi.netlify.app/bff/cee/scenarios/:id/graph (cold read after a draft turn)",
+    "cee_build": "c110c5e3 (== deployed staging head at capture time)",
+    "brief": "B3 platform-rewrite-vs-copilot, pre-registered corpus olumi-docs/PHASE0-EVIDENCE-2026-07-28/context-integrity-trace-2026-08-08/briefs/B3.txt",
+    "state_class": "fresh (throwaway witness user, new scenario)",
+    "note": "APPEND-ONLY RECORD (CLAUDE.md trap 14b). These are bytes the product actually emitted. Never edit a value here to make a test pass."
+  },
+  "factor_node": {
+    "id": "18ef8a49",
+    "kind": "factor",
+    "label": "Copilot Engineering Cost",
+    "prior": {
+      "range_max": 1,
+      "range_min": 0,
+      "distribution": "uniform",
+      "prior_is_unquantified": true
+    },
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "scale_frame": 1000000,
+    "display_value": "£1.8m",
+    "observed_state": {
+      "cap": 10000000,
+      "unit": "£",
+      "value": 0.18,
+      "source": "brief_extraction",
+      "raw_value": 1800000,
+      "factor_type": "price",
+      "extractionType": "explicit",
+      "uncertainty_drivers": [
+        "Extracted from brief — confirm value"
+      ]
+    }
+  },
+  "option_id": "33c4ec1b",
+  "option_label": "bet the next two quarters on the AI copilot",
+  "intervention": {
+    "unit": "£",
+    "value": 0.96,
+    "source": "cee_hypothesis",
+    "raw_value": 960000,
+    "reasoning": "Direct causal value has unresolved stated-item binding via edge 7398dbb0; 960000 is not itself a stated figure, and the claim composes it from stated_items[8]=1800000, stated_items[9]=6",
+    "target_match": {
+      "node_id": "18ef8a49",
+      "confidence": "high",
+      "match_type": "exact_id"
+    },
+    "value_confidence": "low"
+  },
+  "factor_id": "18ef8a49"
+}

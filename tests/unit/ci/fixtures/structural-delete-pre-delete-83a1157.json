@@ -1,0 +1,1922 @@
+{
+  "response_version": 2,
+  "assistant_text": "I've built a first decision model for \"Should we open a second bakery location in Leeds next quarter?\".\n\nOptions compared\n• open a second bakery location in Leeds\n• Open Leeds location next quarter as\n• Delay Leeds opening by 6–12 months\n\nWhat the model is weighing\n• Main trade-off: Local demand and foot traffic in the balanced against Capital expenditure required to fit out\n• Assumption to check: whether the model's key inputs reflect your real delivery constraints\n\nYour brief was light on detail, so adding specifics will make the comparison more reliable.\n\nNext, choose the missing effect value for \"open a second bakery location in Leeds…\" on \"Operational capacity and staffing at th…\" so the comparison can be prepared.\n\nA few things to check: I've assumed the goal, the alternatives and the figures in this draft, and I haven't confirmed them with you.\n1. What outcome would make this decision a success?\n2. What alternatives are you weighing this against?\n3. Roughly what scale is at stake — budget, headcount, or revenue?\nYou can answer here, or change them directly on the canvas.",
+  "blocks": [],
+  "suggested_actions": [
+    {
+      "id": "chip_prompt_configure_option",
+      "label": "Configure open a second bakery location in Leeds…",
+      "message": "Help me configure open a second bakery location in Leeds…."
+    }
+  ],
+  "insights": [],
+  "stage_indicator": "analyse",
+  "draft_graph": {
+    "nodes": [
+      {
+        "id": "07c91855",
+        "kind": "risk",
+        "label": "Underperformance if Leeds demand is lower than expected",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "155507b3",
+        "kind": "factor",
+        "label": "Local demand and foot traffic in the Leeds catchment area",
+        "category": "external",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "1bf99178",
+        "kind": "option",
+        "label": "open a second bakery location in Leeds next quarter",
+        "interventions": {
+          "93e38814": {
+            "value": 1,
+            "source": "cee_hypothesis",
+            "target_match": {
+              "node_id": "93e38814",
+              "match_type": "exact_id",
+              "confidence": "high"
+            },
+            "value_confidence": "low",
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief"
+          }
+        },
+        "is_baseline": false,
+        "provenance": "from_brief"
+      },
+      {
+        "id": "378f195a",
+        "kind": "goal",
+        "label": "Should we open a second bakery location in Leeds next quarter?",
+        "provenance": "from_brief"
+      },
+      {
+        "id": "452f17c0",
+        "kind": "outcome",
+        "label": "Brand reach and market presence in Leeds",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "81892667",
+        "kind": "outcome",
+        "label": "Revenue growth from the second location",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "84f94df9",
+        "kind": "risk",
+        "label": "Cash flow strain from upfront investment and running costs",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "93e38814",
+        "kind": "factor",
+        "label": "Capital expenditure required to fit out and launch the Leeds site",
+        "observed_state": {
+          "value": 1,
+          "source": "cee_inference",
+          "extractionType": "inferred",
+          "factor_type": "other",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        },
+        "category": "controllable",
+        "display_value": "Very high (1)",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "95cd9241",
+        "kind": "risk",
+        "label": "Operational overstretch — quality or service degradation at existing location",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "a778feb6",
+        "kind": "factor",
+        "label": "Speed of launch — how quickly the new site opens",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "extractionType": "inferred",
+          "factor_type": "other",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        },
+        "category": "controllable",
+        "display_value": "Moderate (0.5)",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "cb566d85",
+        "kind": "decision",
+        "label": "Decision",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "d21b41d8",
+        "kind": "factor",
+        "label": "Operational capacity and staffing at the new location",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "extractionType": "inferred",
+          "factor_type": "other",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        },
+        "category": "controllable",
+        "display_value": "Moderate (0.5)",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "d8d2df15",
+        "kind": "option",
+        "label": "Open Leeds location next quarter as planned",
+        "interventions": {},
+        "is_baseline": false,
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "e75f367a",
+        "kind": "option",
+        "label": "Delay Leeds opening by 6–12 months",
+        "interventions": {
+          "93e38814": {
+            "value": 0,
+            "source": "cee_hypothesis",
+            "target_match": {
+              "node_id": "93e38814",
+              "match_type": "exact_id",
+              "confidence": "high"
+            },
+            "value_confidence": "low",
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief"
+          }
+        },
+        "is_baseline": false,
+        "provenance": "ai_inferred"
+      }
+    ],
+    "edges": [
+      {
+        "from": "07c91855",
+        "to": "378f195a",
+        "strength": {
+          "mean": -0.5,
+          "std": 0.11999999999999998
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "negative",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "contested",
+          "contested_reasons": [
+            "strength_band_change",
+            "existence_boundary_crossing"
+          ],
+          "pass1": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": -0.25,
+            "strength_std": 0.15,
+            "exists_probability": 0.9,
+            "reasoning": "High underperformance risk strongly deters opening a new location.",
+            "basis": "domain_prior",
+            "needs_user_input": true,
+            "lint_corrected": true
+          },
+          "pass2_adjusted": {
+            "strength_mean": -0.4,
+            "strength_std": 0.035714285714285685,
+            "exists_probability": 0.9
+          },
+          "bias_correction": {
+            "strength_mean_offset": -0.15,
+            "strength_std_offset": -0.11428571428571431,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0.8,
+          "distance_to_goal": 0,
+          "sign_unstable": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "edge_key": "07c91855->378f195a",
+              "before": -0.7,
+              "after": -0.25
+            }
+          ]
+        }
+      },
+      {
+        "from": "155507b3",
+        "to": "07c91855",
+        "strength": {
+          "mean": -0.5,
+          "std": 0.11999999999999998
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "negative",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "contested",
+          "contested_reasons": [
+            "strength_band_change",
+            "existence_boundary_crossing"
+          ],
+          "pass1": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": -0.8,
+            "strength_std": 0.1,
+            "exists_probability": 0.9,
+            "reasoning": "Higher local demand substantially reduces the risk of underperformance.",
+            "basis": "domain_prior",
+            "needs_user_input": true,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": -0.9500000000000001,
+            "strength_std": 0,
+            "exists_probability": 0.9
+          },
+          "bias_correction": {
+            "strength_mean_offset": -0.15,
+            "strength_std_offset": -0.11428571428571431,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 1,
+          "distance_to_goal": 1,
+          "sign_unstable": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "155507b3",
+        "to": "81892667",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.11999999999999998
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "contested",
+          "contested_reasons": [
+            "strength_band_change",
+            "existence_boundary_crossing"
+          ],
+          "pass1": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0.7,
+            "strength_std": 0.15,
+            "exists_probability": 0.9,
+            "reasoning": "Stronger local demand directly drives higher revenue at the new site.",
+            "basis": "domain_prior",
+            "needs_user_input": true,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0.5499999999999999,
+            "strength_std": 0.035714285714285685,
+            "exists_probability": 0.9
+          },
+          "bias_correction": {
+            "strength_mean_offset": -0.15,
+            "strength_std_offset": -0.11428571428571431,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 1,
+          "distance_to_goal": 1,
+          "sign_unstable": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "1bf99178",
+        "to": "93e38814",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "agreed",
+          "contested_reasons": [],
+          "pass1": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0,
+            "reasoning": "",
+            "basis": "weak_guess",
+            "needs_user_input": false,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "bias_correction": {
+            "strength_mean_offset": 0,
+            "strength_std_offset": 0,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0,
+          "distance_to_goal": 2,
+          "sign_unstable": false,
+          "pass2_missing": true,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "1bf99178",
+        "to": "d21b41d8",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "agreed",
+          "contested_reasons": [],
+          "pass1": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0,
+            "reasoning": "",
+            "basis": "weak_guess",
+            "needs_user_input": false,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "bias_correction": {
+            "strength_mean_offset": 0,
+            "strength_std_offset": 0,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0,
+          "distance_to_goal": 2,
+          "sign_unstable": false,
+          "pass2_missing": true,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "452f17c0",
+        "to": "378f195a",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.11999999999999998
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "contested",
+          "contested_reasons": [
+            "existence_boundary_crossing"
+          ],
+          "pass1": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0.14285714285714288,
+            "strength_std": 0.11428571428571431,
+            "exists_probability": 0.85,
+            "reasoning": "Greater brand reach modestly supports the decision to open a second location.",
+            "basis": "domain_prior",
+            "needs_user_input": true,
+            "lint_corrected": true
+          },
+          "pass2_adjusted": {
+            "strength_mean": -0.0071428571428571175,
+            "strength_std": 0,
+            "exists_probability": 0.85
+          },
+          "bias_correction": {
+            "strength_mean_offset": -0.15,
+            "strength_std_offset": -0.11428571428571431,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0.6666666666666666,
+          "distance_to_goal": 0,
+          "sign_unstable": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "edge_key": "452f17c0->378f195a",
+              "before": 0.4,
+              "after": 0.14285714285714288
+            },
+            {
+              "code": "LINT_STD_CLAMPED",
+              "edge_key": "452f17c0->378f195a",
+              "before": 0.15,
+              "after": 0.11428571428571431
+            }
+          ]
+        }
+      },
+      {
+        "from": "81892667",
+        "to": "378f195a",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.11999999999999998
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "contested",
+          "contested_reasons": [
+            "strength_band_change",
+            "existence_boundary_crossing"
+          ],
+          "pass1": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0.25,
+            "strength_std": 0.1,
+            "exists_probability": 0.9,
+            "reasoning": "Higher revenue growth strongly incentivizes proceeding with the new location.",
+            "basis": "domain_prior",
+            "needs_user_input": true,
+            "lint_corrected": true
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0.1,
+            "strength_std": 0,
+            "exists_probability": 0.9
+          },
+          "bias_correction": {
+            "strength_mean_offset": -0.15,
+            "strength_std_offset": -0.11428571428571431,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0.6666666666666666,
+          "distance_to_goal": 0,
+          "sign_unstable": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "edge_key": "81892667->378f195a",
+              "before": 0.7,
+              "after": 0.25
+            }
+          ]
+        }
+      },
+      {
+        "from": "84f94df9",
+        "to": "378f195a",
+        "strength": {
+          "mean": -0.5,
+          "std": 0.11999999999999998
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "negative",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "contested",
+          "contested_reasons": [
+            "strength_band_change",
+            "existence_boundary_crossing"
+          ],
+          "pass1": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": -0.21428571428571427,
+            "strength_std": 0.15,
+            "exists_probability": 0.9,
+            "reasoning": "Greater cash flow strain materially reduces the attractiveness of opening.",
+            "basis": "domain_prior",
+            "needs_user_input": true,
+            "lint_corrected": true
+          },
+          "pass2_adjusted": {
+            "strength_mean": -0.36428571428571427,
+            "strength_std": 0.035714285714285685,
+            "exists_probability": 0.9
+          },
+          "bias_correction": {
+            "strength_mean_offset": -0.15,
+            "strength_std_offset": -0.11428571428571431,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0.7285714285714285,
+          "distance_to_goal": 0,
+          "sign_unstable": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "edge_key": "84f94df9->378f195a",
+              "before": -0.6,
+              "after": -0.21428571428571427
+            }
+          ]
+        }
+      },
+      {
+        "from": "93e38814",
+        "to": "81892667",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.11999999999999998
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "contested",
+          "contested_reasons": [
+            "existence_boundary_crossing"
+          ],
+          "pass1": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0.15,
+            "strength_std": 0.1,
+            "exists_probability": 0.8,
+            "reasoning": "More capital expenditure marginally increases revenue potential.",
+            "basis": "domain_prior",
+            "needs_user_input": true,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0.8
+          },
+          "bias_correction": {
+            "strength_mean_offset": -0.15,
+            "strength_std_offset": -0.11428571428571431,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0.6666666666666666,
+          "distance_to_goal": 1,
+          "sign_unstable": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "93e38814",
+        "to": "84f94df9",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.11999999999999998
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "contested",
+          "contested_reasons": [
+            "strength_band_change",
+            "existence_boundary_crossing"
+          ],
+          "pass1": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0.6,
+            "strength_std": 0.15,
+            "exists_probability": 0.9,
+            "reasoning": "Larger upfront spending significantly raises cash flow strain risk.",
+            "basis": "domain_prior",
+            "needs_user_input": true,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0.44999999999999996,
+            "strength_std": 0.035714285714285685,
+            "exists_probability": 0.9
+          },
+          "bias_correction": {
+            "strength_mean_offset": -0.15,
+            "strength_std_offset": -0.11428571428571431,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0.8999999999999999,
+          "distance_to_goal": 1,
+          "sign_unstable": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "95cd9241",
+        "to": "378f195a",
+        "strength": {
+          "mean": -0.5,
+          "std": 0.11999999999999998
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "negative",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "contested",
+          "contested_reasons": [
+            "existence_boundary_crossing"
+          ],
+          "pass1": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": -0.14285714285714288,
+            "strength_std": 0.11428571428571431,
+            "exists_probability": 0.85,
+            "reasoning": "Operational overstretch risk moderately discourages opening a new bakery.",
+            "basis": "domain_prior",
+            "needs_user_input": true,
+            "lint_corrected": true
+          },
+          "pass2_adjusted": {
+            "strength_mean": -0.29285714285714287,
+            "strength_std": 0,
+            "exists_probability": 0.85
+          },
+          "bias_correction": {
+            "strength_mean_offset": -0.15,
+            "strength_std_offset": -0.11428571428571431,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0.6666666666666666,
+          "distance_to_goal": 0,
+          "sign_unstable": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "edge_key": "95cd9241->378f195a",
+              "before": -0.4,
+              "after": -0.14285714285714288
+            },
+            {
+              "code": "LINT_STD_CLAMPED",
+              "edge_key": "95cd9241->378f195a",
+              "before": 0.15,
+              "after": 0.11428571428571431
+            }
+          ]
+        }
+      },
+      {
+        "from": "a778feb6",
+        "to": "81892667",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.11999999999999998
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "contested",
+          "contested_reasons": [
+            "existence_boundary_crossing"
+          ],
+          "pass1": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0.15,
+            "strength_std": 0.1,
+            "exists_probability": 0.8,
+            "reasoning": "Faster launch speed yields modest additional revenue through earlier operations.",
+            "basis": "domain_prior",
+            "needs_user_input": true,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0.8
+          },
+          "bias_correction": {
+            "strength_mean_offset": -0.15,
+            "strength_std_offset": -0.11428571428571431,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0.6666666666666666,
+          "distance_to_goal": 1,
+          "sign_unstable": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "a778feb6",
+        "to": "95cd9241",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.11999999999999998
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "contested",
+          "contested_reasons": [
+            "strength_band_change",
+            "existence_boundary_crossing"
+          ],
+          "pass1": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0.4,
+            "strength_std": 0.15,
+            "exists_probability": 0.8,
+            "reasoning": "Accelerating the launch schedule increases operational overstretch risk.",
+            "basis": "domain_prior",
+            "needs_user_input": true,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0.25,
+            "strength_std": 0.035714285714285685,
+            "exists_probability": 0.8
+          },
+          "bias_correction": {
+            "strength_mean_offset": -0.15,
+            "strength_std_offset": -0.11428571428571431,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0.6666666666666666,
+          "distance_to_goal": 1,
+          "sign_unstable": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "cb566d85",
+        "to": "1bf99178",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Decision-to-option scaffold minted by the projector"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "default",
+        "validation": {
+          "status": "agreed",
+          "contested_reasons": [],
+          "pass1": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0,
+            "reasoning": "",
+            "basis": "weak_guess",
+            "needs_user_input": false,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "bias_correction": {
+            "strength_mean_offset": 0,
+            "strength_std_offset": 0,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0,
+          "distance_to_goal": 3,
+          "sign_unstable": false,
+          "pass2_missing": true,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "cb566d85",
+        "to": "d8d2df15",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Decision-to-option scaffold minted by the projector"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "default",
+        "validation": {
+          "status": "agreed",
+          "contested_reasons": [],
+          "pass1": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0,
+            "reasoning": "",
+            "basis": "weak_guess",
+            "needs_user_input": false,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "bias_correction": {
+            "strength_mean_offset": 0,
+            "strength_std_offset": 0,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0,
+          "distance_to_goal": 3,
+          "sign_unstable": false,
+          "pass2_missing": true,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "cb566d85",
+        "to": "e75f367a",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Decision-to-option scaffold minted by the projector"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "default",
+        "validation": {
+          "status": "agreed",
+          "contested_reasons": [],
+          "pass1": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0,
+            "reasoning": "",
+            "basis": "weak_guess",
+            "needs_user_input": false,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "bias_correction": {
+            "strength_mean_offset": 0,
+            "strength_std_offset": 0,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0,
+          "distance_to_goal": 3,
+          "sign_unstable": false,
+          "pass2_missing": true,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "d21b41d8",
+        "to": "452f17c0",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.11999999999999998
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "contested",
+          "contested_reasons": [
+            "strength_band_change",
+            "existence_boundary_crossing"
+          ],
+          "pass1": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0.5,
+            "strength_std": 0.1,
+            "exists_probability": 0.85,
+            "reasoning": "Greater staffing capacity at the new site substantially enhances brand presence.",
+            "basis": "domain_prior",
+            "needs_user_input": true,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0.35,
+            "strength_std": 0,
+            "exists_probability": 0.85
+          },
+          "bias_correction": {
+            "strength_mean_offset": -0.15,
+            "strength_std_offset": -0.11428571428571431,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0.7,
+          "distance_to_goal": 1,
+          "sign_unstable": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "d21b41d8",
+        "to": "95cd9241",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.11999999999999998
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "contested",
+          "contested_reasons": [
+            "strength_band_change",
+            "existence_boundary_crossing"
+          ],
+          "pass1": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": -0.6,
+            "strength_std": 0.15,
+            "exists_probability": 0.85,
+            "reasoning": "Higher operational capacity at the new location significantly reduces service quality risk.",
+            "basis": "domain_prior",
+            "needs_user_input": true,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": -0.75,
+            "strength_std": 0.035714285714285685,
+            "exists_probability": 0.85
+          },
+          "bias_correction": {
+            "strength_mean_offset": -0.15,
+            "strength_std_offset": -0.11428571428571431,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 1,
+          "distance_to_goal": 1,
+          "sign_unstable": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "d8d2df15",
+        "to": "93e38814",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "agreed",
+          "contested_reasons": [],
+          "pass1": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0,
+            "reasoning": "",
+            "basis": "weak_guess",
+            "needs_user_input": false,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "bias_correction": {
+            "strength_mean_offset": 0,
+            "strength_std_offset": 0,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0,
+          "distance_to_goal": 2,
+          "sign_unstable": false,
+          "pass2_missing": true,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "d8d2df15",
+        "to": "a778feb6",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "agreed",
+          "contested_reasons": [],
+          "pass1": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0,
+            "reasoning": "",
+            "basis": "weak_guess",
+            "needs_user_input": false,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "bias_correction": {
+            "strength_mean_offset": 0,
+            "strength_std_offset": 0,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0,
+          "distance_to_goal": 2,
+          "sign_unstable": false,
+          "pass2_missing": true,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "d8d2df15",
+        "to": "d21b41d8",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "agreed",
+          "contested_reasons": [],
+          "pass1": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0,
+            "reasoning": "",
+            "basis": "weak_guess",
+            "needs_user_input": false,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "bias_correction": {
+            "strength_mean_offset": 0,
+            "strength_std_offset": 0,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0,
+          "distance_to_goal": 2,
+          "sign_unstable": false,
+          "pass2_missing": true,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "e75f367a",
+        "to": "93e38814",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "agreed",
+          "contested_reasons": [],
+          "pass1": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0,
+            "reasoning": "",
+            "basis": "weak_guess",
+            "needs_user_input": false,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "bias_correction": {
+            "strength_mean_offset": 0,
+            "strength_std_offset": 0,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0,
+          "distance_to_goal": 2,
+          "sign_unstable": false,
+          "pass2_missing": true,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      }
+    ],
+    "node_count": 14,
+    "edge_count": 22
+  },
+  "analysis_ready": {
+    "options": [
+      {
+        "option_id": "1bf99178",
+        "label": "open a second bakery location in Leeds next quarter",
+        "status": "ready",
+        "interventions": {
+          "93e38814": 1
+        },
+        "intervention_details": {
+          "93e38814": {
+            "display_value": "Very high (1)",
+            "normalised_value": 1
+          }
+        },
+        "extraction_metadata": {
+          "source": "cee_hypothesis",
+          "confidence": "low",
+          "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief"
+        },
+        "status_reason": "1 intervention(s) ready for analysis"
+      },
+      {
+        "option_id": "d8d2df15",
+        "label": "Open Leeds location next quarter as planned",
+        "status": "needs_user_mapping",
+        "interventions": {},
+        "extraction_metadata": {
+          "source": "cee_hypothesis",
+          "confidence": "low"
+        },
+        "status_reason": "No interventions extracted"
+      },
+      {
+        "option_id": "e75f367a",
+        "label": "Delay Leeds opening by 6–12 months",
+        "status": "ready",
+        "interventions": {
+          "93e38814": 0
+        },
+        "intervention_details": {
+          "93e38814": {
+            "display_value": "Low (0)",
+            "normalised_value": 0
+          }
+        },
+        "extraction_metadata": {
+          "source": "cee_hypothesis",
+          "confidence": "low",
+          "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief"
+        },
+        "status_reason": "1 intervention(s) ready for analysis"
+      }
+    ],
+    "goal_node_id": "378f195a",
+    "status": "needs_user_input",
+    "blockers": [
+      {
+        "option_id": "1bf99178",
+        "option_label": "open a second bakery location in Leeds next quarter",
+        "factor_id": "d21b41d8",
+        "factor_label": "Operational capacity and staffing at the new location",
+        "blocker_type": "missing_value",
+        "message": "Factor \"Operational capacity and staffing at the new location\" is currently 0.5. What should option \"open a second bakery location in Leeds next quarter\" set it to?",
+        "suggested_action": "add_value"
+      },
+      {
+        "option_id": "d8d2df15",
+        "option_label": "Open Leeds location next quarter as planned",
+        "factor_id": "93e38814",
+        "factor_label": "Capital expenditure required to fit out and launch the Leeds site",
+        "blocker_type": "missing_value",
+        "message": "Factor \"Capital expenditure required to fit out and launch the Leeds site\" is currently 1. What should option \"Open Leeds location next quarter as planned\" set it to?",
+        "suggested_action": "add_value"
+      },
+      {
+        "option_id": "d8d2df15",
+        "option_label": "Open Leeds location next quarter as planned",
+        "factor_id": "a778feb6",
+        "factor_label": "Speed of launch — how quickly the new site opens",
+        "blocker_type": "missing_value",
+        "message": "Factor \"Speed of launch — how quickly the new site opens\" is currently 0.5. What should option \"Open Leeds location next quarter as planned\" set it to?",
+        "suggested_action": "add_value"
+      },
+      {
+        "option_id": "d8d2df15",
+        "option_label": "Open Leeds location next quarter as planned",
+        "factor_id": "d21b41d8",
+        "factor_label": "Operational capacity and staffing at the new location",
+        "blocker_type": "missing_value",
+        "message": "Factor \"Operational capacity and staffing at the new location\" is currently 0.5. What should option \"Open Leeds location next quarter as planned\" set it to?",
+        "suggested_action": "add_value"
+      }
+    ],
+    "model_adjustments": [
+      {
+        "code": "category_reclassified",
+        "node_id": "155507b3",
+        "field": "category",
+        "after": "external",
+        "reason": "Structural inference: no option edge, no value → external (Local demand and foot traffic in the Leeds catchment area)"
+      },
+      {
+        "code": "category_reclassified",
+        "node_id": "93e38814",
+        "field": "category",
+        "after": "controllable",
+        "reason": "Structural inference: has option edge → controllable (Capital expenditure required to fit out and launch the Leeds site)"
+      },
+      {
+        "code": "category_reclassified",
+        "node_id": "a778feb6",
+        "field": "category",
+        "after": "controllable",
+        "reason": "Structural inference: has option edge → controllable (Speed of launch — how quickly the new site opens)"
+      },
+      {
+        "code": "category_reclassified",
+        "node_id": "d21b41d8",
+        "field": "category",
+        "after": "controllable",
+        "reason": "Structural inference: has option edge → controllable (Operational capacity and staffing at the new location)"
+      },
+      {
+        "code": "category_reclassified",
+        "node_id": "155507b3",
+        "field": "nodes[155507b3].category",
+        "reason": "Reclassified unreachable factor \"Local demand and foot traffic in the Leeds catchment area\" to external",
+        "source": "deterministic_sweep"
+      }
+    ],
+    "bias_findings": [
+      {
+        "id": "overconfidence_narrow_belief_band",
+        "category": "other",
+        "severity": "high",
+        "node_ids": [
+          "1bf99178",
+          "93e38814",
+          "d21b41d8",
+          "cb566d85",
+          "d8d2df15",
+          "e75f367a",
+          "a778feb6"
+        ],
+        "explanation": "Edge beliefs are all high and tightly clustered; probability estimates may be over-confident.",
+        "code": "OVERCONFIDENCE",
+        "targets": {
+          "node_ids": [
+            "1bf99178",
+            "93e38814",
+            "d21b41d8",
+            "cb566d85",
+            "d8d2df15",
+            "e75f367a",
+            "a778feb6"
+          ]
+        },
+        "structural_pattern": "Belief values in high, narrow band [1.00, 1.00] across 9 edges",
+        "confidence_band": "medium",
+        "mechanism": "Excessive certainty in own judgments, leading to overly narrow confidence intervals and underestimation of uncertainty.",
+        "citation": "Lichtenstein et al. (1982) - Judgment Under Uncertainty",
+        "micro_intervention": {
+          "steps": [
+            "Widen your confidence interval: what would make you 90% confident vs 50%?",
+            "List three things you might be wrong about in this analysis"
+          ],
+          "estimated_minutes": 3
+        }
+      }
+    ],
+    "computed_at": "2026-08-18T03:50:04.523Z",
+    "freshness": "none",
+    "freshness_reason": "no_successful_run_analysis_fact",
+    "current_graph_hash": "5e5bbce61404eb06"
+  },
+  "analysis_state": {
+    "run_state": {
+      "kind": "never_run"
+    },
+    "readiness": {
+      "status": "needs_user_input",
+      "blockers": [
+        {
+          "repairability": "human_input_required",
+          "option_id": "1bf99178",
+          "option_label": "open a second bakery location in Leeds next quarter",
+          "factor_id": "d21b41d8",
+          "factor_label": "Operational capacity and staffing at the new location",
+          "code": "MISSING_OPTION_VALUE",
+          "category": "option_values",
+          "message": "Choose the missing effect value for \"open a second bakery location in Leeds next quarter\" on \"Operational capacity and staffing at the new location\"."
+        },
+        {
+          "repairability": "human_input_required",
+          "option_id": "d8d2df15",
+          "option_label": "Open Leeds location next quarter as planned",
+          "factor_id": "93e38814",
+          "factor_label": "Capital expenditure required to fit out and launch the Leeds site",
+          "code": "MISSING_OPTION_VALUE",
+          "category": "option_values",
+          "message": "Choose the missing effect value for \"Open Leeds location next quarter as planned\" on \"Capital expenditure required to fit out and launch the Leeds site\"."
+        },
+        {
+          "repairability": "human_input_required",
+          "option_id": "d8d2df15",
+          "option_label": "Open Leeds location next quarter as planned",
+          "factor_id": "a778feb6",
+          "factor_label": "Speed of launch — how quickly the new site opens",
+          "code": "MISSING_OPTION_VALUE",
+          "category": "option_values",
+          "message": "Choose the missing effect value for \"Open Leeds location next quarter as planned\" on \"Speed of launch — how quickly the new site opens\"."
+        },
+        {
+          "repairability": "human_input_required",
+          "option_id": "d8d2df15",
+          "option_label": "Open Leeds location next quarter as planned",
+          "factor_id": "d21b41d8",
+          "factor_label": "Operational capacity and staffing at the new location",
+          "code": "MISSING_OPTION_VALUE",
+          "category": "option_values",
+          "message": "Choose the missing effect value for \"Open Leeds location next quarter as planned\" on \"Operational capacity and staffing at the new location\"."
+        }
+      ]
+    },
+    "leader_claim": {
+      "permitted": false,
+      "withheld_reason": "separation_unavailable"
+    },
+    "robustness": {},
+    "usable_for_prose": false,
+    "usable_for_chips": false,
+    "usable_for_followup": false,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "graph_hash": "5e5bbce61404eb06",
+  "_diagnostic_trace": {
+    "llm_calls": [
+      {
+        "role": "draft_graph",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "input_tokens": 1930,
+        "output_tokens": 1151,
+        "cache_read_tokens": null,
+        "cache_creation_tokens": null,
+        "latency_ms": 18217,
+        "stop_reason": "end_turn",
+        "thinking_enabled": false,
+        "error": null
+      }
+    ],
+    "prompt_identity": [
+      {
+        "task_id": "draft_graph",
+        "prompt_id": "draft_graph_default@v195 (staging)",
+        "version": "draft_graph_default@v195 (staging)",
+        "hash": "152998b447819c2e9e797b1727f8e05b34480486dca6f672a5d2839facd2353f",
+        "source": "pms",
+        "is_staging": true
+      }
+    ],
+    "zone2_assembly": null,
+    "tool_policy": null,
+    "provider_resolution": [
+      {
+        "task": "draft_graph",
+        "env_default_provider": "anthropic",
+        "env_model_override": null,
+        "prompt_config_model": null,
+        "resolved_model": "claude-sonnet-4-6",
+        "resolved_provider": "anthropic",
+        "switch_reason": null
+      }
+    ],
+    "structured_output_config": {
+      "enabled": true,
+      "api_shape": "tool_use",
+      "schema_hash": null,
+      "beta_header_present": false
+    },
+    "streaming_metrics": null,
+    "fallback_trace": [],
+    "benchmarking": {
+      "total_duration_ms": 47564,
+      "substage_timings": {
+        "llm_call_ms": 18217,
+        "parse_ms": 21486,
+        "repair_ms": 60,
+        "validation_ms": 25248,
+        "persistence_ms": 548,
+        "total_handler_duration_ms": 46851,
+        "finalisation_ms": 4
+      }
+    },
+    "correlation_ids": {
+      "request_id": "9fe78da3-d022-40ce-9320-095f1ba5ad83",
+      "scenario_id": "b0b6f54e-1f95-4b6c-b77d-cc48ddd20215",
+      "turn_id": "8f060ce8-fe38-43de-a8ff-206638065239",
+      "graph_hash": "5e5bbce61404eb06",
+      "prompt_hash": "152998b447819c2e9e797b1727f8e05b34480486dca6f672a5d2839facd2353f",
+      "response_hash": "c5100cd05cd3"
+    },
+    "pipeline_outcome": {
+      "graph_drafted": true,
+      "graph_structurally_valid": true,
+      "deterministic_sweep_violations": 0,
+      "verification_status": "passed",
+      "validation_status": "passed",
+      "enrichment_status": "complete",
+      "coaching_status": "complete",
+      "warnings": [],
+      "rescue_score": 18,
+      "factor_value_coverage": {
+        "total": 4,
+        "explicit": 0,
+        "inferred_with_evidence": 1,
+        "fallback_default": 3
+      },
+      "edge_strength_unique_count": 1,
+      "llm_repair": {
+        "triggered": false,
+        "outcome": "skipped",
+        "fallback_reason": null,
+        "attempts": 0
+      },
+      "repair_provenance": [
+        {
+          "rule": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+          "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+          "node_or_edge_id": "edges[1bf99178→93e38814]",
+          "field": "graph",
+          "before": null,
+          "after": null,
+          "source": "structure"
+        },
+        {
+          "rule": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+          "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+          "node_or_edge_id": "edges[1bf99178→d21b41d8]",
+          "field": "graph",
+          "before": null,
+          "after": null,
+          "source": "structure"
+        },
+        {
+          "rule": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+          "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+          "node_or_edge_id": "edges[cb566d85→1bf99178]",
+          "field": "graph",
+          "before": null,
+          "after": null,
+          "source": "structure"
+        },
+        {
+          "rule": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+          "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+          "node_or_edge_id": "edges[cb566d85→d8d2df15]",
+          "field": "graph",
+          "before": null,
+          "after": null,
+          "source": "structure"
+        },
+        {
+          "rule": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+          "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+          "node_or_edge_id": "edges[cb566d85→e75f367a]",
+          "field": "graph",
+          "before": null,
+          "after": null,
+          "source": "structure"
+        },
+        {
+          "rule": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+          "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+          "node_or_edge_id": "edges[d8d2df15→93e38814]",
+          "field": "graph",
+          "before": null,
+          "after": null,
+          "source": "structure"
+        },
+        {
+          "rule": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+          "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+          "node_or_edge_id": "edges[d8d2df15→a778feb6]",
+          "field": "graph",
+          "before": null,
+          "after": null,
+          "source": "structure"
+        },
+        {
+          "rule": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+          "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+          "node_or_edge_id": "edges[d8d2df15→d21b41d8]",
+          "field": "graph",
+          "before": null,
+          "after": null,
+          "source": "structure"
+        },
+        {
+          "rule": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+          "code": "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+          "node_or_edge_id": "edges[e75f367a→93e38814]",
+          "field": "graph",
+          "before": null,
+          "after": null,
+          "source": "structure"
+        },
+        {
+          "rule": "CONTROLLABLE_MISSING_DATA",
+          "code": "CONTROLLABLE_MISSING_DATA",
+          "node_or_edge_id": "nodes[93e38814].data",
+          "field": "graph",
+          "before": null,
+          "after": null,
+          "source": "fallback_default"
+        },
+        {
+          "rule": "CONTROLLABLE_MISSING_DATA",
+          "code": "CONTROLLABLE_MISSING_DATA",
+          "node_or_edge_id": "nodes[a778feb6].data",
+          "field": "graph",
+          "before": null,
+          "after": null,
+          "source": "fallback_default"
+        },
+        {
+          "rule": "CONTROLLABLE_MISSING_DATA",
+          "code": "CONTROLLABLE_MISSING_DATA",
+          "node_or_edge_id": "nodes[d21b41d8].data",
+          "field": "graph",
+          "before": null,
+          "after": null,
+          "source": "fallback_default"
+        },
+        {
+          "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "node_or_edge_id": "nodes[155507b3].category",
+          "field": "graph",
+          "before": null,
+          "after": null,
+          "source": "structure"
+        }
+      ]
+    },
+    "environment": {
+      "build_sha": "83a1157",
+      "environment": "staging"
+    },
+    "exit_path": "draft_graph",
+    "trace_version": 1,
+    "claim_safety": {
+      "may_name_leading_option": true,
+      "verdict_provenance": "no_analysis_exists",
+      "withheld_projection_reason": null
+    }
+  }
+}

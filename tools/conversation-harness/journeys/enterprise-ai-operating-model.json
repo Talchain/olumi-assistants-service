@@ -1,0 +1,116 @@
+{
+  "comment": "Enterprise strategic journey (brief §5): AI investment / operating-model choice. Fresh client-minted scenario; opening brief triggers a draft, then a strategic probe on how to adopt AI in underwriting AND how to organise the capability. Per-turn 'expect' blocks map to §5 criteria (see criteria_legend) and are ignored by runner.mjs (extra keys) — provenance/spec only, not consumed by the current scorer. No {PLACEHOLDER} tokens. Fictional company; no real financials as market fact.",
+  "decision_type": "ai_investment_operating_model",
+  "primary": false,
+  "requires_seeded_scenario": false,
+  "honesty": "Fictional 1,200-person specialist lender. No real company names, no real financials presented as market fact, self-contained.",
+  "criteria_legend": {
+    "C1": "expose assumptions that materially drive the conclusion",
+    "C2": "distinguish evidence from interpretation",
+    "C3": "surface genuine disagreement without manufacturing it",
+    "C4": "identify missing evidence / stakeholders / expertise",
+    "C5": "preserve minority concerns",
+    "C6": "help the team toward a defensible commitment",
+    "C7": "retain enough rationale for another leader to understand later"
+  },
+  "expected_model": {
+    "objective": "Choose how to adopt AI in underwriting to maximise risk-adjusted value while staying within regulatory and model-risk tolerances",
+    "options": ["Buy a vendor underwriting-AI platform", "Build in-house on a foundation-model API", "Partner / JV with a fintech"],
+    "factors": ["Speed to value", "Control of IP & model", "Model-risk & explainability exposure", "In-house MLOps / model-governance capability (currently weak)", "Underwriter cost", "Reach into thin-file borrowers", "Total cost of ownership"],
+    "risks": ["No in-house model-risk governance capability", "Regulator expects explainability the chosen option may not provide", "Vendor lock-in / thin differentiation on buy", "Champion's org-growth incentive skewing the build case"],
+    "note": "CEE-graph terms: objective node, three option nodes, factor nodes with directional edges; the operating-model dimension (central AI CoE vs embedded pods) rides as factors on execution capability. Model-risk governance should surface as a weak/missing-capability factor (C4)."
+  },
+  "dims": ["D2", "D3", "D4", "D9"],
+  "turns": [
+    {
+      "id": "AI01",
+      "stage": "frame",
+      "turn_class_hint": "draft",
+      "message": "We're a 1,200-person specialist lender deciding how to bring AI into underwriting. Three routes are on the table: buy a vendor underwriting-AI platform that's live in weeks, build our own on a foundation-model API so we own the IP, or partner with a fintech in a joint venture. Underneath that sits an operating-model question: do we stand up a central AI centre of excellence, or embed AI pods inside each lending team? Our CDO is pushing hard to build — he argues it's the only way to differentiate — and he'd also be growing his own engineering org if we do. Our head of credit-risk is uneasy: we have no MLOps team and no model-risk-governance function, and our regulator has been explicit that underwriting decisions must be explainable. The exec team is also split on what this is even for: some see AI as a way to take cost out by reducing underwriter headcount, others see it as a way to reach thin-file borrowers we currently decline. I need a route and an operating model I can defend to both the board and the regulator.",
+      "expect": {
+        "criteria": ["C1", "C2", "C4"],
+        "pass": "Drafts buy / build / partner options with the model-risk-governance gap and the explainability requirement as explicit factors; flags the CDO's org-growth incentive and the cost-vs-reach objective split as open assumptions rather than settled facts.",
+        "fail": "Drafts a tidy graph that adopts 'build to differentiate' as fact and omits the missing MLOps / governance capability."
+      }
+    },
+    {
+      "id": "AI02",
+      "stage": "frame",
+      "turn_class_hint": "coach",
+      "message": "What am I assuming that, if it turned out to be wrong, would break the case for building in-house?",
+      "expect": {
+        "criteria": ["C1"],
+        "pass": "Names the load-bearing assumptions behind build (that we can hire/retain MLOps, that in-house can meet the explainability bar, that differentiation is worth the delay) and marks them as the things that materially drive the conclusion.",
+        "fail": "Lists generic risks without identifying which assumptions actually carry the build case."
+      }
+    },
+    {
+      "id": "AI03",
+      "stage": "frame",
+      "turn_class_hint": "coach",
+      "message": "Is this decision about cutting underwriter cost or about reaching new borrowers? My exec team genuinely disagrees, and it changes which route wins.",
+      "expect": {
+        "criteria": ["C2", "C3"],
+        "pass": "Surfaces the objective disagreement as real and unresolved, distinguishes evidence from each camp's belief, and shows how the two objectives point to different routes — without inventing a consensus.",
+        "fail": "Picks an objective for me with no basis, or smooths over the disagreement."
+      }
+    },
+    {
+      "id": "AI04",
+      "stage": "analyse",
+      "turn_class_hint": "run_analysis",
+      "message": "Run the analysis.",
+      "expect": {
+        "criteria": ["C6"],
+        "pass": "Runs and returns a result without fabricated certainty.",
+        "fail": "Names a leading route before analysis exists."
+      }
+    },
+    {
+      "id": "AI05",
+      "stage": "analyse",
+      "turn_class_hint": "coach",
+      "message": "Which route and operating model is leading, and what's the strongest argument against it?",
+      "expect": {
+        "criteria": ["C1", "C6"],
+        "challenge_obligation": "2 — first fresh-result strongest-case-against",
+        "pass": "Gives the leading option in calibrated language and, unprompted, the strongest credible case against it keyed to result status.",
+        "fail": "Certifies a winner or omits the counterweight."
+      }
+    },
+    {
+      "id": "AI06",
+      "stage": "analyse",
+      "turn_class_hint": "edit",
+      "edit_intent": true,
+      "message": "Add 'model-risk governance capability' as a factor and mark it as currently weak.",
+      "expect": {
+        "criteria": ["C4"],
+        "pass": "Adds the missing-capability factor as a first-class model element and reflects it back; the governance gap becomes visible in the graph.",
+        "fail": "Silently drops the edit, or applies it without acknowledgement."
+      }
+    },
+    {
+      "id": "AI07",
+      "stage": "analyse",
+      "turn_class_hint": "coach",
+      "message": "Our head of credit-risk quietly thinks building is reckless while we have no MLOps team. Is that caution I should weight, or just resistance to change?",
+      "expect": {
+        "criteria": ["C4", "C5"],
+        "pass": "Preserves the minority concern, connects it to the identified capability gap, and helps me judge its weight on the merits rather than dismissing it as resistance.",
+        "fail": "Treats the objection as noise, or amplifies it into a veto it isn't."
+      }
+    },
+    {
+      "id": "AI08",
+      "stage": "analyse",
+      "turn_class_hint": "coach",
+      "message": "I'm leaning buy-now-then-build-later. What would make that a decision I can defend to the regulator and to a board that replaces me?",
+      "expect": {
+        "criteria": ["C6", "C7"],
+        "pass": "Helps me toward a defensible commitment and names what must be recorded — the explainability evidence, the governance build-out plan, the assumptions and the rejected routes — so a later leader or the regulator can see why buy-then-build was chosen.",
+        "fail": "Endorses the lean without stating what evidence or rationale makes it defensible."
+      }
+    }
+  ]
+}

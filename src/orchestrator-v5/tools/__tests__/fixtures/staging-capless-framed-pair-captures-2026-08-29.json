@@ -1,0 +1,2224 @@
+[
+  {
+    "capture": "20260829T170934-vs1-adf6cc",
+    "provenance": "staging-capture-2026-08-29",
+    "note": "live signed-in fresh draft of Paul's tech-lead brief, deployed staging",
+    "observedAnalysisReadyStatus": "ready",
+    "observedBlockedReason": null,
+    "graphNodes": [
+      {
+        "id": "0c46a408",
+        "kind": "factor",
+        "label": "Onboarding and ramp-up time"
+      },
+      {
+        "id": "0ce0c696",
+        "kind": "option",
+        "label": "Status Quo — no new hires",
+        "interventions": {
+          "5e10bebe": {
+            "value": 0.1,
+            "source": "cee_hypothesis",
+            "raw_value": 0.1,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "is_baseline": true
+      },
+      {
+        "id": "5deee027",
+        "kind": "factor",
+        "label": "Hiring and salary cost"
+      },
+      {
+        "id": "5e10bebe",
+        "kind": "factor",
+        "label": "Leadership capacity",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "a9b4f47c",
+        "kind": "factor",
+        "label": "Raw development throughput",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "be215545",
+        "kind": "option",
+        "label": "Two Developers",
+        "interventions": {
+          "a9b4f47c": {
+            "value": 0.85,
+            "source": "cee_hypothesis",
+            "raw_value": 0.85,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "a9b4f47c",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "is_baseline": false
+      },
+      {
+        "id": "e18e3326",
+        "kind": "option",
+        "label": "Hire one tech lead and one developer",
+        "interventions": {
+          "5e10bebe": {
+            "value": 0.6,
+            "source": "cee_hypothesis",
+            "raw_value": 0.6,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "a9b4f47c": {
+            "value": 0.5,
+            "source": "cee_hypothesis",
+            "raw_value": 0.5,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "a9b4f47c",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "e70301eb",
+        "kind": "option",
+        "label": "Hire a Tech Lead",
+        "interventions": {
+          "5e10bebe": {
+            "value": 0.9,
+            "source": "cee_hypothesis",
+            "raw_value": 0.9,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "is_baseline": false
+      }
+    ],
+    "options": [
+      {
+        "id": "0ce0c696",
+        "label": "Status Quo — no new hires",
+        "status": "ready",
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "is_baseline": true,
+        "interventions": {
+          "5e10bebe": {
+            "value": 0.1,
+            "source": "cee_hypothesis",
+            "raw_value": 0.1,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "be215545",
+        "label": "Two Developers",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction",
+          "brief_quote": "two developers"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "a9b4f47c": {
+            "value": 0.85,
+            "source": "cee_hypothesis",
+            "raw_value": 0.85,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "a9b4f47c",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "e18e3326",
+        "label": "Hire one tech lead and one developer",
+        "status": "ready",
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "interventions": {
+          "5e10bebe": {
+            "value": 0.6,
+            "source": "cee_hypothesis",
+            "raw_value": 0.6,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "a9b4f47c": {
+            "value": 0.5,
+            "source": "cee_hypothesis",
+            "raw_value": 0.5,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "a9b4f47c",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "e70301eb",
+        "label": "Hire a Tech Lead",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction",
+          "brief_quote": "hire a Tech lead"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "5e10bebe": {
+            "value": 0.9,
+            "source": "cee_hypothesis",
+            "raw_value": 0.9,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "capture": "20260829T171235-vs10-a8dc34",
+    "provenance": "staging-capture-2026-08-29",
+    "note": "live signed-in fresh draft of Paul's tech-lead brief, deployed staging",
+    "observedAnalysisReadyStatus": "ready",
+    "observedBlockedReason": null,
+    "graphNodes": [
+      {
+        "id": "2db7c4f6",
+        "kind": "option",
+        "label": "Status Quo — keep current team (Status Quo)",
+        "interventions": {
+          "5e10bebe": {
+            "value": 0,
+            "source": "cee_hypothesis",
+            "raw_value": 0,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "is_baseline": true
+      },
+      {
+        "id": "5deee027",
+        "kind": "factor",
+        "label": "Hiring and salary cost",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "5e10bebe",
+        "kind": "factor",
+        "label": "Leadership capacity",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "8ca5dffb",
+        "kind": "factor",
+        "label": "Existing team size and experience"
+      },
+      {
+        "id": "8f0d428a",
+        "kind": "factor",
+        "label": "Raw development capacity",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "be215545",
+        "kind": "option",
+        "label": "Two Developers",
+        "interventions": {
+          "5deee027": {
+            "value": 0.85,
+            "source": "cee_hypothesis",
+            "raw_value": 0.85,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5deee027",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "8f0d428a": {
+            "value": 1,
+            "source": "cee_hypothesis",
+            "raw_value": 1,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "8f0d428a",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "ea3cda88": {
+            "value": 0.7,
+            "source": "cee_hypothesis",
+            "raw_value": 0.7,
+            "reasoning": "Direct causal value has unresolved stated-item binding via edge 75629f8f; 0.7 is not itself a stated figure, and the claim composes it from stated_items[3]=3",
+            "target_match": {
+              "node_id": "ea3cda88",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "is_baseline": false
+      },
+      {
+        "id": "e18e3326",
+        "kind": "option",
+        "label": "Hire one tech lead and one developer",
+        "interventions": {
+          "5e10bebe": {
+            "value": 0.6,
+            "source": "cee_hypothesis",
+            "raw_value": 0.6,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "8f0d428a": {
+            "value": 0.5,
+            "source": "cee_hypothesis",
+            "raw_value": 0.5,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "8f0d428a",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "e70301eb",
+        "kind": "option",
+        "label": "Hire a Tech Lead",
+        "interventions": {
+          "5deee027": {
+            "value": 0.6,
+            "source": "cee_hypothesis",
+            "raw_value": 0.6,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5deee027",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "5e10bebe": {
+            "value": 1,
+            "source": "cee_hypothesis",
+            "raw_value": 1,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "ea3cda88": {
+            "value": 0.5,
+            "source": "cee_hypothesis",
+            "raw_value": 0.5,
+            "reasoning": "Direct causal value has unresolved stated-item binding via edge ab54782e; 0.5 is not itself a stated figure, and the claim composes it from stated_items[3]=3",
+            "target_match": {
+              "node_id": "ea3cda88",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "is_baseline": false
+      },
+      {
+        "id": "ea3cda88",
+        "kind": "factor",
+        "label": "Time to onboard and become productive",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      }
+    ],
+    "options": [
+      {
+        "id": "2db7c4f6",
+        "label": "Status Quo — keep current team (Status Quo)",
+        "status": "ready",
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "is_baseline": true,
+        "interventions": {
+          "5e10bebe": {
+            "value": 0,
+            "source": "cee_hypothesis",
+            "raw_value": 0,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "be215545",
+        "label": "Two Developers",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction",
+          "brief_quote": "two developers"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "5deee027": {
+            "value": 0.85,
+            "source": "cee_hypothesis",
+            "raw_value": 0.85,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5deee027",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "8f0d428a": {
+            "value": 1,
+            "source": "cee_hypothesis",
+            "raw_value": 1,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "8f0d428a",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "ea3cda88": {
+            "value": 0.7,
+            "source": "cee_hypothesis",
+            "raw_value": 0.7,
+            "reasoning": "Direct causal value has unresolved stated-item binding via edge 75629f8f; 0.7 is not itself a stated figure, and the claim composes it from stated_items[3]=3",
+            "target_match": {
+              "node_id": "ea3cda88",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "e18e3326",
+        "label": "Hire one tech lead and one developer",
+        "status": "ready",
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "interventions": {
+          "5e10bebe": {
+            "value": 0.6,
+            "source": "cee_hypothesis",
+            "raw_value": 0.6,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "8f0d428a": {
+            "value": 0.5,
+            "source": "cee_hypothesis",
+            "raw_value": 0.5,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "8f0d428a",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "e70301eb",
+        "label": "Hire a Tech Lead",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction",
+          "brief_quote": "hire a Tech lead"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "5deee027": {
+            "value": 0.6,
+            "source": "cee_hypothesis",
+            "raw_value": 0.6,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5deee027",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "5e10bebe": {
+            "value": 1,
+            "source": "cee_hypothesis",
+            "raw_value": 1,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "ea3cda88": {
+            "value": 0.5,
+            "source": "cee_hypothesis",
+            "raw_value": 0.5,
+            "reasoning": "Direct causal value has unresolved stated-item binding via edge ab54782e; 0.5 is not itself a stated figure, and the claim composes it from stated_items[3]=3",
+            "target_match": {
+              "node_id": "ea3cda88",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "capture": "20260829T171257-vs20-b4bfff",
+    "provenance": "staging-capture-2026-08-29",
+    "note": "live signed-in fresh draft of Paul's tech-lead brief, deployed staging",
+    "observedAnalysisReadyStatus": "blocked",
+    "observedBlockedReason": "mixed_scale_unresolved",
+    "graphNodes": [
+      {
+        "id": "171afe0b",
+        "kind": "option",
+        "label": "Continue with current team (Status Quo)",
+        "interventions": {},
+        "is_baseline": true
+      },
+      {
+        "id": "528f7fb9",
+        "kind": "factor",
+        "label": "Launch timeline pressure"
+      },
+      {
+        "id": "5e10bebe",
+        "kind": "factor",
+        "label": "Leadership capacity",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "63e58ac1",
+        "kind": "factor",
+        "label": "Raw development headcount",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "be215545",
+        "kind": "option",
+        "label": "Two Developers",
+        "interventions": {
+          "63e58ac1": {
+            "value": 0.4,
+            "source": "cee_hypothesis",
+            "raw_value": 2,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "63e58ac1",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "is_baseline": false
+      },
+      {
+        "id": "cf4d70fd",
+        "kind": "factor",
+        "label": "Hiring cost",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "e70301eb",
+        "kind": "option",
+        "label": "Hire a Tech Lead",
+        "interventions": {
+          "5e10bebe": {
+            "value": 1,
+            "source": "cee_hypothesis",
+            "raw_value": 1,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "is_baseline": false
+      },
+      {
+        "id": "e8f49675",
+        "kind": "option",
+        "label": "Hire one Tech Lead and one developer (hybrid)",
+        "interventions": {}
+      },
+      {
+        "id": "ea3cda88",
+        "kind": "factor",
+        "label": "Time to onboard and become productive",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      }
+    ],
+    "options": [
+      {
+        "id": "171afe0b",
+        "label": "Continue with current team (Status Quo)",
+        "status": "needs_user_mapping",
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "is_baseline": true,
+        "interventions": {},
+        "user_questions": [
+          "What value should \"Leadership capacity\" be set to for option \"Continue with current team (Status Quo)\"?",
+          "What value should \"Raw development headcount\" be set to for option \"Continue with current team (Status Quo)\"?",
+          "What value should \"Hiring cost\" be set to for option \"Continue with current team (Status Quo)\"?",
+          "What value should \"Time to onboard and become productive\" be set to for option \"Continue with current team (Status Quo)\"?"
+        ]
+      },
+      {
+        "id": "be215545",
+        "label": "Two Developers",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction",
+          "brief_quote": "two developers"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "63e58ac1": {
+            "value": 0.4,
+            "source": "cee_hypothesis",
+            "raw_value": 2,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "63e58ac1",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "e70301eb",
+        "label": "Hire a Tech Lead",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction",
+          "brief_quote": "hire a Tech lead"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "5e10bebe": {
+            "value": 1,
+            "source": "cee_hypothesis",
+            "raw_value": 1,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "e8f49675",
+        "label": "Hire one Tech Lead and one developer (hybrid)",
+        "status": "needs_user_mapping",
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "interventions": {},
+        "user_questions": [
+          "What value should \"Leadership capacity\" be set to for option \"Hire one Tech Lead and one developer (hybrid)\"?",
+          "What value should \"Raw development headcount\" be set to for option \"Hire one Tech Lead and one developer (hybrid)\"?",
+          "What value should \"Hiring cost\" be set to for option \"Hire one Tech Lead and one developer (hybrid)\"?",
+          "What value should \"Time to onboard and become productive\" be set to for option \"Hire one Tech Lead and one developer (hybrid)\"?",
+          "Which factor should \"one Tech\" (staffing_model) apply to?"
+        ],
+        "unresolved_targets": [
+          "staffing_model"
+        ]
+      }
+    ]
+  },
+  {
+    "capture": "20260829T171436-vs21-af3f8c",
+    "provenance": "staging-capture-2026-08-29",
+    "note": "live signed-in fresh draft of Paul's tech-lead brief, deployed staging",
+    "observedAnalysisReadyStatus": "ready",
+    "observedBlockedReason": null,
+    "graphNodes": [
+      {
+        "id": "5e10bebe",
+        "kind": "factor",
+        "label": "Leadership capacity",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "a9b4f47c",
+        "kind": "factor",
+        "label": "Raw development throughput",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "bdfe9aa3",
+        "kind": "option",
+        "label": "Status quo — no new hire",
+        "interventions": {
+          "5e10bebe": {
+            "value": 0.1,
+            "source": "cee_hypothesis",
+            "raw_value": 0.1,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "cf4d70fd": {
+            "value": 0,
+            "source": "cee_hypothesis",
+            "raw_value": 0,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "cf4d70fd",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "is_baseline": true
+      },
+      {
+        "id": "be215545",
+        "kind": "option",
+        "label": "Two Developers",
+        "interventions": {
+          "a9b4f47c": {
+            "value": 0.85,
+            "source": "cee_hypothesis",
+            "raw_value": 0.85,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "a9b4f47c",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "cf4d70fd": {
+            "value": 0.75,
+            "source": "cee_hypothesis",
+            "raw_value": 0.75,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "cf4d70fd",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "ea3cda88": {
+            "value": 0.7,
+            "source": "cee_hypothesis",
+            "raw_value": 0.7,
+            "reasoning": "Direct causal value has unresolved stated-item binding via edge fd289a6f; 0.7 is not itself a stated figure, and the claim composes it from stated_items[3]=3",
+            "target_match": {
+              "node_id": "ea3cda88",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "is_baseline": false
+      },
+      {
+        "id": "cf4d70fd",
+        "kind": "factor",
+        "label": "Hiring cost",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "e18e3326",
+        "kind": "option",
+        "label": "Hire one tech lead and one developer",
+        "interventions": {
+          "5e10bebe": {
+            "value": 0.65,
+            "source": "cee_hypothesis",
+            "raw_value": 0.65,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "cf4d70fd": {
+            "value": 0.85,
+            "source": "cee_hypothesis",
+            "raw_value": 0.85,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "cf4d70fd",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "e70301eb",
+        "kind": "option",
+        "label": "Hire a Tech Lead",
+        "interventions": {
+          "5e10bebe": {
+            "value": 0.9,
+            "source": "cee_hypothesis",
+            "raw_value": 0.9,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "cf4d70fd": {
+            "value": 0.6,
+            "source": "cee_hypothesis",
+            "raw_value": 0.6,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "cf4d70fd",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "ea3cda88": {
+            "value": 0.3,
+            "source": "cee_hypothesis",
+            "raw_value": 0.3,
+            "reasoning": "Direct causal value has unresolved stated-item binding via edge 16bde27e; 0.3 is not itself a stated figure, and the claim composes it from stated_items[3]=3",
+            "target_match": {
+              "node_id": "ea3cda88",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "is_baseline": false
+      },
+      {
+        "id": "ea3cda88",
+        "kind": "factor",
+        "label": "Time to onboard and become productive",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      }
+    ],
+    "options": [
+      {
+        "id": "bdfe9aa3",
+        "label": "Status quo — no new hire",
+        "status": "ready",
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "is_baseline": true,
+        "interventions": {
+          "5e10bebe": {
+            "value": 0.1,
+            "source": "cee_hypothesis",
+            "raw_value": 0.1,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "cf4d70fd": {
+            "value": 0,
+            "source": "cee_hypothesis",
+            "raw_value": 0,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "cf4d70fd",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "be215545",
+        "label": "Two Developers",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction",
+          "brief_quote": "two developers"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "a9b4f47c": {
+            "value": 0.85,
+            "source": "cee_hypothesis",
+            "raw_value": 0.85,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "a9b4f47c",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "cf4d70fd": {
+            "value": 0.75,
+            "source": "cee_hypothesis",
+            "raw_value": 0.75,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "cf4d70fd",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "ea3cda88": {
+            "value": 0.7,
+            "source": "cee_hypothesis",
+            "raw_value": 0.7,
+            "reasoning": "Direct causal value has unresolved stated-item binding via edge fd289a6f; 0.7 is not itself a stated figure, and the claim composes it from stated_items[3]=3",
+            "target_match": {
+              "node_id": "ea3cda88",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "e18e3326",
+        "label": "Hire one tech lead and one developer",
+        "status": "ready",
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "interventions": {
+          "5e10bebe": {
+            "value": 0.65,
+            "source": "cee_hypothesis",
+            "raw_value": 0.65,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "cf4d70fd": {
+            "value": 0.85,
+            "source": "cee_hypothesis",
+            "raw_value": 0.85,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "cf4d70fd",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "e70301eb",
+        "label": "Hire a Tech Lead",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction",
+          "brief_quote": "hire a Tech lead"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "5e10bebe": {
+            "value": 0.9,
+            "source": "cee_hypothesis",
+            "raw_value": 0.9,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "cf4d70fd": {
+            "value": 0.6,
+            "source": "cee_hypothesis",
+            "raw_value": 0.6,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "cf4d70fd",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "ea3cda88": {
+            "value": 0.3,
+            "source": "cee_hypothesis",
+            "raw_value": 0.3,
+            "reasoning": "Direct causal value has unresolved stated-item binding via edge 16bde27e; 0.3 is not itself a stated figure, and the claim composes it from stated_items[3]=3",
+            "target_match": {
+              "node_id": "ea3cda88",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "capture": "20260829T171505-vs12-977dfc",
+    "provenance": "staging-capture-2026-08-29",
+    "note": "live signed-in fresh draft of Paul's tech-lead brief, deployed staging",
+    "observedAnalysisReadyStatus": "blocked",
+    "observedBlockedReason": "mixed_scale_unresolved",
+    "graphNodes": [
+      {
+        "id": "0ce0c696",
+        "kind": "option",
+        "label": "Status Quo — no new hires",
+        "interventions": {},
+        "is_baseline": true
+      },
+      {
+        "id": "5deee027",
+        "kind": "factor",
+        "label": "Hiring and salary cost"
+      },
+      {
+        "id": "5e10bebe",
+        "kind": "factor",
+        "label": "Leadership capacity",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "a9b4f47c",
+        "kind": "factor",
+        "label": "Raw development throughput",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "be215545",
+        "kind": "option",
+        "label": "Two Developers",
+        "interventions": {
+          "a9b4f47c": {
+            "value": 0.4,
+            "source": "cee_hypothesis",
+            "raw_value": 2,
+            "reasoning": "Direct causal value has unresolved stated-item binding via edge a93c3d53; 2 is not itself a stated figure, and the target factor cites stated_items[4]=6",
+            "target_match": {
+              "node_id": "a9b4f47c",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "is_baseline": false
+      },
+      {
+        "id": "e18e3326",
+        "kind": "option",
+        "label": "Hire one tech lead and one developer",
+        "interventions": {}
+      },
+      {
+        "id": "e70301eb",
+        "kind": "option",
+        "label": "Hire a Tech Lead",
+        "interventions": {},
+        "is_baseline": false
+      },
+      {
+        "id": "f04eef1c",
+        "kind": "factor",
+        "label": "Onboarding and ramp time"
+      }
+    ],
+    "options": [
+      {
+        "id": "0ce0c696",
+        "label": "Status Quo — no new hires",
+        "status": "needs_user_mapping",
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "is_baseline": true,
+        "interventions": {},
+        "user_questions": [
+          "What value should \"Leadership capacity\" be set to for option \"Status Quo — no new hires\"?"
+        ]
+      },
+      {
+        "id": "be215545",
+        "label": "Two Developers",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction",
+          "brief_quote": "two developers"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "a9b4f47c": {
+            "value": 0.4,
+            "source": "cee_hypothesis",
+            "raw_value": 2,
+            "reasoning": "Direct causal value has unresolved stated-item binding via edge a93c3d53; 2 is not itself a stated figure, and the target factor cites stated_items[4]=6",
+            "target_match": {
+              "node_id": "a9b4f47c",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "e18e3326",
+        "label": "Hire one tech lead and one developer",
+        "status": "needs_user_mapping",
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "interventions": {},
+        "user_questions": [
+          "What value should \"Leadership capacity\" be set to for option \"Hire one tech lead and one developer\"?",
+          "What value should \"Raw development throughput\" be set to for option \"Hire one tech lead and one developer\"?",
+          "Which factor should \"one tech\" (staffing_model) apply to?"
+        ],
+        "unresolved_targets": [
+          "staffing_model"
+        ]
+      },
+      {
+        "id": "e70301eb",
+        "label": "Hire a Tech Lead",
+        "status": "needs_user_mapping",
+        "provenance": {
+          "source": "brief_extraction",
+          "brief_quote": "hire a Tech lead"
+        },
+        "is_baseline": false,
+        "interventions": {},
+        "user_questions": [
+          "What value should \"Leadership capacity\" be set to for option \"hire a Tech lead\"?",
+          "Which factor should \"Tech\" (staffing_model) apply to?"
+        ],
+        "unresolved_targets": [
+          "staffing_model"
+        ]
+      }
+    ]
+  },
+  {
+    "capture": "20260829T171615-vs22-8d0829",
+    "provenance": "staging-capture-2026-08-29",
+    "note": "live signed-in fresh draft of Paul's tech-lead brief, deployed staging",
+    "observedAnalysisReadyStatus": "ready",
+    "observedBlockedReason": null,
+    "graphNodes": [
+      {
+        "id": "5deee027",
+        "kind": "factor",
+        "label": "Hiring and salary cost"
+      },
+      {
+        "id": "5e10bebe",
+        "kind": "factor",
+        "label": "Leadership capacity",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "a9b4f47c",
+        "kind": "factor",
+        "label": "Raw development throughput",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "bdfe9aa3",
+        "kind": "option",
+        "label": "Status quo — no new hire",
+        "interventions": {
+          "5e10bebe": {
+            "value": 0,
+            "source": "cee_hypothesis",
+            "raw_value": 0,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "is_baseline": true
+      },
+      {
+        "id": "be215545",
+        "kind": "option",
+        "label": "Two Developers",
+        "interventions": {
+          "a9b4f47c": {
+            "value": 0.4,
+            "source": "cee_hypothesis",
+            "raw_value": 2,
+            "reasoning": "Direct causal value has unresolved stated-item binding via edge 2400389e; 2 is not itself a stated figure, and the target factor cites stated_items[4]=6",
+            "target_match": {
+              "node_id": "a9b4f47c",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "is_baseline": false
+      },
+      {
+        "id": "e18e3326",
+        "kind": "option",
+        "label": "Hire one tech lead and one developer",
+        "interventions": {
+          "5e10bebe": {
+            "value": 0.6,
+            "source": "cee_hypothesis",
+            "raw_value": 0.6,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "e70301eb",
+        "kind": "option",
+        "label": "Hire a Tech Lead",
+        "interventions": {
+          "5e10bebe": {
+            "value": 1,
+            "source": "cee_hypothesis",
+            "raw_value": 1,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "is_baseline": false
+      },
+      {
+        "id": "ea3cda88",
+        "kind": "factor",
+        "label": "Time to onboard and become productive"
+      }
+    ],
+    "options": [
+      {
+        "id": "bdfe9aa3",
+        "label": "Status quo — no new hire",
+        "status": "ready",
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "is_baseline": true,
+        "interventions": {
+          "5e10bebe": {
+            "value": 0,
+            "source": "cee_hypothesis",
+            "raw_value": 0,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "be215545",
+        "label": "Two Developers",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction",
+          "brief_quote": "two developers"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "a9b4f47c": {
+            "value": 0.4,
+            "source": "cee_hypothesis",
+            "raw_value": 2,
+            "reasoning": "Direct causal value has unresolved stated-item binding via edge 2400389e; 2 is not itself a stated figure, and the target factor cites stated_items[4]=6",
+            "target_match": {
+              "node_id": "a9b4f47c",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "e18e3326",
+        "label": "Hire one tech lead and one developer",
+        "status": "ready",
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "interventions": {
+          "5e10bebe": {
+            "value": 0.6,
+            "source": "cee_hypothesis",
+            "raw_value": 0.6,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "e70301eb",
+        "label": "Hire a Tech Lead",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction",
+          "brief_quote": "hire a Tech lead"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "5e10bebe": {
+            "value": 1,
+            "source": "cee_hypothesis",
+            "raw_value": 1,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "capture": "20260829T171623-vs13-394e29",
+    "provenance": "staging-capture-2026-08-29",
+    "note": "live signed-in fresh draft of Paul's tech-lead brief, deployed staging",
+    "observedAnalysisReadyStatus": "ready",
+    "observedBlockedReason": null,
+    "graphNodes": [
+      {
+        "id": "54432327",
+        "kind": "option",
+        "label": "Status Quo — no new hire",
+        "interventions": {
+          "5deee027": {
+            "value": 0,
+            "source": "cee_hypothesis",
+            "raw_value": 0,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5deee027",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "5e10bebe": {
+            "value": 0.05,
+            "source": "cee_hypothesis",
+            "raw_value": 0.05,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "a9b4f47c": {
+            "value": 0.3,
+            "source": "cee_hypothesis",
+            "raw_value": 0.3,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "a9b4f47c",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "ba92d504": {
+            "value": 0,
+            "source": "cee_hypothesis",
+            "raw_value": 0,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "ba92d504",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "is_baseline": true
+      },
+      {
+        "id": "5deee027",
+        "kind": "factor",
+        "label": "Hiring and salary cost",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "5e10bebe",
+        "kind": "factor",
+        "label": "Leadership capacity",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "a87caadb",
+        "kind": "factor",
+        "label": "Existing team cohesion and process maturity"
+      },
+      {
+        "id": "a9b4f47c",
+        "kind": "factor",
+        "label": "Raw development throughput",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "ba92d504",
+        "kind": "factor",
+        "label": "Time to productive contribution",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "be215545",
+        "kind": "option",
+        "label": "Two Developers",
+        "interventions": {
+          "5deee027": {
+            "value": 0.75,
+            "source": "cee_hypothesis",
+            "raw_value": 0.75,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5deee027",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "5e10bebe": {
+            "value": 0.15,
+            "source": "cee_hypothesis",
+            "raw_value": 0.15,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "a9b4f47c": {
+            "value": 0.8,
+            "source": "cee_hypothesis",
+            "raw_value": 0.8,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "a9b4f47c",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "ba92d504": {
+            "value": 0.45,
+            "source": "cee_hypothesis",
+            "raw_value": 0.45,
+            "reasoning": "Direct causal value has unresolved stated-item binding via edge 124aced7; 0.45 is not itself a stated figure, and the claim composes it from stated_items[3]=3",
+            "target_match": {
+              "node_id": "ba92d504",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "is_baseline": false
+      },
+      {
+        "id": "e70301eb",
+        "kind": "option",
+        "label": "Hire a Tech Lead",
+        "interventions": {
+          "5deee027": {
+            "value": 0.45,
+            "source": "cee_hypothesis",
+            "raw_value": 0.45,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5deee027",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "5e10bebe": {
+            "value": 0.85,
+            "source": "cee_hypothesis",
+            "raw_value": 0.85,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "a9b4f47c": {
+            "value": 0.45,
+            "source": "cee_hypothesis",
+            "raw_value": 0.45,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "a9b4f47c",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "ba92d504": {
+            "value": 0.65,
+            "source": "cee_hypothesis",
+            "raw_value": 0.65,
+            "reasoning": "Direct causal value has unresolved stated-item binding via edge 19e76d30; 0.65 is not itself a stated figure, and the claim composes it from stated_items[3]=3",
+            "target_match": {
+              "node_id": "ba92d504",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "is_baseline": false
+      }
+    ],
+    "options": [
+      {
+        "id": "54432327",
+        "label": "Status Quo — no new hire",
+        "status": "ready",
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "is_baseline": true,
+        "interventions": {
+          "5deee027": {
+            "value": 0,
+            "source": "cee_hypothesis",
+            "raw_value": 0,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5deee027",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "5e10bebe": {
+            "value": 0.05,
+            "source": "cee_hypothesis",
+            "raw_value": 0.05,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "a9b4f47c": {
+            "value": 0.3,
+            "source": "cee_hypothesis",
+            "raw_value": 0.3,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "a9b4f47c",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "ba92d504": {
+            "value": 0,
+            "source": "cee_hypothesis",
+            "raw_value": 0,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "ba92d504",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "be215545",
+        "label": "Two Developers",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction",
+          "brief_quote": "two developers"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "5deee027": {
+            "value": 0.75,
+            "source": "cee_hypothesis",
+            "raw_value": 0.75,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5deee027",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "5e10bebe": {
+            "value": 0.15,
+            "source": "cee_hypothesis",
+            "raw_value": 0.15,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "a9b4f47c": {
+            "value": 0.8,
+            "source": "cee_hypothesis",
+            "raw_value": 0.8,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "a9b4f47c",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "ba92d504": {
+            "value": 0.45,
+            "source": "cee_hypothesis",
+            "raw_value": 0.45,
+            "reasoning": "Direct causal value has unresolved stated-item binding via edge 124aced7; 0.45 is not itself a stated figure, and the claim composes it from stated_items[3]=3",
+            "target_match": {
+              "node_id": "ba92d504",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "e70301eb",
+        "label": "Hire a Tech Lead",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction",
+          "brief_quote": "hire a Tech lead"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "5deee027": {
+            "value": 0.45,
+            "source": "cee_hypothesis",
+            "raw_value": 0.45,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5deee027",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "5e10bebe": {
+            "value": 0.85,
+            "source": "cee_hypothesis",
+            "raw_value": 0.85,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "a9b4f47c": {
+            "value": 0.45,
+            "source": "cee_hypothesis",
+            "raw_value": 0.45,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "a9b4f47c",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          },
+          "ba92d504": {
+            "value": 0.65,
+            "source": "cee_hypothesis",
+            "raw_value": 0.65,
+            "reasoning": "Direct causal value has unresolved stated-item binding via edge 19e76d30; 0.65 is not itself a stated figure, and the claim composes it from stated_items[3]=3",
+            "target_match": {
+              "node_id": "ba92d504",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "capture": "20260829T171812-vs23-c4aa53",
+    "provenance": "staging-capture-2026-08-29",
+    "note": "live signed-in fresh draft of Paul's tech-lead brief, deployed staging",
+    "observedAnalysisReadyStatus": "ready",
+    "observedBlockedReason": null,
+    "graphNodes": [
+      {
+        "id": "239b5341",
+        "kind": "factor",
+        "label": "Time to onboard and contribute"
+      },
+      {
+        "id": "2db7c4f6",
+        "kind": "option",
+        "label": "Status Quo — keep current team (Status Quo)",
+        "interventions": {
+          "5e10bebe": {
+            "value": 0,
+            "source": "cee_hypothesis",
+            "raw_value": 0,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "is_baseline": true
+      },
+      {
+        "id": "5e10bebe",
+        "kind": "factor",
+        "label": "Leadership capacity",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "63e58ac1",
+        "kind": "factor",
+        "label": "Raw development headcount",
+        "observed_state": {
+          "value": 0.5,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "be215545",
+        "kind": "option",
+        "label": "Two Developers",
+        "interventions": {
+          "63e58ac1": {
+            "value": 1,
+            "source": "cee_hypothesis",
+            "raw_value": 1,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "63e58ac1",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "is_baseline": false
+      },
+      {
+        "id": "cf4d70fd",
+        "kind": "factor",
+        "label": "Hiring cost"
+      },
+      {
+        "id": "e18e3326",
+        "kind": "option",
+        "label": "Hire one tech lead and one developer",
+        "interventions": {
+          "5e10bebe": {
+            "value": 0.6,
+            "source": "cee_hypothesis",
+            "raw_value": 0.6,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "e70301eb",
+        "kind": "option",
+        "label": "Hire a Tech Lead",
+        "interventions": {
+          "5e10bebe": {
+            "value": 1,
+            "source": "cee_hypothesis",
+            "raw_value": 1,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        },
+        "is_baseline": false
+      }
+    ],
+    "options": [
+      {
+        "id": "2db7c4f6",
+        "label": "Status Quo — keep current team (Status Quo)",
+        "status": "ready",
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "is_baseline": true,
+        "interventions": {
+          "5e10bebe": {
+            "value": 0,
+            "source": "cee_hypothesis",
+            "raw_value": 0,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "be215545",
+        "label": "Two Developers",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction",
+          "brief_quote": "two developers"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "63e58ac1": {
+            "value": 1,
+            "source": "cee_hypothesis",
+            "raw_value": 1,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "63e58ac1",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "e18e3326",
+        "label": "Hire one tech lead and one developer",
+        "status": "ready",
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "interventions": {
+          "5e10bebe": {
+            "value": 0.6,
+            "source": "cee_hypothesis",
+            "raw_value": 0.6,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      },
+      {
+        "id": "e70301eb",
+        "label": "Hire a Tech Lead",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction",
+          "brief_quote": "hire a Tech lead"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "5e10bebe": {
+            "value": 1,
+            "source": "cee_hypothesis",
+            "raw_value": 1,
+            "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
+            "target_match": {
+              "node_id": "5e10bebe",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "low"
+          }
+        }
+      }
+    ]
+  }
+]

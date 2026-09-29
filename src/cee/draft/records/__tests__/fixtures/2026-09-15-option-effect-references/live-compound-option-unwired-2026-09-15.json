@@ -1,0 +1,234 @@
+{
+  "stated_items": [
+    {
+      "kind": "goal",
+      "source_quote": "reaching £20k MRR within 12 months",
+      "role": "target",
+      "is_baseline": false
+    },
+    {
+      "kind": "constraint",
+      "source_quote": "keeping monthly churn under 4%",
+      "direction": "ceiling"
+    },
+    {
+      "kind": "option",
+      "source_quote": "increase the Pro plan price from £49 to £59 per month with the next Pro feature release",
+      "is_baseline": false
+    },
+    {
+      "kind": "figure",
+      "source_quote": "£49",
+      "value": 49,
+      "unit": "£/month"
+    },
+    {
+      "kind": "figure",
+      "source_quote": "£59",
+      "value": 59,
+      "unit": "£/month"
+    },
+    {
+      "kind": "figure",
+      "source_quote": "£20k MRR",
+      "value": 20000,
+      "unit": "£"
+    },
+    {
+      "kind": "figure",
+      "source_quote": "12 months",
+      "value": 12,
+      "unit": "months"
+    },
+    {
+      "kind": "figure",
+      "source_quote": "4%",
+      "value": 4,
+      "unit": "%"
+    }
+  ],
+  "claims": [
+    {
+      "claim_kind": "option_refinement",
+      "label": "Hold Price at £49, Push Volume",
+      "basis": [
+        2
+      ],
+      "is_baseline": true
+    },
+    {
+      "claim_kind": "option_refinement",
+      "label": "Raise Price to £59 at Feature Release",
+      "basis": [
+        2
+      ],
+      "is_baseline": false
+    },
+    {
+      "claim_kind": "option_refinement",
+      "label": "Grandfathered Raise: New Customers at £59, Existing at £49",
+      "basis": [
+        2
+      ],
+      "is_baseline": false
+    },
+    {
+      "claim_kind": "factor",
+      "label": "Pro Plan Monthly Price",
+      "basis": [
+        3,
+        4
+      ]
+    },
+    {
+      "claim_kind": "factor",
+      "label": "New Customer Conversion Rate",
+      "basis": []
+    },
+    {
+      "claim_kind": "factor",
+      "label": "Monthly Churn Rate",
+      "basis": [
+        1
+      ]
+    },
+    {
+      "claim_kind": "factor",
+      "label": "Active Pro Subscriber Count",
+      "basis": []
+    },
+    {
+      "claim_kind": "outcome",
+      "label": "Monthly Recurring Revenue",
+      "basis": [
+        0,
+        5
+      ]
+    },
+    {
+      "claim_kind": "risk",
+      "label": "Churn Spike from Price Increase",
+      "basis": [
+        1,
+        2
+      ]
+    },
+    {
+      "claim_kind": "risk",
+      "label": "Conversion Rate Suppression",
+      "basis": [
+        2
+      ]
+    },
+    {
+      "claim_kind": "prior",
+      "label": "Price Elasticity of Pro Segment",
+      "basis": [
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Holding price at £49 sets Pro Plan Monthly Price",
+      "from_claim": 0,
+      "to_claim": 3,
+      "effect": "positive",
+      "sets_to": 49
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Raising price to £59 sets Pro Plan Monthly Price",
+      "from_claim": 1,
+      "to_claim": 3,
+      "effect": "positive",
+      "sets_to": 59
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Grandfathered raise sets blended Pro Plan Monthly Price",
+      "from_claim": 2,
+      "to_claim": 3,
+      "effect": "positive",
+      "sets_to": 54
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Higher Pro Plan Monthly Price increases MRR per subscriber",
+      "from_claim": 3,
+      "to_claim": 7,
+      "effect": "positive",
+      "strength": 0.65
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Higher Pro Plan Monthly Price suppresses new customer conversion",
+      "from_claim": 3,
+      "to_claim": 9,
+      "effect": "positive",
+      "strength": 0.55
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Higher Pro Plan Monthly Price increases churn risk for existing subscribers",
+      "from_claim": 3,
+      "to_claim": 8,
+      "effect": "positive",
+      "strength": 0.45
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Active subscriber count drives MRR volume",
+      "from_claim": 6,
+      "to_claim": 7,
+      "effect": "positive",
+      "strength": 0.7
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Churn spike reduces active subscriber count",
+      "from_claim": 8,
+      "to_claim": 6,
+      "effect": "negative",
+      "strength": 0.6
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Conversion rate suppression limits subscriber growth",
+      "from_claim": 9,
+      "to_claim": 6,
+      "effect": "negative",
+      "strength": 0.5
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "New customer conversion rate grows subscriber count",
+      "from_claim": 4,
+      "to_claim": 6,
+      "effect": "positive",
+      "strength": 0.6
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Monthly Recurring Revenue drives goal attainment",
+      "from_claim": 7,
+      "to_stated": 0,
+      "effect": "positive"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Churn spike threatens goal by eroding subscriber base",
+      "from_claim": 8,
+      "to_stated": 0,
+      "effect": "negative"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Conversion rate suppression threatens goal by limiting new subscribers",
+      "from_claim": 9,
+      "to_stated": 0,
+      "effect": "negative"
+    }
+  ]
+}

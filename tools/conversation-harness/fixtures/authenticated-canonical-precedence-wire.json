@@ -1,0 +1,19 @@
+{
+  "schema": "authenticated_canonical_precedence_wire.v1",
+  "evidence_rung": "AUTHENTICATED_LIVE_WIRE",
+  "scoring_case_fixture": "canonical-precedence-case.json",
+  "scenario_count": 3,
+  "turns_per_scenario": 1,
+  "scenario_mode": "distinct_preprovisioned_scenarios",
+  "worst_case_provider_attempts_per_turn": 4,
+  "endpoints": {
+    "graph_read": "/assist/v1/scenarios/{scenario_id}/graph",
+    "turn": "/orchestrate/v2/turn"
+  },
+  "turn": {
+    "kind": "message",
+    "source": "composer",
+    "turn_class": "direct_answer",
+    "stage": "analyse"
+  }
+}

@@ -1,0 +1,342 @@
+{
+ "_source": "NATIVE capture, AI Conversation NE-20260926-02 (#70 5849971004), runs/live-2026-09-26T2117/research.response.json; gpt-5.6-terra, store:false, 3 web_search calls. Account fields (billing, access_programs, safety_identifier, user, prompt_cache_key, metadata) and reasoning encrypted_content removed; nothing else changed.",
+ "response": {
+  "id": "resp_038007399f3f5e98016ab8366da8a887d2af145024b2297890",
+  "object": "response",
+  "status": "completed",
+  "error": null,
+  "incomplete_details": null,
+  "model": "gpt-5.6-terra",
+  "tools": [
+   {
+    "type": "web_search",
+    "return_token_budget": "default",
+    "search_content_types": [
+     "text"
+    ],
+    "search_context_size": "medium",
+    "user_location": {
+     "type": "approximate",
+     "city": null,
+     "country": "US",
+     "region": null,
+     "timezone": null
+    }
+   }
+  ],
+  "tool_choice": "required",
+  "max_tool_calls": 3,
+  "store": false,
+  "usage": {
+   "input_tokens": 27249,
+   "input_tokens_details": {
+    "cache_write_tokens": 4345,
+    "cached_tokens": 0
+   },
+   "output_tokens": 990,
+   "output_tokens_details": {
+    "reasoning_tokens": 537
+   },
+   "total_tokens": 28239
+  },
+  "output": [
+   {
+    "id": "rs_038007399f3f5e98016ab8366e21c087d2aca74ea7709cc92c",
+    "type": "reasoning",
+    "summary": []
+   },
+   {
+    "id": "ws_038007399f3f5e98016ab8366ee76887d2b6415b7ee1278a46",
+    "type": "web_search_call",
+    "status": "completed",
+    "action": {
+     "type": "search",
+     "queries": [
+      "B2B SaaS SMB monthly customer churn benchmark small medium businesses monthly logo churn",
+      "SaaS Capital churn benchmark SMB customer churn annual 2024",
+      "KeyBanc SaaS survey churn rate SMB monthly customer churn"
+     ],
+     "query": "B2B SaaS SMB monthly customer churn benchmark small medium businesses monthly logo churn",
+     "sources": [
+      {
+       "type": "url",
+       "url": "https://www.smbs.com/statistics/saas-churn-rate"
+      },
+      {
+       "type": "url",
+       "url": "https://optif.ai/learn/questions/b2b-saas-churn-rate-benchmark/"
+      },
+      {
+       "type": "url",
+       "url": "https://churncost.com/b2b-saas-churn-benchmarks-2026"
+      },
+      {
+       "type": "url",
+       "url": "https://www.saasceo.com/average-churn-rate-for-saas/"
+      },
+      {
+       "type": "url",
+       "url": "https://www.metrichq.org/saas/logo-churn/"
+      },
+      {
+       "type": "url",
+       "url": "https://bigdelta.com/blog/average-saas-churn-rate"
+      },
+      {
+       "type": "url",
+       "url": "https://getfairview.com/blog/saas-churn-rate-benchmarks"
+      },
+      {
+       "type": "url",
+       "url": "https://www.koji.so/blog/saas-churn-rate-benchmarks-2026"
+      },
+      {
+       "type": "url",
+       "url": "https://churnguardapp.com/blog/good-churn-rate-small-saas"
+      },
+      {
+       "type": "url",
+       "url": "https://retentioncheck.com/churn-benchmarks/smb-saas"
+      },
+      {
+       "type": "url",
+       "url": "https://retentionlens.com/blog/saas-churn-benchmarks"
+      },
+      {
+       "type": "url",
+       "url": "https://gaintrace.com/explore/retention/how-much-churn-is-normal-b2b-saas"
+      },
+      {
+       "type": "url",
+       "url": "https://assets.website-files.com/5fb5e3d0f5665aa264ab731c/61f09228a464db2578a59a6e_SaaS%20Benchmarking%20Report%20%20%281%29.pdf"
+      },
+      {
+       "type": "url",
+       "url": "https://revpartners.io/hubfs/PDFs/SaaS%20Metric%20Cheat%20sheet.pdf?hsLang=en"
+      },
+      {
+       "type": "url",
+       "url": "https://saasmag.com/wp-content/uploads/2018/06/SaaS-Magazine-Issue-1-A4-Digital.pdf"
+      },
+      {
+       "type": "url",
+       "url": "https://4105085.fs1.hubspotusercontent-na1.net/hubfs/4105085/Files%20related%20to%20Content%20Offers%20%28PDFs%2C%20guides%20etc%29/SaaStock22-Churn.pdf"
+      },
+      {
+       "type": "url",
+       "url": "https://sandhill.com/wp-content/uploads/2023/10/Allied-Advisers-report.pdf"
+      },
+      {
+       "type": "url",
+       "url": "https://saasmag.com/wp-content/uploads/2019/01/saas-mag-issue-1.pdf"
+      },
+      {
+       "type": "url",
+       "url": "https://www.reddit.com/r/SaaS/comments/1sx6tpw/collected_churn_rate_benchmarks_across_12_saas/"
+      },
+      {
+       "type": "url",
+       "url": "https://www.reddit.com/r/SaaS/comments/1r9tfr9/whats_your_actual_monthly_churn_rate_trying_to/"
+      },
+      {
+       "type": "url",
+       "url": "https://www.reddit.com/r/SaaS/comments/1q2py89/how_we_slashed_churn_by_34_through_onboarding/"
+      },
+      {
+       "type": "url",
+       "url": "https://www.reddit.com/r/B2BSaaS/comments/1r1w7cu/a_simple_breakdown_of_saas_churn_causes_metrics/"
+      },
+      {
+       "type": "url",
+       "url": "https://www.reddit.com/r/BootstrappedSaaS/comments/1r1w8lu/a_simple_breakdown_of_saas_churn_causes_metrics/"
+      },
+      {
+       "type": "url",
+       "url": "https://www.reddit.com/r/microsaas/comments/1r1wda4/a_simple_breakdown_of_saas_churn_causes_metrics/"
+      },
+      {
+       "type": "url",
+       "url": "https://www.reddit.com/r/micro_saas/comments/1ryyndw/real_saas_lifecycle_benchmarks_what_actually/"
+      },
+      {
+       "type": "url",
+       "url": "https://www.reddit.com/r/startups/comments/1e15526"
+      },
+      {
+       "type": "url",
+       "url": "https://www.reddit.com/r/SaaS/comments/1ryyo6d/deep_dive_real_saas_lifecycle_benchmarks_what/"
+      },
+      {
+       "type": "url",
+       "url": "https://www.reddit.com/r/microsaas/comments/1ryypa1/deep_dive_real_saas_lifecycle_benchmarks_what/"
+      },
+      {
+       "type": "url",
+       "url": "https://www.reddit.com/r/EntrepreneurRideAlong/comments/1ryz8c3/deep_dive_real_saas_lifecycle_benchmarks_what/"
+      },
+      {
+       "type": "url",
+       "url": "https://www.reddit.com/r/Entrepreneurs/comments/1ryz7f7/deep_dive_real_saas_lifecycle_benchmarks_what/"
+      },
+      {
+       "type": "url",
+       "url": "https://en.wikipedia.org/wiki/Churn_rate"
+      }
+     ]
+    }
+   },
+   {
+    "id": "rs_038007399f3f5e98016ab83672689087d29ead3b19cd0a0ff2",
+    "type": "reasoning",
+    "summary": []
+   },
+   {
+    "id": "ws_038007399f3f5e98016ab83672c13c87d2bdfdb8be767a0b47",
+    "type": "web_search_call",
+    "status": "completed",
+    "action": {
+     "type": "open_page",
+     "url": "https://sandhill.com/wp-content/uploads/2023/10/Allied-Advisers-report.pdf"
+    }
+   },
+   {
+    "id": "rs_038007399f3f5e98016ab83673caf887d297f9dde074272e41",
+    "type": "reasoning",
+    "summary": []
+   },
+   {
+    "id": "ws_038007399f3f5e98016ab83674dcb087d2af1839d86025c178",
+    "type": "web_search_call",
+    "status": "completed",
+    "action": {
+     "type": "search",
+     "queries": [
+      "site:chartmogul.com SaaS churn benchmark monthly customer churn ARPA small business",
+      "site:saascapital.com private B2B SaaS retention benchmark customer churn SMB",
+      "site:bvp.com SaaS customer churn SMB monthly benchmark"
+     ],
+     "query": "site:chartmogul.com SaaS churn benchmark monthly customer churn ARPA small business",
+     "sources": [
+      {
+       "type": "url",
+       "url": "https://chartmogul.com/reports/saas-benchmarks-report/"
+      },
+      {
+       "type": "url",
+       "url": "https://chartmogul.com/reports/saas-benchmarks-report/saas-benchmarks-report-2023.pdf"
+      },
+      {
+       "type": "url",
+       "url": "https://chartmogul.com/reports/saas-billing-report/saas-billing-report-2025.pdf"
+      },
+      {
+       "type": "url",
+       "url": "https://chartmogul.com/reports/saas-retention-report/"
+      },
+      {
+       "type": "url",
+       "url": "https://help.chartmogul.com/article/203-chart-customer-churn-rate"
+      },
+      {
+       "type": "url",
+       "url": "https://chartmogul.com/blog/good-customer-churn-rate/"
+      },
+      {
+       "type": "url",
+       "url": "https://www.bvp.com/memos/pagerduty"
+      },
+      {
+       "type": "url",
+       "url": "https://chartmogul.com/reports/saas-billing-report/"
+      },
+      {
+       "type": "url",
+       "url": "https://www.bvp.com/memos/shopify"
+      },
+      {
+       "type": "url",
+       "url": "https://www.bvp.com/atlas/understanding-churn-and-building-an-action-plan-to-fix-the-proverbial-leaky-bucket"
+      },
+      {
+       "type": "url",
+       "url": "https://chartmogul.com/saas-metrics/arpa/"
+      },
+      {
+       "type": "url",
+       "url": "https://chartmogul.com/pt-br/reports/saas-retention-report/"
+      },
+      {
+       "type": "url",
+       "url": "https://chartmogul.com/reports/saas-retention-the-new-normal/"
+      },
+      {
+       "type": "url",
+       "url": "https://chartmogul.com/reports/"
+      },
+      {
+       "type": "url",
+       "url": "https://sandhill.com/wp-content/uploads/2023/10/Allied-Advisers-report.pdf"
+      },
+      {
+       "type": "url",
+       "url": "https://saasmag.com/wp-content/uploads/2018/06/SaaS-Magazine-Issue-1-A4-Digital.pdf"
+      },
+      {
+       "type": "url",
+       "url": "https://chartmogul.com/reports/saas-benchmarks-report/saas-benchmarks-report-2023.pdf?utm_source=openai"
+      }
+     ]
+    }
+   },
+   {
+    "id": "rs_038007399f3f5e98016ab836772a8487d28888c6dcd3d6da6b",
+    "type": "reasoning",
+    "summary": []
+   },
+   {
+    "id": "msg_038007399f3f5e98016ab83677dcec87d2bf46ae0914343eb2",
+    "type": "message",
+    "status": "completed",
+    "content": [
+     {
+      "type": "output_text",
+      "annotations": [
+       {
+        "type": "url_citation",
+        "end_index": 689,
+        "start_index": 597,
+        "title": "",
+        "url": "https://sandhill.com/wp-content/uploads/2023/10/Allied-Advisers-report.pdf"
+       },
+       {
+        "type": "url_citation",
+        "end_index": 935,
+        "start_index": 835,
+        "title": "",
+        "url": "https://saasmag.com/wp-content/uploads/2018/06/SaaS-Magazine-Issue-1-A4-Digital.pdf"
+       },
+       {
+        "type": "url_citation",
+        "end_index": 1327,
+        "start_index": 1204,
+        "title": "ChartMogul_SaaS Benchmark_V11",
+        "url": "https://chartmogul.com/reports/saas-benchmarks-report/saas-benchmarks-report-2023.pdf?utm_source=openai"
+       },
+       {
+        "type": "url_citation",
+        "end_index": 1898,
+        "start_index": 1798,
+        "title": "",
+        "url": "https://saasmag.com/wp-content/uploads/2018/06/SaaS-Magazine-Issue-1-A4-Digital.pdf"
+       }
+      ],
+      "logprobs": [],
+      "text": "For **monthly customer (logo) churn**—the share of customer accounts that cancel in a month—a practical benchmark for B2B SaaS is:\n\n| Customer segment | Typical monthly customer churn |\n|---|---:|\n| **Small businesses / SMB** | **~3%–7%** |\n| **Mid-market** | **~1%–2%** |\n| **Broad SMB-to-mid-market portfolio** | **~1%–7%**, depending mostly on account size, contract commitment, and product stickiness |\n\nThe **3%–7% SMB range** is reported in an Allied Advisers SMB SaaS benchmark, which explicitly labels it as monthly customer churn; it contrasts this with less than 1% for enterprise SaaS. ([sandhill.com](https://sandhill.com/wp-content/uploads/2023/10/Allied-Advisers-report.pdf)) A separate SaaS Magazine/FE International analysis likewise reports **3%–7% for SMB**, **1%–2% for mid-market**, and **0.5%–1% for enterprise**. ([saasmag.com](https://saasmag.com/wp-content/uploads/2018/06/SaaS-Magazine-Issue-1-A4-Digital.pdf))\n\nAs a cross-check from a large SaaS-data provider, ChartMogul’s benchmark data show median monthly **customer** churn declining as average revenue per account rises: **4.2%** at $25–$100 ARPA, **3.1%** at $100–$250, **2.3%** at $500–$1,000, and **1.8%** above $1,000. ([chartmogul.com](https://chartmogul.com/reports/saas-benchmarks-report/saas-benchmarks-report-2023.pdf?utm_source=openai)) That pattern is consistent with lower churn as a company moves from small accounts toward larger mid-market accounts.\n\nTwo cautions:\n\n- These figures are **customer/logo churn**, not **revenue churn** or net revenue retention; those can be materially lower because surviving accounts may expand.\n- A 3%–7% monthly rate compounds sharply: the cited SMB benchmark equates it to roughly **31%–58% annual customer churn**, rather than simply 36%–84% from multiplying by 12. ([saasmag.com](https://saasmag.com/wp-content/uploads/2018/06/SaaS-Magazine-Issue-1-A4-Digital.pdf))"
+     }
+    ],
+    "phase": "final_answer",
+    "role": "assistant"
+   }
+  ]
+ }
+}

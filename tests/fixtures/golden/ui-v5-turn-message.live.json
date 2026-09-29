@@ -1,0 +1,9 @@
+{
+  "kind": "message",
+  "turn_id": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+  "scenario_id": "550e8400-e29b-41d4-a716-446655440000",
+  "stage": "frame",
+  "turn_class": "frame",
+  "message": "I need to choose a vendor and I'm worried about margin risk.",
+  "source": "composer"
+}

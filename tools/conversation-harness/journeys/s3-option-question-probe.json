@@ -1,0 +1,12 @@
+{
+  "comment": "S3 option-question probe — either/or ask + recommendation between two NAMED options (labels from fixtures/frozen-graph.json), + an elicitation probe. Dims: D2 chip-presence-per-question-class (either/or + enumerated regex on assistant_text -> chips on the SAME envelope), D3 question budget (baseline-log), D4 brevity.",
+  "requires_seeded_scenario": true,
+  "placeholders": { "OPT_A": "Hire One Tech Lead", "OPT_B": "Hire Two Mid-Level Developers" },
+  "dims": ["D2", "D3", "D4"],
+  "turns": [
+    { "id": "S3A0", "stage": "analyse", "message": "Run the analysis", "turn_class_hint": "run_analysis" },
+    { "id": "S3O1", "stage": "analyse", "message": "Should I go with {OPT_A} or {OPT_B}?", "turn_class_hint": "coach" },
+    { "id": "S3O2", "stage": "analyse", "message": "Between {OPT_A} and {OPT_B}, which do you recommend, and why?", "turn_class_hint": "coach" },
+    { "id": "S3O3", "stage": "analyse", "message": "What would you ask me next to sharpen this decision?", "turn_class_hint": "coach" }
+  ]
+}

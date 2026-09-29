@@ -1,0 +1,7 @@
+{
+  "name": "@examples/root",
+  "private": true,
+  "workspaces": [
+    "react-sse-client"
+  ]
+}

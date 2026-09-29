@@ -1,0 +1,50 @@
+{
+  "name": "validation-healthy",
+  "description": "Clean validation pass - no errors, no warnings. Tests Tier 1 passthrough assertions.",
+  "brief": "Should we invest in solar panels for the office building to reduce energy costs?",
+  "endpoint": "draft_graph",
+  "recorded_response": {
+    "graph": {
+      "version": "1",
+      "default_seed": 42,
+      "nodes": [
+        { "id": "decision_1", "kind": "decision", "label": "Should we invest in solar panels for the office building?" },
+        { "id": "opt_install", "kind": "option", "label": "Install solar panels" },
+        { "id": "opt_skip", "kind": "option", "label": "Skip solar investment" },
+        { "id": "fac_upfront_cost", "kind": "factor", "label": "Upfront Installation Cost" },
+        { "id": "fac_energy_savings", "kind": "factor", "label": "Monthly Energy Savings" },
+        { "id": "fac_grid_rates", "kind": "factor", "label": "Grid Electricity Rates" },
+        { "id": "outcome_roi", "kind": "outcome", "label": "Return on Investment" },
+        { "id": "goal_1", "kind": "goal", "label": "Minimize long-term energy costs" }
+      ],
+      "edges": [
+        { "from": "decision_1", "to": "opt_install", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "decision_1", "to": "opt_skip", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "opt_install", "to": "fac_upfront_cost", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "opt_install", "to": "fac_energy_savings", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "opt_skip", "to": "fac_upfront_cost", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "opt_skip", "to": "fac_energy_savings", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "fac_upfront_cost", "to": "outcome_roi", "strength_mean": -0.6, "strength_std": 0.15, "belief_exists": 0.95, "effect_direction": "negative" },
+        { "from": "fac_energy_savings", "to": "outcome_roi", "strength_mean": 0.7, "strength_std": 0.12, "belief_exists": 0.9, "effect_direction": "positive" },
+        { "from": "fac_grid_rates", "to": "outcome_roi", "strength_mean": 0.4, "strength_std": 0.2, "belief_exists": 0.8, "effect_direction": "positive" },
+        { "from": "outcome_roi", "to": "goal_1", "strength_mean": 0.85, "strength_std": 0.1, "belief_exists": 1, "effect_direction": "positive" }
+      ],
+      "meta": { "roots": [], "leaves": [], "suggested_positions": {}, "source": "assistant" }
+    },
+    "validation": {
+      "passed": true,
+      "errors": [],
+      "warnings": []
+    }
+  },
+  "assertions": {
+    "has_decision_node": true,
+    "has_goal_node": true,
+    "option_count_gte": 2,
+    "factor_count_gte": 3,
+    "validation_passes": true,
+    "validation_error_count": 0,
+    "validation_warning_count": 0,
+    "structural_edges_canonical": true
+  }
+}

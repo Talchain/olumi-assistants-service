@@ -1,0 +1,15 @@
+{
+  "brief": "We need to increase upgrades from the Pro trial to paid by identifying the highest leverage actions for Q4.",
+  "constraints": {
+    "region": "NAMER",
+    "timeline": "Q4",
+    "budget": "$50k"
+  },
+  "attachments": [
+    {
+      "id": "trial-data",
+      "kind": "csv",
+      "name": "trial_upgrades.csv"
+    }
+  ]
+}

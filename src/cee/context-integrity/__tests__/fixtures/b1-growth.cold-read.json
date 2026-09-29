@@ -1,0 +1,4149 @@
+{
+  "_provenance": {
+    "capture": "PHASE0-EVIDENCE-2026-07-28/context-integrity-trace-2026-08-08/raw/496a89d9-T2_COLD1.json",
+    "seam": "POST /bff/cee/scenarios/:id/graph (cold read)",
+    "captured_at": "2026-08-08",
+    "cee_build": "4b57b8f",
+    "scenario_id": "496a89d9-70f3-4b4f-8f4e-c19c3e7ebf78",
+    "note": "Real deployed bytes. Reduced to the two fields the derivation consumes; neither is edited."
+  },
+  "brief_text": "I need to work out whether we push into Germany next year or double down on the UK — that's the decision, and honestly the board is split. We're an 85-person regtech SaaS doing £11.2m ARR, growing about 28% year on year, but UK new-logo growth slowed to 9% over the last two quarters and I think the UK market is maybe 70% penetrated for our segment — that's my gut, not a real number. The goal is to get to £20m ARR by end of FY28 without dropping gross margin below 78%. Germany: TAM is supposedly €400m (that's from the 2025 Gartner regtech sizing, though our head of sales thinks it's inflated, maybe half that once you strip out the banks we can't serve). BaFin licensing will take 9 to 14 months, legal quoted us €250k for the process, and we'd need maybe 6 local hires — say €900k a year fully loaded. We have £3.1m cash and we're profitable-ish, breakeven plus or minus £100k a quarter, so we can't fund a two-year burn on this. Assumption: our UK compliance content localises to the German regime with about 60% reuse — our CTO says it's more like 40%, and if he's right the engineering cost roughly doubles. Two existing customers (both UK banks with Frankfurt operations) have said they'd sponsor a pilot — I have the emails from May. Constraint: we cannot hire more than 8 people total next year, HR freeze from the board, and marketing spend is capped at £1.5m. There's a half-formed idea floating around that we partner with a local player like Regnology instead of going direct — nobody has scoped it, might be nothing. Also worth saying: our NRR is 112%, and if we just focused on expansion we might hit £16m without any new market — Priya's cohort model in the June board pack says £15.8m by FY28 on expansion alone. I honestly don't know whether the Germany window closes if we wait a year — two US competitors raised big rounds in Q2. The CFO wants to wait 12 months, the CRO wants to go now. So: Germany in 2027, or UK depth?",
+  "graph": {
+    "meta": {
+      "roots": [
+        "dec_expansion",
+        "fac_bafin_complexity",
+        "fac_cash_runway",
+        "fac_competitive_window",
+        "fac_localisation_cost",
+        "fac_nrr",
+        "fac_uk_saturation"
+      ],
+      "leaves": [
+        "goal_arr"
+      ],
+      "source": "assistant"
+    },
+    "edges": [
+      {
+        "to": "opt_germany_direct",
+        "from": "dec_expansion",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "opt_partner_germany",
+        "from": "dec_expansion",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "opt_status_quo",
+        "from": "dec_expansion",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "opt_uk_depth",
+        "from": "dec_expansion",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_bafin_delay",
+        "from": "fac_bafin_complexity",
+        "origin": "ai",
+        "strength": {
+          "std": 0.11565217391304349,
+          "mean": 0.24782608695652172
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.14,
+            "strength_mean": 0.3,
+            "exists_probability": 0.8
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Greater BaFin process complexity plausibly drives more licensing delay risk.",
+            "strength_std": 0.1,
+            "strength_mean": 0.5,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.95
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.5000000000000001,
+          "pass2_adjusted": {
+            "strength_std": 0.1,
+            "strength_mean": 0.55,
+            "exists_probability": 0.8999999999999999
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "raw_magnitude"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_cash_strain",
+        "from": "fac_cash_runway",
+        "origin": "ai",
+        "strength": {
+          "std": 0.07702702702702702,
+          "mean": -0.25675675675675674
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": -0.4,
+            "exists_probability": 0.92
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Longer cash runway mechanically reduces cash and margin strain risk.",
+            "strength_std": 0.1,
+            "strength_mean": -0.4,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.95
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.10000000000000009,
+          "pass2_adjusted": {
+            "strength_std": 0.1,
+            "strength_mean": -0.35,
+            "exists_probability": 0.8999999999999999
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.92,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "out_germany_pipeline",
+        "from": "fac_competitive_window",
+        "origin": "ai",
+        "strength": {
+          "std": 0.11565217391304347,
+          "mean": 0.23130434782608694
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.14,
+            "strength_mean": 0.28,
+            "exists_probability": 0.72
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "A wider competitive window likely increases new-logo pipeline in Germany.",
+            "strength_std": 0.15,
+            "strength_mean": 0.3,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.8
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.14,
+          "pass2_adjusted": {
+            "strength_std": 0.15,
+            "strength_mean": 0.35000000000000003,
+            "exists_probability": 0.75
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.72,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "out_germany_pipeline",
+        "from": "fac_germany_direct",
+        "origin": "ai",
+        "strength": {
+          "std": 0.12391304347826085,
+          "mean": 0.4543478260869565
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.15,
+            "strength_mean": 0.55,
+            "exists_probability": 0.82
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Direct market entry effort should substantially boost Germany pipeline volumes.",
+            "strength_std": 0.15,
+            "strength_mean": 0.5,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0,
+          "pass2_adjusted": {
+            "strength_std": 0.15,
+            "strength_mean": 0.55,
+            "exists_probability": 0.85
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.82,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_bafin_delay",
+        "from": "fac_germany_direct",
+        "origin": "ai",
+        "strength": {
+          "std": 0.12391304347826086,
+          "mean": 0.49565217391304345
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.15,
+            "strength_mean": 0.6,
+            "exists_probability": 0.92
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Pursuing direct entry increases exposure to BaFin licensing delays.",
+            "strength_std": 0.1,
+            "strength_mean": 0.25,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.5999999999999999,
+          "pass2_adjusted": {
+            "strength_std": 0.1,
+            "strength_mean": 0.30000000000000004,
+            "exists_probability": 0.85
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "raw_magnitude"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.92,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_cash_strain",
+        "from": "fac_germany_direct",
+        "origin": "ai",
+        "strength": {
+          "std": 0.08986486486486488,
+          "mean": 0.28885135135135137
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.14,
+            "strength_mean": 0.45,
+            "exists_probability": 0.9
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Direct entry requires spend and hires, increasing cash-strain risk.",
+            "strength_std": 0.1,
+            "strength_mean": 0.15,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.5,
+          "pass2_adjusted": {
+            "strength_std": 0.1,
+            "strength_mean": 0.2,
+            "exists_probability": 0.85
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.9,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_localisation_overrun",
+        "from": "fac_germany_direct",
+        "origin": "ai",
+        "strength": {
+          "std": 0.18,
+          "mean": 0.5
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.18,
+            "strength_mean": 0.5,
+            "exists_probability": 0.88
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Direct entry magnifies the chance of engineering localisation overruns.",
+            "strength_std": 0.2,
+            "strength_mean": 0.6,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.3333333333333333,
+          "pass2_adjusted": {
+            "strength_std": 0.2,
+            "strength_mean": 0.65,
+            "exists_probability": 0.85
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.88,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "out_arr_growth",
+        "from": "fac_headcount_budget",
+        "origin": "ai",
+        "strength": {
+          "std": 0.09913043478260869,
+          "mean": 0.23130434782608697
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": 0.28,
+            "exists_probability": 0.8
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "More headcount capacity supports faster ARR growth trajectory.",
+            "strength_std": 0.1,
+            "strength_mean": 0.2,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.05999999999999994,
+          "pass2_adjusted": {
+            "strength_std": 0.1,
+            "strength_mean": 0.25000000000000006,
+            "exists_probability": 0.85
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_headcount_constraint",
+        "from": "fac_headcount_budget",
+        "origin": "ai",
+        "strength": {
+          "std": 0.12,
+          "mean": 0.55
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": 0.55,
+            "exists_probability": 0.88
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Higher headcount allocation reduces the risk of breaching HR constraints.",
+            "strength_std": 0.15,
+            "strength_mean": -0.7,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": true,
+          "max_divergence": 1,
+          "pass2_adjusted": {
+            "strength_std": 0.15,
+            "strength_mean": -0.6499999999999999,
+            "exists_probability": 0.85
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "sign_flip"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.88,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_cash_strain",
+        "from": "fac_localisation_cost",
+        "origin": "ai",
+        "strength": {
+          "std": 0.07702702702702702,
+          "mean": 0.16047297297297297
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": 0.25,
+            "exists_probability": 0.8
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Greater localisation engineering cost adds to cash-strain risk.",
+            "strength_std": 0.1,
+            "strength_mean": 0.15,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.09999999999999998,
+          "pass2_adjusted": {
+            "strength_std": 0.1,
+            "strength_mean": 0.2,
+            "exists_probability": 0.85
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_localisation_overrun",
+        "from": "fac_localisation_cost",
+        "origin": "ai",
+        "strength": {
+          "std": 0.15,
+          "mean": 0.35
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.15,
+            "strength_mean": 0.35,
+            "exists_probability": 0.85
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Higher localisation cost signals complexity that drives overrun risk.",
+            "strength_std": 0.15,
+            "strength_mean": 0.4,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.20000000000000018,
+          "pass2_adjusted": {
+            "strength_std": 0.15,
+            "strength_mean": 0.45000000000000007,
+            "exists_probability": 0.85
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.85,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "out_arr_growth",
+        "from": "fac_marketing_spend",
+        "origin": "ai",
+        "strength": {
+          "std": 0.08260869565217392,
+          "mean": 0.1817391304347826
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.1,
+            "strength_mean": 0.22,
+            "exists_probability": 0.78
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Increased marketing spend generally drives higher ARR growth.",
+            "strength_std": 0.1,
+            "strength_mean": 0.2,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.06000000000000011,
+          "pass2_adjusted": {
+            "strength_std": 0.1,
+            "strength_mean": 0.25000000000000006,
+            "exists_probability": 0.85
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.78,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_cash_strain",
+        "from": "fac_marketing_spend",
+        "origin": "ai",
+        "strength": {
+          "std": 0.06418918918918919,
+          "mean": 0.12837837837837837
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.1,
+            "strength_mean": 0.2,
+            "exists_probability": 0.75
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Marketing outlays add to near-term cash and margin strain.",
+            "strength_std": 0.1,
+            "strength_mean": 0.15,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.95
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0,
+          "pass2_adjusted": {
+            "strength_std": 0.1,
+            "strength_mean": 0.2,
+            "exists_probability": 0.8999999999999999
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.75,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "out_arr_growth",
+        "from": "fac_nrr",
+        "origin": "ai",
+        "strength": {
+          "std": 0.08260869565217392,
+          "mean": 0.2891304347826087
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.1,
+            "strength_mean": 0.35,
+            "exists_probability": 0.9
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Higher net revenue retention materially improves ARR growth trajectory.",
+            "strength_std": 0.1,
+            "strength_mean": 0.4,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.20000000000000018,
+          "pass2_adjusted": {
+            "strength_std": 0.1,
+            "strength_mean": 0.45000000000000007,
+            "exists_probability": 0.85
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.9,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "out_uk_expansion_revenue",
+        "from": "fac_nrr",
+        "origin": "ai",
+        "strength": {
+          "std": 0.07723577235772358,
+          "mean": 0.3475609756097561
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.1,
+            "strength_mean": 0.45,
+            "exists_probability": 0.92
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "NRR directly drives upsell and expansion revenue in the UK.",
+            "strength_std": 0.1,
+            "strength_mean": 0.6,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.4,
+          "pass2_adjusted": {
+            "strength_std": 0.1,
+            "strength_mean": 0.65,
+            "exists_probability": 0.85
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.92,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "out_germany_pipeline",
+        "from": "fac_partner_entry",
+        "origin": "ai",
+        "strength": {
+          "std": 0.148695652173913,
+          "mean": 0.2643478260869565
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.18,
+            "strength_mean": 0.32,
+            "exists_probability": 0.65
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Partnering offers some pipeline uplift, but less than direct entry.",
+            "strength_std": 0.15,
+            "strength_mean": 0.2,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.8
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.3333333333333333,
+          "pass2_adjusted": {
+            "strength_std": 0.15,
+            "strength_mean": 0.25000000000000006,
+            "exists_probability": 0.75
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "existence_boundary_crossing"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.65,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_bafin_delay",
+        "from": "fac_partner_entry",
+        "origin": "ai",
+        "strength": {
+          "std": 0.11565217391304349,
+          "mean": 0.20652173913043478
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.14,
+            "strength_mean": 0.25,
+            "exists_probability": 0.72
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Using a local partner likely mitigates some BaFin delay risk.",
+            "strength_std": 0.1,
+            "strength_mean": -0.25,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.85
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": true,
+          "max_divergence": 1,
+          "pass2_adjusted": {
+            "strength_std": 0.1,
+            "strength_mean": -0.19999999999999996,
+            "exists_probability": 0.7999999999999999
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "sign_flip"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.72,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_cash_strain",
+        "from": "fac_partner_entry",
+        "origin": "ai",
+        "strength": {
+          "std": 0.06418918918918919,
+          "mean": 0.11554054054054054
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.1,
+            "strength_mean": 0.18,
+            "exists_probability": 0.7
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Partner entry spreads cost, reducing cash-strain risk slightly.",
+            "strength_std": 0.1,
+            "strength_mean": -0.15,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.8
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": true,
+          "max_divergence": 1,
+          "pass2_adjusted": {
+            "strength_std": 0.1,
+            "strength_mean": -0.09999999999999996,
+            "exists_probability": 0.75
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "sign_flip"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.7,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "out_arr_growth",
+        "from": "fac_uk_depth",
+        "origin": "ai",
+        "strength": {
+          "std": 0.09913043478260869,
+          "mean": 0.24782608695652172
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": 0.3,
+            "exists_probability": 0.8
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Doubling down on UK provides incremental ARR growth but is saturation-limited.",
+            "strength_std": 0.15,
+            "strength_mean": 0.2,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.85
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.09999999999999987,
+          "pass2_adjusted": {
+            "strength_std": 0.15,
+            "strength_mean": 0.25000000000000006,
+            "exists_probability": 0.7999999999999999
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "out_uk_expansion_revenue",
+        "from": "fac_uk_depth",
+        "origin": "ai",
+        "strength": {
+          "std": 0.10813008130081302,
+          "mean": 0.37073170731707317
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.14,
+            "strength_mean": 0.48,
+            "exists_probability": 0.85
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Increased UK investment yields more upsell revenue within remaining market.",
+            "strength_std": 0.15,
+            "strength_mean": 0.2,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.85
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.45999999999999985,
+          "pass2_adjusted": {
+            "strength_std": 0.15,
+            "strength_mean": 0.25000000000000006,
+            "exists_probability": 0.7999999999999999
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "raw_magnitude"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.85,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "out_uk_expansion_revenue",
+        "from": "fac_uk_saturation",
+        "origin": "ai",
+        "strength": {
+          "std": 0.10813008130081302,
+          "mean": -0.23170731707317072
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.14,
+            "strength_mean": -0.3,
+            "exists_probability": 0.78
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "High UK market saturation dampens incremental expansion revenue.",
+            "strength_std": 0.15,
+            "strength_mean": -0.2,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.3333333333333333,
+          "pass2_adjusted": {
+            "strength_std": 0.15,
+            "strength_mean": -0.14999999999999997,
+            "exists_probability": 0.85
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.78,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_germany_direct",
+        "from": "opt_germany_direct",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_headcount_budget",
+        "from": "opt_germany_direct",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_marketing_spend",
+        "from": "opt_germany_direct",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_headcount_budget",
+        "from": "opt_partner_germany",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_marketing_spend",
+        "from": "opt_partner_germany",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_partner_entry",
+        "from": "opt_partner_germany",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_germany_direct",
+        "from": "opt_status_quo",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_headcount_budget",
+        "from": "opt_status_quo",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_marketing_spend",
+        "from": "opt_status_quo",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_partner_entry",
+        "from": "opt_status_quo",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_uk_depth",
+        "from": "opt_status_quo",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_headcount_budget",
+        "from": "opt_uk_depth",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_marketing_spend",
+        "from": "opt_uk_depth",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_uk_depth",
+        "from": "opt_uk_depth",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "goal_arr",
+        "from": "out_arr_growth",
+        "origin": "ai",
+        "strength": {
+          "std": 0.1,
+          "mean": 0.55
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.1,
+            "strength_mean": 0.55,
+            "exists_probability": 0.95
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "ARR growth trajectory directly drives achievement of the ARR goal.",
+            "strength_std": 0.1,
+            "strength_mean": 0.23809523809523808,
+            "lint_corrected": true,
+            "needs_user_input": true,
+            "exists_probability": 0.95
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.5238095238095238,
+          "pass2_adjusted": {
+            "strength_std": 0.1,
+            "strength_mean": 0.2880952380952381,
+            "exists_probability": 0.8999999999999999
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [
+            "existence_boundary_crossing"
+          ],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": 0.23809523809523808,
+              "before": 0.5,
+              "edge_key": "out_arr_growth->goal_arr"
+            }
+          ]
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.95,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "goal_arr",
+        "from": "out_germany_pipeline",
+        "origin": "ai",
+        "strength": {
+          "std": 0.12,
+          "mean": 0.45
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": 0.45,
+            "exists_probability": 0.88
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "Germany pipeline conversion contributes to hitting overall ARR target.",
+            "strength_std": 0.1,
+            "strength_mean": 0.14285714285714285,
+            "lint_corrected": true,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.5142857142857142,
+          "pass2_adjusted": {
+            "strength_std": 0.1,
+            "strength_mean": 0.1928571428571429,
+            "exists_probability": 0.85
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": 0.14285714285714285,
+              "before": 0.3,
+              "edge_key": "out_germany_pipeline->goal_arr"
+            }
+          ]
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.88,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "goal_arr",
+        "from": "out_uk_expansion_revenue",
+        "origin": "ai",
+        "strength": {
+          "std": 0.1,
+          "mean": 0.4
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.1,
+            "strength_mean": 0.4,
+            "exists_probability": 0.92
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "UK upsell revenue feeds directly into the ARR goal.",
+            "strength_std": 0.1,
+            "strength_mean": 0.14285714285714285,
+            "lint_corrected": true,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.41428571428571426,
+          "pass2_adjusted": {
+            "strength_std": 0.1,
+            "strength_mean": 0.1928571428571429,
+            "exists_probability": 0.85
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": 0.14285714285714285,
+              "before": 0.3,
+              "edge_key": "out_uk_expansion_revenue->goal_arr"
+            }
+          ]
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.92,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "goal_arr",
+        "from": "risk_bafin_delay",
+        "origin": "ai",
+        "strength": {
+          "std": 0.12,
+          "mean": -0.32
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": -0.32,
+            "exists_probability": 0.85
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "BaFin delays hinder reaching ARR targets by shifting timing.",
+            "strength_std": 0.0761904761904762,
+            "strength_mean": -0.09523809523809523,
+            "lint_corrected": true,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.6666666666666666,
+          "pass2_adjusted": {
+            "strength_std": 0.0761904761904762,
+            "strength_mean": -0.0452380952380952,
+            "exists_probability": 0.85
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [
+            "strength_band_change",
+            "confidence_band_change"
+          ],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": -0.09523809523809523,
+              "before": -0.2,
+              "edge_key": "risk_bafin_delay->goal_arr"
+            },
+            {
+              "code": "LINT_STD_CLAMPED",
+              "after": 0.0761904761904762,
+              "before": 0.1,
+              "edge_key": "risk_bafin_delay->goal_arr"
+            }
+          ]
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.85,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "goal_arr",
+        "from": "risk_cash_strain",
+        "origin": "ai",
+        "strength": {
+          "std": 0.12,
+          "mean": -0.35
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": -0.35,
+            "exists_probability": 0.9
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "Cash and margin strain can force cutbacks that impede ARR growth.",
+            "strength_std": 0.1,
+            "strength_mean": -0.14285714285714285,
+            "lint_corrected": true,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.5142857142857143,
+          "pass2_adjusted": {
+            "strength_std": 0.1,
+            "strength_mean": -0.09285714285714282,
+            "exists_probability": 0.85
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [
+            "raw_magnitude"
+          ],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": -0.14285714285714285,
+              "before": -0.3,
+              "edge_key": "risk_cash_strain->goal_arr"
+            }
+          ]
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.9,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "goal_arr",
+        "from": "risk_headcount_constraint",
+        "origin": "ai",
+        "strength": {
+          "std": 0.1,
+          "mean": -0.22
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.1,
+            "strength_mean": -0.22,
+            "exists_probability": 0.82
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "Breached headcount constraints limit capacity to grow ARR.",
+            "strength_std": 0.1,
+            "strength_mean": -0.11904761904761904,
+            "lint_corrected": true,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.301904761904762,
+          "pass2_adjusted": {
+            "strength_std": 0.1,
+            "strength_mean": -0.06904761904761901,
+            "exists_probability": 0.85
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": -0.11904761904761904,
+              "before": -0.25,
+              "edge_key": "risk_headcount_constraint->goal_arr"
+            }
+          ]
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.82,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "goal_arr",
+        "from": "risk_localisation_overrun",
+        "origin": "ai",
+        "strength": {
+          "std": 0.12,
+          "mean": -0.28
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": -0.28,
+            "exists_probability": 0.8
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "Engineering overruns delay revenue recognition, hurting ARR targets.",
+            "strength_std": 0.1,
+            "strength_mean": -0.11904761904761904,
+            "lint_corrected": true,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.421904761904762,
+          "pass2_adjusted": {
+            "strength_std": 0.1,
+            "strength_mean": -0.06904761904761901,
+            "exists_probability": 0.85
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": 0.05000000000000003,
+            "exists_probability_offset": -0.050000000000000044
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [
+            "raw_magnitude"
+          ],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": -0.11904761904761904,
+              "before": -0.25,
+              "edge_key": "risk_localisation_overrun->goal_arr"
+            }
+          ]
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "dec_expansion",
+        "kind": "decision",
+        "label": "Geographic Expansion Strategy",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "fac_bafin_complexity",
+        "kind": "factor",
+        "label": "BaFin Licensing Complexity",
+        "prior": {
+          "range_max": 1,
+          "range_min": 0.5,
+          "distribution": "uniform"
+        },
+        "category": "external",
+        "provenance": "ai_inferred",
+        "display_value": "0.5 to 1"
+      },
+      {
+        "id": "fac_cash_runway",
+        "kind": "factor",
+        "label": "Cash Runway",
+        "prior": {
+          "range_max": 0.9299999999999999,
+          "range_min": 0.31,
+          "distribution": "uniform"
+        },
+        "category": "external",
+        "provenance": "from_brief",
+        "display_value": "0.31 to 0.93",
+        "extractionType": "explicit"
+      },
+      {
+        "id": "fac_competitive_window",
+        "kind": "factor",
+        "label": "Germany Competitive Window",
+        "prior": {
+          "range_max": 0.8,
+          "range_min": 0.3,
+          "distribution": "uniform"
+        },
+        "category": "external",
+        "provenance": "ai_inferred",
+        "display_value": "0.3 to 0.8"
+      },
+      {
+        "id": "fac_germany_direct",
+        "kind": "factor",
+        "label": "Direct Germany Market Entry",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "encoding_map": {
+          "0": "Not pursuing direct Germany entry",
+          "1": "Pursuing direct Germany entry"
+        },
+        "display_value": "Low (0)",
+        "observed_state": {
+          "value": 0,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "fac_headcount_budget",
+        "kind": "factor",
+        "label": "New Headcount Allocation",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "display_value": "1.6 £m",
+        "observed_state": {
+          "cap": 8,
+          "unit": "£m",
+          "value": 0.2,
+          "source": "cee_inference",
+          "raw_value": 1.6,
+          "factor_type": "cost",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "fac_localisation_cost",
+        "kind": "factor",
+        "label": "Engineering Localisation Cost",
+        "prior": {
+          "range_max": 0.75,
+          "range_min": 0.25,
+          "distribution": "uniform"
+        },
+        "category": "external",
+        "provenance": "ai_inferred",
+        "display_value": "0.25 to 0.75",
+        "extractionType": "inferred"
+      },
+      {
+        "id": "fac_marketing_spend",
+        "kind": "factor",
+        "label": "Marketing Spend",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "display_value": "0.3 £m",
+        "observed_state": {
+          "cap": 1.5,
+          "unit": "£m",
+          "value": 0.2,
+          "source": "cee_inference",
+          "raw_value": 0.3,
+          "factor_type": "cost",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "fac_nrr",
+        "kind": "factor",
+        "label": "Net Revenue Retention",
+        "prior": {
+          "range_max": 1,
+          "range_min": 0,
+          "distribution": "uniform"
+        },
+        "category": "external",
+        "provenance": "from_brief",
+        "extractionType": "explicit"
+      },
+      {
+        "id": "fac_partner_entry",
+        "kind": "factor",
+        "label": "Germany Partner Channel Activation",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "encoding_map": {
+          "0": "No partner channel",
+          "1": "Partner channel activated"
+        },
+        "display_value": "Low (0)",
+        "observed_state": {
+          "value": 0,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "fac_uk_depth",
+        "kind": "factor",
+        "label": "UK Market Depth Investment",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "encoding_map": {
+          "0": "No incremental UK depth investment",
+          "1": "Full UK depth investment"
+        },
+        "display_value": "Low (0)",
+        "observed_state": {
+          "value": 0,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "fac_uk_saturation",
+        "kind": "factor",
+        "label": "UK Market Saturation",
+        "prior": {
+          "range_max": 1,
+          "range_min": 0.35,
+          "distribution": "uniform"
+        },
+        "category": "external",
+        "provenance": "ai_inferred",
+        "display_value": "0.35 to 1",
+        "extractionType": "inferred"
+      },
+      {
+        "id": "goal_arr",
+        "kind": "goal",
+        "label": "Reach £20m ARR by End of FY28",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "opt_germany_direct",
+        "kind": "option",
+        "label": "Enter Germany Directly in 2027",
+        "provenance": "ai_inferred",
+        "is_baseline": false,
+        "interventions": {
+          "fac_uk_depth": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_uk_depth",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_partner_entry": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_partner_entry",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_germany_direct": {
+            "value": 1,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_germany_direct",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_marketing_spend": {
+            "unit": "£m",
+            "value": 0.8,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_marketing_spend",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_headcount_budget": {
+            "unit": "£m",
+            "value": 0.75,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_headcount_budget",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      },
+      {
+        "id": "opt_partner_germany",
+        "kind": "option",
+        "label": "Partner Entry into Germany via Local Player",
+        "provenance": "ai_inferred",
+        "is_baseline": false,
+        "interventions": {
+          "fac_uk_depth": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_uk_depth",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_partner_entry": {
+            "value": 1,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_partner_entry",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_germany_direct": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_germany_direct",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_marketing_spend": {
+            "unit": "£m",
+            "value": 0.4,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_marketing_spend",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_headcount_budget": {
+            "unit": "£m",
+            "value": 0.25,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_headcount_budget",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      },
+      {
+        "id": "opt_status_quo",
+        "kind": "option",
+        "label": "Expand Within Existing Base Only (Status Quo)",
+        "provenance": "ai_inferred",
+        "is_baseline": true,
+        "interventions": {
+          "fac_uk_depth": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_uk_depth",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_partner_entry": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_partner_entry",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_germany_direct": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_germany_direct",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_marketing_spend": {
+            "unit": "£m",
+            "value": 0.2,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_marketing_spend",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_headcount_budget": {
+            "unit": "£m",
+            "value": 0.2,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_headcount_budget",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      },
+      {
+        "id": "opt_uk_depth",
+        "kind": "option",
+        "label": "Double Down on UK Expansion",
+        "provenance": "ai_inferred",
+        "is_baseline": false,
+        "interventions": {
+          "fac_uk_depth": {
+            "value": 1,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_uk_depth",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_partner_entry": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_partner_entry",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_germany_direct": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_germany_direct",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_marketing_spend": {
+            "unit": "£m",
+            "value": 0.6,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_marketing_spend",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_headcount_budget": {
+            "unit": "£m",
+            "value": 0.5,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_headcount_budget",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      },
+      {
+        "id": "out_arr_growth",
+        "kind": "outcome",
+        "label": "ARR Growth Trajectory",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "out_germany_pipeline",
+        "kind": "outcome",
+        "label": "Germany New Logo Pipeline",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "out_uk_expansion_revenue",
+        "kind": "outcome",
+        "label": "UK Expansion and Upsell Revenue",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "risk_bafin_delay",
+        "kind": "risk",
+        "label": "BaFin Licensing Delay",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "risk_cash_strain",
+        "kind": "risk",
+        "label": "Cash and Margin Strain",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "risk_headcount_constraint",
+        "kind": "risk",
+        "label": "Headcount Constraint Breach Risk",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "risk_localisation_overrun",
+        "kind": "risk",
+        "label": "Engineering Localisation Overrun",
+        "provenance": "ai_inferred"
+      }
+    ],
+    "trace": {
+      "engine": {
+        "model": "claude-sonnet-4-6",
+        "version": "1.12.0",
+        "provider": "anthropic"
+      },
+      "pipeline": {
+        "enrich": {
+          "source": "unified_pipeline",
+          "called_count": 1,
+          "factors_added": 0,
+          "extraction_mode": "v4_complete_skip",
+          "factors_skipped": 0,
+          "factors_enhanced": 0
+        },
+        "repair": {
+          "edge_restore": {
+            "restoredCount": 0
+          },
+          "deterministic_sweep": {
+            "sweep_ran": true,
+            "status_quo": {
+              "fixed": false,
+              "marked_droppable": false
+            },
+            "edge_format": "V1_FLAT",
+            "graph_delta": {
+              "edges_after": 46,
+              "nodes_after": 24,
+              "edges_before": 46,
+              "nodes_before": 24
+            },
+            "rescue_score": 36,
+            "repairs_count": 15,
+            "sweep_version": "v3",
+            "bucket_summary": {
+              "a": 0,
+              "b": 9,
+              "c": 0
+            },
+            "violations_after": 0,
+            "llm_repair_needed": false,
+            "violations_before": 9,
+            "factor_goal_splits": 0,
+            "unreachable_factors": {
+              "reclassified": [
+                "fac_bafin_complexity",
+                "fac_cash_runway",
+                "fac_competitive_window",
+                "fac_localisation_cost",
+                "fac_nrr",
+                "fac_uk_saturation"
+              ],
+              "marked_droppable": []
+            },
+            "complexity_cap_pruned": 0,
+            "goal_threshold_stripped": 0,
+            "disconnected_options_after": [],
+            "disconnected_options_before": [],
+            "option_goal_shortcuts_removed": 0,
+            "option_goal_shortcuts_skipped": 0,
+            "option_risk_shortcuts_removed": 0,
+            "option_risk_shortcuts_skipped": 0,
+            "option_goal_shortcuts_rerouted": 0,
+            "option_risk_shortcuts_rerouted": 0,
+            "disconnected_observables_pruned": [],
+            "goal_threshold_possibly_inferred": 0,
+            "option_outcome_shortcuts_removed": 0,
+            "option_outcome_shortcuts_skipped": 0,
+            "remaining_forbidden_edges_removed": 0
+          },
+          "deterministic_enforcement": {
+            "ran": true,
+            "blocked": false,
+            "total_repairs": 5,
+            "nodes_rescaled": 5,
+            "bridge_chains_removed": 0,
+            "bridge_goal_edges_added": 0,
+            "edges_skipped_non_finite": 0,
+            "post_validation_error_count": 0,
+            "post_validation_warning_count": 0
+          }
+        },
+        "status": "success",
+        "llm_raw": {
+          "text": "{\"nodes\":[{\"id\":\"dec_expansion\",\"kind\":\"decision\",\"label\":\"Geographic Expansion Strategy\"},{\"id\":\"opt_germany_direct\",\"kind\":\"option\",\"label\":\"Enter Germany Directly in 2027\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_germany_direct\",\"value\":1},{\"factor_id\":\"fac_uk_depth\",\"value\":0},{\"factor_id\":\"fac_partner_entry\",\"value\":0},{\"factor_id\":\"fac_headcount_budget\",\"value\":0.75},{\"factor_id\":\"fac_marketing_spend\",\"value\":0.8}]},\"is_baseline\":false},{\"id\":\"opt_uk_depth\",\"kind\":\"option\",\"label\":\"Double Down on UK Expansion\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_germany_direct\",\"value\":0},{\"factor_id\":\"fac_uk_depth\",\"value\":1},{\"factor_id\":\"fac_partner_entry\",\"value\":0},{\"factor_id\":\"fac_headcount_budget\",\"value\":0.5},{\"factor_id\":\"fac_marketing_spend\",\"value\":0.6}]},\"is_baseline\":false},{\"id\":\"opt_partner_germany\",\"kind\":\"option\",\"label\":\"Partner Entry into Germany via Local Player\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_germany_direct\",\"value\":0},{\"factor_id\":\"fac_uk_depth\",\"value\":0},{\"factor_id\":\"fac_partner_entry\",\"value\":1},{\"factor_id\":\"fac_headcount_budget\",\"value\":0.25},{\"factor_id\":\"fac_marketing_spend\",\"value\":0.4}]},\"is_baseline\":false},{\"id\":\"opt_status_quo\",\"kind\":\"option\",\"label\":\"Expand Within Existing Base Only (Status Quo)\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_germany_direct\",\"value\":0},{\"factor_id\":\"fac_uk_depth\",\"value\":0},{\"factor_id\":\"fac_partner_entry\",\"value\":0},{\"factor_id\":\"fac_headcount_budget\",\"value\":0.2},{\"factor_id\":\"fac_marketing_spend\",\"value\":0.2}]},\"is_baseline\":true},{\"id\":\"fac_germany_direct\",\"kind\":\"factor\",\"label\":\"Direct Germany Market Entry\",\"category\":\"controllable\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"encoding_map\":\"{\\\"0\\\": \\\"Not pursuing direct Germany entry\\\", \\\"1\\\": \\\"Pursuing direct Germany entry\\\"}\",\"is_baseline\":false},\"prior\":null},{\"id\":\"fac_uk_depth\",\"kind\":\"factor\",\"label\":\"UK Market Depth Investment\",\"category\":\"controllable\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"encoding_map\":\"{\\\"0\\\": \\\"No incremental UK depth investment\\\", \\\"1\\\": \\\"Full UK depth investment\\\"}\",\"is_baseline\":false},\"prior\":null},{\"id\":\"fac_partner_entry\",\"kind\":\"factor\",\"label\":\"Germany Partner Channel Activation\",\"category\":\"controllable\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"encoding_map\":\"{\\\"0\\\": \\\"No partner channel\\\", \\\"1\\\": \\\"Partner channel activated\\\"}\",\"is_baseline\":false},\"prior\":null},{\"id\":\"fac_headcount_budget\",\"kind\":\"factor\",\"label\":\"New Headcount Allocation\",\"category\":\"controllable\",\"data\":{\"value\":0.2,\"extractionType\":\"inferred\",\"factor_type\":\"cost\",\"raw_value\":1.6,\"unit\":\"£m\",\"cap\":8,\"is_baseline\":false},\"prior\":null},{\"id\":\"fac_marketing_spend\",\"kind\":\"factor\",\"label\":\"Marketing Spend\",\"category\":\"controllable\",\"data\":{\"value\":0.2,\"extractionType\":\"inferred\",\"factor_type\":\"cost\",\"raw_value\":0.3,\"unit\":\"£m\",\"cap\":1.5,\"is_baseline\":false},\"prior\":null},{\"id\":\"fac_localisation_cost\",\"kind\":\"factor\",\"label\":\"Engineering Localisation Cost\",\"category\":\"observable\",\"data\":{\"value\":0.5,\"extractionType\":\"inferred\",\"factor_type\":\"cost\",\"raw_value\":0.5,\"unit\":\"scale\",\"cap\":1.0,\"is_baseline\":false},\"prior\":null},{\"id\":\"fac_cash_runway\",\"kind\":\"factor\",\"label\":\"Cash Runway\",\"category\":\"observable\",\"data\":{\"value\":0.62,\"extractionType\":\"explicit\",\"factor_type\":\"cost\",\"raw_value\":3.1,\"unit\":\"£m\",\"cap\":5.0,\"is_baseline\":false},\"prior\":null},{\"id\":\"fac_nrr\",\"kind\":\"factor\",\"label\":\"Net Revenue Retention\",\"category\":\"observable\",\"data\":{\"value\":1.12,\"extractionType\":\"explicit\",\"factor_type\":\"revenue\",\"raw_value\":112,\"unit\":\"%\",\"cap\":130,\"is_baseline\":false},\"prior\":null},{\"id\":\"fac_uk_saturation\",\"kind\":\"factor\",\"label\":\"UK Market Saturation\",\"category\":\"observable\",\"data\":{\"value\":0.7,\"extractionType\":\"inferred\",\"factor_type\":\"demand\",\"raw_value\":70,\"unit\":\"%\",\"cap\":100,\"is_baseline\":false},\"prior\":null},{\"id\":\"fac_competitive_window\",\"kind\":\"factor\",\"label\":\"Germany Competitive Window\",\"category\":\"external\",\"prior\":{\"distribution\":\"uniform\",\"range_min\":0.3,\"range_max\":0.8}},{\"id\":\"fac_bafin_complexity\",\"kind\":\"factor\",\"label\":\"BaFin Licensing Complexity\",\"category\":\"external\",\"prior\":{\"distribution\":\"uniform\",\"range_min\":0.5,\"range_max\":1.0}},{\"id\":\"out_arr_growth\",\"kind\":\"outcome\",\"label\":\"ARR Growth Trajectory\"},{\"id\":\"out_germany_pipeline\",\"kind\":\"outcome\",\"label\":\"Germany New Logo Pipeline\"},{\"id\":\"out_uk_expansion_revenue\",\"kind\":\"outcome\",\"label\":\"UK Expansion and Upsell Revenue\"},{\"id\":\"risk_cash_strain\",\"kind\":\"risk\",\"label\":\"Cash and Margin Strain\"},{\"id\":\"risk_headcount_constraint\",\"kind\":\"risk\",\"label\":\"Headcount Constraint Breach Risk\"},{\"id\":\"risk_localisation_overrun\",\"kind\":\"risk\",\"label\":\"Engineering Localisation Overrun\"},{\"id\":\"risk_bafin_delay\",\"kind\":\"risk\",\"label\":\"BaFin Licensing Delay\"},{\"id\":\"goal_arr\",\"kind\":\"goal\",\"label\":\"Reach £20m ARR by End of FY28\",\"data\":null,\"prior\":null,\"is_baseline\":false,\"intercept\":null}],\"edges\":[{\"from\":\"dec_expansion\",\"to\":\"opt_germany_direct\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"dec_expansion\",\"to\":\"opt_uk_depth\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"dec_expansion\",\"to\":\"opt_partner_germany\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"dec_expansion\",\"to\":\"opt_status_quo\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_germany_direct\",\"to\":\"fac_germany_direct\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_germany_direct\",\"to\":\"fac_headcount_budget\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_germany_direct\",\"to\":\"fac_marketing_spend\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_uk_depth\",\"to\":\"fac_uk_depth\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_uk_depth\",\"to\":\"fac_headcount_budget\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_uk_depth\",\"to\":\"fac_marketing_spend\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_partner_germany\",\"to\":\"fac_partner_entry\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_partner_germany\",\"to\":\"fac_headcount_budget\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_partner_germany\",\"to\":\"fac_marketing_spend\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_status_quo\",\"to\":\"fac_germany_direct\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_status_quo\",\"to\":\"fac_uk_depth\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_status_quo\",\"to\":\"fac_partner_entry\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_status_quo\",\"to\":\"fac_headcount_budget\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_status_quo\",\"to\":\"fac_marketing_spend\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"fac_germany_direct\",\"to\":\"out_germany_pipeline\",\"strength\":{\"mean\":0.55,\"std\":0.15},\"exists_probability\":0.82,\"effect_direction\":\"positive\"},{\"from\":\"fac_germany_direct\",\"to\":\"risk_cash_strain\",\"strength\":{\"mean\":0.45,\"std\":0.14},\"exists_probability\":0.90,\"effect_direction\":\"positive\"},{\"from\":\"fac_germany_direct\",\"to\":\"risk_localisation_overrun\",\"strength\":{\"mean\":0.50,\"std\":0.18},\"exists_probability\":0.88,\"effect_direction\":\"positive\"},{\"from\":\"fac_germany_direct\",\"to\":\"risk_bafin_delay\",\"strength\":{\"mean\":0.60,\"std\":0.15},\"exists_probability\":0.92,\"effect_direction\":\"positive\"},{\"from\":\"fac_uk_depth\",\"to\":\"out_uk_expansion_revenue\",\"strength\":{\"mean\":0.48,\"std\":0.14},\"exists_probability\":0.85,\"effect_direction\":\"positive\"},{\"from\":\"fac_uk_depth\",\"to\":\"out_arr_growth\",\"strength\":{\"mean\":0.30,\"std\":0.12},\"exists_probability\":0.80,\"effect_direction\":\"positive\"},{\"from\":\"fac_partner_entry\",\"to\":\"out_germany_pipeline\",\"strength\":{\"mean\":0.32,\"std\":0.18},\"exists_probability\":0.65,\"effect_direction\":\"positive\"},{\"from\":\"fac_partner_entry\",\"to\":\"risk_cash_strain\",\"strength\":{\"mean\":0.18,\"std\":0.10},\"exists_probability\":0.70,\"effect_direction\":\"positive\"},{\"from\":\"fac_partner_entry\",\"to\":\"risk_bafin_delay\",\"strength\":{\"mean\":0.25,\"std\":0.14},\"exists_probability\":0.72,\"effect_direction\":\"positive\"},{\"from\":\"fac_headcount_budget\",\"to\":\"risk_headcount_constraint\",\"strength\":{\"mean\":0.55,\"std\":0.12},\"exists_probability\":0.88,\"effect_direction\":\"positive\"},{\"from\":\"fac_headcount_budget\",\"to\":\"out_arr_growth\",\"strength\":{\"mean\":0.28,\"std\":0.12},\"exists_probability\":0.80,\"effect_direction\":\"positive\"},{\"from\":\"fac_marketing_spend\",\"to\":\"out_arr_growth\",\"strength\":{\"mean\":0.22,\"std\":0.10},\"exists_probability\":0.78,\"effect_direction\":\"positive\"},{\"from\":\"fac_marketing_spend\",\"to\":\"risk_cash_strain\",\"strength\":{\"mean\":0.20,\"std\":0.10},\"exists_probability\":0.75,\"effect_direction\":\"positive\"},{\"from\":\"fac_localisation_cost\",\"to\":\"risk_localisation_overrun\",\"strength\":{\"mean\":0.35,\"std\":0.15},\"exists_probability\":0.85,\"effect_direction\":\"positive\"},{\"from\":\"fac_localisation_cost\",\"to\":\"risk_cash_strain\",\"strength\":{\"mean\":0.25,\"std\":0.12},\"exists_probability\":0.80,\"effect_direction\":\"positive\"},{\"from\":\"fac_cash_runway\",\"to\":\"risk_cash_strain\",\"strength\":{\"mean\":-0.40,\"std\":0.12},\"exists_probability\":0.92,\"effect_direction\":\"negative\"},{\"from\":\"fac_nrr\",\"to\":\"out_uk_expansion_revenue\",\"strength\":{\"mean\":0.45,\"std\":0.10},\"exists_probability\":0.92,\"effect_direction\":\"positive\"},{\"from\":\"fac_nrr\",\"to\":\"out_arr_growth\",\"strength\":{\"mean\":0.35,\"std\":0.10},\"exists_probability\":0.90,\"effect_direction\":\"positive\"},{\"from\":\"fac_uk_saturation\",\"to\":\"out_uk_expansion_revenue\",\"strength\":{\"mean\":-0.30,\"std\":0.14},\"exists_probability\":0.78,\"effect_direction\":\"negative\"},{\"from\":\"fac_competitive_window\",\"to\":\"out_germany_pipeline\",\"strength\":{\"mean\":0.28,\"std\":0.14},\"exists_probability\":0.72,\"effect_direction\":\"positive\"},{\"from\":\"fac_bafin_complexity\",\"to\":\"risk_bafin_delay\",\"strength\":{\"mean\":0.30,\"std\":0.14},\"exists_probability\":0.80,\"effect_direction\":\"positive\"},{\"from\":\"out_arr_growth\",\"to\":\"goal_arr\",\"strength\":{\"mean\":0.55,\"std\":0.10},\"exists_probability\":0.95,\"effect_direction\":\"positive\"},{\"from\":\"out_germany_pipeline\",\"to\":\"goal_arr\",\"strength\":{\"mean\":0.45,\"std\":0.12},\"exists_probability\":0.88,\"effect_direction\":\"positive\"},{\"from\":\"out_uk_expansion_revenue\",\"to\":\"goal_arr\",\"strength\":{\"mean\":0.40,\"std\":0.10},\"exists_probability\":0.92,\"effect_direction\":\"positive\"},{\"from\":\"risk_cash_strain\",\"to\":\"goal_arr\",\"strength\":{\"mean\":-0.35,\"std\":0.12},\"exists_probability\":0.90,\"effect_direction\":\"negative\"},{\"from\":\"risk_headcount_constraint\",\"to\":\"goal_arr\",\"strength\":{\"mean\":-0.22,\"std\":0.10},\"exists_probability\":0.82,\"effect_direction\":\"negative\"},{\"from\":\"risk_localisation_overrun\",\"to\":\"goal_arr\",\"strength\":{\"mean\":-0.28,\"std\":0.12},\"exists_probability\":0.80,\"effect_direction\":\"negative\"},{\"from\":\"risk_bafin_delay\",\"to\":\"goal_arr\",\"strength\":{\"mean\":-0.32,\"std\":0.12},\"exists_probability\":0.85,\"effect_direction\":\"negative\"}],\"goal_constraints\":[{\"constraint_id\":\"gc_gross_margin\",\"node_id\":\"risk_cash_strain\",\"operator\":\"<=\",\"value\":0.5,\"label\":\"Gross margin must not drop below 78%\",\"unit\":\"scale\",\"source_quote\":\"without dropping gross margin below 78%\",\"confidence\":0.85,\"provenance\":\"explicit\"},{\"constraint_id\":\"gc_headcount\",\"node_id\":\"risk_headcount_constraint\",\"operator\":\"<=\",\"value\":0.5,\"label\":\"No more than 8 new hires total next year\",\"unit\":\"headcount\",\"source_quote\":\"cannot hire more than 8 people total next year\",\"confidence\":1.0,\"provenance\":\"explicit\"},{\"constraint_id\":\"gc_marketing\",\"node_id\":\"fac_marketing_spend\",\"operator\":\"<=\",\"value\":1.0,\"label\":\"Marketing spend capped at £1.5m\",\"unit\":\"£m\",\"source_quote\":\"marketing spend is capped at £1.5m\",\"confidence\":1.0,\"provenance\":\"explicit\"}]}",
+          "truncated": true,
+          "char_count": 12644,
+          "output_hash": "2f5972c85ab770649dc3526f294b3c91887e33ad497b3075f6041d0bf87000a7",
+          "output_preview": "{\"nodes\":[{\"id\":\"dec_expansion\",\"kind\":\"decision\",\"label\":\"Geographic Expansion Strategy\"},{\"id\":\"opt_germany_direct\",\"kind\":\"option\",\"label\":\"Enter Germany Directly in 2027\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_germany_direct\",\"value\":1},{\"factor_id\":\"fac_uk_depth\",\"value\":0},{\"factor_id\":\"fac_partner_entry\",\"value\":0},{\"factor_id\":\"fac_headcount_budget\",\"value\":0.75},{\"factor_id\":\"fac_marketing_spend\",\"value\":0.8}]},\"is_baseline\":false},{\"id\":\"opt_uk_depth\",\"kind\":\"option\",\"label\":\"Double Down on UK Expansion\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_germany_direct\",\"value\":0},{\"factor_id\":\"fac_uk_depth\",\"value\":1},{\"factor_id\":\"fac_partner_entry\",\"value\":0},{\"factor_id\":\"fac_headcount_budget\",\"value\":0.5},{\"factor_id\":\"fac_marketing_spend\",\"value\":0.6}]},\"is_baseline\":false},{\"id\":\"opt_partner_germany\",\"kind\":\"option\",\"label\":\"Partner Entry into Germany via Local Player\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_germany_direct\",\"value\":0},{\"factor_id\":\"fac_uk_depth\",\"value\":0},{\"factor_id\":\"fac_partner_entry\",\"value\":1},{\"factor_id\":\"fac_headcount_budget\",\"value\":0.25},{\"factor_id\":\"fac_marketing_spend\",\"value\":0.4}]},\"is_baseline\":false},{\"id\":\"opt_status_quo\",\"kind\":\"option\",\"label\":\"Expand Within Existing Base Only (Status Quo)\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_germany_direct\",\"value\":0},{\"factor_id\":\"fac_uk_depth\",\"value\":0},{\"factor_id\":\"fac_partner_entry\",\"value\":0},{\"factor_id\":\"fac_headcount_budget\",\"value\":0.2},{\"factor_id\":\"fac_marketing_spend\",\"value\":0.2}]},\"is_baseline\":true},{\"id\":\"fac_germany_direct\",\"kind\":\"factor\",\"label\":\"Direct Germany Market Entry\",\"category\":\"controllable\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"encoding_map\":\"{\\\"0\\\": \\\"Not pursuing direct Ger",
+          "output_edge_count": 46,
+          "output_node_count": 24,
+          "full_output_available": true
+        },
+        "final_graph": {
+          "edge_count": 46,
+          "node_count": 24,
+          "node_kinds": [
+            "decision",
+            "factor",
+            "goal",
+            "option",
+            "outcome",
+            "risk"
+          ]
+        },
+        "llm_quality": {
+          "risk_coefficient_corrections": 0
+        },
+        "llm_metadata": {
+          "seed": 17,
+          "model": "claude-sonnet-4-6",
+          "streamed": true,
+          "max_tokens": 8491,
+          "duration_ms": 45991,
+          "instance_id": "f67dc9b4",
+          "prompt_hash": "152998b447819c2e9e797b1727f8e05b34480486dca6f672a5d2839facd2353f",
+          "temperature": 0,
+          "token_usage": {
+            "total_tokens": 4741,
+            "prompt_tokens": 668,
+            "completion_tokens": 4073
+          },
+          "cache_age_ms": 107698,
+          "cache_status": "fresh",
+          "finish_reason": "end_turn",
+          "prompt_version": "draft_graph_default@v195 (staging)",
+          "response_chars": 12644,
+          "time_to_edges_ms": 22401,
+          "use_staging_mode": true,
+          "prompt_text_version": "v195",
+          "runaway_abort_count": 0,
+          "runaway_abort_triggers": [],
+          "structured_outputs_used": true,
+          "salvaged_from_truncation": false
+        },
+        "cee_provenance": {
+          "model": "claude-sonnet-4-6",
+          "commit": "4b57b8f",
+          "version": "1.12.0",
+          "model_id": "claude-sonnet-4-6",
+          "capability": "draft_graph",
+          "prompt_hash": "152998b447819c2e9e797b1727f8e05b34480486dca6f672a5d2839facd2353f",
+          "context_hash": "38fba9238991",
+          "pipeline_path": "unified",
+          "prompt_source": "supabase",
+          "prompt_version": "draft_graph_default@v195 (staging)",
+          "build_timestamp": "2026-08-08T16:11:58.029Z",
+          "prompt_store_version": 195,
+          "model_override_active": false,
+          "prompt_override_active": false,
+          "engine_base_url_configured": false
+        },
+        "llm_call_count": 1,
+        "repair_summary": {
+          "status_quo": {
+            "fixed": false,
+            "marked_droppable": false
+          },
+          "graph_delta": {
+            "edges_after": 46,
+            "nodes_after": 24,
+            "edges_before": 46,
+            "nodes_before": 24
+          },
+          "bucket_summary": {
+            "a": 0,
+            "b": 9,
+            "c": 0
+          },
+          "llm_repair_needed": false,
+          "status_quo_action": "none",
+          "unreachable_factors": {
+            "reclassified": [
+              "fac_bafin_complexity",
+              "fac_cash_runway",
+              "fac_competitive_window",
+              "fac_localisation_cost",
+              "fac_nrr",
+              "fac_uk_saturation"
+            ],
+            "marked_droppable": []
+          },
+          "edge_format_detected": "V1_FLAT",
+          "deterministic_repairs": [
+            {
+              "code": "CONTROLLABLE_MISSING_DATA",
+              "path": "nodes[fac_germany_direct].data",
+              "action": "Populated missing required fields with defaults"
+            },
+            {
+              "code": "CONTROLLABLE_MISSING_DATA",
+              "path": "nodes[fac_headcount_budget].data",
+              "action": "Populated missing required fields with defaults"
+            },
+            {
+              "code": "CONTROLLABLE_MISSING_DATA",
+              "path": "nodes[fac_marketing_spend].data",
+              "action": "Populated missing required fields with defaults"
+            },
+            {
+              "code": "CONTROLLABLE_MISSING_DATA",
+              "path": "nodes[fac_partner_entry].data",
+              "action": "Populated missing required fields with defaults"
+            },
+            {
+              "code": "CONTROLLABLE_MISSING_DATA",
+              "path": "nodes[fac_uk_depth].data",
+              "action": "Populated missing required fields with defaults"
+            },
+            {
+              "code": "OBSERVABLE_EXTRA_DATA",
+              "path": "nodes[fac_cash_runway].data",
+              "action": "Removed factor_type, uncertainty_drivers, and empty interventions sentinel (extra for observable)"
+            },
+            {
+              "code": "OBSERVABLE_EXTRA_DATA",
+              "path": "nodes[fac_localisation_cost].data",
+              "action": "Removed factor_type, uncertainty_drivers, and empty interventions sentinel (extra for observable)"
+            },
+            {
+              "code": "OBSERVABLE_EXTRA_DATA",
+              "path": "nodes[fac_nrr].data",
+              "action": "Removed factor_type, uncertainty_drivers, and empty interventions sentinel (extra for observable)"
+            },
+            {
+              "code": "OBSERVABLE_EXTRA_DATA",
+              "path": "nodes[fac_uk_saturation].data",
+              "action": "Removed factor_type, uncertainty_drivers, and empty interventions sentinel (extra for observable)"
+            },
+            {
+              "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "path": "nodes[fac_bafin_complexity].category",
+              "action": "Reclassified unreachable factor \"BaFin Licensing Complexity\" to external"
+            },
+            {
+              "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "path": "nodes[fac_cash_runway].category",
+              "action": "Reclassified unreachable factor \"Cash Runway\" to external with synthesised prior [0.31, 0.9299999999999999]",
+              "prior_synthesised": true,
+              "synthesised_range": {
+                "range_max": 0.9299999999999999,
+                "range_min": 0.31
+              }
+            },
+            {
+              "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "path": "nodes[fac_competitive_window].category",
+              "action": "Reclassified unreachable factor \"Germany Competitive Window\" to external"
+            },
+            {
+              "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "path": "nodes[fac_localisation_cost].category",
+              "action": "Reclassified unreachable factor \"Engineering Localisation Cost\" to external with synthesised prior [0.25, 0.75]",
+              "prior_synthesised": true,
+              "synthesised_range": {
+                "range_max": 0.75,
+                "range_min": 0.25
+              }
+            },
+            {
+              "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "path": "nodes[fac_nrr].category",
+              "action": "Reclassified unreachable factor \"Net Revenue Retention\" to external with synthesised prior [0, 1]",
+              "prior_synthesised": true,
+              "synthesised_range": {
+                "range_max": 1,
+                "range_min": 0
+              }
+            },
+            {
+              "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "path": "nodes[fac_uk_saturation].category",
+              "action": "Reclassified unreachable factor \"UK Market Saturation\" to external with synthesised prior [0.35, 1]",
+              "prior_synthesised": true,
+              "synthesised_range": {
+                "range_max": 1,
+                "range_min": 0.35
+              }
+            },
+            {
+              "code": "INBOUND_BUDGET_RESCALED",
+              "path": "edges[*→out_arr_growth]",
+              "action": "Rescaled 4 causal inbound edges from sum=1.150 to 0.95"
+            },
+            {
+              "code": "INBOUND_BUDGET_RESCALED",
+              "path": "edges[*→out_germany_pipeline]",
+              "action": "Rescaled 3 causal inbound edges from sum=1.150 to 0.95"
+            },
+            {
+              "code": "INBOUND_BUDGET_RESCALED",
+              "path": "edges[*→out_uk_expansion_revenue]",
+              "action": "Rescaled 3 causal inbound edges from sum=1.230 to 0.95"
+            },
+            {
+              "code": "INBOUND_BUDGET_RESCALED",
+              "path": "edges[*→risk_bafin_delay]",
+              "action": "Rescaled 3 causal inbound edges from sum=1.150 to 0.95"
+            },
+            {
+              "code": "INBOUND_BUDGET_RESCALED",
+              "path": "edges[*→risk_cash_strain]",
+              "action": "Rescaled 5 causal inbound edges from sum=1.480 to 0.95"
+            }
+          ],
+          "deterministic_sweep_ran": true,
+          "remaining_violation_codes": [],
+          "remaining_violations_count": 0,
+          "deterministic_repairs_count": 20,
+          "deterministic_sweep_version": "v3",
+          "risk_coefficient_corrections": []
+        },
+        "field_deletions": {
+          "count": 12,
+          "events": [
+            {
+              "field": "data.factor_type",
+              "stage": "deterministic-sweep",
+              "reason": "OBSERVABLE_EXTRA_DATA",
+              "node_id": "fac_cash_runway"
+            },
+            {
+              "field": "data.factor_type",
+              "stage": "deterministic-sweep",
+              "reason": "OBSERVABLE_EXTRA_DATA",
+              "node_id": "fac_localisation_cost"
+            },
+            {
+              "field": "data.factor_type",
+              "stage": "deterministic-sweep",
+              "reason": "OBSERVABLE_EXTRA_DATA",
+              "node_id": "fac_nrr"
+            },
+            {
+              "field": "data.factor_type",
+              "stage": "deterministic-sweep",
+              "reason": "OBSERVABLE_EXTRA_DATA",
+              "node_id": "fac_uk_saturation"
+            },
+            {
+              "field": "data.value",
+              "stage": "unreachable-factors",
+              "reason": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "node_id": "fac_cash_runway"
+            },
+            {
+              "field": "data",
+              "stage": "unreachable-factors",
+              "reason": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "node_id": "fac_cash_runway"
+            },
+            {
+              "field": "data.value",
+              "stage": "unreachable-factors",
+              "reason": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "node_id": "fac_localisation_cost"
+            },
+            {
+              "field": "data",
+              "stage": "unreachable-factors",
+              "reason": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "node_id": "fac_localisation_cost"
+            },
+            {
+              "field": "data.value",
+              "stage": "unreachable-factors",
+              "reason": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "node_id": "fac_nrr"
+            },
+            {
+              "field": "data",
+              "stage": "unreachable-factors",
+              "reason": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "node_id": "fac_nrr"
+            },
+            {
+              "field": "data.value",
+              "stage": "unreachable-factors",
+              "reason": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "node_id": "fac_uk_saturation"
+            },
+            {
+              "field": "data",
+              "stage": "unreachable-factors",
+              "reason": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "node_id": "fac_uk_saturation"
+            }
+          ],
+          "stages": [
+            "deterministic-sweep",
+            "unreachable-factors"
+          ],
+          "reasons": [
+            "OBSERVABLE_EXTRA_DATA",
+            "UNREACHABLE_FACTOR_RECLASSIFIED"
+          ]
+        },
+        "plan_annotation": {
+          "plan_id": "c20ae9b5-5f2c-47e7-8c14-6c96e7ee948b",
+          "model_id": "claude-sonnet-4-6",
+          "plan_hash": "c58bac1765d5",
+          "confidence": {
+            "overall": 0.85,
+            "structure": 1,
+            "parameters": 1
+          },
+          "open_questions": [],
+          "prompt_version": "draft_graph_default@v195 (staging)",
+          "context_hash_v0": "31dcdf430578",
+          "stage3_rationales": []
+        },
+        "stage_snapshots": {
+          "stage_1_parse": {
+            "goal_node_id": "goal_arr",
+            "goal_threshold": "absent",
+            "goal_threshold_cap": "absent",
+            "goal_threshold_raw": "absent",
+            "goal_threshold_unit": "absent",
+            "goal_constraints_count": 0
+          },
+          "stage_3_enrich": {
+            "goal_node_id": "goal_arr",
+            "goal_threshold": "absent",
+            "goal_threshold_cap": "absent",
+            "goal_threshold_raw": "absent",
+            "goal_threshold_unit": "absent",
+            "goal_constraints_count": 0
+          },
+          "stage_4_repair": {
+            "goal_node_id": "goal_arr",
+            "goal_threshold": "absent",
+            "goal_threshold_cap": "absent",
+            "goal_threshold_raw": "absent",
+            "goal_threshold_unit": "absent",
+            "goal_constraints_count": 0
+          },
+          "stage_5_package": {
+            "goal_node_id": "goal_arr",
+            "goal_threshold": "absent",
+            "goal_threshold_cap": "absent",
+            "goal_threshold_raw": "absent",
+            "goal_threshold_unit": "absent",
+            "goal_constraints_count": 0
+          },
+          "stage_4b_threshold_sweep": {
+            "goal_node_id": "goal_arr",
+            "goal_threshold": "absent",
+            "goal_threshold_cap": "absent",
+            "goal_threshold_raw": "absent",
+            "goal_threshold_unit": "absent",
+            "goal_constraints_count": 0
+          }
+        },
+        "threshold_sweep": {
+          "ran": true,
+          "codes": [],
+          "duration_ms": 0,
+          "goals_checked": 1,
+          "strips_applied": 0,
+          "warnings_emitted": 0
+        },
+        "diagnostic_checks": {
+          "cee_trace_present": true,
+          "llm_raw_available": true,
+          "intercept_populated": false,
+          "is_baseline_present": true,
+          "confidence_unique_values": [
+            0.65,
+            0.7,
+            0.72,
+            0.75,
+            0.78,
+            0.8,
+            0.82,
+            0.85,
+            0.88,
+            0.9,
+            0.92,
+            0.95
+          ],
+          "confidence_differentiated": true
+        },
+        "total_duration_ms": 88202,
+        "validation_summary": {
+          "model_notes": [
+            "[questionable_edge] The assumed negative effect of partner entry on BaFin delay risk may be context-specific and merits verification.",
+            "[brief_ambiguity] The brief does not quantify how competitive window width translates into pipeline volume."
+          ],
+          "bias_offsets": {
+            "strength_std": 0,
+            "strength_mean": 0.05000000000000003,
+            "exists_probability": -0.050000000000000044
+          },
+          "contested_count": 17,
+          "lint_corrections": 8,
+          "pass2_latency_ms": 41421,
+          "total_edges_validated": 28,
+          "total_pipeline_latency_ms": 41425
+        },
+        "pipeline_checkpoints": [
+          {
+            "stage": "post_adapter_normalisation",
+            "edge_count": 46,
+            "node_count": 24,
+            "sample_edges": [
+              {
+                "to": "opt_germany_direct",
+                "from": "dec_expansion",
+                "strength_std": 0.01,
+                "belief_exists": 1,
+                "strength_mean": 1,
+                "effect_direction": "positive"
+              },
+              {
+                "to": "risk_bafin_delay",
+                "from": "fac_bafin_complexity",
+                "strength_std": 0.14,
+                "belief_exists": 0.8,
+                "strength_mean": 0.3,
+                "effect_direction": "positive"
+              },
+              {
+                "to": "goal_arr",
+                "from": "out_arr_growth",
+                "strength_std": 0.1,
+                "belief_exists": 0.95,
+                "strength_mean": 0.55,
+                "effect_direction": "positive"
+              }
+            ],
+            "edge_field_presence": {
+              "weight": 0,
+              "strength_std": 46,
+              "belief_exists": 46,
+              "strength_mean": 46,
+              "effect_direction": 46
+            },
+            "node_field_presence": {
+              "option_nodes_total": 4,
+              "options_with_interventions": 4
+            },
+            "nested_strength_detected": true
+          },
+          {
+            "stage": "post_stabilisation",
+            "edge_count": 46,
+            "node_count": 24,
+            "sample_edges": [
+              {
+                "to": "opt_germany_direct",
+                "from": "dec_expansion",
+                "strength_std": 0.01,
+                "belief_exists": 1,
+                "strength_mean": 1,
+                "effect_direction": "positive"
+              },
+              {
+                "to": "risk_bafin_delay",
+                "from": "fac_bafin_complexity",
+                "strength_std": 0.11565217391304349,
+                "belief_exists": 0.8,
+                "strength_mean": 0.24782608695652172,
+                "effect_direction": "positive"
+              },
+              {
+                "to": "goal_arr",
+                "from": "out_arr_growth",
+                "strength_std": 0.1,
+                "belief_exists": 0.95,
+                "strength_mean": 0.55,
+                "effect_direction": "positive"
+              }
+            ],
+            "edge_field_presence": {
+              "weight": 46,
+              "strength_std": 46,
+              "belief_exists": 46,
+              "strength_mean": 46,
+              "effect_direction": 46
+            },
+            "node_field_presence": {
+              "option_nodes_total": 4,
+              "options_with_interventions": 4
+            }
+          },
+          {
+            "stage": "pre_boundary",
+            "edge_count": 46,
+            "node_count": 24,
+            "sample_edges": [
+              {
+                "to": "opt_germany_direct",
+                "from": "dec_expansion",
+                "strength_std": 0.01,
+                "belief_exists": 1,
+                "strength_mean": 1,
+                "effect_direction": "positive"
+              },
+              {
+                "to": "risk_bafin_delay",
+                "from": "fac_bafin_complexity",
+                "strength_std": 0.11565217391304349,
+                "belief_exists": 0.8,
+                "strength_mean": 0.24782608695652172,
+                "effect_direction": "positive"
+              },
+              {
+                "to": "goal_arr",
+                "from": "out_arr_growth",
+                "strength_std": 0.1,
+                "belief_exists": 0.95,
+                "strength_mean": 0.55,
+                "effect_direction": "positive"
+              }
+            ],
+            "edge_field_presence": {
+              "weight": 46,
+              "strength_std": 46,
+              "belief_exists": 46,
+              "strength_mean": 46,
+              "effect_direction": 46
+            },
+            "node_field_presence": {
+              "option_nodes_total": 4,
+              "options_with_interventions": 4
+            }
+          }
+        ],
+        "pipeline_checkpoints_meta": {
+          "enabled": true,
+          "total_count": 3,
+          "adapter_count": 1,
+          "pipeline_count": 2
+        }
+      },
+      "request_id": "16d3936a-810d-4014-bf06-41662858f9b8",
+      "correlation_id": "16d3936a-810d-4014-bf06-41662858f9b8",
+      "repair_summary": {
+        "status_quo": {
+          "fixed": false,
+          "marked_droppable": false
+        },
+        "graph_delta": {
+          "edges_after": 46,
+          "nodes_after": 24,
+          "edges_before": 46,
+          "nodes_before": 24
+        },
+        "bucket_summary": {
+          "a": 0,
+          "b": 9,
+          "c": 0
+        },
+        "llm_repair_needed": false,
+        "status_quo_action": "none",
+        "unreachable_factors": {
+          "reclassified": [
+            "fac_bafin_complexity",
+            "fac_cash_runway",
+            "fac_competitive_window",
+            "fac_localisation_cost",
+            "fac_nrr",
+            "fac_uk_saturation"
+          ],
+          "marked_droppable": []
+        },
+        "edge_format_detected": "V1_FLAT",
+        "deterministic_repairs": [
+          {
+            "code": "CONTROLLABLE_MISSING_DATA",
+            "path": "nodes[fac_germany_direct].data",
+            "action": "Populated missing required fields with defaults"
+          },
+          {
+            "code": "CONTROLLABLE_MISSING_DATA",
+            "path": "nodes[fac_headcount_budget].data",
+            "action": "Populated missing required fields with defaults"
+          },
+          {
+            "code": "CONTROLLABLE_MISSING_DATA",
+            "path": "nodes[fac_marketing_spend].data",
+            "action": "Populated missing required fields with defaults"
+          },
+          {
+            "code": "CONTROLLABLE_MISSING_DATA",
+            "path": "nodes[fac_partner_entry].data",
+            "action": "Populated missing required fields with defaults"
+          },
+          {
+            "code": "CONTROLLABLE_MISSING_DATA",
+            "path": "nodes[fac_uk_depth].data",
+            "action": "Populated missing required fields with defaults"
+          },
+          {
+            "code": "OBSERVABLE_EXTRA_DATA",
+            "path": "nodes[fac_cash_runway].data",
+            "action": "Removed factor_type, uncertainty_drivers, and empty interventions sentinel (extra for observable)"
+          },
+          {
+            "code": "OBSERVABLE_EXTRA_DATA",
+            "path": "nodes[fac_localisation_cost].data",
+            "action": "Removed factor_type, uncertainty_drivers, and empty interventions sentinel (extra for observable)"
+          },
+          {
+            "code": "OBSERVABLE_EXTRA_DATA",
+            "path": "nodes[fac_nrr].data",
+            "action": "Removed factor_type, uncertainty_drivers, and empty interventions sentinel (extra for observable)"
+          },
+          {
+            "code": "OBSERVABLE_EXTRA_DATA",
+            "path": "nodes[fac_uk_saturation].data",
+            "action": "Removed factor_type, uncertainty_drivers, and empty interventions sentinel (extra for observable)"
+          },
+          {
+            "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "path": "nodes[fac_bafin_complexity].category",
+            "action": "Reclassified unreachable factor \"BaFin Licensing Complexity\" to external"
+          },
+          {
+            "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "path": "nodes[fac_cash_runway].category",
+            "action": "Reclassified unreachable factor \"Cash Runway\" to external with synthesised prior [0.31, 0.9299999999999999]",
+            "prior_synthesised": true,
+            "synthesised_range": {
+              "range_max": 0.9299999999999999,
+              "range_min": 0.31
+            }
+          },
+          {
+            "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "path": "nodes[fac_competitive_window].category",
+            "action": "Reclassified unreachable factor \"Germany Competitive Window\" to external"
+          },
+          {
+            "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "path": "nodes[fac_localisation_cost].category",
+            "action": "Reclassified unreachable factor \"Engineering Localisation Cost\" to external with synthesised prior [0.25, 0.75]",
+            "prior_synthesised": true,
+            "synthesised_range": {
+              "range_max": 0.75,
+              "range_min": 0.25
+            }
+          },
+          {
+            "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "path": "nodes[fac_nrr].category",
+            "action": "Reclassified unreachable factor \"Net Revenue Retention\" to external with synthesised prior [0, 1]",
+            "prior_synthesised": true,
+            "synthesised_range": {
+              "range_max": 1,
+              "range_min": 0
+            }
+          },
+          {
+            "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "path": "nodes[fac_uk_saturation].category",
+            "action": "Reclassified unreachable factor \"UK Market Saturation\" to external with synthesised prior [0.35, 1]",
+            "prior_synthesised": true,
+            "synthesised_range": {
+              "range_max": 1,
+              "range_min": 0.35
+            }
+          },
+          {
+            "code": "INBOUND_BUDGET_RESCALED",
+            "path": "edges[*→out_arr_growth]",
+            "action": "Rescaled 4 causal inbound edges from sum=1.150 to 0.95"
+          },
+          {
+            "code": "INBOUND_BUDGET_RESCALED",
+            "path": "edges[*→out_germany_pipeline]",
+            "action": "Rescaled 3 causal inbound edges from sum=1.150 to 0.95"
+          },
+          {
+            "code": "INBOUND_BUDGET_RESCALED",
+            "path": "edges[*→out_uk_expansion_revenue]",
+            "action": "Rescaled 3 causal inbound edges from sum=1.230 to 0.95"
+          },
+          {
+            "code": "INBOUND_BUDGET_RESCALED",
+            "path": "edges[*→risk_bafin_delay]",
+            "action": "Rescaled 3 causal inbound edges from sum=1.150 to 0.95"
+          },
+          {
+            "code": "INBOUND_BUDGET_RESCALED",
+            "path": "edges[*→risk_cash_strain]",
+            "action": "Rescaled 5 causal inbound edges from sum=1.480 to 0.95"
+          }
+        ],
+        "deterministic_sweep_ran": true,
+        "remaining_violation_codes": [],
+        "remaining_violations_count": 0,
+        "deterministic_repairs_count": 20,
+        "deterministic_sweep_version": "v3",
+        "risk_coefficient_corrections": []
+      },
+      "transform_defaults": {
+        "defaults": [],
+        "total_defaults": 0,
+        "defaulted_edge_count": 0
+      }
+    },
+    "options": [
+      {
+        "id": "opt_germany_direct",
+        "label": "Enter Germany Directly in 2027",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "fac_uk_depth": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_uk_depth",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_partner_entry": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_partner_entry",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_germany_direct": {
+            "value": 1,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_germany_direct",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_marketing_spend": {
+            "unit": "£m",
+            "value": 0.8,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_marketing_spend",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_headcount_budget": {
+            "unit": "£m",
+            "value": 0.75,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_headcount_budget",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      },
+      {
+        "id": "opt_partner_germany",
+        "label": "Partner Entry into Germany via Local Player",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "fac_uk_depth": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_uk_depth",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_partner_entry": {
+            "value": 1,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_partner_entry",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_germany_direct": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_germany_direct",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_marketing_spend": {
+            "unit": "£m",
+            "value": 0.4,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_marketing_spend",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_headcount_budget": {
+            "unit": "£m",
+            "value": 0.25,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_headcount_budget",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      },
+      {
+        "id": "opt_status_quo",
+        "label": "Expand Within Existing Base Only (Status Quo)",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction"
+        },
+        "is_baseline": true,
+        "interventions": {
+          "fac_uk_depth": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_uk_depth",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_partner_entry": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_partner_entry",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_germany_direct": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_germany_direct",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_marketing_spend": {
+            "unit": "£m",
+            "value": 0.2,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_marketing_spend",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_headcount_budget": {
+            "unit": "£m",
+            "value": 0.2,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_headcount_budget",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      },
+      {
+        "id": "opt_uk_depth",
+        "label": "Double Down on UK Expansion",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "fac_uk_depth": {
+            "value": 1,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_uk_depth",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_partner_entry": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_partner_entry",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_germany_direct": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_germany_direct",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_marketing_spend": {
+            "unit": "£m",
+            "value": 0.6,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_marketing_spend",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_headcount_budget": {
+            "unit": "£m",
+            "value": 0.5,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_headcount_budget",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      }
+    ],
+    "quality": {
+      "safety": 8,
+      "overall": 9,
+      "coverage": 10,
+      "structure": 8,
+      "structural_proxy": 8
+    },
+    "_timings": {
+      "draft_graph": {
+        "parse_ms": 46023,
+        "total_ms": 88212,
+        "enrich_ms": 55,
+        "repair_ms": 35,
+        "package_ms": 15,
+        "boundary_ms": 9,
+        "normalise_ms": 0,
+        "parse_llm_ms": 45991,
+        "repair_fired": false,
+        "repair_reason": null,
+        "repair_attempts": 0,
+        "coaching_pass_ms": 26160,
+        "threshold_sweep_ms": 3,
+        "validation_pipeline_ms": 41426
+      }
+    },
+    "coaching": {
+      "summary": "The decision sits at a genuine fork between growth speed and financial safety, with several key uncertainties — localisation cost, UK saturation depth, and competitive timing — that are currently treated as fixed assumptions rather than ranges. Stress-testing those assumptions before committing will sharpen the board conversation considerably.",
+      "bias_signals": [
+        {
+          "type": "overconfidence",
+          "detail": "The brief states '60% reuse' as the working assumption while simultaneously recording the CTO's contrary view that 'it's more like 40%' and that this 'roughly doubles' engineering cost — treating the higher figure as the planning baseline despite an internal expert disagreement is a classic overconfidence pattern.",
+          "target": "fac_localisation_cost"
+        },
+        {
+          "type": "anchoring",
+          "detail": "The brief acknowledges 'that's my gut, not a real number' about the 70% UK penetration figure, yet this estimate anchors the entire framing of how much headroom the UK depth path has via UK Market Saturation.",
+          "target": "fac_uk_saturation"
+        },
+        {
+          "type": "narrow_framing",
+          "detail": "The brief frames the choice as 'Germany in 2027, or UK depth?' but also mentions 'a half-formed idea floating around that we partner with a local player like Regnology instead of going direct — nobody has scoped it, might be nothing,' suggesting the partner route is being treated as peripheral rather than as a fully evaluated alternative.",
+          "target": "opt_partner_germany"
+        }
+      ],
+      "widening_log": {
+        "elements_added": [],
+        "brief_completeness": "partial",
+        "elements_considered_but_excluded": [
+          "A 'gross margin floor' constraint node was considered but the 78% threshold is already implicitly captured through Cash and Margin Strain flowing to Reach £20m ARR by End of FY28",
+          "A 'pilot sponsor revenue' node was considered but the brief does not give enough detail to distinguish it cleanly from Germany New Logo Pipeline"
+        ]
+      },
+      "strengthen_items": [
+        {
+          "id": "add-localisation-range",
+          "label": "Treat localisation cost as a range, not a point estimate",
+          "detail": "The brief records a direct conflict between 60% reuse (your assumption) and 40% reuse (the CTO's view), with the explicit note that 'if he's right the engineering cost roughly doubles' — this disagreement should be surfaced as a formal uncertainty driving Engineering Localisation Overrun rather than left as a footnote.",
+          "action_type": "add_risk",
+          "bias_category": "overconfidence"
+        },
+        {
+          "id": "add-pilot-sponsor-path",
+          "label": "Formalise the two pilot sponsors as a distinct entry pathway",
+          "detail": "The two UK banks with Frankfurt operations who 'have said they'd sponsor a pilot' represent a concrete, lower-capital route into Germany that sits between Enter Germany Directly in 2027 and Partner Entry into Germany via Local Player but is not currently represented as its own option, meaning its effect on Germany New Logo Pipeline and Cash and Margin Strain is invisible in the current structure.",
+          "action_type": "add_option",
+          "bias_category": "narrow_framing"
+        },
+        {
+          "id": "add-uk-saturation-evidence",
+          "label": "Anchor UK saturation to evidence, not gut feel",
+          "detail": "The brief explicitly flags that the '70% penetrated' figure is 'my gut, not a real number,' yet UK Market Saturation flows directly into UK Expansion and Upsell Revenue and ultimately Reach £20m ARR by End of FY28 — validating or bounding this figure would materially change how much weight the UK depth path can carry.",
+          "action_type": "add_constraint",
+          "bias_category": "anchoring"
+        },
+        {
+          "id": "reframe-window-urgency",
+          "label": "Separate competitive urgency from entry-mode urgency",
+          "detail": "The brief conflates 'two US competitors raised big rounds in Q2' with the question of whether to go direct or via a partner, but Germany Competitive Window currently feeds only Germany New Logo Pipeline — it is worth examining whether the window affects the partner route differently from the direct route, since a partner might move faster through BaFin than a solo filing.",
+          "action_type": "reframe_goal",
+          "bias_category": "narrow_framing"
+        }
+      ]
+    },
+    "goal_node_id": "goal_arr",
+    "causal_claims": [
+      {
+        "to": "risk_bafin_delay",
+        "from": "fac_bafin_complexity",
+        "type": "direct_effect",
+        "stated_strength": "strong"
+      },
+      {
+        "to": "risk_cash_strain",
+        "from": "fac_localisation_cost",
+        "type": "direct_effect",
+        "stated_strength": "strong"
+      },
+      {
+        "to": "out_uk_expansion_revenue",
+        "from": "fac_nrr",
+        "type": "direct_effect",
+        "stated_strength": "strong"
+      },
+      {
+        "to": "out_uk_expansion_revenue",
+        "from": "fac_uk_saturation",
+        "type": "direct_effect",
+        "stated_strength": "moderate"
+      },
+      {
+        "to": "out_germany_pipeline",
+        "from": "fac_competitive_window",
+        "type": "direct_effect",
+        "stated_strength": "moderate"
+      },
+      {
+        "to": "risk_cash_strain",
+        "from": "fac_cash_runway",
+        "type": "direct_effect",
+        "stated_strength": "strong"
+      },
+      {
+        "to": "risk_localisation_overrun",
+        "from": "fac_localisation_cost",
+        "type": "direct_effect",
+        "stated_strength": "strong"
+      },
+      {
+        "to": "risk_bafin_delay",
+        "from": "fac_partner_entry",
+        "type": "direct_effect",
+        "stated_strength": "moderate"
+      }
+    ],
+    "topology_plan": [],
+    "analysis_ready": {
+      "status": "ready",
+      "options": [
+        {
+          "id": "opt_germany_direct",
+          "label": "Enter Germany Directly in 2027",
+          "status": "ready",
+          "interventions": {
+            "fac_uk_depth": {
+              "value": 0,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            },
+            "fac_partner_entry": {
+              "value": 0,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            },
+            "fac_germany_direct": {
+              "value": 1,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            },
+            "fac_marketing_spend": {
+              "value": 0.8,
+              "source": "brief_extraction",
+              "display_value": "0.3 £m"
+            },
+            "fac_headcount_budget": {
+              "value": 0.75,
+              "source": "brief_extraction",
+              "display_value": "1.6 £m"
+            }
+          },
+          "status_reason": "5 intervention(s) ready for analysis",
+          "extraction_metadata": {
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "confidence": "high"
+          },
+          "intervention_details": {
+            "fac_uk_depth": {
+              "display_value": "Low (0)",
+              "normalised_value": 0
+            },
+            "fac_partner_entry": {
+              "display_value": "Low (0)",
+              "normalised_value": 0
+            },
+            "fac_germany_direct": {
+              "display_value": "Low (0)",
+              "normalised_value": 1
+            },
+            "fac_marketing_spend": {
+              "unit": "£m",
+              "raw_value": 0.3,
+              "display_value": "0.3 £m",
+              "normalised_value": 0.8
+            },
+            "fac_headcount_budget": {
+              "unit": "£m",
+              "raw_value": 1.6,
+              "display_value": "1.6 £m",
+              "normalised_value": 0.75
+            }
+          }
+        },
+        {
+          "id": "opt_partner_germany",
+          "label": "Partner Entry into Germany via Local Player",
+          "status": "ready",
+          "interventions": {
+            "fac_uk_depth": {
+              "value": 0,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            },
+            "fac_partner_entry": {
+              "value": 1,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            },
+            "fac_germany_direct": {
+              "value": 0,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            },
+            "fac_marketing_spend": {
+              "value": 0.4,
+              "source": "brief_extraction",
+              "display_value": "0.3 £m"
+            },
+            "fac_headcount_budget": {
+              "value": 0.25,
+              "source": "brief_extraction",
+              "display_value": "1.6 £m"
+            }
+          },
+          "status_reason": "5 intervention(s) ready for analysis",
+          "extraction_metadata": {
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "confidence": "high"
+          },
+          "intervention_details": {
+            "fac_uk_depth": {
+              "display_value": "Low (0)",
+              "normalised_value": 0
+            },
+            "fac_partner_entry": {
+              "display_value": "Low (0)",
+              "normalised_value": 1
+            },
+            "fac_germany_direct": {
+              "display_value": "Low (0)",
+              "normalised_value": 0
+            },
+            "fac_marketing_spend": {
+              "unit": "£m",
+              "raw_value": 0.3,
+              "display_value": "0.3 £m",
+              "normalised_value": 0.4
+            },
+            "fac_headcount_budget": {
+              "unit": "£m",
+              "raw_value": 1.6,
+              "display_value": "1.6 £m",
+              "normalised_value": 0.25
+            }
+          }
+        },
+        {
+          "id": "opt_status_quo",
+          "label": "Expand Within Existing Base Only (Status Quo)",
+          "status": "ready",
+          "is_baseline": true,
+          "interventions": {
+            "fac_uk_depth": {
+              "value": 0,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            },
+            "fac_partner_entry": {
+              "value": 0,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            },
+            "fac_germany_direct": {
+              "value": 0,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            },
+            "fac_marketing_spend": {
+              "value": 0.2,
+              "source": "brief_extraction",
+              "display_value": "0.3 £m"
+            },
+            "fac_headcount_budget": {
+              "value": 0.2,
+              "source": "brief_extraction",
+              "display_value": "1.6 £m"
+            }
+          },
+          "status_reason": "5 intervention(s) ready for analysis",
+          "extraction_metadata": {
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "confidence": "high"
+          },
+          "intervention_details": {
+            "fac_uk_depth": {
+              "display_value": "Low (0)",
+              "normalised_value": 0
+            },
+            "fac_partner_entry": {
+              "display_value": "Low (0)",
+              "normalised_value": 0
+            },
+            "fac_germany_direct": {
+              "display_value": "Low (0)",
+              "normalised_value": 0
+            },
+            "fac_marketing_spend": {
+              "unit": "£m",
+              "raw_value": 0.3,
+              "display_value": "0.3 £m",
+              "normalised_value": 0.2
+            },
+            "fac_headcount_budget": {
+              "unit": "£m",
+              "raw_value": 1.6,
+              "display_value": "1.6 £m",
+              "normalised_value": 0.2
+            }
+          }
+        },
+        {
+          "id": "opt_uk_depth",
+          "label": "Double Down on UK Expansion",
+          "status": "ready",
+          "interventions": {
+            "fac_uk_depth": {
+              "value": 1,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            },
+            "fac_partner_entry": {
+              "value": 0,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            },
+            "fac_germany_direct": {
+              "value": 0,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            },
+            "fac_marketing_spend": {
+              "value": 0.6,
+              "source": "brief_extraction",
+              "display_value": "0.3 £m"
+            },
+            "fac_headcount_budget": {
+              "value": 0.5,
+              "source": "brief_extraction",
+              "display_value": "1.6 £m"
+            }
+          },
+          "status_reason": "5 intervention(s) ready for analysis",
+          "extraction_metadata": {
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "confidence": "high"
+          },
+          "intervention_details": {
+            "fac_uk_depth": {
+              "display_value": "Low (0)",
+              "normalised_value": 1
+            },
+            "fac_partner_entry": {
+              "display_value": "Low (0)",
+              "normalised_value": 0
+            },
+            "fac_germany_direct": {
+              "display_value": "Low (0)",
+              "normalised_value": 0
+            },
+            "fac_marketing_spend": {
+              "unit": "£m",
+              "raw_value": 0.3,
+              "display_value": "0.3 £m",
+              "normalised_value": 0.6
+            },
+            "fac_headcount_budget": {
+              "unit": "£m",
+              "raw_value": 1.6,
+              "display_value": "1.6 £m",
+              "normalised_value": 0.5
+            }
+          }
+        }
+      ],
+      "goal_node_id": "goal_arr",
+      "bias_findings": [],
+      "model_adjustments": [
+        {
+          "code": "category_reclassified",
+          "field": "nodes[fac_bafin_complexity].category",
+          "reason": "Reclassified unreachable factor \"BaFin Licensing Complexity\" to external",
+          "source": "deterministic_sweep",
+          "node_id": "fac_bafin_complexity"
+        },
+        {
+          "code": "category_reclassified",
+          "field": "nodes[fac_cash_runway].category",
+          "reason": "Reclassified unreachable factor \"Cash Runway\" to external with synthesised prior [0.31, 0.9299999999999999]",
+          "source": "deterministic_sweep",
+          "node_id": "fac_cash_runway"
+        },
+        {
+          "code": "category_reclassified",
+          "field": "nodes[fac_competitive_window].category",
+          "reason": "Reclassified unreachable factor \"Germany Competitive Window\" to external",
+          "source": "deterministic_sweep",
+          "node_id": "fac_competitive_window"
+        },
+        {
+          "code": "category_reclassified",
+          "field": "nodes[fac_localisation_cost].category",
+          "reason": "Reclassified unreachable factor \"Engineering Localisation Cost\" to external with synthesised prior [0.25, 0.75]",
+          "source": "deterministic_sweep",
+          "node_id": "fac_localisation_cost"
+        },
+        {
+          "code": "category_reclassified",
+          "field": "nodes[fac_nrr].category",
+          "reason": "Reclassified unreachable factor \"Net Revenue Retention\" to external with synthesised prior [0, 1]",
+          "source": "deterministic_sweep",
+          "node_id": "fac_nrr"
+        },
+        {
+          "code": "category_reclassified",
+          "field": "nodes[fac_uk_saturation].category",
+          "reason": "Reclassified unreachable factor \"UK Market Saturation\" to external with synthesised prior [0.35, 1]",
+          "source": "deterministic_sweep",
+          "node_id": "fac_uk_saturation"
+        }
+      ]
+    },
+    "draft_warnings": [
+      {
+        "id": "goal_no_baseline_value",
+        "edge_ids": [],
+        "fix_hint": "Set goal node's observed_state.value to establish baseline for comparison",
+        "node_ids": [
+          "goal_arr"
+        ],
+        "severity": "low",
+        "explanation": "Goal node has no observed_state.value set.",
+        "affected_edge_ids": [],
+        "affected_node_ids": [
+          "goal_arr"
+        ]
+      }
+    ],
+    "schema_version": "3.0",
+    "_pipeline_outcome": {
+      "warnings": [],
+      "llm_repair": {
+        "outcome": "skipped",
+        "attempts": 0,
+        "triggered": false,
+        "fallback_reason": null
+      },
+      "rescue_score": 36,
+      "graph_drafted": true,
+      "coaching_status": "complete",
+      "enrichment_status": "complete",
+      "repair_provenance": [
+        {
+          "code": "CONTROLLABLE_MISSING_DATA",
+          "rule": "CONTROLLABLE_MISSING_DATA",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "fallback_default",
+          "node_or_edge_id": "nodes[fac_germany_direct].data"
+        },
+        {
+          "code": "CONTROLLABLE_MISSING_DATA",
+          "rule": "CONTROLLABLE_MISSING_DATA",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "fallback_default",
+          "node_or_edge_id": "nodes[fac_headcount_budget].data"
+        },
+        {
+          "code": "CONTROLLABLE_MISSING_DATA",
+          "rule": "CONTROLLABLE_MISSING_DATA",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "fallback_default",
+          "node_or_edge_id": "nodes[fac_marketing_spend].data"
+        },
+        {
+          "code": "CONTROLLABLE_MISSING_DATA",
+          "rule": "CONTROLLABLE_MISSING_DATA",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "fallback_default",
+          "node_or_edge_id": "nodes[fac_partner_entry].data"
+        },
+        {
+          "code": "CONTROLLABLE_MISSING_DATA",
+          "rule": "CONTROLLABLE_MISSING_DATA",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "fallback_default",
+          "node_or_edge_id": "nodes[fac_uk_depth].data"
+        },
+        {
+          "code": "OBSERVABLE_EXTRA_DATA",
+          "rule": "OBSERVABLE_EXTRA_DATA",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "fallback_default",
+          "node_or_edge_id": "nodes[fac_cash_runway].data"
+        },
+        {
+          "code": "OBSERVABLE_EXTRA_DATA",
+          "rule": "OBSERVABLE_EXTRA_DATA",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "fallback_default",
+          "node_or_edge_id": "nodes[fac_localisation_cost].data"
+        },
+        {
+          "code": "OBSERVABLE_EXTRA_DATA",
+          "rule": "OBSERVABLE_EXTRA_DATA",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "fallback_default",
+          "node_or_edge_id": "nodes[fac_nrr].data"
+        },
+        {
+          "code": "OBSERVABLE_EXTRA_DATA",
+          "rule": "OBSERVABLE_EXTRA_DATA",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "fallback_default",
+          "node_or_edge_id": "nodes[fac_uk_saturation].data"
+        },
+        {
+          "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "structure",
+          "node_or_edge_id": "nodes[fac_bafin_complexity].category"
+        },
+        {
+          "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "structure",
+          "node_or_edge_id": "nodes[fac_cash_runway].category"
+        },
+        {
+          "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "structure",
+          "node_or_edge_id": "nodes[fac_competitive_window].category"
+        },
+        {
+          "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "structure",
+          "node_or_edge_id": "nodes[fac_localisation_cost].category"
+        },
+        {
+          "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "structure",
+          "node_or_edge_id": "nodes[fac_nrr].category"
+        },
+        {
+          "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "structure",
+          "node_or_edge_id": "nodes[fac_uk_saturation].category"
+        },
+        {
+          "code": "INBOUND_BUDGET_RESCALED",
+          "rule": "INBOUND_BUDGET_RESCALED",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "structure",
+          "node_or_edge_id": "edges[*→out_arr_growth]"
+        },
+        {
+          "code": "INBOUND_BUDGET_RESCALED",
+          "rule": "INBOUND_BUDGET_RESCALED",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "structure",
+          "node_or_edge_id": "edges[*→out_germany_pipeline]"
+        },
+        {
+          "code": "INBOUND_BUDGET_RESCALED",
+          "rule": "INBOUND_BUDGET_RESCALED",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "structure",
+          "node_or_edge_id": "edges[*→out_uk_expansion_revenue]"
+        },
+        {
+          "code": "INBOUND_BUDGET_RESCALED",
+          "rule": "INBOUND_BUDGET_RESCALED",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "structure",
+          "node_or_edge_id": "edges[*→risk_bafin_delay]"
+        },
+        {
+          "code": "INBOUND_BUDGET_RESCALED",
+          "rule": "INBOUND_BUDGET_RESCALED",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "structure",
+          "node_or_edge_id": "edges[*→risk_cash_strain]"
+        }
+      ],
+      "validation_status": "passed",
+      "verification_status": "passed",
+      "factor_value_coverage": {
+        "total": 11,
+        "explicit": 0,
+        "fallback_default": 6,
+        "inferred_with_evidence": 5
+      },
+      "graph_structurally_valid": true,
+      "edge_strength_unique_count": 24,
+      "deterministic_sweep_violations": 0
+    }
+  }
+}

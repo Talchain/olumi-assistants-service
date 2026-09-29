@@ -1,0 +1,50 @@
+{
+  "brief_id": "08-cycle-creation",
+  "model": "gpt-4.1",
+  "prompt_hash": "sha256:2d6fcbc9d09869a271bc93df1b5bbb450a4a5ee3053d9395c3143b810c973cc5",
+  "response": {
+    "model_id": "gpt-4.1",
+    "brief_id": "08-cycle-creation",
+    "status": "success",
+    "raw_text": "{\n  \"operations\": [],\n  \"warnings\": [\n    \"Edges from outcome→factor (out_revenue→fac_investment) are forbidden by the topology rules. Only the following forward patterns are allowed: decision→option, option→factor, factor→factor (mediated or confounded), factor→outcome/risk, outcome/risk→goal.\"\n  ],\n  \"coaching\": {\n    \"summary\": \"An edge from Revenue Growth directly back to Expansion Investment is not allowed in causal decision graphs under these rules. If you wish to model a feedback loop (e.g., high revenue enables more investment), consider adding a mediating observable factor (such as 'Available Cash') between out_revenue and fac_investment. Let me know if you'd like to explore this alternative.\",\n    \"rerun_recommended\": false\n  }\n}",
+    "parsed_graph": {
+      "operations": [],
+      "warnings": [
+        "Edges from outcome→factor (out_revenue→fac_investment) are forbidden by the topology rules. Only the following forward patterns are allowed: decision→option, option→factor, factor→factor (mediated or confounded), factor→outcome/risk, outcome/risk→goal."
+      ],
+      "coaching": {
+        "summary": "An edge from Revenue Growth directly back to Expansion Investment is not allowed in causal decision graphs under these rules. If you wish to model a feedback loop (e.g., high revenue enables more investment), consider adding a mediating observable factor (such as 'Available Cash') between out_revenue and fac_investment. Let me know if you'd like to explore this alternative.",
+        "rerun_recommended": false
+      }
+    },
+    "extraction_attempted": false,
+    "latency_ms": 2400,
+    "input_tokens": 5390,
+    "output_tokens": 174,
+    "est_cost_usd": 0.012171999999999999,
+    "pricing_source": "api_usage",
+    "parsed_json": {
+      "operations": [],
+      "warnings": [
+        "Edges from outcome→factor (out_revenue→fac_investment) are forbidden by the topology rules. Only the following forward patterns are allowed: decision→option, option→factor, factor→factor (mediated or confounded), factor→outcome/risk, outcome/risk→goal."
+      ],
+      "coaching": {
+        "summary": "An edge from Revenue Growth directly back to Expansion Investment is not allowed in causal decision graphs under these rules. If you wish to model a feedback loop (e.g., high revenue enables more investment), consider adding a mediating observable factor (such as 'Available Cash') between out_revenue and fac_investment. Let me know if you'd like to explore this alternative.",
+        "rerun_recommended": false
+      }
+    }
+  },
+  "scores": {
+    "valid_json": true,
+    "correct_shape": true,
+    "operation_types_correct": true,
+    "topology_compliant": true,
+    "has_impact_rationale": true,
+    "correct_ordering": true,
+    "empty_ops_handled": false,
+    "coaching_present": true,
+    "path_syntax_valid": true
+  },
+  "overall": 0.9000000000000001,
+  "captured_at": "2026-03-14T16:39:41.327Z"
+}

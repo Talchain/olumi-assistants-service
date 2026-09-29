@@ -1,0 +1,203 @@
+{
+  "name": "golden-journey-v1-false-restore",
+  "description": "SYNTHETIC RED fixture for the restore/version/rollback false-success claim class and stale-presented-as-current what-changed prose. No version substrate exists (no model_versions table, no restore path, no snapshots — Model Management is future work), so ANY 'Restored…' / 'Created a version…' / 'Rolled back…' claim on a turn that made no durable graph write is phantom success (the same live failure class as the a9da06f2 proposal-worded-as-applied defect, in Model-Management vocabulary). This fixture proves the broadened A4/A8 classifiers catch that class on replay, and that A1 catches a stale what-changed comparison presented with no staleness caveat or rerun affordance. Turn 6 is the honest counterpart and must stay green: stale acknowledged in prose plus the executable chip_action_rerun_analysis chip. Generic decision content — no real scenario data.",
+  "expected_milestones": [
+    "A8 fail: mutate_intent turn claims 'Restored the previous version' while the graph hash never moved and only a proposed_* pending was emitted",
+    "A4 fail: follow_up turn opens with 'Created a version snapshot' — no version substrate exists to create",
+    "A1 fail: explain_changed turn compares runs as current while analysis_ready.freshness is 'stale', with no caveat and no rerun chip",
+    "A4 fail: reload turn opens with 'Rolled back your edits' — nothing was rolled back",
+    "PASS: honest close acknowledges staleness and offers the executable Re-run analysis chip"
+  ],
+  "transcript": {
+    "note": "Hand-authored synthetic observations (same construction path as the continuity-test capture builder). Graph hashes are opaque 16-hex-style tokens, mirroring the wire analysis-affecting hash — NEVER 64-hex: the 64-char graphIdentityHash is CEE-local (Group A) and not on any wire surface; the architecture-protection scan enforces this.",
+    "diagnostic_trace_enabled": true,
+    "timing_debug_enabled": false,
+    "observations": [
+      {
+        "step": "1_run_analysis",
+        "role": "analysis",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "The analysis is complete. Hire two senior engineers comes out ahead, with a 62% win probability against the offshore option's 26%.",
+          "suggested_actions": [
+            {
+              "id": "chip_explain_leader",
+              "label": "Why does it lead?",
+              "message": "Why does the leading option come out ahead?",
+              "action_type": "what_would_flip"
+            }
+          ],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-07-01T10:00:00.000Z",
+            "options": [
+              { "option_id": "opt_hire", "label": "Hire two senior engineers", "win_probability": 0.62 },
+              { "option_id": "opt_offshore", "label": "Engage an offshore partner", "win_probability": 0.26 }
+            ],
+            "freshness": "fresh",
+            "freshness_reason": "graph_hash_match",
+            "graph_hash_at_run": "a1b2c3d4e5f6a1b2",
+            "current_graph_hash": "a1b2c3d4e5f6a1b2"
+          },
+          "_diagnostic_trace": {
+            "exit_path": "run_analysis",
+            "correlation_ids": { "request_id": "req-fr-1", "scenario_id": "scn-fr", "turn_id": "turn-1" }
+          },
+          "_timings": { "turn": { "total_ms": 1200 } }
+        }
+      },
+      {
+        "step": "2_false_restore",
+        "role": "mutate_intent",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "Restored the previous version of your model. The earlier factor values are back in place, so you can pick up where you left off.",
+          "suggested_actions": [],
+          "pending_actions": [
+            { "action": { "kind": "proposed_concept" } }
+          ],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-07-01T10:00:00.000Z",
+            "options": [
+              { "option_id": "opt_hire", "label": "Hire two senior engineers", "win_probability": 0.62 },
+              { "option_id": "opt_offshore", "label": "Engage an offshore partner", "win_probability": 0.26 }
+            ],
+            "freshness": "fresh",
+            "freshness_reason": "graph_hash_match",
+            "graph_hash_at_run": "a1b2c3d4e5f6a1b2",
+            "current_graph_hash": "a1b2c3d4e5f6a1b2"
+          },
+          "_diagnostic_trace": {
+            "exit_path": "direct_answer",
+            "correlation_ids": { "request_id": "req-fr-2", "scenario_id": "scn-fr", "turn_id": "turn-2" }
+          },
+          "_timings": { "turn": { "total_ms": 1100 } }
+        }
+      },
+      {
+        "step": "3_version_claim",
+        "role": "follow_up",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "Created a version snapshot of your decision model, so you can come back to this comparison of Hire two senior engineers and the offshore option — its 62% win probability is preserved.",
+          "suggested_actions": [],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-07-01T10:00:00.000Z",
+            "options": [
+              { "option_id": "opt_hire", "label": "Hire two senior engineers", "win_probability": 0.62 },
+              { "option_id": "opt_offshore", "label": "Engage an offshore partner", "win_probability": 0.26 }
+            ],
+            "freshness": "fresh",
+            "freshness_reason": "graph_hash_match",
+            "graph_hash_at_run": "a1b2c3d4e5f6a1b2",
+            "current_graph_hash": "a1b2c3d4e5f6a1b2"
+          },
+          "_diagnostic_trace": {
+            "exit_path": "direct_answer",
+            "correlation_ids": { "request_id": "req-fr-3", "scenario_id": "scn-fr", "turn_id": "turn-3" }
+          },
+          "_timings": { "turn": { "total_ms": 900 } }
+        }
+      },
+      {
+        "step": "4_stale_what_changed",
+        "role": "explain_changed",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "Compared with your previous run, Hire two senior engineers still leads and its lead has widened by four percentage points. Delivery capacity now has more influence on the outcome than before.",
+          "suggested_actions": [],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-07-01T10:00:00.000Z",
+            "options": [
+              { "option_id": "opt_hire", "label": "Hire two senior engineers", "win_probability": 0.62 },
+              { "option_id": "opt_offshore", "label": "Engage an offshore partner", "win_probability": 0.26 }
+            ],
+            "freshness": "stale",
+            "freshness_reason": "graph_hash_diverged",
+            "graph_hash_at_run": "a1b2c3d4e5f6a1b2",
+            "current_graph_hash": "c3d4e5f6a1b2c3d4"
+          },
+          "_diagnostic_trace": {
+            "exit_path": "direct_answer",
+            "correlation_ids": { "request_id": "req-fr-4", "scenario_id": "scn-fr", "turn_id": "turn-4" }
+          },
+          "_timings": { "turn": { "total_ms": 1300 } }
+        }
+      },
+      {
+        "step": "5_rollback_reload",
+        "role": "reload",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "Rolled back your edits. Your model is back to the earlier version, and the analysis of Hire two senior engineers versus the offshore option still stands.",
+          "suggested_actions": [],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-07-01T10:00:00.000Z",
+            "options": [
+              { "option_id": "opt_hire", "label": "Hire two senior engineers", "win_probability": 0.62 },
+              { "option_id": "opt_offshore", "label": "Engage an offshore partner", "win_probability": 0.26 }
+            ],
+            "freshness": "stale",
+            "freshness_reason": "graph_hash_diverged",
+            "graph_hash_at_run": "a1b2c3d4e5f6a1b2",
+            "current_graph_hash": "c3d4e5f6a1b2c3d4"
+          },
+          "_diagnostic_trace": {
+            "exit_path": "direct_answer",
+            "correlation_ids": { "request_id": "req-fr-5", "scenario_id": "scn-fr", "turn_id": "turn-5" }
+          },
+          "_timings": { "turn": { "total_ms": 1000 } }
+        }
+      },
+      {
+        "step": "6_honest_close",
+        "role": "follow_up",
+        "http_status": 200,
+        "body": {
+          "response_version": 2,
+          "assistant_text": "The model has changed since the last analysis, so the win probabilities for Hire two senior engineers and the offshore option may not reflect your latest edits. Re-run the analysis to bring them up to date.",
+          "suggested_actions": [
+            {
+              "id": "chip_action_rerun_analysis",
+              "label": "Re-run analysis",
+              "message": "Re-run the analysis.",
+              "action_type": "run_analysis"
+            }
+          ],
+          "analysis_ready": {
+            "status": "ready",
+            "goal_node_id": "goal_delivery",
+            "computed_at": "2026-07-01T10:00:00.000Z",
+            "options": [
+              { "option_id": "opt_hire", "label": "Hire two senior engineers", "win_probability": 0.62 },
+              { "option_id": "opt_offshore", "label": "Engage an offshore partner", "win_probability": 0.26 }
+            ],
+            "freshness": "stale",
+            "freshness_reason": "graph_hash_diverged",
+            "graph_hash_at_run": "a1b2c3d4e5f6a1b2",
+            "current_graph_hash": "c3d4e5f6a1b2c3d4"
+          },
+          "_diagnostic_trace": {
+            "exit_path": "direct_answer",
+            "correlation_ids": { "request_id": "req-fr-6", "scenario_id": "scn-fr", "turn_id": "turn-6" }
+          },
+          "_timings": { "turn": { "total_ms": 800 } }
+        }
+      }
+    ]
+  }
+}

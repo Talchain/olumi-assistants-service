@@ -1,0 +1,183 @@
+{
+  "_provenance": {
+    "source_file": "output/paul-test-20260923/construction-witness/raw/c16-fd312b5-A.json",
+    "source_sha256": "bf3b828001894c6daea6322b5f9ab2055a26916d78bf6ae06bd35209ea1876ab",
+    "turns_kept": [
+      "t5"
+    ],
+    "served_build": "CEE fd312b5d729f2000e7aa193f96637725242da41b (staging)",
+    "route": "POST /agent/v1/turn (agent lane, served wire response)",
+    "captured": "2026-09-24 construction witness (see source_file)",
+    "trimmed": true,
+    "trim_note": "Only the Run turns are kept, and of each only: graph_hash, analysis_state (whole), analysis_ready {status, may_run, goal_node_id, freshness, freshness_reason, graph_hash_at_run, current_graph_hash, computed_at, options[{option_id,label}]}, the single analysis_result block {type, computed_against_hash, leading_option_id, summary, win_probabilities, enrichment {robustness, confidence_tier, option_comparison_status}}, and the turn's tools_called. Dropped: assistant_text, draft_graph, suggested_actions, diagnostics, provider calls, receipts and every other enrichment field. Values are byte-identical to the source for every kept field.",
+    "capture_note": "The source holds the ROUTE response only, not the internal /orchestrate/v2/turn run response the Runtime hands to captureAnalysis. Tests reconstruct that capture from the same turn's analysis_state + analysis_result (the same run: identical scenario, hash and computed_at).",
+    "why_this_fixture": "Fragile edges on a clear winner (is_tie false, gap >= 0.25, is_robust true, display_verdict moderate, leader named): the positive control that KEEPS the DSK-P-003 badge."
+  },
+  "scenario_id": "e64b62e5-097f-4f08-b40c-91dbfe725666",
+  "turns": {
+    "t5": {
+      "tools_called": [
+        "get_canonical_state",
+        "run_analysis"
+      ],
+      "graph_hash": "4b661d3c711585ee",
+      "analysis_state": {
+        "run_state": {
+          "kind": "complete_current",
+          "computed_at": "2026-09-24T10:19:54.218Z"
+        },
+        "readiness": {
+          "status": "unknown",
+          "blockers": []
+        },
+        "leader_claim": {
+          "permitted": true,
+          "separation": "separated"
+        },
+        "robustness": {
+          "aggregate_level": "moderate"
+        },
+        "usable_for_prose": true,
+        "usable_for_chips": true,
+        "usable_for_followup": true,
+        "requires_rerun": false,
+        "blocked_unusable": false,
+        "contradictions": []
+      },
+      "analysis_ready": {
+        "status": "ready",
+        "may_run": true,
+        "goal_node_id": "engineering_velocity",
+        "freshness": "fresh",
+        "freshness_reason": "agent_readback_run_state_current",
+        "graph_hash_at_run": "4b661d3c711585ee",
+        "current_graph_hash": "4b661d3c711585ee",
+        "computed_at": "2026-09-24T10:19:54.218Z",
+        "options": [
+          {
+            "option_id": "hire_a_tech_lead",
+            "label": "Hire a Tech Lead"
+          },
+          {
+            "option_id": "hire_two_developers",
+            "label": "Hire two developers"
+          },
+          {
+            "option_id": "maintain_current_staffing",
+            "label": "Maintain current staffing"
+          },
+          {
+            "option_id": "hire_one_developer",
+            "label": "Hire one developer"
+          }
+        ]
+      },
+      "analysis_result": {
+        "type": "analysis_result",
+        "computed_against_hash": "4b661d3c711585ee",
+        "leading_option_id": "hire_a_tech_lead",
+        "summary": "Hire a Tech Lead scored highest against your goal in 72% of runs of this model, but treat this as provisional: the link between Technical coordination and Engineering velocity is fragile.",
+        "win_probabilities": {
+          "Hire a Tech Lead": 0.721325,
+          "Hire one developer": 0.130575,
+          "Hire two developers": 0.056575,
+          "Maintain current staffing": 0.091525
+        },
+        "enrichment": {
+          "robustness": {
+            "level": "moderate",
+            "near_tie": {
+              "gap": 0.59075,
+              "is_tie": false,
+              "threshold": 0.1,
+              "top_option_id": "hire_a_tech_lead",
+              "tied_option_ids": [
+                "hire_a_tech_lead"
+              ],
+              "second_option_id": "hire_one_developer"
+            },
+            "is_robust": true,
+            "confidence": 0.721325,
+            "robust_edges": [],
+            "fragile_edges": [
+              {
+                "to_id": "engineering_velocity",
+                "edge_id": "technical_coordination->engineering_velocity",
+                "from_id": "technical_coordination",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "Engineering velocity",
+                "from_label": "Technical coordination",
+                "switch_probability": 0.2016,
+                "alternative_winner_id": "maintain_current_staffing",
+                "alternative_winner_label": "Maintain current staffing",
+                "marginal_switch_probability": 0.2
+              },
+              {
+                "to_id": "engineering_velocity",
+                "edge_id": "rework_rate->engineering_velocity",
+                "from_id": "rework_rate",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "Engineering velocity",
+                "from_label": "Rework rate",
+                "switch_probability": 0.168,
+                "alternative_winner_id": "hire_one_developer",
+                "alternative_winner_label": "Hire one developer",
+                "marginal_switch_probability": 0
+              },
+              {
+                "to_id": "rework_rate",
+                "edge_id": "tech_lead_hires->rework_rate",
+                "from_id": "tech_lead_hires",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "Rework rate",
+                "from_label": "Tech Lead hires",
+                "switch_probability": 0.1516,
+                "alternative_winner_id": "hire_one_developer",
+                "alternative_winner_label": "Hire one developer",
+                "marginal_switch_probability": 0
+              },
+              {
+                "to_id": "engineering_velocity",
+                "edge_id": "development_capacity->engineering_velocity",
+                "from_id": "development_capacity",
+                "visible": false,
+                "severity": "warning",
+                "to_label": "Engineering velocity",
+                "from_label": "Development capacity",
+                "switch_probability": 0.1272,
+                "alternative_winner_id": "hire_one_developer",
+                "alternative_winner_label": "Hire one developer",
+                "marginal_switch_probability": 0
+              },
+              {
+                "to_id": "technical_coordination",
+                "edge_id": "tech_lead_hires->technical_coordination",
+                "from_id": "tech_lead_hires",
+                "visible": false,
+                "severity": "warning",
+                "to_label": "Technical coordination",
+                "from_label": "Tech Lead hires",
+                "switch_probability": 0.1036,
+                "alternative_winner_id": "maintain_current_staffing",
+                "alternative_winner_label": "Maintain current staffing",
+                "marginal_switch_probability": 0
+              }
+            ],
+            "display_verdict": "moderate",
+            "confidence_basis": "recommendation_stability_uncalibrated",
+            "recommended_option_id": "hire_a_tech_lead",
+            "display_verdict_reason": "this run was only moderately stable under the changes we tested",
+            "recommended_option_label": "Hire a Tech Lead",
+            "recommended_option_compliance": "not_applicable",
+            "recommended_option_compliance_reason": "no limits were set for this decision"
+          },
+          "confidence_tier": "strong",
+          "option_comparison_status": "computed"
+        }
+      }
+    }
+  }
+}

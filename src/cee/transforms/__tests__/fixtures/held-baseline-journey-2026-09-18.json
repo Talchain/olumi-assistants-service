@@ -1,0 +1,1543 @@
+{
+  "_record": "APPEND-ONLY HISTORIC RECORD of what deployed staging build 0168483 emitted on 18 Sep 2026. Never edit to match new behaviour (trap 14b).",
+  "captured_at": "2026-09-18",
+  "endpoint": "POST /proxy/v5/turn (deployed staging, build 0168483)",
+  "scenario_id": "d1795668-4a7d-4ef0-a77c-04ab206d6fce",
+  "brief": "We're a 40-person B2B SaaS company. Our Pro plan churn rate is 4% monthly and we want it under 2.5%. We're weighing three options: cut the Pro price from £49 to £39, invest two engineers for a quarter in the onboarding flow, or hire two customer success reps at £45k each. Our runway is 14 months and we can't let it drop below 9. Which should we do?",
+  "draft_graph": {
+    "nodes": [
+      {
+        "id": "150def25",
+        "kind": "risk",
+        "label": "Revenue Dilution Risk",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "1c61c799",
+        "kind": "risk",
+        "label": "Runway Erosion Risk",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "36825cf1",
+        "kind": "factor",
+        "label": "CS Headcount Cost",
+        "observed_state": {
+          "value": 0,
+          "unit": "£",
+          "source": "cee_inference",
+          "raw_value": 0,
+          "extractionType": "inferred",
+          "factor_type": "other",
+          "uncertainty_drivers": []
+        },
+        "category": "controllable",
+        "scale_frame": 100000,
+        "display_value": "£0",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "3fb49c45",
+        "kind": "option",
+        "label": "invest two engineers for a quarter in the onboarding flow",
+        "interventions": {
+          "abc7389a": {
+            "value": 0.75,
+            "raw_value": 0.75,
+            "unit": "scale",
+            "source": "cee_hypothesis",
+            "target_match": {
+              "node_id": "abc7389a",
+              "match_type": "exact_id",
+              "confidence": "high"
+            },
+            "value_confidence": "low",
+            "reasoning": "Olumi estimate via edge d428338f; no stated figure is cited for this option→factor effect"
+          },
+          "b059dcf8": {
+            "value": 0.8,
+            "raw_value": 0.8,
+            "unit": "scale",
+            "source": "cee_hypothesis",
+            "target_match": {
+              "node_id": "b059dcf8",
+              "match_type": "exact_id",
+              "confidence": "high"
+            },
+            "value_confidence": "low",
+            "reasoning": "Olumi estimate via edge 1ab7d93d; no stated figure is cited for this option→factor effect"
+          }
+        },
+        "provenance": "from_brief",
+        "source_quote": "invest two engineers for a quarter in the onboarding flow"
+      },
+      {
+        "id": "541f3b69",
+        "kind": "outcome",
+        "label": "Churn Reduction",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "57b38228",
+        "kind": "option",
+        "label": "Cut the Pro Price from £49 to £39",
+        "interventions": {
+          "ed5b5711": {
+            "value": 0.78,
+            "raw_value": 39,
+            "unit": "£",
+            "source": "brief_extraction",
+            "target_match": {
+              "node_id": "ed5b5711",
+              "match_type": "exact_id",
+              "confidence": "high"
+            },
+            "value_confidence": "high",
+            "reasoning": "Direct from V4 prompt data.interventions; the amount is stated in the brief"
+          }
+        },
+        "provenance": "from_brief",
+        "source_quote": "cut the Pro price from £49 to £39",
+        "label_authored": true
+      },
+      {
+        "id": "68c0488d",
+        "kind": "option",
+        "label": "Hire Two Customer Success Reps at £45k Each",
+        "interventions": {
+          "36825cf1": {
+            "value": 0.9,
+            "raw_value": 90000,
+            "unit": "£",
+            "source": "cee_hypothesis",
+            "target_match": {
+              "node_id": "36825cf1",
+              "match_type": "exact_id",
+              "confidence": "high"
+            },
+            "value_confidence": "low",
+            "reasoning": "Olumi estimate via edge 379fb864; no stated figure is cited for this option→factor effect"
+          },
+          "db6b9df5": {
+            "value": 0.8,
+            "raw_value": 0.8,
+            "unit": "scale",
+            "source": "cee_hypothesis",
+            "target_match": {
+              "node_id": "db6b9df5",
+              "match_type": "exact_id",
+              "confidence": "high"
+            },
+            "value_confidence": "low",
+            "reasoning": "Olumi estimate via edge 7f13c79c; no stated figure is cited for this option→factor effect"
+          }
+        },
+        "provenance": "from_brief",
+        "source_quote": "hire two customer success reps at £45k each",
+        "label_authored": true
+      },
+      {
+        "id": "86249c32",
+        "kind": "decision",
+        "label": "Question",
+        "provenance": "ai_inferred",
+        "label_placeholder": true
+      },
+      {
+        "id": "897b32dc",
+        "kind": "factor",
+        "label": "Runway Remaining",
+        "observed_state": {
+          "value": 0.7,
+          "unit": "months",
+          "source": "cee_inference",
+          "raw_value": 14,
+          "extractionType": "inferred"
+        },
+        "category": "observable",
+        "scale_frame": 20,
+        "display_value": "14 months",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "abc7389a",
+        "kind": "factor",
+        "label": "Onboarding Quality",
+        "observed_state": {
+          "value": 0.3,
+          "unit": "scale",
+          "source": "cee_inference",
+          "extractionType": "inferred",
+          "factor_type": "other",
+          "uncertainty_drivers": []
+        },
+        "category": "controllable",
+        "display_value": "0.3 scale",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "b059dcf8",
+        "kind": "factor",
+        "label": "Engineering Opportunity Cost",
+        "observed_state": {
+          "value": 0.5,
+          "unit": "scale",
+          "source": "cee_inference",
+          "extractionType": "inferred",
+          "factor_type": "other",
+          "uncertainty_drivers": []
+        },
+        "category": "controllable",
+        "display_value": "0.5 scale",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "bad0f75e",
+        "kind": "option",
+        "label": "Status Quo (Hold Current Plan)",
+        "interventions": {},
+        "is_baseline": true,
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "db6b9df5",
+        "kind": "factor",
+        "label": "Customer Success Coverage",
+        "observed_state": {
+          "value": 0.2,
+          "unit": "scale",
+          "source": "cee_inference",
+          "extractionType": "inferred",
+          "factor_type": "other",
+          "uncertainty_drivers": []
+        },
+        "category": "controllable",
+        "display_value": "0.2 scale",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "dd36f7f6",
+        "kind": "goal",
+        "label": "We Want It Under 2.5%",
+        "goal_threshold": 0.025,
+        "goal_threshold_raw": 2.5,
+        "goal_threshold_unit": "%",
+        "goal_threshold_cap": 100,
+        "goal_threshold_frame": "level",
+        "provenance": "from_brief",
+        "source_quote": "we want it under 2.5%",
+        "label_authored": true
+      },
+      {
+        "id": "defa94d2",
+        "kind": "factor",
+        "label": "Price Sensitivity",
+        "category": "external",
+        "prior": {
+          "distribution": "uniform",
+          "range_min": 0.25,
+          "range_max": 0.75
+        },
+        "extractionType": "inferred",
+        "display_value": "0.25 to 0.75 scale",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "ed5b5711",
+        "kind": "factor",
+        "label": "Pro Plan Price",
+        "observed_state": {
+          "value": 0.98,
+          "unit": "£",
+          "source": "cee_inference",
+          "raw_value": 49,
+          "extractionType": "inferred",
+          "factor_type": "other",
+          "uncertainty_drivers": []
+        },
+        "category": "controllable",
+        "scale_frame": 50,
+        "display_value": "£49",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "edbad1ba",
+        "kind": "option",
+        "label": "Phased: Onboarding + CS Hire",
+        "interventions": {
+          "36825cf1": {
+            "value": 0.45,
+            "raw_value": 45000,
+            "unit": "£",
+            "source": "brief_extraction",
+            "target_match": {
+              "node_id": "36825cf1",
+              "match_type": "exact_id",
+              "confidence": "high"
+            },
+            "value_confidence": "high",
+            "reasoning": "Stated magnitude carried for this factor; the brief states £45k"
+          },
+          "abc7389a": {
+            "value": 0.6,
+            "raw_value": 0.6,
+            "unit": "scale",
+            "source": "cee_hypothesis",
+            "target_match": {
+              "node_id": "abc7389a",
+              "match_type": "exact_id",
+              "confidence": "high"
+            },
+            "value_confidence": "low",
+            "reasoning": "Olumi estimate via edge bda8868b; this option→factor effect is not bound to a stated option record"
+          },
+          "db6b9df5": {
+            "value": 0.5,
+            "raw_value": 0.5,
+            "unit": "scale",
+            "source": "cee_hypothesis",
+            "target_match": {
+              "node_id": "db6b9df5",
+              "match_type": "exact_id",
+              "confidence": "high"
+            },
+            "value_confidence": "low",
+            "reasoning": "Olumi estimate via edge 7d5e1e99; this option→factor effect is not bound to a stated option record"
+          }
+        },
+        "is_baseline": false,
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "out_897b32dc_impact",
+        "kind": "outcome",
+        "label": "Runway Remaining Impact",
+        "provenance": "ai_inferred"
+      }
+    ],
+    "edges": [
+      {
+        "from": "150def25",
+        "to": "dd36f7f6",
+        "strength": {
+          "mean": -0.5,
+          "std": 0.11999999999999998
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "negative",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "contested",
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "pass1": {
+            "strength_mean": -0.5,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": -0.25641025641025644,
+            "strength_std": 0.15,
+            "exists_probability": 0.9,
+            "reasoning": "Higher revenue dilution risk directly reduces the probability of achieving the churn goal by shrinking effective revenue per user.",
+            "basis": "domain_prior",
+            "needs_user_input": true,
+            "lint_corrected": true
+          },
+          "pass2_adjusted": {
+            "strength_mean": -0.23974358974358978,
+            "strength_std": 0.175,
+            "exists_probability": 0.9
+          },
+          "bias_correction": {
+            "strength_mean_offset": 0.016666666666666663,
+            "strength_std_offset": 0.02500000000000001,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0.6666666666666666,
+          "distance_to_goal": 0,
+          "sign_unstable": false,
+          "pass1_missing": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "edge_key": "150def25->dd36f7f6",
+              "before": -0.5,
+              "after": -0.25641025641025644
+            }
+          ]
+        }
+      },
+      {
+        "from": "1c61c799",
+        "to": "dd36f7f6",
+        "strength": {
+          "mean": -0.7,
+          "std": 0.16799999999999995
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "negative",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "contested",
+          "contested_reasons": [
+            "raw_magnitude"
+          ],
+          "pass1": {
+            "strength_mean": -0.7,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": -0.3076923076923077,
+            "strength_std": 0.15,
+            "exists_probability": 0.9,
+            "reasoning": "Greater runway erosion risk lowers likelihood of reaching the churn target by limiting capacity to fund churn-reduction initiatives.",
+            "basis": "domain_prior",
+            "needs_user_input": true,
+            "lint_corrected": true
+          },
+          "pass2_adjusted": {
+            "strength_mean": -0.29102564102564105,
+            "strength_std": 0.175,
+            "exists_probability": 0.9
+          },
+          "bias_correction": {
+            "strength_mean_offset": 0.016666666666666663,
+            "strength_std_offset": 0.02500000000000001,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0.8179487179487178,
+          "distance_to_goal": 0,
+          "sign_unstable": false,
+          "pass1_missing": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "edge_key": "1c61c799->dd36f7f6",
+              "before": -0.6,
+              "after": -0.3076923076923077
+            }
+          ]
+        }
+      },
+      {
+        "from": "36825cf1",
+        "to": "150def25",
+        "strength": {
+          "mean": 0.3,
+          "std": 0.2
+        },
+        "exists_probability": 0.75,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair",
+        "validation": {
+          "status": "contested",
+          "contested_reasons": [
+            "strength_band_change",
+            "existence_boundary_crossing"
+          ],
+          "pass1": {
+            "strength_mean": 0.3,
+            "strength_std": 0.2,
+            "exists_probability": 0.75
+          },
+          "pass2": {
+            "strength_mean": 0.15,
+            "strength_std": 0.15,
+            "exists_probability": 0.3,
+            "reasoning": "Customer success headcount cost is unlikely to affect revenue dilution risk directly.",
+            "basis": "weak_guess",
+            "needs_user_input": true,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0.16666666666666666,
+            "strength_std": 0.175,
+            "exists_probability": 0.3
+          },
+          "bias_correction": {
+            "strength_mean_offset": 0.016666666666666663,
+            "strength_std_offset": 0.02500000000000001,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0.6666666666666666,
+          "distance_to_goal": 1,
+          "sign_unstable": false,
+          "pass1_missing": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "36825cf1",
+        "to": "1c61c799",
+        "strength": {
+          "mean": 0.6,
+          "std": 0.144
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "agreed",
+          "contested_reasons": [],
+          "pass1": {
+            "strength_mean": 0.6,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0.6,
+            "strength_std": 0.15,
+            "exists_probability": 0.9,
+            "reasoning": "Increased CS headcount cost significantly accelerates runway erosion due to higher burn.",
+            "basis": "domain_prior",
+            "needs_user_input": true,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0.6166666666666667,
+            "strength_std": 0.175,
+            "exists_probability": 0.9
+          },
+          "bias_correction": {
+            "strength_mean_offset": 0.016666666666666663,
+            "strength_std_offset": 0.02500000000000001,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0.6666666666666666,
+          "distance_to_goal": 1,
+          "sign_unstable": false,
+          "pass1_missing": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "36825cf1",
+        "to": "897b32dc",
+        "strength": {
+          "mean": -0.5,
+          "std": 0.11999999999999998
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "negative",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "agreed",
+          "contested_reasons": [],
+          "pass1": {
+            "strength_mean": -0.5,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0,
+            "reasoning": "",
+            "basis": "weak_guess",
+            "needs_user_input": false,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "bias_correction": {
+            "strength_mean_offset": 0,
+            "strength_std_offset": 0,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0,
+          "distance_to_goal": 2,
+          "sign_unstable": false,
+          "pass1_missing": false,
+          "pass2_missing": true,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "3fb49c45",
+        "to": "abc7389a",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai"
+      },
+      {
+        "from": "3fb49c45",
+        "to": "b059dcf8",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai"
+      },
+      {
+        "from": "541f3b69",
+        "to": "dd36f7f6",
+        "strength": {
+          "mean": 0.85,
+          "std": 0.20399999999999996
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "contested",
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "pass1": {
+            "strength_mean": 0.85,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0.358974358974359,
+            "strength_std": 0.1,
+            "exists_probability": 0.9,
+            "reasoning": "Greater churn reduction directly raises the chance of achieving a sub-2.5% churn goal.",
+            "basis": "structural_inference",
+            "needs_user_input": true,
+            "lint_corrected": true
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0.37564102564102564,
+            "strength_std": 0.125,
+            "exists_probability": 0.9
+          },
+          "bias_correction": {
+            "strength_mean_offset": 0.016666666666666663,
+            "strength_std_offset": 0.02500000000000001,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0.9487179487179487,
+          "distance_to_goal": 0,
+          "sign_unstable": false,
+          "pass1_missing": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "edge_key": "541f3b69->dd36f7f6",
+              "before": 0.7,
+              "after": 0.358974358974359
+            }
+          ]
+        }
+      },
+      {
+        "from": "57b38228",
+        "to": "ed5b5711",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai"
+      },
+      {
+        "from": "68c0488d",
+        "to": "36825cf1",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai"
+      },
+      {
+        "from": "68c0488d",
+        "to": "db6b9df5",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai"
+      },
+      {
+        "from": "86249c32",
+        "to": "3fb49c45",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Decision-to-option scaffold minted by the projector"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "default"
+      },
+      {
+        "from": "86249c32",
+        "to": "57b38228",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Decision-to-option scaffold minted by the projector"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "default"
+      },
+      {
+        "from": "86249c32",
+        "to": "68c0488d",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Decision-to-option scaffold minted by the projector"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "default"
+      },
+      {
+        "from": "86249c32",
+        "to": "bad0f75e",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Decision-to-option scaffold minted by the projector"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "default"
+      },
+      {
+        "from": "86249c32",
+        "to": "edbad1ba",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Decision-to-option scaffold minted by the projector"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "default"
+      },
+      {
+        "from": "897b32dc",
+        "to": "out_897b32dc_impact",
+        "strength": {
+          "mean": 0.8,
+          "std": 0.15
+        },
+        "exists_probability": 0.9,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Split factor→goal into factor→outcome→goal"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair",
+        "validation": {
+          "status": "agreed",
+          "contested_reasons": [],
+          "pass1": {
+            "strength_mean": 0.8,
+            "strength_std": 0.15,
+            "exists_probability": 0.9
+          },
+          "pass2": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0,
+            "reasoning": "",
+            "basis": "weak_guess",
+            "needs_user_input": false,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "bias_correction": {
+            "strength_mean_offset": 0,
+            "strength_std_offset": 0,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0,
+          "distance_to_goal": 1,
+          "sign_unstable": false,
+          "pass1_missing": false,
+          "pass2_missing": true,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "abc7389a",
+        "to": "541f3b69",
+        "strength": {
+          "mean": 0.31666666666666665,
+          "std": 0.07599999999999998
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "agreed",
+          "contested_reasons": [],
+          "pass1": {
+            "strength_mean": 0.31666666666666665,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0.3,
+            "strength_std": 0.1,
+            "exists_probability": 0.9,
+            "reasoning": "Improving onboarding quality is known to reduce churn rates moderately.",
+            "basis": "domain_prior",
+            "needs_user_input": true,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0.31666666666666665,
+            "strength_std": 0.125,
+            "exists_probability": 0.9
+          },
+          "bias_correction": {
+            "strength_mean_offset": 0.016666666666666663,
+            "strength_std_offset": 0.02500000000000001,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0.6666666666666666,
+          "distance_to_goal": 1,
+          "sign_unstable": false,
+          "pass1_missing": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "b059dcf8",
+        "to": "1c61c799",
+        "strength": {
+          "mean": 0.3,
+          "std": 0.072
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "agreed",
+          "contested_reasons": [],
+          "pass1": {
+            "strength_mean": 0.3,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0.4,
+            "strength_std": 0.1,
+            "exists_probability": 0.8,
+            "reasoning": "Diverting engineering resources imposes moderate runway risk through opportunity cost.",
+            "basis": "domain_prior",
+            "needs_user_input": true,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0.4166666666666667,
+            "strength_std": 0.125,
+            "exists_probability": 0.8
+          },
+          "bias_correction": {
+            "strength_mean_offset": 0.016666666666666663,
+            "strength_std_offset": 0.02500000000000001,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0.6666666666666666,
+          "distance_to_goal": 1,
+          "sign_unstable": false,
+          "pass1_missing": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "b059dcf8",
+        "to": "897b32dc",
+        "strength": {
+          "mean": -0.3,
+          "std": 0.072
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "negative",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "agreed",
+          "contested_reasons": [],
+          "pass1": {
+            "strength_mean": -0.3,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0,
+            "reasoning": "",
+            "basis": "weak_guess",
+            "needs_user_input": false,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "bias_correction": {
+            "strength_mean_offset": 0,
+            "strength_std_offset": 0,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0,
+          "distance_to_goal": 2,
+          "sign_unstable": false,
+          "pass1_missing": false,
+          "pass2_missing": true,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "bad0f75e",
+        "to": "36825cf1",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair"
+      },
+      {
+        "from": "bad0f75e",
+        "to": "abc7389a",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair"
+      },
+      {
+        "from": "bad0f75e",
+        "to": "b059dcf8",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair"
+      },
+      {
+        "from": "bad0f75e",
+        "to": "db6b9df5",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair"
+      },
+      {
+        "from": "bad0f75e",
+        "to": "ed5b5711",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair"
+      },
+      {
+        "from": "db6b9df5",
+        "to": "541f3b69",
+        "strength": {
+          "mean": 0.29230769230769227,
+          "std": 0.07015384615384614
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "agreed",
+          "contested_reasons": [],
+          "pass1": {
+            "strength_mean": 0.29230769230769227,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0.25,
+            "strength_std": 0.1,
+            "exists_probability": 0.85,
+            "reasoning": "Greater CS coverage tends to decrease churn moderately by addressing customer issues.",
+            "basis": "domain_prior",
+            "needs_user_input": true,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0.26666666666666666,
+            "strength_std": 0.125,
+            "exists_probability": 0.85
+          },
+          "bias_correction": {
+            "strength_mean_offset": 0.016666666666666663,
+            "strength_std_offset": 0.02500000000000001,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0.6666666666666666,
+          "distance_to_goal": 1,
+          "sign_unstable": false,
+          "pass1_missing": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "defa94d2",
+        "to": "541f3b69",
+        "strength": {
+          "mean": 0.12179487179487179,
+          "std": 0.05
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "contested",
+          "contested_reasons": [
+            "sign_flip"
+          ],
+          "pass1": {
+            "strength_mean": 0.12179487179487179,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": -0.2,
+            "strength_std": 0.1,
+            "exists_probability": 0.8,
+            "reasoning": "Higher price sensitivity weakens the effect of churn reduction initiatives by making users more likely to leave.",
+            "basis": "domain_prior",
+            "needs_user_input": true,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": -0.18333333333333335,
+            "strength_std": 0.125,
+            "exists_probability": 0.8
+          },
+          "bias_correction": {
+            "strength_mean_offset": 0.016666666666666663,
+            "strength_std_offset": 0.02500000000000001,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 1,
+          "distance_to_goal": 1,
+          "sign_unstable": true,
+          "pass1_missing": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "ed5b5711",
+        "to": "541f3b69",
+        "strength": {
+          "mean": 0.21923076923076923,
+          "std": 0.052615384615384606
+        },
+        "exists_probability": 0.8,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai",
+        "validation": {
+          "status": "agreed",
+          "contested_reasons": [],
+          "pass1": {
+            "strength_mean": 0.21923076923076923,
+            "strength_std": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "strength_mean": 0.25,
+            "strength_std": 0.1,
+            "exists_probability": 0.95,
+            "reasoning": "Cutting the Pro price from £49 to £39 is expected to boost churn reduction, though magnitude is unclear.",
+            "basis": "brief_explicit",
+            "needs_user_input": true,
+            "lint_corrected": false
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0.26666666666666666,
+            "strength_std": 0.125,
+            "exists_probability": 0.95
+          },
+          "bias_correction": {
+            "strength_mean_offset": 0.016666666666666663,
+            "strength_std_offset": 0.02500000000000001,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 1,
+          "distance_to_goal": 1,
+          "sign_unstable": false,
+          "pass1_missing": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": []
+        }
+      },
+      {
+        "from": "edbad1ba",
+        "to": "36825cf1",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai"
+      },
+      {
+        "from": "edbad1ba",
+        "to": "abc7389a",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai"
+      },
+      {
+        "from": "edbad1ba",
+        "to": "db6b9df5",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        },
+        "exists_probability": 1,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Model-inferred causal link (records projector)"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "ai"
+      },
+      {
+        "from": "out_897b32dc_impact",
+        "to": "dd36f7f6",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.15
+        },
+        "exists_probability": 0.9,
+        "effect_direction": "positive",
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Split factor→goal into factor→outcome→goal"
+        },
+        "provenance_display": "ai_inferred",
+        "origin": "repair",
+        "validation": {
+          "status": "contested",
+          "contested_reasons": [
+            "existence_boundary_crossing"
+          ],
+          "pass1": {
+            "strength_mean": 0.5,
+            "strength_std": 0.15,
+            "exists_probability": 0.9
+          },
+          "pass2": {
+            "strength_mean": 0.07692307692307693,
+            "strength_std": 0.15,
+            "exists_probability": 0.3,
+            "reasoning": "Runway remaining impact may have limited direct influence on achieving the churn goal.",
+            "basis": "weak_guess",
+            "needs_user_input": true,
+            "lint_corrected": true
+          },
+          "pass2_adjusted": {
+            "strength_mean": 0.09358974358974359,
+            "strength_std": 0.175,
+            "exists_probability": 0.3
+          },
+          "bias_correction": {
+            "strength_mean_offset": 0.016666666666666663,
+            "strength_std_offset": 0.02500000000000001,
+            "exists_probability_offset": 0
+          },
+          "max_divergence": 0.8128205128205128,
+          "distance_to_goal": 0,
+          "sign_unstable": false,
+          "pass1_missing": false,
+          "pass2_missing": false,
+          "evoi_rank": null,
+          "evoi_impact": null,
+          "was_shown": false,
+          "user_action": "pending",
+          "resolved_value": null,
+          "resolved_by": "default",
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "edge_key": "out_897b32dc_impact->dd36f7f6",
+              "before": 0.15,
+              "after": 0.07692307692307693
+            },
+            {
+              "code": "LINT_STD_CLAMPED",
+              "edge_key": "out_897b32dc_impact->dd36f7f6",
+              "before": 0.15,
+              "after": 0.06153846153846154
+            },
+            {
+              "code": "LINT_STD_FLOORED_WEAK_GUESS",
+              "edge_key": "out_897b32dc_impact->dd36f7f6",
+              "before": 0.06153846153846154,
+              "after": 0.15
+            }
+          ]
+        }
+      }
+    ],
+    "node_count": 18,
+    "edge_count": 32,
+    "goal_constraints": [
+      {
+        "constraint_id": "constraint_dd36f7f6_max",
+        "node_id": "dd36f7f6",
+        "operator": "<=",
+        "value": 0.025,
+        "label": "At or below 2.5%",
+        "unit": "fraction",
+        "source_quote": "we want it under 2.5%",
+        "confidence": 0.85,
+        "provenance": "explicit",
+        "value_frame": "level",
+        "provenance_unit_relabelled": {
+          "rule": "percent_label_to_fraction_label",
+          "pre_normalisation_value": 0.025,
+          "pre_normalisation_unit": "%"
+        }
+      }
+    ]
+  },
+  "observed_analysis_ready": {
+    "status": "needs_user_mapping",
+    "options": [
+      {
+        "option_id": "3fb49c45",
+        "label": "invest two engineers for a quarter in the onboarding flow",
+        "status": "ready",
+        "status_reason": "2 intervention(s) ready for analysis",
+        "is_baseline": null,
+        "intervention_count": 2
+      },
+      {
+        "option_id": "57b38228",
+        "label": "Cut the Pro Price from £49 to £39",
+        "status": "ready",
+        "status_reason": "1 intervention(s) ready for analysis",
+        "is_baseline": null,
+        "intervention_count": 1
+      },
+      {
+        "option_id": "68c0488d",
+        "label": "Hire Two Customer Success Reps at £45k Each",
+        "status": "ready",
+        "status_reason": "2 intervention(s) ready for analysis",
+        "is_baseline": null,
+        "intervention_count": 2
+      },
+      {
+        "option_id": "bad0f75e",
+        "label": "Status Quo (Hold Current Plan)",
+        "status": "needs_user_mapping",
+        "status_reason": "No interventions extracted",
+        "is_baseline": true,
+        "intervention_count": 0
+      },
+      {
+        "option_id": "edbad1ba",
+        "label": "Phased: Onboarding + CS Hire",
+        "status": "ready",
+        "status_reason": "3 intervention(s) ready for analysis",
+        "is_baseline": null,
+        "intervention_count": 3
+      }
+    ]
+  },
+  "observed_readiness_blockers_t1": [
+    {
+      "code": "OPTION_NEEDS_MAPPING",
+      "category": "option_mapping",
+      "message": "Choose which factor \"Status Quo (Hold Current Plan)\" changes and by how much. Olumi has already linked it to 5 factors to keep the model connected, but that link is Olumi's own inference rather than a mapping you stated, and it carries no effect value.",
+      "repairability": "human_input_required",
+      "option_id": "bad0f75e",
+      "option_label": "Status Quo (Hold Current Plan)"
+    }
+  ],
+  "observed_suggested_actions_t1": [
+    {
+      "id": "chip_prompt_configure_option",
+      "label": "Configure Status Quo (Hold Current Plan)",
+      "message": "Help me configure Status Quo (Hold Current Plan)."
+    }
+  ],
+  "t4_request_message": "Help me configure Status Quo (Hold Current Plan).",
+  "observed_assistant_text_t4": "The Status Quo option already represents 'no change' — it has an empty interventions object, so all factors remain at their current observed values. There is nothing to configure for this option since its purpose is to serve as the baseline comparison against the other three options. If a runway floor constraint is still unlinked to the model, tell me in your own words what it should check against (e.g., which factor or outcome represents runway) and I will connect it.",
+  "observed_blocks_t4": [],
+  "observed_suggested_actions_t4": [],
+  "observed_readiness_blockers_t4": [
+    {
+      "code": "OPTION_NEEDS_MAPPING",
+      "category": "option_mapping",
+      "message": "Choose which factor \"Status Quo (Hold Current Plan)\" changes and by how much. Olumi has already linked it to 5 factors to keep the model connected, but that link is Olumi's own inference rather than a mapping you stated, and it carries no effect value.",
+      "repairability": "human_input_required",
+      "option_id": "bad0f75e",
+      "option_label": "Status Quo (Hold Current Plan)"
+    }
+  ],
+  "observed_analysis_ready_status_t4": "needs_user_mapping"
+}

@@ -1,0 +1,134 @@
+{
+  "name": "golden-journey-v1-context-drop",
+  "description": "RED baseline for A12 (prior-turn context continuity). SYNTHETIC (hand-authored) transcript of the lived continuity defect: the draft and analysis establish the option labels and the leader, then the follow-up turn ('how does the runner-up compare?') answers as if the conversation never happened. It denies having the earlier results and names no option established in prior turns. A12 must FAIL on step 4_follow_up and the replay must exit 1. Before A12 existed, this fixture exited 0 (its only fail was advisory A5) - proof that A1-A11 alone could not catch a dropped conversation. Pre/post replay transcripts are archived durably in Docs/golden-journey/a12-continuity-invariant-evidence.md.",
+  "brief": "We are a 15-person engineering team weighing three options for scaling delivery over the next six months: hire two senior engineers locally, engage an offshore partner, or introduce tiered pricing to hire more gradually. Decision matters for Q3 roadmap commitments.",
+  "expected_milestones": [
+    {
+      "step": "4_follow_up",
+      "role": "follow_up",
+      "expect": "A12 fails: the answer denies prior context and references no option or factor established in earlier turns",
+      "components": [
+        "context_management"
+      ],
+      "invariants": [
+        "A12"
+      ]
+    }
+  ],
+  "transcript": {
+    "note": "Synthetic continuity-drop capture. Steps 1-3 are healthy; step 4 drops the conversation.",
+    "diagnostic_trace_enabled": false,
+    "timing_debug_enabled": false,
+    "observations": [
+      {
+        "step": "1_draft",
+        "http_status": 200,
+        "body": {
+          "assistant_text": "Your decision model is ready, with three options and a few cost and delivery factors. You can run the analysis whenever you're ready, or refine the options first.",
+          "suggested_actions": [
+            {
+              "id": "chip-run",
+              "label": "Run analysis",
+              "message": "Run analysis.",
+              "action_type": "run_analysis"
+            }
+          ],
+          "draft_graph": {
+            "nodes": [
+              {
+                "id": "goal_scale",
+                "kind": "goal",
+                "label": "Scale delivery for Q3"
+              },
+              {
+                "id": "opt_hire",
+                "kind": "option",
+                "label": "Hire two senior engineers"
+              },
+              {
+                "id": "opt_offshore",
+                "kind": "option",
+                "label": "Engage an offshore partner"
+              },
+              {
+                "id": "opt_pricing",
+                "kind": "option",
+                "label": "Introduce tiered pricing"
+              },
+              {
+                "id": "fac_budget",
+                "kind": "factor",
+                "label": "Budget"
+              },
+              {
+                "id": "fac_speed",
+                "kind": "factor",
+                "label": "Delivery speed"
+              }
+            ],
+            "edges": []
+          }
+        }
+      },
+      {
+        "step": "2_run_analysis",
+        "http_status": 200,
+        "body": {
+          "assistant_text": "Analysis complete. Hire two senior engineers currently leads with about 62% probability against the goal, ahead of Engage an offshore partner.",
+          "analysis_ready": {
+            "status": "ready",
+            "freshness": "fresh",
+            "graph_hash_at_run": "hash-context-drop-0001",
+            "current_graph_hash": "hash-context-drop-0001",
+            "option_comparison": [
+              {
+                "option_id": "opt_hire",
+                "option_label": "Hire two senior engineers",
+                "win_probability": 0.62
+              },
+              {
+                "option_id": "opt_offshore",
+                "option_label": "Engage an offshore partner",
+                "win_probability": 0.26
+              },
+              {
+                "option_id": "opt_pricing",
+                "option_label": "Introduce tiered pricing",
+                "win_probability": 0.12
+              }
+            ]
+          },
+          "suggested_actions": []
+        }
+      },
+      {
+        "step": "3_explain_leader",
+        "http_status": 200,
+        "body": {
+          "assistant_text": "Hire two senior engineers leads at roughly 62% because it improves delivery speed most directly while keeping Budget within range.",
+          "analysis_ready": {
+            "status": "ready",
+            "freshness": "fresh",
+            "graph_hash_at_run": "hash-context-drop-0001",
+            "current_graph_hash": "hash-context-drop-0001"
+          },
+          "suggested_actions": []
+        }
+      },
+      {
+        "step": "4_follow_up",
+        "http_status": 200,
+        "body": {
+          "assistant_text": "I don't have the earlier results in this conversation, so I can't tell you which option was the runner-up or how it compares. In general, comparing two approaches means weighing their trade-offs against what you are trying to achieve. If you share the details again, I can take a look.",
+          "analysis_ready": {
+            "status": "ready",
+            "freshness": "fresh",
+            "graph_hash_at_run": "hash-context-drop-0001",
+            "current_graph_hash": "hash-context-drop-0001"
+          },
+          "suggested_actions": []
+        }
+      }
+    ]
+  }
+}

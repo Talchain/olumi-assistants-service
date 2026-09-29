@@ -1,0 +1,156 @@
+{
+  "nodes": [
+    {"id": "dec_crm", "kind": "decision", "label": "CRM Replacement vs Training Investment Decision"},
+
+    {"id": "opt_replace", "kind": "option", "label": "Replace CRM Platform",
+     "data": {"interventions": {"fac_replace_action": 1, "fac_training_investment": 0.2, "fac_migration_effort": 0.7}},
+     "is_baseline": false},
+    {"id": "opt_train", "kind": "option", "label": "Keep Current CRM, Invest in Training",
+     "data": {"interventions": {"fac_replace_action": 0, "fac_training_investment": 0.8, "fac_migration_effort": 0}},
+     "is_baseline": false},
+    {"id": "opt_hybrid", "kind": "option", "label": "Phased Migration with Parallel Training",
+     "data": {"interventions": {"fac_replace_action": 1, "fac_training_investment": 0.5, "fac_migration_effort": 0.4}},
+     "is_baseline": false},
+    {"id": "opt_status_quo", "kind": "option", "label": "Continue Current CRM Unchanged (Status Quo)",
+     "data": {"interventions": {"fac_replace_action": 0, "fac_training_investment": 0.1, "fac_migration_effort": 0}},
+     "is_baseline": true}
+  ],
+  "nodes_continued_note": "placeholder",
+  "edges_placeholder": "placeholder"
+}
+
+Wait, I need to correct this — let me output the full, valid JSON object only.
+
+{
+  "nodes": [
+    {"id": "dec_crm", "kind": "decision", "label": "CRM Replacement vs Training Investment Decision"},
+
+    {"id": "opt_replace", "kind": "option", "label": "Replace CRM Platform",
+     "data": {"interventions": {"fac_replace_action": 1, "fac_training_investment": 0.2, "fac_migration_effort": 0.7}},
+     "is_baseline": false},
+    {"id": "opt_train", "kind": "option", "label": "Keep Current CRM, Invest in Training",
+     "data": {"interventions": {"fac_replace_action": 0, "fac_training_investment": 0.8, "fac_migration_effort": 0}},
+     "is_baseline": false},
+    {"id": "opt_hybrid", "kind": "option", "label": "Phased Migration with Parallel Training",
+     "data": {"interventions": {"fac_replace_action": 1, "fac_training_investment": 0.5, "fac_migration_effort": 0.4}},
+     "is_baseline": false},
+    {"id": "opt_status_quo", "kind": "option", "label": "Continue Current CRM Unchanged (Status Quo)",
+     "data": {"interventions": {"fac_replace_action": 0, "fac_training_investment": 0.1, "fac_migration_effort": 0}},
+     "is_baseline": true},
+
+    {"id": "fac_replace_action", "kind": "factor", "label": "CRM Platform Replacement",
+     "category": "controllable", "provenance": "brief_explicit",
+     "data": {"value": 0, "extractionType": "inferred", "factor_type": "other",
+              "display_value": "No platform replacement underway",
+              "encoding_map": "{\"0\": \"Keep existing platform\", \"1\": \"Replace platform\"}",
+              "uncertainty_drivers": ["Vendor selection not finalised", "Data migration scope unclear"]}},
+    {"id": "fac_training_investment", "kind": "factor", "label": "Training Investment Level",
+     "category": "controllable", "provenance": "brief_explicit",
+     "data": {"value": 0.1, "raw_value": 6000, "unit": "£", "cap": 30000,
+              "display_value": "£6,000",
+              "extractionType": "inferred", "factor_type": "cost",
+              "uncertainty_drivers": ["Training uptake by staff uncertain", "No baseline training spend stated"]}},
+    {"id": "fac_migration_effort", "kind": "factor", "label": "Migration Implementation Effort",
+     "category": "controllable", "provenance": "brief_implied",
+     "data": {"value": 0, "raw_value": 0, "unit": "months", "cap": 6,
+              "display_value": "No migration underway",
+              "extractionType": "inferred", "factor_type": "time",
+              "uncertainty_drivers": ["Migration timeline unproven", "Team capacity for parallel work unknown"]}},
+
+    {"id": "fac_team_size", "kind": "factor", "label": "Team Size",
+     "category": "observable", "provenance": "brief_explicit",
+     "data": {"value": 0.5, "raw_value": 25, "unit": "people", "cap": 50,
+              "display_value": "25 people", "extractionType": "explicit"}},
+    {"id": "fac_licence_cost", "kind": "factor", "label": "Current Annual Licence Cost",
+     "category": "observable", "provenance": "brief_explicit",
+     "data": {"value": 0.6, "raw_value": 60000, "unit": "£", "cap": 100000,
+              "display_value": "£60,000", "extractionType": "explicit"}},
+
+    {"id": "fac_vendor_market", "kind": "factor", "label": "Vendor Pricing and Market Conditions",
+     "category": "external", "provenance": "model_added",
+     "extractionType": "external", "factor_type": "external",
+     "prior": {"distribution": "uniform", "range_min": 0.0, "range_max": 1.0}},
+
+    {"id": "out_productivity", "kind": "outcome", "label": "Team Productivity Gain"},
+    {"id": "out_data_capability", "kind": "outcome", "label": "Reporting and Data Capability"},
+    {"id": "risk_disruption", "kind": "risk", "label": "Operational Disruption During Transition"},
+    {"id": "risk_adoption", "kind": "risk", "label": "Staff Adoption Failure Risk"},
+    {"id": "risk_cost_overrun", "kind": "risk", "label": "Budget Overrun Risk",
+     "data": {"value": 0.6, "raw_value": 60000, "unit": "£", "cap": 120000,
+              "display_value": "£60,000 baseline spend", "extractionType": "explicit"}},
+
+    {"id": "goal_crm_value", "kind": "goal", "label": "Maximise CRM-Driven Operational Value This Year"}
+  ],
+  "edges": [
+    {"from": "dec_crm", "to": "opt_replace", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "dec_crm", "to": "opt_train", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "dec_crm", "to": "opt_hybrid", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "dec_crm", "to": "opt_status_quo", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+
+    {"from": "opt_replace", "to": "fac_replace_action", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "opt_replace", "to": "fac_training_investment", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "opt_replace", "to": "fac_migration_effort", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+
+    {"from": "opt_train", "to": "fac_replace_action", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "opt_train", "to": "fac_training_investment", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+
+    {"from": "opt_hybrid", "to": "fac_replace_action", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "opt_hybrid", "to": "fac_training_investment", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "opt_hybrid", "to": "fac_migration_effort", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+
+    {"from": "opt_status_quo", "to": "fac_replace_action", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+    {"from": "opt_status_quo", "to": "fac_training_investment", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+
+    {"from": "fac_replace_action", "to": "out_data_capability", "strength": {"mean": 0.55, "std": 0.18}, "exists_probability": 0.75, "effect_direction": "positive"},
+    {"from": "fac_replace_action", "to": "risk_disruption", "strength": {"mean": 0.50, "std": 0.15}, "exists_probability": 0.85, "effect_direction": "positive"},
+    {"from": "fac_replace_action", "to": "risk_cost_overrun", "strength": {"mean": 0.35, "std": 0.20}, "exists_probability": 0.80, "effect_direction": "positive"},
+
+    {"from": "fac_training_investment", "to": "out_productivity", "strength": {"mean": 0.45, "std": 0.14}, "exists_probability": 0.85, "effect_direction": "positive"},
+    {"from": "fac_training_investment", "to": "risk_adoption", "strength": {"mean": -0.40, "std": 0.16}, "exists_probability": 0.80, "effect_direction": "negative"},
+
+    {"from": "fac_migration_effort", "to": "risk_disruption", "strength": {"mean": 0.30, "std": 0.15}, "exists_probability": 0.78, "effect_direction": "positive"},
+    {"from": "fac_migration_effort", "to": "risk_adoption", "strength": {"mean": 0.20, "std": 0.14}, "exists_probability": 0.70, "effect_direction": "positive"},
+    {"from": "fac_migration_effort", "to": "out_data_capability", "strength": {"mean": 0.15, "std": 0.10}, "exists_probability": 0.65, "effect_direction": "positive"},
+
+    {"from": "fac_team_size", "to": "risk_adoption", "strength": {"mean": 0.12, "std": 0.08}, "exists_probability": 0.70, "effect_direction": "positive"},
+    {"from": "fac_licence_cost", "to": "risk_cost_overrun", "strength": {"mean": 0.20, "std": 0.10}, "exists_probability": 0.85, "effect_direction": "positive"},
+
+    {"from": "fac_vendor_market", "to": "risk_cost_overrun", "strength": {"mean": 0.18, "std": 0.15}, "exists_probability": 0.60, "effect_direction": "positive"},
+    {"from": "fac_vendor_market", "to": "out_data_capability", "strength": {"mean": 0.10, "std": 0.10}, "exists_probability": 0.55, "effect_direction": "positive"},
+
+    {"from": "out_productivity", "to": "goal_crm_value", "strength": {"mean": 0.45, "std": 0.12}, "exists_probability": 0.90, "effect_direction": "positive"},
+    {"from": "out_data_capability", "to": "goal_crm_value", "strength": {"mean": 0.35, "std": 0.14}, "exists_probability": 0.85, "effect_direction": "positive"},
+    {"from": "risk_disruption", "to": "goal_crm_value", "strength": {"mean": -0.30, "std": 0.15}, "exists_probability": 0.88, "effect_direction": "negative"},
+    {"from": "risk_adoption", "to": "goal_crm_value", "strength": {"mean": -0.35, "std": 0.16}, "exists_probability": 0.85, "effect_direction": "negative"},
+    {"from": "risk_cost_overrun", "to": "goal_crm_value", "strength": {"mean": -0.25, "std": 0.14}, "exists_probability": 0.82, "effect_direction": "negative"}
+  ],
+  "goal_constraints": [
+    {"constraint_id": "gc_budget", "node_id": "risk_cost_overrun", "operator": "<=", "value": 0.75,
+     "label": "Keep spend within reasonable range of current £60k licence baseline", "unit": "£",
+     "source_quote": "Annual licence is around 60k", "confidence": 0.6, "provenance": "explicit"}
+  ],
+  "causal_claims": [
+    {"type": "direct_effect", "from": "fac_replace_action", "to": "risk_disruption", "stated_strength": "strong"},
+    {"type": "direct_effect", "from": "fac_training_investment", "to": "risk_adoption", "stated_strength": "strong"},
+    {"type": "direct_effect", "from": "fac_training_investment", "to": "out_productivity", "stated_strength": "moderate"},
+    {"type": "no_direct_effect", "from": "fac_vendor_market", "to": "out_productivity"},
+    {"type": "mediation_only", "from": "fac_migration_effort", "via": "risk_disruption", "to": "goal_crm_value"},
+    {"type": "direct_effect", "from": "fac_replace_action", "to": "out_data_capability", "stated_strength": "strong"}
+  ],
+  "coaching": {
+    "summary": "The core tension is between Reporting and Data Capability gains from Replace CRM Platform against Operational Disruption During Transition and Staff Adoption Failure Risk, while Keep Current CRM, Invest in Training avoids disruption but limits capability upside. The Phased Migration with Parallel Training option is only lightly evidenced and budget guardrails beyond the current £60,000 licence are not explicitly stated.",
+    "strengthen_items": [
+      {"id": "str_1", "label": "Define explicit budget cap", "detail": "No stated ceiling on migration or training spend beyond current licence cost weakens overrun risk estimates", "action_type": "add_constraint", "bias_category": "anchoring"},
+      {"id": "str_2", "label": "Quantify adoption timeline", "detail": "Staff adoption risk is only loosely modelled; real training completion rates would sharpen the comparison", "action_type": "add_risk", "bias_category": "overconfidence"}
+    ],
+    "widening_log": {
+      "elements_added": ["opt_hybrid", "fac_vendor_market", "risk_cost_overrun"],
+      "elements_considered_but_excluded": ["A pure outsourcing or managed-service option was considered but excluded as speculative without brief support"],
+      "brief_completeness": "partial"
+    },
+    "bias_signals": [
+      {"type": "narrow_framing", "detail": "The brief frames this as a binary replace-or-train choice, but a phased approach could reduce risk while still capturing some capability gains"},
+      {"type": "status_quo_bias", "detail": "No explicit numeric target for productivity or data capability was given, making it easy to default to keeping the current CRM without a clear bar for improvement"}
+    ]
+  }
+}

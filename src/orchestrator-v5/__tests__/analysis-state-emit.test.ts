@@ -1,0 +1,1125 @@
+/**
+ * ANALYSIS-STATE AUTHORITY, STEP 3 — `analysis_state` (AnalysisStateV1) on the wire.
+ *
+ * These tests are written RED-FIRST against the OBSERVABLE wire behaviour of
+ * `finaliseV5Response`, not against the composer's internals, because the claim
+ * the step makes is a claim about what a consumer receives. At the PR base
+ * every assertion below fails with `analysis_state` undefined; that is the
+ * signature this file exists to flip.
+ *
+ * BINDING BY IDENTITY (trap 19). Every assertion names its object — a run-state
+ * `kind`, a `factor_id`, a `withheld_reason` code — never a value predicate
+ * another object could satisfy. The blocker assertions in particular match on
+ * `factor_id`, never on message text, because two blockers on one turn can
+ * share a message and differ in scope.
+ *
+ * THE DISCRIMINATING PAIRS, stated so a reviewer can check them rather than
+ * take them on trust:
+ *   * `refused` vs `blocked` — the two states a naive implementation collapses.
+ *     A mutant mapping `refused` onto `blocked` must RED the two refusal tests
+ *     and leave the genuinely-blocked test GREEN. Both directions are asserted.
+ *   * `refused` on a derivation the clamp EARLY-RETURNS (already stale/unknown).
+ *     This is the case a reason-string sniffer cannot see, and it is the reason
+ *     the refusal signal is carried explicitly rather than inferred from
+ *     `freshness_reason`. An implementation that reads only the reason passes
+ *     the first refusal test and REDs this one.
+ *   * `leader_claim.permitted` — the CONJUNCTION. Entitlement-only and
+ *     separation-only implementations each pass half the matrix; all four cells
+ *     are asserted.
+ */
+
+import { describe, it, expect } from 'vitest';
+import { OlumiResponseSchema, AnalysisStateV1Schema } from '@talchain/schemas/boundary';
+import type { OlumiResponse } from '@talchain/schemas/boundary';
+
+import { finaliseV5Response } from '../response-finaliser.js';
+import { composeAnalysisStateV1 } from '../compose/analysis-state-v1.js';
+import {
+  clampRefusalFreshness,
+  type AnalysisReadyPayload,
+} from '../compose/analysis-ready-emit.js';
+import type { FreshnessDerivation } from '../context/freshness.js';
+import { BASE_FINALISED_HEALTHY_TURN } from './__fixtures__/base-finalised-healthy-turn.js';
+
+// ─── Fixtures ─────────────────────────────────────────────────────────────
+
+function freshDerivation(): FreshnessDerivation {
+  return {
+    freshness: 'fresh',
+    reason: 'graph_hash_match',
+    selected_fact_index: 0,
+    graph_hash_at_run: 'hash_abc',
+    current_graph_hash: 'hash_abc',
+    computed_at: '2026-08-16T12:00:00.000Z',
+  };
+}
+
+function staleDerivation(
+  reason: FreshnessDerivation['reason'] = 'graph_hash_diverged',
+): FreshnessDerivation {
+  return {
+    freshness: 'stale',
+    reason,
+    selected_fact_index: 0,
+    graph_hash_at_run: 'hash_abc',
+    current_graph_hash: 'hash_xyz',
+    computed_at: '2026-08-16T12:00:00.000Z',
+  };
+}
+
+function noRunDerivation(): FreshnessDerivation {
+  return {
+    freshness: 'none',
+    reason: 'no_successful_run_analysis_fact',
+    selected_fact_index: null,
+    graph_hash_at_run: null,
+    current_graph_hash: 'hash_abc',
+    computed_at: null,
+  };
+}
+
+function unknownDerivation(
+  reason: FreshnessDerivation['reason'],
+): FreshnessDerivation {
+  return {
+    freshness: 'unknown',
+    reason,
+    selected_fact_index: 0,
+    graph_hash_at_run: null,
+    current_graph_hash: 'hash_abc',
+    computed_at: '2026-08-16T12:00:00.000Z',
+  };
+}
+
+function readyPayload(): AnalysisReadyPayload {
+  return {
+    status: 'ready',
+    goal_node_id: 'goal_productivity',
+    options: [
+      {
+        option_id: 'opt_status_quo',
+        label: 'Status quo',
+        status: 'ready',
+        interventions: { fac_headcount: 0 },
+        is_baseline: true,
+      },
+    ],
+  };
+}
+
+function blockedPayload(): AnalysisReadyPayload {
+  return {
+    status: 'blocked',
+    blocked_reason: 'model_structure_invalid',
+    goal_node_id: 'goal_productivity',
+    options: [],
+    blockers: [
+      {
+        option_id: 'opt_tech_lead',
+        option_label: 'Hire a tech lead',
+        factor_id: 'fac_headcount',
+        factor_label: 'Headcount',
+        blocker_type: 'missing_value',
+        message: 'legacy message the contract does not carry',
+        suggested_action: 'add_value',
+      },
+      {
+        factor_id: 'fac_role_type',
+        factor_label: 'Role type',
+        blocker_type: 'missing_connection',
+        message: 'legacy message the contract does not carry',
+        suggested_action: 'add_edge',
+      },
+    ],
+  } as AnalysisReadyPayload;
+}
+
+function refusalPayload(): AnalysisReadyPayload {
+  // The exact shape `buildAnalysisRefusalReadiness` produces.
+  return {
+    options: [],
+    goal_node_id: '',
+    status: 'blocked',
+    blocked_reason: 'parameter_invalid_at_execute',
+  };
+}
+
+interface ResponseOpts {
+  readonly robustnessLevel?: string;
+  readonly nearTieIsTie?: boolean;
+  readonly withAnalysisBlock?: boolean;
+}
+
+function baseResponse(opts: ResponseOpts = {}): OlumiResponse {
+  const withBlock = opts.withAnalysisBlock !== false;
+  return {
+    response_version: 2,
+    assistant_text: 'A comparison of the options.',
+    stage_indicator: 'analyse',
+    blocks: withBlock
+      ? [
+          {
+            // The WIRE block shape (`type`, not the CEE-internal `block_type`)
+            // — derived from OlumiResponseSchema, so the conformance tests
+            // below exercise a body the strict schema actually accepts rather
+            // than passing vacuously on a body it rejects for an unrelated
+            // reason.
+            type: 'analysis_result',
+            summary: 'Comparison complete',
+            leading_option_id: 'opt_tech_lead',
+            enrichment: {
+              robustness: {
+                ...(opts.robustnessLevel !== undefined
+                  ? { level: opts.robustnessLevel }
+                  : {}),
+                near_tie: { is_tie: opts.nearTieIsTie === true },
+              },
+            },
+          },
+        ]
+      : [],
+    suggested_actions: [],
+    insights: [],
+  } as unknown as OlumiResponse;
+}
+
+type FinaliserCtx = Parameters<typeof finaliseV5Response>[1];
+
+function finalise(
+  response: OlumiResponse,
+  ctx: {
+    analysisReady?: AnalysisReadyPayload;
+    freshness?: FreshnessDerivation;
+    /** The derivation `claimSafety.forExit()` carries to a graph-less exit. */
+    exitFreshness?: FreshnessDerivation;
+    /** Declared by every route exit; `null` means no graph was in scope. */
+    graph?: unknown;
+    mayNameLeadingOption?: boolean;
+  },
+): Record<string, unknown> {
+  return finaliseV5Response(response, ctx as FinaliserCtx) as unknown as Record<
+    string,
+    unknown
+  >;
+}
+
+function stateOf(body: Record<string, unknown>): Record<string, unknown> {
+  const state = body.analysis_state;
+  expect(state, 'analysis_state must be present on this turn').toBeDefined();
+  return state as Record<string, unknown>;
+}
+
+function runStateOf(body: Record<string, unknown>): Record<string, unknown> {
+  return stateOf(body).run_state as Record<string, unknown>;
+}
+
+
+// ─── The cross-tree capture's inputs, kept byte-identical to
+//     `scripts/capture-finalised-healthy-turn.ts`. The script is what was run
+//     on the PR base to produce `BASE_FINALISED_HEALTHY_TURN`; these mirror it
+//     so the in-suite comparison is against the same input, not a lookalike.
+//     A drift between the two shows up immediately as a failed deep-equal.
+
+function captureInputReadiness(): AnalysisReadyPayload {
+  return {
+    status: 'ready',
+    goal_node_id: 'goal_productivity',
+    options: [
+      {
+        option_id: 'opt_status_quo',
+        label: 'Make No New Hire (Status Quo)',
+        status: 'ready',
+        interventions: { fac_role_type: 0, fac_headcount: 0 },
+        is_baseline: true,
+      },
+      {
+        option_id: 'opt_tech_lead',
+        label: 'Hire a Tech Lead',
+        status: 'ready',
+        interventions: { fac_role_type: 1, fac_headcount: 0.2 },
+      },
+    ],
+  };
+}
+
+function captureInputFreshness(): FreshnessDerivation {
+  return {
+    freshness: 'fresh',
+    reason: 'graph_hash_match',
+    selected_fact_index: 0,
+    graph_hash_at_run: 'abc123',
+    current_graph_hash: 'abc123',
+    computed_at: '2026-08-16T12:00:00.000Z',
+  };
+}
+
+function captureInputResponse(): OlumiResponse {
+  return {
+    response_version: 2,
+    assistant_text: 'Hiring a tech lead scores highest on the modelled goal.',
+    stage_indicator: 'analyse',
+    blocks: [
+      {
+        type: 'analysis_result',
+        summary: 'Comparison complete',
+        leading_option_id: 'opt_tech_lead',
+        enrichment: {
+          robustness: {
+            level: 'high',
+            near_tie: { is_tie: false, gap: 0.19 },
+          },
+        },
+      },
+    ],
+    suggested_actions: [],
+    insights: [],
+  } as unknown as OlumiResponse;
+}
+
+// ─── run_state — the seven-branch verdict ─────────────────────────────────
+
+describe('analysis_state.run_state', () => {
+  it('emits kind=complete_current with the selected fact timestamp on a fresh turn', () => {
+    const body = finalise(baseResponse(), {
+      analysisReady: readyPayload(),
+      freshness: freshDerivation(),
+      mayNameLeadingOption: true,
+    });
+    expect(runStateOf(body)).toEqual({
+      kind: 'complete_current',
+      computed_at: '2026-08-16T12:00:00.000Z',
+    });
+  });
+
+  it('emits kind=complete_stale with cause=graph_changed when the graph hash diverged', () => {
+    const body = finalise(baseResponse(), {
+      analysisReady: readyPayload(),
+      freshness: staleDerivation('graph_hash_diverged'),
+      mayNameLeadingOption: true,
+    });
+    expect(runStateOf(body)).toEqual({
+      kind: 'complete_stale',
+      computed_at: '2026-08-16T12:00:00.000Z',
+      cause: 'graph_changed',
+    });
+  });
+
+  it('emits cause=options_changed — NOT graph_changed — when the analysed options diverged', () => {
+    // The two causes carry different remedies; collapsing them to one "stale"
+    // loses the only thing a consumer could act on.
+    const body = finalise(baseResponse(), {
+      analysisReady: readyPayload(),
+      freshness: staleDerivation('analysed_options_diverged'),
+      mayNameLeadingOption: true,
+    });
+    expect(runStateOf(body).cause).toBe('options_changed');
+  });
+
+  it('emits kind=never_run when no successful analysis fact exists', () => {
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      analysisReady: readyPayload(),
+      freshness: noRunDerivation(),
+      mayNameLeadingOption: true,
+    });
+    expect(runStateOf(body)).toEqual({ kind: 'never_run' });
+  });
+
+  it.each([
+    ['derivation_failed', 'store_unreadable'],
+    ['invariant_failed', 'store_unreadable'],
+    ['legacy_fact_missing_hash', 'legacy_fact'],
+    ['current_graph_hash_unavailable', 'no_graph_this_turn'],
+  ] as const)(
+    'maps unknown freshness reason %s to unknown_degraded cause %s',
+    (reason, cause) => {
+      const body = finalise(baseResponse(), {
+        analysisReady: readyPayload(),
+        freshness: unknownDerivation(reason),
+        mayNameLeadingOption: true,
+      });
+      expect(runStateOf(body)).toEqual({ kind: 'unknown_degraded', cause });
+    },
+  );
+
+  it('emits kind=blocked with the payload reason when the MODEL is unanalysable', () => {
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      analysisReady: blockedPayload(),
+      freshness: noRunDerivation(),
+      mayNameLeadingOption: false,
+    });
+    const runState = runStateOf(body);
+    expect(runState.kind).toBe('blocked');
+    expect(runState.reason_code).toBe('model_structure_invalid');
+  });
+});
+
+// ─── refused — the new state, and the pair that discriminates it ──────────
+
+describe('analysis_state.run_state — the refused state', () => {
+  it('emits kind=refused, never blocked, when THIS TURN declined to analyse', () => {
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      analysisReady: refusalPayload(),
+      freshness: clampRefusalFreshness(freshDerivation()),
+      mayNameLeadingOption: false,
+    });
+    const runState = runStateOf(body);
+    expect(runState.kind).toBe('refused');
+    expect(runState.reason_code).toBe('parameter_invalid_at_execute');
+  });
+
+  it('carries NO timestamp on a refusal — the branch declines to make a currency claim', () => {
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      analysisReady: refusalPayload(),
+      freshness: clampRefusalFreshness(freshDerivation()),
+      mayNameLeadingOption: false,
+    });
+    expect('computed_at' in runStateOf(body)).toBe(false);
+  });
+
+  it('emits kind=refused even when the clamp EARLY-RETURNS on an already-stale derivation', () => {
+    // The discriminating case. `clampRefusalFreshness` returns a stale/unknown
+    // derivation untouched, so its `reason` is NOT the refusal reason — an
+    // implementation that sniffs `freshness_reason` reports `complete_stale`
+    // here and the product goes on vouching for a result this turn refused to
+    // stand behind.
+    const clamped = clampRefusalFreshness(staleDerivation());
+    expect(clamped.reason).toBe('graph_hash_diverged'); // precondition, pinned in-test
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      analysisReady: refusalPayload(),
+      freshness: clamped,
+      mayNameLeadingOption: false,
+    });
+    expect(runStateOf(body).kind).toBe('refused');
+  });
+
+  it('does NOT emit refused for a genuinely blocked model (the other half of the pair)', () => {
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      analysisReady: blockedPayload(),
+      freshness: noRunDerivation(),
+      mayNameLeadingOption: false,
+    });
+    expect(runStateOf(body).kind).toBe('blocked');
+  });
+});
+
+// ─── readiness ────────────────────────────────────────────────────────────
+
+describe('analysis_state.readiness', () => {
+  it('carries the producer status verbatim', () => {
+    const body = finalise(baseResponse(), {
+      analysisReady: readyPayload(),
+      freshness: freshDerivation(),
+      mayNameLeadingOption: true,
+    });
+    expect((stateOf(body).readiness as Record<string, unknown>).status).toBe('ready');
+  });
+
+  it('maps each wire blocker to a contract blocker, preserving per-factor scope BY ID', () => {
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      analysisReady: blockedPayload(),
+      freshness: noRunDerivation(),
+      mayNameLeadingOption: false,
+    });
+    const readiness = stateOf(body).readiness as {
+      blockers: Array<Record<string, unknown>>;
+    };
+    expect(readiness.blockers).toHaveLength(2);
+
+    const headcount = readiness.blockers.find((b) => b.factor_id === 'fac_headcount');
+    expect(headcount, 'the fac_headcount blocker must survive the mapping').toBeDefined();
+    expect(headcount).toMatchObject({
+      code: 'MISSING_OPTION_VALUE',
+      category: 'option_values',
+      repairability: 'human_input_required',
+      option_id: 'opt_tech_lead',
+      option_label: 'Hire a tech lead',
+      factor_id: 'fac_headcount',
+      factor_label: 'Headcount',
+    });
+
+    const roleType = readiness.blockers.find((b) => b.factor_id === 'fac_role_type');
+    expect(roleType, 'the fac_role_type blocker must survive the mapping').toBeDefined();
+    expect(roleType).toMatchObject({
+      code: 'MISSING_OPTION_CONNECTION',
+      category: 'option_mapping',
+      factor_id: 'fac_role_type',
+    });
+    // ABSENCE IS DISTINCT: this blocker is not option-scoped, so the key must
+    // be absent rather than empty.
+    expect('option_id' in (roleType as object)).toBe(false);
+  });
+
+  it('emits an EMPTY blocker list — a positive "nothing is blocking" claim — on a ready model', () => {
+    const body = finalise(baseResponse(), {
+      analysisReady: readyPayload(),
+      freshness: freshDerivation(),
+      mayNameLeadingOption: true,
+    });
+    expect((stateOf(body).readiness as { blockers: unknown[] }).blockers).toEqual([]);
+  });
+});
+
+// ─── leader_claim — the conjunction, all four cells ───────────────────────
+
+describe('analysis_state.leader_claim', () => {
+  it('permitted=true only when the CEE entitlement holds AND the options separate', () => {
+    const body = finalise(baseResponse({ robustnessLevel: 'high', nearTieIsTie: false }), {
+      analysisReady: readyPayload(),
+      freshness: freshDerivation(),
+      mayNameLeadingOption: true,
+    });
+    const claim = stateOf(body).leader_claim as Record<string, unknown>;
+    expect(claim.permitted).toBe(true);
+    expect('withheld_reason' in claim).toBe(false);
+    expect(claim.separation).toBe('separated');
+  });
+
+  it('permitted=false with withheld_reason=options_do_not_separate on a near tie', () => {
+    const body = finalise(baseResponse({ robustnessLevel: 'low', nearTieIsTie: true }), {
+      analysisReady: readyPayload(),
+      freshness: freshDerivation(),
+      mayNameLeadingOption: true,
+    });
+    const claim = stateOf(body).leader_claim as Record<string, unknown>;
+    expect(claim.permitted).toBe(false);
+    expect(claim.withheld_reason).toBe('options_do_not_separate');
+    expect(claim.separation).toBe('near_tie');
+  });
+
+  it('permitted=false with withheld_reason=constraint_verdict_withheld when CEE withheld it', () => {
+    const body = finalise(baseResponse({ robustnessLevel: 'high', nearTieIsTie: false }), {
+      analysisReady: readyPayload(),
+      freshness: freshDerivation(),
+      mayNameLeadingOption: false,
+    });
+    const claim = stateOf(body).leader_claim as Record<string, unknown>;
+    expect(claim.permitted).toBe(false);
+    expect(claim.withheld_reason).toBe('constraint_verdict_withheld');
+  });
+
+  it('permitted=false with withheld_reason=separation_unavailable when no separation was computed', () => {
+    // FAIL-CLOSED. The contract defines `permitted` as a conjunction that is
+    // true only when BOTH halves hold; an unknown statistical half is not a
+    // held half. ABSENCE IS DISTINCT — `separation` is omitted, never
+    // fabricated as "no separation".
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      analysisReady: readyPayload(),
+      freshness: freshDerivation(),
+      mayNameLeadingOption: true,
+    });
+    const claim = stateOf(body).leader_claim as Record<string, unknown>;
+    expect(claim.permitted).toBe(false);
+    expect(claim.withheld_reason).toBe('separation_unavailable');
+    expect('separation' in claim).toBe(false);
+  });
+});
+
+// ─── robustness — two named fields, and one honest absence ───────────────
+
+describe('analysis_state.robustness', () => {
+  it('carries the engine aggregate level when the turn computed one', () => {
+    const body = finalise(baseResponse({ robustnessLevel: 'high' }), {
+      analysisReady: readyPayload(),
+      freshness: freshDerivation(),
+      mayNameLeadingOption: true,
+    });
+    expect((stateOf(body).robustness as Record<string, unknown>).aggregate_level).toBe(
+      'high',
+    );
+  });
+
+  it('OMITS aggregate_level when nothing computed one — absent is not "not robust"', () => {
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      analysisReady: readyPayload(),
+      freshness: freshDerivation(),
+      mayNameLeadingOption: true,
+    });
+    expect('aggregate_level' in (stateOf(body).robustness as object)).toBe(false);
+  });
+
+  it('DISCLOSED LIMIT — factors_that_flip_leader is never emitted at step 3', () => {
+    // Absent means "the flip analysis was NOT COMPUTED"; `[]` would mean it was
+    // computed and nothing flips. The only flip evidence reachable at this seam
+    // is keyed by factor LABEL, and the contract requires IDs, so emitting
+    // either value would be a fabricated finding. This test pins the gap so it
+    // is visible in a green suite rather than assumed closed; it REDs if a
+    // later change starts emitting the field without an id-bearing producer.
+    for (const opts of [{ robustnessLevel: 'high' }, { withAnalysisBlock: false }]) {
+      const body = finalise(baseResponse(opts), {
+        analysisReady: readyPayload(),
+        freshness: freshDerivation(),
+        mayNameLeadingOption: true,
+      });
+      expect('factors_that_flip_leader' in (stateOf(body).robustness as object)).toBe(
+        false,
+      );
+    }
+  });
+});
+
+// ─── the composed predicates — producer of record, not re-derived ────────
+
+describe('analysis_state usability predicates and contradictions', () => {
+  it('a fresh, ready run is usable for prose, chips and follow-up, with no rerun', () => {
+    const state = stateOf(
+      finalise(baseResponse(), {
+        analysisReady: readyPayload(),
+        freshness: freshDerivation(),
+        mayNameLeadingOption: true,
+      }),
+    );
+    expect(state.usable_for_prose).toBe(true);
+    expect(state.usable_for_chips).toBe(true);
+    expect(state.usable_for_followup).toBe(true);
+    expect(state.requires_rerun).toBe(false);
+    expect(state.blocked_unusable).toBe(false);
+    expect(state.contradictions).toEqual([]);
+  });
+
+  it('a stale run drops CHIPS ONLY and asks for a rerun — the predicates are not one flag', () => {
+    const state = stateOf(
+      finalise(baseResponse(), {
+        analysisReady: readyPayload(),
+        freshness: staleDerivation(),
+        mayNameLeadingOption: true,
+      }),
+    );
+    expect(state.usable_for_prose).toBe(true);
+    expect(state.usable_for_chips).toBe(false);
+    expect(state.usable_for_followup).toBe(true);
+    expect(state.requires_rerun).toBe(true);
+  });
+
+  it('a blocked model is unusable for every purpose', () => {
+    const state = stateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), {
+        analysisReady: blockedPayload(),
+        freshness: noRunDerivation(),
+        mayNameLeadingOption: false,
+      }),
+    );
+    expect(state.blocked_unusable).toBe(true);
+    expect(state.usable_for_prose).toBe(false);
+    expect(state.usable_for_chips).toBe(false);
+  });
+
+  it('reports the producer\'s OWN detected contradiction rather than resolving it by guess', () => {
+    // `status: 'ready'` carrying actionable blockers is a should-never-happen
+    // integrity violation the canonical verdict already detects. The wire must
+    // carry it, not silently pick a side.
+    const contradictory = {
+      ...readyPayload(),
+      blockers: [
+        {
+          factor_id: 'fac_headcount',
+          factor_label: 'Headcount',
+          blocker_type: 'missing_value',
+          message: 'x',
+          suggested_action: 'add_value',
+        },
+      ],
+    } as AnalysisReadyPayload;
+    const state = stateOf(
+      finalise(baseResponse(), {
+        analysisReady: contradictory,
+        freshness: freshDerivation(),
+        mayNameLeadingOption: true,
+      }),
+    );
+    expect(state.contradictions).toContain('status_ready_with_actionable_blockers');
+  });
+});
+
+// ─── contract conformance + the additive guarantee ───────────────────────
+
+describe('analysis_state contract conformance', () => {
+  const cases: Array<[string, Parameters<typeof finalise>[1], ResponseOpts]> = [
+    [
+      'fresh',
+      { analysisReady: readyPayload(), freshness: freshDerivation(), mayNameLeadingOption: true },
+      { robustnessLevel: 'high' },
+    ],
+    [
+      'stale',
+      { analysisReady: readyPayload(), freshness: staleDerivation(), mayNameLeadingOption: true },
+      {},
+    ],
+    [
+      'never_run',
+      { analysisReady: readyPayload(), freshness: noRunDerivation(), mayNameLeadingOption: true },
+      { withAnalysisBlock: false },
+    ],
+    [
+      'blocked',
+      { analysisReady: blockedPayload(), freshness: noRunDerivation(), mayNameLeadingOption: false },
+      { withAnalysisBlock: false },
+    ],
+    [
+      'refused',
+      {
+        analysisReady: refusalPayload(),
+        freshness: clampRefusalFreshness(freshDerivation()),
+        mayNameLeadingOption: false,
+      },
+      { withAnalysisBlock: false },
+    ],
+    [
+      'unknown_degraded',
+      {
+        analysisReady: readyPayload(),
+        freshness: unknownDerivation('legacy_fact_missing_hash'),
+        mayNameLeadingOption: true,
+      },
+      {},
+    ],
+  ];
+
+  it.each(cases)('%s state parses against AnalysisStateV1Schema', (_name, ctx, opts) => {
+    const body = finalise(baseResponse(opts), ctx);
+    expect(() => AnalysisStateV1Schema.parse(stateOf(body))).not.toThrow();
+  });
+
+  it.each(cases)('%s response parses against the strict OlumiResponseSchema', (_name, ctx, opts) => {
+    const body = finalise(baseResponse(opts), ctx);
+    expect(() => OlumiResponseSchema.parse(body)).not.toThrow();
+  });
+});
+
+describe('additive on the wire', () => {
+  // The load-bearing control is CROSS-TREE: `BASE_FINALISED_HEALTHY_TURN` was
+  // measured on a separate clone at the PR base (staging `bacf35d5`, schemas
+  // 0.44.0) — a tree containing neither the vendor bump nor the emission. A
+  // same-tree comparison could only show this lane agreeing with itself.
+  function captureHeadBody(): Record<string, unknown> {
+    const finalised = finaliseV5Response(
+      captureInputResponse(),
+      {
+        analysisReady: captureInputReadiness(),
+        freshness: captureInputFreshness(),
+        mayNameLeadingOption: true,
+      } as FinaliserCtx,
+    );
+    const body = JSON.parse(JSON.stringify(finalised)) as Record<string, unknown>;
+    const ready = body.analysis_ready as Record<string, unknown> | undefined;
+    if (ready && typeof ready.computed_at === 'string') ready.computed_at = '<normalised>';
+    return body;
+  }
+
+  it('the head body MINUS analysis_state equals the body measured on the PR base', () => {
+    const head = captureHeadBody();
+    expect(head.analysis_state, 'this turn must emit the new key').toBeDefined();
+    const { analysis_state: _new, ...rest } = head;
+    expect(rest).toEqual(BASE_FINALISED_HEALTHY_TURN);
+  });
+
+  it('POSITIVE CONTROL — the comparison can see a one-character difference', () => {
+    // Without this, a deep-equal that silently compared two empty objects, or
+    // an assertion pointed at the wrong value, would pass by testing nothing.
+    const mutated = {
+      ...BASE_FINALISED_HEALTHY_TURN,
+      assistant_text: `${String(BASE_FINALISED_HEALTHY_TURN.assistant_text)}!`,
+    };
+    expect(mutated).not.toEqual(BASE_FINALISED_HEALTHY_TURN);
+  });
+
+  it('adds exactly ONE top-level key relative to the PR base', () => {
+    const head = captureHeadBody();
+    expect(Object.keys(head).sort()).toEqual(
+      [...Object.keys(BASE_FINALISED_HEALTHY_TURN), 'analysis_state'].sort(),
+    );
+  });
+
+  it('the internal refusal flag never reaches the wire', () => {
+    // `refusal_declared` rides the freshness derivation, which is stamped onto
+    // `analysis_ready` by `attachComputedAt`. That stamper reads NAMED members,
+    // so the flag cannot leak — asserted rather than argued.
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      analysisReady: refusalPayload(),
+      freshness: clampRefusalFreshness(freshDerivation()),
+      mayNameLeadingOption: false,
+    });
+    expect(JSON.stringify(body)).not.toContain('refusal_declared');
+  });
+
+  it('adds exactly ONE top-level key on a NO-ANALYSIS-CONTEXT exit too', () => {
+    // The step-4 emission must be additive on the clarify-family exits by the
+    // same standard as the analysis-carrying ones: one new key, nothing
+    // rewritten. Compared against the SAME body finalised with no context at
+    // all rather than against a fixture this lane wrote.
+    const input = baseResponse({ withAnalysisBlock: false });
+    const body = finalise(input, { mayNameLeadingOption: false });
+    const inputKeys = Object.keys(input as unknown as Record<string, unknown>);
+    expect(Object.keys(body).sort()).toEqual([...inputKeys, 'analysis_state'].sort());
+  });
+});
+
+// ─── ROADMAP 2.1264 — the key is present on EVERY turn exit ───────────────
+//
+// ⚠ THIS DESCRIBE REPLACES A TEST THAT PINNED THE OPPOSITE, and the swap is
+// the point of the step, so it is recorded rather than silently dropped
+// (CLAUDE.md trap #14). The removed test read:
+//
+//     it('omits analysis_state entirely when the producer has no verdict to
+//        supply', () => { … expect('analysis_state' in body).toBe(false); });
+//
+// Its rationale — absence is a contract-licensed state meaning "no verdict was
+// supplied" — is still TRUE OF THE CONTRACT. What changed is CEE's posture
+// inside it: while CEE emitted the key on some exits and omitted it on others,
+// absence on the wire meant BOTH "this build predates the field" AND "this turn
+// supplied no verdict", and a consumer cannot tell those apart. That ambiguity
+// is what forced the UI back onto legacy per-turn-type feature detection.
+// CEE now always supplies a verdict, so absence means exactly one thing: a
+// build that predates the field.
+//
+// ⚠ AND THE STATE IT EMITS IS *NOT* `never_run`, WHICH THE STEP-4 BRIEF ASKED
+// FOR. Derived at the vendored 0.46.0 bytes, `never_run` is declared as *"No
+// analysis has ever been run for this model"*, and its consumer licence is to
+// *"render the pre-analysis affordance"*. A clarify-family exit threads no
+// graph, no freshness derivation and no fact read, so it CANNOT know that —
+// and on a scenario that does hold a completed analysis, a `never_run` stamp
+// would send the UI to the pre-analysis affordance over a real result. That is
+// the contradiction class this whole contract exists to close, manufactured by
+// its own fix. `unknown_degraded` + `no_graph_this_turn` is the branch whose
+// declared meaning ("the producer CANNOT DETERMINE the run state this turn";
+// "no graph was in scope, so there was nothing to classify") is true BY
+// CONSTRUCTION of such an exit, so that is what ships.
+
+describe('analysis_state on an exit with NO analysis context (ROADMAP 2.1264)', () => {
+  it('EMITS the key — a consumer never has to feature-detect per turn type', () => {
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      mayNameLeadingOption: false,
+    });
+    expect('analysis_state' in body).toBe(true);
+  });
+
+  it('run_state is unknown_degraded/no_graph_this_turn — the branch that is TRUE here', () => {
+    const runState = runStateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), { mayNameLeadingOption: false }),
+    );
+    expect(runState.kind).toBe('unknown_degraded');
+    expect(runState.cause).toBe('no_graph_this_turn');
+  });
+
+  it('is NEVER never_run — the producer cannot know no analysis has EVER run', () => {
+    // The discriminating half of the pair. An implementation that reached for
+    // the brief's `never_run` passes the previous test's "key is present"
+    // sibling and REDs here.
+    const runState = runStateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), { mayNameLeadingOption: false }),
+    );
+    expect(runState.kind).not.toBe('never_run');
+  });
+
+  it('THE PAIR — never_run IS emitted when a fact read actually found none', () => {
+    // Without this, the assertion above could be satisfied by an
+    // implementation that never emits `never_run` at all, which would lose a
+    // state the contract needs. `noRunDerivation()` is a fact read that
+    // returned nothing; THAT licenses the positive claim.
+    const runState = runStateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), {
+        analysisReady: readyPayload(),
+        freshness: noRunDerivation(),
+        mayNameLeadingOption: true,
+      }),
+    );
+    expect(runState.kind).toBe('never_run');
+  });
+
+  it('claims NO usability and reports no contradictions', () => {
+    const state = stateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), { mayNameLeadingOption: false }),
+    );
+    expect(state.usable_for_prose).toBe(false);
+    expect(state.usable_for_chips).toBe(false);
+    expect(state.usable_for_followup).toBe(false);
+    // `requires_rerun` false: there is no result here whose recomputation
+    // would move the user forward, and the flag LICENSES a rerun affordance.
+    expect(state.requires_rerun).toBe(false);
+    // `blocked_unusable` false: nothing established that the MODEL is
+    // unanalysable. Suppressing every result-derived surface on a
+    // clarification turn would be a verdict this exit did not reach.
+    expect(state.blocked_unusable).toBe(false);
+    expect(state.contradictions).toEqual([]);
+  });
+
+  it('readiness says UNSUPPLIED, not blocked — the exit assessed nothing', () => {
+    const state = stateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), { mayNameLeadingOption: false }),
+    );
+    const readiness = state.readiness as Record<string, unknown>;
+    expect(readiness.status).toBe('unknown');
+    expect(readiness.blockers).toEqual([]);
+  });
+
+  it('THE PAIR — a graph-less exit that DID supply readiness keeps the payload verdict', () => {
+    // `readiness_intake` and two `edit_graph` exits thread `analysisReady`
+    // with NO freshness (derived from route-v2.ts's 21 `sendFinalised200` call
+    // sites). Their readiness verdict must survive: an implementation that
+    // hardcoded the no-context state would flatten a real `blocked` model into
+    // "unknown" and lose the blockers the UI's repair affordance consumes.
+    const state = stateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), {
+        analysisReady: blockedPayload(),
+        mayNameLeadingOption: false,
+      }),
+    );
+    expect((state.readiness as Record<string, unknown>).status).toBe('blocked');
+    expect((state.run_state as Record<string, unknown>).kind).toBe('blocked');
+    const blockers = (state.readiness as Record<string, unknown>).blockers as Array<
+      Record<string, unknown>
+    >;
+    expect(blockers.map((b) => b.factor_id).sort()).toEqual(
+      ['fac_headcount', 'fac_role_type'].sort(),
+    );
+  });
+
+  it('leader_claim is composed by the SAME conjunction — withheld, with the CEE reason', () => {
+    const state = stateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), { mayNameLeadingOption: false }),
+    );
+    const claim = state.leader_claim as Record<string, unknown>;
+    expect(claim.permitted).toBe(false);
+    expect(claim.withheld_reason).toBe('constraint_verdict_withheld');
+    // ABSENCE IS DISTINCT: no separation statement was computed on this turn,
+    // which is not the same as "the options do not separate".
+    expect('separation' in claim).toBe(false);
+  });
+
+  it('THE OTHER HALF — entitled but no separation reads separation_unavailable', () => {
+    // Proves the reason is derived from WHICH half failed rather than being a
+    // constant on the no-context path. Both halves of the conjunction are
+    // therefore live here, not only on analysis-carrying turns.
+    const claim = stateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), { mayNameLeadingOption: true }),
+    ).leader_claim as Record<string, unknown>;
+    expect(claim.permitted).toBe(false);
+    expect(claim.withheld_reason).toBe('separation_unavailable');
+  });
+
+  it('does NOT synthesise an analysis_ready block — the two stamps stay independent', () => {
+    // ⚠ THE COUPLING THIS PINS IS REAL AND SHARP. The no-context derivation
+    // carries `reason: 'current_graph_hash_unavailable'`, which is a member of
+    // `FRESHNESS_ONLY_SYNTHESIS_REASONS`. Had it been threaded onto
+    // `ctx.freshness` instead of held locally, the finaliser would ALSO have
+    // synthesised a freshness-only `analysis_ready` whose status is `blocked`
+    // — a second new top-level key AND a fabricated blocked claim on every
+    // clarification turn.
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      mayNameLeadingOption: false,
+    });
+    expect('analysis_ready' in body).toBe(false);
+  });
+
+  it('POSITIVE CONTROL — the synthesis path this turn avoids really does fire', () => {
+    // Without this, the assertion above could pass because the synthesis is
+    // broken rather than because it was correctly not reached (trap #13).
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      freshness: unknownDerivation('current_graph_hash_unavailable'),
+      mayNameLeadingOption: false,
+    });
+    expect('analysis_ready' in body).toBe(true);
+  });
+
+  it('the no-context state parses against AnalysisStateV1Schema', () => {
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      mayNameLeadingOption: false,
+    });
+    expect(() => AnalysisStateV1Schema.parse(stateOf(body))).not.toThrow();
+  });
+
+  it('the no-context response parses against the strict OlumiResponseSchema', () => {
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      mayNameLeadingOption: false,
+    });
+    expect(() => OlumiResponseSchema.parse(body)).not.toThrow();
+  });
+
+  it('the composer still returns undefined for a caller with NO canonical verdict', () => {
+    // The contract-licensed absence remains reachable at the COMPOSER, which
+    // other producers may use; what changed is that the finaliser always
+    // supplies a verdict. Kept under test so the branch is not untested dead
+    // code.
+    expect(composeAnalysisStateV1({ canonical: null, rawRobustness: null })).toBeUndefined();
+  });
+});
+
+// ─── THE REVIEW BLOCKER — a graph-less exit must not DEGRADE a known-good
+//     analysis state (review of PR #1004) ───────────────────────────────────
+//
+// ⚠⚠ WHAT THE FIRST CUT OF THIS PR GOT WRONG, recorded because it is the whole
+// reason this describe exists. Emitting `unknown_degraded` on EVERY graph-less
+// exit was honest about what the FINALISER could see and WRONG about what CEE
+// KNOWS. On a post-analysis clarification turn the UI previously fell back to
+// its retained-fresh legacy verdict and displayed "Analysis complete"; a
+// complete, strict-valid `unknown_degraded` object outranks that fallback and
+// flips the display to "Results may be outdated" + a "Rerun analysis" CTA,
+// ungated. And the contract MANDATES that harm — `unknown_degraded` instructs a
+// consumer to degrade visibly and never fall back to its last-known state. So
+// the emission would have bought "absence is unambiguous" at the price of
+// re-opening the harm class ROADMAP 2.1085 closed (documented at
+// `route-v2.ts:2611`, measured on staging 13 Aug).
+//
+// THE FIX IS NOT TO STOP EMITTING — it is to emit the TRUTH, which CEE already
+// holds. `claimSafety.forExit()` runs `buildTurnContext` on exactly these exits
+// (lazy, memoised, one read per turn) and that context already computes a
+// freshness derivation from the persisted graph. It is now carried to the exit
+// as `exitFreshness` and consumed by the finaliser, so a post-analysis clarify
+// turn emits `complete_current` / `complete_stale` — truthful, non-degrading,
+// and absence still means only "this build predates the field".
+//
+// ⚠ WHY A DISTINCT CTX MEMBER AND NOT `freshness`: the four graph-bearing exits
+// spread `claimSafety.forExit()` and ALSO set `freshness`, and the KEY ORDER
+// DIFFERS BETWEEN THEM — `system_event:2532` and `chip_click:2611` set freshness
+// BEFORE the spread, `draft_graph:3955` and `edit_graph:5082` after. A
+// `freshness` member on the stamp would therefore have silently overridden the
+// real per-turn derivation on two of the four. Precedence lives in the
+// finaliser, explicitly, where key order cannot decide it.
+
+/**
+ * Run-state kinds that INSTRUCT A CONSUMER TO DEGRADE what it is showing.
+ *
+ * Cited, not invented: the vendored 0.46.0 contract says `unknown_degraded`
+ * means "The producer CANNOT DETERMINE the run state this turn … A consumer
+ * must degrade visibly — say the state is unknown — and must never fall back to
+ * a default kind, to its own last-known state, or to a client-side derivation."
+ * At the UI that maps to `results_stale` / "Results may be outdated" / a "Rerun
+ * analysis" CTA (measured by the PR review by executing the UI's own pure
+ * `deriveAnalysisDisplayState` against the values emitted here).
+ *
+ * A turn that KNOWS the analysis is current must never emit a member of this
+ * set. That is the property, stated once, so every assertion below binds to it
+ * by name rather than to a hand-copied kind string.
+ */
+const DEGRADING_RUN_STATE_KINDS: readonly string[] = ['unknown_degraded'];
+
+describe('a graph-less exit consumes the fact read that already happened (exitFreshness)', () => {
+  it('a POST-ANALYSIS clarify turn emits complete_current — not a degraded verdict', () => {
+    const runState = runStateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), {
+        // The shape `claimSafety.forExit()` now supplies: the derivation the
+        // turn context already computed from the persisted graph.
+        exitFreshness: freshDerivation(),
+        graph: null,
+        mayNameLeadingOption: true,
+      }),
+    );
+    expect(runState.kind).toBe('complete_current');
+    expect(runState.computed_at).toBe('2026-08-16T12:00:00.000Z');
+  });
+
+  it('THE HARM, ASSERTED AS THE PROPERTY — it emits no DEGRADING kind', () => {
+    // Bound to the named property rather than to `!== 'unknown_degraded'`, so a
+    // future degrading kind added to the contract is covered by extending one
+    // list rather than by remembering to add an assertion.
+    const runState = runStateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), {
+        exitFreshness: freshDerivation(),
+        graph: null,
+        mayNameLeadingOption: true,
+      }),
+    );
+    expect(DEGRADING_RUN_STATE_KINDS).not.toContain(runState.kind);
+  });
+
+  it('and it is USABLE — the predicates do not blank out a good analysis', () => {
+    // The display consequence in the other direction: a `complete_current`
+    // run_state whose usability predicates all read false would suppress every
+    // result-derived surface anyway, which is the same harm by another route.
+    const state = stateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), {
+        exitFreshness: freshDerivation(),
+        graph: null,
+        mayNameLeadingOption: true,
+      }),
+    );
+    expect(state.usable_for_prose).toBe(true);
+    expect(state.usable_for_chips).toBe(true);
+    expect(state.usable_for_followup).toBe(true);
+    expect(state.requires_rerun).toBe(false);
+    expect(state.blocked_unusable).toBe(false);
+  });
+
+  it('a STALE post-analysis clarify turn says stale, with the actionable cause', () => {
+    const runState = runStateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), {
+        exitFreshness: staleDerivation(),
+        graph: null,
+        mayNameLeadingOption: true,
+      }),
+    );
+    expect(runState.kind).toBe('complete_stale');
+    expect(runState.cause).toBe('graph_changed');
+  });
+
+  it('never_run BECOMES TRUTHFUL here — a real fact read that found nothing', () => {
+    // ⭐ THE BRIEF'S REQUESTED STATE, NOW EARNED. `never_run` was refused on the
+    // first cut because nothing had looked; with the fact read threaded, a
+    // graph-less exit on a never-analysed scenario can make the positive claim.
+    const runState = runStateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), {
+        exitFreshness: noRunDerivation(),
+        graph: null,
+        mayNameLeadingOption: false,
+      }),
+    );
+    expect(runState.kind).toBe('never_run');
+  });
+
+  it('a FAILED context read says store_unreadable — not "no graph this turn"', () => {
+    // The honest cause for "we tried to look and could not", distinct from
+    // "there was nothing to look at". Different sentences, different remedies.
+    const runState = runStateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), {
+        exitFreshness: unknownDerivation('derivation_failed'),
+        graph: null,
+        mayNameLeadingOption: false,
+      }),
+    );
+    expect(runState.kind).toBe('unknown_degraded');
+    expect(runState.cause).toBe('store_unreadable');
+  });
+
+  it('PRECEDENCE — the exit\'s OWN per-turn derivation outranks the persisted one', () => {
+    // The two are given DELIBERATELY DIFFERENT verdicts, so this cannot pass by
+    // both paths agreeing. `freshness` is the mutating turn's own derivation and
+    // must win; `exitFreshness` describes the persisted graph.
+    const runState = runStateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), {
+        freshness: staleDerivation(),
+        exitFreshness: freshDerivation(),
+        graph: null,
+        mayNameLeadingOption: true,
+      }),
+    );
+    expect(runState.kind).toBe('complete_stale');
+  });
+
+  it('THE MUTATING-TURN GATE — a graph-BEARING exit never consumes exitFreshness', () => {
+    // ⚠ THIS IS THE SAFETY HALF, and it is why the consumption is gated on
+    // `graph == null`. `exitFreshness` is derived from the PERSISTED graph. On an
+    // exit that mutated the graph this turn, the persisted derivation can read
+    // `fresh` while the post-edit graph has diverged — a FALSE currency claim,
+    // which is worse than the degraded verdict this whole review is about.
+    // Those exits thread their own `freshness`; if one ever fails to, it must
+    // fall back rather than borrow a derivation about a different graph.
+    const runState = runStateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), {
+        exitFreshness: freshDerivation(),
+        graph: { nodes: [], edges: [] },
+        mayNameLeadingOption: true,
+      }),
+    );
+    expect(runState.kind).not.toBe('complete_current');
+    expect(runState.kind).toBe('unknown_degraded');
+  });
+
+  it('the post-analysis clarify state parses against AnalysisStateV1Schema', () => {
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      exitFreshness: freshDerivation(),
+      graph: null,
+      mayNameLeadingOption: true,
+    });
+    expect(() => AnalysisStateV1Schema.parse(stateOf(body))).not.toThrow();
+    expect(() => OlumiResponseSchema.parse(body)).not.toThrow();
+  });
+});

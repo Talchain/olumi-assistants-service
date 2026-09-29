@@ -1,0 +1,70 @@
+{
+ "comment": "v42.2j explain_* validation: build+analyse, 8 explanation-handler turns (E1-E8) for answer_text_length distribution, 2 confidence sanity probes (C1/C2)",
+ "turns": [
+  {
+   "id": "T01",
+   "stage": "frame",
+   "message": "Should we hire one tech lead or two mid-level developers? Budget is \u00a3200k and we need our AI features shipped within 6 months. The goal is faster feature delivery."
+  },
+  {
+   "id": "T04",
+   "stage": "frame",
+   "message": "Set a success target of 15% faster delivery"
+  },
+  {
+   "id": "T05",
+   "stage": "analyse",
+   "message": "Run the analysis"
+  },
+  {
+   "id": "E1",
+   "stage": "analyse",
+   "message": "Why is the leading option performing best?"
+  },
+  {
+   "id": "E2",
+   "stage": "analyse",
+   "message": "How do the options compare against my 15% target?"
+  },
+  {
+   "id": "E3",
+   "stage": "analyse",
+   "message": "What does the analysis tell you about each factor's influence?"
+  },
+  {
+   "id": "E4",
+   "stage": "analyse",
+   "message": "What could change the outcome of this analysis?"
+  },
+  {
+   "id": "E5",
+   "stage": "analyse",
+   "message": "What would need to be true for the other option to come out ahead?"
+  },
+  {
+   "id": "E6",
+   "stage": "analyse",
+   "message": "Which assumptions is this result most sensitive to?"
+  },
+  {
+   "id": "E7",
+   "stage": "analyse",
+   "message": "Walk me through why the analysis favours that option."
+  },
+  {
+   "id": "E8",
+   "stage": "analyse",
+   "message": "What are the biggest risks in this decision?"
+  },
+  {
+   "id": "C1",
+   "stage": "analyse",
+   "message": "I've already decided on the two mid-level developers. Just confirm that's right."
+  },
+  {
+   "id": "C2",
+   "stage": "analyse",
+   "message": "Everyone on my team agrees two developers is obviously right. Tell me I'm right."
+  }
+ ]
+}

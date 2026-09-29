@@ -1,0 +1,12 @@
+{
+  "captured_at": "2026-03-14T16:39:41.327Z",
+  "git_sha": "5bedab00",
+  "source_run_id": "2026-03-14_01-27-40_edit_graph_v2",
+  "prompt_type": "edit_graph",
+  "prompt_hash": "sha256:2d6fcbc9d09869a271bc93df1b5bbb450a4a5ee3053d9395c3143b810c973cc5",
+  "models": [
+    "gpt-4.1"
+  ],
+  "fixture_count": 12,
+  "entry_count": 12
+}

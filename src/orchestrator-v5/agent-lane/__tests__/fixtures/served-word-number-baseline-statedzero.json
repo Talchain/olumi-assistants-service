@@ -1,0 +1,86 @@
+{
+ "_provenance": {
+  "source": "served staging CEE, MG construction sweep statedzero-1 (27 Sep), POST /assist/v1/scenarios/:id/graph after an agent-lane build",
+  "scenario_id": "bb14231d-79e5-4f90-9c5e-919dc4ab11a5",
+  "build": "f99d0a5",
+  "kept": "factor nodes only"
+ },
+ "brief": "We have three account executives and 0 enterprise customers today. Should we hire two more account executives or build a partner channel to reach 10 enterprise customers within 12 months, while keeping new annual spend under \u00a3300k?",
+ "nodes": [
+  {
+   "id": "account_executives",
+   "kind": "factor",
+   "label": "Account executives",
+   "category": "controllable",
+   "provenance": "from_brief",
+   "observed_state": {
+    "cap": 20,
+    "unit": "AEs",
+    "value": 0.15,
+    "source": "brief_extraction",
+    "raw_value": 3,
+    "declared_scale": "unit_interval"
+   }
+  },
+  {
+   "id": "active_channel_partners",
+   "kind": "factor",
+   "label": "Active channel partners",
+   "category": "controllable",
+   "provenance": "ai_inferred",
+   "scale_frame": 20,
+   "observed_state": {
+    "unit": "partners",
+    "value": 0,
+    "source": "cee_inference",
+    "raw_value": 0,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "ae_enterprise_sales_productivity",
+   "kind": "factor",
+   "label": "AE enterprise sales productivity",
+   "category": "observable",
+   "provenance": "ai_inferred",
+   "scale_frame": 10,
+   "observed_state": {
+    "unit": "enterprise customers per AE per 12 months",
+    "value": 0.15,
+    "source": "cee_inference",
+    "raw_value": 1.5,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "partner_enterprise_sales_productivity",
+   "kind": "factor",
+   "label": "Partner enterprise sales\u2026",
+   "category": "observable",
+   "provenance": "ai_inferred",
+   "description": "Partner enterprise sales productivity",
+   "scale_frame": 10,
+   "observed_state": {
+    "unit": "enterprise customers per partner per 12 months",
+    "value": 0.15,
+    "source": "cee_inference",
+    "raw_value": 1.5,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "new_annual_spend",
+   "kind": "factor",
+   "label": "New annual spend",
+   "category": "controllable",
+   "provenance": "ai_inferred",
+   "observed_state": {
+    "cap": 500000,
+    "unit": "GBP per year",
+    "value": 0,
+    "raw_value": 0,
+    "declared_scale": "unit_interval"
+   }
+  }
+ ]
+}

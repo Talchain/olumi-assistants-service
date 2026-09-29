@@ -1,0 +1,829 @@
+/**
+ * Patch Summary Formatter
+ *
+ * Generates user-facing summary strings and compact grouped detail items for
+ * graph_patch blocks. Called by draft_graph, edit_graph, and patch_accepted
+ * to ensure every user-visible patch always has meaningful, polished content.
+ *
+ * Design goals:
+ * - Deterministic (no randomness, no timestamps, no internal IDs)
+ * - Plain English — no internal patch jargon, no op-type dumps
+ * - Scales: small patches → specific; large patches → grouped/semantic
+ * - Robust pluralisation and graceful fallback for unknown kinds
+ */
+
+import type { PatchOperation, GraphV3T } from './types.js';
+import { log } from '../utils/telemetry.js';
+import { formatNodeValue } from './deterministic/format-node-value.js';
+import { ENTITY_ID_LEAK_RE, resolveLabel } from './shared/entity-id-pattern.js';
+
+/**
+ * Pull the label off an `add_node` operation's value payload.
+ * For add_node, the new node is NOT yet in the graph, so the value is the
+ * authoritative label source. Returns null when the value has no label.
+ */
+function labelFromAddNodeValue(op: PatchOperation): string | null {
+  if (op.op !== 'add_node') return null;
+  const v = op.value as Record<string, unknown> | undefined;
+  const label = v?.label;
+  return typeof label === 'string' && label.length > 0 ? label : null;
+}
+
+// ============================================================================
+// Node kind label map
+// ============================================================================
+
+/** Human-readable singular/plural labels for known node kinds. */
+const NODE_KIND_LABELS: Record<string, { singular: string; plural: string }> = {
+  factor:   { singular: 'factor',   plural: 'factors'   },
+  goal:     { singular: 'goal',     plural: 'goals'     },
+  option:   { singular: 'option',   plural: 'options'   },
+  outcome:  { singular: 'outcome',  plural: 'outcomes'  },
+  risk:     { singular: 'risk',     plural: 'risks'     },
+  lever:    { singular: 'lever',    plural: 'levers'    },
+  driver:   { singular: 'driver',   plural: 'drivers'   },
+  barrier:  { singular: 'barrier',  plural: 'barriers'  },
+  enabler:  { singular: 'enabler',  plural: 'enablers'  },
+  context:  { singular: 'context node', plural: 'context nodes' },
+};
+
+function nodeKindLabel(kind: string, count: number): string {
+  const entry = NODE_KIND_LABELS[kind.toLowerCase()];
+  if (entry) {
+    return count === 1 ? entry.singular : entry.plural;
+  }
+  // Graceful fallback for unknown kinds
+  const safe = kind.toLowerCase().replace(/_/g, ' ');
+  return count === 1 ? safe : `${safe}s`;
+}
+
+function plural(word: string, count: number): string {
+  return count === 1 ? word : `${word}s`;
+}
+
+// ============================================================================
+// Operation analysis helpers
+// ============================================================================
+
+interface OpAnalysis {
+  /** add_node ops grouped by node kind → count */
+  addedByKind: Map<string, number>;
+  /** remove_node ops grouped by node kind → list of labels */
+  removedByKind: Map<string, string[]>;
+  /** update_node ops: list of node labels + changed fields */
+  updatedNodes: Array<{ label: string; fields: string[] }>;
+  /** add_edge count */
+  edgesAdded: number;
+  /** remove_edge count */
+  edgesRemoved: number;
+  /** update_edge ops: list of from/to labels */
+  edgesUpdated: Array<{ from: string; to: string }>;
+  totalOps: number;
+}
+
+/**
+ * Analyse a PatchOperation array into structured buckets for summary generation.
+ */
+export function analyseOperations(operations: PatchOperation[]): OpAnalysis {
+  const addedByKind = new Map<string, number>();
+  const removedByKind = new Map<string, string[]>();
+  const updatedNodes: Array<{ label: string; fields: string[] }> = [];
+  let edgesAdded = 0;
+  let edgesRemoved = 0;
+  const edgesUpdated: Array<{ from: string; to: string }> = [];
+
+  for (const op of operations) {
+    switch (op.op) {
+      case 'add_node': {
+        const v = op.value as Record<string, unknown> | undefined;
+        const kind = typeof v?.kind === 'string' ? v.kind : 'node';
+        addedByKind.set(kind, (addedByKind.get(kind) ?? 0) + 1);
+        break;
+      }
+      case 'remove_node': {
+        const v = (op.old_value ?? op.value) as Record<string, unknown> | undefined;
+        const kind = typeof v?.kind === 'string' ? v.kind : 'node';
+        const label = typeof v?.label === 'string' ? v.label : undefined;
+        const list = removedByKind.get(kind) ?? [];
+        if (label) list.push(label);
+        removedByKind.set(kind, list);
+        break;
+      }
+      case 'update_node': {
+        const v = op.value as Record<string, unknown> | undefined;
+        const old = op.old_value as Record<string, unknown> | undefined;
+        // label: prefer old_value label (more reliable than update payload)
+        const label = typeof old?.label === 'string' ? old.label
+          : typeof v?.label === 'string' ? v.label
+          : extractLabelFromPath(op.path);
+        const fields = v ? Object.keys(v).filter(k => k !== 'id') : [];
+        updatedNodes.push({ label, fields });
+        break;
+      }
+      case 'add_edge': {
+        edgesAdded++;
+        break;
+      }
+      case 'remove_edge': {
+        edgesRemoved++;
+        break;
+      }
+      case 'update_edge': {
+        const path = op.path ?? '';
+        // path like /edges/factor_1->goal_1 or edges/factor_1->goal_1
+        const arrowMatch = path.match(/([^/]+)->([^/]+)$/);
+        edgesUpdated.push({
+          from: arrowMatch?.[1] ?? path,
+          to: arrowMatch?.[2] ?? '',
+        });
+        break;
+      }
+    }
+  }
+
+  return {
+    addedByKind,
+    removedByKind,
+    updatedNodes,
+    edgesAdded,
+    edgesRemoved,
+    edgesUpdated,
+    totalOps: operations.length,
+  };
+}
+
+/**
+ * Extract a human-readable identifier from a patch path (last segment, dashes → spaces).
+ * e.g. "/nodes/technical_oversight" → "technical oversight"
+ */
+function extractLabelFromPath(path: string | undefined): string {
+  if (!path) return 'element';
+  const segment = path.replace(/^\//, '').split('/').pop() ?? path;
+  return segment.replace(/_/g, ' ');
+}
+
+// ============================================================================
+// Summary generation
+// ============================================================================
+
+/**
+ * Threshold above which a patch is considered "large" and gets grouped detail.
+ * Small patches (≤ this count) get specific item-level detail instead.
+ */
+const SMALL_PATCH_THRESHOLD = 3;
+
+/**
+ * Verb form for the leading clause of a semantic summary.
+ *
+ * - `'edit'` (proposal): "Proposing to add" / "Proposing to update" / "Proposing to remove"
+ * - `'full_draft'` and `'accepted'` (applied): "Added" / "Updated" / "Removed"
+ *
+ * Proposal vs. applied wording is part of the contract: a proposal turn must
+ * not say "Added" because nothing has been applied yet.
+ */
+function verbFor(
+  patchContext: 'full_draft' | 'edit' | 'accepted' | undefined,
+  variant: 'add' | 'update' | 'remove' | 'connect',
+): string {
+  const isProposal = patchContext === 'edit';
+  switch (variant) {
+    case 'add':
+      return isProposal ? 'Proposing to add' : 'Added';
+    case 'update':
+      return isProposal ? 'Proposing to update' : 'Updated';
+    case 'remove':
+      return isProposal ? 'Proposing to remove' : 'Removed';
+    case 'connect':
+      return isProposal ? 'Proposing to connect' : 'Connected';
+  }
+}
+
+/**
+ * Build a label-aware semantic summary. Returns null when ANY required label
+ * cannot be resolved (callers fall back to count-based output in that case).
+ */
+function buildSemanticSummary(
+  operations: PatchOperation[],
+  graph: GraphV3T,
+  patchContext: 'full_draft' | 'edit' | 'accepted' | undefined,
+): string | null {
+  const a = analyseOperations(operations);
+  const isLarge = a.totalOps > SMALL_PATCH_THRESHOLD;
+  if (!isLarge) return buildSmallSemanticSummary(operations, graph, patchContext);
+  return buildLargeSemanticSummary(operations, graph, patchContext);
+}
+
+function buildSmallSemanticSummary(
+  operations: PatchOperation[],
+  graph: GraphV3T,
+  patchContext: 'full_draft' | 'edit' | 'accepted' | undefined,
+): string | null {
+  const sentences: string[] = [];
+
+  // Track ids of nodes added in THIS patch so add_edge resolution can prefer
+  // the in-patch label over a graph lookup (the new node isn't in the graph yet).
+  const addedNodeOpById = new Map<string, PatchOperation>();
+  for (const op of operations) {
+    if (op.op !== 'add_node') continue;
+    const v = op.value as Record<string, unknown> | undefined;
+    const id = typeof v?.id === 'string' ? v.id : op.path;
+    if (id) addedNodeOpById.set(id, op);
+  }
+
+  // Track add_edge ops we've already consumed inside an add_node sentence
+  // so we don't double-count them as standalone connections.
+  const consumedEdgeIndices = new Set<number>();
+
+  for (let i = 0; i < operations.length; i++) {
+    const op = operations[i];
+
+    if (op.op === 'add_node') {
+      const v = op.value as Record<string, unknown> | undefined;
+      const nodeId = typeof v?.id === 'string' ? v.id : op.path;
+      // For add_node, label MUST come from op.value FIRST — the node is not
+      // in the graph yet. resolveLabel is the existing-entity fallback only.
+      const label = labelFromAddNodeValue(op);
+      if (!label) return null;
+      const kind = typeof v?.kind === 'string' ? v.kind : 'node';
+
+      if (kind === 'option') {
+        // Find sibling add_edge ops whose `from` is this option — those are
+        // the option's intervention/structural targets.
+        const targetLabels: string[] = [];
+        for (let j = 0; j < operations.length; j++) {
+          const other = operations[j];
+          if (other.op !== 'add_edge') continue;
+          const ev = other.value as Record<string, unknown> | undefined;
+          if (ev?.from !== nodeId) continue;
+          const to = typeof ev?.to === 'string' ? ev.to : null;
+          if (!to) continue;
+          // The target is an existing factor — resolve from the graph.
+          const targetLabel = resolveLabel(graph, to);
+          if (!targetLabel) return null;
+          targetLabels.push(targetLabel);
+          consumedEdgeIndices.add(j);
+        }
+        if (targetLabels.length > 0) {
+          sentences.push(
+            `${verbFor(patchContext, 'add')} **${label}** option that affects ${joinList(targetLabels)}`,
+          );
+        } else {
+          sentences.push(`${verbFor(patchContext, 'add')} **${label}** option`);
+        }
+      } else if (kind === 'factor') {
+        const category = typeof v?.category === 'string' ? v.category : null;
+        sentences.push(
+          category
+            ? `${verbFor(patchContext, 'add')} **${label}** as a ${category} factor`
+            : `${verbFor(patchContext, 'add')} **${label}** as a factor`,
+        );
+      } else {
+        sentences.push(`${verbFor(patchContext, 'add')} **${label}** as a ${nodeKindLabel(kind, 1)}`);
+      }
+    } else if (op.op === 'update_node') {
+      // update_node always targets an existing node — resolve from the graph.
+      const label = resolveLabel(graph, op.path);
+      if (!label) return null;
+      const v = op.value as Record<string, unknown> | undefined;
+      const fields = v ? Object.keys(v).filter((k) => k !== 'id') : [];
+      if (fields.length === 1) {
+        const rawField = fields[0];
+        if (rawField.includes('/')) return null;
+        if (ENTITY_ID_LEAK_RE.test(rawField)) return null;
+        const friendly = friendlyFieldName(rawField);
+        if (ENTITY_ID_LEAK_RE.test(friendly)) return null;
+        const newValueDisplay = formatUpdateValueForDisplay(rawField, v![rawField], graph, op.path);
+        const verb = verbFor(patchContext, 'update');
+        // For value/data fields the label already names the quantity being
+        // set, so "Updated X value to Y" reads redundantly. Elide the field
+        // word in that case → "Updated X to Y". Other fields (strength,
+        // category, label) carry real information and keep the field word.
+        const fieldWordRedundant = rawField === 'value' || rawField === 'data';
+        if (newValueDisplay) {
+          if (fieldWordRedundant) {
+            sentences.push(`${verb} **${label}** to ${newValueDisplay}`);
+          } else {
+            sentences.push(`${verb} **${label}** ${friendly} to ${newValueDisplay}`);
+          }
+        } else if (fieldWordRedundant) {
+          // Value/data field with no displayable value — omit the field word
+          // entirely to avoid leaking field keys like "value" into the summary.
+          sentences.push(`${verb} **${label}**`);
+        } else {
+          sentences.push(`${verb} **${label}** ${friendly}`);
+        }
+      } else {
+        sentences.push(`${verbFor(patchContext, 'update')} **${label}**`);
+      }
+    } else if (op.op === 'add_edge') {
+      if (consumedEdgeIndices.has(i)) continue;
+      const ev = op.value as Record<string, unknown> | undefined;
+      const from = typeof ev?.from === 'string' ? ev.from : null;
+      const to = typeof ev?.to === 'string' ? ev.to : null;
+      if (!from || !to) return null;
+      // For each endpoint: prefer in-patch add_node label; fall back to graph lookup.
+      const fromAdded = addedNodeOpById.get(from);
+      const toAdded = addedNodeOpById.get(to);
+      const fromLabel = (fromAdded ? labelFromAddNodeValue(fromAdded) : null) ?? resolveLabel(graph, from);
+      const toLabel = (toAdded ? labelFromAddNodeValue(toAdded) : null) ?? resolveLabel(graph, to);
+      if (!fromLabel || !toLabel) return null;
+      sentences.push(`${verbFor(patchContext, 'connect')} **${fromLabel}** to **${toLabel}**`);
+    } else if (op.op === 'remove_node') {
+      const ov = (op.old_value ?? op.value) as Record<string, unknown> | undefined;
+      const label =
+        (typeof ov?.label === 'string' ? ov.label : null) ?? resolveLabel(graph, op.path);
+      if (!label) return null;
+      sentences.push(`${verbFor(patchContext, 'remove')} **${label}**`);
+    } else {
+      // Unhandled op kind on the semantic path — bail to count fallback.
+      return null;
+    }
+  }
+
+  if (sentences.length === 0) return null;
+  return sentences.join('. ') + '.';
+}
+
+function buildLargeSemanticSummary(
+  operations: PatchOperation[],
+  graph: GraphV3T,
+  patchContext: 'full_draft' | 'edit' | 'accepted' | undefined,
+): string | null {
+  // The large-patch sentence is anchored on the first add_node with a usable label.
+  let topLabel: string | null = null;
+  let topKind: string | null = null;
+  for (const op of operations) {
+    if (op.op !== 'add_node') continue;
+    const lbl = labelFromAddNodeValue(op);
+    if (lbl) {
+      topLabel = lbl;
+      const v = op.value as Record<string, unknown> | undefined;
+      topKind = typeof v?.kind === 'string' ? v.kind : 'node';
+      break;
+    }
+  }
+  if (!topLabel) return null;
+
+  const a = analyseOperations(operations);
+  const factorCount = a.addedByKind.get('factor') ?? 0;
+  const optionCount = a.addedByKind.get('option') ?? 0;
+  const edgeCount = a.edgesAdded;
+
+  const verb = verbFor(patchContext, 'add');
+  const parts: string[] = [];
+
+  if (factorCount > 0) {
+    parts.push(
+      `${factorCount} ${nodeKindLabel('factor', factorCount)}${topKind === 'factor' ? ` including **${topLabel}**` : ''}`,
+    );
+  }
+  if (optionCount > 0) {
+    parts.push(
+      `${optionCount} ${nodeKindLabel('option', optionCount)}${topKind === 'option' ? ` including **${topLabel}**` : ''}`,
+    );
+  }
+  if (edgeCount > 0) {
+    parts.push(`${edgeCount} ${plural('connection', edgeCount)}`);
+  }
+
+  if (parts.length === 0) return null;
+  // Reference graph parameter so the linter doesn't complain — also helps the
+  // future case where we add label-aware grouping for non-additive ops.
+  void graph;
+  return `${verb} ${joinList(parts)}.`;
+}
+
+/**
+ * Generate a concise, user-facing summary for an applied/proposed graph patch.
+ *
+ * Rules:
+ * - No internal IDs
+ * - No raw op-type jargon
+ * - Reflects what materially changed, not just op count
+ * - Prefers the LLM-provided coaching summary when available (for edit_graph)
+ * - Falls back to operation-derived description
+ * - When `graph` is provided, emits semantic label-aware sentences
+ *   ("Added contractor option that affects development capacity") instead of
+ *   the count-based fallback ("1 option, 2 edges").
+ *
+ * @param operations  The validated PatchOperation array
+ * @param coachingSummary  Optional LLM-generated summary to prefer if present
+ * @param patchContext  Optional context hint ('full_draft' | 'edit' | 'accepted')
+ * @param graph  Optional pre-mutation graph used for label resolution. When
+ *               omitted, the function falls back to count-based behaviour.
+ */
+export function buildPatchSummary(
+  operations: PatchOperation[],
+  coachingSummary?: string | null,
+  patchContext?: 'full_draft' | 'edit' | 'accepted',
+  graph?: GraphV3T | null,
+): string {
+  // Prefer LLM coaching summary when available — it's the highest-quality signal
+  if (coachingSummary && coachingSummary.trim().length > 0) {
+    return coachingSummary.trim();
+  }
+
+  if (operations.length === 0) {
+    return 'No changes were applied.';
+  }
+
+  // Semantic, label-aware path — only when a graph is provided AND label
+  // resolution succeeds for every reference. Any failure falls through to the
+  // count-based path (graceful degradation).
+  if (graph) {
+    const semantic = buildSemanticSummary(operations, graph, patchContext);
+    if (semantic) {
+      // Defence in depth: if a raw entity ID slipped through, drop the
+      // semantic output and fall back to the count-based path.
+      if (!ENTITY_ID_LEAK_RE.test(semantic)) {
+        return semantic;
+      }
+    }
+  }
+
+  // ── full_draft: decision-framed fallback (never leak counts) ────────────
+  // On a draft turn, if we couldn't produce a semantic summary, we refuse to
+  // emit patch-machinery counts ("Added 5 factors, 3 options, 24 connections").
+  // Instead, build a decision-language sentence from the goal label + option
+  // labels on the post-mutation graph. If neither is available, fall back to
+  // a neutral orientation string.
+  if (patchContext === 'full_draft') {
+    return buildFullDraftFallback(graph);
+  }
+
+  const a = analyseOperations(operations);
+  const isLarge = a.totalOps > SMALL_PATCH_THRESHOLD;
+  const parts: string[] = [];
+
+  // ---- Additions ----
+  if (a.addedByKind.size > 0) {
+    if (!isLarge) {
+      // Small patch: use labels for added nodes
+      const addedLabels = operations
+        .filter(op => op.op === 'add_node')
+        .map(op => {
+          const v = op.value as Record<string, unknown> | undefined;
+          return typeof v?.label === 'string' ? v.label : extractLabelFromPath(op.path);
+        })
+        .slice(0, 3);
+      const addParts: string[] = [...addedLabels];
+      if (a.edgesAdded > 0) {
+        addParts.push(`${a.edgesAdded} ${plural('connection', a.edgesAdded)}`);
+      }
+      parts.push(`Added ${joinList(addParts)}`);
+    } else {
+      // Large patch: group by kind with counts
+      const addParts: string[] = [];
+      for (const [kind, count] of a.addedByKind) {
+        addParts.push(`${count} ${nodeKindLabel(kind, count)}`);
+      }
+      if (a.edgesAdded > 0) {
+        addParts.push(`${a.edgesAdded} ${plural('connection', a.edgesAdded)}`);
+      }
+      parts.push(`Added ${joinList(addParts)}`);
+    }
+  } else if (a.edgesAdded > 0) {
+    parts.push(`Added ${a.edgesAdded} ${plural('connection', a.edgesAdded)}`);
+  }
+
+  // ---- Removals ----
+  const removedKinds = [...a.removedByKind.entries()];
+  if (removedKinds.length > 0) {
+    const removeParts = removedKinds.map(([kind, labels]) => {
+      const count = labels.length || 1;
+      if (labels.length === 1) return labels[0];
+      return `${count} ${nodeKindLabel(kind, count)}`;
+    });
+    parts.push(`Removed ${joinList(removeParts)}`);
+  }
+  if (a.edgesRemoved > 0 && removedKinds.length === 0) {
+    parts.push(`Removed ${a.edgesRemoved} ${plural('connection', a.edgesRemoved)}`);
+  }
+
+  // ---- Updates (small patch: specific; large patch: grouped) ----
+  if (a.updatedNodes.length > 0 || a.edgesUpdated.length > 0) {
+    if (!isLarge && a.updatedNodes.length === 1 && a.edgesUpdated.length === 0) {
+      // Single update: specific. Prefer "label field to new_value" over
+      // "label: field" which reads as "Updated X: value." and was the origin
+      // of the bug where the literal word "value" appeared in user-facing text.
+      const u = a.updatedNodes[0];
+      if (u.fields.length === 1) {
+        const rawField = u.fields[0];
+        const field = friendlyFieldName(rawField);
+        const updateOp = operations.find((op) => op.op === 'update_node' && (op.value as { id?: string } | undefined)?.id === (a.updatedNodes[0] as { id?: string }).id) ?? operations.find((op) => op.op === 'update_node');
+        const v = (updateOp?.value ?? {}) as Record<string, unknown>;
+        const newValueDisplay = formatUpdateValueForDisplay(rawField, v[rawField], graph ?? null, updateOp?.path ?? '');
+        const fieldWordRedundant = rawField === 'value' || rawField === 'data';
+        if (newValueDisplay) {
+          parts.push(fieldWordRedundant
+            ? `Updated ${u.label} to ${newValueDisplay}`
+            : `Updated ${u.label} ${field} to ${newValueDisplay}`);
+        } else if (fieldWordRedundant) {
+          parts.push(`Updated ${u.label}`);
+        } else {
+          parts.push(`Updated ${u.label} ${field}`);
+        }
+      } else {
+        parts.push(`Updated ${u.label}`);
+      }
+    } else if (!isLarge && a.updatedNodes.length > 0) {
+      const labels = a.updatedNodes.map(u => u.label).slice(0, 3);
+      parts.push(`Updated ${joinList(labels)}`);
+    } else if (isLarge) {
+      const totalUpdates = a.updatedNodes.length + a.edgesUpdated.length;
+      parts.push(`Updated ${totalUpdates} ${plural('element', totalUpdates)}`);
+    }
+  }
+
+  if (parts.length === 0) {
+    // Edge-only updates or unhandled mix (edit / accepted only).
+    return patchContext === 'edit' ? 'Review the proposed change.' : 'Applied changes.';
+  }
+
+  // Capitalise first letter of first sentence; join with "; "
+  const joined = parts.join('; ');
+  const finalText = capitalise(joined) + '.';
+
+  // F2 defence-in-depth: the count-based path inherits labels from
+  // extractLabelFromPath and friendlyFieldName, both of which can leak raw
+  // entity ids when the patch references them. If any internal token survives
+  // (in EITHER the underscore form OR the friendly space-separated form),
+  // collapse to a fully generic message rather than leaking the id.
+  if (ENTITY_ID_LEAK_RE.test(finalText) || /\bdata\/interventions\b/.test(finalText)) {
+    return patchContext === 'edit' ? 'Review the proposed change.' : 'Applied changes.';
+  }
+
+  return finalText;
+}
+
+/**
+ * Build a decision-framed fallback summary for full_draft patches when
+ * semantic resolution fails. Extracts goal + option labels from the graph
+ * instead of leaking counts ("Added 5 factors, 3 options, and 24 connections").
+ *
+ * Returns "Review the proposed model." only when no graph or no recognisable
+ * structure is available.
+ *
+ * Emits `v4.patch_summary_full_draft_fallback` with a `reason` code so the
+ * fallback path is observable in telemetry — lets staging surface cases
+ * where semantic resolution is regressing vs. genuinely low-information
+ * drafts.
+ */
+function buildFullDraftFallback(graph: GraphV3T | null | undefined): string {
+  const logFallback = (
+    reason: 'no_graph' | 'goal_and_options' | 'options_only' | 'goal_only' | 'empty',
+    summary: string,
+  ): string => {
+    log.info(
+      { event: 'v4.patch_summary_full_draft_fallback', reason, summary },
+      'buildPatchSummary: full_draft semantic path unavailable — using decision-framed fallback',
+    );
+    return summary;
+  };
+
+  if (!graph) return logFallback('no_graph', 'Review the proposed model.');
+
+  const goal = graph.nodes.find((n) => (n as { kind?: string }).kind === 'goal');
+  const options = graph.nodes
+    .filter((n) => (n as { kind?: string }).kind === 'option')
+    .map((n) => (n as { label?: string }).label)
+    .filter((l): l is string => typeof l === 'string' && l.length > 0);
+
+  const goalLabel = typeof (goal as { label?: string } | undefined)?.label === 'string'
+    ? (goal as { label?: string }).label!
+    : null;
+
+  if (goalLabel && options.length > 0) {
+    const shown = options.slice(0, 3);
+    return logFallback('goal_and_options', `${goalLabel}: ${joinList(shown)}.`);
+  }
+
+  if (options.length > 0) {
+    const shown = options.slice(0, 3);
+    return logFallback('options_only', `A decision model comparing ${joinList(shown)}.`);
+  }
+
+  if (goalLabel) {
+    return logFallback('goal_only', `${goalLabel}: proposed model ready for review.`);
+  }
+
+  return logFallback('empty', 'Review the proposed model.');
+}
+
+// ============================================================================
+// Compact detail items
+// ============================================================================
+
+export interface PatchDetailItem {
+  /** Short human-readable description of a group of changes */
+  description: string;
+}
+
+/**
+ * Generate compact grouped detail items for a patch.
+ *
+ * Small patches (≤ SMALL_PATCH_THRESHOLD ops): specific, itemised descriptions.
+ * Large patches: grouped semantic descriptions.
+ *
+ * Never exposes raw op-type names as user-facing content.
+ */
+export function buildPatchDetailItems(operations: PatchOperation[]): PatchDetailItem[] {
+  if (operations.length === 0) return [];
+
+  const a = analyseOperations(operations);
+  const items: PatchDetailItem[] = [];
+  const isLarge = a.totalOps > SMALL_PATCH_THRESHOLD;
+
+  if (isLarge) {
+    // ---- Grouped / semantic detail (large patches) ----
+
+    // Node additions grouped by kind
+    for (const [kind, count] of a.addedByKind) {
+      items.push({ description: `Added ${count} ${nodeKindLabel(kind, count)}` });
+    }
+
+    // Edge additions
+    if (a.edgesAdded > 0) {
+      items.push({
+        description: `Linked ${a.edgesAdded} ${plural('connection', a.edgesAdded)} between nodes`,
+      });
+    }
+
+    // Node removals grouped by kind
+    for (const [kind, labels] of a.removedByKind) {
+      const count = labels.length || 1;
+      if (labels.length === 1) {
+        items.push({ description: `Removed ${labels[0]}` });
+      } else {
+        items.push({ description: `Removed ${count} ${nodeKindLabel(kind, count)}` });
+      }
+    }
+
+    // Edge removals
+    if (a.edgesRemoved > 0) {
+      items.push({
+        description: `Removed ${a.edgesRemoved} ${plural('connection', a.edgesRemoved)}`,
+      });
+    }
+
+    // Updates (grouped)
+    if (a.updatedNodes.length > 0) {
+      items.push({
+        description: `Updated ${a.updatedNodes.length} ${plural('node', a.updatedNodes.length)}`,
+      });
+    }
+    if (a.edgesUpdated.length > 0) {
+      items.push({
+        description: `Updated ${a.edgesUpdated.length} ${plural('connection', a.edgesUpdated.length)}`,
+      });
+    }
+
+  } else {
+    // ---- Specific / itemised detail (small patches) ----
+
+    // Node additions: show label if available
+    for (const op of operations) {
+      if (op.op === 'add_node') {
+        const v = op.value as Record<string, unknown> | undefined;
+        const label = typeof v?.label === 'string' ? v.label : extractLabelFromPath(op.path);
+        const kind = typeof v?.kind === 'string' ? nodeKindLabel(v.kind, 1) : 'node';
+        items.push({ description: `Added ${kind}: ${label}` });
+      }
+    }
+
+    // Node updates: show label + field
+    for (const u of a.updatedNodes) {
+      if (u.fields.length === 1) {
+        const field = friendlyFieldName(u.fields[0]);
+        items.push({ description: field ? `${u.label}: ${field} updated` : `${u.label} updated` });
+      } else if (u.fields.length > 1) {
+        const fieldList = u.fields.slice(0, 2).map(friendlyFieldName).filter(Boolean).join(', ');
+        items.push({ description: fieldList ? `${u.label}: ${fieldList} updated` : `${u.label} updated` });
+      } else {
+        items.push({ description: `${u.label} updated` });
+      }
+    }
+
+    // Edge additions
+    if (a.edgesAdded > 0) {
+      items.push({
+        description: `Added ${a.edgesAdded} ${plural('connection', a.edgesAdded)}`,
+      });
+    }
+
+    // Node removals
+    for (const [, labels] of a.removedByKind) {
+      for (const lbl of labels) {
+        items.push({ description: `Removed ${lbl}` });
+      }
+    }
+
+    // Edge removals
+    if (a.edgesRemoved > 0) {
+      items.push({
+        description: `Removed ${a.edgesRemoved} ${plural('connection', a.edgesRemoved)}`,
+      });
+    }
+
+    // Edge updates
+    for (const eu of a.edgesUpdated) {
+      items.push({ description: `Updated connection from ${eu.from} to ${eu.to}` });
+    }
+  }
+
+  return items;
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/**
+ * Format the *new* value of an update_node field for user-facing display.
+ *
+ * Returns null when the value cannot be rendered safely — caller then falls
+ * back to the field-name-only form. This exists because the old template
+ * `"Proposing to update X: value."` was interpolating the field key name
+ * (e.g. "value") in place of the actual new value.
+ */
+function formatUpdateValueForDisplay(
+  rawField: string,
+  newValue: unknown,
+  graph: GraphV3T | null | undefined,
+  nodeId: string,
+): string | null {
+  if (newValue === null || newValue === undefined) return null;
+
+  if (rawField === 'value' || rawField === 'data') {
+    if (typeof newValue === 'number' && Number.isFinite(newValue)) {
+      const unit = resolveNodeUnit(graph, nodeId);
+      const graphNode = graph?.nodes.find((n) => (n as { id?: string }).id === nodeId);
+      // Do NOT pass raw_value: newValue is the proposed new normalised number
+      // (0-1 scale). Passing the existing node's raw_value would cause
+      // synthesiseDisplayValue to display the old currency amount instead.
+      const formatted = formatNodeValue({
+        value: newValue,
+        unit: unit ?? undefined,
+        kind: (graphNode as { kind?: string } | undefined)?.kind,
+      });
+      return formatted ?? (unit ? `${newValue} ${unit}` : String(newValue));
+    }
+    return null;
+  }
+
+  if (rawField === 'strength_mean' || rawField === 'strength_std') {
+    return typeof newValue === 'number' && Number.isFinite(newValue) ? String(newValue) : null;
+  }
+
+  if (rawField === 'label' || rawField === 'category') {
+    if (typeof newValue === 'string' && newValue.length > 0 && !ENTITY_ID_LEAK_RE.test(newValue)) {
+      return `"${newValue}"`;
+    }
+    return null;
+  }
+
+  if (typeof newValue === 'number' && Number.isFinite(newValue)) return String(newValue);
+  if (typeof newValue === 'string' && newValue.length > 0 && !ENTITY_ID_LEAK_RE.test(newValue)) {
+    return `"${newValue}"`;
+  }
+  return null;
+}
+
+function resolveNodeUnit(graph: GraphV3T | null | undefined, nodeId: string): string | null {
+  if (!graph) return null;
+  for (const node of graph.nodes) {
+    if ((node as { id?: string }).id !== nodeId) continue;
+    const unit = (node as { unit?: string }).unit;
+    return typeof unit === 'string' && unit.length > 0 ? unit : null;
+  }
+  return null;
+}
+
+/** Map internal field names to friendly labels. */
+function friendlyFieldName(field: string): string {
+  const MAP: Record<string, string> = {
+    label: 'name',
+    strength_mean: 'strength',
+    strength_std: 'strength variance',
+    exists_probability: 'confidence',
+    effect_direction: 'direction',
+    data: 'data',
+    value: '',
+    category: 'category',
+    kind: 'type',
+  };
+  return MAP[field] ?? field.replace(/_/g, ' ');
+}
+
+/** Join a list of strings with commas and "and" before the last item. */
+function joinList(items: string[]): string {
+  if (items.length === 0) return '';
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`;
+}
+
+function capitalise(s: string): string {
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}

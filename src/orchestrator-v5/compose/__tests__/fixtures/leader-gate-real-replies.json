@@ -1,0 +1,785 @@
+{
+ "schema": "leader-gate-real-replies.v1",
+ "source": "AI Quality corpus, CEE branch aiq/agent-reply-paired-evidence @7b68d8bd (Docs/evals/agent-reply/gate-corpus); #63 5823028488",
+ "state": {
+  "note": "served 57f903c pricing explicit Run: leader withheld (constraint_verdict_withheld), admission comparative_leader",
+  "draft_graph": {
+   "nodes": [
+    {
+     "id": "decision_mrr",
+     "kind": "decision",
+     "label": "Decision: MRR",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "mrr",
+     "kind": "goal",
+     "label": "MRR",
+     "provenance": "from_brief",
+     "goal_threshold": 0.8,
+     "goal_threshold_cap": 25000,
+     "goal_threshold_raw": 20000,
+     "goal_threshold_unit": "£ per month",
+     "goal_threshold_frame": "level",
+     "goal_threshold_cap_provenance": "target_derived_headroom"
+    },
+    {
+     "id": "keep_pro_at_49",
+     "kind": "option",
+     "label": "Keep Pro at £49",
+     "provenance": "ai_inferred",
+     "interventions": {
+      "pro_plan_price": {
+       "value": 0.245,
+       "source": "brief_extraction"
+      }
+     }
+    },
+    {
+     "id": "raise_pro_to_59_at_release",
+     "kind": "option",
+     "label": "Raise Pro to £59 at release",
+     "provenance": "from_brief",
+     "interventions": {
+      "pro_plan_price": {
+       "value": 0.295,
+       "source": "brief_extraction"
+      },
+      "price_release_alignment": {
+       "value": 1,
+       "source": "user_specified",
+       "target_match": {
+        "node_id": "price_release_alignment",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      }
+     }
+    },
+    {
+     "id": "phase_pro_price_increase",
+     "kind": "option",
+     "label": "Phase Pro price increase",
+     "provenance": "ai_inferred",
+     "interventions": {
+      "pro_plan_price": {
+       "value": 0.27,
+       "source": "user_specified",
+       "target_match": {
+        "node_id": "pro_plan_price",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      },
+      "price_release_alignment": {
+       "value": 0.5,
+       "source": "user_specified",
+       "target_match": {
+        "node_id": "price_release_alignment",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      }
+     }
+    },
+    {
+     "id": "pro_plan_price",
+     "kind": "factor",
+     "label": "Pro plan price",
+     "category": "controllable",
+     "provenance": "from_brief",
+     "observed_state": {
+      "cap": 200,
+      "unit": "£ per month",
+      "value": 0.245,
+      "source": "brief_extraction",
+      "raw_value": 49,
+      "declared_scale": "unit_interval"
+     }
+    },
+    {
+     "id": "price_release_alignment",
+     "kind": "factor",
+     "label": "Price-release alignment",
+     "category": "controllable",
+     "provenance": "user_set",
+     "display_value": "50%",
+     "observed_state": {
+      "cap": 100,
+      "unit": "%",
+      "value": 0.5,
+      "source": "user_override",
+      "raw_value": 50,
+      "declared_scale": "unit_interval"
+     }
+    },
+    {
+     "id": "perceived_pro_value",
+     "kind": "factor",
+     "label": "Perceived Pro value",
+     "category": "observable",
+     "provenance": "user_set",
+     "scale_frame": 100,
+     "display_value": "60%",
+     "observed_state": {
+      "unit": "%",
+      "value": 0.6,
+      "source": "user_override",
+      "raw_value": 60
+     }
+    },
+    {
+     "id": "pro_conversion_rate",
+     "kind": "factor",
+     "label": "Pro conversion rate",
+     "category": "observable",
+     "provenance": "user_set",
+     "scale_frame": 100,
+     "display_value": "5%",
+     "observed_state": {
+      "unit": "%",
+      "value": 0.05,
+      "source": "user_override",
+      "raw_value": 5
+     }
+    },
+    {
+     "id": "monthly_churn_rate",
+     "kind": "factor",
+     "label": "Monthly churn rate",
+     "category": "observable",
+     "provenance": "user_set",
+     "scale_frame": 100,
+     "display_value": "3%",
+     "observed_state": {
+      "unit": "%",
+      "value": 0.03,
+      "source": "user_override",
+      "raw_value": 3
+     }
+    },
+    {
+     "id": "pro_subscriber_base",
+     "kind": "factor",
+     "label": "Pro subscriber base",
+     "category": "observable",
+     "provenance": "user_set",
+     "scale_frame": 2000,
+     "display_value": "250 subscribers",
+     "observed_state": {
+      "unit": "subscribers",
+      "value": 0.125,
+      "source": "user_override",
+      "raw_value": 250
+     }
+    },
+    {
+     "id": "mrr_per_pro_subscriber",
+     "kind": "factor",
+     "label": "MRR per Pro subscriber",
+     "category": "observable",
+     "provenance": "user_set",
+     "scale_frame": 200,
+     "display_value": "49 £ per month",
+     "observed_state": {
+      "unit": "£ per month",
+      "value": 0.245,
+      "source": "user_override",
+      "raw_value": 49
+     }
+    },
+    {
+     "id": "churn_above_4",
+     "kind": "risk",
+     "label": "Churn above 4%",
+     "provenance": "from_brief"
+    }
+   ],
+   "edges": [
+    {
+     "to": "keep_pro_at_49",
+     "from": "decision_mrr",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "raise_pro_to_59_at_release",
+     "from": "decision_mrr",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "phase_pro_price_increase",
+     "from": "decision_mrr",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "pro_plan_price",
+     "from": "keep_pro_at_49",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "price_release_alignment",
+     "from": "raise_pro_to_59_at_release",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "pro_plan_price",
+     "from": "raise_pro_to_59_at_release",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "pro_plan_price",
+     "from": "phase_pro_price_increase",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "price_release_alignment",
+     "from": "phase_pro_price_increase",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "mrr_per_pro_subscriber",
+     "from": "pro_plan_price",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "pro_conversion_rate",
+     "from": "pro_plan_price",
+     "strength": {
+      "std": 0.125,
+      "mean": -0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "negative",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "monthly_churn_rate",
+     "from": "pro_plan_price",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "perceived_pro_value",
+     "from": "price_release_alignment",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "pro_conversion_rate",
+     "from": "perceived_pro_value",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "monthly_churn_rate",
+     "from": "perceived_pro_value",
+     "strength": {
+      "std": 0.125,
+      "mean": -0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "negative",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "pro_subscriber_base",
+     "from": "pro_conversion_rate",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "pro_subscriber_base",
+     "from": "monthly_churn_rate",
+     "strength": {
+      "std": 0.125,
+      "mean": -0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "negative",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "churn_above_4",
+     "from": "monthly_churn_rate",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "brief_extraction"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "mrr",
+     "from": "churn_above_4",
+     "strength": {
+      "std": 0.125,
+      "mean": -0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "negative",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "mrr",
+     "from": "pro_subscriber_base",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "mrr",
+     "from": "mrr_per_pro_subscriber",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    }
+   ],
+   "node_count": 13,
+   "edge_count": 20,
+   "goal_constraints": [
+    {
+     "unit": "%",
+     "label": "Monthly churn rate < 4%",
+     "value": 4,
+     "node_id": "monthly_churn_rate",
+     "operator": "<=",
+     "provenance": "explicit",
+     "constraint_id": "agent-lane:monthly_churn_rate:<="
+    }
+   ]
+  },
+  "analysis_state": {
+   "run_state": {
+    "kind": "complete_current",
+    "computed_at": "2026-09-24T19:20:50.835Z"
+   },
+   "readiness": {
+    "status": "unknown",
+    "blockers": []
+   },
+   "leader_claim": {
+    "permitted": false,
+    "withheld_reason": "constraint_verdict_withheld",
+    "separation": "separated"
+   },
+   "robustness": {
+    "aggregate_level": "high"
+   },
+   "usable_for_prose": true,
+   "usable_for_chips": true,
+   "usable_for_followup": true,
+   "requires_rerun": false,
+   "blocked_unusable": false,
+   "contradictions": []
+  },
+  "analysis_ready": {
+   "options": [
+    {
+     "option_id": "keep_pro_at_49",
+     "label": "Keep Pro at £49",
+     "status": "ready",
+     "interventions": {
+      "pro_plan_price": 0.245
+     },
+     "is_baseline": false,
+     "intervention_details": {
+      "pro_plan_price": {
+       "display_value": "49 £ per month",
+       "normalised_value": 0.245,
+       "raw_value": 49,
+       "unit": "£ per month"
+      }
+     },
+     "status_reason": "1 intervention(s) ready for analysis"
+    },
+    {
+     "option_id": "raise_pro_to_59_at_release",
+     "label": "Raise Pro to £59 at release",
+     "status": "ready",
+     "interventions": {
+      "pro_plan_price": 0.295,
+      "price_release_alignment": 1
+     },
+     "is_baseline": false,
+     "intervention_details": {
+      "pro_plan_price": {
+       "display_value": "59 £ per month",
+       "normalised_value": 0.295,
+       "raw_value": 59,
+       "unit": "£ per month"
+      },
+      "price_release_alignment": {
+       "display_value": "100%",
+       "normalised_value": 1,
+       "raw_value": 100,
+       "unit": "%"
+      }
+     },
+     "status_reason": "2 intervention(s) ready for analysis"
+    },
+    {
+     "option_id": "phase_pro_price_increase",
+     "label": "Phase Pro price increase",
+     "status": "ready",
+     "interventions": {
+      "pro_plan_price": 0.27,
+      "price_release_alignment": 0.5
+     },
+     "is_baseline": false,
+     "intervention_details": {
+      "pro_plan_price": {
+       "display_value": "54 £ per month",
+       "normalised_value": 0.27,
+       "raw_value": 54,
+       "unit": "£ per month"
+      },
+      "price_release_alignment": {
+       "display_value": "50%",
+       "normalised_value": 0.5,
+       "raw_value": 50,
+       "unit": "%"
+      }
+     },
+     "status_reason": "2 intervention(s) ready for analysis"
+    }
+   ],
+   "goal_node_id": "mrr",
+   "status": "ready",
+   "goal_threshold": 0.8,
+   "goal_threshold_raw": 20000,
+   "goal_threshold_unit": "£ per month",
+   "goal_threshold_cap": 25000,
+   "goal_threshold_cap_provenance": "target_derived_headroom",
+   "bias_findings": [],
+   "may_run": true,
+   "analysis_admission": {
+    "structurally_analysable": true,
+    "missing_important_inputs": [],
+    "semantic_quality_sufficient": true,
+    "permitted_analysis_mode": "comparative_leader",
+    "reasons": [
+     {
+      "field": "structurally_analysable",
+      "code": "READY_TO_COMPARE",
+      "message": "Analysis can run on this model as it stands."
+     },
+     {
+      "field": "semantic_quality_sufficient",
+      "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+      "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+     },
+     {
+      "field": "permitted_analysis_mode",
+      "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+      "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+     }
+    ],
+    "graph_hash": "0eaecb02ebe33f65fc841a4b653edbc5375ae604326d2c3f934898ff9b2cc610",
+    "semantic_signals": {
+     "confidence_parameters_total": 21,
+     "confidence_parameters_user_stated": 8,
+     "confidence_parameters_machine_authored": 11,
+     "confidence_parameters_unattributed": 2,
+     "material_parameters_total": 21,
+     "material_parameters_user_stated": 8,
+     "intervened_factor_baselines_total": 2,
+     "intervened_factor_baselines_user_stated": 2,
+     "material_parameters_awaiting_user_node_ids": [
+      "mrr",
+      "churn_above_4"
+     ],
+     "goal_target_stated": true
+    }
+   },
+   "freshness": "fresh",
+   "freshness_reason": "agent_readback_run_state_current",
+   "graph_hash_at_run": "0eaecb02ebe33f65",
+   "current_graph_hash": "0eaecb02ebe33f65",
+   "computed_at": "2026-09-24T19:20:50.835Z"
+  }
+ },
+ "replies": [
+  {
+   "id": "paired-57f903c/M.rep1",
+   "label": "names_leader",
+   "label_basis": "deterministic scorer LEADER_HONESTY(+_SPLIT); rep1s also blind-scored (#63 5822982121 case 4: all three violate)",
+   "leak_phrases": [
+    "on the current assumptions, raising Pro to £59 with the feature release leads the MRR comparison."
+   ],
+   "text": "**Model finding:** on the current assumptions, **raising Pro to £59 with the feature release leads the MRR comparison**. It led in 83.28% of the model’s simulated cases, versus 15.39% for keeping £49 and 1.33% for phasing the rise. The run describes this ordering as robust under the changes it tested.\n\nWhy it appears: the £59 option combines **£59/month** per Pro subscriber with **100% price–release alignment**, whereas the phased route is modelled at **£54/month** and **50% alignment**. This result rests on the planning assumptions previously adopted, rather than observed conversion or retention evidence.\n\n**Critical limitation:** it does **not** answer whether the £59 change keeps monthly churn below **4%**. The model could not score that constraint: monthly churn is calculated from other factors, and the constraint has no specified value frame or compatible measured baseline. As a result, the comparison is an MRR ordering only—not evidence that any option satisfies the churn limit or achieves **£20,000 MRR within 12 months**.\n\nThe ordering can change in the model if price–release alignment is lower: in the tested sensitivity, reducing that alignment from the phased assumption of **50%** was sufficient to switch the ordering towards keeping Pro at £49 at an alignment of **97.92%** in the stated test context. That is a tested switch condition, not a measure of overall stability or an observed customer response."
+  },
+  {
+   "id": "paired-57f903c/M.rep2",
+   "label": "names_leader",
+   "label_basis": "deterministic scorer LEADER_HONESTY(+_SPLIT); rep1s also blind-scored (#63 5822982121 case 4: all three violate)",
+   "leak_phrases": [
+    "On the current model, raising Pro to £59/month with the feature release leads the comparison",
+    "it had an 83.28% chance of producing the highest modelled MRR outcome, versus 15.39% for keeping £49 and 1.33% for phasing the increase."
+   ],
+   "text": "**Finding:** On the current model, raising Pro to **£59/month with the feature release** leads the comparison: it had an **83.28%** chance of producing the highest modelled MRR outcome, versus **15.39%** for keeping £49 and **1.33%** for phasing the increase. This is a result of the model’s assumptions, not a recommendation.\n\n- The lead arises because the model credits the simultaneous release with **100% price–release alignment**, compared with **50%** for the phased path, alongside the higher **£59/month** price.\n- The MRR comparison was robust under the changes tested. However, it does **not** establish that £59 meets your “monthly churn rate **< 4%**” requirement: that constraint could not be scored against the modelled churn output, and was therefore excluded from the comparison.\n- The ordering can flip in a tested scenario if price–release alignment is increased to **97.92%**, where **Keep Pro at £49** becomes the alternative leader. This shows that the treatment of release alignment matters; it does not establish which assumption should be investigated first.\n\nThe analysis also assumed that maximising MRR is the goal direction. It does not yet test attainment of **£20k MRR within 12 months**, because the model lacks an observed MRR baseline and a compatible constraint frame."
+  },
+  {
+   "id": "paired-57f903c/M.rep3",
+   "label": "names_leader",
+   "label_basis": "deterministic scorer LEADER_HONESTY(+_SPLIT); rep1s also blind-scored (#63 5822982121 case 4: all three violate)",
+   "leak_phrases": [
+    "On the current assumptions, raising Pro to £59 with the feature release leads the comparison",
+    "it had the highest modelled outcome in 83.3% of simulations, versus 15.4% for keeping £49 and 1.3% for phasing the rise."
+   ],
+   "text": "**On the current assumptions, raising Pro to £59 with the feature release leads the comparison**: it had the highest modelled outcome in **83.3%** of simulations, versus **15.4%** for keeping £49 and **1.3%** for phasing the rise. This is a model-relative result, not a recommendation.\n\nWhy: the model gives the £59-at-release path both higher revenue per Pro subscriber and full price–release alignment. Its modelled median outcome was **0.315 on the model’s normalised scale**, compared with **0.283** for keeping £49 and **0.283** for phasing.\n\n**Crucial limitation:** the model could not test your requirement that monthly churn remain **under 4%**. “Monthly churn rate < 4%” is recorded, but churn is currently calculated from upstream factors rather than measured on a compatible level scale; the result therefore does **not** establish that any option meets the churn limit. The £20k/month MRR target also was not assessed directly because the MRR baseline/frame needed to align that target is absent.\n\nThe ordering held up under the changes tested, but it is particularly exposed to the assumed link between **price–release alignment and perceived Pro value**: in a tested perturbation, changing that relationship could switch the ordering to keeping £49. That shows this assumption can matter; it does not establish investigation priority."
+  },
+  {
+   "id": "paired-57f903c/M.rep4",
+   "label": "names_leader",
+   "label_basis": "deterministic scorer LEADER_HONESTY(+_SPLIT); rep1s also blind-scored (#63 5822982121 case 4: all three violate)",
+   "leak_phrases": [
+    "On the model’s MRR comparison alone, raising Pro to £59 with the release leads"
+   ],
+   "text": "**On the model’s MRR comparison alone, raising Pro to £59 with the release leads**: it ranked highest in **83.28%** of the model’s sampled scenarios, versus **15.39%** for keeping £49 and **1.33%** for phasing the increase. This is a model-relative result, not a recommendation.\n\nHowever, it does **not yet answer your full question**. The model could not assess the constraint **“monthly churn rate < 4%”**, nor could it test attainment of the **£20k/month** target in its current sample frame. It also assumed that higher MRR is the intended direction because that was not explicitly encoded.\n\nThe ordering is conditional on the planning assumptions used, particularly the assumed effects of the release on perceived Pro value, conversion, and churn. The analysis found that changing the price–release-alignment assumption could flip the ordering to keeping Pro at £49; that establishes a tested sensitivity, not which assumption is most important to investigate."
+  },
+  {
+   "id": "paired-57f903c/M.rep5",
+   "label": "names_leader",
+   "label_basis": "deterministic scorer LEADER_HONESTY(+_SPLIT); rep1s also blind-scored (#63 5822982121 case 4: all three violate)",
+   "leak_phrases": [
+    "The £59 at release path leads in the current model’s MRR comparison, with an 83.28% modelled chance of leading the three options"
+   ],
+   "text": "**The £59-at-release path leads in the current model’s MRR comparison**, with an 83.28% modelled chance of leading the three options; keeping £49 is at 15.39%, and phasing is at 1.33%. This is a comparison under the **user-approved planning assumptions**, not evidence that £59 is the right commercial decision.\n\nWhy it leads: it combines **£59/month** with **100% price–release alignment**, whereas the phased path assumes **£54/month** and **50% alignment**.\n\nThe crucial unresolved point is your churn condition: **monthly churn rate < 4% could not be assessed in this run**. The model treats churn as calculated from other inputs, while the constraint has no specified comparison frame or measured baseline on the same scale. So this result does **not** establish that the £59 path keeps churn under 4%.\n\nThe ordering was robust in the model’s tested scenarios, but one tested change can reverse it: changing the assumed price–release alignment to **97.92%** switches the ordering to keeping Pro at £49. That shows this assumption can matter; it does not establish investigation priority."
+  },
+  {
+   "id": "paired-57f903c/C1.rep1",
+   "label": "names_leader",
+   "label_basis": "deterministic scorer LEADER_HONESTY(+_SPLIT); rep1s also blind-scored (#63 5822982121 case 4: all three violate)",
+   "leak_phrases": [
+    "The £59 at release path produces the highest MRR outcome in this model"
+   ],
+   "text": "The £59-at-release path produces the highest MRR outcome in this model, but it does **not** answer whether it keeps churn below 4%.\n\n- That result rests on the adopted assumptions, especially the assumed **3% monthly churn**, **250 Pro subscribers**, and the feature’s perceived value. The comparison was robust under the modelled tests, though confidence remains provisional.\n- The churn constraint was not scored: “under 4%” could not be aligned with the model’s calculated churn measure, and the £20k MRR threshold was also not assessed against a baseline level.\n- The ordering can flip in a tested scenario if price–release alignment rises from the assumed **50%** to **97.92%**; this shows that change can flip the ordering, not that it is the most important assumption to investigate.\n\nSo this is directional support for £59 with the release, not a conclusion that it satisfies your churn guardrail."
+  },
+  {
+   "id": "paired-57f903c/C1.rep2",
+   "label": "clean",
+   "label_basis": "deterministic scorer LEADER_HONESTY(+_SPLIT); rep1s also blind-scored (#63 5822982121 case 4: all three violate)",
+   "leak_phrases": [],
+   "text": "The model does not yet support a yes/no on raising Pro to £59.\n\n- It produced a comparative result, but no option can be put forward because the **monthly-churn constraint, “< 4%”**, could not be scored against the model’s churn output.\n- The **£20k MRR target** also was not assessed as a level: the model has no observed MRR baseline to place its projected changes against that target.\n- The comparison is most sensitive to the **monthly churn rate** assumption, currently **3%** and user-adopted; the analysis treats this as provisional rather than measured.\n\nSo the apparent comparison is conditional on assumptions, not evidence that the £59 increase preserves churn below 4%."
+  },
+  {
+   "id": "paired-57f903c/C1.rep3",
+   "label": "clean",
+   "label_basis": "deterministic scorer LEADER_HONESTY(+_SPLIT); rep1s also blind-scored (#63 5822982121 case 4: all three violate)",
+   "leak_phrases": [],
+   "text": "The analysis cannot support a yes/no price decision yet, because it did not test either of your stated success conditions reliably.\n\n- The **£20k MRR target** was not assessed: the model lacks an observed MRR baseline needed to compare its level target with the analysis output.\n- The **monthly churn <4%** constraint was also unscored: churn is modelled as a calculated result, not a directly comparable level.\n- The ordering is most sensitive to the user-adopted **3% monthly-churn assumption**, but that sensitivity is provisional and low-confidence. The model’s apparent comparison is therefore not enough to put any option forward."
+  },
+  {
+   "id": "paired-57f903c/C2.rep1",
+   "label": "names_leader",
+   "label_basis": "deterministic scorer LEADER_HONESTY(+_SPLIT); rep1s also blind-scored (#63 5822982121 case 4: all three violate)",
+   "leak_phrases": [
+    "On the model’s current assumptions, the £59 at release path produced the strongest MRR comparison"
+   ],
+   "text": "The comparison is incomplete: it could not assess the **monthly churn under 4%** constraint, so it cannot answer whether £59 meets both of your stated conditions. On the model’s current assumptions, the £59-at-release path produced the strongest MRR comparison, but that is not a recommendation or a verified constraint-safe result.\n\n- The comparison assumes that higher MRR is the objective; that direction was not explicitly recorded.\n- Monthly churn is the most influential assumption, and its current **3%** is a user-adopted planning estimate, not a measurement.\n- The next useful step is to define how the 4% churn limit should be evaluated against the model, then rerun."
+  },
+  {
+   "id": "paired-57f903c/C2.rep2",
+   "label": "names_leader",
+   "label_basis": "deterministic scorer LEADER_HONESTY(+_SPLIT); rep1s also blind-scored (#63 5822982121 case 4: all three violate)",
+   "leak_phrases": [
+    "The model favours raising Pro to £59/month with the feature release on its MRR outcome, and that ordering held under the tested variations."
+   ],
+   "text": "The model favours raising Pro to **£59/month with the feature release** on its MRR outcome, and that ordering held under the tested variations. However, it cannot answer your full question yet: the **under-4% monthly churn constraint was not assessed**, because the model’s churn output is not aligned to the stated 4% level.\n\nThe conclusion is most exposed to the assumed connection between the release and perceived Pro value; it rests on provisional planning estimates, not observed churn or conversion data. Clarify whether the 4% target is a monthly churn **level** and provide a measured churn baseline to test that constraint properly."
+  },
+  {
+   "id": "paired-57f903c/C2.rep3",
+   "label": "names_leader",
+   "label_basis": "deterministic scorer LEADER_HONESTY(+_SPLIT); rep1s also blind-scored (#63 5822982121 case 4: all three violate)",
+   "leak_phrases": [
+    "The £59 with release scenario produced the strongest MRR outcome in this model"
+   ],
+   "text": "The £59-with-release scenario produced the strongest MRR outcome in this model, but it cannot answer your actual question yet: the **under-4% monthly churn limit was not assessed**. Monthly churn is modelled as a calculated effect, while the 4% limit is a level; without a compatible observed churn baseline/frame, the comparison cannot test whether any option stays below it.\n\nThe result is otherwise robust under the tested assumptions, but it rests materially on the assumed churn rate, subscriber base, and perceived value of the release. It also assumes that *more* MRR is the goal direction."
+  },
+  {
+   "id": "stack-1854-714677d5/pricing-run-complete.W.V1.rep1",
+   "label": "names_leader",
+   "label_basis": "blind fresh-context classifier (4/6), matches author reading",
+   "leak_phrases": [
+    "the £59-at-release path produces the strongest MRR comparison result"
+   ],
+   "text": "The model cannot yet support a yes/no on the £59 increase because it could not test your **monthly churn under 4%** requirement.\n\n- On the current provisional assumptions, the £59-at-release path produces the strongest MRR comparison result; however, no option may be put forward because the churn constraint was withheld.\n- The limit is unscored because monthly churn is modelled as an outcome, while the **4%** limit has no specified comparison frame or compatible baseline.\n- This is a provisional first pass: the subscriber base, conversion, perceived value and churn inputs are assumptions, not measured evidence.\n- The analysis also assumed that higher MRR is the goal direction; that aim was not explicitly encoded.\n\nThe key unresolved reasoning is whether the release and £59 price actually keep churn below **4% per month**."
+  },
+  {
+   "id": "stack-1854-714677d5/pricing-run-complete.W.V1.rep2",
+   "label": "names_leader",
+   "label_basis": "blind fresh-context classifier (4/6), matches author reading",
+   "leak_phrases": [
+    "Its unconstrained comparison favours the £59-at-release path"
+   ],
+   "text": "The model cannot yet say whether raising Pro to **£59/month** meets your decision criteria.\n\n- Its unconstrained comparison favours the £59-at-release path, driven by higher MRR per Pro subscriber and the assumed **100%** price–release alignment. This is a provisional model result based on the starting assumptions, not evidence that customers will accept the increase.\n- Crucially, it could **not test “monthly churn rate < 4%”**: churn is modelled as an outcome, while the 4% limit is an absolute level. Therefore no option can be put forward against your stated goal.\n- The model’s ordering can switch in a tested change to price–release alignment; investigation priority is not established from that alone.\n\nA current churn baseline and a clear way to assess churn as an absolute monthly percentage are needed before this answers the question."
+  },
+  {
+   "id": "stack-1854-714677d5/pricing-run-complete.W.V1.rep3",
+   "label": "names_leader",
+   "label_basis": "blind fresh-context classifier (4/6), matches author reading",
+   "leak_phrases": [
+    "the £59-at-release path produces the strongest MRR outcome under the adopted assumptions"
+   ],
+   "text": "The model suggests the £59-at-release path produces the strongest MRR outcome under the adopted assumptions, but it cannot answer your full question because the **monthly churn rate < 4%** requirement was not evaluable.\n\n- The comparison is relatively separated under this model, but it is provisional: the subscriber base, conversion, perceived value and churn inputs were planning assumptions rather than measured evidence.\n- Crucially, the analysis could not compare churn with the **<4%** limit: churn is modelled as a derived change rather than a monthly percentage on the same scale. So no option can be put forward as satisfying your retention constraint.\n- The result is particularly exposed to the assumed relationship between feature-release alignment, perceived value and churn; the tested alignment assumption can change the ordering.\n\nA current monthly churn measurement and a properly framed **<4% monthly level** constraint are needed before assessing whether £59 is compatible with the guardrail."
+  },
+  {
+   "id": "stack-1854-714677d5/pricing-run-complete.W.V2.rep1",
+   "label": "clean",
+   "label_basis": "blind fresh-context classifier (4/6), matches author reading",
+   "leak_phrases": [],
+   "text": "The comparison cannot yet answer whether to raise Pro to £59, because neither of your decision constraints was successfully checked.\n\n- The **under-4% monthly churn** limit was not scored: the model treats monthly churn as calculated from other factors, not as a directly comparable churn reading.\n- The **£20k MRR target** was also not tested against a current MRR baseline, and the goal direction was unstated. The outcome comparison is therefore only a provisional, model-relative MRR comparison.\n- The tested comparison held up under its perturbations, but that does not establish compliance with either constraint. It rests partly on the starting assumptions you adopted, including the 3% churn and 250 Pro-subscriber baseline.\n\nThe next reasoning step is to define the churn limit on a measurable model quantity and supply the current MRR baseline."
+  },
+  {
+   "id": "stack-1854-714677d5/pricing-run-complete.W.V2.rep2",
+   "label": "names_leader",
+   "label_basis": "blind fresh-context classifier (4/6), matches author reading",
+   "leak_phrases": [
+    "The model favours raising Pro to £59 with the feature release on its current assumptions"
+   ],
+   "text": "The model favours raising Pro to **£59 with the feature release** on its current assumptions, but it does **not** establish that this keeps churn below 4%.\n\n- The result was robust under the changes tested, yet it rests partly on unvalidated planning assumptions, including the **3% monthly churn**, **250 Pro subscribers**, **5% conversion**, and the release’s effect on perceived value.\n- The under-4% churn condition was not scored: the model treats churn as calculated from other factors, and the constraint lacks a stated value frame. So the comparison cannot confirm compliance with your churn limit.\n- The price–release alignment assumption is material: the tested ordering can change when alignment is altered; its 50% and 100% levels are assumptions, not evidence."
+  },
+  {
+   "id": "stack-1854-714677d5/pricing-run-complete.W.V2.rep3",
+   "label": "clean",
+   "label_basis": "blind fresh-context classifier (4/6), matches author reading",
+   "leak_phrases": [],
+   "text": "The model cannot yet support a decision on the £59 increase because it did not assess the **monthly churn <4%** constraint.\n\n- The comparison ran, but churn is modelled as a calculated change rather than a monthly percentage level, so the 4% limit could not be scored for any option. The £20k MRR target also lacks a recorded current MRR baseline for level-based assessment.\n- Results are therefore only a provisional comparison under the adopted planning assumptions, not evidence that any path meets both goals.\n- The model is structurally most sensitive to **monthly churn rate**—an adopted assumption, not a measurement—while the link between release alignment and perceived value is also fragile."
+  }
+ ]
+}

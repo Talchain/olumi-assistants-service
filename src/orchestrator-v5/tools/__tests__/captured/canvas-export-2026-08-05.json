@@ -1,0 +1,243 @@
+{
+ "version": 2,
+ "nodes": [
+  {
+   "id": "dec_mrr_growth",
+   "kind": "decision",
+   "label": "MRR Growth Strategy to \u00a3250k"
+  },
+  {
+   "id": "fac_budget_spend",
+   "kind": "factor",
+   "label": "Growth Budget Deployed"
+  },
+  {
+   "id": "fac_churn_rate",
+   "kind": "factor",
+   "label": "Monthly Churn Rate"
+  },
+  {
+   "id": "fac_conversion_rate",
+   "kind": "factor",
+   "label": "Conversion Rate"
+  },
+  {
+   "id": "fac_lead_volume",
+   "kind": "factor",
+   "label": "Lead Volume"
+  },
+  {
+   "id": "fac_onboarding_capacity",
+   "kind": "factor",
+   "label": "Onboarding Capacity"
+  },
+  {
+   "id": "fac_partner_channel",
+   "kind": "factor",
+   "label": "Partner Channel Programme"
+  },
+  {
+   "id": "fac_sales_headcount",
+   "kind": "factor",
+   "label": "Sales Headcount Investment"
+  },
+  {
+   "id": "fac_sales_ramp",
+   "kind": "factor",
+   "label": "Sales Ramp Time"
+  },
+  {
+   "id": "fac_self_serve",
+   "kind": "factor",
+   "label": "Self-Serve Tier Launch"
+  },
+  {
+   "id": "goal_mrr",
+   "kind": "goal",
+   "label": "Reach \u00a3250k Monthly Recurring Revenue"
+  },
+  {
+   "id": "opt_hire_sales",
+   "kind": "option",
+   "label": "Hire Two Sales Reps"
+  },
+  {
+   "id": "opt_partner",
+   "kind": "option",
+   "label": "Invest in Partner Channel"
+  },
+  {
+   "id": "opt_self_serve",
+   "kind": "option",
+   "label": "Launch Self-Serve Tier"
+  },
+  {
+   "id": "opt_status_quo",
+   "kind": "option",
+   "label": "Keep Current Approach (Status Quo)"
+  },
+  {
+   "id": "out_mrr_retention",
+   "kind": "outcome",
+   "label": "MRR Retained from Existing Base"
+  },
+  {
+   "id": "out_new_mrr",
+   "kind": "outcome",
+   "label": "New MRR Generated"
+  },
+  {
+   "id": "risk_budget_overrun",
+   "kind": "risk",
+   "label": "Budget Overrun Pressure"
+  },
+  {
+   "id": "risk_onboarding_failure",
+   "kind": "risk",
+   "label": "Onboarding Failure Rate"
+  },
+  {
+   "id": "risk_slow_ramp",
+   "kind": "risk",
+   "label": "Slow Sales Ramp Delay"
+  }
+ ],
+ "edges": [
+  {
+   "from": "dec_mrr_growth",
+   "to": "opt_hire_sales"
+  },
+  {
+   "from": "dec_mrr_growth",
+   "to": "opt_partner"
+  },
+  {
+   "from": "dec_mrr_growth",
+   "to": "opt_self_serve"
+  },
+  {
+   "from": "dec_mrr_growth",
+   "to": "opt_status_quo"
+  },
+  {
+   "from": "fac_budget_spend",
+   "to": "out_new_mrr"
+  },
+  {
+   "from": "fac_budget_spend",
+   "to": "risk_budget_overrun"
+  },
+  {
+   "from": "fac_churn_rate",
+   "to": "out_mrr_retention"
+  },
+  {
+   "from": "fac_conversion_rate",
+   "to": "out_new_mrr"
+  },
+  {
+   "from": "fac_lead_volume",
+   "to": "out_new_mrr"
+  },
+  {
+   "from": "fac_onboarding_capacity",
+   "to": "out_mrr_retention"
+  },
+  {
+   "from": "fac_onboarding_capacity",
+   "to": "risk_onboarding_failure"
+  },
+  {
+   "from": "fac_partner_channel",
+   "to": "fac_conversion_rate"
+  },
+  {
+   "from": "fac_partner_channel",
+   "to": "fac_lead_volume"
+  },
+  {
+   "from": "fac_sales_headcount",
+   "to": "fac_lead_volume"
+  },
+  {
+   "from": "fac_sales_headcount",
+   "to": "risk_slow_ramp"
+  },
+  {
+   "from": "fac_sales_ramp",
+   "to": "out_new_mrr"
+  },
+  {
+   "from": "fac_sales_ramp",
+   "to": "risk_slow_ramp"
+  },
+  {
+   "from": "fac_self_serve",
+   "to": "fac_lead_volume"
+  },
+  {
+   "from": "fac_self_serve",
+   "to": "fac_onboarding_capacity"
+  },
+  {
+   "from": "opt_hire_sales",
+   "to": "fac_budget_spend"
+  },
+  {
+   "from": "opt_hire_sales",
+   "to": "fac_sales_headcount"
+  },
+  {
+   "from": "opt_partner",
+   "to": "fac_budget_spend"
+  },
+  {
+   "from": "opt_partner",
+   "to": "fac_partner_channel"
+  },
+  {
+   "from": "opt_self_serve",
+   "to": "fac_budget_spend"
+  },
+  {
+   "from": "opt_self_serve",
+   "to": "fac_self_serve"
+  },
+  {
+   "from": "opt_status_quo",
+   "to": "fac_budget_spend"
+  },
+  {
+   "from": "opt_status_quo",
+   "to": "fac_partner_channel"
+  },
+  {
+   "from": "opt_status_quo",
+   "to": "fac_sales_headcount"
+  },
+  {
+   "from": "opt_status_quo",
+   "to": "fac_self_serve"
+  },
+  {
+   "from": "out_mrr_retention",
+   "to": "goal_mrr"
+  },
+  {
+   "from": "out_new_mrr",
+   "to": "goal_mrr"
+  },
+  {
+   "from": "risk_budget_overrun",
+   "to": "goal_mrr"
+  },
+  {
+   "from": "risk_onboarding_failure",
+   "to": "goal_mrr"
+  },
+  {
+   "from": "risk_slow_ramp",
+   "to": "goal_mrr"
+  }
+ ]
+}

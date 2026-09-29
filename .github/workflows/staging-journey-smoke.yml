@@ -1,0 +1,121 @@
+name: Staging Journey Smoke
+
+# THE ALARM.
+#
+# Drafting — step one of the product — was broken on staging for hours while
+# seven merges shipped over it. Nothing caught it. The pre-existing
+# `nightly-smoke` workflow was `skipped` on 8 of its last 8 runs (gated behind
+# the repo variable SMOKE_SCHEDULE_ENABLED, which has never been set), marked
+# `continue-on-error`, scheduled weekly, and pointed at PRODUCTION — an
+# environment that is out of scope. `cee-diagnostics` is dead the same way.
+#
+# A reviewed release exception can hold paid calls only for the named Core /
+# Drafting batch: set CORE_DRAFTING_PAID_HOLD=20260920 and mark its staging merge
+# commits [core-drafting-20260920]. Unset or any other value keeps the alarm on.
+# Other pushes and explicit exact-SHA dispatch are unaffected. A held job is
+# SKIPPED, not evidence of a successful journey. Clear the hold after the batch's
+# triggered jobs reach terminal state; changing the variable triggers no run.
+# Required non-model CI, freshness and journey assertions are not bypassed.
+# The tests pin this bounded exception and still reject unrelated variable gates,
+# continue-on-error, loss of the push trigger, or a production target.
+#
+# HOW IT CATCHES THE OUTAGE
+#   Render auto-deploys `staging` on push. This workflow starts on that same
+#   push and first POLLS /healthz until the deployed build matches this commit.
+#   If the deploy failed (CEE 26638e7a was `build_failed` when this was
+#   written), the poll times out and the run goes RED — so "the deploy did not
+#   ship" is caught even though Render never tells GitHub anything. Only once
+#   the right build is confirmed serving does it drive the real user journey.
+
+on:
+  push:
+    branches: [staging]
+  workflow_dispatch:
+    inputs:
+      expect_sha:
+        # Blank does NOT disable the freshness check: GitHub treats an empty
+        # input as falsy, so it falls back to `github.sha` (the commit this
+        # dispatch ran from). That fallback is deliberate — there is no way to
+        # ask this workflow to skip Phase 1, because "test whatever happens to
+        # be deployed" is how a stale build passes for a build it never ran.
+        description: "Commit expected to be serving (blank = the commit this run was dispatched from)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+# Only the newest push matters; an older in-flight run is testing a build that
+# is already superseded.
+concurrency:
+  group: staging-journey-smoke
+  cancel-in-progress: true
+
+jobs:
+  journey:
+    if: >-
+      ${{ !(vars.CORE_DRAFTING_PAID_HOLD == '20260920' && (github.event_name == 'push' && github.ref == 'refs/heads/staging' && contains(github.event.head_commit.message, '[core-drafting-20260920]'))) }}
+    name: Live user journey against deployed staging
+    runs-on: ubuntu-latest
+    # Freshness poll (15 min) + the SAMPLED journey (12 min budget) + headroom.
+    # The two maxima are effectively exclusive — a freshness poll that runs to
+    # its timeout means the deploy did not ship, and that path returns BEFORE
+    # Phase 2 — so this is headroom, not expected runner cost. A measured
+    # sample costs ~50-97s and k defaults to 5.
+    #
+    # This number is NOT hand-maintained against the script: a test derives the
+    # script's own SMOKE_FRESHNESS_TIMEOUT_MS and SMOKE_JOURNEY_BUDGET_MS
+    # defaults and REDS if their sum ever reaches it. Being killed by the job
+    # timeout is the worst failure available here — the process dies before the
+    # rate, the census and the floor verdict are printed, so a run that measured
+    # four healthy samples looks exactly like one that measured nothing.
+    timeout-minutes: 32
+    steps:
+      # SPARSE on purpose. This gate runs a dependency-free .mjs that reads NO
+      # repository files (verified: zero `import` / `readFileSync` / `require(`
+      # in the script). A full checkout would clone ~160MB / 7,736 files —
+      # 56% of it the git-tracked `node_modules` — on every push to staging,
+      # for a script that needs exactly one directory.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/ci
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # No `pnpm install` on purpose: the gate is a dependency-free .mjs using
+      # built-in fetch. That keeps the alarm fast, and keeps it working even
+      # when the dependency graph is what broke.
+      - name: Drive the live user journey
+        env:
+          SMOKE_BASE_URL: ${{ vars.STAGING_ASSIST_BASE_URL || 'https://cee-staging.onrender.com' }}
+          # THE BROWSER ORIGIN. The gate drives POST /proxy/v5/turn — the route
+          # the deployed UI bundle actually calls (it bakes the absolute host
+          # https://cee-staging.onrender.com/proxy/v5/turn, so Netlify is not in
+          # the drafting path). That route validates `Origin` against the Render
+          # dashboard value BROWSER_PROXY_ALLOWED_ORIGINS and injects the service
+          # key itself, so NO API KEY IS SENT — `SMOKE_API_KEY` is gone rather
+          # than left unused, because dead config is the mirror this repo keeps
+          # paying for.
+          #
+          # It is passed EXPLICITLY, not defaulted inside the script: if this
+          # origin stops being admitted, every browser user is blocked, and the
+          # gate must go red rather than invent an origin that still works.
+          SMOKE_ORIGIN: ${{ vars.STAGING_UI_ORIGIN || 'https://staging--olumi.netlify.app' }}
+          SMOKE_EXPECT_SHA: ${{ github.event.inputs.expect_sha || github.sha }}
+        # `shell: bash` is LOAD-BEARING, not cosmetic. GitHub's default Linux
+        # shell is `bash -e {0}` WITHOUT pipefail, so `node ... | tee` would
+        # exit with tee's status (0) and this alarm would pass while the
+        # journey was broken — the exact guarantee-theatre this gate exists to
+        # end. `shell: bash` selects `bash --noprofile --norc -eo pipefail {0}`.
+        # Asserted by tests/unit/ci/staging-journey-smoke.test.ts.
+        shell: bash
+        run: node scripts/ci/staging-journey-smoke.mjs 2>&1 | tee staging-journey-smoke.log
+
+      - name: Upload journey log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-journey-smoke-log
+          path: staging-journey-smoke.log

@@ -1,0 +1,70 @@
+{
+  "brief_id": "03-strengthen-edge",
+  "model": "gpt-4.1",
+  "prompt_hash": "sha256:2d6fcbc9d09869a271bc93df1b5bbb450a4a5ee3053d9395c3143b810c973cc5",
+  "response": {
+    "model_id": "gpt-4.1",
+    "brief_id": "03-strengthen-edge",
+    "status": "success",
+    "raw_text": "{\n  \"operations\": [\n    {\n      \"op\": \"update_edge\",\n      \"path\": \"/edges/fac_europe_entry->out_revenue/strength.mean\",\n      \"value\": 0.55,\n      \"old_value\": 0.35,\n      \"impact\": \"high\",\n      \"rationale\": \"Strengthening the direct effect of Europe Market Entry on Revenue Growth from moderate to strong, increasing its influence as a revenue driver.\"\n    }\n  ],\n  \"removed_edges\": [],\n  \"warnings\": [\n    \"The total inbound strength Σ|mean| to out_revenue will now be 0.75 (fac_europe_entry) + 0.2 (fac_investment) = 0.75, which is within the permissible limit.\"\n  ],\n  \"coaching\": {\n    \"summary\": \"Strengthening the Europe Market Entry → Revenue Growth relationship will increase the evaluated benefit of European expansion via direct revenue impact. This could make expansion appear more attractive in scenario analysis.\",\n    \"rerun_recommended\": true\n  }\n}",
+    "parsed_graph": {
+      "operations": [
+        {
+          "op": "update_edge",
+          "path": "/edges/fac_europe_entry->out_revenue/strength.mean",
+          "value": 0.55,
+          "old_value": 0.35,
+          "impact": "high",
+          "rationale": "Strengthening the direct effect of Europe Market Entry on Revenue Growth from moderate to strong, increasing its influence as a revenue driver."
+        }
+      ],
+      "removed_edges": [],
+      "warnings": [
+        "The total inbound strength Σ|mean| to out_revenue will now be 0.75 (fac_europe_entry) + 0.2 (fac_investment) = 0.75, which is within the permissible limit."
+      ],
+      "coaching": {
+        "summary": "Strengthening the Europe Market Entry → Revenue Growth relationship will increase the evaluated benefit of European expansion via direct revenue impact. This could make expansion appear more attractive in scenario analysis.",
+        "rerun_recommended": true
+      }
+    },
+    "extraction_attempted": false,
+    "latency_ms": 2416,
+    "input_tokens": 5390,
+    "output_tokens": 218,
+    "est_cost_usd": 0.012524,
+    "pricing_source": "api_usage",
+    "parsed_json": {
+      "operations": [
+        {
+          "op": "update_edge",
+          "path": "/edges/fac_europe_entry->out_revenue/strength.mean",
+          "value": 0.55,
+          "old_value": 0.35,
+          "impact": "high",
+          "rationale": "Strengthening the direct effect of Europe Market Entry on Revenue Growth from moderate to strong, increasing its influence as a revenue driver."
+        }
+      ],
+      "removed_edges": [],
+      "warnings": [
+        "The total inbound strength Σ|mean| to out_revenue will now be 0.75 (fac_europe_entry) + 0.2 (fac_investment) = 0.75, which is within the permissible limit."
+      ],
+      "coaching": {
+        "summary": "Strengthening the Europe Market Entry → Revenue Growth relationship will increase the evaluated benefit of European expansion via direct revenue impact. This could make expansion appear more attractive in scenario analysis.",
+        "rerun_recommended": true
+      }
+    }
+  },
+  "scores": {
+    "valid_json": true,
+    "correct_shape": true,
+    "operation_types_correct": false,
+    "topology_compliant": true,
+    "has_impact_rationale": true,
+    "correct_ordering": true,
+    "empty_ops_handled": true,
+    "coaching_present": true,
+    "path_syntax_valid": false
+  },
+  "overall": 0.8,
+  "captured_at": "2026-03-14T16:39:41.327Z"
+}

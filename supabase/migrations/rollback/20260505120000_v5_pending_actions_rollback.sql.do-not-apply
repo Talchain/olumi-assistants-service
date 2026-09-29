@@ -1,0 +1,130 @@
+-- ============================================================
+-- V5 pending-actions — break-glass rollback companion
+-- Matches: 20260505120000_v5_pending_actions.sql
+-- Status: DO NOT APPLY automatically.
+-- ============================================================
+--
+-- The `.do-not-apply` suffix ensures Supabase migration tooling skips
+-- this file. Apply manually only when:
+--   - the 12-arg RPC behaves unexpectedly on staging and immediate
+--     rollback is the safest option; or
+--   - the column or constraint must be removed for any reason.
+--
+-- Restoration target: the exact 11-arg signature shipped by
+-- 20260502120000_v5_brief_text_persistence.sql. The body below is
+-- inlined verbatim from that migration so this file can be applied
+-- without referring back to it.
+--
+-- Order: drop the 12-arg overload first to eliminate PostgREST
+-- ambiguity before re-issuing the 11-arg version, then drop the
+-- column and its constraint.
+-- ============================================================
+
+-- 1. Drop the 12-arg overload introduced by 20260505120000.
+DROP FUNCTION IF EXISTS public.append_turn_atomic(
+  uuid, text, text, text, text, boolean, integer, integer, jsonb, jsonb, text, jsonb
+);
+
+-- 2. Re-CREATE the 11-arg version verbatim from 20260502120000. The
+--    body matches that migration byte-for-byte; the only differences
+--    here are the explicit `public.` schema qualification on CREATE OR
+--    REPLACE and on the GRANT.
+CREATE OR REPLACE FUNCTION public.append_turn_atomic(
+  p_scenario_id      UUID,
+  p_turn_id          TEXT,
+  p_turn_class       TEXT,
+  p_handler_id       TEXT,
+  p_request_hash     TEXT,
+  p_response_emitted BOOLEAN,
+  p_llm_calls_used   INTEGER,
+  p_duration_ms      INTEGER,
+  p_handler_facts    JSONB,
+  p_graph            JSONB DEFAULT NULL,
+  p_brief_text       TEXT  DEFAULT NULL
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  v_turn_id   UUID;
+  v_user_id   UUID;
+  v_fact      JSONB;
+  v_updated   INTEGER;
+BEGIN
+  SELECT user_id INTO v_user_id FROM scenarios WHERE id = p_scenario_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'scenario % not found', p_scenario_id;
+  END IF;
+
+  INSERT INTO v5_conversation_turns (
+    scenario_id, user_id, turn_id, turn_class, handler_id,
+    request_hash, response_emitted, llm_calls_used, duration_ms
+  ) VALUES (
+    p_scenario_id, v_user_id, p_turn_id, p_turn_class, p_handler_id,
+    p_request_hash, p_response_emitted, p_llm_calls_used, p_duration_ms
+  )
+  ON CONFLICT (scenario_id, turn_id) DO NOTHING
+  RETURNING id INTO v_turn_id;
+
+  IF NOT FOUND THEN
+    SELECT id INTO v_turn_id
+      FROM v5_conversation_turns
+      WHERE scenario_id = p_scenario_id AND turn_id = p_turn_id;
+    RETURN v_turn_id;
+  END IF;
+
+  IF p_graph IS NOT NULL THEN
+    UPDATE scenarios SET graph = p_graph WHERE id = p_scenario_id;
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    IF v_updated = 0 THEN
+      RAISE EXCEPTION 'append_turn_atomic: scenarios row % vanished between SELECT and UPDATE', p_scenario_id;
+    END IF;
+  END IF;
+
+  IF jsonb_array_length(COALESCE(p_handler_facts, '[]'::jsonb)) > 0 THEN
+    FOR v_fact IN SELECT * FROM jsonb_array_elements(p_handler_facts)
+    LOOP
+      INSERT INTO v5_handler_facts (
+        v5_conversation_turn_id, scenario_id, user_id,
+        handler_id, action_type, noop, payload
+      ) VALUES (
+        v_turn_id,
+        p_scenario_id,
+        v_user_id,
+        v_fact->>'handler_id',
+        v_fact->>'action_type',
+        COALESCE((v_fact->>'noop')::boolean, FALSE),
+        COALESCE(v_fact->'payload', '{}'::jsonb)
+      );
+    END LOOP;
+  END IF;
+
+  IF p_brief_text IS NOT NULL THEN
+    UPDATE scenarios
+       SET brief_text = p_brief_text,
+           updated_at = NOW()
+     WHERE id = p_scenario_id
+       AND (brief_text IS NULL OR brief_text = '');
+  END IF;
+
+  RETURN v_turn_id;
+END;
+$$;
+
+-- 3. Re-issue GRANTs on the restored 11-arg signature.
+REVOKE EXECUTE ON FUNCTION public.append_turn_atomic(
+  uuid, text, text, text, text, boolean, integer, integer, jsonb, jsonb, text
+) FROM PUBLIC;
+
+GRANT EXECUTE ON FUNCTION public.append_turn_atomic(
+  uuid, text, text, text, text, boolean, integer, integer, jsonb, jsonb, text
+) TO service_role;
+
+-- 4. Remove the column and constraint last (after the function no
+--    longer references it).
+ALTER TABLE public.v5_conversation_turns
+  DROP CONSTRAINT IF EXISTS v5_conversation_turns_pending_actions_shape;
+ALTER TABLE public.v5_conversation_turns
+  DROP COLUMN IF EXISTS pending_actions;

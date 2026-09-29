@@ -1,0 +1,95 @@
+{
+  "_capture_metadata": {
+    "captured_at": "2026-05-02T00:00:00.000Z",
+    "source_environment": "synthetic-pending-v194",
+    "prompt_version": "v192b",
+    "prompt_pms_revision": 189,
+    "prompt_hash": "PENDING_V194_DEPLOYMENT",
+    "schemas_package_version": "0.11.0",
+    "cee_commit": "PENDING_GATE_2_COMMIT",
+    "known_gaps": [
+      "This is a synthetic fixture created during Gate 2 implementation. It is NOT a true staging capture. Replace with a real targeted-staging or v194 capture before MC-30 enforcement.",
+      "v192b raw output emits off-enum bias_category values (framing, blindspots, confidence) at ~41% rate; the legacy normaliser at anthropic.ts:884 maps them to canonical BiasType. This fixture uses canonical values directly to assert the post-normaliser contract.",
+      "prompt_hash and cee_commit MUST be filled in at real-capture time."
+    ]
+  },
+  "graph": {
+    "version": "1",
+    "default_seed": 17,
+    "nodes": [
+      { "id": "dec_strategy", "kind": "decision", "label": "Mid-market expansion strategy" },
+      { "id": "opt_acquire", "kind": "option", "label": "Acquire competitor", "data": { "is_baseline": false, "interventions": { "fac_acquisition": 1 } } },
+      { "id": "opt_build", "kind": "option", "label": "Build new product tier", "data": { "is_baseline": false, "interventions": { "fac_product_tier": 1 } } },
+      { "id": "opt_status_quo", "kind": "option", "label": "Continue as-is", "data": { "is_baseline": true, "interventions": {} } },
+      { "id": "fac_acquisition", "kind": "factor", "label": "Acquisition completed", "category": "controllable", "data": { "value": 0, "extractionType": "explicit", "factor_type": "other", "uncertainty_drivers": [] } },
+      { "id": "fac_product_tier", "kind": "factor", "label": "Product tier launched", "category": "controllable", "data": { "value": 0, "extractionType": "explicit", "factor_type": "other", "uncertainty_drivers": [] } },
+      { "id": "out_acquisition", "kind": "outcome", "label": "Mid-market customer acquisition" },
+      { "id": "risk_runway", "kind": "risk", "label": "Cash runway risk" },
+      { "id": "goal_midmarket", "kind": "goal", "label": "Mid-market revenue target", "goal_threshold": 0.8 }
+    ],
+    "edges": [
+      { "from": "dec_strategy", "to": "opt_acquire", "strength_mean": 1, "strength_std": 0.01, "exists_probability": 1, "effect_direction": "positive", "edge_id": "e_dec_acquire" },
+      { "from": "dec_strategy", "to": "opt_build", "strength_mean": 1, "strength_std": 0.01, "exists_probability": 1, "effect_direction": "positive", "edge_id": "e_dec_build" },
+      { "from": "dec_strategy", "to": "opt_status_quo", "strength_mean": 1, "strength_std": 0.01, "exists_probability": 1, "effect_direction": "positive", "edge_id": "e_dec_sq" },
+      { "from": "opt_acquire", "to": "fac_acquisition", "strength_mean": 1, "strength_std": 0.01, "exists_probability": 1, "effect_direction": "positive", "edge_id": "e_opt_fac_a" },
+      { "from": "opt_build", "to": "fac_product_tier", "strength_mean": 1, "strength_std": 0.01, "exists_probability": 1, "effect_direction": "positive", "edge_id": "e_opt_fac_b" },
+      { "from": "fac_acquisition", "to": "out_acquisition", "strength_mean": 0.7, "strength_std": 0.15, "exists_probability": 0.85, "effect_direction": "positive", "edge_id": "e_fac_a_out" },
+      { "from": "fac_product_tier", "to": "out_acquisition", "strength_mean": 0.5, "strength_std": 0.2, "exists_probability": 0.7, "effect_direction": "positive", "edge_id": "e_fac_b_out" },
+      { "from": "fac_acquisition", "to": "risk_runway", "strength_mean": 0.4, "strength_std": 0.15, "exists_probability": 0.6, "effect_direction": "positive", "edge_id": "e_fac_a_risk" },
+      { "from": "out_acquisition", "to": "goal_midmarket", "strength_mean": 0.8, "strength_std": 0.1, "exists_probability": 0.9, "effect_direction": "positive", "edge_id": "e_out_goal" },
+      { "from": "risk_runway", "to": "goal_midmarket", "strength_mean": -0.5, "strength_std": 0.15, "exists_probability": 0.7, "effect_direction": "negative", "edge_id": "e_risk_goal" }
+    ]
+  },
+  "topology_plan": [
+    "opt_acquire sets {fac_acquisition=1}",
+    "opt_build sets {fac_product_tier=1}",
+    "opt_status_quo sets {fac_acquisition=0, fac_product_tier=0}",
+    "fac_acquisition -> out_acquisition, risk_runway",
+    "fac_product_tier -> out_acquisition",
+    "out_acquisition / risk_runway -> goal_midmarket"
+  ],
+  "causal_claims": [
+    { "type": "direct_effect", "from": "fac_acquisition", "to": "out_acquisition", "stated_strength": "strong" },
+    { "type": "direct_effect", "from": "fac_acquisition", "to": "risk_runway", "stated_strength": "moderate" },
+    { "type": "direct_effect", "from": "fac_product_tier", "to": "out_acquisition", "stated_strength": "moderate" },
+    { "type": "no_direct_effect", "from": "fac_product_tier", "to": "risk_runway" },
+    { "type": "mediation_only", "from": "fac_acquisition", "via": "out_acquisition", "to": "goal_midmarket" }
+  ],
+  "coaching": {
+    "summary": "Acquisition trades faster Mid-Market Customer Acquisition for higher Cash Runway Risk; the build path is slower but financially safer, while Continue As-Is leaves the goal unmet. Consider whether a phased pilot reduces acquisition execution risk while preserving upside.",
+    "strengthen_items": [
+      {
+        "id": "strengthen_001",
+        "label": "Stress synergy estimate",
+        "detail": "The synergy assumption sits as a point value. Recast it as a 10-30M range to surface downside scenarios and let the simulation expose fragility.",
+        "action_type": "add_constraint",
+        "bias_category": "anchoring"
+      },
+      {
+        "id": "strengthen_002",
+        "label": "Add staged acquisition",
+        "detail": "Brief frames the choice as binary acquire-vs-skip. A phased pilot (earn-out, minority stake) is a real third path that reduces execution risk.",
+        "action_type": "add_option",
+        "bias_category": "narrow_framing"
+      }
+    ],
+    "widening_log": {
+      "elements_added": ["risk_runway"],
+      "elements_considered_but_excluded": [
+        "Regulatory pause unlikely in this 12-month horizon",
+        "FX exposure not material at projected revenue scale"
+      ],
+      "brief_completeness": "partial"
+    },
+    "bias_signals": [
+      {
+        "type": "narrow_framing",
+        "detail": "Brief frames the decision as binary acquire-or-skip; partner / phased / minority-stake routes exist and would shift the risk profile."
+      },
+      {
+        "type": "overconfidence",
+        "detail": "Synergy estimate is a single point with no stated uncertainty band; downside scenarios are absent from the brief."
+      }
+    ]
+  }
+}

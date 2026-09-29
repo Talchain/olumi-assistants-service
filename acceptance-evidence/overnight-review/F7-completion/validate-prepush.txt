@@ -1,0 +1,22 @@
+
+pre-push validation
+-------------------
+  toolchain-preflight                  OK
+  branch-guard                         OK (no refs)
+  typecheck                            OK
+  lint-changed                         OK (2 file(s) linted vs origin/staging)
+  smoke-tests                          OK
+  stale-js                             OK
+  dependency-audit                     OK
+  tarball-sha                          OK
+  transport-invariants                 OK
+  data-responsibility                  OK
+  phase-0-complete                     OK
+  docs-consistency                     OK
+  state-write-invariant                OK
+  handler-ownership                    OK
+  phase-1.5-invariants                 OK
+  response-finaliser-contract          OK
+  forbidden-boundary-patterns          OK
+
+pre-push: all checks passed.

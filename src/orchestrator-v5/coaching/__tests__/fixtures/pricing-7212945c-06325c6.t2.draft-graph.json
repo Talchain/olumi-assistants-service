@@ -1,0 +1,324 @@
+{
+  "_provenance": {
+    "source_file": "~/.claude/olumi-coaching-20260924/witness-kit/browser/bw-89716c13-8a2f291-pricing-fix2/turns.jsonl",
+    "source_sha256": "8b6a54f8b538aae8b21acce41c3c6d638bb71516854804cf8fc53fbbc60d2761",
+    "source_line_index": 1,
+    "served_build": "CEE 06325c6 · UI 89716c13",
+    "graph_hash": "c247337beab725ed",
+    "note": "The WHOLE draft graph of the explicit Run turn (t2 in pricing-7212945c-06325c6.run-turns.trimmed.json), byte-identical."
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "decision_monthly_recurring_revenue_increase",
+        "kind": "decision",
+        "label": "Decision: Monthly recurring…",
+        "provenance": "ai_inferred",
+        "description": "Decision: Monthly recurring revenue increase"
+      },
+      {
+        "id": "monthly_recurring_revenue_increase",
+        "kind": "goal",
+        "label": "Monthly recurring revenue…",
+        "provenance": "from_brief",
+        "description": "Monthly recurring revenue increase",
+        "goal_threshold": 0.8,
+        "goal_threshold_cap": 25000,
+        "goal_threshold_raw": 20000,
+        "goal_threshold_unit": "£/month",
+        "goal_threshold_frame": "level",
+        "goal_threshold_cap_provenance": "target_derived_headroom"
+      },
+      {
+        "id": "keep_pro_at_49",
+        "kind": "option",
+        "label": "Keep Pro at £49",
+        "provenance": "from_brief",
+        "is_baseline": true
+      },
+      {
+        "id": "raise_pro_to_59",
+        "kind": "option",
+        "label": "Raise Pro to £59",
+        "provenance": "from_brief",
+        "interventions": {
+          "pro_plan_price": {
+            "value": 0.295,
+            "source": "brief_extraction"
+          }
+        }
+      },
+      {
+        "id": "raise_pro_to_54",
+        "kind": "option",
+        "label": "Raise Pro to £54",
+        "provenance": "ai_inferred",
+        "interventions": {
+          "pro_plan_price": {
+            "value": 0.27,
+            "source": "cee_hypothesis"
+          }
+        }
+      },
+      {
+        "id": "pro_plan_price",
+        "kind": "factor",
+        "label": "Pro plan price",
+        "category": "controllable",
+        "provenance": "from_brief",
+        "observed_state": {
+          "cap": 200,
+          "unit": "£/month",
+          "value": 0.245,
+          "source": "brief_extraction",
+          "raw_value": 49,
+          "declared_scale": "unit_interval"
+        }
+      },
+      {
+        "id": "active_pro_subscribers",
+        "kind": "factor",
+        "label": "Active Pro subscribers",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 20000,
+        "observed_state": {
+          "unit": "subscribers",
+          "value": 0.125,
+          "source": "cee_inference",
+          "raw_value": 2500,
+          "extractionType": "inferred"
+        }
+      },
+      {
+        "id": "monthly_churn",
+        "kind": "factor",
+        "label": "Monthly churn",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100,
+        "observed_state": {
+          "unit": "%",
+          "value": 0.03,
+          "source": "cee_inference",
+          "raw_value": 3,
+          "extractionType": "inferred"
+        }
+      },
+      {
+        "id": "price_sensitivity",
+        "kind": "factor",
+        "label": "Price sensitivity",
+        "category": "external",
+        "provenance": "ai_inferred",
+        "scale_frame": 100,
+        "observed_state": {
+          "unit": "score out of 100",
+          "value": 0.5,
+          "source": "cee_inference",
+          "raw_value": 50,
+          "extractionType": "inferred"
+        }
+      },
+      {
+        "id": "churn_threshold_breach",
+        "kind": "risk",
+        "label": "Churn threshold breach",
+        "provenance": "ai_inferred"
+      }
+    ],
+    "edges": [
+      {
+        "to": "keep_pro_at_49",
+        "from": "decision_monthly_recurring_revenue_increase",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "raise_pro_to_59",
+        "from": "decision_monthly_recurring_revenue_increase",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "raise_pro_to_54",
+        "from": "decision_monthly_recurring_revenue_increase",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "pro_plan_price",
+        "from": "raise_pro_to_59",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "pro_plan_price",
+        "from": "raise_pro_to_54",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "pro_plan_price",
+        "from": "keep_pro_at_49",
+        "origin": "repair",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "monthly_recurring_revenue_increase",
+        "from": "pro_plan_price",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "monthly_churn",
+        "from": "pro_plan_price",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "monthly_churn",
+        "from": "price_sensitivity",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "active_pro_subscribers",
+        "from": "monthly_churn",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "monthly_recurring_revenue_increase",
+        "from": "active_pro_subscribers",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "churn_threshold_breach",
+        "from": "monthly_churn",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "monthly_recurring_revenue_increase",
+        "from": "churn_threshold_breach",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      }
+    ],
+    "node_count": 10,
+    "edge_count": 13,
+    "goal_constraints": [
+      {
+        "unit": "%",
+        "label": "Monthly churn",
+        "value": 4,
+        "node_id": "monthly_churn",
+        "operator": "<=",
+        "provenance": "explicit",
+        "constraint_id": "agent-lane:monthly_churn:<="
+      }
+    ]
+  }
+}

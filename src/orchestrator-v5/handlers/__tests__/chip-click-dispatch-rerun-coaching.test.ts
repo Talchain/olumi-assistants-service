@@ -1,0 +1,469 @@
+/**
+ * ROADMAP 2.73 — chip-click run_analysis coaching + decision_review
+ * observability.
+ *
+ * Fix A: the chip dispatch previously composed `coaching: null` hardcoded,
+ * so a chip-driven run (first OR rerun) shipped zero STEP-5 coaching prose
+ * by construction. It now invokes the SAME `applyCoachingSignal` helper
+ * the turn-executor uses:
+ *   - first chip run  → FIRST_ANALYSIS_COMPLETE text joins assistant_text
+ *   - chip rerun      → RERUN_ANALYSIS_COMPLETE text joins assistant_text,
+ *                       and the committed run_analysis fact carries the
+ *                       signal marker in its enrichment.
+ *
+ * Fix C: when the timings/trace gate is on and the decision_review LLM
+ * call RETURNS, the dispatch result carries `turnTimings` with the
+ * decision_review attribution (#476 parity); a call that never returned
+ * produces NO entry (no phantom attribution).
+ *
+ * Harness mirrors chip-click-dispatch-analysis-ready.test.ts (registry +
+ * commit + enricher mocked at their module seams; the coaching helper and
+ * composer run REAL).
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
+import type { RunAnalysisScenarioSnapshot } from '../../tools/handlers/run-analysis.js';
+
+import { makeMessagePayload } from '../../__tests__/fixtures.js';
+
+const {
+  loadScenarioSnapshotForRunAnalysisMock,
+  commitDirectAnswerMock,
+  enrichRunAnalysisMock,
+  handlerFnMock,
+  createRegistryMock,
+} = vi.hoisted(() => ({
+  loadScenarioSnapshotForRunAnalysisMock: vi.fn(),
+  commitDirectAnswerMock: vi.fn(),
+  enrichRunAnalysisMock: vi.fn(),
+  handlerFnMock: vi.fn(),
+  createRegistryMock: vi.fn(),
+}));
+
+// Mutable holder so tests can vary the stubbed context's prior_facts
+// (the rerun discriminator) without re-mocking the module.
+const buildTurnContextStub: {
+  priorFacts: unknown[];
+  scenarioBriefText: string | null;
+} = { priorFacts: [], scenarioBriefText: null };
+
+vi.mock('../../build-turn-context.js', async () => {
+  const actual = await vi.importActual<typeof import('../../build-turn-context.js')>(
+    '../../build-turn-context.js',
+  );
+  return {
+    ...actual,
+    loadScenarioSnapshotForRunAnalysis: loadScenarioSnapshotForRunAnalysisMock,
+    buildTurnContext: vi.fn(async () => ({
+      stage: 'analyse',
+      entity_registry: { option_ids: [], goal_id: null },
+      capabilities: {
+        can_run_analysis: false,
+        can_edit_graph: false,
+        can_run_decision_review: false,
+        can_generate_coaching: false,
+        can_invoke_tools: false,
+        can_commit_session_state: false,
+      },
+      messages: [{ role: 'user', content: 'Run the analysis' }],
+      session_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      request_id: 'req-test',
+      budgets: {
+        turn_ms: 30000,
+        handler_ms: 20000,
+        plot_ms: 15000,
+        anthropic_ms: 15000,
+        openai_ms: 15000,
+      },
+      prior_turns: [],
+      prior_facts: buildTurnContextStub.priorFacts,
+      scenarioBriefText: buildTurnContextStub.scenarioBriefText,
+      persistedGraph: null,
+    })),
+  };
+});
+
+vi.mock('../../commit.js', () => ({
+  commitDirectAnswer: commitDirectAnswerMock,
+  computeRequestHash: vi.fn().mockReturnValue('sha256:testhash'),
+}));
+
+vi.mock('../../coaching/decision-review-enricher.js', () => ({
+  enrichRunAnalysisWithDecisionReview: enrichRunAnalysisMock,
+}));
+
+vi.mock('../../tools/registry.js', async () => {
+  const actual = await vi.importActual<typeof import('../../tools/registry.js')>(
+    '../../tools/registry.js',
+  );
+  return {
+    ...actual,
+    createRegistry: createRegistryMock,
+    getDefaultRegistry: () => new Map([['run_analysis', handlerFnMock]]),
+    resolveHandler: (_registry: unknown, id: string) =>
+      id === 'run_analysis' ? handlerFnMock : undefined,
+  };
+});
+
+import { dispatchChipClickRunAnalysis } from '../chip-click-dispatch.js';
+
+const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const TURN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+function payload() {
+  return makeMessagePayload({
+    scenario_id: SCENARIO_ID,
+    turn_id: TURN_ID,
+    stage: 'analyse',
+    message: 'Run the analysis.',
+    turn_class: 'decide',
+    source: 'chip_click',
+    chip: { action_type: 'run_analysis' },
+  });
+}
+
+// Minimal schema-valid graph so the snapshot pre-load path resolves.
+const READY_GRAPH: GraphV3T = GraphV3.parse({
+  nodes: [
+    { id: 'dec_launch', kind: 'decision', label: 'Launch?' },
+    { id: 'goal_revenue', kind: 'goal', label: 'Revenue', goal_threshold: 0.8 },
+    // A material, user-stated input makes the existing leader-positive cases
+    // genuinely comparative, rather than accidentally relying on a missing cap.
+    { id: 'fac_marketing', kind: 'factor', label: 'Marketing spend', observed_state: { value: 0.5, source: 'user_override' } },
+    { id: 'opt_launch', kind: 'option', label: 'Launch now', interventions: { fac_marketing: 0.7 } },
+    { id: 'opt_status_quo', kind: 'option', label: 'Status quo', interventions: { fac_marketing: 0.3 } },
+  ],
+  edges: [
+    { from: 'dec_launch', to: 'opt_launch', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'dec_launch', to: 'opt_status_quo', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'opt_launch', to: 'fac_marketing', strength: { mean: 0.6, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
+    { from: 'opt_status_quo', to: 'fac_marketing', strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
+    { from: 'fac_marketing', to: 'goal_revenue', strength: { mean: 0.6, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+  ],
+});
+
+function snapshot(): RunAnalysisScenarioSnapshot {
+  return {
+    graph: READY_GRAPH,
+    options: [
+      { id: 'opt_launch', option_id: 'opt_launch', label: 'Launch now', interventions: { fac_marketing: 0.7 } },
+      { id: 'opt_status_quo', option_id: 'opt_status_quo', label: 'Status quo', interventions: { fac_marketing: 0.3 } },
+    ],
+    goal_node_id: 'goal_revenue',
+    rawPersistedGraph: READY_GRAPH,
+  };
+}
+
+function runEnvelope(): Record<string, unknown> {
+  return {
+    analysis_status: 'completed',
+    results: [
+      { option_id: 'opt_launch', option_label: 'Launch now', win_probability: 0.62, factor_sensitivity: [] },
+      { option_id: 'opt_status_quo', option_label: 'Status quo', win_probability: 0.38, factor_sensitivity: [] },
+    ],
+  };
+}
+
+function handlerOutcome() {
+  return {
+    assistant_text: 'Launch now scored highest against your goal in 62% of runs of this model.',
+    handler_facts: [
+      {
+        fact_type: 'run_analysis' as const,
+        fact_version: 1,
+        noop: false,
+        result: {
+          scenario_id: SCENARIO_ID,
+          leading_option_id: 'opt_launch',
+          summary: 'Analysis ran with two options compared.',
+          win_probabilities: { 'Launch now': 0.62, 'Status quo': 0.38 },
+          enrichment: runEnvelope(),
+          // ROADMAP 2.804 — now LOAD-BEARING. The coaching slot's leader-claim
+          // permission comes from the fact chain, which fails CLOSED on a fact
+          // with no verdict stamp (the pre-#710 population). An unstamped
+          // fixture no longer models a current production turn: `run_analysis`
+          // stamps every fact it writes. Exact shape of `projectClaimSafety`.
+          constraint_verdict: {
+            may_name_leading_option: true,
+            constraint_verdict_state: 'not_applicable',
+          },
+        },
+      },
+    ],
+    llm_calls_used: 0,
+  };
+}
+
+function priorRunFact(): HandlerFact {
+  return {
+    fact_type: 'run_analysis',
+    fact_version: 1,
+    noop: false,
+    result: {
+      scenario_id: SCENARIO_ID,
+      leading_option_id: 'opt_launch',
+      summary: 'prior run',
+      enrichment: runEnvelope(),
+      computed_at: '2026-07-15T00:00:00.000Z',
+      graph_hash_at_run: 'hash-prior',
+      // ROADMAP 2.804 — stamped for the same reason as the current-turn fact
+      // above. This one matters twice over: it is the fact
+      // `selectRunAnalysisFact` picks as the DISPLAYED analysis, and an
+      // unstamped displayed analysis withholds the leader for the whole turn.
+      constraint_verdict: {
+        may_name_leading_option: true,
+        constraint_verdict_state: 'not_applicable',
+      },
+    },
+  } as unknown as HandlerFact;
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  buildTurnContextStub.priorFacts = [];
+  buildTurnContextStub.scenarioBriefText = null;
+  loadScenarioSnapshotForRunAnalysisMock.mockResolvedValue(snapshot());
+  createRegistryMock.mockImplementation(() => new Map([['run_analysis', handlerFnMock]]));
+  handlerFnMock.mockResolvedValue(handlerOutcome());
+  enrichRunAnalysisMock.mockImplementation(
+    async ({ handlerFacts }: { handlerFacts: unknown[] }) => handlerFacts,
+  );
+  // The real chokepoint RETURNS the response it committed: the SAME object on
+  // the untouched fast path, an AMENDED copy when it attached the F-HELD lapse
+  // notice or suppressed competing run_analysis chips. `response: {}` misstated
+  // that contract, and the dispatcher now CONSUMES the returned value, so the
+  // stub has to echo (CLAUDE.md trap 12 — a stub is a hand-maintained mirror).
+  commitDirectAnswerMock.mockImplementation(async (r: unknown) => ({
+    response: r,
+    performed: true,
+    persisted_row_id: 'row-1',
+    graphPersisted: false,
+  }));
+});
+
+describe('chip-click run_analysis — STEP-5 coaching (ROADMAP 2.73 Fix A)', () => {
+  it('FIRST chip run: FIRST_ANALYSIS_COMPLETE text joins assistant_text (was coaching: null hardcoded)', async () => {
+    buildTurnContextStub.priorFacts = [];
+
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-cc-first',
+    });
+
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+    expect(out.analysisReady?.analysis_admission?.permitted_analysis_mode).toBe('comparative_leader');
+    expect(out.response.assistant_text).toContain('first analysis');
+    expect(out.response.assistant_text).toContain('the leading option');
+  });
+
+  it('chip RERUN: RERUN_ANALYSIS_COMPLETE text joins assistant_text and names the unchanged leader', async () => {
+    buildTurnContextStub.priorFacts = [priorRunFact()];
+
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-cc-rerun',
+    });
+
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+    expect(out.analysisReady?.analysis_admission?.permitted_analysis_mode).toBe('comparative_leader');
+    // Same envelope both runs → unchanged leader copy from compareRuns.
+    expect(out.response.assistant_text).toContain('unchanged');
+    expect(out.response.assistant_text).toContain('Launch now still leads');
+    // And the rerun turn must NOT claim to be the first analysis.
+    expect(out.response.assistant_text).not.toContain('first analysis');
+  });
+
+  it('chip RERUN: committed run_analysis fact carries the signal marker (cache-reader visibility)', async () => {
+    buildTurnContextStub.priorFacts = [priorRunFact()];
+
+    await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-cc-rerun-fact',
+    });
+
+    expect(commitDirectAnswerMock).toHaveBeenCalledTimes(1);
+    const committed = commitDirectAnswerMock.mock.calls[0]![1] as {
+      handler_facts: Array<{ result: { enrichment?: Record<string, unknown> } }>;
+    };
+    expect(committed.handler_facts[0]!.result.enrichment?.coaching_signal_id).toBe(
+      'RERUN_ANALYSIS_COMPLETE',
+    );
+    expect(committed.handler_facts[0]!.result.enrichment?.coaching_signal_turn_id).toBe(
+      'req-cc-rerun-fact',
+    );
+  });
+});
+
+describe('chip-click admission caps designation, not the completed comparison', () => {
+  function machineAuthoredSnapshot(): RunAnalysisScenarioSnapshot {
+    const original = snapshot();
+    const graph = GraphV3.parse({
+      ...READY_GRAPH,
+      nodes: READY_GRAPH.nodes.map((node) => node.id === 'fac_marketing'
+        ? { ...node, observed_state: { value: 0.5, source: 'cee_inference' } }
+        : node),
+    });
+    return { ...original, graph, rawPersistedGraph: graph };
+  }
+
+  it.each([false, true])('provisional run (prior=%s) keeps figures, first-run guidance and actual rerun comparison', async (hasPrior) => {
+    loadScenarioSnapshotForRunAnalysisMock.mockResolvedValue(machineAuthoredSnapshot());
+    buildTurnContextStub.priorFacts = hasPrior ? [priorRunFact()] : [];
+    const out = await dispatchChipClickRunAnalysis({ payload: payload(), requestId: 'req-provisional' });
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+
+    // Real canonical snapshot -> admission -> shared signal -> composer/commit.
+    // The registry/store/optional review are stubbed; admission and composition
+    // are not. This assertion must fail before the consumer assertions if the
+    // graph ever stops representing the witnessed machine-authored population.
+    expect(out.analysisReady?.analysis_admission).toMatchObject({
+      structurally_analysable: true,
+      permitted_analysis_mode: 'quantified_provisional',
+    });
+    expect(out.mayNameLeadingOption).toBe(true); // distinct result entitlement
+    expect(out.response.assistant_text).toContain('62% of runs of this model');
+    if (hasPrior) {
+      // The admission must not erase a real rerun delta or its explanation.
+      // This same-envelope case is the positive twin to the first-run nudge.
+      expect(out.response.assistant_text).toContain('unchanged');
+      expect(out.response.assistant_text).toContain('Launch now still leads');
+      expect(out.response.assistant_text).not.toContain('first analysis');
+    } else {
+      expect(out.response.assistant_text).toContain('Explore the comparison');
+      expect(out.response.assistant_text).not.toContain('the leading option');
+    }
+    expect(out.response.assistant_text).not.toContain('No single option can be put forward');
+    const block = out.response.blocks?.find((item) => item.type === 'analysis_result');
+    expect(block).toMatchObject({ type: 'analysis_result', leading_option_id: 'opt_launch' });
+    expect(block).toHaveProperty('summary', 'Analysis ran with two options compared.');
+    expect(block).toHaveProperty('win_probabilities', { 'Launch now': 0.62, 'Status quo': 0.38 });
+    const committed = commitDirectAnswerMock.mock.calls[0];
+    expect(committed).toBeDefined();
+    expect(committed![0]).toMatchObject({ assistant_text: out.response.assistant_text });
+    expect(committed![1]).toMatchObject({ handler_facts: [expect.objectContaining({
+      result: expect.objectContaining({ scenario_id: SCENARIO_ID, leading_option_id: 'opt_launch' }),
+    })] });
+  });
+
+  it('unavailable admission preserves the existing permitting first-run behaviour', async () => {
+    // The existing injected-registry path has no canonical snapshot. Missing
+    // evidence must not be fabricated as a machine-authored/provisional mode.
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(), requestId: 'req-admission-unavailable',
+      handlerRegistry: new Map([['run_analysis', handlerFnMock]]),
+    });
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+    expect(out.analysisReady).toBeUndefined();
+    expect(out.response.assistant_text).toContain('the leading option');
+    expect(out.response.assistant_text).toContain('62% of runs of this model');
+  });
+
+  it('provisional admission cannot reopen a genuinely withheld fact', async () => {
+    loadScenarioSnapshotForRunAnalysisMock.mockResolvedValue(machineAuthoredSnapshot());
+    const held = handlerOutcome();
+    held.handler_facts[0]!.result.constraint_verdict.may_name_leading_option = false;
+    handlerFnMock.mockResolvedValue(held);
+    const out = await dispatchChipClickRunAnalysis({ payload: payload(), requestId: 'req-held' });
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+    expect(out.analysisReady?.analysis_admission?.permitted_analysis_mode).toBe('quantified_provisional');
+    expect(out.mayNameLeadingOption).toBe(false);
+    expect(out.response.assistant_text).not.toContain('first analysis');
+    expect(out.response.assistant_text).not.toContain('Explore the comparison');
+  });
+});
+
+describe('chip-click run_analysis — decision_review observability (ROADMAP 2.73 Fix C)', () => {
+  let priorAwaitFlag: string | undefined;
+  let priorTraceFlag: string | undefined;
+
+  beforeEach(async () => {
+    priorAwaitFlag = process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW;
+    priorTraceFlag = process.env.CEE_DIAGNOSTIC_TRACE_ENABLED;
+    process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW = 'true';
+    process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'true';
+    const { _resetConfigCache } = await import('../../../config/index.js');
+    _resetConfigCache();
+  });
+
+  afterEach(async () => {
+    if (priorAwaitFlag === undefined) delete process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW;
+    else process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW = priorAwaitFlag;
+    if (priorTraceFlag === undefined) delete process.env.CEE_DIAGNOSTIC_TRACE_ENABLED;
+    else process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = priorTraceFlag;
+    const { _resetConfigCache } = await import('../../../config/index.js');
+    _resetConfigCache();
+  });
+
+  it('threads decision_review attribution into turnTimings when the enricher call RETURNS (#476 parity)', async () => {
+    enrichRunAnalysisMock.mockImplementation(
+      async ({
+        handlerFacts,
+        callTelemetrySink,
+      }: {
+        handlerFacts: unknown[];
+        callTelemetrySink?: {
+          model?: string;
+          provider?: string;
+          input_tokens?: number;
+          output_tokens?: number;
+          prompt_hash?: string;
+          prompt_version?: string;
+          prompt_source?: string;
+        };
+      }) => {
+        if (callTelemetrySink) {
+          callTelemetrySink.model = 'gpt-4.1';
+          callTelemetrySink.provider = 'openai';
+          callTelemetrySink.input_tokens = 1200;
+          callTelemetrySink.output_tokens = 800;
+          callTelemetrySink.prompt_hash = 'sha256:chipdrhash';
+          callTelemetrySink.prompt_version = 'decision_review_default@v11.1';
+          callTelemetrySink.prompt_source = 'store';
+        }
+        return handlerFacts;
+      },
+    );
+
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-cc-dr-telemetry',
+    });
+
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+    expect(out.turnTimings).toBeDefined();
+    expect(out.turnTimings!.decision_review_model).toBe('gpt-4.1');
+    expect(out.turnTimings!.decision_review_provider).toBe('openai');
+    expect(out.turnTimings!.decision_review_input_tokens).toBe(1200);
+    expect(out.turnTimings!.decision_review_output_tokens).toBe(800);
+    expect(typeof out.turnTimings!.decision_review_ms).toBe('number');
+    // SECOND PRODUCTION WRITER of the decision_review_* fields. The
+    // turn-executor block is the other one; a fix applied to only one of them
+    // leaves chip-driven analysis turns silently un-attributed, which is
+    // exactly the enumerate-vs-observe trap this assertion exists to close.
+    expect(out.turnTimings!.decision_review_prompt_hash).toBe('sha256:chipdrhash');
+    expect(out.turnTimings!.decision_review_prompt_version).toBe(
+      'decision_review_default@v11.1',
+    );
+    expect(out.turnTimings!.decision_review_prompt_source).toBe('store');
+    // The sink must actually have been OFFERED to the enricher.
+    const call = enrichRunAnalysisMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(call.callTelemetrySink).toBeDefined();
+  });
+
+  it('emits NO turnTimings when the enricher call never returned a result (no phantom attribution)', async () => {
+    // Sink left unpopulated — models a skip / timeout inside the enricher.
+    enrichRunAnalysisMock.mockImplementation(
+      async ({ handlerFacts }: { handlerFacts: unknown[] }) => handlerFacts,
+    );
+
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-cc-dr-skip',
+    });
+
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+    expect(out.turnTimings).toBeUndefined();
+  });
+});

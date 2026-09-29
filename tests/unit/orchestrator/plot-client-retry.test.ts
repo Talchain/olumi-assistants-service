@@ -1,0 +1,639 @@
+/**
+ * Tests for PLoT client retry logic (H.4) and outbound structural validation (H.5).
+ */
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { PLoTError, PLoTTimeoutError } from "../../../src/orchestrator/plot-client.js";
+
+// ============================================================================
+// Mocks
+// ============================================================================
+
+vi.mock("../../../src/config/index.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../../src/config/index.js")>();
+  return {
+    ...original,
+    config: new Proxy(original.config, {
+      get(target, prop) {
+        if (prop === "plot") {
+          return {
+            baseUrl: "http://plot-test:3002",
+            authToken: "test-token-secret",
+          };
+        }
+        return Reflect.get(target, prop);
+      },
+    }),
+  };
+});
+
+const { createPLoTClient, _validateRunPayload, _validatePatchPayload, _isRetryableError, _cancellableSleep } =
+  await import("../../../src/orchestrator/plot-client.js");
+
+/** Valid option object for test payloads — has id, option_id, and numeric interventions. */
+const VALID_OPT = { id: "a", option_id: "a", interventions: { fac_1: 0.5 } };
+/** Valid /v2/run payload for tests. */
+const VALID_RUN = { graph: { nodes: [], edges: [] }, options: [VALID_OPT], goal_node_id: "g1" };
+/** Valid /v2/run response for tests. */
+const VALID_RUN_RESPONSE = { meta: { seed_used: 42, n_samples: 100, response_hash: "h" }, results: [{ option_id: "a" }] };
+
+// ============================================================================
+// H.5: Outbound Structural Validation
+// ============================================================================
+
+describe("Outbound Structural Validation (H.5)", () => {
+  describe("validateRunPayload", () => {
+    it("throws INTERNAL_PAYLOAD_ERROR when graph is missing", () => {
+      expect(() =>
+        _validateRunPayload({ options: [VALID_OPT], goal_node_id: "g1" }),
+      ).toThrow(/graph/);
+
+      try {
+        _validateRunPayload({ options: [VALID_OPT], goal_node_id: "g1" });
+      } catch (e: any) {
+        expect(e.orchestratorError.code).toBe("INTERNAL_PAYLOAD_ERROR");
+      }
+    });
+
+    it("throws INTERNAL_PAYLOAD_ERROR when graph is null", () => {
+      expect(() =>
+        _validateRunPayload({ graph: null, options: [VALID_OPT], goal_node_id: "g1" }),
+      ).toThrow(/graph/);
+    });
+
+    it("throws INTERNAL_PAYLOAD_ERROR when options is missing", () => {
+      expect(() =>
+        _validateRunPayload({ graph: {}, goal_node_id: "g1" }),
+      ).toThrow(/options/);
+    });
+
+    it("throws INTERNAL_PAYLOAD_ERROR when options is empty array", () => {
+      expect(() =>
+        _validateRunPayload({ graph: {}, options: [], goal_node_id: "g1" }),
+      ).toThrow(/options/);
+    });
+
+    it("throws INTERNAL_PAYLOAD_ERROR when option is missing id", () => {
+      expect(() =>
+        _validateRunPayload({ graph: {}, options: [{ option_id: "a", interventions: { f: 1 } }], goal_node_id: "g1" }),
+      ).toThrow(/id/);
+    });
+
+    it("throws INTERNAL_PAYLOAD_ERROR when intervention value is not a number", () => {
+      expect(() =>
+        _validateRunPayload({ graph: {}, options: [{ id: "a", interventions: { f: { value: 1 } } }], goal_node_id: "g1" }),
+      ).toThrow(/finite number/);
+    });
+
+    it("throws INTERNAL_PAYLOAD_ERROR when intervention value is NaN", () => {
+      expect(() =>
+        _validateRunPayload({ graph: {}, options: [{ id: "a", interventions: { f: NaN } }], goal_node_id: "g1" }),
+      ).toThrow(/finite number/);
+    });
+
+    it("throws INTERNAL_PAYLOAD_ERROR when interventions is null", () => {
+      expect(() =>
+        _validateRunPayload({ graph: {}, options: [{ id: "a", interventions: null }], goal_node_id: "g1" }),
+      ).toThrow(/interventions/);
+    });
+
+    it("throws INTERNAL_PAYLOAD_ERROR when goal_node_id is missing", () => {
+      expect(() =>
+        _validateRunPayload({ graph: {}, options: [VALID_OPT] }),
+      ).toThrow(/goal_node_id/);
+    });
+
+    it("throws INTERNAL_PAYLOAD_ERROR when goal_node_id is empty string", () => {
+      expect(() =>
+        _validateRunPayload({ graph: {}, options: [VALID_OPT], goal_node_id: "" }),
+      ).toThrow(/goal_node_id/);
+    });
+
+    it("passes valid payload through without error", () => {
+      expect(() =>
+        _validateRunPayload({
+          graph: { nodes: [], edges: [] },
+          options: [{ id: "opt_1", option_id: "opt_1", label: "A", interventions: { fac_1: 0.5 } }],
+          goal_node_id: "goal_1",
+        }),
+      ).not.toThrow();
+    });
+
+    it("passes through extra unexpected top-level fields (no false positives)", () => {
+      expect(() =>
+        _validateRunPayload({
+          ...VALID_RUN,
+          extra_field: "unexpected",
+          n_samples: 1000,
+        }),
+      ).not.toThrow();
+    });
+  });
+
+  describe("validatePatchPayload", () => {
+    it("throws INTERNAL_PAYLOAD_ERROR when graph is missing", () => {
+      expect(() =>
+        _validatePatchPayload({ operations: [{ op: "add_node" }] }),
+      ).toThrow(/graph/);
+    });
+
+    it("throws INTERNAL_PAYLOAD_ERROR when operations is empty array", () => {
+      expect(() =>
+        _validatePatchPayload({ graph: {}, operations: [] }),
+      ).toThrow(/operations/);
+    });
+
+    it("throws INTERNAL_PAYLOAD_ERROR when operations is missing", () => {
+      expect(() =>
+        _validatePatchPayload({ graph: {} }),
+      ).toThrow(/operations/);
+    });
+
+    it("passes valid payload through without error", () => {
+      expect(() =>
+        _validatePatchPayload({
+          graph: { nodes: [], edges: [] },
+          operations: [{ op: "add_node", path: "x" }],
+        }),
+      ).not.toThrow();
+    });
+
+    it("passes through extra unexpected fields", () => {
+      expect(() =>
+        _validatePatchPayload({
+          graph: { nodes: [], edges: [] },
+          operations: [{ op: "add_node", path: "x" }],
+          scenario_id: "s1",
+          base_graph_hash: "abc123",
+        }),
+      ).not.toThrow();
+    });
+  });
+
+  describe("outbound validation prevents HTTP call", () => {
+    let fetchSpy: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      fetchSpy = vi.fn();
+      vi.stubGlobal("fetch", fetchSpy);
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("run: missing graph → INTERNAL_PAYLOAD_ERROR before HTTP call", async () => {
+      const client = createPLoTClient()!;
+
+      await expect(
+        client.run({ options: [VALID_OPT], goal_node_id: "g1" }, "req-1"),
+      ).rejects.toThrow(/graph/);
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("validatePatch: empty operations → INTERNAL_PAYLOAD_ERROR before HTTP call", async () => {
+      const client = createPLoTClient()!;
+
+      await expect(
+        client.validatePatch({ graph: {}, operations: [] }, "req-1"),
+      ).rejects.toThrow(/operations/);
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("run: valid payload → HTTP call made normally", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve(VALID_RUN_RESPONSE),
+      });
+
+      const client = createPLoTClient()!;
+      await client.run(VALID_RUN, "req-1");
+
+      expect(fetchSpy).toHaveBeenCalledOnce();
+    });
+  });
+});
+
+// ============================================================================
+// H.4: Retry Logic
+// ============================================================================
+
+describe("PLoT Client Retry Logic (H.4)", () => {
+  let fetchSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  describe("isRetryableError", () => {
+    it("returns true for PLoTError with 5xx status", () => {
+      expect(_isRetryableError(new PLoTError("fail", 503, "run", 100))).toBe(true);
+      expect(_isRetryableError(new PLoTError("fail", 500, "run", 100))).toBe(true);
+    });
+
+    it("returns false for PLoTError with 4xx status", () => {
+      expect(_isRetryableError(new PLoTError("fail", 422, "run", 100))).toBe(false);
+      expect(_isRetryableError(new PLoTError("fail", 400, "run", 100))).toBe(false);
+    });
+
+    it("returns true for PLoTTimeoutError", () => {
+      expect(_isRetryableError(new PLoTTimeoutError("timeout", "run", 30000, 30100))).toBe(true);
+    });
+  });
+
+  describe("cancellableSleep", () => {
+    it("completes when no abort signal", async () => {
+      const result = await _cancellableSleep(10);
+      expect(result).toBe(true);
+    });
+
+    it("returns false when signal is already aborted", async () => {
+      const controller = new AbortController();
+      controller.abort();
+      const result = await _cancellableSleep(10, controller.signal);
+      expect(result).toBe(false);
+    });
+
+    it("returns false when signal aborts during sleep", async () => {
+      const controller = new AbortController();
+      const promise = _cancellableSleep(5000, controller.signal);
+      controller.abort();
+      const result = await promise;
+      expect(result).toBe(false);
+    });
+  });
+
+  describe("run — retry on transient 503", () => {
+    it("retries once on 503 and succeeds on retry", async () => {
+      const successResponse = VALID_RUN_RESPONSE;
+
+      fetchSpy
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+          json: () => Promise.resolve({ message: "Service Unavailable" }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(successResponse),
+        });
+
+      const client = createPLoTClient()!;
+      const result = await client.run(
+        VALID_RUN,
+        "req-1",
+      );
+
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(result.meta.seed_used).toBe(42);
+    });
+
+    it("fails after retry exhausted on persistent 503", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: false,
+        status: 503,
+        json: () => Promise.resolve({ message: "Service Unavailable" }),
+      });
+
+      const client = createPLoTClient()!;
+
+      await expect(
+        client.run(
+          VALID_RUN,
+          "req-1",
+        ),
+      ).rejects.toThrow(PLoTError);
+
+      // 1 original + 1 retry = 2 calls
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("run — no retry on 422 (client error)", () => {
+    it("422 fails immediately without retry", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: false,
+        status: 422,
+        json: () => Promise.resolve({ analysis_status: "blocked", status_reason: "Bad input" }),
+      });
+
+      const client = createPLoTClient()!;
+
+      await expect(
+        client.run(
+          VALID_RUN,
+          "req-1",
+        ),
+      ).rejects.toThrow(PLoTError);
+
+      // Only 1 call — no retry
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("run — budget-aware retry", () => {
+    it("skips retry when remaining budget < 2s after backoff", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: false,
+        status: 503,
+        json: () => Promise.resolve({ message: "Service Unavailable" }),
+      });
+
+      const client = createPLoTClient()!;
+      const now = Date.now();
+
+      await expect(
+        client.run(
+          VALID_RUN,
+          "req-1",
+          {
+            turnStartedAt: now - 58_000, // 58s elapsed of 60s budget
+            turnBudgetMs: 60_000, // 2s remaining — after 2s backoff = 0s left < 2s min
+          },
+        ),
+      ).rejects.toThrow(PLoTError);
+
+      // Only 1 call — retry skipped due to budget
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("run — abort during retry backoff", () => {
+    it("abandons retry when turn is aborted during backoff sleep", async () => {
+      fetchSpy.mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        json: () => Promise.resolve({ message: "Service Unavailable" }),
+      });
+
+      const controller = new AbortController();
+      const client = createPLoTClient()!;
+
+      const promise = client.run(
+        VALID_RUN,
+        "req-1",
+        { turnSignal: controller.signal },
+      );
+
+      // Abort during the backoff sleep
+      setTimeout(() => controller.abort(), 100);
+
+      await expect(promise).rejects.toThrow(PLoTError);
+      // Only 1 fetch call — retry abandoned
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("run — timeout is NOT retried (policy change 2026-07-19)", () => {
+    // DELIBERATE INVERSION. This test previously asserted the opposite
+    // ("retries once on PLoT timeout"). That behaviour was correct when CEE's
+    // cap (30s) sat BELOW PLoT's own REQUEST_BUDGET_MS (70s): a timeout then
+    // meant CEE cut PLoT off early, and a second attempt could genuinely
+    // succeed. Now that the cap is 75s — ABOVE PLoT's budget — a timeout means
+    // PLoT failed to finish within its OWN budget, i.e. an internal failure. A
+    // retry near-certainly reproduces it at double the PLoT+ISL compute cost,
+    // on a request the user is already waiting on.
+    //
+    // The premise is pinned separately, so this inversion cannot outlive it:
+    // `budget-timeout-invariants.test.ts` fails if PLOT_RUN_TIMEOUT_MS ever
+    // drops back below PLoT's request budget.
+    it("does NOT retry on PLoT timeout, even with ample remaining budget", async () => {
+      fetchSpy
+        .mockImplementationOnce(() => {
+          return Promise.reject(Object.assign(new Error("The operation was aborted"), { name: "AbortError" }));
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(VALID_RUN_RESPONSE),
+        });
+
+      const client = createPLoTClient()!;
+
+      await expect(client.run(VALID_RUN, "req-1")).rejects.toThrow(PLoTTimeoutError);
+
+      // The second mock was primed with a SUCCESS: if a retry fired, this call
+      // would have resolved instead of rejecting. It rejects, so no retry.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("run — brief-bearing timeout budget (FIX 1)", () => {
+    it("uses the extended brief-bearing timeout window (does not abort at the base 30s budget)", async () => {
+      // Simulate a fetch that resolves successfully but only after the base
+      // (non-brief) 30s timeout would have already fired an AbortController
+      // abort. If the client is still using the base PLOT_RUN_TIMEOUT_MS for
+      // a brief-bearing payload, advancing fake timers past 30s aborts the
+      // in-flight fetch before it resolves and this call rejects instead of
+      // succeeding.
+      fetchSpy.mockImplementationOnce(
+        (_url: string, init: { signal: AbortSignal }) =>
+          new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+              resolve({ ok: true, json: () => Promise.resolve(VALID_RUN_RESPONSE) });
+            }, 45_000); // beyond the base 30s window, within the brief-bearing window
+            init.signal.addEventListener("abort", () => {
+              clearTimeout(timer);
+              reject(Object.assign(new Error("The operation was aborted"), { name: "AbortError" }));
+            });
+          }),
+      );
+
+      const client = createPLoTClient()!;
+      const briefRun = { ...VALID_RUN, brief: "A decision brief with real content." };
+      const resultPromise = client.run(briefRun, "req-brief-1");
+
+      await vi.advanceTimersByTimeAsync(45_000);
+      const result = await resultPromise;
+
+      expect(result.meta.seed_used).toBe(42);
+      // Exactly one attempt — the extended window covered the full call, no retry needed.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("a slow brief-bearing review callback that exceeds even the extended window does NOT trigger a retry (retry-storm structurally impossible)", async () => {
+      // Both attempts would abort — but we only care that a SECOND attempt
+      // never fires. A brief-bearing timeout is expensive (it means PLoT's
+      // synchronous LLM-backed decision-review chain ran, or nearly ran, to
+      // completion) — retrying would double LLM spend on a call that isn't
+      // cheaply idempotent. Pin: exactly one fetch call, no retry.
+      fetchSpy.mockImplementation(
+        (_url: string, init: { signal: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            init.signal.addEventListener("abort", () => {
+              reject(Object.assign(new Error("The operation was aborted"), { name: "AbortError" }));
+            });
+          }),
+      );
+
+      const client = createPLoTClient()!;
+      const briefRun = { ...VALID_RUN, brief: "A decision brief with real content." };
+      const resultPromise = client.run(briefRun, "req-brief-2");
+      resultPromise.catch(() => {}); // swallow — asserted below via rejects
+
+      await vi.runAllTimersAsync();
+
+      await expect(resultPromise).rejects.toThrow(PLoTTimeoutError);
+      // Only the ONE attempt — no retry-storm on a brief-bearing timeout.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    // REPLACES "a non-brief run still retries on timeout as before".
+    //
+    // That test was the brief-vs-non-brief DISCRIMINATOR: brief skips the
+    // timeout retry, non-brief takes it. The 2026-07-19 policy change disables
+    // the timeout retry for BOTH, which would have left the brief carve-out
+    // tests unable to distinguish a working carve-out from a removed one —
+    // they would pass either way, which is no evidence at all.
+    //
+    // The 5xx class restores the discrimination: a brief-bearing 5xx must NOT
+    // retry (asserted below), while a non-brief 5xx MUST. Keep BOTH sides, or
+    // `skipRetryEntirely` could be deleted outright with the suite still green.
+    it("DISCRIMINATOR: a non-brief run DOES still retry on a fast 5xx (the brief carve-out is what suppresses it)", async () => {
+      fetchSpy
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+          json: () => Promise.resolve({ message: "Service Unavailable" }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(VALID_RUN_RESPONSE),
+        });
+
+      const client = createPLoTClient()!;
+      const result = await client.run(VALID_RUN, "req-no-brief-1");
+
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(result.meta.seed_used).toBe(42);
+    });
+
+    // FIX B (1.41 fix round, C2) — the retry-storm guard previously only
+    // checked `firstError instanceof PLoTTimeoutError`. A 5xx or network
+    // error firing WHILE the expensive, non-idempotent decision-review LLM
+    // chain is running would still re-fire the whole chain a second time.
+    // A brief-bearing run must never retry on ANY retryable error class.
+    it("a brief-bearing 5xx does NOT retry (retry-storm structurally impossible for any error class, not just timeout)", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: false,
+        status: 503,
+        json: () => Promise.resolve({ message: "Service Unavailable" }),
+      });
+
+      const client = createPLoTClient()!;
+      const briefRun = { ...VALID_RUN, brief: "A decision brief with real content." };
+
+      await expect(client.run(briefRun, "req-brief-5xx")).rejects.toThrow(PLoTError);
+
+      // Only the ONE attempt — no retry-storm on a brief-bearing 5xx.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("a brief-bearing network error does NOT retry (retry-storm structurally impossible for any error class, not just timeout)", async () => {
+      fetchSpy.mockRejectedValue(new Error("fetch failed: ECONNRESET"));
+
+      const client = createPLoTClient()!;
+      const briefRun = { ...VALID_RUN, brief: "A decision brief with real content." };
+
+      await expect(client.run(briefRun, "req-brief-network")).rejects.toThrow();
+
+      // Only the ONE attempt — no retry-storm on a brief-bearing network error.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("a non-brief run still retries on 5xx as before (existing behaviour unchanged)", async () => {
+      fetchSpy
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+          json: () => Promise.resolve({ message: "Service Unavailable" }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(VALID_RUN_RESPONSE),
+        });
+
+      const client = createPLoTClient()!;
+      const result = await client.run(VALID_RUN, "req-no-brief-5xx");
+
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(result.meta.seed_used).toBe(42);
+    });
+  });
+
+  describe("run — idempotency preservation", () => {
+    it("retry uses same requestId", async () => {
+      fetchSpy
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+          json: () => Promise.resolve({ message: "Service Unavailable" }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(VALID_RUN_RESPONSE),
+        });
+
+      const client = createPLoTClient()!;
+      await client.run(
+        VALID_RUN,
+        "req-unique-123",
+      );
+
+      // Both calls use the same requestId in headers
+      const firstCallHeaders = fetchSpy.mock.calls[0][1].headers;
+      const secondCallHeaders = fetchSpy.mock.calls[1][1].headers;
+      expect(firstCallHeaders["X-Request-Id"]).toBe("req-unique-123");
+      expect(secondCallHeaders["X-Request-Id"]).toBe("req-unique-123");
+    });
+  });
+
+  describe("validatePatch — retry on transient 500", () => {
+    it("retries once on 500 and succeeds on retry", async () => {
+      fetchSpy
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 500,
+          text: () => Promise.resolve("Internal Server Error"),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ verdict: "accepted", applied_graph: {} }),
+        });
+
+      const client = createPLoTClient()!;
+      const result = await client.validatePatch(
+        { graph: {}, operations: [{ op: "add_node" }] },
+        "req-1",
+      );
+
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(result.kind).toBe("success");
+    });
+
+    it("does NOT retry 422 rejection (deterministic client error)", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: false,
+        status: 422,
+        json: () => Promise.resolve({ status: "rejected", code: "CYCLE", message: "Cycle detected" }),
+      });
+
+      const client = createPLoTClient()!;
+      const result = await client.validatePatch(
+        { graph: {}, operations: [{ op: "add_edge" }] },
+        "req-1",
+      );
+
+      // 422 is not retried — returns structured rejection
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(result.kind).toBe("rejection");
+    });
+  });
+});

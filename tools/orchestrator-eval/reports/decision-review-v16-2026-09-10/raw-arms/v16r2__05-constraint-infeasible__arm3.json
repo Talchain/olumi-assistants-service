@@ -1,0 +1,24 @@
+{
+  "prompt_version": "v16r",
+  "fixture": "05-constraint-infeasible",
+  "arm": 3,
+  "model": "claude-sonnet-5",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 16883,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 884,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "service_tier": "standard",
+    "inference_geo": "global"
+  },
+  "latency_s": 10,
+  "text": "{\n  \"narrative_summary\": \"Launch in March produced the best outcome in 69% of runs of this model, but the brief states shipping cannot happen before the audit closes, so that option is not available and Launch in June is the feasible path. Annual Recurring Revenue stays sensitive to when the audit actually finishes.\",\n  \"story_headlines\": {\n    \"opt_march\": \"Launch in March scores highest here, but the audit constraint rules it out as stated.\",\n    \"opt_june\": \"Launch in June stays feasible only if audit timing and early demand hold as modelled.\"\n  },\n  \"robustness_explanation\": {\n    \"summary\": \"The ordering holds in about 68% of variations, a middling figure given one option is barred by the audit constraint.\",\n    \"primary_risk\": \"The link from Audit Completion to Annual Recurring Revenue could flip which option this model points to.\",\n    \"stability_factors\": [\n      \"Early Demand shows a fairly firm connection to Annual Recurring Revenue on these numbers\"\n    ],\n    \"fragility_factors\": [\n      \"The link from Audit Completion to Annual Recurring Revenue is the main source of movement in this result\"\n    ]\n  },\n  \"readiness_rationale\": \"This decision is not settled yet: the option this model favours on the numbers breaches the audit condition stated in the brief, so the comparison needs reframing around only the options that can actually ship.\",\n  \"evidence_enhancements\": {},\n  \"scenario_contexts\": {},\n  \"flip_thresholds\": [],\n  \"bias_findings\": [],\n  \"key_assumptions\": [\n    \"The link from Audit Completion to Annual Recurring Revenue assumes the audit's finish date is fixed and known.\",\n    \"The brief's condition that shipping cannot happen before the audit closes is treated as a hard constraint, not a preference.\",\n    \"The link from Early Demand to Annual Recurring Revenue assumes early demand behaves as currently modelled.\"\n  ],\n  \"decision_quality_prompts\": [\n    {\n      \"question\": \"What would have to be true about the audit timeline for Launch in June to feel too slow?\",\n      \"principle\": \"Consider-the-opposite\",\n      \"applies_because\": \"One option scores highest in this model but is barred by a stated constraint, so it helps to pressure-test the feasible alternative directly.\"\n    },\n    {\n      \"question\": \"This decision failed because the audit dragged on, what early signals would have shown that risk?\",\n      \"principle\": \"Pre-mortem (Klein)\",\n      \"applies_because\": \"The comparison still needs framing around the audit constraint, and a pre-mortem surfaces what to watch before committing to Launch in June.\"\n    }\n  ]\n}"
+}

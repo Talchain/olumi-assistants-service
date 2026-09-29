@@ -1,0 +1,858 @@
+{
+ "nodes": [
+  {
+   "id": "0fbd96b0",
+   "kind": "decision",
+   "label": "Question",
+   "provenance": "ai_inferred",
+   "label_placeholder": true
+  },
+  {
+   "id": "11b371fd",
+   "kind": "factor",
+   "label": "Agency Contract Cost",
+   "category": "controllable",
+   "scale_frame": 200000,
+   "prior": {
+    "distribution": "uniform",
+    "range_min": 0,
+    "range_max": 1,
+    "prior_is_unquantified": true
+   },
+   "factor_type": "other",
+   "uncertainty_drivers": [
+    "Not provided"
+   ],
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "15aff96b",
+   "kind": "factor",
+   "label": "Internal Development Spend",
+   "observed_state": {
+    "value": 0.2,
+    "unit": "\u00a3",
+    "source": "brief_extraction",
+    "raw_value": 200000,
+    "cap": 1000000,
+    "extractionType": "explicit",
+    "factor_type": "other",
+    "uncertainty_drivers": [
+     "Extracted from brief \u2014 confirm value"
+    ]
+   },
+   "category": "controllable",
+   "scale_frame": 200000,
+   "prior": {
+    "distribution": "uniform",
+    "range_min": 0,
+    "range_max": 1,
+    "prior_is_unquantified": true
+   },
+   "display_value": "\u00a3200k",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "2fdc1788",
+   "kind": "risk",
+   "label": "Delivery Delay Risk",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "341c4358",
+   "kind": "option",
+   "label": "Outsource to Reporting Agency",
+   "interventions": {
+    "11b371fd": {
+     "value": 0.9,
+     "raw_value": 180000,
+     "source": "cee_hypothesis",
+     "target_match": {
+      "node_id": "11b371fd",
+      "match_type": "exact_id",
+      "confidence": "high"
+     },
+     "value_confidence": "low",
+     "reasoning": "Olumi estimate via edge 18231b23; this option\u2192factor effect is not bound to a stated option record"
+    }
+   },
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "360e6e8b",
+   "kind": "outcome",
+   "label": "Reporting Capability Achievement",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "7e1eb8e1",
+   "kind": "option",
+   "label": "Continue Without Formal Reporting (Status Quo)",
+   "interventions": {
+    "15aff96b": {
+     "value": 0,
+     "raw_value": 0,
+     "unit": "\u00a3",
+     "source": "cee_hypothesis",
+     "target_match": {
+      "node_id": "15aff96b",
+      "match_type": "exact_id",
+      "confidence": "high"
+     },
+     "value_confidence": "low",
+     "reasoning": "Olumi estimate via edge 514a297e; this option\u2192factor effect is not bound to a stated option record"
+    }
+   },
+   "is_baseline": true,
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "8f788330",
+   "kind": "factor",
+   "label": "Vendor Licensing Cost",
+   "category": "controllable",
+   "scale_frame": 100000,
+   "prior": {
+    "distribution": "uniform",
+    "range_min": 0,
+    "range_max": 1,
+    "prior_is_unquantified": true
+   },
+   "factor_type": "other",
+   "uncertainty_drivers": [
+    "Not provided"
+   ],
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "a2dbb0a1",
+   "kind": "option",
+   "label": "Build Reporting In-House",
+   "interventions": {
+    "15aff96b": {
+     "value": 0.8,
+     "raw_value": 160000,
+     "unit": "\u00a3",
+     "source": "cee_hypothesis",
+     "target_match": {
+      "node_id": "15aff96b",
+      "match_type": "exact_id",
+      "confidence": "high"
+     },
+     "value_confidence": "low",
+     "reasoning": "Olumi estimate via edge 897ba4f5; this option\u2192factor effect is not bound to a stated option record"
+    }
+   },
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "c5f4f68e",
+   "kind": "option",
+   "label": "Buy Off-the-Shelf Reporting Tool",
+   "interventions": {
+    "8f788330": {
+     "value": 0.6,
+     "raw_value": 60000,
+     "source": "cee_hypothesis",
+     "target_match": {
+      "node_id": "8f788330",
+      "match_type": "exact_id",
+      "confidence": "high"
+     },
+     "value_confidence": "low",
+     "reasoning": "Olumi estimate via edge 7beca163; this option\u2192factor effect is not bound to a stated option record"
+    }
+   },
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "dac3fdc3",
+   "kind": "risk",
+   "label": "Budget Overrun Risk",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "fe1b2ad1",
+   "kind": "goal",
+   "label": "delivering reporting capability while keeping total reporting spend at or below \u00a3200,000 this year",
+   "goal_threshold": 0.8,
+   "goal_threshold_raw": 200000,
+   "goal_threshold_unit": "\u00a3",
+   "goal_threshold_cap": 250000,
+   "goal_threshold_frame": "level",
+   "provenance": "from_brief",
+   "source_quote": "delivering reporting capability while keeping total reporting spend at or below \u00a3200,000 this year"
+  }
+ ],
+ "edges": [
+  {
+   "from": "0fbd96b0",
+   "to": "341c4358",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Decision-to-option scaffold minted by the projector"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "default"
+  },
+  {
+   "from": "0fbd96b0",
+   "to": "7e1eb8e1",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Decision-to-option scaffold minted by the projector"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "default"
+  },
+  {
+   "from": "0fbd96b0",
+   "to": "a2dbb0a1",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Decision-to-option scaffold minted by the projector"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "default"
+  },
+  {
+   "from": "0fbd96b0",
+   "to": "c5f4f68e",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Decision-to-option scaffold minted by the projector"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "default"
+  },
+  {
+   "from": "11b371fd",
+   "to": "360e6e8b",
+   "strength": {
+    "mean": 0.5,
+    "std": 0.11999999999999998
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": 0,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": 0.38,
+     "strength_std": 0.15,
+     "exists_probability": 0.9,
+     "reasoning": "Higher agency spend directly purchases more reporting capability features.",
+     "basis": "domain_prior",
+     "needs_user_input": true,
+     "lint_corrected": false
+    },
+    "pass2_adjusted": {
+     "strength_mean": 0.19818181818181818,
+     "strength_std": 0.15,
+     "exists_probability": 0.9
+    },
+    "bias_correction": {
+     "strength_mean_offset": -0.18181818181818182,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 0,
+    "distance_to_goal": 1,
+    "sign_unstable": false,
+    "pass1_missing": true,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "11b371fd",
+   "to": "dac3fdc3",
+   "strength": {
+    "mean": 0.5,
+    "std": 0.11999999999999998
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": 0,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": 0.5,
+     "strength_std": 0.15,
+     "exists_probability": 0.9,
+     "reasoning": "Increased agency cost consumes budget headroom and raises overrun risk proportionally.",
+     "basis": "domain_prior",
+     "needs_user_input": true,
+     "lint_corrected": false
+    },
+    "pass2_adjusted": {
+     "strength_mean": 0.3181818181818182,
+     "strength_std": 0.15,
+     "exists_probability": 0.9
+    },
+    "bias_correction": {
+     "strength_mean_offset": -0.18181818181818182,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 0,
+    "distance_to_goal": 1,
+    "sign_unstable": false,
+    "pass1_missing": true,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "15aff96b",
+   "to": "2fdc1788",
+   "strength": {
+    "mean": 0.5,
+    "std": 0.11999999999999998
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": 0,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": -0.6,
+     "strength_std": 0.2,
+     "exists_probability": 0.9,
+     "reasoning": "Allocating more internal development resources typically accelerates delivery and reduces delay risk.",
+     "basis": "domain_prior",
+     "needs_user_input": true,
+     "lint_corrected": false
+    },
+    "pass2_adjusted": {
+     "strength_mean": -0.7818181818181817,
+     "strength_std": 0.2,
+     "exists_probability": 0.9
+    },
+    "bias_correction": {
+     "strength_mean_offset": -0.18181818181818182,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 0,
+    "distance_to_goal": 1,
+    "sign_unstable": false,
+    "pass1_missing": true,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "15aff96b",
+   "to": "360e6e8b",
+   "strength": {
+    "mean": 0.5,
+    "std": 0.11999999999999998
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": 0,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": 0.31,
+     "strength_std": 0.15,
+     "exists_probability": 0.9,
+     "reasoning": "Higher internal development spend builds in-house capability and thus improves reporting achievement.",
+     "basis": "domain_prior",
+     "needs_user_input": true,
+     "lint_corrected": false
+    },
+    "pass2_adjusted": {
+     "strength_mean": 0.12818181818181817,
+     "strength_std": 0.15,
+     "exists_probability": 0.9
+    },
+    "bias_correction": {
+     "strength_mean_offset": -0.18181818181818182,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 0,
+    "distance_to_goal": 1,
+    "sign_unstable": false,
+    "pass1_missing": true,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "15aff96b",
+   "to": "dac3fdc3",
+   "strength": {
+    "mean": 0.5,
+    "std": 0.11999999999999998
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": 0,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": 0.5,
+     "strength_std": 0.15,
+     "exists_probability": 0.9,
+     "reasoning": "Greater internal development spend counts against the budget and increases overrun risk.",
+     "basis": "domain_prior",
+     "needs_user_input": true,
+     "lint_corrected": false
+    },
+    "pass2_adjusted": {
+     "strength_mean": 0.3181818181818182,
+     "strength_std": 0.15,
+     "exists_probability": 0.9
+    },
+    "bias_correction": {
+     "strength_mean_offset": -0.18181818181818182,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 0,
+    "distance_to_goal": 1,
+    "sign_unstable": false,
+    "pass1_missing": true,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "2fdc1788",
+   "to": "fe1b2ad1",
+   "strength": {
+    "mean": -0.5,
+    "std": 0.11999999999999998
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "negative",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": -0.5,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": -0.3181818181818182,
+     "strength_std": 0.15,
+     "exists_probability": 0.95,
+     "reasoning": "Higher delivery delay risk directly threatens on-time capability delivery within the year.",
+     "basis": "domain_prior",
+     "needs_user_input": true,
+     "lint_corrected": true
+    },
+    "pass2_adjusted": {
+     "strength_mean": -0.5,
+     "strength_std": 0.15,
+     "exists_probability": 0.95
+    },
+    "bias_correction": {
+     "strength_mean_offset": -0.18181818181818182,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 1,
+    "distance_to_goal": 0,
+    "sign_unstable": false,
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": [
+     {
+      "code": "LINT_BUDGET_RESCALE",
+      "edge_key": "2fdc1788->fe1b2ad1",
+      "before": -0.7,
+      "after": -0.3181818181818182
+     }
+    ]
+   }
+  },
+  {
+   "from": "341c4358",
+   "to": "11b371fd",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai"
+  },
+  {
+   "from": "360e6e8b",
+   "to": "fe1b2ad1",
+   "strength": {
+    "mean": 0.5,
+    "std": 0.11999999999999998
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": 0,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": 0.36363636363636365,
+     "strength_std": 0.1,
+     "exists_probability": 0.99,
+     "reasoning": "Achieving reporting capability is by definition required for the goal.",
+     "basis": "brief_explicit",
+     "needs_user_input": false,
+     "lint_corrected": true
+    },
+    "pass2_adjusted": {
+     "strength_mean": 0.18181818181818182,
+     "strength_std": 0.1,
+     "exists_probability": 0.99
+    },
+    "bias_correction": {
+     "strength_mean_offset": -0.18181818181818182,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 0,
+    "distance_to_goal": 0,
+    "sign_unstable": false,
+    "pass1_missing": true,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": [
+     {
+      "code": "LINT_BUDGET_RESCALE",
+      "edge_key": "360e6e8b->fe1b2ad1",
+      "before": 0.8,
+      "after": 0.36363636363636365
+     }
+    ]
+   }
+  },
+  {
+   "from": "7e1eb8e1",
+   "to": "15aff96b",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai"
+  },
+  {
+   "from": "8f788330",
+   "to": "360e6e8b",
+   "strength": {
+    "mean": 0.5,
+    "std": 0.11999999999999998
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": 0,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": 0.31,
+     "strength_std": 0.15,
+     "exists_probability": 0.85,
+     "reasoning": "Spending on vendor licenses enables off-the-shelf feature availability and boosts capability.",
+     "basis": "domain_prior",
+     "needs_user_input": true,
+     "lint_corrected": false
+    },
+    "pass2_adjusted": {
+     "strength_mean": 0.12818181818181817,
+     "strength_std": 0.15,
+     "exists_probability": 0.85
+    },
+    "bias_correction": {
+     "strength_mean_offset": -0.18181818181818182,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 0,
+    "distance_to_goal": 1,
+    "sign_unstable": false,
+    "pass1_missing": true,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "a2dbb0a1",
+   "to": "15aff96b",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai"
+  },
+  {
+   "from": "c5f4f68e",
+   "to": "8f788330",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai"
+  },
+  {
+   "from": "dac3fdc3",
+   "to": "fe1b2ad1",
+   "strength": {
+    "mean": -0.5,
+    "std": 0.11999999999999998
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "negative",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": -0.5,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": -0.3181818181818182,
+     "strength_std": 0.15,
+     "exists_probability": 0.95,
+     "reasoning": "Higher budget overrun risk directly undermines the goal of staying under the spend cap.",
+     "basis": "domain_prior",
+     "needs_user_input": true,
+     "lint_corrected": true
+    },
+    "pass2_adjusted": {
+     "strength_mean": -0.5,
+     "strength_std": 0.15,
+     "exists_probability": 0.95
+    },
+    "bias_correction": {
+     "strength_mean_offset": -0.18181818181818182,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 1,
+    "distance_to_goal": 0,
+    "sign_unstable": false,
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": [
+     {
+      "code": "LINT_BUDGET_RESCALE",
+      "edge_key": "dac3fdc3->fe1b2ad1",
+      "before": -0.7,
+      "after": -0.3181818181818182
+     }
+    ]
+   }
+  }
+ ],
+ "node_count": 12,
+ "edge_count": 17,
+ "goal_constraints": [
+  {
+   "constraint_id": "constraint_fe1b2ad1_max",
+   "node_id": "fe1b2ad1",
+   "operator": "<=",
+   "value": 200000,
+   "label": "Keep spend at or at or below \u00a3200,000",
+   "unit": "\u00a3",
+   "source_quote": "spend at or below \u00a3200,000",
+   "confidence": 0.85,
+   "provenance": "explicit",
+   "value_frame": "level"
+  }
+ ]
+}

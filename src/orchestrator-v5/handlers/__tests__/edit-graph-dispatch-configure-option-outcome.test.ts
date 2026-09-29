@@ -1,0 +1,745 @@
+/**
+ * ⭐⭐ ROADMAP 2.427 — `dispatchEditGraph` binds the configure-option OUTCOME
+ * to the turn's INTENT.
+ *
+ * Sibling of `edit-graph-dispatch-false-success.test.ts`, and the distinction
+ * between the two files IS the defect:
+ *
+ *   - That file pins the V5 H5 invariant, which asks *"did anything land?"*
+ *     and rewrites a success claim when nothing did.
+ *   - This file pins the case H5 is STRUCTURALLY BLIND TO: something landed,
+ *     it was the WRONG ENTITY, and the prose was accurate about the entity it
+ *     described. `successfulAppliedMutation` is TRUE on that turn, so every
+ *     branch of H5 is skipped and the false success ships with zero error
+ *     blocks.
+ *
+ * The motivating capture, deployed CEE `98f2476` (`P3r7_4_phrasing.json`):
+ * "Updated the Cloud-Native CRM to Adoption Complexity edge strength from 1.0
+ * to 0.7. Rerun analysis to see the effect." — `blocks: []`, and the option the
+ * user asked to configure still `needs_encoding` with `interventions: {}`.
+ *
+ * ⚠ EXTRACTOR-DELETION OBLIGATION (trap 19): deleting the outcome guard from
+ * `edit-graph-dispatch.ts` MUST turn the T12c edge-strength case below red.
+ * A test that passes with the producer removed is not a test.
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach, type MockedFunction } from 'vitest';
+import { _resetConfigCache } from '../../../config/index.js';
+import { appendLapseNotice } from '../hold-thread-through.js';
+import { findSuccessClaimHit } from '../../compose/forbidden-user-facing-phrases.js';
+import { formatWithheldWriteNotice } from '../../routing/option-intervention-write-guard.js';
+import type { FastifyRequest } from 'fastify';
+import type { EditGraphResult } from '../../../orchestrator/tools/edit-graph.js';
+import type { GraphV3T } from '../../../schemas/cee-v3.js';
+
+// ── module-level mocks (same posture as the H5 sibling) ─────────────
+
+vi.mock('../../../orchestrator/tools/edit-graph.js', () => ({
+  handleEditGraph: vi.fn(),
+}));
+
+vi.mock('../../commit.js', () => ({
+  commitDirectAnswer: vi.fn(),
+  computeRequestHash: vi.fn().mockReturnValue('sha256:testhash'),
+}));
+
+vi.mock('../../../adapters/llm/router.js', () => ({
+  getAdapter: vi.fn().mockReturnValue({}),
+}));
+
+vi.mock('../../build-turn-context.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../build-turn-context.js')>();
+  return {
+    ...actual,
+    loadPersistedGraphStrict: vi.fn().mockResolvedValue(null),
+  };
+});
+
+vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../utils/telemetry.js')>();
+  return { ...actual, emit: vi.fn() };
+});
+
+// ── imports after mocks ─────────────────────────────────────────────
+
+import { dispatchEditGraph } from '../edit-graph-dispatch.js';
+import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
+import { commitDirectAnswer } from '../../commit.js';
+import { emit, TelemetryEvents } from '../../../utils/telemetry.js';
+import { composeConfigureOptionClarifyResponse } from '../../compose/configure-option-clarify-response.js';
+import { carriesConfigureOptionValuePayload } from '../../routing/configure-option-intent.js';
+import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
+import type { GraphStateIngress } from '../../boundary/request-extensions.js';
+
+// ── the captured graph ──────────────────────────────────────────────
+
+const FACTORS = [
+  { id: 'fac_platform_cost', label: 'Platform Licence Cost' },
+  { id: 'fac_feature_richness', label: 'Feature Richness' },
+  { id: 'fac_adoption_complexity', label: 'Adoption Complexity' },
+] as const;
+
+function interventionBundle(values: Readonly<Record<string, number>>) {
+  const out: Record<string, unknown> = {};
+  for (const [factorId, value] of Object.entries(values)) {
+    out[factorId] = {
+      value,
+      source: 'brief_extraction',
+      target_match: { node_id: factorId, confidence: 'high', match_type: 'exact_id' },
+    };
+  }
+  return out;
+}
+
+function edge(from: string, to: string, mean: number) {
+  return {
+    from,
+    to,
+    strength: { mean, std: 0.01 },
+    exists_probability: 0.95,
+    effect_direction: (mean >= 0 ? 'positive' : 'negative') as 'positive' | 'negative',
+  };
+}
+
+function captureGraph(opts: {
+  readonly cloudNativeInterventions?: Readonly<Record<string, number>>;
+  readonly cloudNativeComplexityStrength?: number;
+} = {}): GraphV3T {
+  const { cloudNativeInterventions, cloudNativeComplexityStrength = 1 } = opts;
+  return {
+    nodes: [
+      { id: 'goal_crm_roi', kind: 'goal', label: 'CRM Programme ROI' },
+      ...FACTORS.map((f) => ({ id: f.id, kind: 'factor' as const, label: f.label })),
+      {
+        id: 'opt_basic',
+        kind: 'option' as const,
+        label: 'Basic Platform',
+        interventions: interventionBundle({
+          fac_platform_cost: 0.3,
+          fac_feature_richness: 0.3,
+          fac_adoption_complexity: 0.25,
+        }),
+      },
+      {
+        id: 'opt_cloud_native',
+        kind: 'option' as const,
+        label: 'Cloud-Native CRM',
+        ...(cloudNativeInterventions
+          ? { interventions: interventionBundle(cloudNativeInterventions) }
+          : {}),
+      },
+    ],
+    edges: [
+      ...FACTORS.map((f) => edge('opt_basic', f.id, 1)),
+      edge('opt_cloud_native', 'fac_platform_cost', 1),
+      edge('opt_cloud_native', 'fac_feature_richness', 1),
+      edge('opt_cloud_native', 'fac_adoption_complexity', cloudNativeComplexityStrength),
+      ...FACTORS.map((f) => edge(f.id, 'goal_crm_roi', 0.5)),
+    ],
+  } as GraphV3T;
+}
+
+const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const TURN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+/** The live T12c phrasing — capture P3/P3r1–r7, MANIFEST.json. */
+const T12C = 'Under the Cloud-Native CRM option, set its effect on Adoption Complexity to 0.7.';
+
+/** The false-success sentence the deployed product actually shipped. */
+const CAPTURED_FALSE_SUCCESS =
+  'Updated the Cloud-Native CRM to Adoption Complexity edge strength from 1.0 to 0.7. Rerun analysis to see the effect.';
+
+/** The generic dead end the sibling capture (P3) shipped. */
+const CAPTURED_GENERIC_REFUSAL =
+  "I wasn't able to make that change safely. Can you describe what you'd like to add or change in simpler terms?";
+
+const INGRESS_GRAPH = captureGraph() as unknown as GraphStateIngress;
+
+function makePayload(message: string) {
+  return {
+    kind: 'message' as const,
+    scenario_id: SCENARIO_ID,
+    turn_id: TURN_ID,
+    stage: 'analyse' as const,
+    message,
+    turn_class: 'frame' as const,
+    source: 'composer' as const,
+  };
+}
+
+/**
+ * The captured branch (b): an APPLIED edit that wrote the wrong entity.
+ * `appliedGraph` present + operations present ⇒ `successfulAppliedMutation`
+ * is true, which is exactly why H5 cannot see this.
+ */
+function wrongEntityAppliedResult(assistantText: string): EditGraphResult {
+  return {
+    blocks: [],
+    assistantText,
+    latencyMs: 1000,
+    appliedGraph: captureGraph({
+      cloudNativeComplexityStrength: 0.7,
+    }) as unknown as EditGraphResult['appliedGraph'],
+    wasRejected: false,
+    operations: [
+      {
+        op: 'update_edge',
+        path: 'opt_cloud_native->fac_adoption_complexity',
+        value: { strength: { mean: 0.7, std: 0.01 } },
+      },
+    ],
+    appliedChanges: {
+      summary: 'Adjusted the Cloud-Native CRM to Adoption Complexity edge strength.',
+      changes: [
+        {
+          label: 'Adoption Complexity',
+          description: 'Edge strength 1.0 → 0.7.',
+          element_ref: 'fac_adoption_complexity',
+        },
+      ],
+      rerun_recommended: true,
+    },
+    operation_meta: [{ impact: 'medium', rationale: '' }],
+  } as unknown as EditGraphResult;
+}
+
+/** The captured branch (a): OPERATION_DID_NOT_LAND — ops submitted, none applied. */
+function didNotLandResult(assistantText: string): EditGraphResult {
+  return {
+    blocks: [],
+    assistantText,
+    latencyMs: 500,
+    appliedGraph: null,
+    wasRejected: false,
+    operations: [],
+  };
+}
+
+/** The honest success shape: an interventions write for the named option. */
+function honouredResult(assistantText: string): EditGraphResult {
+  return {
+    blocks: [],
+    assistantText,
+    latencyMs: 1000,
+    appliedGraph: captureGraph({
+      cloudNativeInterventions: { fac_adoption_complexity: 0.7 },
+    }) as unknown as EditGraphResult['appliedGraph'],
+    wasRejected: false,
+    operations: [
+      {
+        op: 'update_node',
+        path: 'opt_cloud_native',
+        value: { data: { interventions: { fac_adoption_complexity: 0.7 } } },
+      },
+    ],
+    appliedChanges: {
+      summary: 'Configured Cloud-Native CRM.',
+      changes: [
+        {
+          label: 'Cloud-Native CRM',
+          description: 'Adoption Complexity set to 0.7.',
+          element_ref: 'opt_cloud_native',
+        },
+      ],
+      rerun_recommended: true,
+    },
+    operation_meta: [{ impact: 'medium', rationale: '' }],
+  } as unknown as EditGraphResult;
+}
+
+function makeCommitResult() {
+  return {
+    response: {},
+    performed: true as const,
+    persisted_row_id: 'row-test',
+    graphPersisted: true,
+  };
+}
+
+const STUB_REQUEST = {} as FastifyRequest;
+
+/**
+ * The copy the guard is required to produce — DERIVED from the shipped
+ * composer, never transcribed. A copy edit moves the expectation with it
+ * instead of leaving a stale literal that passes by testing nothing.
+ */
+/**
+ * ⚠ RE-POINTED 2026-08-16 (L-25): `valueAlreadySupplied` is now DERIVED from the
+ * fixture message by the SAME predicate production uses, not assumed false.
+ *
+ * `T12C` carries "…to 0.7", i.e. the user HAS supplied a value. The composer
+ * used to answer that by re-emitting its demand verbatim, and this expectation
+ * pinned exactly that — witnessed live on deployed CEE `bacf35d`: the product
+ * demanded a template, the user typed it back, and got the identical sentence
+ * again. The loop did not terminate.
+ *
+ * Deriving the flag here (rather than hardcoding `true`) keeps the test honest
+ * if the fixture message ever changes shape: the expectation follows the
+ * message, exactly as the dispatch does. The precondition — that this fixture
+ * really does carry a value — is asserted by name below, so this cannot become
+ * a tautology that quietly stops discriminating.
+ */
+/**
+ * ⚠ ALSO DERIVES THE ADMISSION (review C1, 2026-08-16). The dispatch now
+ * resolves `resolveRunAdmission` on the graph it holds and threads the verdict
+ * in, so the reply says "the analysis will run…" only when it actually would.
+ * This capture graph does NOT admit, so the honest-alternative branch is the
+ * correct output — derived here for the same reason `valueAlreadySupplied` is,
+ * and guarded against tautology by the preconditions asserted below.
+ */
+const CAPTURE_ADMISSION = resolveRunAdmission(captureGraph());
+
+const EXPECTED_RECOVERY_TEXT = composeConfigureOptionClarifyResponse({
+  optionLabel: 'Cloud-Native CRM',
+  factorLabels: ['Platform Licence Cost', 'Feature Richness', 'Adoption Complexity'],
+  stage: 'analyse',
+  // ⚠⚠ THIS WAS `valueAlreadySupplied: carriesConfigureOptionValuePayload(T12C)`
+  // AND THE RENAME TO `message` MADE IT A SILENT NO-OP. Test files are excluded
+  // from `tsconfig.build.json`, so an unknown excess property compiles and is
+  // simply IGNORED: this derived expectation quietly became the NON-terminating
+  // demand while the dispatch path under test produced the terminating copy.
+  // It failed loudly here only because the expectation is DERIVED — a
+  // hand-written literal would have gone on agreeing with nothing (ROADMAP 2.1267).
+  message: T12C,
+  analysisWillProceed: CAPTURE_ADMISSION.willProceed,
+  blockedNextStep: CAPTURE_ADMISSION.willProceed ? null : CAPTURE_ADMISSION.strict.nextStep,
+}).assistant_text;
+
+/**
+ * ⭐⭐⭐ THE SAME RECOVERY COPY, PLUS THE ADMISSION THAT NOTHING WAS SAVED —
+ * and the second half is NEW BEHAVIOUR THIS FILE'S OWN FIXTURE EARNED.
+ *
+ * `wrongEntityAppliedResult` applies an EDGE-STRENGTH write
+ * (`opt_cloud_native → fac_adoption_complexity`, 1.0 → 0.7) — the captured
+ * 2.427 defect, verbatim. Until the deliberate-edit lane,
+ * `option-intervention-write-guard.ts` read only node `observed_state.value`,
+ * so an edge-only write produced `no_baseline_write` and **PERSISTED**. This
+ * file therefore pinned a reply that said *"Cloud-Native CRM still has no
+ * effect value … Answer here and I'll set it"* while an edge write had
+ * silently landed underneath it: honest text over a persisted wrong mutation,
+ * which is precisely the state the write guard exists to prevent.
+ *
+ * The write is now withheld, so the graph and the reply finally agree, and the
+ * user is told plainly that nothing was saved. The copy itself is BYTE-
+ * IDENTICAL — the recovery sentence did not move, and that is the point: the
+ * TEXT guard was always right, and it was the WRITE that was wrong.
+ *
+ * DERIVED, never transcribed — from the two shipped producers and the shipped
+ * joiner. A hand-written literal here would go on agreeing with nothing the
+ * moment either producer moved, which is the defect the comment above this
+ * constant records (ROADMAP 2.1267).
+ *
+ * `formatWithheldWriteNotice([])` takes an EMPTY label list on purpose: an
+ * edge write moves no node, so there is no node the notice could truthfully
+ * call unchanged, and the unqualified sentence is the honest one.
+ */
+const EXPECTED_RECOVERY_TEXT_WITHHELD = appendLapseNotice(
+  EXPECTED_RECOVERY_TEXT,
+  formatWithheldWriteNotice([]),
+);
+
+describe('L-25 — the repair loop terminates', () => {
+  it('the fixture message genuinely carries a value (precondition for every recovery assertion)', () => {
+    expect(carriesConfigureOptionValuePayload(T12C)).toBe(true);
+  });
+
+  it('C1 — this capture graph genuinely does NOT admit, so the blocked branch is the right one', () => {
+    // PRECONDITION PINNED BY NAME. Without this the derived expectation above
+    // would agree with the code by construction: if the graph ever started
+    // admitting, both sides would flip together and the promise assertion below
+    // would silently stop testing anything.
+    expect(CAPTURE_ADMISSION.willProceed).toBe(false);
+    expect(CAPTURE_ADMISSION.strict.nextStep).toBeTruthy();
+  });
+
+  it('C1 — the reply states the honest alternative and makes NO promise about analysis', () => {
+    expect(EXPECTED_RECOVERY_TEXT).toContain('The analysis cannot run on this model yet.');
+    expect(EXPECTED_RECOVERY_TEXT).not.toMatch(/analysis will run/i);
+  });
+
+  it('C1 — DISCRIMINATING TWIN: an admitting model gets the promise instead', () => {
+    const promised = composeConfigureOptionClarifyResponse({
+      optionLabel: 'Cloud-Native CRM',
+      factorLabels: ['Platform Licence Cost'],
+      stage: 'analyse',
+      message: T12C,
+      analysisWillProceed: true,
+    }).assistant_text;
+    expect(promised).toMatch(/analysis will run/i);
+    expect(promised).not.toContain('The analysis cannot run on this model yet.');
+  });
+
+  it('the recovery copy does NOT re-demand the format the user just used', () => {
+    expect(EXPECTED_RECOVERY_TEXT).not.toContain("option's effect on");
+    expect(EXPECTED_RECOVERY_TEXT).not.toContain('Tell me what it changes');
+    // It still names the option — terminating must not mean going vague.
+    expect(EXPECTED_RECOVERY_TEXT).toContain('Cloud-Native CRM');
+  });
+
+  it('DISCRIMINATING TWIN — a message with no value still gets the demand', () => {
+    const noValue = 'Configure the Cloud-Native CRM option.';
+    expect(carriesConfigureOptionValuePayload(noValue)).toBe(false);
+    const demand = composeConfigureOptionClarifyResponse({
+      optionLabel: 'Cloud-Native CRM',
+      factorLabels: ['Platform Licence Cost'],
+      stage: 'analyse',
+      message: noValue,
+    }).assistant_text;
+    expect(demand).toContain("option's effect on");
+  });
+});
+
+// Same mode premise as the H5 sibling: 'off' is the mode in which the seam
+// under test is reached byte-identically. Stated, not inherited.
+beforeEach(() => {
+  vi.stubEnv('CEE_GRAPH_MANAGEMENT_MODE', 'off');
+  _resetConfigCache();
+  vi.clearAllMocks();
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+  _resetConfigCache();
+});
+
+async function dispatch(message: string, result: EditGraphResult) {
+  (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(result);
+  (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+    .mockResolvedValue(makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+  return dispatchEditGraph({
+    payload: makePayload(message),
+    requestId: 'req-2427',
+    request: STUB_REQUEST,
+    graphState: INGRESS_GRAPH,
+    analysisState: null,
+  });
+}
+
+describe('ROADMAP 2.427 — branch (b): the wrong-entity write H5 cannot see', () => {
+  it('refuses the captured false success and answers with the routable recovery copy', async () => {
+    const out = await dispatch(T12C, wrongEntityAppliedResult(CAPTURED_FALSE_SUCCESS));
+
+    // The lie is gone.
+    expect(out.response.assistant_text).not.toContain('edge strength');
+    expect(out.response.assistant_text).not.toContain(CAPTURED_FALSE_SUCCESS);
+    // And what replaces it names the option, the unset factors, and the
+    // sentence that writes them — now followed by the admission that the
+    // edge write this fixture applies was NOT saved. See
+    // `EXPECTED_RECOVERY_TEXT_WITHHELD`: the copy is byte-identical and the
+    // notice is new, because the write guard's edge arm now withholds the
+    // captured 2.427 mutation instead of letting it persist under honest text.
+    expect(out.response.assistant_text).toBe(EXPECTED_RECOVERY_TEXT_WITHHELD);
+    expect(out.response.assistant_text).toContain(EXPECTED_RECOVERY_TEXT);
+    expect(out.response.assistant_text).toContain('Cloud-Native CRM');
+    // L-25: this message CARRIES a value, so the reply must not re-demand the
+    // format the user just used. It names the option and a route out instead.
+    expect(out.response.assistant_text).not.toContain("option's effect on");
+  });
+
+  /**
+   * ⭐⭐ THE HALF THIS ROW NEVER HAD — ASSERTED AT THE STORED OBJECT.
+   *
+   * `assistant_text` has been honest since 2.427. The EDGE WRITE underneath it
+   * persisted anyway, which is exactly why the defect survived two guards
+   * written against it: **a reply is not evidence about a graph.** On every
+   * build before this lane, `metadata.graph` was DEFINED here and carried
+   * `opt_cloud_native → fac_adoption_complexity` at strength 0.7 — the model
+   * the user would have reloaded into.
+   *
+   * Its own `it` on purpose, so it is reached and proven independently of the
+   * copy assertion above rather than sheltering behind it (a failing earlier
+   * expectation would stop this one ever running, and an assertion that never
+   * runs is not evidence).
+   */
+  it('the captured EDGE write is NOT committed — the graph matches the reply', async () => {
+    await dispatch(T12C, wrongEntityAppliedResult(CAPTURED_FALSE_SUCCESS));
+
+    expect(commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .toHaveBeenCalledTimes(1);
+    const metadata = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mock.calls[0]![1];
+    expect(metadata.graph).toBeUndefined();
+  });
+
+  it('emits the unhonoured-outcome meter with applied_something=true', async () => {
+    await dispatch(T12C, wrongEntityAppliedResult(CAPTURED_FALSE_SUCCESS));
+
+    const call = (emit as MockedFunction<typeof emit>).mock.calls.find(
+      ([event]) => event === TelemetryEvents.V5ConfigureOptionOutcomeUnhonoured,
+    );
+    expect(call, 'V5ConfigureOptionOutcomeUnhonoured was not emitted').toBeDefined();
+    expect(call![1]).toMatchObject({
+      scenario_id: SCENARIO_ID,
+      option_id: 'opt_cloud_native',
+      // The field that separates this branch from the did-not-land one:
+      // something DID land, which is why H5 stayed silent.
+      applied_something: true,
+    });
+  });
+});
+
+describe('ROADMAP 2.427 — branch (a): the generic dead end', () => {
+  it('replaces the generic refusal with copy that names a working phrasing', async () => {
+    const out = await dispatch(T12C, didNotLandResult(CAPTURED_GENERIC_REFUSAL));
+
+    expect(out.response.assistant_text).not.toBe(CAPTURED_GENERIC_REFUSAL);
+    expect(out.response.assistant_text).toBe(EXPECTED_RECOVERY_TEXT);
+  });
+
+  it('emits the meter with applied_something=false', async () => {
+    await dispatch(T12C, didNotLandResult(CAPTURED_GENERIC_REFUSAL));
+
+    const call = (emit as MockedFunction<typeof emit>).mock.calls.find(
+      ([event]) => event === TelemetryEvents.V5ConfigureOptionOutcomeUnhonoured,
+    );
+    expect(call![1]).toMatchObject({ option_id: 'opt_cloud_native', applied_something: false });
+  });
+});
+
+describe('ROADMAP 2.427 — the guard stays out of the way of working turns', () => {
+  it('an honoured configure keeps its own confirmation', async () => {
+    const confirmation =
+      'Configured the Cloud-Native CRM option to set Adoption Complexity to 0.7. Rerun analysis to see the downstream effect.';
+    const out = await dispatch(T12C, honouredResult(confirmation));
+
+    expect(out.response.assistant_text).toContain('Configured the Cloud-Native CRM option');
+    expect(out.response.assistant_text).not.toBe(EXPECTED_RECOVERY_TEXT);
+    expect(
+      (emit as MockedFunction<typeof emit>).mock.calls.some(
+        ([e]) => e === TelemetryEvents.V5ConfigureOptionOutcomeUnhonoured,
+      ),
+    ).toBe(false);
+  });
+
+  it('DISCRIMINATION CONTROL P7 — a factor edit that names no option is untouched', async () => {
+    // Live capture P7: "Set Adoption Complexity to 0.7." → the product changed a
+    // factor and said so. No option was named, so no option-scoped promise was
+    // made and this guard must have no opinion.
+    const factorEditText = 'Updated Adoption Complexity from 0.1 to 0.7.';
+    const out = await dispatch('Set Adoption Complexity to 0.7.', wrongEntityAppliedResult(factorEditText));
+
+    expect(out.response.assistant_text).toContain('Updated Adoption Complexity');
+    expect(
+      (emit as MockedFunction<typeof emit>).mock.calls.some(
+        ([e]) => e === TelemetryEvents.V5ConfigureOptionOutcomeUnhonoured,
+      ),
+    ).toBe(false);
+  });
+
+  it('DISCRIMINATION CONTROL P8 — a vague ask keeps the product’s existing clarify reply', async () => {
+    // Live capture P8: "Make Cloud-Native CRM better on Adoption Complexity."
+    // The product already answers this well; the guard must not overwrite it.
+    const existingClarify =
+      'The Cloud-Native CRM option was just added and its links to Adoption Complexity do not have real effect values yet.';
+    const out = await dispatch(
+      'Make Cloud-Native CRM better on Adoption Complexity.',
+      didNotLandResult(existingClarify),
+    );
+
+    expect(out.response.assistant_text).toContain('was just added');
+    expect(
+      (emit as MockedFunction<typeof emit>).mock.calls.some(
+        ([e]) => e === TelemetryEvents.V5ConfigureOptionOutcomeUnhonoured,
+      ),
+    ).toBe(false);
+  });
+});
+
+/**
+ * ⭐⭐ P1 (adversarial review of `572f7ea9`) — at the DISPATCHER, where the harm
+ * actually lands.
+ *
+ * The unit-level verdict being wrong is bad; what makes it a P1 is what this
+ * seam then does with it. `dispatchEditGraph` replaces `assistant_text`
+ * WHOLESALE, so a mis-resolved verdict does not merely add a caveat — it
+ * deletes a TRUE success confirmation and substitutes recovery copy about an
+ * option the user never mentioned, then logs `applied_something: true`,
+ * recording the guard's own mistake as a product defect in the meter that
+ * measures product defects.
+ */
+describe('ROADMAP 2.427 — P1 regression pair: the verdict may only name a NAMED option', () => {
+  /** CRM already configured at 0.7; Basic Platform is the SOLE blocked option. */
+  function crmConfiguredBasicBlocked(complexity: number): GraphV3T {
+    return {
+      nodes: [
+        { id: 'goal_crm_roi', kind: 'goal', label: 'CRM Programme ROI' },
+        ...FACTORS.map((f) => ({ id: f.id, kind: 'factor' as const, label: f.label })),
+        { id: 'opt_basic', kind: 'option' as const, label: 'Basic Platform' },
+        {
+          id: 'opt_cloud_native',
+          kind: 'option' as const,
+          label: 'Cloud-Native CRM',
+          interventions: interventionBundle({ fac_adoption_complexity: complexity }),
+        },
+      ],
+      edges: [
+        ...FACTORS.map((f) => edge('opt_basic', f.id, 1)),
+        ...FACTORS.map((f) => edge('opt_cloud_native', f.id, 1)),
+        ...FACTORS.map((f) => edge(f.id, 'goal_crm_roi', 0.5)),
+      ],
+    } as GraphV3T;
+  }
+
+  /**
+   * The same configured graph, with the WRONG ENTITY moved: the
+   * `opt_cloud_native → fac_adoption_complexity` EDGE, not the option's own
+   * effect value. This is the capture's shape on a REVISION.
+   */
+  function crmConfiguredWrongEntityEdge(): GraphV3T {
+    const base = crmConfiguredBasicBlocked(0.7);
+    return {
+      ...base,
+      edges: base.edges.map((e) =>
+        e.from === 'opt_cloud_native' && e.to === 'fac_adoption_complexity'
+          ? { ...e, strength: { mean: 0.7, std: 0.01 } }
+          : e,
+      ),
+    } as GraphV3T;
+  }
+
+  const REVISION =
+    'Under the Cloud-Native CRM option, set its effect on Adoption Complexity to 0.9.';
+  const TRUE_CONFIRMATION =
+    'Updated the Cloud-Native CRM option: Adoption Complexity is now 0.9. Rerun analysis to see the effect.';
+
+  it('PAIR/1 — a revision that LANDS keeps its true confirmation and emits no meter', async () => {
+    const revisionApplied: EditGraphResult = {
+      blocks: [],
+      assistantText: TRUE_CONFIRMATION,
+      latencyMs: 1000,
+      appliedGraph: crmConfiguredBasicBlocked(0.9) as unknown as EditGraphResult['appliedGraph'],
+      wasRejected: false,
+      operations: [
+        {
+          op: 'update_node',
+          path: 'opt_cloud_native',
+          value: { data: { interventions: { fac_adoption_complexity: 0.9 } } },
+        },
+      ],
+      appliedChanges: {
+        summary: 'Revised Cloud-Native CRM.',
+        changes: [
+          {
+            label: 'Cloud-Native CRM',
+            description: 'Adoption Complexity 0.7 → 0.9.',
+            element_ref: 'opt_cloud_native',
+          },
+        ],
+        rerun_recommended: true,
+      },
+      operation_meta: [{ impact: 'medium', rationale: '' }],
+    } as unknown as EditGraphResult;
+
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(revisionApplied);
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+    const out = await dispatchEditGraph({
+      payload: makePayload(REVISION),
+      requestId: 'req-2427-p1',
+      request: STUB_REQUEST,
+      graphState: crmConfiguredBasicBlocked(0.7) as unknown as GraphStateIngress,
+      analysisState: null,
+    });
+
+    // The user's edit worked. Their confirmation must survive intact.
+    expect(out.response.assistant_text).toContain('Cloud-Native CRM');
+    expect(out.response.assistant_text).toContain('0.9');
+    // And above all, NOTHING about the option they never mentioned.
+    expect(out.response.assistant_text).not.toContain('Basic Platform');
+    expect(out.response.assistant_text).not.toBe(EXPECTED_RECOVERY_TEXT);
+    // The meter must not count the guard's own mis-resolution as a defect.
+    expect(
+      (emit as MockedFunction<typeof emit>).mock.calls.some(
+        ([e]) => e === TelemetryEvents.V5ConfigureOptionOutcomeUnhonoured,
+      ),
+    ).toBe(false);
+  });
+
+  /**
+   * ⛔⛔ F1 — A WITHHELD REVISION MUST NOT CONFIRM AND THEN DENY.
+   *
+   * ── THE REGRESSION, and it was INTRODUCED by withholding ─────────────────
+   * Before the write guard reached revisions, this turn shipped the LLM's
+   * *"Updated … edge strength from 1.0 to 0.7"* AND persisted the edge. The
+   * sentence was wrong-entity but it was TRUE about the graph. Withholding the
+   * write made it FALSE — and nothing replaced it:
+   *
+   *   `not_honoured_no_copy` deliberately skips the wholesale text replacement
+   *   (it carries no copy, because no true sentence exists for a revision), and
+   *   the V5 H5 false-success invariant is gated on `!successfulAppliedMutation`
+   *   — which is TRUE on a withheld turn, because the applier really did apply.
+   *   It is `effectiveAppliedMutation` that goes false.
+   *
+   * So the user got a confirmation and a denial in one reply. **We withheld the
+   * corrupting write and replaced it with a contradictory receipt**, which is
+   * arguably worse than the silent refusal it replaced.
+   *
+   * ⭐ THE TELL, and why no existing test caught it: every test in this file
+   * pinned either the `not_honoured` path (text replaced wholesale) or the
+   * verdict in isolation. **No test pinned the COMPOSED REPLY for the
+   * `not_honoured_no_copy` class** — the class this lane created.
+   */
+  it('F1 — a withheld REVISION never confirms and denies in the same reply', async () => {
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue({
+      blocks: [],
+      assistantText: CAPTURED_FALSE_SUCCESS,
+      latencyMs: 1000,
+      appliedGraph: crmConfiguredWrongEntityEdge() as unknown as EditGraphResult['appliedGraph'],
+      wasRejected: false,
+      operations: [
+        {
+          op: 'update_edge',
+          path: 'opt_cloud_native->fac_adoption_complexity',
+          value: { strength: { mean: 0.7, std: 0.01 } },
+        },
+      ],
+      operation_meta: [{ impact: 'medium', rationale: '' }],
+    } as unknown as EditGraphResult);
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+    const out = await dispatchEditGraph({
+      payload: makePayload(REVISION),
+      requestId: 'req-2427-f1',
+      request: STUB_REQUEST,
+      graphState: crmConfiguredBasicBlocked(0.7) as unknown as GraphStateIngress,
+      analysisState: null,
+    });
+
+    const text = out.response.assistant_text ?? '';
+
+    // PRECONDITION: the write really is withheld, or this asserts nothing about
+    // a contradiction — a persisted write would make the confirmation true.
+    const metadata = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mock.calls[0]![1];
+    expect(metadata.graph, 'precondition: the write must be withheld').toBeUndefined();
+
+    // PRECONDITION: the denial really is present, so "no contradiction" cannot
+    // pass by the notice having silently stopped being appended.
+    expect(text).toContain('nothing from this message was saved');
+
+    // ⭐ THE ASSERTION. Derived from the repo's OWN success-claim detector, not
+    // from a hand-listed set of sentences — a literal list would go stale the
+    // first time the model phrases it differently (trap 12).
+    expect(
+      findSuccessClaimHit(text),
+      `reply both confirms and denies:\n${text}`,
+    ).toBeNull();
+  });
+
+  it('PAIR/2 — the motivating failure still gets recovery copy about the NAMED option', async () => {
+    // The discriminating twin: nothing about the P1 fix may weaken the
+    // defect-kill this row exists for.
+    const out = await dispatch(T12C, wrongEntityAppliedResult(CAPTURED_FALSE_SUCCESS));
+
+    // Same copy, now carrying the withheld-write admission — the fixture is an
+    // edge write, which the guard's edge arm withholds.
+    expect(out.response.assistant_text).toBe(EXPECTED_RECOVERY_TEXT_WITHHELD);
+    expect(out.response.assistant_text).toContain('Cloud-Native CRM');
+    const call = (emit as MockedFunction<typeof emit>).mock.calls.find(
+      ([e]) => e === TelemetryEvents.V5ConfigureOptionOutcomeUnhonoured,
+    );
+    expect(call![1]).toMatchObject({ option_id: 'opt_cloud_native' });
+  });
+});

@@ -1,0 +1,181 @@
+/**
+ * ⭐ One click approves the ONE proposal just offered (approval-chips.ts), and
+ * the chip says exactly what typing "yes" would.
+ */
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import Fastify, { type FastifyInstance } from 'fastify';
+import { approvalChipsFor } from '../approval-chips.js';
+
+describe('approval chips', () => {
+  it('one proposal offered, nothing authorised → an approve chip and an amend chip', () => {
+    const chips = approvalChipsFor([{ name: 'propose_starting_point', ok: true, mutated: false, proposal_id: 'prop_1' }]);
+    expect(chips.map((c) => [c.label, c.message])).toEqual([
+      ['Use as starting assumptions', 'Yes, use those.'],
+      ['Change something first', 'Before you apply it, I want to change some of it.'],
+    ]);
+    // A chip without an action_type is plain text on the Agent route.
+    for (const c of chips) expect((c as { action_type?: unknown }).action_type).toBeUndefined();
+  });
+
+  /**
+   * ⭐ An added option (#1788's `propose_new_option`) gets the same one-click, typed approval
+   * as every other proposal, so its "yes" takes fast path 2 (0 model calls) rather than a
+   * full Agent turn. Without an entry here the proposal was offered with NO chip at all.
+   */
+  it('RED: a proposed NEW OPTION → a typed approve chip carrying its proposal id, and the amend chip', () => {
+    const chips = approvalChipsFor([{ name: 'propose_new_option', ok: true, mutated: false, proposal_id: 'prop_abc123' }]);
+    expect(chips.map((c) => [c.id, c.label, c.message])).toEqual([
+      ['agent-approve-proposal:prop_abc123', 'Add this option', 'Yes, add that option.'],
+      ['agent-amend-proposal', 'Change something first', 'Before you apply it, I want to change some of it.'],
+    ]);
+  });
+
+  /**
+   * ⛔ B3 (Paul's test, 27 Sep): a held add-option's button carries the product's FULL sentence (`detail`) when the
+   * product cut its label; with no sentence from the product, no `detail` is invented.
+   */
+  describe('held add-option (gmh_) — the product\'s full sentence', () => {
+    const calls = [{ name: 'propose_new_option', ok: true, mutated: false, proposal_id: 'gmh_0123456789ab' }];
+    const held = (extra: Record<string, unknown>) => () => ({ proposal: undefined, result: { ok: true, mutated: false, proposal_id: 'gmh_0123456789ab',
+      public_label: "Add option '£59 for new Pro customers; grandfather existi...", held_message: "Yes, add option '£59 for new Pro customers; grandfather existing customers'.", ...extra } });
+    it('RED: the product sent its full sentence → the button carries it as `detail`, beside the product\'s own label and message', () => {
+      const [approve] = approvalChipsFor(calls, held({ held_detail: "Add option '£59 for new Pro customers; grandfather existing customers'." }));
+      expect(approve).toEqual({ id: 'agent-approve-proposal:gmh_0123456789ab', label: "Add option '£59 for new Pro customers; grandfather existi...",
+        message: "Yes, add option '£59 for new Pro customers; grandfather existing customers'.", detail: "Add option '£59 for new Pro customers; grandfather existing customers'." });
+    });
+    it('CONTRAST: no sentence from the product (absent or blank) → no `detail` key', () => {
+      for (const extra of [{}, { held_detail: '  ' }]) expect(Object.keys(approvalChipsFor(calls, held(extra))[0]!)).toEqual(['id', 'label', 'message']);
+    });
+  });
+
+  /**
+   * ⭐ A turn that APPROVED one change and PROPOSED the next offers the next one's chip (measured on
+   * served `6dfb56f`, 24 Sep: "Yes, make that change" applied the baseline link and proposed its level,
+   * and the reply offered NO chip — the user had to type "yes" again). Only proposals authorised in
+   * THIS turn are consumed; if an authorisation's identity is unknown, nothing is offered on a guess.
+   */
+  it('RED: authorised A and proposed B in one turn → B\'s typed approve chip', () => {
+    const chips = approvalChipsFor([
+      { name: 'authorise_change', ok: true, mutated: true, proposal_id: 'prop_a1b2c3' },
+      { name: 'propose_option_interventions', ok: true, mutated: false, proposal_id: 'prop_d4e5f6' },
+    ]);
+    expect(chips.map((c) => c.id)).toEqual(['agent-approve-proposal:prop_d4e5f6', 'agent-amend-proposal']);
+  });
+
+  it('CONTRAST: the proposal authorised in this same turn is never re-offered', () => {
+    expect(approvalChipsFor([
+      { name: 'propose_model_change', ok: true, mutated: false, proposal_id: 'prop_a1b2c3' },
+      { name: 'authorise_change', ok: true, mutated: true, proposal_id: 'prop_a1b2c3' },
+    ])).toEqual([]);
+  });
+
+  it('CONTRAST: an authorisation whose proposal is unknown → nothing is offered on a guess', () => {
+    expect(approvalChipsFor([
+      { name: 'authorise_change', ok: true, mutated: true },
+      { name: 'propose_option_interventions', ok: true, mutated: false, proposal_id: 'prop_d4e5f6' },
+    ])).toEqual([]);
+  });
+
+  it('CONTRAST: two proposals pending → no chip (a "yes" would be ambiguous)', () => {
+    expect(approvalChipsFor([
+      { name: 'propose_assumptions', ok: true, mutated: false, proposal_id: 'prop_1' },
+      { name: 'propose_option_interventions', ok: true, mutated: false, proposal_id: 'prop_2' },
+    ])).toEqual([]);
+  });
+
+  it('CONTRAST: a refused proposal, a turn that authorised, and a read-only turn → no chip', () => {
+    expect(approvalChipsFor([{ name: 'propose_starting_point', ok: false, mutated: false }])).toEqual([]);
+    expect(approvalChipsFor([
+      { name: 'propose_starting_point', ok: true, mutated: false, proposal_id: 'prop_1' },
+      { name: 'authorise_change', ok: true, mutated: true },
+    ])).toEqual([]);
+    expect(approvalChipsFor([{ name: 'get_canonical_state', ok: true, mutated: false }])).toEqual([]);
+  });
+
+  /**
+   * ⛔ ORDER DECIDES VALIDITY (Codex #1806 5807933515). B proposed on H0, then A approved → H1: the
+   * store refuses B as superseded, so a chip for it would offer an action that cannot commit.
+   */
+  it('RED: proposed B, THEN a write moved the model → no chip for the now-stale B', () => {
+    expect(approvalChipsFor([
+      { name: 'propose_option_interventions', ok: true, mutated: false, proposal_id: 'prop_d4e5f6' },
+      { name: 'authorise_change', ok: true, mutated: true, proposal_id: 'prop_a1b2c3' },
+    ])).toEqual([]);
+    // Any change counts, not only an authorisation — a build after the proposal stales it too.
+    expect(approvalChipsFor([
+      { name: 'propose_model_change', ok: true, mutated: false, proposal_id: 'prop_d4e5f6' },
+      { name: 'build_model_from_brief', ok: true, mutated: true },
+    ])).toEqual([]);
+  });
+
+  it('CONTRAST: an approval that REFUSED (nothing moved) leaves the earlier proposal offerable', () => {
+    const chips = approvalChipsFor([
+      { name: 'propose_option_interventions', ok: true, mutated: false, proposal_id: 'prop_d4e5f6' },
+      { name: 'authorise_change', ok: false, mutated: false, proposal_id: 'prop_a1b2c3' },
+    ]);
+    expect(chips.map((c) => c.id)).toEqual(['agent-approve-proposal:prop_d4e5f6', 'agent-amend-proposal']);
+  });
+});
+
+/* ── the ROUTE: a real proposal reaches the user with its chip, and no id ── */
+const store = {
+  ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
+  readCommittedTurn: vi.fn(async () => null),
+  append: vi.fn(async () => ({ id: 'row-1' })),
+};
+vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
+vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return { ...actual, resolveUserIdentity: async () => ({ mode: 'off' }) };
+});
+
+describe('the route offers one-click approval for the proposal it just made', () => {
+  let app: FastifyInstance;
+  let call = 0;
+  let proposalId = '';
+  beforeAll(async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: string }) => {
+      call += 1;
+      if (call === 1) {
+        return new Response(JSON.stringify({ output: [{
+          type: 'function_call', name: 'propose_model_change', call_id: 'c1',
+          arguments: JSON.stringify({ from_label: 'Team size', to_label: 'Velocity', direction: 'positive', strength: 'strong', rationale: 'More people ship more.' }),
+        }] }), { status: 200 });
+      }
+      // The second model call sees the proposal's id in its tool output — and,
+      // like the served replies, prints it.
+      const sent = String(init?.body ?? '');
+      proposalId = /prop_[0-9a-f]{6,}/.exec(sent)?.[0] ?? '';
+      return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text',
+        text: `**Proposal \`${proposalId}\`** would connect Team size to Velocity. Approve it if that is right.` }] }] }), { status: 200 });
+    }));
+    vi.resetModules();
+    process.env.AGENT_LANE_ENABLED = 'true';
+    process.env.AGENT_LANE_PREVIEW = 'false';
+    const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
+    app = Fastify({ logger: false });
+    app.post('/assist/v1/scenarios/:id/graph', async () => ({
+      graph: { nodes: [{ id: 'f1', kind: 'factor', label: 'Team size' }, { id: 'o1', kind: 'outcome', label: 'Velocity' }], edges: [] },
+      graph_hash: 'h1',
+    }));
+    await app.register(agentV1TurnRoute);
+    await app.ready();
+  }, 60_000);
+  afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
+
+  it('RED: the reply carries a "Make this change" chip whose message is the typed approval, and shows no id', async () => {
+    const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b', message: 'Team size strongly drives velocity, so connect them.' } });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { assistant_text: string; suggested_actions: { label: string; message: string }[]; _agent: { tool_calls: { name: string; ok: boolean }[] } };
+    // Vacuity guards: the proposal really was made, and the model really printed its id.
+    expect(body._agent.tool_calls).toEqual([expect.objectContaining({ name: 'propose_model_change', ok: true })]);
+    expect(proposalId).toMatch(/^prop_[0-9a-f]{6,}$/);
+
+    expect(body.suggested_actions.map((a) => [a.label, a.message])).toEqual([
+      ['Make this change', 'Yes, make that change.'],
+      ['Change something first', 'Before you apply it, I want to change some of it.'],
+    ]);
+    expect(body.assistant_text).not.toMatch(/prop_[0-9a-f]{6,}/);
+    expect(body.assistant_text).toContain('**This proposal** would connect Team size to Velocity.');
+  });
+});

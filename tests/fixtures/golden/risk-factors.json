@@ -1,0 +1,39 @@
+{
+  "name": "risk-factors",
+  "description": "Brief with explicit risks that should be captured as factors with negative impact",
+  "brief": "Should we launch the product now or delay 3 months? Risk: competitor may launch first. Risk: team burnout from crunch.",
+  "endpoint": "draft_graph",
+  "recorded_response": {
+    "graph": {
+      "version": "1",
+      "default_seed": 42,
+      "nodes": [
+        { "id": "decision_1", "kind": "decision", "label": "Should we launch now or delay 3 months?" },
+        { "id": "opt_launch_now", "kind": "option", "label": "Launch now" },
+        { "id": "opt_delay", "kind": "option", "label": "Delay 3 months" },
+        { "id": "fac_readiness", "kind": "factor", "label": "Product Readiness", "category": "controllable" },
+        { "id": "risk_competitor", "kind": "risk", "label": "Competitor may launch first" },
+        { "id": "risk_burnout", "kind": "risk", "label": "Team burnout from crunch" },
+        { "id": "outcome_success", "kind": "outcome", "label": "Product Launch Success" },
+        { "id": "goal_1", "kind": "goal", "label": "Successful product launch with market share" }
+      ],
+      "edges": [
+        { "from": "decision_1", "to": "opt_launch_now", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "decision_1", "to": "opt_delay", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "opt_launch_now", "to": "fac_readiness", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "fac_readiness", "to": "outcome_success", "strength_mean": 0.7, "belief_exists": 0.85 },
+        { "from": "risk_competitor", "to": "goal_1", "strength_mean": -0.5, "belief_exists": 0.7 },
+        { "from": "risk_burnout", "to": "goal_1", "strength_mean": -0.4, "belief_exists": 0.8 },
+        { "from": "outcome_success", "to": "goal_1", "strength_mean": 0.9, "belief_exists": 1 }
+      ],
+      "meta": { "roots": [], "leaves": [], "suggested_positions": {}, "source": "assistant" }
+    },
+    "validation": { "passed": true, "errors": [], "warnings": [] }
+  },
+  "assertions": {
+    "has_decision_node": true,
+    "has_goal_node": true,
+    "risk_count_gte": 2,
+    "validation_passes": true
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "scenario_id": "231e6644-d484-410d-8c1a-a1ae770406a7",
+  "turn_id": "dd49f933-364c-4636-b1f8-822e6805ce45",
+  "turn_class": "frame",
+  "kind": "message",
+  "stage": "analyse",
+  "source": "composer",
+  "message": "Should I go with Hire One Tech Lead or Hire Two Mid-Level Developers?"
+}

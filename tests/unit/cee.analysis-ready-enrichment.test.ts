@@ -1,0 +1,455 @@
+/**
+ * Unit tests for analysis-ready enrichment additions:
+ * - is_baseline detection (CEE-2, Task 3)
+ * - intervention_details construction including CEE-6 echo stripping (CEE-9, Task 4)
+ */
+
+import { describe, it, expect } from "vitest";
+import { buildAnalysisReadyPayload, labelMatchesBaseline } from "../../src/cee/transforms/analysis-ready.js";
+// ROADMAP 1.162 — statically imported, NOT `await import(...)` inside the test body.
+//
+// This module graph costs ~1.1s to resolve on an idle machine and was measured
+// at 2931-4722ms under CPU oversubscription (loadavg 14-51 on 10 cores), i.e.
+// up to 94.4% of vitest's 5000ms default per-test timeout. Paying that cost
+// inside the `it()` charged module resolution — pure I/O and transform work,
+// unrelated to the behaviour under assertion — against the test's own budget,
+// so the verdict depended on machine load rather than on the code.
+//
+// A static import moves the cost into collection, which is not governed by
+// testTimeout. There is no mock-hoisting reason for it to be lazy: this file
+// declares no `vi.mock`, and neither the file nor vitest.setup.ts calls
+// `vi.resetModules()`, so the dynamic import returned the same cached module
+// object a static import yields. Behaviour is identical; only the accounting
+// changes. Do NOT reintroduce a lazy import here to "speed up" the file.
+import { extractAnalysisReady } from "../../src/orchestrator/tools/draft-graph.js";
+import type { OptionV3T, GraphV3T, NodeV3T } from "../../src/schemas/cee-v3.js";
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/** Minimal V3 option with empty interventions */
+function makeOption(id: string, label: string, extra?: Record<string, unknown>): OptionV3T {
+  return {
+    id,
+    label,
+    status: "ready",
+    interventions: {},
+    ...extra,
+  } as unknown as OptionV3T;
+}
+
+/** Minimal V3 graph with a goal node */
+function makeGraph(extraNodes: NodeV3T[] = []): GraphV3T {
+  return {
+    nodes: [
+      {
+        id: "goal_1",
+        kind: "goal",
+        label: "Grow revenue",
+      },
+      ...extraNodes,
+    ],
+    edges: [],
+  } as unknown as GraphV3T;
+}
+
+/** Build a minimal option with one intervention pointing to a factor */
+function makeOptionWithIntervention(
+  id: string,
+  label: string,
+  factorId: string,
+  value: number,
+): OptionV3T {
+  return {
+    id,
+    label,
+    status: "ready",
+    interventions: {
+      [factorId]: {
+        value,
+        source: "brief_extraction",
+        target_match: { node_id: factorId, match_type: "exact_id", confidence: "high" },
+      },
+    },
+  } as unknown as OptionV3T;
+}
+
+/** Minimal factor node */
+function makeFactorNode(id: string, label: string, extra?: Partial<NodeV3T>): NodeV3T {
+  return {
+    id,
+    kind: "factor",
+    label,
+    ...extra,
+  } as NodeV3T;
+}
+
+// ============================================================================
+// is_baseline — spec golden fixtures
+// ============================================================================
+
+describe("is_baseline detection", () => {
+  it("marks 'Do nothing' option as baseline", () => {
+    const options = [
+      makeOption("opt_hire", "Hire full-time developer"),
+      makeOption("opt_contract", "Use contractors"),
+      makeOption("opt_nothing", "Do nothing"),
+    ];
+    const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
+    expect(payload.options[2].is_baseline).toBe(true);
+    expect(payload.options[0].is_baseline).toBeUndefined();
+    expect(payload.options[1].is_baseline).toBeUndefined();
+  });
+
+  it("matches 'current' keyword", () => {
+    const options = [
+      makeOption("opt_a", "Expand to Europe"),
+      makeOption("opt_b", "Focus on UK"),
+      makeOption("opt_c", "Maintain current strategy"),
+    ];
+    const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
+    expect(payload.options[2].is_baseline).toBe(true);
+  });
+
+  it("does not mark any option when no keyword matches", () => {
+    const options = [
+      makeOption("opt_a", "Option A"),
+      makeOption("opt_b", "Option B"),
+      makeOption("opt_c", "Option C"),
+    ];
+    const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
+    for (const opt of payload.options) {
+      expect(opt.is_baseline).toBeUndefined();
+    }
+  });
+
+  it("marks 'status quo' option as baseline", () => {
+    const options = [
+      makeOption("opt_new", "New CRM Platform"),
+      makeOption("opt_sq", "Status quo"),
+    ];
+    const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
+    expect(payload.options[1].is_baseline).toBe(true);
+  });
+
+  it("prefers LLM-provided is_baseline flag over keyword", () => {
+    const options = [
+      makeOption("opt_a", "Do nothing", { is_baseline: true }),
+      makeOption("opt_b", "Current approach"),
+    ];
+    const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
+    expect(payload.options[0].is_baseline).toBe(true);
+    // Second option keyword matched but LLM flag on first wins
+    expect(payload.options[1].is_baseline).toBeUndefined();
+  });
+
+  // ⚠⚠ DELIBERATELY REVERSED 2026-08-14. This test previously asserted
+  // "first match wins when multiple labels match keyword" — and that arbitrary
+  // pick is the mechanism that shipped an INVERTED baseline on the deployed
+  // build `41156fc`:
+  //
+  //     is_baseline: true   "replace our current CRM with HubSpot next quarter"
+  //     is_baseline: absent "keep what we have"      ← the ACTUAL status quo
+  //
+  // 3 of 3 `B_crm` draws, because the flat keyword list held the bare token
+  // "current" and index 0 won before "keep what we have" was ever tested.
+  // First-match-by-index over a set several options can satisfy is not a
+  // detection; it is a coin flip wearing a detection's name.
+  //
+  // `is_baseline` tells the analysis which option is the COMPARISON BASE, so a
+  // wrong baseline silently rebases every comparison the user reads, while a
+  // missing one is a disclosed gap. Not symmetric harms, so not a symmetric
+  // predicate (trap 22b): where two options both claim to change nothing, NO
+  // baseline is claimed. The honest channel for resolving it is the model's own
+  // `is_baseline` flag, which the records grammar now carries (grammar design
+  // note 5) and which priority 1 reads — see the test directly above, which
+  // still passes and shows the flag overriding every label reading.
+  it("several idiomatic matches ⇒ NO baseline, rather than an arbitrary first pick", () => {
+    const options = [
+      makeOption("opt_a", "Keep existing"),
+      makeOption("opt_b", "Maintain current setup"),
+    ];
+    const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
+    expect(payload.options[0].is_baseline).toBeUndefined();
+    expect(payload.options[1].is_baseline).toBeUndefined();
+    // …and each label IS individually a baseline idiom, so this is a uniqueness
+    // refusal and not a tiering regression that stopped seeing them at all.
+    expect(labelMatchesBaseline("Keep existing")).toBe(true);
+    expect(labelMatchesBaseline("Maintain current setup")).toBe(true);
+  });
+
+  it("matches 'baseline' keyword", () => {
+    const options = [
+      makeOption("opt_a", "Scale up marketing"),
+      makeOption("opt_b", "Baseline scenario"),
+    ];
+    const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
+    expect(payload.options[1].is_baseline).toBe(true);
+  });
+
+  it("is case-insensitive", () => {
+    const options = [
+      makeOption("opt_a", "DO NOTHING"),
+      makeOption("opt_b", "Something else"),
+    ];
+    const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
+    expect(payload.options[0].is_baseline).toBe(true);
+  });
+
+  it("does not match partial word (e.g. 'currently' does not trigger 'current')", () => {
+    const options = [
+      makeOption("opt_a", "Currently in progress"),
+      makeOption("opt_b", "Something else"),
+    ];
+    const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
+    // "currently" contains "current" so the boundary check should handle this
+    // The regex uses word boundary so "currently" should NOT match "current"
+    for (const opt of payload.options) {
+      expect(opt.is_baseline).toBeUndefined();
+    }
+  });
+});
+
+// ============================================================================
+// intervention_details — spec golden fixtures
+// ============================================================================
+
+describe("intervention_details construction", () => {
+  it("builds display_value from factor raw_value + unit", () => {
+    const factorNode = makeFactorNode("fac_dev_headcount", "Developer Headcount", {
+      observed_state: {
+        value: 0.5,
+        raw_value: 5,
+        unit: "people",
+        source: "brief_extraction",
+      },
+    });
+    const options = [makeOptionWithIntervention("opt_a", "Hire team", "fac_dev_headcount", 0.5)];
+    const graph = makeGraph([factorNode]);
+
+    const payload = buildAnalysisReadyPayload(options, "goal_1", graph);
+    const details = payload.options[0].intervention_details;
+
+    expect(details).toBeDefined();
+    expect(details!["fac_dev_headcount"]).toBeDefined();
+    expect(details!["fac_dev_headcount"].display_value).toBe("5 people");
+    expect(details!["fac_dev_headcount"].normalised_value).toBe(0.5);
+    expect(details!["fac_dev_headcount"].raw_value).toBe(5);
+    expect(details!["fac_dev_headcount"].unit).toBe("people");
+  });
+
+  it("CEE-6: strips echo when display_value matches factor label", () => {
+    // Factor with display_value that would echo its label
+    const factorNode = makeFactorNode("fac_marketing", "Marketing Expertise", {
+      display_value: "Marketing Expertise",
+      observed_state: { value: 0.15, source: "brief_extraction" },
+    });
+    const options = [makeOptionWithIntervention("opt_a", "Boost marketing", "fac_marketing", 0.7)];
+    const graph = makeGraph([factorNode]);
+
+    const payload = buildAnalysisReadyPayload(options, "goal_1", graph);
+    const details = payload.options[0].intervention_details;
+
+    expect(details!["fac_marketing"].display_value).not.toBe("Marketing Expertise");
+    // Should be numeric/qualitative instead
+    expect(details!["fac_marketing"].normalised_value).toBe(0.7);
+  });
+
+  it("uses LLM display_value from factor when not an echo", () => {
+    const factorNode = makeFactorNode("fac_dev_cost", "Development Cost", {
+      display_value: "£200k",
+      observed_state: {
+        value: 0.4,
+        raw_value: 200000,
+        unit: "£",
+        source: "brief_extraction",
+      },
+    });
+    const options = [makeOptionWithIntervention("opt_a", "Outsource", "fac_dev_cost", 0.4)];
+    const graph = makeGraph([factorNode]);
+
+    const payload = buildAnalysisReadyPayload(options, "goal_1", graph);
+    const details = payload.options[0].intervention_details;
+
+    expect(details!["fac_dev_cost"].display_value).toBe("£200k");
+  });
+
+  it("falls back to qualitative band when no factor metadata", () => {
+    // Option references a factor that is not in the graph
+    const options = [makeOptionWithIntervention("opt_a", "Some option", "fac_unknown", 0.7)];
+    const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
+
+    const details = payload.options[0].intervention_details;
+
+    // Without factor metadata, should still produce something reasonable
+    expect(details!["fac_unknown"]).toBeDefined();
+    expect(details!["fac_unknown"].display_value).toBeTruthy();
+  });
+
+  it("omits intervention_details when no interventions", () => {
+    const options = [makeOption("opt_empty", "Empty option")];
+    const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
+    // No interventions → no details object
+    expect(payload.options[0].intervention_details).toBeUndefined();
+  });
+
+  it("preserves intervention numeric value through optional upgrade to rich form", () => {
+    const factorNode = makeFactorNode("fac_price", "Pricing", {
+      observed_state: { value: 0.6, raw_value: 59, unit: "£", source: "brief_extraction" },
+    });
+    const options = [makeOptionWithIntervention("opt_a", "Premium pricing", "fac_price", 0.6)];
+    const graph = makeGraph([factorNode]);
+
+    const payload = buildAnalysisReadyPayload(options, "goal_1", graph);
+
+    // Factor has unit + raw_value → meaningful display_value synthesised →
+    // interventions upgraded to { value, display_value }. Numeric value
+    // is preserved; inference downstream still flattens via
+    // flattenInterventions().
+    const entry = payload.options[0].interventions["fac_price"];
+    const numeric = typeof entry === 'number' ? entry : (entry as { value: number }).value;
+    expect(numeric).toBe(0.6);
+  });
+
+  it("does not strip display_value when factor label is empty (Finding 1 regression)", () => {
+    // Factor with no label — empty-label guard must prevent isEcho=true for all candidates
+    const factorNode = makeFactorNode("fac_no_label", "", {
+      display_value: "£500k",
+      observed_state: { value: 0.5, raw_value: 500000, unit: "£", source: "brief_extraction" },
+    });
+    const options = [makeOptionWithIntervention("opt_a", "Big spend", "fac_no_label", 0.5)];
+    const graph = makeGraph([factorNode]);
+
+    const payload = buildAnalysisReadyPayload(options, "goal_1", graph);
+    const details = payload.options[0].intervention_details;
+
+    expect(details!["fac_no_label"].display_value).toBe("£500k");
+  });
+
+  it("does not strip qualitative band display when label is a band word (Finding 3 regression)", () => {
+    // Factor labelled "High Risk" — display "High (0.7)" must NOT be echo-stripped
+    // because "high" is a substring of "high risk", not the other way around
+    const factorNode = makeFactorNode("fac_high_risk", "High Risk", {
+      observed_state: { value: 0.7, source: "brief_extraction" },
+      factor_type: "probability",
+    });
+    const options = [makeOptionWithIntervention("opt_a", "Mitigate risk", "fac_high_risk", 0.7)];
+    const graph = makeGraph([factorNode]);
+
+    const payload = buildAnalysisReadyPayload(options, "goal_1", graph);
+    const details = payload.options[0].intervention_details;
+
+    // "High (0.7)" must be preserved, not stripped to "0.7"
+    expect(details!["fac_high_risk"].display_value).toBe("High (0.7)");
+  });
+});
+
+// ============================================================================
+// is_baseline — hyphenated label regression (Finding 5)
+// ============================================================================
+
+describe("is_baseline — hyphenated label regression", () => {
+  it("does not match 'existing' inside 'pre-existing'", () => {
+    const options = [
+      makeOption("opt_a", "Address pre-existing conditions"),
+      makeOption("opt_b", "Build new system"),
+    ];
+    const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
+    for (const opt of payload.options) {
+      expect(opt.is_baseline).toBeUndefined();
+    }
+  });
+
+  it("does not match 'baseline' inside 'sub-baseline'", () => {
+    const options = [
+      makeOption("opt_a", "Improve sub-baseline performance"),
+      makeOption("opt_b", "New approach"),
+    ];
+    const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
+    for (const opt of payload.options) {
+      expect(opt.is_baseline).toBeUndefined();
+    }
+  });
+
+  it("still matches standalone 'existing' at word boundary", () => {
+    const options = [
+      makeOption("opt_a", "Keep existing process"),
+      makeOption("opt_b", "New process"),
+    ];
+    const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
+    expect(payload.options[0].is_baseline).toBe(true);
+  });
+});
+
+describe("is_baseline — staging regression labels", () => {
+  const stagingLabels = [
+    "Make No New Hire (Status Quo)",
+    "No New Hire (Status Quo)",
+    "No Dedicated Marketing (Status Quo)",
+    "No Dedicated Campaign (Status Quo)",
+  ];
+
+  for (const label of stagingLabels) {
+    it(`labelMatchesBaseline detects "${label}"`, () => {
+      expect(labelMatchesBaseline(label)).toBe(true);
+    });
+  }
+
+  it("all four staging labels are detected as baseline by buildAnalysisReadyPayload", () => {
+    for (const label of stagingLabels) {
+      const options = [
+        makeOption("opt_a", "Hire a Senior Developer"),
+        makeOption("opt_b", label),
+      ];
+      const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
+      expect(payload.options[1].is_baseline, `Expected is_baseline=true for "${label}"`).toBe(true);
+      expect(payload.options[0].is_baseline).toBeUndefined();
+    }
+  });
+
+  it("intervention_details survives extractAnalysisReady round-trip", () => {
+    // Build a payload with intervention_details via the real pipeline
+    const factorNode = {
+      id: "fac_cost", kind: "factor", label: "Cost",
+      observed_state: { raw_value: 50000, unit: "GBP", value: 0.5 },
+      display_value: "£50,000",
+    } as unknown as NodeV3T;
+    const graph = makeGraph([factorNode]);
+    graph.edges = [{ from: "opt_a", to: "fac_cost" }] as any;
+
+    const options = [
+      makeOption("opt_a", "Option A", {
+        interventions: { fac_cost: { value: 0.5, source: "brief_extraction", target_match: { confidence: "high" } } },
+      }),
+    ];
+
+    const payload = buildAnalysisReadyPayload(options, "goal_1", graph);
+    expect(payload.options[0].intervention_details).toBeDefined();
+    expect(Object.keys(payload.options[0].intervention_details!).length).toBeGreaterThan(0);
+
+    // Now round-trip through extractAnalysisReady (simulates pipeline → draft-graph.ts)
+    const body = { analysis_ready: payload };
+    const extracted = extractAnalysisReady(body as any);
+    expect(extracted).toBeDefined();
+    expect(extracted!.options[0].intervention_details).toBeDefined();
+    expect(extracted!.options[0].intervention_details!["fac_cost"]).toBeDefined();
+    expect(extracted!.options[0].intervention_details!["fac_cost"].display_value).toBe("£50,000");
+  });
+
+  it("empty intervention_details is omitted after extractAnalysisReady", () => {
+    const body = {
+      analysis_ready: {
+        options: [
+          { id: "opt_a", label: "Option A", status: "ready", interventions: { fac_x: 0.5 }, intervention_details: {} },
+        ],
+        goal_node_id: "goal_1",
+        status: "ready",
+      },
+    };
+
+    const extracted = extractAnalysisReady(body as any);
+    expect(extracted).toBeDefined();
+    expect(extracted!.options[0]).not.toHaveProperty("intervention_details");
+  });
+});

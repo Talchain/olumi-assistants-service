@@ -1,0 +1,70 @@
+{
+  "schema_version": "olumi.draft_graph.legacy_disposition.v1",
+  "authority": "governed/draft-graph-v5/manifest.json",
+  "dispositions": {
+    "KEEP": [
+      {
+        "path": "governed/draft-graph-v5/baseline/pms-draft-graph-v195.txt",
+        "reason": "Exact serving PMS snapshot and the sole baseline prompt authority."
+      },
+      {
+        "path": "src/scorer.ts",
+        "reason": "Keep its per-dimension signals as explicitly informational diagnostics; it cannot authorize a records-contract prompt promotion."
+      }
+    ],
+    "REPLACE": [
+      {
+        "path": "src/runner.ts",
+        "reason": "For draft_graph quality or promotion claims, replace raw provider calls with the governed production-records runner. Retain for other prompt types."
+      },
+      {
+        "path": "src/adapters/draft-graph.ts",
+        "reason": "Replace its all-Markdown corpus selection and raw graph parse path for governed draft_graph evaluation."
+      }
+    ],
+    "QUARANTINE": [
+      {
+        "path": "src/validator.ts",
+        "reason": "Its retired raw-graph topology accepts only 5/14 current records-contract captures; quarantine it from structural and promotion authority."
+      },
+      { "path": "prompts/draft-v175-B.txt", "reason": "Historical pre-records prompt; reproduction only." },
+      { "path": "prompts/draft-v175-gpt41-v2.txt", "reason": "Historical provider-specific prompt; reproduction only." },
+      { "path": "prompts/draft-v175-gpt41.txt", "reason": "Historical provider-specific prompt; reproduction only." },
+      { "path": "prompts/draft-v175-gpt4o-v2.txt", "reason": "Historical provider-specific prompt; reproduction only." },
+      { "path": "prompts/draft-v175-gpt4o.txt", "reason": "Historical provider-specific prompt; reproduction only." },
+      { "path": "prompts/draft-v175.txt", "reason": "Historical pre-records prompt; reproduction only." },
+      { "path": "prompts/draft-v175B-claude-v2.txt", "reason": "Historical provider-specific prompt; reproduction only." },
+      { "path": "prompts/draft-v175B-claude.txt", "reason": "Historical provider-specific prompt; reproduction only." },
+      { "path": "prompts/draft-v176-A.txt", "reason": "Historical prompt experiment; reproduction only." },
+      { "path": "prompts/draft-v176-B.txt", "reason": "Historical prompt experiment; reproduction only." },
+      { "path": "prompts/draft-v176-C.txt", "reason": "Historical prompt experiment; reproduction only." },
+      { "path": "prompts/draft-v176.txt", "reason": "Historical prompt experiment; reproduction only." },
+      { "path": "prompts/draft-v178-B.txt", "reason": "Historical prompt experiment; reproduction only." },
+      { "path": "prompts/draft-v178-C.txt", "reason": "Historical prompt experiment; reproduction only." },
+      { "path": "prompts/draft-v178-D.txt", "reason": "Historical prompt experiment; reproduction only." },
+      { "path": "prompts/draft-v178.txt", "reason": "Historical prompt experiment; reproduction only." },
+      { "path": "prompts/draft_graph_v168.txt", "reason": "Historical prompt experiment; reproduction only." },
+      { "path": "prompts/draft_graph_v169.txt", "reason": "Historical prompt experiment; reproduction only." },
+      { "path": "prompts/draft_graph_v170.txt", "reason": "Historical prompt experiment; reproduction only." },
+      { "path": "prompts/draft_graph_v192b.txt", "reason": "Historical graph-output prompt; conflicts with the serving records contract." },
+      { "path": "prompts/draft_graph_v20.txt", "reason": "Historical prompt experiment; reproduction only." },
+      { "path": "prompts/draft_graph_v21.5.txt", "reason": "Historical prompt experiment; reproduction only." },
+      { "path": "prompts/draft_graph_v22.txt", "reason": "Historical prompt experiment; reproduction only." },
+      { "path": "prompts/user-message-reminder.txt", "reason": "Stale reminder still requires retired topology_plan and is not serving-equivalent." }
+    ],
+    "REMOVE": [
+      {
+        "path": "prompts/store_draft_graph_v175.txt",
+        "reason": "Byte-identical duplicate of prompts/draft-v175.txt; no unique archaeological value."
+      },
+      {
+        "path": "briefs/hiring-staging.md",
+        "reason": "Remove from the governed corpus; it remains an ad-hoc staging fixture outside the canonical 14."
+      },
+      {
+        "path": "briefs/pricing-staging.md",
+        "reason": "Remove from the governed corpus; it remains an ad-hoc staging fixture outside the canonical 14."
+      }
+    ]
+  }
+}

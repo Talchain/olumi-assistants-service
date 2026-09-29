@@ -1,0 +1,74 @@
+{
+  "fixture": "v5-turn.run-analysis.staging.json",
+  "captured_at": "2026-04-30T15:18:13.322Z",
+  "captured_against": {
+    "host": "cee-staging.onrender.com",
+    "endpoint": "/orchestrate/v2/turn",
+    "build": "3bb151b",
+    "build_full": "3bb151b607143848e8cde3eaf9291046baff1702",
+    "ancestry": "at-or-after a555cf7 (verified: git merge-base --is-ancestor a555cf7 3bb151b → exit 0)"
+  },
+  "request": {
+    "kind": "message",
+    "stage": "analyse",
+    "turn_class": "decide",
+    "source": "chip_click",
+    "chip": { "action_type": "run_analysis" }
+  },
+  "shape_summary": {
+    "top_level_keys": ["analysis_ready", "assistant_text", "blocks", "insights", "response_version", "stage_indicator", "suggested_actions"],
+    "blocks_count": 1,
+    "block_0_type": "analysis_result",
+    "analysis_ready_options_count": 4,
+    "enrichment_top_level_key_count": 40,
+    "enrichment_critiques_count": 4,
+    "enrichment_review_cards_count": 1,
+    "enrichment_meta_response_hash": "ef1aeb36a440854a"
+  },
+  "regression_targets": [
+    {
+      "path": "$.blocks[0].enrichment.critiques[0..3].message",
+      "leak_type": "raw_entity_id_in_user_facing_prose",
+      "captured_samples": [
+        "Node 'opt_hire_local' has kind='option'. Option nodes are filtered before analysis.",
+        "Node 'opt_offshore' has kind='option'. Option nodes are filtered before analysis.",
+        "Node 'opt_status_quo' has kind='option'. Option nodes are filtered before analysis.",
+        "Node 'opt_tiered_pricing' has kind='option'. Option nodes are filtered before analysis."
+      ],
+      "classification": "Bucket D (diagnostic — suppress to enrichment._diagnostics)"
+    }
+  ],
+  "review_cards_audit": {
+    "user_facing_prose_paths": [
+      "$.blocks[0].enrichment.review_cards[*].what",
+      "$.blocks[0].enrichment.review_cards[*].why",
+      "$.blocks[0].enrichment.review_cards[*].items[*].suggested_evidence"
+    ],
+    "structural_only_paths": [
+      "$.blocks[0].enrichment.review_cards[*].card_id",
+      "$.blocks[0].enrichment.review_cards[*].card_type",
+      "$.blocks[0].enrichment.review_cards[*].priority",
+      "$.blocks[0].enrichment.review_cards[*].priority_band",
+      "$.blocks[0].enrichment.review_cards[*].review_phase",
+      "$.blocks[0].enrichment.review_cards[*].suggested_action",
+      "$.blocks[0].enrichment.review_cards[*].supporting_refs[*]",
+      "$.blocks[0].enrichment.review_cards[*].provenance.*",
+      "$.blocks[0].enrichment.review_cards[*].items[*].node_id",
+      "$.blocks[0].enrichment.review_cards[*].items[*].factor_id",
+      "$.blocks[0].enrichment.review_cards[*].items[*].factor_label",
+      "$.blocks[0].enrichment.review_cards[*].items[*].sensitivity_rank",
+      "$.blocks[0].enrichment.review_cards[*].items[*].sensitivity_value",
+      "$.blocks[0].enrichment.review_cards[*].items[*].confidence_normalised",
+      "$.blocks[0].enrichment.review_cards[*].items[*].score",
+      "$.blocks[0].enrichment.review_cards[*].items[*].elasticity"
+    ],
+    "fixture_state": "All review_card prose strings are ID-clean and label-resolved in this fixture; the audit confirmed prose paths exist and require allowlisting in the sanitiser, not exclusion."
+  },
+  "intended_use": [
+    "Regression input for the analysis-enrichment critique-prose-safety fix brief.",
+    "decision_review v15 input verification.",
+    "Future contract test: tests/contract/decision-review-egress.test.ts."
+  ],
+  "drift_policy": "When the captured leak is fixed in production, re-capture against the new build, update build/captured_at fields, and update regression_targets.captured_samples to the new (clean) wire output.",
+  "scenario_id": "5f625966-eead-4337-a306-79de5f0a9632"
+}

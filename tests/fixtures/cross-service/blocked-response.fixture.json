@@ -1,0 +1,32 @@
+{
+  "description": "Blocked response contract for cross-service consumption",
+  "cee_output": {
+    "graph": null,
+    "nodes": [],
+    "edges": [],
+    "options": [],
+    "analysis_ready": {
+      "status": "blocked",
+      "goal_node_id": "",
+      "options": [],
+      "blockers": [
+        {
+          "code": "validation_failure",
+          "message": "Graph failed V3 schema validation",
+          "severity": "error"
+        }
+      ]
+    },
+    "meta": {
+      "source": "assistant"
+    },
+    "trace": {
+      "request_id": "test-request-123"
+    }
+  },
+  "assertions": {
+    "plot_accepts": true,
+    "ui_safe_serialization": true,
+    "no_undefined_access": true
+  }
+}

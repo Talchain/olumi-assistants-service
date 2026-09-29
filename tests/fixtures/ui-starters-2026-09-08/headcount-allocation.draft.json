@@ -1,0 +1,1216 @@
+{
+  "schema_version": "3.0",
+  "nodes": [
+    {
+      "id": "dec_hiring",
+      "kind": "decision",
+      "label": "Headcount Allocation Decision",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_ae_headcount",
+      "kind": "factor",
+      "label": "Account Executive Headcount Added",
+      "observed_state": {
+        "value": 0,
+        "source": "cee_inference",
+        "extractionType": "inferred",
+        "factor_type": "demand",
+        "uncertainty_drivers": [
+          "Ramp time to quota varies by hire quality",
+          "Sales effectiveness constrained by product reliability"
+        ]
+      },
+      "category": "controllable",
+      "encoding_map": {
+        "0": "No AEs added",
+        "0.5": "Two AEs added",
+        "0.75": "Three AEs added"
+      },
+      "display_value": "Low (0)",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_eng_attrition",
+      "kind": "factor",
+      "label": "Engineering Attrition Rate",
+      "category": "external",
+      "prior": {
+        "distribution": "uniform",
+        "range_min": 0.3,
+        "range_max": 0.8999999999999999
+      },
+      "extractionType": "inferred",
+      "display_value": "0.3 to 0.9",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_eng_headcount",
+      "kind": "factor",
+      "label": "Platform Engineer Headcount Added",
+      "observed_state": {
+        "value": 0,
+        "source": "cee_inference",
+        "extractionType": "inferred",
+        "factor_type": "quality",
+        "uncertainty_drivers": [
+          "Reliability improvement timeline uncertain",
+          "Engineering attrition may offset new hires"
+        ]
+      },
+      "category": "controllable",
+      "encoding_map": {
+        "0": "No engineers added",
+        "0.5": "Two engineers added",
+        "1.0": "Four engineers added"
+      },
+      "display_value": "Low (0)",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_market_demand",
+      "kind": "factor",
+      "label": "Market Demand for Product",
+      "category": "external",
+      "prior": {
+        "distribution": "uniform",
+        "range_min": 0.3,
+        "range_max": 0.8
+      },
+      "display_value": "0.3 to 0.8",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_quota_attainment",
+      "kind": "factor",
+      "label": "Current Sales Quota Attainment",
+      "category": "external",
+      "prior": {
+        "distribution": "uniform",
+        "range_min": 0.25,
+        "range_max": 0.75
+      },
+      "extractionType": "inferred",
+      "display_value": "0.25 to 0.75",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "goal_arr",
+      "kind": "goal",
+      "label": "Achieve ARR Growth by Q3",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "opt_eng",
+      "kind": "option",
+      "label": "Hire Four Platform Engineers",
+      "interventions": {
+        "fac_ae_headcount": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_ae_headcount",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_eng_headcount": {
+          "value": 1,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_eng_headcount",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "is_baseline": false,
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "opt_sales",
+      "kind": "option",
+      "label": "Hire Three Account Executives",
+      "interventions": {
+        "fac_ae_headcount": {
+          "value": 0.75,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_ae_headcount",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_eng_headcount": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_eng_headcount",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "is_baseline": false,
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "opt_split",
+      "kind": "option",
+      "label": "Two-and-Two Split (AE + Engineer)",
+      "interventions": {
+        "fac_ae_headcount": {
+          "value": 0.5,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_ae_headcount",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_eng_headcount": {
+          "value": 0.5,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_eng_headcount",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "is_baseline": false,
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "opt_status_quo",
+      "kind": "option",
+      "label": "Freeze Hiring (Status Quo)",
+      "interventions": {
+        "fac_ae_headcount": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_ae_headcount",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_eng_headcount": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_eng_headcount",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "is_baseline": true,
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "out_new_arr",
+      "kind": "outcome",
+      "label": "New ARR Generated",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "out_reliability",
+      "kind": "outcome",
+      "label": "Platform Reliability Improvement",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "risk_churn",
+      "kind": "risk",
+      "label": "Customer Churn from Reliability Failures",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "risk_eng_attrition",
+      "kind": "risk",
+      "label": "Engineering Team Attrition",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "risk_sales_miss",
+      "kind": "risk",
+      "label": "Sales Quota Miss Due to Product Gaps",
+      "provenance": "ai_inferred"
+    }
+  ],
+  "edges": [
+    {
+      "from": "dec_hiring",
+      "to": "opt_eng",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "dec_hiring",
+      "to": "opt_sales",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "dec_hiring",
+      "to": "opt_split",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "dec_hiring",
+      "to": "opt_status_quo",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_ae_headcount",
+      "to": "out_new_arr",
+      "strength": {
+        "mean": 0.38,
+        "std": 0.18
+      },
+      "exists_probability": 0.72,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_ae_headcount",
+      "to": "risk_sales_miss",
+      "strength": {
+        "mean": -0.22,
+        "std": 0.14
+      },
+      "exists_probability": 0.78,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_eng_attrition",
+      "to": "out_reliability",
+      "strength": {
+        "mean": -0.2,
+        "std": 0.1
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_eng_attrition",
+      "to": "risk_eng_attrition",
+      "strength": {
+        "mean": 0.4,
+        "std": 0.12
+      },
+      "exists_probability": 0.88,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_eng_headcount",
+      "to": "out_reliability",
+      "strength": {
+        "mean": 0.55,
+        "std": 0.15
+      },
+      "exists_probability": 0.82,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_eng_headcount",
+      "to": "risk_churn",
+      "strength": {
+        "mean": -0.45,
+        "std": 0.15
+      },
+      "exists_probability": 0.85,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_eng_headcount",
+      "to": "risk_eng_attrition",
+      "strength": {
+        "mean": -0.3,
+        "std": 0.14
+      },
+      "exists_probability": 0.75,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_market_demand",
+      "to": "out_new_arr",
+      "strength": {
+        "mean": 0.18,
+        "std": 0.1
+      },
+      "exists_probability": 0.7,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_quota_attainment",
+      "to": "out_new_arr",
+      "strength": {
+        "mean": 0.25,
+        "std": 0.1
+      },
+      "exists_probability": 0.88,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_quota_attainment",
+      "to": "risk_sales_miss",
+      "strength": {
+        "mean": -0.35,
+        "std": 0.12
+      },
+      "exists_probability": 0.9,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_eng",
+      "to": "fac_eng_headcount",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_sales",
+      "to": "fac_ae_headcount",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_split",
+      "to": "fac_ae_headcount",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_split",
+      "to": "fac_eng_headcount",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_status_quo",
+      "to": "fac_ae_headcount",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_status_quo",
+      "to": "fac_eng_headcount",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "out_new_arr",
+      "to": "goal_arr",
+      "strength": {
+        "mean": 0.65,
+        "std": 0.1
+      },
+      "exists_probability": 0.92,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "out_reliability",
+      "to": "goal_arr",
+      "strength": {
+        "mean": 0.3,
+        "std": 0.12
+      },
+      "exists_probability": 0.85,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "risk_churn",
+      "to": "goal_arr",
+      "strength": {
+        "mean": -0.45,
+        "std": 0.12
+      },
+      "exists_probability": 0.9,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "risk_eng_attrition",
+      "to": "goal_arr",
+      "strength": {
+        "mean": -0.2,
+        "std": 0.1
+      },
+      "exists_probability": 0.78,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "risk_sales_miss",
+      "to": "goal_arr",
+      "strength": {
+        "mean": -0.35,
+        "std": 0.12
+      },
+      "exists_probability": 0.88,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    }
+  ],
+  "options": [
+    {
+      "id": "opt_eng",
+      "label": "Hire Four Platform Engineers",
+      "status": "ready",
+      "interventions": {
+        "fac_ae_headcount": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_ae_headcount",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_eng_headcount": {
+          "value": 1,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_eng_headcount",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "provenance": {
+        "source": "brief_extraction"
+      },
+      "is_baseline": false
+    },
+    {
+      "id": "opt_sales",
+      "label": "Hire Three Account Executives",
+      "status": "ready",
+      "interventions": {
+        "fac_ae_headcount": {
+          "value": 0.75,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_ae_headcount",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_eng_headcount": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_eng_headcount",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "provenance": {
+        "source": "brief_extraction"
+      },
+      "is_baseline": false
+    },
+    {
+      "id": "opt_split",
+      "label": "Two-and-Two Split (AE + Engineer)",
+      "status": "ready",
+      "interventions": {
+        "fac_ae_headcount": {
+          "value": 0.5,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_ae_headcount",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_eng_headcount": {
+          "value": 0.5,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_eng_headcount",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "provenance": {
+        "source": "brief_extraction"
+      },
+      "is_baseline": false
+    },
+    {
+      "id": "opt_status_quo",
+      "label": "Freeze Hiring (Status Quo)",
+      "status": "ready",
+      "interventions": {
+        "fac_ae_headcount": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_ae_headcount",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_eng_headcount": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_eng_headcount",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "provenance": {
+        "source": "brief_extraction"
+      },
+      "is_baseline": true
+    }
+  ],
+  "goal_node_id": "goal_arr",
+  "validation_warnings": [
+    {
+      "code": "OPTION_SIMILARITY",
+      "message": "Options \"Two-and-Two Split (AE + Engineer)\" and \"Freeze Hiring (Status Quo)\" affect the same factors (Jaccard 1.00). Consider whether they represent genuinely different approaches.",
+      "severity": "info",
+      "details": {
+        "optionA": "opt_split",
+        "optionB": "opt_status_quo",
+        "jaccard": 1
+      },
+      "suggestion": "Options affect the same factors — consider whether they represent genuinely different approaches"
+    }
+  ],
+  "goal_constraints": [
+    {
+      "constraint_id": "constraint_goal_arr_max",
+      "node_id": "goal_arr",
+      "operator": "<=",
+      "value": 2,
+      "label": "Delivery deadline",
+      "unit": "months",
+      "source_quote": "by Q3",
+      "confidence": 0.85,
+      "provenance": "inferred",
+      "deadline_metadata": {
+        "deadline_date": "2026-09-30",
+        "reference_date": "2026-07-28",
+        "assumed_reference_date": true
+      }
+    }
+  ],
+  "coaching": {
+    "summary": "The decision sits at the intersection of two compounding problems — a reliability deficit that suppresses sales effectiveness and rising engineering attrition that worsens that deficit — making the causal chain from hiring choice to ARR growth non-trivial to trace. Strengthening the reasoning means surfacing missing links, testing the Q3 timeline assumption, and guarding against the framing that more sellers automatically means more revenue.",
+    "strengthen_items": [
+      {
+        "id": "link-reliability-to-quota",
+        "label": "Make the reliability-to-quota-attainment link explicit",
+        "detail": "The brief states the sales team 'already misses quota with the current product reliability,' yet the causal structure does not connect Platform Reliability Improvement back to Current Sales Quota Attainment — closing this loop would reveal whether fixing reliability is a prerequisite for any sales headcount to be effective.",
+        "action_type": "add_risk",
+        "bias_category": "narrow_framing"
+      },
+      {
+        "id": "add-time-lag-constraint",
+        "label": "Introduce a time-to-impact constraint for the Q3 deadline",
+        "detail": "Neither engineering ramp-up time nor sales ramp-to-productivity is represented, yet both affect whether any option can plausibly move New ARR Generated or Platform Reliability Improvement before the board's Q3 milestone.",
+        "action_type": "add_constraint",
+        "bias_category": "overconfidence"
+      },
+      {
+        "id": "link-attrition-to-reliability-loop",
+        "label": "Capture the attrition-reliability feedback loop",
+        "detail": "Rising engineering attrition degrades reliability, which in turn could accelerate further attrition — this self-reinforcing dynamic between Engineering Attrition Rate and Platform Reliability Improvement is present in the brief but not yet modelled as a feedback path.",
+        "action_type": "add_risk",
+        "bias_category": "overconfidence"
+      },
+      {
+        "id": "examine-status-quo-baseline",
+        "label": "Stress-test the status-quo option as a meaningful baseline",
+        "detail": "Freeze Hiring (Status Quo) is included but its downstream effects on Customer Churn from Reliability Failures and Engineering Team Attrition under a 'rising attrition' and ongoing reliability debt scenario deserve explicit articulation so the other options are compared against a realistic, not neutral, baseline.",
+        "action_type": "add_option",
+        "bias_category": "status_quo_bias"
+      }
+    ],
+    "widening_log": {
+      "elements_added": [],
+      "elements_considered_but_excluded": [
+        "A 'competitive landscape' factor was considered but the brief gives no signal about competitive dynamics, so adding it would be speculative.",
+        "A 'board confidence' outcome was considered but the brief treats ARR growth as the sole board metric, making a separate node redundant."
+      ],
+      "brief_completeness": "partial"
+    },
+    "bias_signals": [
+      {
+        "type": "narrow_framing",
+        "detail": "The brief frames the choice as 'three AEs to push revenue now' versus engineers, implying AE headcount directly drives ARR — yet it also states 'the sales team already misses quota with the current product reliability,' which suggests the revenue lever may be blocked regardless of seller count.",
+        "target": "opt_sales"
+      },
+      {
+        "type": "overconfidence",
+        "detail": "The brief anchors the goal to 'ARR growth by Q3' without acknowledging ramp time for either engineers or account executives, implying a confidence in speed-to-impact that the causal structure does not yet support.",
+        "target": "goal_arr"
+      },
+      {
+        "type": "anchoring",
+        "detail": "The framing opens with 'approved headcount for four hires,' which anchors the entire analysis to exactly four positions and may foreclose consideration of sequencing, contract, or other staffing forms that could address both constraints.",
+        "target": "dec_hiring"
+      }
+    ]
+  },
+  "causal_claims": [
+    {
+      "type": "direct_effect",
+      "from": "fac_ae_headcount",
+      "to": "out_new_arr",
+      "stated_strength": "moderate"
+    },
+    {
+      "type": "direct_effect",
+      "from": "fac_ae_headcount",
+      "to": "risk_sales_miss",
+      "stated_strength": "moderate"
+    },
+    {
+      "type": "direct_effect",
+      "from": "fac_eng_attrition",
+      "to": "out_reliability",
+      "stated_strength": "moderate"
+    },
+    {
+      "type": "direct_effect",
+      "from": "fac_eng_attrition",
+      "to": "risk_eng_attrition",
+      "stated_strength": "moderate"
+    },
+    {
+      "type": "direct_effect",
+      "from": "fac_eng_headcount",
+      "to": "out_reliability",
+      "stated_strength": "moderate"
+    },
+    {
+      "type": "direct_effect",
+      "from": "fac_eng_headcount",
+      "to": "risk_churn",
+      "stated_strength": "moderate"
+    },
+    {
+      "type": "direct_effect",
+      "from": "fac_quota_attainment",
+      "to": "out_new_arr",
+      "stated_strength": "moderate"
+    },
+    {
+      "type": "direct_effect",
+      "from": "fac_quota_attainment",
+      "to": "risk_sales_miss",
+      "stated_strength": "moderate"
+    }
+  ],
+  "topology_plan": [],
+  "draft_warnings": [
+    {
+      "id": "goal_no_baseline_value",
+      "severity": "low",
+      "node_ids": [
+        "goal_arr"
+      ],
+      "edge_ids": [],
+      "affected_node_ids": [
+        "goal_arr"
+      ],
+      "affected_edge_ids": [],
+      "explanation": "Goal node has no observed_state.value set.",
+      "fix_hint": "Set goal node's observed_state.value to establish baseline for comparison"
+    }
+  ],
+  "analysis_ready": {
+    "options": [
+      {
+        "id": "opt_eng",
+        "label": "Hire Four Platform Engineers",
+        "status": "ready",
+        "status_reason": "2 intervention(s) ready for analysis",
+        "interventions": {
+          "fac_ae_headcount": {
+            "value": 0,
+            "source": "brief_extraction",
+            "display_value": "Low (0)"
+          },
+          "fac_eng_headcount": {
+            "value": 1,
+            "source": "brief_extraction",
+            "display_value": "Very high (1)"
+          }
+        },
+        "extraction_metadata": {
+          "source": "brief_extraction",
+          "confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "intervention_details": {
+          "fac_ae_headcount": {
+            "display_value": "Low (0)",
+            "normalised_value": 0
+          },
+          "fac_eng_headcount": {
+            "display_value": "Very high (1)",
+            "normalised_value": 1
+          }
+        }
+      },
+      {
+        "id": "opt_sales",
+        "label": "Hire Three Account Executives",
+        "status": "ready",
+        "status_reason": "2 intervention(s) ready for analysis",
+        "interventions": {
+          "fac_ae_headcount": {
+            "value": 0.75,
+            "source": "brief_extraction",
+            "display_value": "High (0.75)"
+          },
+          "fac_eng_headcount": {
+            "value": 0,
+            "source": "brief_extraction",
+            "display_value": "Low (0)"
+          }
+        },
+        "extraction_metadata": {
+          "source": "brief_extraction",
+          "confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "intervention_details": {
+          "fac_ae_headcount": {
+            "display_value": "High (0.75)",
+            "normalised_value": 0.75
+          },
+          "fac_eng_headcount": {
+            "display_value": "Low (0)",
+            "normalised_value": 0
+          }
+        }
+      },
+      {
+        "id": "opt_split",
+        "label": "Two-and-Two Split (AE + Engineer)",
+        "status": "ready",
+        "status_reason": "2 intervention(s) ready for analysis",
+        "interventions": {
+          "fac_ae_headcount": {
+            "value": 0.5,
+            "source": "brief_extraction",
+            "display_value": "Moderate (0.5)"
+          },
+          "fac_eng_headcount": {
+            "value": 0.5,
+            "source": "brief_extraction",
+            "display_value": "Moderate (0.5)"
+          }
+        },
+        "extraction_metadata": {
+          "source": "brief_extraction",
+          "confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "intervention_details": {
+          "fac_ae_headcount": {
+            "display_value": "Moderate (0.5)",
+            "normalised_value": 0.5
+          },
+          "fac_eng_headcount": {
+            "display_value": "Moderate (0.5)",
+            "normalised_value": 0.5
+          }
+        }
+      },
+      {
+        "id": "opt_status_quo",
+        "label": "Freeze Hiring (Status Quo)",
+        "status": "ready",
+        "status_reason": "2 intervention(s) ready for analysis",
+        "interventions": {
+          "fac_ae_headcount": {
+            "value": 0,
+            "source": "brief_extraction",
+            "display_value": "Low (0)"
+          },
+          "fac_eng_headcount": {
+            "value": 0,
+            "source": "brief_extraction",
+            "display_value": "Low (0)"
+          }
+        },
+        "extraction_metadata": {
+          "source": "brief_extraction",
+          "confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "is_baseline": true,
+        "intervention_details": {
+          "fac_ae_headcount": {
+            "display_value": "Low (0)",
+            "normalised_value": 0
+          },
+          "fac_eng_headcount": {
+            "display_value": "Low (0)",
+            "normalised_value": 0
+          }
+        }
+      }
+    ],
+    "goal_node_id": "goal_arr",
+    "status": "ready",
+    "bias_findings": [
+      {
+        "id": "authority_high_degree_node",
+        "category": "other",
+        "severity": "medium",
+        "node_ids": [
+          "fac_ae_headcount",
+          "out_new_arr",
+          "risk_sales_miss",
+          "opt_sales",
+          "opt_split",
+          "opt_status_quo"
+        ],
+        "explanation": "One or more authority-labelled nodes are highly connected in the decision graph; this may overweight senior opinions.",
+        "code": "AUTHORITY_BIAS",
+        "targets": {
+          "node_ids": [
+            "fac_ae_headcount",
+            "out_new_arr",
+            "risk_sales_miss",
+            "opt_sales",
+            "opt_split",
+            "opt_status_quo"
+          ]
+        },
+        "structural_pattern": "Authority-labelled node has connections to three or more other nodes",
+        "confidence_band": "medium",
+        "mechanism": "Tendency to attribute greater accuracy to opinions of authority figures, regardless of content.",
+        "citation": "Milgram (1963) - Journal of Abnormal and Social Psychology",
+        "micro_intervention": {
+          "steps": [
+            "Collect input anonymously before revealing who said what",
+            "Explicitly ask junior team members to share their view first"
+          ],
+          "estimated_minutes": 3
+        }
+      }
+    ],
+    "model_adjustments": [
+      {
+        "code": "category_reclassified",
+        "node_id": "fac_eng_attrition",
+        "field": "nodes[fac_eng_attrition].category",
+        "reason": "Reclassified unreachable factor \"Engineering Attrition Rate\" to external with synthesised prior [0.3, 0.8999999999999999]",
+        "source": "deterministic_sweep"
+      },
+      {
+        "code": "category_reclassified",
+        "node_id": "fac_market_demand",
+        "field": "nodes[fac_market_demand].category",
+        "reason": "Reclassified unreachable factor \"Market Demand for Product\" to external",
+        "source": "deterministic_sweep"
+      },
+      {
+        "code": "category_reclassified",
+        "node_id": "fac_quota_attainment",
+        "field": "nodes[fac_quota_attainment].category",
+        "reason": "Reclassified unreachable factor \"Current Sales Quota Attainment\" to external with synthesised prior [0.25, 0.75]",
+        "source": "deterministic_sweep"
+      }
+    ]
+  },
+  "meta": {
+    "roots": [
+      "dec_hiring",
+      "fac_eng_attrition",
+      "fac_market_demand",
+      "fac_quota_attainment"
+    ],
+    "leaves": [
+      "goal_arr"
+    ],
+    "source": "assistant"
+  },
+  "quality": {
+    "overall": 9,
+    "structure": 8,
+    "coverage": 10,
+    "structural_proxy": 8,
+    "safety": 8
+  },
+  "_pipeline_outcome": {
+    "graph_drafted": true,
+    "graph_structurally_valid": true,
+    "deterministic_sweep_violations": 0,
+    "verification_status": "passed",
+    "validation_status": "skipped",
+    "enrichment_status": "complete",
+    "coaching_status": "complete",
+    "warnings": [],
+    "rescue_score": 13,
+    "factor_value_coverage": {
+      "total": 5,
+      "explicit": 0,
+      "inferred_with_evidence": 2,
+      "fallback_default": 3
+    },
+    "edge_strength_unique_count": 12,
+    "llm_repair": {
+      "triggered": false,
+      "outcome": "skipped",
+      "fallback_reason": null,
+      "attempts": 0
+    },
+    "repair_provenance": [
+      {
+        "rule": "OBSERVABLE_EXTRA_DATA",
+        "code": "OBSERVABLE_EXTRA_DATA",
+        "node_or_edge_id": "nodes[fac_eng_attrition].data",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "fallback_default"
+      },
+      {
+        "rule": "OBSERVABLE_EXTRA_DATA",
+        "code": "OBSERVABLE_EXTRA_DATA",
+        "node_or_edge_id": "nodes[fac_quota_attainment].data",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "fallback_default"
+      },
+      {
+        "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+        "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+        "node_or_edge_id": "nodes[fac_eng_attrition].category",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "structure"
+      },
+      {
+        "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+        "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+        "node_or_edge_id": "nodes[fac_market_demand].category",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "structure"
+      },
+      {
+        "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+        "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+        "node_or_edge_id": "nodes[fac_quota_attainment].category",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "structure"
+      }
+    ]
+  }
+}

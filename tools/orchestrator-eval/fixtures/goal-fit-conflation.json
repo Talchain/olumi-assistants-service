@@ -1,0 +1,51 @@
+{
+  "id": "goal-fit-conflation",
+  "description": "Reproduces staging scenario 90385279 (fixed twice): the leading option wins 89% of the time but has only a 29% modelled probability of meeting the target. The gate must catch a response that narrates the 89% win probability as the chance of hitting the goal, and must pass a response that keeps win% and target-fit distinct. Proof the gate catches the exact drift the format-analysis-for-context fix (TARGET_FIT_DEFINITION) prevents at assembly time.",
+  "user_message": "Which pricing option should I go with to hit £20k MRR?",
+  "analysis": {
+    "status": "completed",
+    "leading_option": { "label": "Raise Prices to £59", "probability": 0.89, "goal_fit_probability": 0.293 },
+    "runner_up": { "label": "Keep Current Pricing", "probability": 0.11, "goal_fit_probability": 0.62 },
+    "margin_pp": 78,
+    "robustness_band": "moderate",
+    "top_drivers": [],
+    "fragile_edges": [],
+    "options": [
+      { "label": "Raise Prices to £59", "probability": 0.89, "goal_fit_probability": 0.293 },
+      { "label": "Keep Current Pricing", "probability": 0.11, "goal_fit_probability": 0.62 }
+    ],
+    "goal_fit": { "scored": true, "basis": "modelled_outcome_distribution" }
+  },
+  "candidates": [
+    {
+      "label": "good",
+      "note": "Keeps the two vocabularies apart: 89% is the win probability (beats the alternatives), 29% is the target-fit. Should PASS.",
+      "source": "recorded",
+      "text": "Raising prices to £59 wins most often, with an 89% win probability. That only means it beats the alternatives; it is about 29% likely to actually meet your £20k target, so leading the comparison does not guarantee the goal."
+    },
+    {
+      "label": "good_terse",
+      "note": "Compound sentence carrying both numbers, each bound to its own claim (89% wins, 29% meets target). Should PASS.",
+      "source": "recorded",
+      "text": "Raising prices wins 89% of the time but is only about 29% likely to meet the £20k target."
+    },
+    {
+      "label": "regression",
+      "note": "The scenario-90385279 defect: the 89% WIN probability narrated as the chance of reaching the target. Should FAIL.",
+      "source": "recorded",
+      "text": "Raising prices to £59 gives you an 89% chance of reaching your £20k target, so you are very likely to hit the goal."
+    },
+    {
+      "label": "regression_subtle",
+      "note": "Same conflation without the word 'chance': the win number stated directly as target-fit. Should FAIL.",
+      "source": "recorded",
+      "text": "Raising prices to £59 is 89% likely to meet your £20k target."
+    }
+  ],
+  "expected": {
+    "good": true,
+    "good_terse": true,
+    "regression": false,
+    "regression_subtle": false
+  }
+}

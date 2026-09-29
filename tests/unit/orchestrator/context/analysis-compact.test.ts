@@ -1,0 +1,654 @@
+import { describe, it, expect, vi } from "vitest";
+import { compactAnalysis } from "../../../../src/orchestrator/context/analysis-compact.js";
+import type { V2RunResponseEnvelope } from "../../../../src/orchestrator/types.js";
+
+// ============================================================================
+// Fixtures
+// ============================================================================
+
+function makeOption(overrides?: Record<string, unknown>) {
+  return {
+    option_id: "opt_a",
+    option_label: "Option A",
+    win_probability: 0.6,
+    outcome_mean: 0.55,
+    ...overrides,
+  };
+}
+
+function makeResponse(overrides?: Partial<V2RunResponseEnvelope>): V2RunResponseEnvelope {
+  return {
+    meta: { seed_used: 42, n_samples: 1000, response_hash: "abc123" },
+    results: [makeOption()],
+    ...overrides,
+  } as V2RunResponseEnvelope;
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+describe("compactAnalysis", () => {
+  it("returns null for null input", () => {
+    expect(compactAnalysis(null)).toBeNull();
+  });
+
+  it("returns null for undefined input", () => {
+    expect(compactAnalysis(undefined)).toBeNull();
+  });
+
+  it("returns null when analysis_status is 'blocked'", () => {
+    const response = makeResponse({ analysis_status: "blocked" } as Record<string, unknown>);
+    expect(compactAnalysis(response)).toBeNull();
+  });
+
+  it("returns null when analysis_status is 'failed'", () => {
+    const response = makeResponse({ analysis_status: "failed" } as Record<string, unknown>);
+    expect(compactAnalysis(response)).toBeNull();
+  });
+
+  it("extracts winner as highest win_probability option", () => {
+    const response = makeResponse({
+      results: [
+        makeOption({ option_id: "opt_a", option_label: "Option A", win_probability: 0.3 }),
+        makeOption({ option_id: "opt_b", option_label: "Option B", win_probability: 0.7 }),
+      ],
+    });
+    const summary = compactAnalysis(response);
+    expect(summary).not.toBeNull();
+    expect(summary!.winner.option_id).toBe("opt_b");
+    expect(summary!.winner.option_label).toBe("Option B");
+    expect(summary!.winner.win_probability).toBe(0.7);
+  });
+
+  it("tiebreaks winner by option_id lexicographic when win_probability tied", () => {
+    const response = makeResponse({
+      results: [
+        makeOption({ option_id: "opt_z", option_label: "Option Z", win_probability: 0.5 }),
+        makeOption({ option_id: "opt_a", option_label: "Option A", win_probability: 0.5 }),
+        makeOption({ option_id: "opt_m", option_label: "Option M", win_probability: 0.5 }),
+      ],
+    });
+    const summary = compactAnalysis(response);
+    expect(summary!.winner.option_id).toBe("opt_a");
+  });
+
+  it("sorts options by win_probability descending in summary", () => {
+    const response = makeResponse({
+      results: [
+        makeOption({ option_id: "opt_a", win_probability: 0.2 }),
+        makeOption({ option_id: "opt_b", win_probability: 0.7 }),
+        makeOption({ option_id: "opt_c", win_probability: 0.5 }),
+      ],
+    });
+    const summary = compactAnalysis(response);
+    const probs = summary!.options.map((o) => o.win_probability);
+    expect(probs).toEqual([0.7, 0.5, 0.2]);
+  });
+
+  it("extracts top 5 drivers from factor_sensitivity across all options", () => {
+    const results = [
+      {
+        ...makeOption({ option_id: "opt_a" }),
+        factor_sensitivity: [
+          { node_id: "factor_1", label: "Factor 1", sensitivity: 0.8, influence_score: 0.8 },
+          { node_id: "factor_2", label: "Factor 2", sensitivity: -0.6, influence_score: 0.6 },
+          { node_id: "factor_3", label: "Factor 3", sensitivity: 0.4, influence_score: 0.4 },
+          { node_id: "factor_4", label: "Factor 4", sensitivity: -0.3, influence_score: 0.3 },
+          { node_id: "factor_5", label: "Factor 5", sensitivity: 0.2, influence_score: 0.2 },
+          { node_id: "factor_6", label: "Factor 6", sensitivity: 0.1, influence_score: 0.1 },
+        ],
+      },
+    ];
+    const response = makeResponse({ results });
+    const summary = compactAnalysis(response);
+    expect(summary!.top_drivers).toHaveLength(5);
+    // Sorted by absolute sensitivity descending
+    expect(summary!.top_drivers[0].factor_id).toBe("factor_1");
+    expect(summary!.top_drivers[0].sensitivity).toBe(0.8);
+    expect(summary!.top_drivers[1].factor_id).toBe("factor_2");
+    expect(summary!.top_drivers[1].direction).toBe("negative");
+  });
+
+  it("honours the authoritative direction enum over the magnitude sign (unsigned elasticity)", () => {
+    // Contract: elasticity is unsigned and `direction` is authoritative. A
+    // factor with positive (unsigned) elasticity but direction 'negative' must
+    // resolve negative — pre-fix it sign-derived 'positive' from the magnitude.
+    const results = [
+      {
+        ...makeOption({ option_id: "opt_a" }),
+        factor_sensitivity: [
+          { node_id: "factor_1", label: "Factor 1", elasticity: 0.6, direction: "negative", influence_score: 0.6 },
+        ],
+      },
+    ];
+    const summary = compactAnalysis(makeResponse({ results } as Partial<V2RunResponseEnvelope>));
+    expect(summary!.top_drivers[0].factor_id).toBe("factor_1");
+    expect(summary!.top_drivers[0].direction).toBe("negative");
+  });
+
+  it("preserves a 'neutral' direction instead of collapsing it to positive", () => {
+    const results = [
+      {
+        ...makeOption({ option_id: "opt_a" }),
+        factor_sensitivity: [
+          { node_id: "factor_1", label: "Factor 1", elasticity: 0.5, direction: "neutral", influence_score: 0.5 },
+        ],
+      },
+    ];
+    const summary = compactAnalysis(makeResponse({ results } as Partial<V2RunResponseEnvelope>));
+    expect(summary!.top_drivers[0].direction).toBe("neutral");
+  });
+
+  it("falls back to the magnitude sign only when direction is absent", () => {
+    // Regression: signed sensitivity with no explicit direction → sign wins.
+    const results = [
+      {
+        ...makeOption({ option_id: "opt_a" }),
+        factor_sensitivity: [
+          { node_id: "factor_1", label: "Factor 1", sensitivity: -0.7, influence_score: 0.7 },
+          { node_id: "factor_2", label: "Factor 2", sensitivity: 0.3, influence_score: 0.3 },
+        ],
+      },
+    ];
+    const summary = compactAnalysis(makeResponse({ results } as Partial<V2RunResponseEnvelope>));
+    const f1 = summary!.top_drivers.find((d) => d.factor_id === "factor_1");
+    const f2 = summary!.top_drivers.find((d) => d.factor_id === "factor_2");
+    expect(f1!.direction).toBe("negative");
+    expect(f2!.direction).toBe("positive");
+  });
+
+  it("excludes per-result factor sensitivities that are non-finite (NaN, Infinity, -Infinity)", () => {
+    // Matches the top-level fallback's guard so no NaN/Infinity reaches a
+    // DriverSummary shared by downstream consumers that do not re-filter.
+    const results = [
+      {
+        ...makeOption({ option_id: "opt_a" }),
+        factor_sensitivity: [
+          { node_id: "factor_good", label: "Good", sensitivity: 0.5, direction: "positive", influence_score: 0.5 },
+          { node_id: "factor_nan", label: "NaN", sensitivity: Number.NaN, direction: "positive", influence_score: Number.NaN },
+          { node_id: "factor_inf", label: "Inf", elasticity: Number.POSITIVE_INFINITY, direction: "negative", influence_score: Number.POSITIVE_INFINITY },
+          { node_id: "factor_ninf", label: "NegInf", elasticity: Number.NEGATIVE_INFINITY, direction: "negative", influence_score: Number.NEGATIVE_INFINITY },
+        ],
+      },
+    ];
+    const summary = compactAnalysis(makeResponse({ results } as Partial<V2RunResponseEnvelope>));
+    expect(summary!.top_drivers.map((d) => d.factor_id)).toEqual(["factor_good"]);
+    expect(summary!.top_drivers.every((d) => Number.isFinite(d.sensitivity))).toBe(true);
+  });
+
+  it("deduplicates drivers across options (max absolute sensitivity wins)", () => {
+    const results = [
+      {
+        ...makeOption({ option_id: "opt_a" }),
+        factor_sensitivity: [
+          { node_id: "factor_1", label: "Factor 1", sensitivity: 0.3, influence_score: 0.3 },
+        ],
+      },
+      {
+        ...makeOption({ option_id: "opt_b" }),
+        factor_sensitivity: [
+          { node_id: "factor_1", label: "Factor 1", sensitivity: 0.8, influence_score: 0.8 },
+        ],
+      },
+    ];
+    const response = makeResponse({ results });
+    const summary = compactAnalysis(response);
+    const drivers = summary!.top_drivers.filter((d) => d.factor_id === "factor_1");
+    expect(drivers).toHaveLength(1);
+    expect(drivers[0].sensitivity).toBe(0.8);
+  });
+
+  it("derives robustness_level from robustness_synthesis.overall_assessment", () => {
+    const response = makeResponse({
+      robustness_synthesis: { overall_assessment: "high" },
+    } as Record<string, unknown>);
+    const summary = compactAnalysis(response);
+    // "high" is mapped to canonical "stable" by mapRobustnessToCanonical
+    expect(summary!.robustness_level).toBe("stable");
+  });
+
+  it("falls back to robustness.overall_robustness on first option", () => {
+    const results = [
+      {
+        ...makeOption(),
+        robustness: { overall_robustness: "moderate" },
+      },
+    ];
+    const response = makeResponse({ results });
+    const summary = compactAnalysis(response);
+    // "moderate" maps to canonical "moderate"
+    expect(summary!.robustness_level).toBe("moderate");
+  });
+
+  it("falls back to robustness.level at top level", () => {
+    const response = makeResponse({
+      robustness: { level: "low" },
+    });
+    const summary = compactAnalysis(response);
+    // "low" is mapped to canonical "fragile" by mapRobustnessToCanonical
+    expect(summary!.robustness_level).toBe("fragile");
+  });
+
+  it("returns 'unknown' robustness_level when nothing available (no silent moderate fallback)", () => {
+    const response = makeResponse();
+    const summary = compactAnalysis(response);
+    // deriveRobustnessLevel returns "unknown"; mapRobustnessToCanonical now
+    // preserves "unknown" rather than silently coercing to "moderate", so
+    // downstream projectAnalysis can collapse it to null and composers
+    // omit the robustness sentence rather than asserting a false band.
+    expect(summary!.robustness_level).toBe("unknown");
+  });
+
+  it("deliberate 'unknown' passes through silently — no warning on the no-signal path", async () => {
+    // The "no robustness signal at all" path is expected and should NOT
+    // emit a low-level warning every analysis turn (which would flood
+    // telemetry). Only genuinely novel vendor strings should warn.
+    const telemetry = await import("../../../../src/utils/telemetry.js");
+    const warnSpy = vi.spyOn(telemetry.log, "warn").mockImplementation(() => {});
+    try {
+      const summary = compactAnalysis(makeResponse());
+      expect(summary!.robustness_level).toBe("unknown");
+      const robustnessWarn = warnSpy.mock.calls.find((c) =>
+        typeof c[1] === "string" && c[1].includes("unrecognised robustness band"),
+      );
+      expect(robustnessWarn).toBeUndefined();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("unrecognised vendor robustness string emits a warning (not silenced)", async () => {
+    const telemetry = await import("../../../../src/utils/telemetry.js");
+    const warnSpy = vi.spyOn(telemetry.log, "warn").mockImplementation(() => {});
+    try {
+      const summary = compactAnalysis(
+        makeResponse({ robustness: { level: "shaky" } as { level: string } }),
+      );
+      expect(summary!.robustness_level).toBe("unknown");
+      const robustnessWarn = warnSpy.mock.calls.find((c) =>
+        typeof c[1] === "string" && c[1].includes("unrecognised robustness band"),
+      );
+      expect(robustnessWarn).toBeDefined();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("unrecognised robustness warn payload is bounded by category, not raw-derived", async () => {
+    // Cardinality contract: the warn payload must group cleanly in
+    // dashboards no matter how many distinct vendor strings reach this
+    // branch. We assert by both presence (stable category fields) AND
+    // absence (no raw-derived fields). If a future change adds back a
+    // raw value, raw prefix, or exact length, one of these assertions
+    // fails.
+    const telemetry = await import("../../../../src/utils/telemetry.js");
+    const warnSpy = vi.spyOn(telemetry.log, "warn").mockImplementation(() => {});
+    try {
+      const longValue = "extremely_unstable_with_long_qualifier_string";
+      compactAnalysis(
+        makeResponse({ robustness: { level: longValue } as { level: string } }),
+      );
+      const robustnessWarn = warnSpy.mock.calls.find((c) =>
+        typeof c[1] === "string" && c[1].includes("unrecognised robustness band"),
+      );
+      expect(robustnessWarn).toBeDefined();
+      const payload = robustnessWarn?.[0] as Record<string, unknown> | undefined;
+      expect(payload).toBeDefined();
+      // Stable category fields only.
+      expect(payload?.reason).toBe("unrecognised_robustness_band");
+      // length_bucket is a bounded enum ('short' / 'medium' / 'long').
+      expect(["short", "medium", "long"]).toContain(payload?.length_bucket);
+      // Raw-derived fields MUST be absent.
+      expect("raw_robustness_band" in (payload ?? {})).toBe(false);
+      expect("value_prefix" in (payload ?? {})).toBe(false);
+      expect("value_length" in (payload ?? {})).toBe(false);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("length_bucket groups by category, not exact length (multiple strings → same bucket)", async () => {
+    // Two distinct long vendor strings must yield the SAME length_bucket;
+    // otherwise the bucket is acting as a raw-derived proxy.
+    const telemetry = await import("../../../../src/utils/telemetry.js");
+    const warnSpy = vi.spyOn(telemetry.log, "warn").mockImplementation(() => {});
+    try {
+      compactAnalysis(makeResponse({ robustness: { level: "extremely_unstable_long_variant_one" } as { level: string } }));
+      compactAnalysis(makeResponse({ robustness: { level: "extremely_unstable_long_variant_two" } as { level: string } }));
+      const warns = warnSpy.mock.calls.filter((c) =>
+        typeof c[1] === "string" && c[1].includes("unrecognised robustness band"),
+      );
+      expect(warns).toHaveLength(2);
+      const buckets = warns.map((c) => (c[0] as Record<string, unknown>).length_bucket);
+      // Same category (`long`) for two distinct strings of similar length.
+      expect(buckets[0]).toBe(buckets[1]);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("maps raw 'very_low' robustness.level to canonical 'fragile'", () => {
+    const response = makeResponse({
+      robustness: { level: "very_low" },
+    });
+    const summary = compactAnalysis(response);
+    // Aligns with ISL_ROBUSTNESS_MAP in deterministic/turn-context.ts.
+    expect(summary!.robustness_level).toBe("fragile");
+  });
+
+  it("maps unrecognised raw robustness values to 'unknown' (not 'moderate')", () => {
+    const response = makeResponse({
+      robustness: { level: "bogus_band" } as { level: string },
+    });
+    const summary = compactAnalysis(response);
+    expect(summary!.robustness_level).toBe("unknown");
+  });
+
+  it("preserves all known canonical robustness mappings", () => {
+    const cases: ReadonlyArray<readonly [string, string]> = [
+      ["low", "fragile"],
+      ["medium", "moderate"],
+      ["high", "stable"],
+      ["very_high", "highly_stable"],
+      ["fragile", "fragile"],
+      ["moderate", "moderate"],
+      ["stable", "stable"],
+      ["highly_stable", "highly_stable"],
+    ];
+    for (const [raw, expected] of cases) {
+      const summary = compactAnalysis(
+        makeResponse({ robustness: { level: raw } }),
+      );
+      expect(summary!.robustness_level).toBe(expected);
+    }
+  });
+
+  it("counts fragile edges deduplicated by edge_id", () => {
+    const results = [
+      {
+        ...makeOption({ option_id: "opt_a" }),
+        robustness: {
+          fragile_edges: [
+            { edge_id: "edge_1" },
+            { edge_id: "edge_2" },
+          ],
+        },
+      },
+      {
+        ...makeOption({ option_id: "opt_b" }),
+        robustness: {
+          fragile_edges: [
+            { edge_id: "edge_1" },  // duplicate
+            { edge_id: "edge_3" },
+          ],
+        },
+      },
+    ];
+    const response = makeResponse({ results });
+    const summary = compactAnalysis(response);
+    expect(summary!.fragile_edge_count).toBe(3); // edge_1, edge_2, edge_3 (deduplicated)
+  });
+
+  it("detects constraint_tensions when joint < individual × 0.7", () => {
+    const results = [
+      {
+        ...makeOption(),
+        probability_of_joint_goal: 0.3,
+        constraint_probabilities: [
+          { constraint_id: "c1", probability: 0.9 },
+          { constraint_id: "c2", probability: 0.8 },
+        ],
+      },
+    ];
+    // joint (0.3) < min(0.9, 0.8) × 0.7 = 0.56 → tension
+    const response = makeResponse({ results });
+    const summary = compactAnalysis(response);
+    expect(summary!.constraint_tensions).toBeDefined();
+    expect(summary!.constraint_tensions).toContain("c1");
+    expect(summary!.constraint_tensions).toContain("c2");
+  });
+
+  it("returns no constraint_tensions when ratio is above threshold", () => {
+    const results = [
+      {
+        ...makeOption(),
+        probability_of_joint_goal: 0.75,
+        constraint_probabilities: [
+          { constraint_id: "c1", probability: 0.9 },
+        ],
+      },
+    ];
+    // joint (0.75) < min(0.9) × 0.7 = 0.63? No — 0.75 > 0.63
+    const response = makeResponse({ results });
+    const summary = compactAnalysis(response);
+    expect(summary!.constraint_tensions).toBeUndefined();
+  });
+
+  it("is deterministic — same input → identical output", () => {
+    const response = makeResponse({
+      results: [
+        makeOption({ option_id: "opt_a", win_probability: 0.6 }),
+        makeOption({ option_id: "opt_b", win_probability: 0.4 }),
+      ],
+    });
+    const s1 = JSON.stringify(compactAnalysis(response));
+    const s2 = JSON.stringify(compactAnalysis(response));
+    expect(s1).toBe(s2);
+  });
+
+  it("uses graph node labels when provided", () => {
+    const results = [
+      {
+        ...makeOption(),
+        factor_sensitivity: [
+          { node_id: "n1", sensitivity: 0.9, influence_score: 0.9 },
+        ],
+      },
+    ];
+    const response = makeResponse({ results });
+    const graphLabels = new Map([["n1", "Revenue Growth"]]);
+    const summary = compactAnalysis(response, graphLabels);
+    expect(summary!.top_drivers[0].factor_label).toBe("Revenue Growth");
+  });
+
+  // =========================================================================
+  // Margin computation
+  // =========================================================================
+
+  describe("margin", () => {
+    it("computes margin as winner - runner_up when 2+ options", () => {
+      const response = makeResponse({
+        results: [
+          makeOption({ option_id: "opt_a", option_label: "Option A", win_probability: 0.65 }),
+          makeOption({ option_id: "opt_b", option_label: "Option B", win_probability: 0.35 }),
+        ],
+      });
+      const summary = compactAnalysis(response);
+      expect(summary).not.toBeNull();
+      // 0.65 - 0.35 = 0.30
+      expect(summary!.margin).toBeCloseTo(0.30, 5);
+    });
+
+    it("returns margin=null when only 1 option", () => {
+      const response = makeResponse({
+        results: [
+          makeOption({ option_id: "opt_a", option_label: "Option A", win_probability: 0.9 }),
+        ],
+      });
+      const summary = compactAnalysis(response);
+      expect(summary).not.toBeNull();
+      expect(summary!.margin).toBeNull();
+    });
+
+    it("computes margin correctly with 3+ options (winner vs second place)", () => {
+      const response = makeResponse({
+        results: [
+          makeOption({ option_id: "opt_a", win_probability: 0.5 }),
+          makeOption({ option_id: "opt_b", win_probability: 0.3 }),
+          makeOption({ option_id: "opt_c", win_probability: 0.2 }),
+        ],
+      });
+      const summary = compactAnalysis(response);
+      // 0.5 - 0.3 = 0.2
+      expect(summary!.margin).toBeCloseTo(0.2, 5);
+    });
+  });
+
+  // =========================================================================
+  // Full option comparison — p10, p90, mean
+  // =========================================================================
+
+  describe("full option comparison", () => {
+    it("includes all options sorted by win_probability descending", () => {
+      const response = makeResponse({
+        results: [
+          makeOption({ option_id: "opt_c", option_label: "Status Quo", win_probability: 0.18, outcome_mean: 0.15, outcome_p10: -0.05, outcome_p90: 0.35 }),
+          makeOption({ option_id: "opt_a", option_label: "Hire Tech Lead", win_probability: 0.37, outcome_mean: 0.42, outcome_p10: 0.18, outcome_p90: 0.67 }),
+          makeOption({ option_id: "opt_b", option_label: "Hire AI Contractor", win_probability: 0.24, outcome_mean: 0.31, outcome_p10: 0.09, outcome_p90: 0.54 }),
+        ],
+      });
+      const summary = compactAnalysis(response);
+      expect(summary).not.toBeNull();
+      expect(summary!.options).toHaveLength(3);
+      expect(summary!.options[0].option_label).toBe("Hire Tech Lead");
+      expect(summary!.options[1].option_label).toBe("Hire AI Contractor");
+      expect(summary!.options[2].option_label).toBe("Status Quo");
+    });
+
+    it("includes mean, p10, p90 for each option", () => {
+      const response = makeResponse({
+        results: [
+          makeOption({ option_id: "opt_a", option_label: "Option A", win_probability: 0.6, outcome_mean: 0.42, outcome_p10: 0.18, outcome_p90: 0.67 }),
+        ],
+      });
+      const summary = compactAnalysis(response);
+      expect(summary!.options[0].outcome_mean).toBe(0.42);
+      expect(summary!.options[0].outcome_p10).toBe(0.18);
+      expect(summary!.options[0].outcome_p90).toBe(0.67);
+    });
+
+    it("omits p10/p90 when not present in response", () => {
+      const response = makeResponse({
+        results: [
+          makeOption({ option_id: "opt_a", option_label: "Option A", win_probability: 0.6, outcome_mean: 0.42 }),
+        ],
+      });
+      const summary = compactAnalysis(response);
+      expect(summary!.options[0].outcome_mean).toBe(0.42);
+      expect(summary!.options[0].outcome_p10).toBeUndefined();
+      expect(summary!.options[0].outcome_p90).toBeUndefined();
+    });
+
+    it("returns empty options array when no analysis exists (null input)", () => {
+      const summary = compactAnalysis(null);
+      expect(summary).toBeNull();
+    });
+
+    it("extracts from nested outcome.{mean,p10,p90} shape (ISL-style)", () => {
+      const response = makeResponse({
+        results: [
+          {
+            option_id: "opt_a",
+            option_label: "Hire Tech Lead",
+            win_probability: 0.37,
+            outcome: { mean: 0.42, p10: 0.18, p90: 0.67 },
+          },
+          {
+            option_id: "opt_b",
+            option_label: "Status Quo",
+            win_probability: 0.18,
+            outcome: { mean: 0.15, p10: -0.05, p90: 0.35 },
+          },
+        ],
+      });
+      const summary = compactAnalysis(response);
+      expect(summary).not.toBeNull();
+      // Flat fields take precedence, nested is fallback — here only nested exists
+      expect(summary!.options[0].outcome_mean).toBe(0.42);
+      expect(summary!.options[0].outcome_p10).toBe(0.18);
+      expect(summary!.options[0].outcome_p90).toBe(0.67);
+      expect(summary!.options[1].outcome_mean).toBe(0.15);
+      expect(summary!.options[1].outcome_p10).toBe(-0.05);
+      expect(summary!.options[1].outcome_p90).toBe(0.35);
+    });
+
+    it("populates option_results when p10/p90 available", () => {
+      const response = makeResponse({
+        results: [
+          makeOption({ option_id: "opt_a", option_label: "Option A", win_probability: 0.6, outcome_mean: 0.42, outcome_p10: 0.18, outcome_p90: 0.67 }),
+          makeOption({ option_id: "opt_b", option_label: "Option B", win_probability: 0.4, outcome_mean: 0.31, outcome_p10: 0.09, outcome_p90: 0.54 }),
+        ],
+      });
+      const summary = compactAnalysis(response);
+      expect(summary!.option_results).toBeDefined();
+      expect(summary!.option_results).toHaveLength(2);
+      expect(summary!.option_results![0]).toEqual({
+        label: "Option A",
+        win_probability: 0.6,
+        mean: 0.42,
+        p10: 0.18,
+        p90: 0.67,
+      });
+    });
+
+    it("omits option_results when no p10/p90 available", () => {
+      const response = makeResponse({
+        results: [
+          makeOption({ option_id: "opt_a", option_label: "Option A", win_probability: 0.6, outcome_mean: 0.42 }),
+        ],
+      });
+      const summary = compactAnalysis(response);
+      expect(summary!.option_results).toBeUndefined();
+    });
+
+    it("omits option_results when only some options have p10/p90 (all-or-nothing)", () => {
+      const response = makeResponse({
+        results: [
+          makeOption({ option_id: "opt_a", option_label: "Option A", win_probability: 0.6, outcome_mean: 0.42, outcome_p10: 0.18, outcome_p90: 0.67 }),
+          makeOption({ option_id: "opt_b", option_label: "Option B", win_probability: 0.4, outcome_mean: 0.31 }),
+        ],
+      });
+      const summary = compactAnalysis(response);
+      // All-or-nothing: because Option B lacks p10/p90, option_results is not populated
+      expect(summary!.option_results).toBeUndefined();
+      // But individual options still carry their p10/p90 where available
+      expect(summary!.options[0].outcome_p10).toBe(0.18);
+      expect(summary!.options[1].outcome_p10).toBeUndefined();
+    });
+  });
+
+  describe("V2 nested results object (UI sends fields inside results)", () => {
+    it("extracts options from results.option_comparison when results is an object", () => {
+      const response = {
+        meta: { seed_used: 42, n_samples: 1000, response_hash: "abc123" },
+        results: {
+          option_comparison: [
+            makeOption({ option_id: "opt_a", option_label: "Option A", win_probability: 0.65 }),
+            makeOption({ option_id: "opt_b", option_label: "Option B", win_probability: 0.35 }),
+          ],
+        },
+      } as unknown as V2RunResponseEnvelope;
+
+      const summary = compactAnalysis(response);
+      expect(summary).not.toBeNull();
+      expect(summary!.winner.option_id).toBe("opt_a");
+      expect(summary!.options).toHaveLength(2);
+      expect(summary!.options[0].win_probability).toBe(0.65);
+    });
+
+    it("derives robustness from nested results.robustness when top-level is absent", () => {
+      const response = {
+        meta: { seed_used: 42, n_samples: 1000, response_hash: "abc123" },
+        results: {
+          option_comparison: [makeOption()],
+          robustness: { level: "fragile" },
+        },
+      } as unknown as V2RunResponseEnvelope;
+
+      const summary = compactAnalysis(response);
+      expect(summary).not.toBeNull();
+      expect(summary!.robustness_level).toBe("fragile");
+    });
+  });
+});

@@ -1,0 +1,103 @@
+{
+  "id": "orch-23-user-contradicts-model",
+  "name": "User Contradicts Model — Experience vs Analysis",
+  "description": "User says 'the model is wrong, churn won't be that high based on my experience'. The orchestrator should acknowledge the user's experience as valid data, not dismiss it, and propose a structural fix (updating the value or adding a factor).",
+  "stage": "evaluate",
+  "user_message": "I don't buy the churn numbers. I've been in this market for 15 years and churn has never been above 3% for our segment. The model is overestimating it.",
+  "turn_context": {
+    "scenario_id": "orch-23-user-contradicts-model",
+    "turn_id": "t1",
+    "stage": "evaluate",
+    "entities": {
+      "decisions": [],
+      "options": [
+        { "id": "opt_raise", "label": "Raise Prices" },
+        { "id": "opt_hold", "label": "Hold Prices" }
+      ],
+      "factors": [
+        { "id": "fac_churn", "label": "Churn Rate", "category": "observable", "value": 0.07 },
+        { "id": "fac_conversion", "label": "Conversion Rate", "category": "observable", "value": 0.1 },
+        { "id": "fac_market_growth", "label": "Market Growth", "category": "external", "has_prior": true }
+      ],
+      "outcomes": [],
+      "risks": [],
+      "goals": [
+        { "id": "goal_arr", "label": "Annual Recurring Revenue", "threshold": 1000000, "unit": "GBP" }
+      ],
+      "edges": [
+        { "from": "fac_churn", "to": "goal_arr", "strength_mean": -0.55, "exists_probability": 0.95 },
+        { "from": "fac_conversion", "to": "goal_arr", "strength_mean": 0.4, "exists_probability": 0.9 },
+        { "from": "fac_market_growth", "to": "goal_arr", "strength_mean": 0.3, "exists_probability": 0.8 },
+        { "from": "opt_raise", "to": "fac_churn", "strength_mean": 0.2, "exists_probability": 0.75 },
+        { "from": "opt_raise", "to": "fac_conversion", "strength_mean": -0.15, "exists_probability": 0.7 }
+      ],
+      "constraints": []
+    },
+    "graph": {
+      "node_count": 6,
+      "edge_count": 5,
+      "option_count": 2,
+      "missing_structural": []
+    },
+    "analysis": {
+      "status": "completed",
+      "staleness_reason": null,
+      "winner": { "id": "opt_hold", "label": "Hold Prices", "probability": 0.57 },
+      "runner_up": { "id": "opt_raise", "label": "Raise Prices", "probability": 0.43 },
+      "robustness_band": "moderate",
+      "top_drivers": [
+        { "id": "fac_churn", "label": "Churn Rate", "sensitivity": 0.48 },
+        { "id": "fac_conversion", "label": "Conversion Rate", "sensitivity": 0.29 }
+      ],
+      "fragile_edges": [],
+      "constraints_met": null
+    },
+    "capabilities": {
+      "can_run_analysis": true,
+      "can_explain_results": true,
+      "can_edit_graph": false,
+      "can_compare_options": true,
+      "can_generate_artefact": false,
+      "disabled_reasons": {}
+    },
+    "blockers": [],
+    "signals": {
+      "high_uncertainty_factors": [],
+      "dominant_factor": { "id": "fac_churn", "label": "Churn Rate", "sensitivity": 0.48 },
+      "close_call": false,
+      "missing_option_families": [],
+      "default_value_count": 1,
+      "weak_edges": []
+    },
+    "conversation": {
+      "turn_count": 5,
+      "last_user_intent": "challenge_result",
+      "last_tool_used": "explain_result",
+      "recent_actions_taken": ["run_analysis", "explain_result"],
+      "recent_actions_declined": [],
+      "pending_confirmation": null,
+      "last_failed_action": null
+    },
+    "eligible_actions": ["explain_result", "compare_options", "what_would_flip", "set_factor_value", "adjust_edge_strength", "run_analysis", "add_constraint"]
+  },
+  "expected": {
+    "expects_uncertainty_language": true,
+    "must_contain": ["churn"],
+    "scenario_assertions": [
+      {
+        "description": "Should propose a structural fix (update value or adjust edge)",
+        "check": "proposes_structural_fix"
+      },
+      {
+        "description": "Should not dismiss user experience",
+        "check": "text_not_contains",
+        "value": "the model is correct"
+      },
+      {
+        "description": "Should have at least one recommended action",
+        "check": "min_actions",
+        "value": 1
+      }
+    ]
+  }
+}

@@ -1,0 +1,443 @@
+// TEMPLATE AUDIT (16 April 2026)
+//
+// 7 migrated (handler emits HandlerFact -> composer generates text):
+//   1. draft_created   — fact.data: option_count, goal_label.  Coaching: tradeoff, biggest_inference, calibration_target.  Handler: actions/draft-graph.ts
+//   2. factor_added    — fact.data: value_label, target_label, category.  Coaching: critical_gap.  Handler: actions/add-factor.ts
+//   3. option_added    — fact.data: intervention_count.  Coaching: (unused).  Handler: actions/add-option.ts
+//   4. value_set       — fact.data: new_value, unit.  Coaching: drivers[0].  Handler: actions/set-factor-value.ts
+//   5. analysis_complete — fact.data: (none).  Coaching: headline, drivers, cta.  Handler: actions/run-analysis.ts, actions/explain-result.ts
+//   6. analysis_started — fact.data: (none).  Coaching: (unused).  Handler: (pipeline internal)
+//   7. graph_edited    — fact.data: (none).  Coaching: (unused).  Handler: actions/edit-graph.ts
+//
+// 7 unmigrated (legacy assistantText, composer templates are transitional placeholders):
+//   8. edge_adjusted        — actions/adjust-edge-strength.ts
+//   9. constraint_added     — actions/add-constraint.ts
+//  10. factor_removed       — actions/remove-factor.ts
+//  11. goal_target_set      — actions/set-goal-target.ts
+//  12. premortem_run        — actions/run-premortem.ts
+//  13. assumption_challenged — actions/challenge-assumption.ts
+//  14. brief_generated      — actions/generate-artefact.ts
+//  15. evidence_found       — actions/what-would-flip.ts
+//
+
+/**
+ * Response Composer (WS2)
+ *
+ * Handlers emit a structured HandlerFact instead of a raw assistantText
+ * string. The composer reads the fact + CoachingContext + hasPatchBlock
+ * flag and produces user-facing text deterministically.
+ *
+ * Design rules (enforced by contract tests):
+ *   - Decision-first: lead with decision significance, not model operations.
+ *   - When hasPatchBlock=true: 1 sentence orientation only (except
+ *     draft_created which allows up to 2). The patch card carries the
+ *     structural detail.
+ *   - When hasPatchBlock=false: 1-2 sentences maximum.
+ *   - No confirmation prose: "Confirm to apply", "Please confirm", and
+ *     similar are banned. Accept/Dismiss buttons handle this.
+ *   - No completion verbs: "I'll add", "Updated", "Added", "Done", "Applied".
+ *   - No internal jargon: "interventions", "patch", "graph_patch".
+ *   - No em dashes. British English. Sentence case.
+ *   - Entity labels from HandlerFact ground the text when available.
+ *
+ * Feature flag: CEE_COACHING_CONTEXT_ENABLED (shared with WS1/WS8).
+ */
+
+import type { CoachingContext } from "./coaching-context-builder.js";
+
+// ============================================================================
+// Types
+// ============================================================================
+
+export type HandlerAction =
+  | 'draft_created'
+  | 'factor_added'
+  | 'option_added'
+  | 'value_set'
+  | 'edge_adjusted'
+  | 'constraint_added'
+  | 'factor_removed'
+  | 'goal_target_set'
+  | 'graph_edited'
+  | 'analysis_started'
+  | 'analysis_complete'
+  | 'premortem_run'
+  | 'assumption_challenged'
+  | 'brief_generated'
+  | 'evidence_found';
+
+export interface HandlerFact {
+  /** Canonical action name — drives which template is applied. */
+  action: HandlerAction;
+  /** Entities the action touched, with label + id + kind. */
+  entities_affected: Array<{ id: string; label: string; kind: string }>;
+  /** Short phrase describing what changed (e.g. "strength from 0.20 to 0.75"). */
+  what_changed: string;
+  /** One-sentence coaching significance (filled by handler or composer). */
+  why_it_matters?: string | null;
+  /** True when the model has been mutated and the prior analysis is now stale. */
+  stale_analysis: boolean;
+  /** True when the change was applied without confirmation. */
+  auto_apply: boolean;
+  /** Action-specific payload (values, unit, options, etc.). */
+  data?: Record<string, unknown>;
+}
+
+// ============================================================================
+// Public API
+// ============================================================================
+
+/**
+ * Produce user-facing text for a handler fact.
+ *
+ * Pure function — no side effects. The caller (pipeline-v4.ts) replaces
+ * assistantText with the return value when a fact is present on ActionResult.
+ *
+ * @param hasPatchBlock  True when the current turn will emit a visible
+ *   graph_patch card. When true, migrated templates produce a short
+ *   orientation sentence only (the card carries the structural detail).
+ */
+export function composeResponse(
+  fact: HandlerFact,
+  coaching: CoachingContext | null,
+  hasPatchBlock: boolean = false,
+): string {
+  switch (fact.action) {
+    case 'draft_created':
+      return composeDraftCreated(fact, coaching, hasPatchBlock);
+    case 'factor_added':
+      return composeFactorAdded(fact, coaching, hasPatchBlock);
+    case 'option_added':
+      return composeOptionAdded(fact, coaching, hasPatchBlock);
+    case 'value_set':
+      return composeValueSet(fact, coaching, hasPatchBlock);
+    case 'edge_adjusted':
+      return composeEdgeAdjusted(fact);
+    case 'constraint_added':
+      return composeConstraintAdded(fact);
+    case 'factor_removed':
+      return composeFactorRemoved(fact);
+    case 'goal_target_set':
+      return composeGoalTargetSet(fact);
+    case 'graph_edited':
+      return composeGraphEdited(fact, hasPatchBlock);
+    case 'analysis_started':
+      return composeAnalysisStarted(fact);
+    case 'analysis_complete':
+      return composeAnalysisComplete(fact, coaching);
+    case 'premortem_run':
+      return composePremortemRun(fact);
+    case 'assumption_challenged':
+      return composeAssumptionChallenged(fact);
+    case 'brief_generated':
+      return composeBriefGenerated(fact);
+    case 'evidence_found':
+      return composeEvidenceFound(fact);
+  }
+}
+
+// ============================================================================
+// Template implementations
+// ============================================================================
+
+function composeDraftCreated(fact: HandlerFact, coaching: CoachingContext | null, hasPatchBlock: boolean): string {
+  const goalLabel = (fact.data?.goal_label as string | undefined) ?? 'your decision';
+  const parts: string[] = [];
+
+  // Lead with the core trade-off when coaching context is available.
+  if (coaching?.tradeoff) {
+    const t = coaching.tradeoff;
+    parts.push(`Your ${goalLabel} trades ${t.benefit_a} against ${t.benefit_b}.`);
+  } else {
+    parts.push(`Your ${goalLabel} is ready to explore.`);
+  }
+
+  // Biggest inference — highlights what's estimated vs from brief.
+  // Allowed as a second sentence even when hasPatchBlock=true (draft_created exception).
+  if (coaching?.biggest_inference) {
+    const bi = coaching.biggest_inference;
+    parts.push(`${bi.factor_label} is the biggest assumption, inferred from ${bi.reason}.`);
+  }
+
+  if (hasPatchBlock) {
+    // Draft always has a patch card — cap at 2 sentences (orientation only).
+    return parts.slice(0, 2).join(' ');
+  }
+
+  // Calibration target — next question the user should think about.
+  if (coaching?.calibration_target) {
+    const ct = coaching.calibration_target;
+    parts.push(
+      `How strong is the effect of ${ct.source_label} on ${ct.target_label} in your experience?`,
+    );
+  }
+
+  return parts.slice(0, 3).join(' ');
+}
+
+function composeFactorAdded(fact: HandlerFact, coaching: CoachingContext | null, hasPatchBlock: boolean): string {
+  const entity = fact.entities_affected[0];
+  if (!entity) return fact.what_changed;
+  const kind = entity.kind === 'risk' ? 'risk factor' : 'factor';
+  const connectionSegment = fact.data?.target_label
+    ? ` connecting to ${fact.data.target_label}`
+    : '';
+
+  // Pull why_it_matters from handler or coaching context.
+  const significance =
+    fact.why_it_matters
+    ?? (coaching?.critical_gap?.type === 'missing_factor' ? coaching.critical_gap.detail : null);
+
+  if (hasPatchBlock) {
+    // Orientation only — the patch card shows the structural detail.
+    if (significance) return ensureEntityGrounding(entity.label, significance);
+    return `${entity.label} captures a ${kind} that could shift the balance of the decision.`;
+  }
+
+  if (fact.auto_apply) {
+    const base = `${entity.label} is now in the model as a ${kind}${connectionSegment}.`;
+    return significance ? `${base} ${significance}` : base;
+  }
+
+  // Proposal framing — no "Confirm to apply".
+  const base = `${entity.label} would capture a ${kind}${connectionSegment}.`;
+  return significance ? `${base} ${significance}` : base;
+}
+
+function composeOptionAdded(fact: HandlerFact, _coaching: CoachingContext | null, hasPatchBlock: boolean): string {
+  const entity = fact.entities_affected[0];
+  if (!entity) return fact.what_changed;
+  const interventionCount = (fact.data?.intervention_count as number | undefined) ?? 0;
+  const summary = interventionCount > 0
+    ? ` with ${interventionCount} effect${interventionCount === 1 ? '' : 's'}`
+    : '';
+
+  if (hasPatchBlock) {
+    // Orientation only — the patch card shows the option detail.
+    return `${entity.label} adds a different path to your decision.`;
+  }
+
+  if (fact.auto_apply) {
+    return `${entity.label} is now captured as an option${summary}.`;
+  }
+
+  // Proposal framing — no "Confirm to apply".
+  return summary
+    ? `${entity.label} would add a different path${summary} to your decision.`
+    : `${entity.label} would add a different path to your decision.`;
+}
+
+function composeValueSet(fact: HandlerFact, coaching: CoachingContext | null, hasPatchBlock: boolean): string {
+  const entity = fact.entities_affected[0];
+  if (!entity) return fact.what_changed;
+  const newValue = fact.data?.new_value;
+  const unit = (fact.data?.unit as string | undefined) ?? '';
+  // Prefer display_value (qualitative for unitless 0-1 factors, formatted for
+  // real units) over the raw numeric. Falls back to numeric+unit when the
+  // handler didn't produce a display_value — defence in depth.
+  const displayValue = fact.data?.display_value as string | undefined;
+  const valueStr = displayValue
+    ?? (newValue != null ? `${newValue}${unit ? ' ' + unit : ''}` : '?');
+  // Qualitative bands are sentence fragments ("low", "high") and read
+  // naturally with the copula "is"; numeric values read naturally with "at".
+  // Keep this regex in sync with `qualitativeBand()` in
+  // src/cee/factor-extraction/display-value.ts — it enumerates the four
+  // bands that exist today (low / moderate / high / very high). Drift here
+  // would silently demote qualitative values to the numeric "at" template.
+  const isQualitative = displayValue != null && /^(low|moderate|high|very high)$/i.test(displayValue);
+  const isTopDriver = coaching?.drivers?.[0]?.factor_id === entity.id;
+
+  if (hasPatchBlock && fact.auto_apply) {
+    // Auto-applied patch card (e.g. draft_graph). Orientation only — the
+    // patch card shows the detail. Strictly 1 sentence, applied wording.
+    if (isTopDriver) {
+      return isQualitative
+        ? `${entity.label} is ${valueStr}, the factor the outcome is most sensitive to.`
+        : `At ${valueStr}, ${entity.label} is the factor the outcome is most sensitive to.`;
+    }
+    if (fact.why_it_matters) {
+      const lead = isQualitative
+        ? `${entity.label} is ${valueStr}`
+        : `${entity.label} at ${valueStr}`;
+      return ensureSentencePunctuation(`${lead} ${lowercaseFirst(fact.why_it_matters)}`);
+    }
+    return isQualitative
+      ? `${entity.label} is ${valueStr}.`
+      : `${entity.label} calibrated to ${valueStr}.`;
+  }
+
+  if (hasPatchBlock && !fact.auto_apply) {
+    // Proposal patch card (e.g. set_factor_value, add_option). Brief
+    // proposal wording — the card is labelled "Proposed" and shows the
+    // detail. Must NOT use "calibrated" / "set to" / "done" phrasing.
+    // Qualitative uses "is" ("Salary is high"), numeric uses "at"
+    // ("Salary at £95k"), matching the full-form proposal section below.
+    const lead = isQualitative
+      ? `${entity.label} is ${valueStr}`
+      : `${entity.label} at ${valueStr}`;
+    if (isTopDriver) {
+      return `${lead} would be the factor the outcome is most sensitive to.`;
+    }
+    if (fact.why_it_matters) {
+      return ensureSentencePunctuation(`${lead} would ${lowercaseFirst(fact.why_it_matters)}`);
+    }
+    return `${lead} would shift the balance of the decision.`;
+  }
+
+  if (fact.auto_apply) {
+    const base = isQualitative
+      ? `${entity.label} is ${valueStr}.`
+      : `${entity.label} set to ${valueStr}.`;
+    if (isTopDriver) return `${base} This is the factor the outcome is most sensitive to.`;
+    if (fact.why_it_matters) return `${base} ${fact.why_it_matters}`;
+    return base;
+  }
+
+  // Proposal framing — no "Confirm to apply".
+  // Qualitative values read naturally with "is" framing, joined by ", which"
+  // so the why_it_matters clause parses as a consequence rather than a
+  // dangling fragment. Numeric values keep the legacy "at" framing.
+  if (isQualitative) {
+    const lead = `${entity.label} is ${valueStr}`;
+    if (fact.why_it_matters) return ensureSentencePunctuation(`${lead}, which would ${lowercaseFirst(fact.why_it_matters)}`);
+    return `${lead}, which would shift the balance of the decision.`;
+  }
+  const lead = `${entity.label} at ${valueStr}`;
+  if (fact.why_it_matters) return ensureSentencePunctuation(`${lead} would ${lowercaseFirst(fact.why_it_matters)}`);
+  return `${lead} would shift the balance of the decision.`;
+}
+
+function composeEdgeAdjusted(fact: HandlerFact): string {
+  if (fact.auto_apply) {
+    return `Edge strength is now ${fact.what_changed}.`;
+  }
+  return `Edge strength would change to ${fact.what_changed}.`;
+}
+
+function composeConstraintAdded(fact: HandlerFact): string {
+  const entity = fact.entities_affected[0];
+  const label = entity?.label ?? 'constraint';
+  if (fact.auto_apply) {
+    return `${label} is now captured as a constraint.`;
+  }
+  return `${label} would be added as a constraint.`;
+}
+
+function composeFactorRemoved(fact: HandlerFact): string {
+  const entity = fact.entities_affected[0];
+  const label = entity?.label ?? 'the factor';
+  if (fact.auto_apply) {
+    return `${label} is no longer in the model.`;
+  }
+  return `${label} would be removed from the model.`;
+}
+
+function composeGoalTargetSet(fact: HandlerFact): string {
+  const entity = fact.entities_affected[0];
+  const label = entity?.label ?? 'the goal';
+  const target = fact.data?.target;
+  if (fact.auto_apply) {
+    return `${label} target is now ${target ?? 'the new value'}.`;
+  }
+  return `${label} target would change to ${target ?? 'the new value'}.`;
+}
+
+function composeAnalysisStarted(fact: HandlerFact): string {
+  void fact;
+  return 'Running the analysis now.';
+}
+
+function composeAnalysisComplete(fact: HandlerFact, coaching: CoachingContext | null): string {
+  // One sentence of orientation only. The results blocks carry the
+  // headline, driver breakdown, and CTA detail.
+  const h = coaching?.headline;
+  if (!h) {
+    return fact.what_changed || 'Analysis results are ready.';
+  }
+
+  return `${h.leading_option} leads at ${h.leading_probability}%.`;
+}
+
+/**
+ * Append a period if the sentence doesn't already end with terminal
+ * punctuation. Prevents run-on sentences when composer parts are joined.
+ */
+function ensureSentencePunctuation(text: string): string {
+  const trimmed = text.trimEnd();
+  if (!trimmed) return trimmed;
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
+/**
+ * Lowercase the first character of a string. Used when splicing
+ * why_it_matters into mid-sentence position (e.g. "X at Y would {why}").
+ */
+function lowercaseFirst(text: string): string {
+  if (!text) return text;
+  return text.charAt(0).toLowerCase() + text.slice(1);
+}
+
+/**
+ * Ensure the entity label appears in the text. If the text already contains
+ * the label (case-insensitive), return it with sentence punctuation. If not,
+ * prepend the label as a prefix: "Label: lowercased text."
+ */
+function ensureEntityGrounding(label: string, text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return trimmed;
+  if (trimmed.toLowerCase().includes(label.toLowerCase())) {
+    return ensureSentencePunctuation(trimmed);
+  }
+  return ensureSentencePunctuation(`${label}: ${lowercaseFirst(trimmed)}`);
+}
+
+function composePremortemRun(fact: HandlerFact): string {
+  void fact;
+  return 'Here are the most likely failure paths for your leading option.';
+}
+
+function composeAssumptionChallenged(fact: HandlerFact): string {
+  const entity = fact.entities_affected[0];
+  if (entity) {
+    return `Looking harder at ${entity.label}. What evidence would change your view?`;
+  }
+  return 'Looking harder at that assumption. What evidence would change your view?';
+}
+
+function composeBriefGenerated(fact: HandlerFact): string {
+  void fact;
+  return 'Here is your decision brief, ready to share.';
+}
+
+function composeEvidenceFound(fact: HandlerFact): string {
+  const count = (fact.data?.evidence_count as number | undefined) ?? 0;
+  return count > 0
+    ? `Found ${count} relevant piece${count === 1 ? '' : 's'} of evidence.`
+    : 'No directly relevant evidence was found for this question.';
+}
+
+function composeGraphEdited(fact: HandlerFact, hasPatchBlock: boolean): string {
+  const entities = fact.entities_affected;
+  // Use entity label only when a single specific entity was affected; otherwise
+  // use "the model" to avoid naming one node from a multi-node edit.
+  const singleLabel = entities.length === 1 && entities[0].label !== 'the model'
+    ? entities[0].label
+    : null;
+
+  if (hasPatchBlock) {
+    // Patch card carries structural detail; keep prose to one sentence.
+    if (fact.auto_apply) {
+      return singleLabel ? `${singleLabel} has been updated.` : 'The model has been updated.';
+    }
+    return singleLabel
+      ? `Changes to ${singleLabel} would restructure the model.`
+      : `${fact.what_changed ?? 'These changes'} would restructure the model.`;
+  }
+
+  if (fact.auto_apply) {
+    return `The model has been updated: ${fact.what_changed ?? 'structural changes applied'}.`;
+  }
+  return singleLabel
+    ? `Changes to ${singleLabel} would restructure the model.`
+    : `${fact.what_changed ?? 'These changes'} would restructure the model.`;
+}

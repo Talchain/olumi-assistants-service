@@ -1,0 +1,612 @@
+{
+  "_provenance": "Served CEE 319dde1, 26 Sep 2026 01:42Z: the persisted graph of guest scenario 91aad963 after the UI's POST /graph/register following a factor_value_edit (Canvas witness 5842091415). Read back through POST /assist/v1/scenarios/:id/graph. Verbatim; not authored.",
+  "graph": {
+    "edges": [
+      {
+        "to": "opt_full_switch",
+        "from": "dec_pricing",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "opt_hybrid",
+        "from": "dec_pricing",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "opt_new_logos",
+        "from": "dec_pricing",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "opt_status_quo",
+        "from": "dec_pricing",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "out_bottom_up_growth",
+        "from": "fac_adoption_friction",
+        "strength": {
+          "std": 0.10901639344262294,
+          "mean": -0.35040983606557374
+        },
+        "edge_type": "directed",
+        "effect_direction": "negative",
+        "exists_probability": 0.88
+      },
+      {
+        "to": "risk_pricing_complexity",
+        "from": "fac_adoption_friction",
+        "strength": {
+          "std": 0.14,
+          "mean": 0.35
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 0.78
+      },
+      {
+        "to": "out_nrr",
+        "from": "fac_enterprise_revenue_risk",
+        "strength": {
+          "std": 0.14,
+          "mean": -0.5
+        },
+        "edge_type": "directed",
+        "effect_direction": "negative",
+        "exists_probability": 0.92
+      },
+      {
+        "to": "risk_enterprise_churn",
+        "from": "fac_enterprise_revenue_risk",
+        "strength": {
+          "std": 0.10326086956521738,
+          "mean": 0.447463768115942
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 0.9
+      },
+      {
+        "to": "out_bottom_up_growth",
+        "from": "fac_market_competition",
+        "strength": {
+          "std": 0.09344262295081965,
+          "mean": 0.17131147540983604
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 0.7
+      },
+      {
+        "to": "risk_enterprise_churn",
+        "from": "fac_market_competition",
+        "strength": {
+          "std": 0.06884057971014493,
+          "mean": 0.12391304347826086
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 0.65
+      },
+      {
+        "to": "out_nrr",
+        "from": "fac_top_account_concentration",
+        "strength": {
+          "std": 0.08,
+          "mean": -0.2
+        },
+        "edge_type": "directed",
+        "effect_direction": "negative",
+        "exists_probability": 0.9
+      },
+      {
+        "to": "risk_enterprise_churn",
+        "from": "fac_top_account_concentration",
+        "strength": {
+          "std": 0.06884057971014493,
+          "mean": 0.3786231884057971
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 0.95
+      },
+      {
+        "to": "out_bottom_up_growth",
+        "from": "fac_usage_exposure",
+        "strength": {
+          "std": 0.11680327868852457,
+          "mean": 0.4282786885245901
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 0.85
+      },
+      {
+        "to": "out_nrr",
+        "from": "fac_usage_exposure",
+        "strength": {
+          "std": 0.12,
+          "mean": 0.25
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 0.75
+      },
+      {
+        "to": "fac_adoption_friction",
+        "from": "opt_full_switch",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "fac_enterprise_revenue_risk",
+        "from": "opt_full_switch",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "fac_usage_exposure",
+        "from": "opt_full_switch",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "fac_adoption_friction",
+        "from": "opt_hybrid",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "fac_enterprise_revenue_risk",
+        "from": "opt_hybrid",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "fac_usage_exposure",
+        "from": "opt_hybrid",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "fac_adoption_friction",
+        "from": "opt_new_logos",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "fac_enterprise_revenue_risk",
+        "from": "opt_new_logos",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "fac_usage_exposure",
+        "from": "opt_new_logos",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "fac_adoption_friction",
+        "from": "opt_status_quo",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "fac_enterprise_revenue_risk",
+        "from": "opt_status_quo",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "fac_usage_exposure",
+        "from": "opt_status_quo",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "goal_pricing_transition",
+        "from": "out_bottom_up_growth",
+        "strength": {
+          "std": 0.12,
+          "mean": 0.4
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 0.88
+      },
+      {
+        "to": "goal_pricing_transition",
+        "from": "out_nrr",
+        "strength": {
+          "std": 0.1,
+          "mean": 0.55
+        },
+        "edge_type": "directed",
+        "effect_direction": "positive",
+        "exists_probability": 0.95
+      },
+      {
+        "to": "goal_pricing_transition",
+        "from": "risk_enterprise_churn",
+        "strength": {
+          "std": 0.12,
+          "mean": -0.5
+        },
+        "edge_type": "directed",
+        "effect_direction": "negative",
+        "exists_probability": 0.92
+      },
+      {
+        "to": "goal_pricing_transition",
+        "from": "risk_pricing_complexity",
+        "strength": {
+          "std": 0.1,
+          "mean": -0.22
+        },
+        "edge_type": "directed",
+        "effect_direction": "negative",
+        "exists_probability": 0.75
+      }
+    ],
+    "nodes": [
+      {
+        "id": "dec_pricing",
+        "kind": "decision",
+        "label": "Pricing Model Transition Strategy",
+        "starterId": "pricing-model",
+        "provenance": "ai_inferred",
+        "starterTitle": "Pricing Model Transition Strategy"
+      },
+      {
+        "id": "fac_adoption_friction",
+        "kind": "factor",
+        "label": "Bottom-Up Adoption Friction",
+        "category": "controllable",
+        "starterId": "pricing-model",
+        "provenance": "user_set",
+        "starterTitle": "Pricing Model Transition Strategy",
+        "display_value": "0.65",
+        "extractionType": null,
+        "observed_state": {
+          "value": 0.65,
+          "source": "user_override",
+          "factor_type": "other",
+          "extractionType": null,
+          "uncertainty_drivers": [
+            "Current seat model limits trial and expansion",
+            "Onboarding complexity unknown"
+          ]
+        }
+      },
+      {
+        "id": "fac_enterprise_revenue_risk",
+        "kind": "factor",
+        "label": "Enterprise Revenue Cannibalization Risk (w014113)",
+        "category": "controllable",
+        "starterId": "pricing-model",
+        "provenance": "user_set",
+        "starterTitle": "Pricing Model Transition Strategy",
+        "display_value": "Low (0)",
+        "observed_state": {
+          "value": 0,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Top 10 accounts are 40% of revenue",
+            "Actual usage patterns of large accounts unknown"
+          ]
+        }
+      },
+      {
+        "id": "fac_market_competition",
+        "kind": "factor",
+        "label": "Competitive Pressure for Usage Pricing",
+        "prior": {
+          "range_max": 0.8,
+          "range_min": 0.3,
+          "distribution": "uniform"
+        },
+        "category": "external",
+        "starterId": "pricing-model",
+        "provenance": "ai_inferred",
+        "starterTitle": "Pricing Model Transition Strategy",
+        "display_value": "0.3 to 0.8"
+      },
+      {
+        "id": "fac_top_account_concentration",
+        "kind": "factor",
+        "label": "Top Account Revenue Concentration",
+        "prior": {
+          "range_max": 0.6000000000000001,
+          "range_min": 0.2,
+          "distribution": "uniform"
+        },
+        "category": "external",
+        "starterId": "pricing-model",
+        "provenance": "from_brief",
+        "starterTitle": "Pricing Model Transition Strategy",
+        "display_value": "0.2 to 0.6",
+        "extractionType": "explicit"
+      },
+      {
+        "id": "fac_usage_exposure",
+        "kind": "factor",
+        "label": "Usage-Based Pricing Exposure",
+        "category": "controllable",
+        "starterId": "pricing-model",
+        "provenance": "ai_inferred",
+        "encoding_map": {
+          "0": "No usage pricing",
+          "1": "Full usage pricing"
+        },
+        "starterTitle": "Pricing Model Transition Strategy",
+        "display_value": "Low (0)",
+        "observed_state": {
+          "value": 0,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "goal_pricing_transition",
+        "kind": "goal",
+        "label": "Achieve NRR Above 110% While Enabling Bottom-Up Adoption",
+        "starterId": "pricing-model",
+        "provenance": "ai_inferred",
+        "starterTitle": "Pricing Model Transition Strategy",
+        "goal_threshold": 0.8,
+        "goal_threshold_cap": 137.5,
+        "goal_threshold_raw": 110,
+        "goal_threshold_unit": "%",
+        "goal_threshold_frame": "level",
+        "goal_threshold_cap_provenance": "target_derived_headroom"
+      },
+      {
+        "id": "opt_full_switch",
+        "kind": "option",
+        "label": "Full Switch to Usage-Based at Renewal",
+        "starterId": "pricing-model",
+        "provenance": "ai_inferred",
+        "is_baseline": false,
+        "starterTitle": "Pricing Model Transition Strategy",
+        "interventions": {
+          "fac_usage_exposure": {
+            "value": 1,
+            "source": "brief_extraction",
+            "display_value": "Very high (1)"
+          },
+          "fac_adoption_friction": {
+            "value": 0.1,
+            "source": "brief_extraction",
+            "display_value": "Low (0.1)"
+          },
+          "fac_enterprise_revenue_risk": {
+            "value": 0.8,
+            "source": "brief_extraction",
+            "display_value": "Very high (0.8)"
+          }
+        },
+        "interventionKeys": [
+          "fac_usage_exposure",
+          "fac_adoption_friction",
+          "fac_enterprise_revenue_risk"
+        ]
+      },
+      {
+        "id": "opt_hybrid",
+        "kind": "option",
+        "label": "Hybrid Platform Fee Plus Usage",
+        "starterId": "pricing-model",
+        "provenance": "ai_inferred",
+        "is_baseline": false,
+        "starterTitle": "Pricing Model Transition Strategy",
+        "interventions": {
+          "fac_usage_exposure": {
+            "value": 0.5,
+            "source": "brief_extraction",
+            "display_value": "Moderate (0.5)"
+          },
+          "fac_adoption_friction": {
+            "value": 0.4,
+            "source": "brief_extraction",
+            "display_value": "Moderate (0.4)"
+          },
+          "fac_enterprise_revenue_risk": {
+            "value": 0.4,
+            "source": "brief_extraction",
+            "display_value": "Moderate (0.4)"
+          }
+        },
+        "interventionKeys": [
+          "fac_usage_exposure",
+          "fac_adoption_friction",
+          "fac_enterprise_revenue_risk"
+        ]
+      },
+      {
+        "id": "opt_new_logos",
+        "kind": "option",
+        "label": "Usage-Based for New Logos Only",
+        "starterId": "pricing-model",
+        "provenance": "ai_inferred",
+        "is_baseline": false,
+        "starterTitle": "Pricing Model Transition Strategy",
+        "interventions": {
+          "fac_usage_exposure": {
+            "value": 0.3,
+            "source": "brief_extraction",
+            "display_value": "Moderate (0.3)"
+          },
+          "fac_adoption_friction": {
+            "value": 0.6,
+            "source": "brief_extraction",
+            "display_value": "High (0.6)"
+          },
+          "fac_enterprise_revenue_risk": {
+            "value": 0.1,
+            "source": "brief_extraction",
+            "display_value": "Low (0.1)"
+          }
+        },
+        "interventionKeys": [
+          "fac_usage_exposure",
+          "fac_adoption_friction",
+          "fac_enterprise_revenue_risk"
+        ]
+      },
+      {
+        "id": "opt_status_quo",
+        "kind": "option",
+        "label": "Keep Per-Seat Pricing (Status Quo)",
+        "starterId": "pricing-model",
+        "provenance": "ai_inferred",
+        "is_baseline": true,
+        "starterTitle": "Pricing Model Transition Strategy",
+        "interventions": {
+          "fac_usage_exposure": {
+            "value": 0,
+            "source": "brief_extraction",
+            "display_value": "Low (0)"
+          },
+          "fac_adoption_friction": {
+            "value": 0.8,
+            "source": "brief_extraction",
+            "display_value": "Very high (0.8)"
+          },
+          "fac_enterprise_revenue_risk": {
+            "value": 0,
+            "source": "brief_extraction",
+            "display_value": "Low (0)"
+          }
+        },
+        "interventionKeys": [
+          "fac_usage_exposure",
+          "fac_adoption_friction",
+          "fac_enterprise_revenue_risk"
+        ]
+      },
+      {
+        "id": "out_bottom_up_growth",
+        "kind": "outcome",
+        "label": "Bottom-Up New Logo Acquisition",
+        "starterId": "pricing-model",
+        "provenance": "ai_inferred",
+        "starterTitle": "Pricing Model Transition Strategy"
+      },
+      {
+        "id": "out_nrr",
+        "kind": "outcome",
+        "label": "Net Revenue Retention",
+        "starterId": "pricing-model",
+        "provenance": "ai_inferred",
+        "starterTitle": "Pricing Model Transition Strategy"
+      },
+      {
+        "id": "risk_enterprise_churn",
+        "kind": "risk",
+        "label": "Enterprise Account Revenue Loss",
+        "starterId": "pricing-model",
+        "provenance": "ai_inferred",
+        "starterTitle": "Pricing Model Transition Strategy"
+      },
+      {
+        "id": "risk_pricing_complexity",
+        "kind": "risk",
+        "label": "Pricing Model Complexity and Execution Risk",
+        "starterId": "pricing-model",
+        "provenance": "ai_inferred",
+        "starterTitle": "Pricing Model Transition Strategy"
+      }
+    ]
+  }
+}

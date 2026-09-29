@@ -1,0 +1,561 @@
+{
+ "__PROVENANCE__": {
+  "what": "A HISTORIC CAPTURE. The model's real pass-1 record set and its real completion-pass claims, decoded from the round-7 acceptance block's redacting-proxy captures (2026-08-12).",
+  "APPEND_ONLY": "This file is EVIDENCE, not a fixture to keep current. It records what the model actually emitted on a dated build. Add new captures; never edit these bytes to make a test pass.",
+  "draft_capture": "2026-08-12T04-55-07-584Z_0026.json",
+  "completion_capture": "2026-08-12T04-55-39-862Z_0027.json",
+  "draft_started_at": "2026-08-12T04:55:07.584Z",
+  "completion_started_at": "2026-08-12T04:55:39.862Z",
+  "run": 18,
+  "brief": "B3",
+  "scenario": "be8db25a",
+  "live_outcome": "PASS 21n/30e (on PASS 1 \u2014 the completion was discarded)",
+  "round7_completion_pass_log": "ask 2\u21922 \u00b7 nodes 14\u219214 \u00b7 edges 17\u219225 \u00b7 kept=false"
+ },
+ "records": {
+  "stated_items": [
+   {
+    "kind": "goal",
+    "source_quote": "15% ARR growth next year without engineering attrition getting worse",
+    "role": "target"
+   },
+   {
+    "kind": "option",
+    "source_quote": "bet the next two quarters on the AI copilot",
+    "role": "target"
+   },
+   {
+    "kind": "option",
+    "source_quote": "finally do the platform rewrite",
+    "role": "target"
+   },
+   {
+    "kind": "option",
+    "source_quote": "neither",
+    "role": "target"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "lift win rate from 22% to 30%",
+    "value": 30,
+    "unit": "%",
+    "role": "context"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "that number came from Marcus polling 15 AEs on Slack, so treat accordingly",
+    "role": "context"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "+\u00a315/seat/month on our 40,000 seats",
+    "value": 15,
+    "unit": "\u00a3/seat/month",
+    "role": "context"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "up to \u00a37.2m a year if attach were 100%",
+    "value": 7200000,
+    "unit": "\u00a3",
+    "role": "context"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "25% attach feels honest, call it \u00a31.8m",
+    "value": 1800000,
+    "unit": "\u00a3",
+    "role": "context"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "year one is more like 10%, so \u00a3700k in year one",
+    "value": 700000,
+    "unit": "\u00a3",
+    "role": "context"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "Elena's team said 6 engineers for 8 months once you include evals and the safety review",
+    "value": 6,
+    "unit": "engineers",
+    "role": "context"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "LLM serving cost is the thing nobody can pin down: finance modelled \u00a33 per seat per month, could be half that or triple depending on caching",
+    "value": 3,
+    "unit": "\u00a3/seat/month",
+    "role": "context"
+   },
+   {
+    "kind": "constraint",
+    "source_quote": "legal has NOT confirmed this, and if it's wrong the whole thing is dead in enterprise, which is 60% of revenue",
+    "role": "constraint",
+    "direction": "floor"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "60% of revenue",
+    "value": 60,
+    "unit": "%",
+    "role": "context"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "Rewrite = 10 engineers, 12 months",
+    "value": 10,
+    "unit": "engineers",
+    "role": "context"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "history says double whatever engineering estimates on this codebase",
+    "role": "context"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "monolith adds roughly 30% drag to every feature",
+    "value": 30,
+    "unit": "%",
+    "role": "context"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "deploys take 45 minutes",
+    "value": 45,
+    "unit": "minutes",
+    "role": "context"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "lost two staff engineers to it last year",
+    "value": 2,
+    "unit": "engineers",
+    "role": "context"
+   },
+   {
+    "kind": "constraint",
+    "source_quote": "board approved \u00a32m for strategic initiatives. Realistically it's \u00a31.2m after the security remediation eats its share",
+    "value": 1200000,
+    "unit": "\u00a3",
+    "role": "constraint",
+    "direction": "ceiling"
+   },
+   {
+    "kind": "constraint",
+    "source_quote": "the copilot must demo at Camunda Days on 14 May 2027",
+    "role": "constraint",
+    "direction": "ceiling"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "three competitors shipped copilots in the last two quarters, PMM says we're 12 months behind already",
+    "role": "context"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "the \u00a31.8m is a year-three number",
+    "value": 1800000,
+    "unit": "\u00a3",
+    "role": "context"
+   },
+   {
+    "kind": "figure",
+    "source_quote": "4 engineers for 6 months",
+    "value": 4,
+    "unit": "engineers",
+    "role": "context"
+   }
+  ],
+  "claims": [
+   {
+    "claim_kind": "factor",
+    "label": "Copilot engineering cost (6 engineers \u00d7 8 months)",
+    "basis": [
+     10
+    ],
+    "category": "controllable",
+    "value": 480000,
+    "sets_to": 480000
+   },
+   {
+    "claim_kind": "factor",
+    "label": "Rewrite engineering cost (10 engineers \u00d7 12 months, doubled)",
+    "basis": [
+     15,
+     19
+    ],
+    "category": "controllable",
+    "value": 0
+   },
+   {
+    "claim_kind": "factor",
+    "label": "LLM serving cost uncertainty",
+    "basis": [
+     11
+    ],
+    "category": "external"
+   },
+   {
+    "claim_kind": "factor",
+    "label": "Data-processing legal clearance",
+    "basis": [
+     12
+    ],
+    "category": "external"
+   },
+   {
+    "claim_kind": "factor",
+    "label": "Copilot year-one attach rate",
+    "basis": [
+     9
+    ],
+    "category": "observable",
+    "value": 0.1
+   },
+   {
+    "claim_kind": "factor",
+    "label": "Win rate uplift from copilot",
+    "basis": [
+     4,
+     5
+    ],
+    "category": "external"
+   },
+   {
+    "claim_kind": "factor",
+    "label": "Engineering attrition risk",
+    "basis": [
+     18
+    ],
+    "category": "observable"
+   },
+   {
+    "claim_kind": "factor",
+    "label": "Feature velocity drag from monolith",
+    "basis": [
+     16
+    ],
+    "category": "observable",
+    "value": 0.3
+   },
+   {
+    "claim_kind": "factor",
+    "label": "Competitive window remaining",
+    "basis": [
+     22
+    ],
+    "category": "external"
+   },
+   {
+    "claim_kind": "option_refinement",
+    "label": "Rewrite first, then copilot (sequenced)",
+    "basis": [
+     1,
+     2
+    ]
+   },
+   {
+    "claim_kind": "option_refinement",
+    "label": "Copilot MVP scoped to non-enterprise to sidestep legal risk",
+    "basis": [
+     1,
+     12,
+     13
+    ]
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Choosing copilot sets engineering cost to ~\u00a3480k",
+    "basis": [
+     1,
+     10
+    ],
+    "from_stated": 1,
+    "to_claim": 0,
+    "effect": "positive",
+    "sets_to": 480000
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Copilot engineering cost reduces available budget headroom",
+    "basis": [
+     19
+    ],
+    "from_claim": 0,
+    "to_stated": 19,
+    "effect": "negative"
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Attach rate drives year-one copilot revenue",
+    "basis": [
+     8,
+     9
+    ],
+    "from_claim": 4,
+    "to_claim": 5,
+    "effect": "positive"
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Win rate uplift from copilot drives ARR growth",
+    "basis": [
+     4,
+     0
+    ],
+    "from_claim": 5,
+    "to_stated": 0,
+    "effect": "positive"
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Year-one copilot revenue (attach \u00d7 price) contributes to ARR growth goal",
+    "basis": [
+     8,
+     9,
+     0
+    ],
+    "from_claim": 4,
+    "to_stated": 0,
+    "effect": "positive"
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "LLM serving cost erodes copilot margin and net ARR contribution",
+    "basis": [
+     11,
+     0
+    ],
+    "from_claim": 2,
+    "to_stated": 0,
+    "effect": "negative"
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Legal clearance failure kills enterprise copilot revenue (60% of revenue at risk)",
+    "basis": [
+     12,
+     13
+    ],
+    "from_claim": 3,
+    "to_stated": 0,
+    "effect": "positive"
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Choosing rewrite sets engineering cost to ~\u00a32.4m (doubled estimate), exceeding budget",
+    "basis": [
+     2,
+     15,
+     19
+    ],
+    "from_stated": 2,
+    "to_claim": 1,
+    "effect": "positive",
+    "sets_to": 2400000
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Rewrite cost vs \u00a31.2m budget creates a hard funding constraint",
+    "basis": [
+     19
+    ],
+    "from_claim": 1,
+    "to_stated": 19,
+    "effect": "negative"
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Rewrite reduces monolith drag, improving feature velocity and future ARR growth",
+    "basis": [
+     16,
+     17,
+     0
+    ],
+    "from_claim": 7,
+    "to_stated": 0,
+    "effect": "positive"
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Monolith drag suppresses copilot velocity if rewrite not done first",
+    "basis": [
+     16,
+     1
+    ],
+    "from_claim": 7,
+    "to_claim": 5,
+    "effect": "negative"
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Engineering attrition worsens if monolith not addressed",
+    "basis": [
+     18,
+     0
+    ],
+    "from_claim": 6,
+    "to_stated": 0,
+    "effect": "negative"
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Rewrite reduces engineering attrition risk",
+    "basis": [
+     18,
+     2
+    ],
+    "from_stated": 2,
+    "to_claim": 6,
+    "effect": "negative"
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Competitive window closing reduces value of delayed copilot launch",
+    "basis": [
+     22,
+     1
+    ],
+    "from_claim": 8,
+    "to_stated": 0,
+    "effect": "negative"
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Sequenced option delays copilot by ~12+ months, compounding competitive lag",
+    "basis": [
+     22,
+     15
+    ],
+    "from_claim": 9,
+    "to_claim": 8,
+    "effect": "negative"
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Copilot MVP scoped to non-enterprise avoids legal risk but caps year-one revenue to ~40% of addressable",
+    "basis": [
+     12,
+     13,
+     10
+    ],
+    "from_claim": 10,
+    "to_claim": 4,
+    "effect": "negative"
+   },
+   {
+    "claim_kind": "prior",
+    "label": "Legal clearance probability: binary outcome, unconfirmed",
+    "basis": [
+     12
+    ],
+    "strength": 0.5
+   },
+   {
+    "claim_kind": "prior",
+    "label": "LLM cost range: \u00a31.50\u2013\u00a39/seat/month (half to triple of \u00a33 central estimate)",
+    "basis": [
+     11
+    ],
+    "strength": 0.3
+   },
+   {
+    "claim_kind": "prior",
+    "label": "Win rate uplift credibility: low (15 AEs on Slack, no holdout)",
+    "basis": [
+     4,
+     5
+    ],
+    "strength": 0.25
+   },
+   {
+    "claim_kind": "prior",
+    "label": "Rewrite duration: 12 months \u00d7 2 = 24 months expected given historical doubling",
+    "basis": [
+     15
+    ],
+    "strength": 0.7
+   }
+  ]
+ },
+ "completion": {
+  "claims": [
+   {
+    "claim_kind": "causal_link",
+    "label": "Choosing copilot option sets attach rate which drives year-one revenue toward ARR growth goal",
+    "from_stated": 1,
+    "to_claim": 4,
+    "effect": "positive",
+    "sets_to": 10
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Choosing copilot option sets win rate uplift factor",
+    "from_stated": 1,
+    "to_claim": 5,
+    "effect": "positive"
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Attach rate drives year-one copilot revenue contribution to ARR growth",
+    "from_claim": 4,
+    "to_stated": 0,
+    "effect": "positive",
+    "strength": 700000,
+    "category": "observable",
+    "value": 700000
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Win rate uplift from copilot contributes to ARR growth goal",
+    "from_claim": 5,
+    "to_stated": 0,
+    "effect": "positive"
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Choosing neither option leaves competitive window to close further",
+    "from_stated": 3,
+    "to_claim": 8,
+    "effect": "negative"
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Closing competitive window reduces ARR growth",
+    "from_claim": 8,
+    "to_stated": 0,
+    "effect": "negative"
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Choosing neither option leaves monolith drag unaddressed",
+    "from_stated": 3,
+    "to_claim": 7,
+    "effect": "negative"
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Unaddressed monolith drag suppresses feature velocity and ARR growth",
+    "from_claim": 7,
+    "to_stated": 0,
+    "effect": "negative"
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Choosing neither option leaves engineering attrition risk unaddressed",
+    "from_stated": 3,
+    "to_claim": 6,
+    "effect": "negative"
+   },
+   {
+    "claim_kind": "causal_link",
+    "label": "Unaddressed engineering attrition worsens attrition and undermines ARR growth goal",
+    "from_claim": 6,
+    "to_stated": 0,
+    "effect": "negative"
+   }
+  ]
+ }
+}

@@ -1,0 +1,53 @@
+{
+  "_provenance": "Journey E brief reply, served CEE staging, harness paul-journey-v2.mjs run pj-20260928T074951Z file E01-brief-msg1.json (PJ-E-A2 STABLE FAIL 3/3: 'deadline \"by Q3\" NOT held'). `brief` is request.body.message verbatim. `served` quotes the reply facts this fixture binds to: the goal node as registered, the manifest row for \"Q3\", the position of the drafter's own Q3 question in _agent.open_questions (index 7 of 10) and the reply's shown count (2 of 10). `candidate` is RECONSTRUCTED from that draft_graph's labels (goal, options, factors, risk, links): the raw drafter output is not in the capture, so its goal.horizon_months is UNVERIFIED and the test drives both null and a guessed count.",
+  "brief": "Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under £400k?",
+  "served": {
+    "goal_node": { "id": "ship_the_new_platform", "kind": "goal", "label": "ship the new platform", "provenance": "from_brief", "goal_threshold_unit": "% completion", "goal_threshold_frame": "level" },
+    "manifest_q3": { "literal": "Q3", "kind": "period", "char_offset": 89, "verdict": "prose_only", "matched_node_id": null, "stated_kind": "figure" },
+    "drafter_q3_question": "How much platform work remains, and what calendar date defines Q3 for this decision?",
+    "drafter_q3_question_index": 7,
+    "open_questions_count": 10,
+    "reply_shown_suffix": "(2 of 10 shown.)"
+  },
+  "candidate": {
+    "goal": {
+      "metric": "ship the new platform", "operator": ">=", "target_stated": false, "value": null, "unit": "% completion",
+      "horizon_months": null, "provenance": "explicit", "baseline_known": false, "baseline_value": null,
+      "baseline_provenance": "inferred", "scope": null
+    },
+    "constraints": [
+      { "metric": "Annual salary spend", "operator": "<", "value": 400000, "unit": "GBP/year", "provenance": "explicit", "frame": "level" }
+    ],
+    "options": [
+      { "label": "Two senior engineers", "provenance": "explicit", "is_status_quo": false, "changes": ["Senior engineers hired"],
+        "interventions": [{ "factor_label": "Senior engineers hired", "value": 2, "value_kind": "absolute", "unit": "engineers", "provenance": "explicit" }] },
+      { "label": "Four junior engineers", "provenance": "explicit", "is_status_quo": false, "changes": ["Junior engineers hired"],
+        "interventions": [{ "factor_label": "Junior engineers hired", "value": 4, "value_kind": "absolute", "unit": "engineers", "provenance": "explicit" }] }
+    ],
+    "factors": [
+      { "label": "Senior engineers hired", "role": "controllable", "baseline_known": false, "baseline_value": null, "unit": "engineers", "provenance": "explicit", "plausible_max": 20 },
+      { "label": "Junior engineers hired", "role": "controllable", "baseline_known": false, "baseline_value": null, "unit": "engineers", "provenance": "explicit", "plausible_max": 30 },
+      { "label": "Engineering delivery capacity", "role": "observable", "baseline_known": false, "baseline_value": null, "unit": "FTE-equivalents", "provenance": "inferred", "plausible_max": 50 },
+      { "label": "Annual salary spend", "role": "observable", "baseline_known": false, "baseline_value": null, "unit": "GBP/year", "provenance": "inferred", "plausible_max": 2000000 }
+    ],
+    "risks": [{ "label": "Hiring lead time", "provenance": "inferred" }],
+    "outcomes": [],
+    "links": [
+      { "from": "Senior engineers hired", "to": "Engineering delivery capacity", "direction": "positive", "provenance": "inferred", "effect_amount": null, "effect_per_source_change": null, "effect_provenance": null },
+      { "from": "Junior engineers hired", "to": "Engineering delivery capacity", "direction": "positive", "provenance": "inferred", "effect_amount": null, "effect_per_source_change": null, "effect_provenance": null },
+      { "from": "Engineering delivery capacity", "to": "ship the new platform", "direction": "positive", "provenance": "inferred", "effect_amount": null, "effect_per_source_change": null, "effect_provenance": null },
+      { "from": "Senior engineers hired", "to": "Annual salary spend", "direction": "positive", "provenance": "inferred", "effect_amount": null, "effect_per_source_change": null, "effect_provenance": null },
+      { "from": "Junior engineers hired", "to": "Annual salary spend", "direction": "positive", "provenance": "inferred", "effect_amount": null, "effect_per_source_change": null, "effect_provenance": null },
+      { "from": "Annual salary spend", "to": "ship the new platform", "direction": "negative", "provenance": "inferred", "effect_amount": null, "effect_per_source_change": null, "effect_provenance": null },
+      { "from": "Senior engineers hired", "to": "Hiring lead time", "direction": "positive", "provenance": "inferred", "effect_amount": null, "effect_per_source_change": null, "effect_provenance": null },
+      { "from": "Junior engineers hired", "to": "Hiring lead time", "direction": "positive", "provenance": "inferred", "effect_amount": null, "effect_per_source_change": null, "effect_provenance": null },
+      { "from": "Hiring lead time", "to": "ship the new platform", "direction": "negative", "provenance": "inferred", "effect_amount": null, "effect_per_source_change": null, "effect_provenance": null }
+    ],
+    "identities": [],
+    "unknowns": [
+      "What is the current level of completion of the new platform?",
+      "How much platform work remains, and what calendar date defines Q3 for this decision?"
+    ],
+    "decision_question": null
+  }
+}

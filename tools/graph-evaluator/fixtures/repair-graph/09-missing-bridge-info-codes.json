@@ -1,0 +1,40 @@
+{
+  "id": "rg-09-info-level-codes",
+  "name": "Info-level codes — MIXED_RANGE_DERIVATION and CONSTRAINT_DIRECTION_HEURISTIC",
+  "description": "Graph has two info-level violations. Repair must acknowledge them in rationales with no structural changes, and must not modify the graph.",
+  "brief": "We are deciding whether to expand to a new city. Some factor ranges mix internal and benchmark data.",
+  "graph": {
+    "nodes": [
+      {"id": "dec_city_expand", "kind": "decision", "label": "City Expansion"},
+      {"id": "opt_expand_now", "kind": "option", "label": "Expand This Year", "data": {"interventions": {"fac_expansion_invest": 1.0}}},
+      {"id": "opt_wait", "kind": "option", "label": "Wait One Year", "data": {"interventions": {"fac_expansion_invest": 0.3}}},
+      {"id": "fac_expansion_invest", "kind": "factor", "label": "Expansion Investment", "category": "controllable", "data": {"value": 0.4, "extractionType": "inferred", "factor_type": "cost", "uncertainty_drivers": ["Budget TBD"]}},
+      {"id": "fac_city_demand", "kind": "factor", "label": "City Market Demand", "category": "external", "prior": {"distribution": "uniform", "range_min": 0.0, "range_max": 1.0}},
+      {"id": "out_new_revenue", "kind": "outcome", "label": "New City Revenue"},
+      {"id": "goal_growth", "kind": "goal", "label": "Revenue Growth"}
+    ],
+    "edges": [
+      {"from": "dec_city_expand", "to": "opt_expand_now", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "dec_city_expand", "to": "opt_wait", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_expand_now", "to": "fac_expansion_invest", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_wait", "to": "fac_expansion_invest", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "fac_expansion_invest", "to": "out_new_revenue", "strength": {"mean": 0.60, "std": 0.18}, "exists_probability": 0.82, "effect_direction": "positive"},
+      {"from": "fac_city_demand", "to": "out_new_revenue", "strength": {"mean": 0.50, "std": 0.20}, "exists_probability": 0.75, "effect_direction": "positive"},
+      {"from": "out_new_revenue", "to": "goal_growth", "strength": {"mean": 0.70, "std": 0.15}, "exists_probability": 0.90, "effect_direction": "positive"}
+    ]
+  },
+  "violations": [
+    {"code": "MIXED_RANGE_DERIVATION", "node_or_edge": "fac_city_demand", "detail": "Factor uses mixed range derivation (benchmark + internal). Info only."},
+    {"code": "CONSTRAINT_DIRECTION_HEURISTIC", "node_or_edge": "fac_expansion_invest", "detail": "Constraint direction determined by heuristic. Info only."}
+  ],
+  "expected": {
+    "violations_addressed": ["MIXED_RANGE_DERIVATION", "CONSTRAINT_DIRECTION_HEURISTIC"],
+    "preserve_node_ids": ["dec_city_expand", "opt_expand_now", "opt_wait", "fac_expansion_invest", "fac_city_demand", "out_new_revenue", "goal_growth"],
+    "forbidden_edges": [],
+    "required_edges": [],
+    "no_bridge_edges": false,
+    "preserve_bidirected": false,
+    "check_external_prior": false,
+    "no_json_comments": true
+  }
+}

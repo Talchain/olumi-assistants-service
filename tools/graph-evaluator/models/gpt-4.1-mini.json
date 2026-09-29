@@ -1,0 +1,16 @@
+{
+  "id": "gpt-4.1-mini",
+  "display_name": "GPT-4.1 Mini",
+  "provider": "openai",
+  "model": "gpt-4.1-mini",
+  "api_key_env": "OPENAI_API_KEY",
+  "params": {
+    "temperature": 0
+  },
+  "target_mode": "fast",
+  "pricing": {
+    "input_per_1m": 0.40,
+    "output_per_1m": 1.60,
+    "source": "openai_api_docs_2026-03"
+  }
+}

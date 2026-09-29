@@ -1,0 +1,58 @@
+{
+  "error": "INTERNAL_ERROR",
+  "boundary": "B1",
+  "direction": "egress",
+  "validator": "draft_graph_pipeline",
+  "details": {
+    "retryable": false,
+    "reason": "draft_graph_cee_graph_invalid",
+    "stage": "frame",
+    "violation_code": "OPTIONS_IDENTICAL",
+    "identical_option_ids": [
+      "opt_defer",
+      "opt_open_leeds"
+    ],
+    "intervention_signature": "",
+    "repair_skip_reason": "options_identical_unrepairable_by_llm",
+    "recovery": {
+      "suggestion": "Your options need at least one distinct value to compare. For a pricing decision, give a price for each option (e.g. Low = £49/month, Mid = £99/month, High = £199/month).",
+      "hints": [
+        "Give each option at least one unique value (price, headcount, timeline, scope).",
+        "Use specific numbers rather than vague descriptions.",
+        "Or describe how each option differs from the others in plain language."
+      ]
+    },
+    "pipeline_error_code": "CEE_GRAPH_INVALID"
+  },
+  "request_id": "629c888b-ab31-4679-90e5-867067367830",
+  "retryable": false,
+  "_diagnostic_trace": {
+    "llm_calls": [],
+    "prompt_identity": [],
+    "zone2_assembly": null,
+    "tool_policy": null,
+    "provider_resolution": [],
+    "structured_output_config": null,
+    "streaming_metrics": null,
+    "fallback_trace": [],
+    "benchmarking": {
+      "total_duration_ms": 40768,
+      "substage_timings": {}
+    },
+    "correlation_ids": {
+      "request_id": "629c888b-ab31-4679-90e5-867067367830",
+      "scenario_id": "1f944542-2d4b-4a2b-8f9d-db6f7e44ee79",
+      "turn_id": "1805272d-0ab3-41fb-944b-f99d9009abfb"
+    },
+    "retry": {
+      "timed_out": false,
+      "error_type": "Error"
+    },
+    "environment": {
+      "build_sha": "e22f8a6",
+      "environment": "staging"
+    },
+    "exit_path": "draft_graph_error",
+    "trace_version": 1
+  }
+}

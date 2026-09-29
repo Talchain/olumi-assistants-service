@@ -1,0 +1,170 @@
+{
+  "captured_at": "2026-07-12T01:00:05.033Z",
+  "cee": {
+    "base": "http://localhost:3101",
+    "health": {
+      "ok": true,
+      "build": "7704517",
+      "degraded": false,
+      "service": "assistants",
+      "version": "1.12.0",
+      "prompts_ready": true,
+      "critical_prompts_pms": true
+    },
+    "deploy_sha": "7704517",
+    "prompts": {
+      "keys": {
+        "sent_hash": null,
+        "content_hash": null,
+        "version": null,
+        "source": null
+      }
+    }
+  },
+  "plot": {
+    "base": "https://plot-lite-service-staging.onrender.com",
+    "health": {
+      "status": "ok",
+      "build": "9e5a25c",
+      "p95_ms": 13,
+      "c2xx": 17,
+      "c4xx": 2,
+      "c5xx": 0,
+      "lastReplayStatus": "unknown",
+      "runtime": {
+        "node": "v20.20.2",
+        "uptime_s": 4291,
+        "rss_mb": 85,
+        "heap_used_mb": 23,
+        "eventloop_delay_ms": 10,
+        "p95_ms": 13,
+        "p99_ms": 13
+      },
+      "caches": {
+        "idempotency_current": 0
+      },
+      "rate_limit": {
+        "enabled": true,
+        "rpm": 60,
+        "last5m_429": 0
+      },
+      "cee_circuit_breaker": {
+        "state": "closed",
+        "consecutiveFailures": 0,
+        "threshold": 5,
+        "cooldownMs": 30000,
+        "probeInFlight": false
+      },
+      "test_routes_enabled": false,
+      "replay": {
+        "lastStatus": "unknown",
+        "refusals": 0,
+        "retries": 0,
+        "lastTs": null
+      },
+      "flags_doc": {
+        "test_routes_enabled": false,
+        "rate_limit.enabled": true
+      }
+    }
+  },
+  "isl": {
+    "base": "https://isl-staging.onrender.com",
+    "health": {
+      "status": "healthy",
+      "version": "1.0.0",
+      "build": "d773f4a",
+      "build_full": "d773f4a8dd71377658b7d3be3d451b2d4df49b17",
+      "timestamp": "2026-07-12T01:00:05.595755Z",
+      "config_fingerprint": "cb0a8a533671"
+    },
+    "deploy_sha": "d773f4a8dd71377658b7d3be3d451b2d4df49b17"
+  },
+  "flags": {
+    "BIL_ENABLED": "true",
+    "CEE_ADD_RISK_REJECTION_GUIDANCE_ENABLED": "true",
+    "CEE_ANTHROPIC_STRUCTURED_OUTPUTS": "true",
+    "CEE_BIAS_STRUCTURAL_ENABLED": "true",
+    "CEE_BRIEF_DETECTION_ENABLED": "true",
+    "CEE_CACHE_RESPONSE_ENABLED": "false",
+    "CEE_CACHE_RESPONSE_MAX_SIZE": "100",
+    "CEE_CACHE_RESPONSE_TTL_MS": "300000",
+    "CEE_CAUSAL_VALIDATION_ENABLED": "true",
+    "CEE_CLARIFIER_ENABLED": "true",
+    "CEE_COACHING_CONTEXT_PROMPT_ENABLED": "true",
+    "CEE_DECISION_REVIEW_ENABLED": "true",
+    "CEE_DETERMINISTIC_ENFORCEMENT_ENABLED": "true",
+    "CEE_DETERMINISTIC_ORCHESTRATOR_ENABLED": "true",
+    "CEE_DETERMINISTIC_ROUTING_V2": "true",
+    "CEE_DIAGNOSTIC_TRACE_ENABLED": "true",
+    "CEE_DRAFT_ARCHETYPES_ENABLED": "true",
+    "CEE_DRAFT_COMPLIANCE_REMINDER_ENABLED": "true",
+    "CEE_DRAFT_GRAPH_THINKING": "false",
+    "CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED": "true",
+    "CEE_EDIT_GRAPH_THINKING": "false",
+    "CEE_ENTITY_MEMORY_ENABLED": "true",
+    "CEE_FIELD_SURVIVAL_TRACE": "true",
+    "CEE_GRAPH_MANAGEMENT_MODE": "shadow",
+    "CEE_GRAPH_MAX_EDGES": "50",
+    "CEE_GRAPH_MAX_NODES": "20",
+    "CEE_MAX_TOKENS_EDIT_GRAPH": "18000",
+    "CEE_MAX_TOKENS_ORCHESTRATOR": "18000",
+    "CEE_MODEL_DECISION_REVIEW": "gpt-4.1",
+    "CEE_MODEL_DRAFT_GRAPH": "claude-sonnet-4-6",
+    "CEE_MODEL_EDIT_GRAPH": "claude-sonnet-4-6",
+    "CEE_MODEL_ORCHESTRATOR": "claude-sonnet-4-6",
+    "CEE_MODEL_REPAIR": "gpt-4.1",
+    "CEE_MODEL_SELECTION_ENABLED": "true",
+    "CEE_MODEL_VERSIONS_ENABLED": "true",
+    "CEE_OBSERVABILITY_ENABLED": "true",
+    "CEE_ORCHESTRATOR_ENABLED": "true",
+    "CEE_ORCHESTRATOR_THINKING": "false",
+    "CEE_ORCHESTRATOR_VALIDATION_ENABLED": "false",
+    "CEE_PATCH_BUDGET_ENABLED": "true",
+    "CEE_PATCH_PRE_VALIDATION_ENABLED": "true",
+    "CEE_PIPELINE_CHECKPOINTS_ENABLED": "true",
+    "CEE_PIPELINE_V4_ENABLED": "false",
+    "CEE_PLOT_EGRESS_SCALE_NET_ENABLED": "true",
+    "CEE_POST_ANALYSIS_LOOP_ENABLED": "true",
+    "CEE_PREFLIGHT_ENABLED": "true",
+    "CEE_PREFLIGHT_READINESS_THRESHOLD": "0.4",
+    "CEE_PREFLIGHT_STRICT": "false",
+    "CEE_PRE_DECISION_CHECKS_ENABLED": "true",
+    "CEE_PROMPT_AUTO_MIGRATE": "false",
+    "CEE_PROMPT_DEBUG_ENABLED": "true",
+    "CEE_REFINEMENT_ENABLED": "true",
+    "CEE_RUN_ANALYSIS_READY_GUARD": "false",
+    "CEE_TURN_DEBUG_ENABLED": "false",
+    "CEE_V5_GRAPH_CAS_MODE": "observe",
+    "CEE_VALIDATION_PIPELINE_ENABLED": "false",
+    "CEE_VERIFICATION_PIPELINE_ENABLED": "false",
+    "CEE_ZONE2_REGISTRY_ENABLED": "true",
+    "CRITIQUE_ENABLED": "true",
+    "DRAFT_GRAPH_TURN_BUDGET_MS": "180000",
+    "DSK_COACHING_ENABLED": "true",
+    "DSK_ENABLED": "true",
+    "ENABLE_LEGACY_SSE": "false",
+    "ENABLE_ORCHESTRATOR_STREAMING": "false",
+    "ENABLE_ORCHESTRATOR_V2": "true",
+    "ENABLE_V5_ORCHESTRATOR": "true",
+    "GROUNDING_ENABLED": "true",
+    "ISL_MAX_RETRIES": "4",
+    "ISL_TIMEOUT_MS": "60000",
+    "LOG_LEVEL": "debug",
+    "MOE_SPIKE_ENABLED": "false",
+    "NODE_ENV": "staging",
+    "ORCHESTRATOR_DEBUG_BUNDLE": "true",
+    "ORCHESTRATOR_TIMEOUT_MS": "150000",
+    "ORCHESTRATOR_TURN_BUDGET_MS": "180000",
+    "PROMPTS_BRAINTRUST_ENABLED": "false",
+    "PROMPTS_ENABLED": "true",
+    "PROMPTS_STORE_TYPE": "supabase",
+    "PROMPTS_USE_STAGING": "True",
+    "RESEARCH_ENABLED": "true",
+    "RESEARCH_MODEL": "gpt-4.1-mini",
+    "ROUTE_TIMEOUT_MS": "180000",
+    "SSE_WRITE_TIMEOUT_MS": "180000",
+    "V5_TIMING_DEBUG": "true"
+  },
+  "flags_source": "/Users/paulslee/Documents/GitHub/orchestrator-prompt-workstream/candidates/staging-parity.env"
+}

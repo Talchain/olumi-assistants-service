@@ -1,0 +1,191 @@
+{
+  "preserve": [
+    "Goal: reach £20k MRR within 12 months.",
+    "Constraint: keep monthly churn below 4%.",
+    "Decision under consideration: increase the Pro price from £49 to £59 with the next Pro feature release.",
+    "Comparator: keep the Pro price at £49.",
+    "Current skeleton factors: Pro price, feature release, Pro subscriber count, and monthly churn.",
+    "Core uncertainty: the price increase's effects on churn, subscriber growth, and the feature release's effect on growth."
+  ],
+  "proposed_options": [
+    {
+      "label": "Raise Pro to £59 for new subscribers at the feature release, while grandfathering existing Pro subscribers for a defined period or until a renewal event.",
+      "why_material": "This separates acquisition-price elasticity from immediate exposure of the existing base, potentially reducing near-term cancellation risk while still testing the higher price point.",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "Run a staged or segmented £59 price test around the feature release before making £59 the default price.",
+      "why_material": "A controlled rollout can produce evidence on conversion, downgrades, cancellations, and net MRR before broad exposure creates a churn breach.",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "Keep Pro at £49 and monetize the released capability through an optional add-on or a higher plan tier.",
+      "why_material": "This creates an alternative route to higher revenue that may preserve the perceived value of the existing Pro plan for price-sensitive customers.",
+      "provenance": "ai_proposed"
+    }
+  ],
+  "proposed_factors": [
+    {
+      "label": "New-customer conversion to Pro at each price point",
+      "why_material": "A higher list price can change the rate at which prospective customers become Pro subscribers, affecting subscriber growth and MRR.",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "Existing-customer cancellation and downgrade behavior at renewal",
+      "why_material": "A price change may lead customers either to cancel or move to a lower plan; these pathways have different implications for logo churn, subscriber count, and MRR.",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "Perceived value of the feature release relative to the £59 price",
+      "why_material": "Customers' assessment of whether the release justifies the price is a plausible mediator of both purchase conversion and retention.",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "Feature adoption and realized customer benefit",
+      "why_material": "Merely releasing a feature need not improve retention; adoption and realized benefit are more defensible mechanisms through which it could affect willingness to pay and churn.",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "Gross Pro additions and net Pro subscriber growth",
+      "why_material": "MRR progress depends on additions as well as retention; net subscriber growth makes the trade-off between higher ARPU and lower conversion or retention visible.",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "Definition and cohorting of monthly churn",
+      "why_material": "The decision needs clarity on whether the under-4% constraint is customer/logo churn or revenue churn, and whether it is measured for exposed renewal cohorts versus the blended base.",
+      "provenance": "ai_proposed"
+    }
+  ],
+  "proposed_risks": [
+    {
+      "label": "The feature release does not create enough perceived or realized value to offset price sensitivity.",
+      "why_material": "If the value proposition is unclear or the feature is not adopted, the joint release-and-price-change may weaken conversion and retention rather than support them.",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "Downgrades may reduce MRR without necessarily appearing as customer churn.",
+      "why_material": "A customer who remains subscribed on a lower plan may leave logo churn below 4% while still undermining MRR progress.",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "A blended churn metric may mask a harmful response among customers exposed to the increase.",
+      "why_material": "Unexposed customers or new cohorts can dilute the aggregate metric, delaying detection of price-change-related retention problems.",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "Grandfathering or segmentation may create pricing complexity or perceived unfairness.",
+      "why_material": "A risk-mitigating rollout can itself affect customer trust, support burden, and eventual migration to the new price.",
+      "provenance": "ai_proposed"
+    }
+  ],
+  "proposed_outcomes": [
+    {
+      "label": "Net MRR change from the price-and-release decision",
+      "why_material": "The relevant revenue outcome combines the higher price paid by retained subscribers with changes in conversions, additions, downgrades, and cancellations.",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "Monthly churn among customers exposed to the new price",
+      "why_material": "This outcome directly tests whether the decision is compatible with the churn constraint, rather than relying only on a blended churn result.",
+      "provenance": "ai_proposed"
+    },
+    {
+      "label": "Revenue per retained Pro subscriber",
+      "why_material": "This distinguishes the benefit of a higher price from changes in the size of the Pro subscriber base.",
+      "provenance": "ai_proposed"
+    }
+  ],
+  "proposed_links": [
+    {
+      "from": "Pro plan price",
+      "to": "Perceived value of the feature release relative to the £59 price",
+      "direction": "negative",
+      "why_material": "Holding perceived product value constant, a higher price can reduce customers' assessment of price-value fit; the feature release may counteract this through increased perceived value.",
+      "provenance": "ai_proposed"
+    },
+    {
+      "from": "Feature adoption and realized customer benefit",
+      "to": "Perceived value of the feature release relative to the £59 price",
+      "direction": "positive",
+      "why_material": "Customers who adopt the release and obtain meaningful benefit may perceive stronger value at the new price.",
+      "provenance": "ai_proposed"
+    },
+    {
+      "from": "Perceived value of the feature release relative to the £59 price",
+      "to": "New-customer conversion to Pro at each price point",
+      "direction": "positive",
+      "why_material": "Stronger perceived value can support willingness to purchase Pro, whereas weak price-value fit can suppress conversion.",
+      "provenance": "ai_proposed"
+    },
+    {
+      "from": "Perceived value of the feature release relative to the £59 price",
+      "to": "Existing-customer cancellation and downgrade behavior at renewal",
+      "direction": "negative",
+      "why_material": "Stronger perceived value can reduce the propensity to cancel or downgrade at renewal after a price change.",
+      "provenance": "ai_proposed"
+    },
+    {
+      "from": "Existing-customer cancellation and downgrade behavior at renewal",
+      "to": "Monthly churn rate",
+      "direction": "positive",
+      "why_material": "More cancellations among eligible customers increase churn; downgrades may not increase logo churn and should therefore be tracked separately.",
+      "provenance": "ai_proposed"
+    },
+    {
+      "from": "New-customer conversion to Pro at each price point",
+      "to": "Gross Pro additions and net Pro subscriber growth",
+      "direction": "positive",
+      "why_material": "Higher conversion among qualified prospects contributes to gross additions and, all else equal, net subscriber growth.",
+      "provenance": "ai_proposed"
+    },
+    {
+      "from": "Existing-customer cancellation and downgrade behavior at renewal",
+      "to": "Gross Pro additions and net Pro subscriber growth",
+      "direction": "negative",
+      "why_material": "Cancellations and plan exits reduce the active Pro base, while downgrades can remove customers from Pro even if they remain customers.",
+      "provenance": "ai_proposed"
+    },
+    {
+      "from": "Gross Pro additions and net Pro subscriber growth",
+      "to": "Net MRR change from the price-and-release decision",
+      "direction": "positive",
+      "why_material": "More net active Pro subscribers increases recurring revenue, conditional on the revenue associated with each subscriber.",
+      "provenance": "ai_proposed"
+    },
+    {
+      "from": "Pro plan price",
+      "to": "Revenue per retained Pro subscriber",
+      "direction": "positive",
+      "why_material": "For retained customers actually charged the new price, a higher Pro price increases recurring revenue per subscriber before discounts, grandfathering, or plan changes.",
+      "provenance": "ai_proposed"
+    },
+    {
+      "from": "Revenue per retained Pro subscriber",
+      "to": "Net MRR change from the price-and-release decision",
+      "direction": "positive",
+      "why_material": "Higher recurring revenue per retained subscriber contributes to net MRR, but does not by itself establish that total MRR rises because subscriber counts may also change.",
+      "provenance": "ai_proposed"
+    }
+  ],
+  "excluded": [
+    {
+      "candidate": "Assuming that the £59 price increase will increase total MRR.",
+      "reason": "Higher price per retained subscriber can be offset by lower conversion, downgrades, or cancellations; no evidence for the net effect was provided."
+    },
+    {
+      "candidate": "Assuming that the feature release will increase the number of Pro subscribers.",
+      "reason": "The release's value, adoption, and effect on purchase and retention were not specified."
+    },
+    {
+      "candidate": "Assuming a specific customer segment, competitive benchmark, or willingness-to-pay level.",
+      "reason": "The brief supplies no segmentation, market, or customer-research evidence."
+    }
+  ],
+  "fidelity_warnings": [
+    "The skeleton's direct link from Pro plan price to MRR is directionally incomplete: price affects MRR through revenue per paying subscriber and through changes in acquisition, retention, and plan mix.",
+    "The skeleton's direct link from monthly churn rate to MRR compresses an important mechanism. Churn reduces retained subscribers (and potentially retained recurring revenue), which then affects MRR; the impact also depends on gross additions and pricing.",
+    "The asserted positive link from the feature release to number of Pro subscribers is not established by the brief. A more defensible causal path runs through feature adoption, realized benefit, perceived value, conversion, and retention.",
+    "The churn constraint is underspecified: customer/logo churn and revenue churn can move differently, especially if customers downgrade instead of canceling.",
+    "The goal wording says 'reaching £20k MRR within 12 months,' while the skeleton expresses an end-horizon threshold; it does not clarify whether attaining the threshold at any point, sustaining it, or ending month 12 at or above it is intended."
+  ]
+}

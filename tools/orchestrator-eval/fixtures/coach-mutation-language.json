@@ -1,0 +1,36 @@
+{
+  "id": "coach-mutation-language",
+  "description": "Structural-advice coaching turn. The prompt invites high-value structural moves (make X a constraint, split, merge, mediator). Live finding (arm B P25, and the deterministic advice-gate template): natural gerund/first-person phrasing ('adjusting X', \"I'd suggest adding\") pattern-matches the production containsMutationLanguage guard, which on an explanation answer invalidates it (deterministic fallback) and on any turn reads as an unbacked graph mutation. The gate must catch the mutation-phrased advice and pass the noun-form advice (v42.2c COACHING rule: 'X would work better as a constraint', 'a mediator between the two would capture the delay', 'if X were lower').",
+  "user_message": "Should any of these factors be treated differently in the model structure?",
+  "analysis": {
+    "status": "completed",
+    "leading_option": { "label": "Hire One Tech Lead", "probability": 0.81 },
+    "runner_up": { "label": "Hire Two Mid-Level Developers", "probability": 0.18 },
+    "margin_pp": 63,
+    "robustness_band": "stable",
+    "top_drivers": [],
+    "fragile_edges": [],
+    "options": [
+      { "label": "Hire One Tech Lead", "probability": 0.81 },
+      { "label": "Hire Two Mid-Level Developers", "probability": 0.18 }
+    ]
+  },
+  "candidates": [
+    {
+      "label": "good",
+      "note": "Noun-form structural advice framed as a property of the model, no first-person mutation verb. Should PASS.",
+      "source": "recorded",
+      "text": "Budget Pressure would work better as a constraint than a factor, because it caps every option rather than trading off against them. A mediator between Team Seniority and Delivery Speed would capture the coordination delay your current direct link hides. If Delivery Risk were lower, the gap between the two hires would widen."
+    },
+    {
+      "label": "regression",
+      "note": "First-person / gerund mutation phrasing the production guard flags as an unbacked change claim. Should FAIL.",
+      "source": "recorded",
+      "text": "I'd suggest adding a constraint on Budget Pressure, and adjusting the link between Team Seniority and Delivery Speed so it runs through a mediator."
+    }
+  ],
+  "expected": {
+    "good": true,
+    "regression": false
+  }
+}

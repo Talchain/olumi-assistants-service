@@ -1,0 +1,21 @@
+{
+  "message": "What factors should I consider for this decision?",
+  "scenario_id": "scn-conv-001",
+  "client_turn_id": "ct-conv-001",
+  "conversation_history": [
+    {
+      "role": "user",
+      "content": "I need help deciding between two vendors"
+    },
+    {
+      "role": "assistant",
+      "content": "I'd be happy to help you evaluate your vendor options. Let's start by identifying the key factors."
+    }
+  ],
+  "graph_state": {
+    "nodes": [
+      { "id": "goal_1", "kind": "goal", "label": "Select Best Vendor" }
+    ],
+    "edges": []
+  }
+}

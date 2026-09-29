@@ -1,0 +1,556 @@
+/**
+ * Prompt Caching Adapter - Dual-mode Cache (Redis + LRU fallback) for LLM Responses
+ *
+ * Wraps any LLMAdapter to cache responses and avoid redundant API calls.
+ *
+ * Features:
+ * - Dual-mode storage: Redis (production) or LRU (fallback/dev)
+ * - TTL-based expiration for stale entries
+ * - Per-operation caching (draft_graph, suggest_options, etc.)
+ * - Telemetry for hits/misses/evictions
+ * - Environment-driven configuration:
+ *   - PROMPT_CACHE_ENABLED: Enable/disable caching (default: false)
+ *   - REDIS_PROMPT_CACHE_ENABLED: Use Redis backend (default: false, requires REDIS_URL)
+ *   - PROMPT_CACHE_MAX_SIZE: Max LRU entries (default: 100, only for memory mode)
+ *   - PROMPT_CACHE_TTL_MS: Entry TTL in milliseconds (default: 3600000 = 1 hour)
+ *
+ * Redis key pattern: pc:v2:{operation}:{sha256}
+ * Note: Streaming responses are NOT cached (bypasses cache)
+ */
+
+import { createHash } from "node:crypto";
+import { LruTtlCache } from "../../utils/cache.js";
+import { emit, TelemetryEvents, log } from "../../utils/telemetry.js";
+import { fastHash } from "../../utils/hash.js";
+import { getRedis } from "../../platform/redis.js";
+import { config } from "../../config/index.js";
+import type {
+  LLMAdapter,
+  DraftGraphArgs,
+  DraftGraphResult,
+  SuggestOptionsArgs,
+  SuggestOptionsResult,
+  ExplainDiffArgs,
+  ExplainDiffResult,
+  ClarifyBriefArgs,
+  ClarifyBriefResult,
+  CritiqueGraphArgs,
+  CritiqueGraphResult,
+  ChatArgs,
+  ChatResult,
+  ChatWithToolsArgs,
+  ChatWithToolsResult,
+  ChatWithToolsStreamEvent,
+  CallOpts,
+  DraftStreamEvent,
+} from "./types.js";
+
+const RESPONSE_CACHE_NAMESPACE = "pc:v2";
+
+interface ResponseAuthority {
+  readonly prompt: {
+    readonly operation: string;
+    readonly content: string;
+    readonly taskId: string;
+    readonly source: string;
+    readonly promptId: string | null;
+    readonly version: number | null;
+    readonly promptVersion: string;
+    readonly promptHash: string | null;
+    readonly isStaging: boolean | null;
+    readonly useStagingMode: boolean | null;
+    readonly modelConfig: unknown;
+  };
+  readonly routingTopology: ReadonlyArray<{
+    readonly provider: string;
+    readonly model: string;
+  }>;
+  readonly generationConfig: {
+    readonly timeoutMs: number;
+    readonly configuredMaxTokens: number | null;
+    readonly maxTokensCeiling: number | null;
+    readonly anthropicStructuredOutputs: boolean | null;
+    readonly draftComplianceReminderEnabled: boolean | null;
+  };
+}
+
+interface FailoverMetadataProvider {
+  getFailoverMetadata(): {
+    readonly topology?: ReadonlyArray<{
+      readonly provider: string;
+      readonly model: string;
+    }>;
+  };
+}
+
+// Cache configuration helpers (using centralized config)
+function getCacheEnabled(): boolean {
+  return config.promptCache.enabled;
+}
+
+/**
+ * Sorted JSON replacer for deterministic cache keys (module-level for efficiency)
+ * Ensures consistent cache keys regardless of property order
+ */
+function sortedReplacer(_key: string, value: unknown): unknown {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return Object.keys(value as object)
+      .sort()
+      .reduce((sorted: Record<string, unknown>, key) => {
+        sorted[key] = (value as Record<string, unknown>)[key];
+        return sorted;
+      }, {});
+  }
+  return value;
+}
+
+function getRedisCacheEnabled(): boolean {
+  return config.redis.promptCacheEnabled;
+}
+
+function getCacheMaxSize(): number {
+  return config.promptCache.maxSize;
+}
+
+function getCacheTtlMs(): number {
+  return config.promptCache.ttlMs;
+}
+
+function getConfiguredMaxTokens(operation: string): number | null {
+  const key = {
+    draft_graph: "draft",
+    suggest_options: "options",
+    clarify_brief: "clarification",
+    critique_graph: "critique",
+  }[operation] as "draft" | "options" | "clarification" | "critique" | undefined;
+
+  if (!key) return null;
+  return config.cee.maxTokens[key] ?? null;
+}
+
+function hasFailoverMetadata(adapter: LLMAdapter): adapter is LLMAdapter & FailoverMetadataProvider {
+  return typeof (adapter as Partial<FailoverMetadataProvider>).getFailoverMetadata === "function";
+}
+
+function getRoutingTopology(adapter: LLMAdapter): ResponseAuthority["routingTopology"] {
+  if (hasFailoverMetadata(adapter)) {
+    const topology = adapter.getFailoverMetadata().topology;
+    if (
+      topology?.length &&
+      topology.every(
+        (entry) =>
+          typeof entry.provider === "string" &&
+          entry.provider.length > 0 &&
+          typeof entry.model === "string" &&
+          entry.model.length > 0,
+      )
+    ) {
+      return topology.map(({ provider, model }) => ({ provider, model }));
+    }
+  }
+
+  return [{ provider: adapter.name, model: adapter.model }];
+}
+
+/**
+ * Caching adapter that wraps an LLM adapter with dual-mode cache (Redis + LRU fallback)
+ */
+export class CachingAdapter implements LLMAdapter {
+  readonly name: string;
+  readonly model: string;
+  /** Cache stores stringified JSON (like Redis) for efficient single-parse on read */
+  private readonly cache: LruTtlCache<string, string>;
+  private readonly enabled: boolean;
+  private readonly redisEnabled: boolean;
+
+  constructor(private readonly adapter: LLMAdapter) {
+    // Preserve original adapter name to avoid breaking downstream routing
+    this.name = adapter.name;
+    this.model = adapter.model;
+    this.enabled = getCacheEnabled();
+    this.redisEnabled = getRedisCacheEnabled();
+
+    // Create LRU cache as fallback (always initialized, used when Redis unavailable)
+    this.cache = new LruTtlCache(
+      getCacheMaxSize(),
+      getCacheTtlMs(),
+      (key, value, reason) => {
+        emit(TelemetryEvents.PromptCacheEviction, {
+          key_hash: fastHash(key, 8),
+          reason,
+          provider: adapter.name,
+          backend: "memory",
+        });
+
+        log.debug(
+          { key_hash: fastHash(key, 8), reason, cache_size: this.cache.size },
+          "Prompt cache eviction (memory)"
+        );
+      }
+    );
+
+    log.info(
+      {
+        provider: adapter.name,
+        enabled: this.enabled,
+        redis_enabled: this.redisEnabled,
+        max_size: getCacheMaxSize(),
+        ttl_ms: getCacheTtlMs(),
+      },
+      "Prompt caching adapter initialized"
+    );
+  }
+
+  /**
+   * Generate cache key from operation and args
+   * Uses canonical JSON to ensure stable keys regardless of property order
+   *
+   * Key pattern: pc:v2:{operation}:{sha256}
+   * (Redis keyPrefix will prepend its deployment namespace.)
+   */
+  private getCacheKey(operation: string, args: unknown, authority: ResponseAuthority): string {
+    const keyData = JSON.stringify(
+      {
+        namespace: RESPONSE_CACHE_NAMESPACE,
+        operation,
+        args,
+        authority,
+      },
+      sortedReplacer,
+    );
+    const hash = createHash("sha256").update(keyData, "utf8").digest("hex");
+
+    return `${RESPONSE_CACHE_NAMESPACE}:${operation}:${hash}`;
+  }
+
+  /**
+   * Build the immutable response authority required for safe cross-request
+   * reuse. Operations without an exact governed prompt/code fingerprint are
+   * deliberately not cached (notably the current inline explain_diff path).
+   */
+  private getResponseAuthority(operation: string, opts: CallOpts): ResponseAuthority | null {
+    const snapshot = opts.preloadedSystemPrompt;
+    if (
+      !snapshot ||
+      snapshot.operation !== operation ||
+      snapshot.meta.taskId !== operation
+    ) {
+      return null;
+    }
+
+    const routingTopology = getRoutingTopology(this.adapter);
+    // Anthropic consumes the exact clarify snapshot carried in CallOpts.
+    // OpenAI and fixtures currently serve provider-owned inline/code prompts,
+    // so a topology that can reach either provider has no single immutable
+    // prompt authority at this boundary and must bypass response caching.
+    if (
+      operation === "clarify_brief" &&
+      routingTopology.some(({ provider }) => provider !== "anthropic")
+    ) {
+      return null;
+    }
+
+    const prompt = {
+      operation: snapshot.operation,
+      content: snapshot.content,
+      taskId: snapshot.meta.taskId,
+      source: snapshot.meta.source,
+      promptId: snapshot.meta.promptId ?? null,
+      version: snapshot.meta.version ?? null,
+      promptVersion: snapshot.meta.prompt_version,
+      promptHash: snapshot.meta.prompt_hash ?? null,
+      isStaging: snapshot.meta.isStaging ?? null,
+      useStagingMode: snapshot.meta.use_staging_mode ?? null,
+      modelConfig: snapshot.meta.modelConfig ?? null,
+    };
+
+    return {
+      prompt,
+      routingTopology,
+      generationConfig: {
+        // timeoutMs is response authority: draft max_tokens is derived from
+        // this live window, and shorter windows can also alter failover.
+        timeoutMs: opts.timeoutMs,
+        configuredMaxTokens: getConfiguredMaxTokens(operation),
+        maxTokensCeiling: opts.maxTokensCeiling ?? null,
+        anthropicStructuredOutputs:
+          operation === "draft_graph" || operation === "critique_graph"
+            ? config.cee.anthropicStructuredOutputs
+            : null,
+        draftComplianceReminderEnabled:
+          operation === "draft_graph"
+            ? config.cee.draftComplianceReminderEnabled
+            : null,
+      },
+    };
+  }
+
+  /**
+   * Execute operation with caching (dual-mode: Redis + LRU fallback)
+   */
+  private async withCache<T>(
+    operation: string,
+    args: any,
+    opts: CallOpts,
+    fn: () => Promise<T>
+  ): Promise<T> {
+    // Check bypass flag first (before checking enabled)
+    if (opts.bypassCache) {
+      // Don't emit telemetry for explicit bypass (low signal)
+      return fn();
+    }
+
+    // Skip cache if disabled (don't emit telemetry to avoid noise)
+    if (!this.enabled) {
+      return fn();
+    }
+
+    const authority = this.getResponseAuthority(operation, opts);
+    if (!authority) {
+      return fn();
+    }
+
+    const cacheKey = this.getCacheKey(operation, args, authority);
+
+    // Try Redis first if enabled
+    if (this.redisEnabled) {
+      const redis = await getRedis();
+
+      if (redis) {
+        try {
+          // Try Redis get
+          const redisValue = await redis.get(cacheKey);
+
+          if (redisValue) {
+            // Redis hit
+            emit(TelemetryEvents.PromptCacheHit, {
+              operation,
+              provider: this.adapter.name,
+              backend: "redis",
+            });
+
+            // Deep clone to prevent mutation leakage
+            return JSON.parse(redisValue);
+          }
+
+          // Redis miss - call underlying adapter
+          emit(TelemetryEvents.PromptCacheMiss, {
+            operation,
+            provider: this.adapter.name,
+            backend: "redis",
+          });
+
+          const result = await fn();
+
+          // Store in Redis with TTL (deep clone to prevent mutations)
+          const ttlSeconds = Math.max(1, Math.floor(getCacheTtlMs() / 1000));
+          await redis.set(
+            cacheKey,
+            JSON.stringify(result),
+            "EX",
+            ttlSeconds
+          );
+
+          log.debug(
+            { operation, key_hash: fastHash(cacheKey, 8), ttl_seconds: ttlSeconds },
+            "Prompt cache stored in Redis"
+          );
+
+          return result;
+        } catch (error) {
+          // Redis error - fall through to LRU cache
+          log.warn(
+            { error, operation, key_hash: fastHash(cacheKey, 8) },
+            "Redis cache error, falling back to memory"
+          );
+        }
+      }
+    }
+
+    // Fallback to LRU cache (either Redis disabled or Redis unavailable/error)
+    // LRU stores stringified JSON (like Redis) for efficient single-parse on read
+    const cachedJson = this.cache.get(cacheKey);
+    if (cachedJson !== undefined) {
+      // LRU hit - single parse (no double clone)
+      emit(TelemetryEvents.PromptCacheHit, {
+        operation,
+        provider: this.adapter.name,
+        backend: "memory",
+      });
+
+      return JSON.parse(cachedJson);
+    }
+
+    // LRU miss - call underlying adapter
+    emit(TelemetryEvents.PromptCacheMiss, {
+      operation,
+      provider: this.adapter.name,
+      backend: "memory",
+    });
+
+    const result = await fn();
+
+    // Store stringified JSON in LRU (single stringify, matches Redis behavior)
+    this.cache.set(cacheKey, JSON.stringify(result));
+
+    return result;
+  }
+
+  async draftGraph(args: DraftGraphArgs, opts: CallOpts): Promise<DraftGraphResult> {
+    return this.withCache("draft_graph", args, opts, () => this.adapter.draftGraph(args, opts));
+  }
+
+  async suggestOptions(
+    args: SuggestOptionsArgs,
+    opts: CallOpts
+  ): Promise<SuggestOptionsResult> {
+    return this.withCache("suggest_options", args, opts, () =>
+      this.adapter.suggestOptions(args, opts)
+    );
+  }
+
+  async clarifyBrief(args: ClarifyBriefArgs, opts: CallOpts): Promise<ClarifyBriefResult> {
+    return this.withCache("clarify_brief", args, opts, () =>
+      this.adapter.clarifyBrief(args, opts)
+    );
+  }
+
+  async critiqueGraph(args: CritiqueGraphArgs, opts: CallOpts): Promise<CritiqueGraphResult> {
+    return this.withCache("critique_graph", args, opts, () =>
+      this.adapter.critiqueGraph(args, opts)
+    );
+  }
+
+  async explainDiff(args: ExplainDiffArgs, opts: CallOpts): Promise<ExplainDiffResult> {
+    return this.withCache("explain_diff", args, opts, () => this.adapter.explainDiff(args, opts));
+  }
+
+  /**
+   * Stream support - delegates to underlying adapter (NOT cached)
+   * Streaming responses cannot be cached due to their progressive nature
+   */
+  async *streamDraftGraph(
+    args: DraftGraphArgs,
+    opts: CallOpts
+  ): AsyncIterable<DraftStreamEvent> {
+    if (!this.adapter.streamDraftGraph) {
+      throw new Error(`Adapter ${this.adapter.name} does not support streaming`);
+    }
+
+    // Always bypass cache for streaming
+    yield* this.adapter.streamDraftGraph(args, opts);
+  }
+
+  /**
+   * Get cache statistics
+   */
+  stats(): {
+    size: number;
+    capacity: number;
+    ttlMs: number;
+    enabled: boolean;
+    backend: "redis" | "memory";
+  } {
+    return {
+      ...this.cache.stats(),
+      enabled: this.enabled,
+      backend: this.redisEnabled ? "redis" : "memory",
+    };
+  }
+
+  /**
+   * Clear cache (for testing/debugging)
+   * Clears both Redis and LRU cache
+   */
+  async clearCache(): Promise<void> {
+    // Clear LRU cache
+    this.cache.clear();
+
+    // Clear Redis cache if enabled
+    if (this.redisEnabled) {
+      const redis = await getRedis();
+      if (redis) {
+        try {
+          // Scan for all prompt cache keys and delete
+          let cursor = "0";
+          let totalDeleted = 0;
+
+          do {
+            // V1 `pc:{operation}:*` entries are quarantined: never read them
+            // and do not mutate them from request/runtime code. Operators may
+            // retire that namespace separately after the v2 deployment.
+            const [newCursor, keys] = await redis.scan(
+              cursor,
+              "MATCH",
+              `${RESPONSE_CACHE_NAMESPACE}:*`,
+              "COUNT",
+              100
+            );
+            cursor = newCursor;
+
+            if (keys.length > 0) {
+              await redis.del(...keys);
+              totalDeleted += keys.length;
+            }
+          } while (cursor !== "0");
+
+          log.info(
+            { provider: this.adapter.name, deleted: totalDeleted },
+            "Prompt cache cleared (Redis)"
+          );
+        } catch (error) {
+          log.error({ error }, "Failed to clear Redis prompt cache");
+        }
+      }
+    }
+
+    log.info({ provider: this.adapter.name }, "Prompt cache cleared");
+  }
+
+  /**
+   * Chat completion - bypasses cache as responses are context-dependent
+   */
+  async chat(args: ChatArgs, opts: CallOpts): Promise<ChatResult> {
+    // Chat responses are typically unique and context-dependent, so we bypass cache
+    return this.adapter.chat(args, opts);
+  }
+
+  /**
+   * Native tool calling - bypasses cache, delegates to underlying adapter
+   */
+  async chatWithTools(args: ChatWithToolsArgs, opts: CallOpts): Promise<ChatWithToolsResult> {
+    if (!this.adapter.chatWithTools) {
+      throw new Error(`Adapter ${this.adapter.name} does not support chatWithTools`);
+    }
+    return this.adapter.chatWithTools(args, opts);
+  }
+
+  /**
+   * Streaming tool calling - bypasses cache, delegates to underlying adapter.
+   * Falls back to non-streaming chatWithTools when inner adapter lacks stream support,
+   * yielding a single message_complete event to maintain streaming contract.
+   */
+  async *streamChatWithTools(args: ChatWithToolsArgs, opts: CallOpts): AsyncIterable<ChatWithToolsStreamEvent> {
+    if (this.adapter.streamChatWithTools) {
+      yield* this.adapter.streamChatWithTools(args, opts);
+      return;
+    }
+    // Fallback: inner adapter doesn't support streaming — use non-streaming path
+    if (!this.adapter.chatWithTools) {
+      throw new Error(`Adapter ${this.adapter.name} does not support chatWithTools or streamChatWithTools`);
+    }
+    const result = await this.adapter.chatWithTools(args, opts);
+    yield { type: 'message_complete' as const, result };
+  }
+}
+
+/**
+ * Wrap an adapter with caching if enabled
+ * Returns the original adapter if caching is disabled
+ */
+export function withCaching(adapter: LLMAdapter): LLMAdapter {
+  if (!getCacheEnabled()) {
+    return adapter;
+  }
+  return new CachingAdapter(adapter);
+}

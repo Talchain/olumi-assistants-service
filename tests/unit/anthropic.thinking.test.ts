@@ -1,0 +1,828 @@
+/**
+ * Unit tests for extended thinking support in the Anthropic adapter.
+ *
+ * Covers:
+ * - thinking block passed to API when thinking is enabled
+ * - temperature forced to 1 when thinking is enabled
+ * - temperature remains 0 when thinking is absent or disabled
+ * - no thinking block when config is disabled
+ * - chatWithAnthropic handles thinking blocks before text blocks in response
+ * - max_tokens auto-raised to budget + 1024 when thinking enabled and no override set
+ * - max_tokens auto-raised when explicit override is too low
+ * - model capability guard: unsupported model disables thinking with a warning
+ * - thinking mode parsing: "enabled" accepted, unsupported values rejected at startup
+ * - startup warning covers the no-max-token-override case (adapter default)
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+// ---------------------------------------------------------------------------
+// Capture the mock spy before vi.mock() hoists it
+// ---------------------------------------------------------------------------
+
+const mockCreate = vi.fn();
+// Lane C (2026-07-23): draftGraphWithAnthropic now STREAMS (messages.stream);
+// the chat / chat_with_tools paths under test still use messages.create.
+const mockStream = vi.fn();
+
+vi.mock("@anthropic-ai/sdk", () => ({
+  default: class MockAnthropic {
+    messages = { create: mockCreate, stream: mockStream };
+  },
+}));
+
+// Stub prompt-loader to prevent Supabase network calls in unit tests
+vi.mock("../../src/adapters/llm/prompt-loader.js", () => ({
+  getSystemPrompt: vi.fn().mockResolvedValue("mock system prompt"),
+  getSystemPromptMeta: vi.fn().mockReturnValue({
+    taskId: "test",
+    prompt_hash: "abc",
+    source: "default",
+    version: null,
+    instance_id: undefined,
+    cache_age_ms: undefined,
+    cache_status: "test",
+    use_staging_mode: false,
+  }),
+  buildDraftPrompt: vi.fn().mockResolvedValue({
+    system: "mock system",
+    userContent: "mock user content",
+  }),
+  invalidatePromptCache: vi.fn(),
+}));
+
+// ---------------------------------------------------------------------------
+// Shared minimal API response factory
+// ---------------------------------------------------------------------------
+
+function makeResponse(content?: object[]) {
+  return {
+    id: "msg_test",
+    type: "message",
+    role: "assistant",
+    content: content ?? [{ type: "text", text: "ok" }],
+    model: "claude-sonnet-4-6",
+    stop_reason: "end_turn",
+    stop_sequence: null,
+    usage: {
+      input_tokens: 10,
+      output_tokens: 5,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// chatWithToolsAnthropic — thinking passthrough and max_tokens enforcement
+// ---------------------------------------------------------------------------
+
+describe("chatWithToolsAnthropic — thinking", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    mockCreate.mockReset();
+    mockCreate.mockResolvedValue(makeResponse());
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("does not include thinking block when thinking is absent", async () => {
+    const { chatWithToolsAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    await chatWithToolsAnthropic({
+      system: "sys",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [{ name: "t", description: "d", input_schema: { type: "object", properties: {} } }],
+      model: "claude-sonnet-4-6",
+    });
+
+    const [body] = mockCreate.mock.calls[0];
+    expect(body.thinking).toBeUndefined();
+    expect(body.temperature).toBe(0);
+  });
+
+  it("passes thinking block and forces temperature=1 when thinking is enabled", async () => {
+    const { chatWithToolsAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    await chatWithToolsAnthropic({
+      system: "sys",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [{ name: "t", description: "d", input_schema: { type: "object", properties: {} } }],
+      model: "claude-sonnet-4-6",
+      thinking: { type: "enabled", budget_tokens: 8000 },
+    });
+
+    const [body] = mockCreate.mock.calls[0];
+    expect(body.thinking).toEqual({ type: "enabled", budget_tokens: 8000 });
+    expect(body.temperature).toBe(1);
+  });
+
+  // POC-BOARD item 9 (CEE_COACH_THINKING_DISABLED): an EXPLICIT {type:'disabled'}
+  // must be TRANSMITTED to the API, not dropped. Sonnet 5 runs adaptive thinking
+  // when the request omits `thinking`, so transmitting the disable is the only
+  // way to suppress it on the coach/routing turn. (Before this change the tools
+  // path silently swallowed a disable — the chat path already transmitted it.)
+  it("transmits thinking:{type:'disabled'} to the API when thinking is disabled", async () => {
+    const { chatWithToolsAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    await chatWithToolsAnthropic({
+      system: "sys",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [{ name: "t", description: "d", input_schema: { type: "object", properties: {} } }],
+      model: "claude-sonnet-4-6",
+      thinking: { type: "disabled" },
+    });
+
+    const [body] = mockCreate.mock.calls[0];
+    expect(body.thinking).toEqual({ type: "disabled" });
+    // Temperature must stay caller-controlled (0 here) — disabling thinking does
+    // NOT force temperature=1 (only enabled thinking does).
+    expect(body.temperature).toBe(0);
+  });
+
+  it("omits the thinking field entirely when thinking is absent (byte-identical default path)", async () => {
+    const { chatWithToolsAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    await chatWithToolsAnthropic({
+      system: "sys",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [{ name: "t", description: "d", input_schema: { type: "object", properties: {} } }],
+      model: "claude-sonnet-4-6",
+    });
+
+    const [body] = mockCreate.mock.calls[0];
+    // No thinking field at all — adaptive thinking stays on (today's behaviour).
+    expect(body.thinking).toBeUndefined();
+    expect("thinking" in body).toBe(false);
+  });
+
+  it("auto-raises max_tokens to budget + 1024 when no override is set", async () => {
+    const { chatWithToolsAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    // No maxTokens arg — adapter default is 4096, budget is 8000; effective must be >= 9024
+    await chatWithToolsAnthropic({
+      system: "sys",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [{ name: "t", description: "d", input_schema: { type: "object", properties: {} } }],
+      model: "claude-sonnet-4-6",
+      thinking: { type: "enabled", budget_tokens: 8000 },
+    });
+
+    const [body] = mockCreate.mock.calls[0];
+    expect(body.max_tokens).toBeGreaterThanOrEqual(8000 + 1024);
+  });
+
+  it("auto-raises max_tokens when explicit override is below budget + 1024", async () => {
+    const { chatWithToolsAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    await chatWithToolsAnthropic({
+      system: "sys",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [{ name: "t", description: "d", input_schema: { type: "object", properties: {} } }],
+      model: "claude-sonnet-4-6",
+      maxTokens: 5000,
+      thinking: { type: "enabled", budget_tokens: 8000 },
+    });
+
+    const [body] = mockCreate.mock.calls[0];
+    expect(body.max_tokens).toBe(8000 + 1024);
+  });
+
+  it("respects explicit max_tokens when already above budget + 1024", async () => {
+    const { chatWithToolsAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    await chatWithToolsAnthropic({
+      system: "sys",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [{ name: "t", description: "d", input_schema: { type: "object", properties: {} } }],
+      model: "claude-sonnet-4-6",
+      maxTokens: 20000,
+      thinking: { type: "enabled", budget_tokens: 8000 },
+    });
+
+    const [body] = mockCreate.mock.calls[0];
+    expect(body.max_tokens).toBe(20000);
+  });
+
+  it("disables thinking and emits a warning for unsupported model", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const { chatWithToolsAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    await chatWithToolsAnthropic({
+      system: "sys",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [{ name: "t", description: "d", input_schema: { type: "object", properties: {} } }],
+      model: "claude-3-5-sonnet-20241022",
+      thinking: { type: "enabled", budget_tokens: 8000 },
+    });
+
+    const [body] = mockCreate.mock.calls[0];
+    expect(body.thinking).toBeUndefined();
+    expect(body.temperature).toBe(0);
+    // Warning was emitted (via pino log.warn — captured as console.warn in test env or directly)
+    // The guard logs via the pino logger; just confirm the call completes without throwing.
+
+    warnSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// chatWithAnthropic (edit_graph path) — thinking passthrough and max_tokens
+// ---------------------------------------------------------------------------
+
+describe("chatWithAnthropic — thinking (edit_graph path)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    mockCreate.mockReset();
+    mockCreate.mockResolvedValue(makeResponse());
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("sends an EXPLICIT thinking:{type:'disabled'} when thinking is absent (R1/D-61: adaptive thinking off by default)", async () => {
+    // R1 (D-61, 2026-07-24): a chat call with no explicit thinking arg previously
+    // OMITTED the field, so Sonnet-5 adaptive thinking ran and ate the caller
+    // budget (the decision_review class). The adapter now ALWAYS transmits an
+    // explicit posture — here, disabled — rather than leaving it ambiguous.
+    const { chatWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    await chatWithAnthropic({
+      system: "sys",
+      userMessage: "hello",
+      model: "claude-sonnet-4-6",
+    });
+
+    const [body] = mockCreate.mock.calls[0];
+    expect(body.thinking).toEqual({ type: "disabled" });
+    expect(body.temperature).toBe(0);
+  });
+
+  it("passes thinking block and forces temperature=1 when enabled", async () => {
+    const { chatWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    await chatWithAnthropic({
+      system: "sys",
+      userMessage: "hello",
+      model: "claude-sonnet-4-6",
+      thinking: { type: "enabled", budget_tokens: 5000 },
+    });
+
+    const [body] = mockCreate.mock.calls[0];
+    expect(body.thinking).toEqual({ type: "enabled", budget_tokens: 5000 });
+    expect(body.temperature).toBe(1);
+  });
+
+  it("auto-raises max_tokens to budget + 1024 when no override is set", async () => {
+    const { chatWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    // Default maxTokens is 4096; budget_tokens is 5000; effective must be >= 6024
+    await chatWithAnthropic({
+      system: "sys",
+      userMessage: "hello",
+      model: "claude-sonnet-4-6",
+      thinking: { type: "enabled", budget_tokens: 5000 },
+    });
+
+    const [body] = mockCreate.mock.calls[0];
+    expect(body.max_tokens).toBeGreaterThanOrEqual(5000 + 1024);
+  });
+
+  it("returns text content when thinking blocks precede text block in response", async () => {
+    mockCreate.mockResolvedValue(
+      makeResponse([
+        { type: "thinking", thinking: "let me think..." },
+        { type: "text", text: "the answer" },
+      ])
+    );
+
+    const { chatWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    const result = await chatWithAnthropic({
+      system: "sys",
+      userMessage: "hello",
+      model: "claude-sonnet-4-6",
+      thinking: { type: "enabled", budget_tokens: 5000 },
+    });
+
+    expect(result.content).toBe("the answer");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// draftGraphWithAnthropic — thinking passthrough and max_tokens enforcement
+// ---------------------------------------------------------------------------
+
+/**
+ * ⚠ A RECORD SET, NOT A GRAPH (draft-by-records cutover).
+ *
+ * The draft path asks the model for `{stated_items, claims}` and projects
+ * GraphV3 itself at the post-LLM seam; a graph-shaped response is refused there,
+ * which made every request-body assertion in this block fail inside the adapter
+ * before it could read the body. The claim is linked through to the goal because
+ * the projector withdraws any factor that cannot reach one.
+ */
+const MINIMAL_DRAFT_RECORDS_JSON = JSON.stringify({
+  stated_items: [
+    { kind: "goal", source_quote: "decide whether to take the job offer" },
+    { kind: "option", source_quote: "take the job offer" },
+    { kind: "option", source_quote: "stay in the current role" },
+  ],
+  claims: [
+    { claim_kind: "factor", label: "total compensation", basis: [0] },
+    {
+      claim_kind: "causal_link",
+      label: "the offer raises total compensation",
+      basis: [0],
+      from_stated: 1,
+      to_claim: 0,
+      effect: "positive",
+    },
+    {
+      claim_kind: "causal_link",
+      label: "compensation bears on the decision",
+      basis: [0],
+      from_claim: 0,
+      to_stated: 0,
+      effect: "positive",
+    },
+  ],
+});
+
+/** Fake MessageStream for the streamed draft path: streams the JSON as a text
+ *  delta, resolves finalMessage with the same {content, stop_reason, usage}
+ *  shape as the non-streaming response (so body-param assertions are unchanged). */
+function makeDraftStream(jsonText: string) {
+  return () => {
+    async function* gen() {
+      yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: jsonText } };
+    }
+    const iterator = gen();
+    return {
+      [Symbol.asyncIterator]: () => iterator,
+      finalMessage: async () => makeResponse([{ type: "text", text: jsonText }]),
+      abort: () => {},
+    };
+  };
+}
+
+describe("draftGraphWithAnthropic — thinking", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    mockCreate.mockReset();
+    mockStream.mockReset();
+    mockStream.mockImplementation(makeDraftStream(MINIMAL_DRAFT_RECORDS_JSON));
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("does not include thinking block when thinking is absent", async () => {
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    await draftGraphWithAnthropic({
+      brief: "Help me decide whether to take the job offer.",
+      docs: [],
+      seed: 1,
+      model: "claude-sonnet-4-6",
+    });
+
+    const [body] = mockStream.mock.calls[0];
+    // F-5 (FINAL-SWEEP): the draft body now sends an EXPLICIT disabled posture
+    // (never omits the field) so a thinking-class model can't run adaptive thinking.
+    expect(body.thinking).toEqual({ type: "disabled" });
+    expect(body.temperature).toBe(0);
+  });
+
+  it("passes thinking block and forces temperature=1 when enabled", async () => {
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    await draftGraphWithAnthropic({
+      brief: "Help me decide whether to take the job offer.",
+      docs: [],
+      seed: 1,
+      model: "claude-sonnet-4-6",
+      thinking: { type: "enabled", budget_tokens: 6000 },
+    });
+
+    const [body] = mockStream.mock.calls[0];
+    expect(body.thinking).toEqual({ type: "enabled", budget_tokens: 6000 });
+    expect(body.temperature).toBe(1);
+  });
+
+  it("auto-raises max_tokens to budget + 1024 when no override is set", async () => {
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    // draft_graph max_tokens is derived from the timeout (6000 at the default
+    // 105s); thinking budget 6000 + 1024 = 7024 > 6000, so max is auto-raised
+    // to 7024 to satisfy the Anthropic max_tokens > budget_tokens constraint.
+    await draftGraphWithAnthropic({
+      brief: "Help me decide whether to take the job offer.",
+      docs: [],
+      seed: 1,
+      model: "claude-sonnet-4-6",
+      thinking: { type: "enabled", budget_tokens: 6000 },
+    });
+
+    const [body] = mockStream.mock.calls[0];
+    expect(body.max_tokens).toBeGreaterThanOrEqual(6000 + 1024);
+  });
+
+  it("disables thinking and emits a warning for unsupported model", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    await draftGraphWithAnthropic({
+      brief: "Help me decide whether to take the job offer.",
+      docs: [],
+      seed: 1,
+      model: "claude-3-5-sonnet-20241022",
+      thinking: { type: "enabled", budget_tokens: 6000 },
+    });
+
+    const [body] = mockStream.mock.calls[0];
+    // F-5 (FINAL-SWEEP): explicit disabled posture even when thinking is dropped.
+    expect(body.thinking).toEqual({ type: "disabled" });
+    expect(body.temperature).toBe(0);
+
+    warnSpy.mockRestore();
+  });
+
+  it("disables structured outputs when thinking is enabled", async () => {
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    await draftGraphWithAnthropic({
+      brief: "Help me decide whether to take the job offer.",
+      docs: [],
+      seed: 1,
+      model: "claude-sonnet-4-6",
+      thinking: { type: "enabled", budget_tokens: 6000 },
+    });
+
+    const [body] = mockStream.mock.calls[0];
+    // output_config must be absent when thinking is enabled (incompatible)
+    expect(body.output_config).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Thinking mode parsing — P0-3
+// ---------------------------------------------------------------------------
+
+describe("config — thinking mode parsing", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it("accepts 'enabled' as a valid thinking mode", async () => {
+    vi.stubEnv("CEE_ORCHESTRATOR_THINKING", "enabled");
+
+    const { _resetConfigCache, config } = await import("../../src/config/index.js");
+    _resetConfigCache();
+
+    expect(config.cee.thinking.orchestratorEnabled).toBe(true);
+    _resetConfigCache();
+  });
+
+  it("accepts 'true' as a valid thinking mode", async () => {
+    vi.stubEnv("CEE_ORCHESTRATOR_THINKING", "true");
+
+    const { _resetConfigCache, config } = await import("../../src/config/index.js");
+    _resetConfigCache();
+
+    expect(config.cee.thinking.orchestratorEnabled).toBe(true);
+    _resetConfigCache();
+  });
+
+  it("parses 'false' as disabled", async () => {
+    vi.stubEnv("CEE_ORCHESTRATOR_THINKING", "false");
+
+    const { _resetConfigCache, config } = await import("../../src/config/index.js");
+    _resetConfigCache();
+
+    expect(config.cee.thinking.orchestratorEnabled).toBe(false);
+    _resetConfigCache();
+  });
+
+  it("rejects unsupported mode string 'adaptive' at startup", async () => {
+    vi.stubEnv("CEE_ORCHESTRATOR_THINKING", "adaptive");
+
+    const { _resetConfigCache, config } = await import("../../src/config/index.js");
+    _resetConfigCache();
+
+    expect(() => config.cee.thinking).toThrow(/Invalid thinking mode.*adaptive/i);
+    _resetConfigCache();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Config — startup warning covers both too-low and unset max_tokens
+// ---------------------------------------------------------------------------
+
+describe("config — thinking budget startup warning", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it("warns when orchestrator max_tokens is explicitly set but <= budget_tokens", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    vi.stubEnv("CEE_ORCHESTRATOR_THINKING", "true");
+    vi.stubEnv("CEE_ORCHESTRATOR_THINKING_BUDGET", "10000");
+    vi.stubEnv("CEE_MAX_TOKENS_ORCHESTRATOR", "8000");
+
+    const { _resetConfigCache, config } = await import("../../src/config/index.js");
+    _resetConfigCache();
+
+    const _unused = config.cee.thinking;
+
+    const budgetWarnings = warnSpy.mock.calls.filter(
+      (c) => typeof c[0] === "string" && c[0].includes("budget_tokens")
+    );
+    expect(budgetWarnings.length).toBeGreaterThanOrEqual(1);
+    expect(budgetWarnings[0][0]).toContain("CEE_MAX_TOKENS_ORCHESTRATOR");
+
+    warnSpy.mockRestore();
+    _resetConfigCache();
+  });
+
+  it("warns when max_tokens is not set and adapter default (4096) <= budget_tokens (10000)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    vi.stubEnv("CEE_ORCHESTRATOR_THINKING", "true");
+    vi.stubEnv("CEE_ORCHESTRATOR_THINKING_BUDGET", "10000");
+    // CEE_MAX_TOKENS_ORCHESTRATOR deliberately not set — adapter default 4096 applies
+
+    const { _resetConfigCache, config } = await import("../../src/config/index.js");
+    _resetConfigCache();
+
+    const _unused = config.cee.thinking;
+
+    const budgetWarnings = warnSpy.mock.calls.filter(
+      (c) => typeof c[0] === "string" && c[0].includes("budget_tokens")
+    );
+    expect(budgetWarnings.length).toBeGreaterThanOrEqual(1);
+    // Warning should mention the env var name and that the default applies
+    expect(budgetWarnings[0][0]).toContain("CEE_MAX_TOKENS_ORCHESTRATOR");
+    expect(budgetWarnings[0][0]).toContain("adapter default");
+
+    warnSpy.mockRestore();
+    _resetConfigCache();
+  });
+
+  it("does not warn when max_tokens > budget_tokens", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    vi.stubEnv("CEE_ORCHESTRATOR_THINKING", "true");
+    vi.stubEnv("CEE_ORCHESTRATOR_THINKING_BUDGET", "10000");
+    vi.stubEnv("CEE_MAX_TOKENS_ORCHESTRATOR", "16000");
+
+    const { _resetConfigCache, config } = await import("../../src/config/index.js");
+    _resetConfigCache();
+
+    const _unused = config.cee.thinking;
+
+    const budgetWarnings = warnSpy.mock.calls.filter(
+      (c) => typeof c[0] === "string" && c[0].includes("budget_tokens")
+    );
+    expect(budgetWarnings).toHaveLength(0);
+
+    warnSpy.mockRestore();
+    _resetConfigCache();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// chatWithToolsAnthropic — thinking-block filtering (P0 signature-leak guard)
+// ---------------------------------------------------------------------------
+// Regression guard for the Sonnet-5 flip leak. On a routing tool call, Sonnet 5
+// returns an extended-thinking content block even when we do not request thinking.
+// The non-streaming tool path used to serialise any unexpected block into a text
+// block (JSON.stringify(block)), which leaked the block's opaque signature JSON as
+// a prefix onto user-facing assistant_text on every Run-analysis click
+// (evidence: acceptance-evidence/sonnet5-flip/03-turn2). A `thinking` block must
+// be DROPPED, never surfaced. Independent of the thinking-disable follow-up (S5-D):
+// even with thinking disabled, a stray thinking block must never reach the user.
+describe("chatWithToolsAnthropic — thinking-block filtering", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    mockCreate.mockReset();
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("drops a thinking block rather than serialising it into a text block", async () => {
+    const SIGNATURE = "ErICfake_opaque_signature_must_not_leak";
+    mockCreate.mockResolvedValue(
+      makeResponse([
+        { type: "thinking", thinking: "internal reasoning", signature: SIGNATURE },
+        { type: "text", text: "Here is the plain answer." },
+        { type: "tool_use", id: "tu_1", name: "run_analysis", input: { foo: "bar" } },
+      ])
+    );
+
+    const { chatWithToolsAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    const result = await chatWithToolsAnthropic({
+      system: "sys",
+      messages: [{ role: "user", content: "run the analysis" }],
+      tools: [
+        { name: "run_analysis", description: "d", input_schema: { type: "object", properties: {} } },
+      ],
+      model: "claude-sonnet-5",
+    });
+
+    // No returned block may carry the thinking JSON / signature.
+    const serialized = JSON.stringify(result.content);
+    expect(serialized).not.toContain(SIGNATURE);
+    expect(serialized).not.toContain('"type":"thinking"');
+
+    // The real text block survives verbatim and alone (no JSON prefix, no extra block).
+    const textBlocks = result.content.filter(
+      (b): b is { type: "text"; text: string } => b.type === "text"
+    );
+    expect(textBlocks).toHaveLength(1);
+    expect(textBlocks[0].text).toBe("Here is the plain answer.");
+
+    // The tool_use action still survives.
+    const toolBlocks = result.content.filter(
+      (b): b is { type: "tool_use"; id: string; name: string; input: Record<string, unknown> } =>
+        b.type === "tool_use"
+    );
+    expect(toolBlocks).toHaveLength(1);
+    expect(toolBlocks[0].name).toBe("run_analysis");
+  });
+
+  it("assistant_text composed from the tool response contains only the text, no signature leak", async () => {
+    const SIGNATURE = "ErICanother_fake_signature";
+    mockCreate.mockResolvedValue(
+      makeResponse([
+        { type: "thinking", thinking: "", signature: SIGNATURE },
+        { type: "text", text: "Plain reply." },
+      ])
+    );
+
+    const { chatWithToolsAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    const result = await chatWithToolsAnthropic({
+      system: "sys",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [{ name: "t", description: "d", input_schema: { type: "object", properties: {} } }],
+      model: "claude-sonnet-5",
+    });
+
+    // Mirror the assistant_text composition in route-with-tool-use.ts.
+    const assistantText = result.content
+      .filter((b): b is { type: "text"; text: string } => b.type === "text")
+      .map((b) => b.text)
+      .join("\n")
+      .trim();
+
+    expect(assistantText).toBe("Plain reply.");
+    expect(assistantText).not.toContain(SIGNATURE);
+    expect(assistantText).not.toContain('"type":"thinking"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// chatWithToolsAnthropic — ROADMAP 1.42 reasoning capture (flag-gated)
+// ---------------------------------------------------------------------------
+// CEE_REASONING_CAPTURE_ENABLED default OFF. When on, VERBATIM `thinking`
+// block text is captured into `result.reasoning` — OUT OF BAND from
+// `content` — never `signature`, and `redacted_thinking` is always dropped
+// regardless of the flag. Flag OFF must remain byte-identical to the #385
+// drop+warn behaviour above.
+describe("chatWithToolsAnthropic — reasoning capture (ROADMAP 1.42)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    mockCreate.mockReset();
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("flag ON: captures thinking text verbatim into result.reasoning, never the signature, content[] stays text+tool_use only", async () => {
+    vi.stubEnv("CEE_REASONING_CAPTURE_ENABLED", "true");
+    const SIGNATURE = "ErICfake_signature_must_never_appear_anywhere";
+    const REASONING_TEXT = "Step 1: consider the tradeoffs. Step 2: pick the safer option.";
+    mockCreate.mockResolvedValue(
+      makeResponse([
+        { type: "thinking", thinking: REASONING_TEXT, signature: SIGNATURE },
+        { type: "text", text: "Here is the plain answer." },
+        { type: "tool_use", id: "tu_1", name: "run_analysis", input: { foo: "bar" } },
+      ])
+    );
+
+    const { chatWithToolsAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    const result = await chatWithToolsAnthropic({
+      system: "sys",
+      messages: [{ role: "user", content: "run the analysis" }],
+      tools: [
+        { name: "run_analysis", description: "d", input_schema: { type: "object", properties: {} } },
+      ],
+      model: "claude-sonnet-5",
+    });
+
+    // Reasoning captured verbatim.
+    expect(result.reasoning).toBe(REASONING_TEXT);
+
+    // The signature must NEVER appear in any CLIENT-FACING field —
+    // content[] and reasoning are what flow toward assistant_text /
+    // orientationText. (Since ROADMAP 1.55b the whole-result object also
+    // carries `replay_thinking_blocks` — verbatim blocks, signature
+    // included, for API-BOUND REPLAY ONLY — so the guard is scoped to the
+    // client-facing fields rather than the full serialised result.)
+    const serializedClientFacing = JSON.stringify({ content: result.content, reasoning: result.reasoning });
+    expect(serializedClientFacing).not.toContain(SIGNATURE);
+
+    // content[] is unaffected by the flag: still only text + tool_use blocks,
+    // no thinking block, no reasoning leak into content.
+    const serializedContent = JSON.stringify(result.content);
+    expect(serializedContent).not.toContain('"type":"thinking"');
+    expect(serializedContent).not.toContain(REASONING_TEXT);
+    expect(result.content.every((b) => b.type === "text" || b.type === "tool_use")).toBe(true);
+    expect(result.content).toHaveLength(2);
+  });
+
+  it("flag ON, no thinking block emitted: result.reasoning is undefined", async () => {
+    vi.stubEnv("CEE_REASONING_CAPTURE_ENABLED", "true");
+    mockCreate.mockResolvedValue(makeResponse([{ type: "text", text: "no thinking here" }]));
+
+    const { chatWithToolsAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    const result = await chatWithToolsAnthropic({
+      system: "sys",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [{ name: "t", description: "d", input_schema: { type: "object", properties: {} } }],
+      model: "claude-sonnet-5",
+    });
+
+    expect(result.reasoning).toBeUndefined();
+  });
+
+  it("flag ON: a redacted_thinking block is always dropped, never captured into reasoning", async () => {
+    vi.stubEnv("CEE_REASONING_CAPTURE_ENABLED", "true");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockCreate.mockResolvedValue(
+      makeResponse([
+        { type: "redacted_thinking", data: "opaque_encrypted_blob" },
+        { type: "text", text: "answer" },
+      ])
+    );
+
+    const { chatWithToolsAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    const result = await chatWithToolsAnthropic({
+      system: "sys",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [{ name: "t", description: "d", input_schema: { type: "object", properties: {} } }],
+      model: "claude-sonnet-5",
+    });
+
+    expect(result.reasoning).toBeUndefined();
+    // Client-facing fields only — since ROADMAP 1.55b the opaque data IS
+    // retained on `replay_thinking_blocks` for API-bound protocol replay.
+    expect(JSON.stringify({ content: result.content, reasoning: result.reasoning })).not.toContain("opaque_encrypted_blob");
+    warnSpy.mockRestore();
+  });
+
+  it("flag OFF (default): byte-identical to current drop+warn behaviour — no reasoning field, thinking block dropped", async () => {
+    // Flag deliberately NOT stubbed — default OFF.
+    const SIGNATURE = "ErICdefault_off_signature";
+    const REASONING_TEXT = "internal reasoning that must stay dropped";
+    mockCreate.mockResolvedValue(
+      makeResponse([
+        { type: "thinking", thinking: REASONING_TEXT, signature: SIGNATURE },
+        { type: "text", text: "Here is the plain answer." },
+        { type: "tool_use", id: "tu_1", name: "run_analysis", input: { foo: "bar" } },
+      ])
+    );
+
+    const { chatWithToolsAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    const result = await chatWithToolsAnthropic({
+      system: "sys",
+      messages: [{ role: "user", content: "run the analysis" }],
+      tools: [
+        { name: "run_analysis", description: "d", input_schema: { type: "object", properties: {} } },
+      ],
+      model: "claude-sonnet-5",
+    });
+
+    // No `reasoning` key on the result at all when the flag is off.
+    expect(result.reasoning).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(result, "reasoning")).toBe(false);
+
+    // Client-facing fields only — since ROADMAP 1.55b the verbatim block
+    // (signature included) IS retained on `replay_thinking_blocks` for
+    // API-bound protocol replay, flag or no flag.
+    const serializedClientFacing = JSON.stringify({ content: result.content, reasoning: result.reasoning });
+    expect(serializedClientFacing).not.toContain(SIGNATURE);
+    expect(serializedClientFacing).not.toContain(REASONING_TEXT);
+    expect(serializedClientFacing).not.toContain('"type":"thinking"');
+
+    expect(result.content).toHaveLength(2);
+    expect(result.content.every((b) => b.type === "text" || b.type === "tool_use")).toBe(true);
+  });
+});

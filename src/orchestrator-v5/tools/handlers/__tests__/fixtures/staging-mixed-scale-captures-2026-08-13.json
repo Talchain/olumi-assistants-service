@@ -1,0 +1,4865 @@
+{
+ "_provenance": {
+  "what": "VERBATIM persisted-graph captures read from CEE own /bff/cee/scenarios/:id/graph on deployed staging",
+  "cee_build": "6079f2d",
+  "ui_build": "978d073c",
+  "captured": "2026-08-13",
+  "source": "olumi-docs/PHASE0-EVIDENCE-2026-07-28/coaching-surface-2026-08-12/mixedscale-20260813/",
+  "diagnosis": "DIAGNOSIS-MIXED-SCALE.md",
+  "note": "APPEND-ONLY RECORD of what the deployed drafter actually produced. Never edit a value here to make a test pass."
+ },
+ "arms": {
+  "M2_with_digit": {
+   "scenario_id": "959b132e-7d9a-492a-94a0-db8ff7aa65e4",
+   "captured_url": "https://staging--olumi.netlify.app/bff/cee/scenarios/959b132e-7d9a-492a-94a0-db8ff7aa65e4/graph",
+   "nodes": [
+    {
+     "id": "04b53821",
+     "kind": "factor",
+     "label": "Compliance Investment (SOC 2 + SSO)",
+     "category": "controllable",
+     "provenance": "ai_inferred",
+     "display_value": "600,000",
+     "observed_state": {
+      "value": 0.6,
+      "source": "cee_inference",
+      "raw_value": 600000,
+      "factor_type": "other",
+      "extractionType": "inferred",
+      "uncertainty_drivers": [
+       "Not provided"
+      ]
+     }
+    },
+    {
+     "id": "06270377",
+     "kind": "decision",
+     "label": "Decision",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "272a62ad",
+     "kind": "option",
+     "label": "spend £600,000 building SOC 2 and SSO to unlock larger enterprise deals",
+     "provenance": "ai_inferred",
+     "interventions": {
+      "04b53821": {
+       "value": 0.6,
+       "source": "cee_hypothesis",
+       "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+       "target_match": {
+        "node_id": "04b53821",
+        "confidence": "high",
+        "match_type": "exact_id"
+       },
+       "value_confidence": "low"
+      }
+     }
+    },
+    {
+     "id": "2e6a7049",
+     "kind": "factor",
+     "label": "Cash Runway",
+     "category": "observable",
+     "provenance": "from_brief",
+     "display_value": "14",
+     "observed_state": {
+      "value": 0.7,
+      "source": "brief_extraction",
+      "raw_value": 14,
+      "extractionType": "observed"
+     }
+    },
+    {
+     "id": "404504c8",
+     "kind": "option",
+     "label": "Status Quo (No New Investment)",
+     "provenance": "ai_inferred",
+     "interventions": {
+      "04b53821": {
+       "value": 0,
+       "source": "cee_hypothesis",
+       "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+       "target_match": {
+        "node_id": "04b53821",
+        "confidence": "high",
+        "match_type": "exact_id"
+       },
+       "value_confidence": "low"
+      },
+      "a2bed6b6": {
+       "value": 0,
+       "source": "cee_hypothesis",
+       "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+       "target_match": {
+        "node_id": "a2bed6b6",
+        "confidence": "high",
+        "match_type": "exact_id"
+       },
+       "value_confidence": "low"
+      }
+     }
+    },
+    {
+     "id": "4b4effc7",
+     "kind": "option",
+     "label": "Phased: Compliance then Sales",
+     "provenance": "ai_inferred",
+     "interventions": {}
+    },
+    {
+     "id": "61011ebf",
+     "kind": "factor",
+     "label": "Enterprise Deal Unlock Rate",
+     "category": "external",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "6e76a52b",
+     "kind": "factor",
+     "label": "Enterprise Market Demand",
+     "category": "external",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "8bbfef8a",
+     "kind": "factor",
+     "label": "Customer Concentration Risk",
+     "prior": {
+      "range_max": 1,
+      "range_min": 0.475,
+      "distribution": "uniform"
+     },
+     "category": "external",
+     "provenance": "ai_inferred",
+     "display_value": "0.47 to 1",
+     "extractionType": "inferred"
+    },
+    {
+     "id": "a2bed6b6",
+     "kind": "factor",
+     "label": "Outbound Sales Investment",
+     "category": "controllable",
+     "provenance": "ai_inferred",
+     "display_value": "0",
+     "observed_state": {
+      "value": 0,
+      "source": "cee_inference",
+      "raw_value": 0,
+      "factor_type": "other",
+      "extractionType": "inferred",
+      "uncertainty_drivers": [
+       "Not provided"
+      ]
+     }
+    },
+    {
+     "id": "bc8b38f7",
+     "kind": "goal",
+     "label": "unlock larger enterprise deals",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "f6a071d4",
+     "kind": "factor",
+     "label": "Sales Pipeline Velocity",
+     "category": "external",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "f86ddeb5",
+     "kind": "option",
+     "label": "spend £600,000 on outbound sales instead",
+     "provenance": "ai_inferred",
+     "interventions": {
+      "a2bed6b6": {
+       "value": 0.6,
+       "source": "cee_hypothesis",
+       "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+       "target_match": {
+        "node_id": "a2bed6b6",
+        "confidence": "high",
+        "match_type": "exact_id"
+       },
+       "value_confidence": "low"
+      }
+     }
+    },
+    {
+     "id": "out_2e6a7049_impact",
+     "kind": "outcome",
+     "label": "Cash Runway Impact",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "out_61011ebf_impact",
+     "kind": "outcome",
+     "label": "Enterprise Deal Unlock Rate Impact",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "out_8bbfef8a_impact",
+     "kind": "outcome",
+     "label": "Customer Concentration Risk Impact",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "out_f6a071d4_impact",
+     "kind": "outcome",
+     "label": "Sales Pipeline Velocity Impact",
+     "provenance": "ai_inferred"
+    }
+   ],
+   "edges": [
+    {
+     "to": "2e6a7049",
+     "from": "04b53821",
+     "origin": "ai",
+     "strength": {
+      "std": 0.132,
+      "mean": 0.55
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "brief_explicit",
+       "reasoning": "Spending £600k directly reduces cash runway by a known proportion.",
+       "strength_std": 0.05,
+       "strength_mean": -0.4,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0.99
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": -0.4,
+       "exists_probability": 0.99
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.09000000000000001,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 2,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "61011ebf",
+     "from": "04b53821",
+     "origin": "ai",
+     "strength": {
+      "std": 0.15599999999999997,
+      "mean": 0.65
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Achieving SOC 2 and SSO commonly unlocks approximately half of blocked enterprise opportunities.",
+       "strength_std": 0.15,
+       "strength_mean": 0.6,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "exists_probability": 0.9
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0.059999999999999984,
+       "strength_mean": 0.6,
+       "exists_probability": 0.9
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.09000000000000001,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 2,
+      "contested_reasons": [
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "272a62ad",
+     "from": "06270377",
+     "origin": "default",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Decision-to-option scaffold minted by the projector"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "reasoning": "",
+       "strength_std": 0,
+       "strength_mean": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0
+      },
+      "status": "agreed",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": true,
+      "sign_unstable": false,
+      "max_divergence": 0,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": 0,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 4,
+      "contested_reasons": [],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "404504c8",
+     "from": "06270377",
+     "origin": "default",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Decision-to-option scaffold minted by the projector"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "reasoning": "",
+       "strength_std": 0,
+       "strength_mean": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0
+      },
+      "status": "agreed",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": true,
+      "sign_unstable": false,
+      "max_divergence": 0,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": 0,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 4,
+      "contested_reasons": [],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "4b4effc7",
+     "from": "06270377",
+     "origin": "default",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Decision-to-option scaffold minted by the projector"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "reasoning": "",
+       "strength_std": 0,
+       "strength_mean": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0
+      },
+      "status": "agreed",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": true,
+      "sign_unstable": false,
+      "max_divergence": 0,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": 0,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 4,
+      "contested_reasons": [],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "f86ddeb5",
+     "from": "06270377",
+     "origin": "default",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Decision-to-option scaffold minted by the projector"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "reasoning": "",
+       "strength_std": 0,
+       "strength_mean": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0
+      },
+      "status": "agreed",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": true,
+      "sign_unstable": false,
+      "max_divergence": 0,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": 0,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 4,
+      "contested_reasons": [],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "04b53821",
+     "from": "272a62ad",
+     "origin": "ai",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "reasoning": "",
+       "strength_std": 0,
+       "strength_mean": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0
+      },
+      "status": "agreed",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": true,
+      "sign_unstable": false,
+      "max_divergence": 0,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": 0,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 3,
+      "contested_reasons": [],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "out_2e6a7049_impact",
+     "from": "2e6a7049",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.5
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "structural_inference",
+       "reasoning": "Cash runway maps directly to its impact metric.",
+       "strength_std": 0.05,
+       "strength_mean": 1,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0.99
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 1,
+       "exists_probability": 0.99
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.09000000000000001,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 1,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "04b53821",
+     "from": "404504c8",
+     "origin": "ai",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "reasoning": "",
+       "strength_std": 0,
+       "strength_mean": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0
+      },
+      "status": "agreed",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": true,
+      "sign_unstable": false,
+      "max_divergence": 0,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": 0,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 3,
+      "contested_reasons": [],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "a2bed6b6",
+     "from": "404504c8",
+     "origin": "ai",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "reasoning": "",
+       "strength_std": 0,
+       "strength_mean": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0
+      },
+      "status": "agreed",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": true,
+      "sign_unstable": false,
+      "max_divergence": 0,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": 0,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 3,
+      "contested_reasons": [],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "04b53821",
+     "from": "4b4effc7",
+     "origin": "ai",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "reasoning": "",
+       "strength_std": 0,
+       "strength_mean": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0
+      },
+      "status": "agreed",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": true,
+      "sign_unstable": false,
+      "max_divergence": 0,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": 0,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 3,
+      "contested_reasons": [],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "a2bed6b6",
+     "from": "4b4effc7",
+     "origin": "ai",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "reasoning": "",
+       "strength_std": 0,
+       "strength_mean": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0
+      },
+      "status": "agreed",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": true,
+      "sign_unstable": false,
+      "max_divergence": 0,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": 0,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 3,
+      "contested_reasons": [],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "out_61011ebf_impact",
+     "from": "61011ebf",
+     "origin": "repair",
+     "strength": {
+      "std": 0.12954545454545452,
+      "mean": 0.43181818181818177
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "structural_inference",
+       "reasoning": "Enterprise unlock rate fully drives its own impact node.",
+       "strength_std": 0.05,
+       "strength_mean": 1,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0.99
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 1,
+       "exists_probability": 0.99
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.09000000000000001,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 1,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "out_61011ebf_impact",
+     "from": "61011ebf",
+     "origin": "repair",
+     "strength": {
+      "std": 0.12954545454545452,
+      "mean": 0.5181818181818181
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "structural_inference",
+       "reasoning": "Enterprise unlock rate fully drives its own impact node.",
+       "strength_std": 0.05,
+       "strength_mean": 1,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0.99
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 1,
+       "exists_probability": 0.99
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.09000000000000001,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 1,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "61011ebf",
+     "from": "6e76a52b",
+     "origin": "ai",
+     "strength": {
+      "std": 0.09599999999999997,
+      "mean": 0.4
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Higher enterprise market demand plausibly raises unlocked deal rates.",
+       "strength_std": 0.2,
+       "strength_mean": 0.4,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "exists_probability": 0.9
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 0.8,
+      "pass2_adjusted": {
+       "strength_std": 0.11,
+       "strength_mean": 0.4,
+       "exists_probability": 0.9
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.09000000000000001,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 2,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "f6a071d4",
+     "from": "6e76a52b",
+     "origin": "ai",
+     "strength": {
+      "std": 0.11999999999999998,
+      "mean": 0.5
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Broader demand increases pipeline velocity to a moderate degree.",
+       "strength_std": 0.2,
+       "strength_mean": 0.4,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "exists_probability": 0.9
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 0.8,
+      "pass2_adjusted": {
+       "strength_std": 0.11,
+       "strength_mean": 0.4,
+       "exists_probability": 0.9
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.09000000000000001,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 2,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "out_8bbfef8a_impact",
+     "from": "8bbfef8a",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.45
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "structural_inference",
+       "reasoning": "Customer concentration risk maps directly to its impact metric.",
+       "strength_std": 0.05,
+       "strength_mean": 1,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0.99
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 1,
+       "exists_probability": 0.99
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.09000000000000001,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 1,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "2e6a7049",
+     "from": "a2bed6b6",
+     "origin": "ai",
+     "strength": {
+      "std": 0.11999999999999998,
+      "mean": 0.5
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "brief_explicit",
+       "reasoning": "Spending £600k on outbound sales directly reduces runway by a known proportion.",
+       "strength_std": 0.05,
+       "strength_mean": -0.4,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0.99
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": -0.4,
+       "exists_probability": 0.99
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.09000000000000001,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 2,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "f6a071d4",
+     "from": "a2bed6b6",
+     "origin": "ai",
+     "strength": {
+      "std": 0.16799999999999995,
+      "mean": 0.7
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Outbound sales investment substantially accelerates pipeline velocity.",
+       "strength_std": 0.15,
+       "strength_mean": 0.6,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "exists_probability": 0.9
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0.059999999999999984,
+       "strength_mean": 0.6,
+       "exists_probability": 0.9
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.09000000000000001,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 2,
+      "contested_reasons": [
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "out_f6a071d4_impact",
+     "from": "f6a071d4",
+     "origin": "repair",
+     "strength": {
+      "std": 0.10178571428571428,
+      "mean": 0.3732142857142858
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "structural_inference",
+       "reasoning": "Pipeline velocity fully determines its impact node.",
+       "strength_std": 0.05,
+       "strength_mean": 1,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0.99
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 1,
+       "exists_probability": 0.99
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.09000000000000001,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 1,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "out_f6a071d4_impact",
+     "from": "f6a071d4",
+     "origin": "repair",
+     "strength": {
+      "std": 0.10178571428571428,
+      "mean": 0.2375
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "structural_inference",
+       "reasoning": "Pipeline velocity fully determines its impact node.",
+       "strength_std": 0.05,
+       "strength_mean": 1,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0.99
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 1,
+       "exists_probability": 0.99
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.09000000000000001,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 1,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "out_f6a071d4_impact",
+     "from": "f6a071d4",
+     "origin": "repair",
+     "strength": {
+      "std": 0.10178571428571428,
+      "mean": 0.3392857142857143
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "structural_inference",
+       "reasoning": "Pipeline velocity fully determines its impact node.",
+       "strength_std": 0.05,
+       "strength_mean": 1,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0.99
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 1,
+       "exists_probability": 0.99
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.09000000000000001,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 1,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "a2bed6b6",
+     "from": "f86ddeb5",
+     "origin": "ai",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "reasoning": "",
+       "strength_std": 0,
+       "strength_mean": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0
+      },
+      "status": "agreed",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": true,
+      "sign_unstable": false,
+      "max_divergence": 0,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": 0,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 3,
+      "contested_reasons": [],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "bc8b38f7",
+     "from": "out_2e6a7049_impact",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.5
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Lower runway can constrain the ability to close large deals.",
+       "strength_std": 0.12,
+       "strength_mean": -0.15,
+       "lint_corrected": true,
+       "needs_user_input": true,
+       "exists_probability": 0.7
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 0.6666666666666666,
+      "pass2_adjusted": {
+       "strength_std": 0.029999999999999985,
+       "strength_mean": -0.15,
+       "exists_probability": 0.7
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.09000000000000001,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 0,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": [
+       {
+        "code": "LINT_BUDGET_RESCALE",
+        "after": -0.15,
+        "before": -0.3,
+        "edge_key": "out_2e6a7049_impact->bc8b38f7"
+       },
+       {
+        "code": "LINT_STD_CLAMPED",
+        "after": 0.12,
+        "before": 0.2,
+        "edge_key": "out_2e6a7049_impact->bc8b38f7"
+       }
+      ]
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "bc8b38f7",
+     "from": "out_61011ebf_impact",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.5
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "structural_inference",
+       "reasoning": "Higher enterprise unlock rates strongly increase deal closures.",
+       "strength_std": 0.1,
+       "strength_mean": 0.4,
+       "lint_corrected": true,
+       "needs_user_input": false,
+       "exists_probability": 0.99
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0.009999999999999995,
+       "strength_mean": 0.4,
+       "exists_probability": 0.99
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.09000000000000001,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 0,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": [
+       {
+        "code": "LINT_BUDGET_RESCALE",
+        "after": 0.4,
+        "before": 0.8,
+        "edge_key": "out_61011ebf_impact->bc8b38f7"
+       }
+      ]
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "bc8b38f7",
+     "from": "out_61011ebf_impact",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.5
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "structural_inference",
+       "reasoning": "Higher enterprise unlock rates strongly increase deal closures.",
+       "strength_std": 0.1,
+       "strength_mean": 0.4,
+       "lint_corrected": true,
+       "needs_user_input": false,
+       "exists_probability": 0.99
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0.009999999999999995,
+       "strength_mean": 0.4,
+       "exists_probability": 0.99
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.09000000000000001,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 0,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": [
+       {
+        "code": "LINT_BUDGET_RESCALE",
+        "after": 0.4,
+        "before": 0.8,
+        "edge_key": "out_61011ebf_impact->bc8b38f7"
+       }
+      ]
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "bc8b38f7",
+     "from": "out_8bbfef8a_impact",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.5
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Greater customer concentration risk may reduce new enterprise wins.",
+       "strength_std": 0.08000000000000002,
+       "strength_mean": -0.1,
+       "lint_corrected": true,
+       "needs_user_input": true,
+       "exists_probability": 0.8
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 0.6666666666666666,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": -0.1,
+       "exists_probability": 0.8
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.09000000000000001,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 0,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": [
+       {
+        "code": "LINT_BUDGET_RESCALE",
+        "after": -0.1,
+        "before": -0.2,
+        "edge_key": "out_8bbfef8a_impact->bc8b38f7"
+       },
+       {
+        "code": "LINT_STD_CLAMPED",
+        "after": 0.08000000000000002,
+        "before": 0.2,
+        "edge_key": "out_8bbfef8a_impact->bc8b38f7"
+       }
+      ]
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "bc8b38f7",
+     "from": "out_f6a071d4_impact",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.5
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Faster pipeline velocity generally leads to more closed deals.",
+       "strength_std": 0.15,
+       "strength_mean": 0.35,
+       "lint_corrected": true,
+       "needs_user_input": true,
+       "exists_probability": 0.95
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0.059999999999999984,
+       "strength_mean": 0.35,
+       "exists_probability": 0.95
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.09000000000000001,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 0,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": [
+       {
+        "code": "LINT_BUDGET_RESCALE",
+        "after": 0.35,
+        "before": 0.7,
+        "edge_key": "out_f6a071d4_impact->bc8b38f7"
+       }
+      ]
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "bc8b38f7",
+     "from": "out_f6a071d4_impact",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.5
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Faster pipeline velocity generally leads to more closed deals.",
+       "strength_std": 0.15,
+       "strength_mean": 0.35,
+       "lint_corrected": true,
+       "needs_user_input": true,
+       "exists_probability": 0.95
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0.059999999999999984,
+       "strength_mean": 0.35,
+       "exists_probability": 0.95
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.09000000000000001,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 0,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": [
+       {
+        "code": "LINT_BUDGET_RESCALE",
+        "after": 0.35,
+        "before": 0.7,
+        "edge_key": "out_f6a071d4_impact->bc8b38f7"
+       }
+      ]
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "bc8b38f7",
+     "from": "out_f6a071d4_impact",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.5
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Faster pipeline velocity generally leads to more closed deals.",
+       "strength_std": 0.15,
+       "strength_mean": 0.35,
+       "lint_corrected": true,
+       "needs_user_input": true,
+       "exists_probability": 0.95
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0.059999999999999984,
+       "strength_mean": 0.35,
+       "exists_probability": 0.95
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.09000000000000001,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 0,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": [
+       {
+        "code": "LINT_BUDGET_RESCALE",
+        "after": 0.35,
+        "before": 0.7,
+        "edge_key": "out_f6a071d4_impact->bc8b38f7"
+       }
+      ]
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    }
+   ]
+  },
+  "N_no_digit": {
+   "scenario_id": "999f3151-a89e-4818-b667-1c0d9c9db008",
+   "captured_url": "https://staging--olumi.netlify.app/bff/cee/scenarios/999f3151-a89e-4818-b667-1c0d9c9db008/graph",
+   "nodes": [
+    {
+     "id": "046e5eec",
+     "kind": "factor",
+     "label": "Security & SSO Investment",
+     "category": "controllable",
+     "provenance": "ai_inferred",
+     "display_value": "600,000",
+     "observed_state": {
+      "value": 0.6,
+      "source": "cee_inference",
+      "raw_value": 600000,
+      "factor_type": "other",
+      "extractionType": "inferred",
+      "uncertainty_drivers": [
+       "Not provided"
+      ]
+     }
+    },
+    {
+     "id": "0baef5d6",
+     "kind": "decision",
+     "label": "Decision",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "2b736014",
+     "kind": "factor",
+     "label": "Enterprise Deal Win Rate",
+     "category": "observable",
+     "provenance": "from_brief",
+     "display_value": "0.15",
+     "observed_state": {
+      "value": 0.15,
+      "source": "brief_extraction",
+      "extractionType": "observed"
+     }
+    },
+    {
+     "id": "41709731",
+     "kind": "option",
+     "label": "spend £600,000 building a security certification and single sign-on to unlock larger enterprise deals",
+     "provenance": "ai_inferred",
+     "interventions": {
+      "046e5eec": {
+       "value": 0.6,
+       "source": "cee_hypothesis",
+       "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+       "target_match": {
+        "node_id": "046e5eec",
+        "confidence": "high",
+        "match_type": "exact_id"
+       },
+       "value_confidence": "low"
+      }
+     }
+    },
+    {
+     "id": "6e76a52b",
+     "kind": "factor",
+     "label": "Enterprise Market Demand",
+     "category": "external",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "8bbfef8a",
+     "kind": "factor",
+     "label": "Customer Concentration Risk",
+     "prior": {
+      "range_max": 0.29000000000000004,
+      "range_min": 0.09,
+      "distribution": "uniform"
+     },
+     "category": "external",
+     "provenance": "ai_inferred",
+     "display_value": "0.09 to 0.29",
+     "extractionType": "inferred"
+    },
+    {
+     "id": "a2bed6b6",
+     "kind": "factor",
+     "label": "Outbound Sales Investment",
+     "category": "controllable",
+     "provenance": "ai_inferred",
+     "display_value": "0",
+     "observed_state": {
+      "value": 0,
+      "source": "cee_inference",
+      "raw_value": 0,
+      "factor_type": "other",
+      "extractionType": "inferred",
+      "uncertainty_drivers": [
+       "Not provided"
+      ]
+     }
+    },
+    {
+     "id": "b9100ec1",
+     "kind": "option",
+     "label": "Phased: Security Cert First, Then Outbound",
+     "provenance": "ai_inferred",
+     "interventions": {}
+    },
+    {
+     "id": "bc8b38f7",
+     "kind": "goal",
+     "label": "unlock larger enterprise deals",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "bc936d4c",
+     "kind": "factor",
+     "label": "Sales Cycle Length",
+     "category": "external",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "e734a0b0",
+     "kind": "factor",
+     "label": "runway is 14 months",
+     "prior": {
+      "range_max": 1,
+      "range_min": 0.35,
+      "distribution": "uniform"
+     },
+     "category": "external",
+     "provenance": "ai_inferred",
+     "display_value": "0.35 to 1 months",
+     "extractionType": "inferred"
+    },
+    {
+     "id": "f86ddeb5",
+     "kind": "option",
+     "label": "spend £600,000 on outbound sales instead",
+     "provenance": "ai_inferred",
+     "interventions": {
+      "a2bed6b6": {
+       "value": 0.6,
+       "source": "cee_hypothesis",
+       "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+       "target_match": {
+        "node_id": "a2bed6b6",
+        "confidence": "high",
+        "match_type": "exact_id"
+       },
+       "value_confidence": "low"
+      }
+     }
+    },
+    {
+     "id": "out_2b736014_impact",
+     "kind": "outcome",
+     "label": "Enterprise Deal Win Rate Impact",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "out_6e76a52b_impact",
+     "kind": "outcome",
+     "label": "Enterprise Market Demand Impact",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "out_8bbfef8a_impact",
+     "kind": "outcome",
+     "label": "Customer Concentration Risk Impact",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "out_bc936d4c_impact",
+     "kind": "outcome",
+     "label": "Sales Cycle Length Impact",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "out_e734a0b0_impact",
+     "kind": "outcome",
+     "label": "runway is 14 months Impact",
+     "provenance": "ai_inferred"
+    }
+   ],
+   "edges": [
+    {
+     "to": "2b736014",
+     "from": "046e5eec",
+     "origin": "ai",
+     "strength": {
+      "std": 0.132,
+      "mean": 0.55
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Investing in security and SSO typically increases enterprise win rates by signaling compliance and reducing friction.",
+       "strength_std": 0.15,
+       "strength_mean": 0.4,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "exists_probability": 0.9
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 0.8,
+      "pass2_adjusted": {
+       "strength_std": 0.04999999999999999,
+       "strength_mean": 0.4,
+       "exists_probability": 0.9
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.1,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 2,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "bc936d4c",
+     "from": "046e5eec",
+     "origin": "ai",
+     "strength": {
+      "std": 0.05999999999999999,
+      "mean": 0.25
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Enhanced security and SSO tends to shorten enterprise sales cycles by reducing legal and procurement delays.",
+       "strength_std": 0.15,
+       "strength_mean": -0.3,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "exists_probability": 0.85
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 0.6666666666666666,
+      "pass2_adjusted": {
+       "strength_std": 0.04999999999999999,
+       "strength_mean": -0.3,
+       "exists_probability": 0.85
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.1,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 2,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "41709731",
+     "from": "0baef5d6",
+     "origin": "default",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Decision-to-option scaffold minted by the projector"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "reasoning": "",
+       "strength_std": 0,
+       "strength_mean": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0
+      },
+      "status": "agreed",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": true,
+      "sign_unstable": false,
+      "max_divergence": 0,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": 0,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 4,
+      "contested_reasons": [],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "b9100ec1",
+     "from": "0baef5d6",
+     "origin": "default",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Decision-to-option scaffold minted by the projector"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "reasoning": "",
+       "strength_std": 0,
+       "strength_mean": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0
+      },
+      "status": "agreed",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": true,
+      "sign_unstable": false,
+      "max_divergence": 0,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": 0,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 4,
+      "contested_reasons": [],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "f86ddeb5",
+     "from": "0baef5d6",
+     "origin": "default",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Decision-to-option scaffold minted by the projector"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "reasoning": "",
+       "strength_std": 0,
+       "strength_mean": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0
+      },
+      "status": "agreed",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": true,
+      "sign_unstable": false,
+      "max_divergence": 0,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": 0,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 4,
+      "contested_reasons": [],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "out_2b736014_impact",
+     "from": "2b736014",
+     "origin": "repair",
+     "strength": {
+      "std": 0.12391304347826086,
+      "mean": 0.5369565217391304
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "structural_inference",
+       "reasoning": "Outcome node directly reflects the underlying win rate factor.",
+       "strength_std": 0.05,
+       "strength_mean": 1,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0.99
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 1,
+       "exists_probability": 0.99
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.1,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 1,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "out_2b736014_impact",
+     "from": "2b736014",
+     "origin": "repair",
+     "strength": {
+      "std": 0.12391304347826086,
+      "mean": 0.41304347826086957
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "structural_inference",
+       "reasoning": "Outcome node directly reflects the underlying win rate factor.",
+       "strength_std": 0.05,
+       "strength_mean": 1,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0.99
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 1,
+       "exists_probability": 0.99
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.1,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 1,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "046e5eec",
+     "from": "41709731",
+     "origin": "ai",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "reasoning": "",
+       "strength_std": 0,
+       "strength_mean": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0
+      },
+      "status": "agreed",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": true,
+      "sign_unstable": false,
+      "max_divergence": 0,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": 0,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 3,
+      "contested_reasons": [],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "out_6e76a52b_impact",
+     "from": "6e76a52b",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.4
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "structural_inference",
+       "reasoning": "Outcome node directly reflects the underlying market demand factor.",
+       "strength_std": 0.05,
+       "strength_mean": 1,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0.99
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 1,
+       "exists_probability": 0.99
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.1,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 1,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "out_8bbfef8a_impact",
+     "from": "8bbfef8a",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.35
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "structural_inference",
+       "reasoning": "Outcome node directly reflects the underlying concentration risk factor.",
+       "strength_std": 0.05,
+       "strength_mean": 1,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0.99
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 1,
+       "exists_probability": 0.99
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.1,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 1,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "2b736014",
+     "from": "a2bed6b6",
+     "origin": "ai",
+     "strength": {
+      "std": 0.10799999999999998,
+      "mean": 0.45
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Outbound sales spend generally lifts win rates by securing more qualified leads.",
+       "strength_std": 0.15,
+       "strength_mean": 0.3,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "exists_probability": 0.85
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 0.6666666666666666,
+      "pass2_adjusted": {
+       "strength_std": 0.04999999999999999,
+       "strength_mean": 0.3,
+       "exists_probability": 0.85
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.1,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 2,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "046e5eec",
+     "from": "b9100ec1",
+     "origin": "ai",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "reasoning": "",
+       "strength_std": 0,
+       "strength_mean": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0
+      },
+      "status": "agreed",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": true,
+      "sign_unstable": false,
+      "max_divergence": 0,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": 0,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 3,
+      "contested_reasons": [],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "a2bed6b6",
+     "from": "b9100ec1",
+     "origin": "ai",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "reasoning": "",
+       "strength_std": 0,
+       "strength_mean": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0
+      },
+      "status": "agreed",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": true,
+      "sign_unstable": false,
+      "max_divergence": 0,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": 0,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 3,
+      "contested_reasons": [],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "out_bc936d4c_impact",
+     "from": "bc936d4c",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.3
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "structural_inference",
+       "reasoning": "Outcome node directly reflects the underlying sales cycle length factor.",
+       "strength_std": 0.05,
+       "strength_mean": 1,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0.99
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 1,
+       "exists_probability": 0.99
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.1,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 1,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "out_e734a0b0_impact",
+     "from": "e734a0b0",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.45
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "structural_inference",
+       "reasoning": "Outcome node directly reflects the underlying runway factor.",
+       "strength_std": 0.05,
+       "strength_mean": 1,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0.99
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 1,
+       "exists_probability": 0.99
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.1,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 1,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "a2bed6b6",
+     "from": "f86ddeb5",
+     "origin": "ai",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "reasoning": "",
+       "strength_std": 0,
+       "strength_mean": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0
+      },
+      "status": "agreed",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": true,
+      "sign_unstable": false,
+      "max_divergence": 0,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": 0,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 3,
+      "contested_reasons": [],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "bc8b38f7",
+     "from": "out_2b736014_impact",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.5
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Win rate improvements are the most direct driver of unlocking larger enterprise deals.",
+       "strength_std": 0.1,
+       "strength_mean": 0.4,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "exists_probability": 0.9
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 0.8,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0.4,
+       "exists_probability": 0.9
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.1,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 0,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "bc8b38f7",
+     "from": "out_2b736014_impact",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.5
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Win rate improvements are the most direct driver of unlocking larger enterprise deals.",
+       "strength_std": 0.1,
+       "strength_mean": 0.4,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "exists_probability": 0.9
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 0.8,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0.4,
+       "exists_probability": 0.9
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.1,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 0,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "bc8b38f7",
+     "from": "out_6e76a52b_impact",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.5
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Higher enterprise demand positively influences the ability to close larger deals.",
+       "strength_std": 0.1,
+       "strength_mean": 0.3,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "exists_probability": 0.9
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 0.6666666666666666,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0.3,
+       "exists_probability": 0.9
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.1,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 0,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "bc8b38f7",
+     "from": "out_8bbfef8a_impact",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.5
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Greater concentration risk reduces the strategic value of individual large enterprise deals.",
+       "strength_std": 0.1,
+       "strength_mean": -0.1,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "exists_probability": 0.8
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 0.6666666666666666,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": -0.1,
+       "exists_probability": 0.8
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.1,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 0,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "bc8b38f7",
+     "from": "out_bc936d4c_impact",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.5
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Shorter sales cycles slightly increase the likelihood of unlocking large deals in time.",
+       "strength_std": 0.1,
+       "strength_mean": 0.1,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "exists_probability": 0.85
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 0.6666666666666666,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0.1,
+       "exists_probability": 0.85
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.1,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 0,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "bc8b38f7",
+     "from": "out_e734a0b0_impact",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.5
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Longer runway modestly improves chances of closing larger enterprise deals before funding runs out.",
+       "strength_std": 0.1,
+       "strength_mean": 0.1,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "exists_probability": 0.9
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 0.6666666666666666,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0.1,
+       "exists_probability": 0.9
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.1,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 0,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    }
+   ]
+  },
+  "K_money_small": {
+   "scenario_id": "ce38577b-e9b5-44d9-adad-f42bdb285c9c",
+   "captured_url": "https://staging--olumi.netlify.app/bff/cee/scenarios/ce38577b-e9b5-44d9-adad-f42bdb285c9c/graph",
+   "nodes": [
+    {
+     "id": "233f8726",
+     "kind": "decision",
+     "label": "Decision",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "465f5125",
+     "kind": "factor",
+     "label": "Sales Rep Productivity",
+     "category": "observable",
+     "provenance": "from_brief",
+     "display_value": "0.5",
+     "observed_state": {
+      "value": 0.5,
+      "source": "brief_extraction",
+      "extractionType": "observed"
+     }
+    },
+    {
+     "id": "5f6f5e36",
+     "kind": "option",
+     "label": "replace our current CRM with HubSpot next quarter",
+     "provenance": "ai_inferred",
+     "interventions": {
+      "7c95bd7d": {
+       "value": 0.75,
+       "source": "cee_hypothesis",
+       "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+       "target_match": {
+        "node_id": "7c95bd7d",
+        "confidence": "high",
+        "match_type": "exact_id"
+       },
+       "value_confidence": "low"
+      },
+      "7ccccf63": {
+       "value": 0.5,
+       "source": "cee_hypothesis",
+       "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+       "target_match": {
+        "node_id": "7ccccf63",
+        "confidence": "high",
+        "match_type": "exact_id"
+       },
+       "value_confidence": "low"
+      },
+      "b94a2d2b": {
+       "value": 0.65,
+       "source": "cee_hypothesis",
+       "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+       "target_match": {
+        "node_id": "b94a2d2b",
+        "confidence": "high",
+        "match_type": "exact_id"
+       },
+       "value_confidence": "low"
+      },
+      "dbbec7ec": {
+       "value": 0.6,
+       "source": "cee_hypothesis",
+       "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+       "target_match": {
+        "node_id": "dbbec7ec",
+        "confidence": "high",
+        "match_type": "exact_id"
+       },
+       "value_confidence": "low"
+      },
+      "e6b19c9b": {
+       "value": 0.4,
+       "source": "cee_hypothesis",
+       "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+       "target_match": {
+        "node_id": "e6b19c9b",
+        "confidence": "high",
+        "match_type": "exact_id"
+       },
+       "value_confidence": "low"
+      }
+     }
+    },
+    {
+     "id": "7c95bd7d",
+     "kind": "factor",
+     "label": "CRM Adoption Rate",
+     "category": "controllable",
+     "provenance": "ai_inferred",
+     "display_value": "Moderate (0.5)",
+     "observed_state": {
+      "value": 0.5,
+      "source": "cee_inference",
+      "factor_type": "other",
+      "extractionType": "inferred",
+      "uncertainty_drivers": [
+       "Not provided"
+      ]
+     }
+    },
+    {
+     "id": "7ccccf63",
+     "kind": "factor",
+     "label": "Annual CRM Licence Cost",
+     "category": "controllable",
+     "provenance": "ai_inferred",
+     "display_value": "50,000",
+     "observed_state": {
+      "value": 0.5,
+      "source": "cee_inference",
+      "raw_value": 50000,
+      "factor_type": "other",
+      "extractionType": "inferred",
+      "uncertainty_drivers": [
+       "Not provided"
+      ]
+     }
+    },
+    {
+     "id": "a551345f",
+     "kind": "option",
+     "label": "keep what we have",
+     "provenance": "ai_inferred",
+     "interventions": {
+      "7c95bd7d": {
+       "value": 0.5,
+       "source": "cee_hypothesis",
+       "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+       "target_match": {
+        "node_id": "7c95bd7d",
+        "confidence": "high",
+        "match_type": "exact_id"
+       },
+       "value_confidence": "low"
+      },
+      "7ccccf63": {
+       "value": 0.5,
+       "source": "cee_hypothesis",
+       "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+       "target_match": {
+        "node_id": "7ccccf63",
+        "confidence": "high",
+        "match_type": "exact_id"
+       },
+       "value_confidence": "low"
+      },
+      "e6b19c9b": {
+       "value": 0,
+       "source": "cee_hypothesis",
+       "reasoning": "Model-chosen intervention level; this amount is not stated in the brief",
+       "target_match": {
+        "node_id": "e6b19c9b",
+        "confidence": "high",
+        "match_type": "exact_id"
+       },
+       "value_confidence": "low"
+      }
+     }
+    },
+    {
+     "id": "b94a2d2b",
+     "kind": "factor",
+     "label": "Implementation Disruption",
+     "category": "controllable",
+     "provenance": "ai_inferred",
+     "display_value": "Low (0.2)",
+     "observed_state": {
+      "value": 0.2,
+      "source": "cee_inference",
+      "factor_type": "other",
+      "extractionType": "inferred",
+      "uncertainty_drivers": [
+       "Not provided"
+      ]
+     }
+    },
+    {
+     "id": "caf5d6ce",
+     "kind": "goal",
+     "label": "higher sales productivity without blowing the budget",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "dbbec7ec",
+     "kind": "factor",
+     "label": "Data Migration Risk",
+     "category": "controllable",
+     "provenance": "ai_inferred",
+     "display_value": "Low (0.2)",
+     "observed_state": {
+      "value": 0.2,
+      "source": "cee_inference",
+      "factor_type": "other",
+      "extractionType": "inferred",
+      "uncertainty_drivers": [
+       "Not provided"
+      ]
+     }
+    },
+    {
+     "id": "e6b19c9b",
+     "kind": "factor",
+     "label": "One-Off Migration Cost",
+     "category": "controllable",
+     "provenance": "ai_inferred",
+     "display_value": "0",
+     "observed_state": {
+      "value": 0,
+      "source": "cee_inference",
+      "raw_value": 0,
+      "factor_type": "other",
+      "extractionType": "inferred",
+      "uncertainty_drivers": [
+       "Not provided"
+      ]
+     }
+    },
+    {
+     "id": "out_465f5125_impact",
+     "kind": "outcome",
+     "label": "Sales Rep Productivity Impact",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "out_7ccccf63_impact",
+     "kind": "outcome",
+     "label": "Annual CRM Licence Cost Impact",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "out_e6b19c9b_impact",
+     "kind": "outcome",
+     "label": "One-Off Migration Cost Impact",
+     "provenance": "ai_inferred"
+    }
+   ],
+   "edges": [
+    {
+     "to": "5f6f5e36",
+     "from": "233f8726",
+     "origin": "default",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Decision-to-option scaffold minted by the projector"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "reasoning": "",
+       "strength_std": 0,
+       "strength_mean": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0
+      },
+      "status": "agreed",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": true,
+      "sign_unstable": false,
+      "max_divergence": 0,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": 0,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 3,
+      "contested_reasons": [],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "a551345f",
+     "from": "233f8726",
+     "origin": "default",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Decision-to-option scaffold minted by the projector"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "reasoning": "",
+       "strength_std": 0,
+       "strength_mean": 0,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0
+      },
+      "status": "agreed",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": true,
+      "sign_unstable": false,
+      "max_divergence": 0,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": 0,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 3,
+      "contested_reasons": [],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "out_465f5125_impact",
+     "from": "465f5125",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.7
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "structural_inference",
+       "reasoning": "The outcome node directly reflects the factor, so a full-range shift in productivity maps to the impact outcome.",
+       "strength_std": 0.05,
+       "strength_mean": 1,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0.99
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 1,
+       "exists_probability": 0.99
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.15,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 1,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "7c95bd7d",
+     "from": "5f6f5e36",
+     "origin": "ai",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Switching to a modern, user-friendly CRM typically boosts adoption rates by a large margin.",
+       "strength_std": 0.15,
+       "strength_mean": 0.8,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "exists_probability": 0.9
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0.8,
+       "exists_probability": 0.9
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.15,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 3,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "7ccccf63",
+     "from": "5f6f5e36",
+     "origin": "ai",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Switching CRMs often changes annual licensing costs moderately, depending on plan differences.",
+       "strength_std": 0.15,
+       "strength_mean": 0.3,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "exists_probability": 0.8
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 0.6666666666666666,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0.3,
+       "exists_probability": 0.8
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.15,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 2,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "b94a2d2b",
+     "from": "5f6f5e36",
+     "origin": "ai",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "A full CRM replacement entails substantial implementation-related disruptions for reps.",
+       "strength_std": 0.15,
+       "strength_mean": 0.8,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "exists_probability": 0.9
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0.8,
+       "exists_probability": 0.9
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.15,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 3,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "b94a2d2b",
+     "from": "5f6f5e36",
+     "origin": "ai",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "A full CRM replacement entails substantial implementation-related disruptions for reps.",
+       "strength_std": 0.15,
+       "strength_mean": 0.8,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "exists_probability": 0.9
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0.8,
+       "exists_probability": 0.9
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.15,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 3,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "dbbec7ec",
+     "from": "5f6f5e36",
+     "origin": "ai",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Migrating data to a new CRM platform introduces notable risk of errors or delays.",
+       "strength_std": 0.15,
+       "strength_mean": 0.7,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "exists_probability": 0.9
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0.7,
+       "exists_probability": 0.9
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.15,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 3,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "e6b19c9b",
+     "from": "5f6f5e36",
+     "origin": "ai",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "brief_explicit",
+       "reasoning": "User specified a one-off migration cost of £20k when replacing the CRM.",
+       "strength_std": 0.05,
+       "strength_mean": 0.5,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0.99
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0.5,
+       "exists_probability": 0.99
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.15,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 2,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "465f5125",
+     "from": "7c95bd7d",
+     "origin": "ai",
+     "strength": {
+      "std": 0.15599999999999997,
+      "mean": 0.65
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Higher CRM adoption directly unlocks more productivity gains among sales reps.",
+       "strength_std": 0.15,
+       "strength_mean": 0.37623762376237624,
+       "lint_corrected": true,
+       "needs_user_input": true,
+       "exists_probability": 0.9
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 0.7524752475247525,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0.37623762376237624,
+       "exists_probability": 0.9
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.15,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 2,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": [
+       {
+        "code": "LINT_BUDGET_RESCALE",
+        "after": 0.37623762376237624,
+        "before": 0.38,
+        "edge_key": "7c95bd7d->465f5125"
+       }
+      ]
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "out_7ccccf63_impact",
+     "from": "7ccccf63",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.55
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "structural_inference",
+       "reasoning": "By definition, the licence cost factor maps directly to its impact outcome.",
+       "strength_std": 0.05,
+       "strength_mean": 1,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0.99
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 1,
+       "exists_probability": 0.99
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.15,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 1,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "7c95bd7d",
+     "from": "a551345f",
+     "origin": "ai",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Keeping the existing CRM yields only minor deviations from current adoption levels.",
+       "strength_std": 0.1,
+       "strength_mean": -0.2,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "exists_probability": 0.8
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 0.6666666666666666,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": -0.2,
+       "exists_probability": 0.8
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.15,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 3,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "7ccccf63",
+     "from": "a551345f",
+     "origin": "ai",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "weak_guess",
+       "reasoning": "Unclear how keeping the same CRM affects annual cost changes, likely minimal.",
+       "strength_std": 0.15,
+       "strength_mean": 0.15,
+       "lint_corrected": false,
+       "needs_user_input": true,
+       "exists_probability": 0.6
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 0.3333333333333333,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0.15,
+       "exists_probability": 0.6
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.15,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 2,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "e6b19c9b",
+     "from": "a551345f",
+     "origin": "ai",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "brief_explicit",
+       "reasoning": "The brief states no one-off migration cost when retaining the current CRM.",
+       "strength_std": 0.05,
+       "strength_mean": -0.5,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0.99
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": -0.5,
+       "exists_probability": 0.99
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.15,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 2,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "465f5125",
+     "from": "b94a2d2b",
+     "origin": "ai",
+     "strength": {
+      "std": 0.08399999999999998,
+      "mean": 0.35
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Greater implementation disruption tends to reduce sales rep productivity.",
+       "strength_std": 0.15,
+       "strength_mean": -0.37623762376237624,
+       "lint_corrected": true,
+       "needs_user_input": true,
+       "exists_probability": 0.9
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 0.7524752475247525,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": -0.37623762376237624,
+       "exists_probability": 0.9
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.15,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 2,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": [
+       {
+        "code": "LINT_BUDGET_RESCALE",
+        "after": -0.37623762376237624,
+        "before": -0.38,
+        "edge_key": "b94a2d2b->465f5125"
+       }
+      ]
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "465f5125",
+     "from": "dbbec7ec",
+     "origin": "ai",
+     "strength": {
+      "std": 0.09599999999999997,
+      "mean": 0.4
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Model-inferred causal link (records projector)"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Higher data migration risk can depress productivity through lost or corrupt data.",
+       "strength_std": 0.2,
+       "strength_mean": -0.24752475247524752,
+       "lint_corrected": true,
+       "needs_user_input": true,
+       "exists_probability": 0.8
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 0.6666666666666666,
+      "pass2_adjusted": {
+       "strength_std": 0.05000000000000002,
+       "strength_mean": -0.24752475247524752,
+       "exists_probability": 0.8
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.15,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 2,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": [
+       {
+        "code": "LINT_BUDGET_RESCALE",
+        "after": -0.24752475247524752,
+        "before": -0.25,
+        "edge_key": "dbbec7ec->465f5125"
+       }
+      ]
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "out_e6b19c9b_impact",
+     "from": "e6b19c9b",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.45
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "structural_inference",
+       "reasoning": "The outcome node directly represents the one-off migration cost factor.",
+       "strength_std": 0.05,
+       "strength_mean": 1,
+       "lint_corrected": false,
+       "needs_user_input": false,
+       "exists_probability": 0.99
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 1,
+       "exists_probability": 0.99
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.15,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 1,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": []
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "caf5d6ce",
+     "from": "out_465f5125_impact",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.5
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Improved productivity impact contributes positively toward the goal of higher sales productivity.",
+       "strength_std": 0.1,
+       "strength_mean": 0.4285714285714285,
+       "lint_corrected": true,
+       "needs_user_input": true,
+       "exists_probability": 0.95
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": 0.4285714285714285,
+       "exists_probability": 0.95
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.15,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 0,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": [
+       {
+        "code": "LINT_BUDGET_RESCALE",
+        "after": 0.4285714285714285,
+        "before": 0.6,
+        "edge_key": "out_465f5125_impact->caf5d6ce"
+       }
+      ]
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "caf5d6ce",
+     "from": "out_7ccccf63_impact",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.5
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "Increased annual licence costs detract from the budget constraint in the goal.",
+       "strength_std": 0.1,
+       "strength_mean": -0.3571428571428571,
+       "lint_corrected": true,
+       "needs_user_input": true,
+       "exists_probability": 0.95
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 1,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": -0.3571428571428571,
+       "exists_probability": 0.95
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.15,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 0,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": [
+       {
+        "code": "LINT_BUDGET_RESCALE",
+        "after": -0.3571428571428571,
+        "before": -0.5,
+        "edge_key": "out_7ccccf63_impact->caf5d6ce"
+       }
+      ]
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    },
+    {
+     "to": "caf5d6ce",
+     "from": "out_e6b19c9b_impact",
+     "origin": "repair",
+     "strength": {
+      "std": 0.15,
+      "mean": 0.5
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Split factor→goal into factor→outcome→goal"
+     },
+     "validation": {
+      "pass1": {
+       "strength_std": 0,
+       "strength_mean": 0,
+       "exists_probability": 0
+      },
+      "pass2": {
+       "basis": "domain_prior",
+       "reasoning": "One-off migration costs negatively affect staying within budget.",
+       "strength_std": 0.15,
+       "strength_mean": -0.21428571428571425,
+       "lint_corrected": true,
+       "needs_user_input": true,
+       "exists_probability": 0.8
+      },
+      "status": "contested",
+      "evoi_rank": null,
+      "was_shown": false,
+      "evoi_impact": null,
+      "resolved_by": "default",
+      "user_action": "pending",
+      "pass2_missing": false,
+      "sign_unstable": false,
+      "max_divergence": 0.6666666666666666,
+      "pass2_adjusted": {
+       "strength_std": 0,
+       "strength_mean": -0.21428571428571425,
+       "exists_probability": 0.8
+      },
+      "resolved_value": null,
+      "bias_correction": {
+       "strength_std_offset": -0.15,
+       "strength_mean_offset": 0,
+       "exists_probability_offset": 0
+      },
+      "distance_to_goal": 0,
+      "contested_reasons": [
+       "strength_band_change",
+       "existence_boundary_crossing"
+      ],
+      "validation_lint_log": [
+       {
+        "code": "LINT_BUDGET_RESCALE",
+        "after": -0.21428571428571425,
+        "before": -0.3,
+        "edge_key": "out_e6b19c9b_impact->caf5d6ce"
+       }
+      ]
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.9,
+     "provenance_display": "ai_inferred"
+    }
+   ]
+  }
+ }
+}

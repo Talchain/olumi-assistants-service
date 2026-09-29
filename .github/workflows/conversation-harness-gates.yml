@@ -1,0 +1,111 @@
+name: Conversation Harness Gates
+
+# CI wiring for the coach-prompt promotion-gate harness (Wave1-L3 round 4).
+#
+# WHY THIS EXISTS: a promotion gate that runs nowhere gates nothing. Until this
+# workflow, `pnpm harness:typecheck` and `pnpm harness:test` existed only as
+# package scripts — the gate's own self-tests (including the G1–G7 dims, the
+# holdout isolation, and the figure-scanner fail-closed corpus) executed only
+# when someone remembered to run them locally. That is the guarantee-theatre
+# class: machinery that reads as a guarantee but never executes.
+#
+# HONEST SCOPE: this job proves the gate MACHINERY (scorer dims, verdict,
+# scanner, holdout split) still executes and discriminates on every PR that
+# can affect it. It does NOT run a live promotion verdict on a candidate
+# prompt — that needs recorded conversation runs and stays a deliberate,
+# human-triggered step (see tools/conversation-harness/README.md).
+#
+# PATHS: the harness imports production checkers from src/orchestrator-v5/
+# (coaching-output-postcheck, mutation-language, forbidden-user-facing-phrases,
+# canonical-analysis-state) — imported, never copied, so changes THERE can
+# break the gate and must trigger this job too.
+#
+# ⚠ AND IT ALSO REACHES tests/utils/ — a blind spot found 7 Aug 2026 while
+# repairing a red this job raised. The path list below is a HAND-MAINTAINED
+# MIRROR of what `tools/conversation-harness/tsconfig.json` transitively pulls
+# in, and it had drifted: the tsconfig reaches two files under tests/, neither
+# of which appeared here. The consequence is asymmetric and nasty — a change to
+# either file can BREAK this job without TRIGGERING it, so the job's last
+# recorded status stays stale (red or green) until some unrelated
+# src/orchestrator-v5/ push happens to re-run it. That is exactly how the fix
+# for a red can look like it never landed.
+#
+# The two files are DERIVED, not guessed:
+#   pnpm exec tsc -p tools/conversation-harness/tsconfig.json --noEmit --listFiles \
+#     | grep "/tests/"
+# At 8f0d26fb that prints exactly:
+#   tests/utils/mock-session-store.ts
+#   tests/utils/rolling-summary-store-fake.ts
+# Both live in tests/utils/, so 'tests/utils/**' is the narrowest entry that
+# covers the reach. RE-DERIVE with the command above rather than trusting this
+# comment: if the harness ever imports a test helper from elsewhere, this list
+# is short again and nothing will say so.
+#
+# ADVISORY by convention (golden-journey-replay.yml pattern): do NOT add this
+# check to a branch-protection required list without a soak period, as a
+# separate branch-protection change. A red run means the promotion gate can no
+# longer prove its own calibration — treat it as blocking for any PR that
+# touches the harness, whatever branch protection says.
+
+on:
+  pull_request:
+    branches: [main, staging]
+    paths:
+      - 'tools/conversation-harness/**'
+      - 'src/orchestrator-v5/**'
+      # Transitively typechecked by the harness tsconfig — see the PATHS note above.
+      - 'tests/utils/**'
+      - '.github/workflows/conversation-harness-gates.yml'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+  push:
+    branches: [staging]
+    paths:
+      - 'tools/conversation-harness/**'
+      - 'src/orchestrator-v5/**'
+      # Transitively typechecked by the harness tsconfig — see the PATHS note above.
+      - 'tests/utils/**'
+      - '.github/workflows/conversation-harness-gates.yml'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: conversation-harness-gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  harness-gates:
+    name: Conversation Harness Gates (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          # Needed by .npmrc token substitution (@talchain/schemas registry).
+          NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
+
+      # preharness:typecheck runs openapi:generate first — the harness tsconfig
+      # reaches src/ transitively and src/generated is gitignored, so absent IS
+      # the clean-clone state (proven in round 3).
+      - name: Harness typecheck (tools/ blind-spot closure)
+        run: pnpm harness:typecheck
+
+      - name: Harness gate self-tests (dims, verdict, scanner corpus, holdout)
+        run: pnpm harness:test

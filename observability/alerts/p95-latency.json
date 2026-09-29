@@ -1,0 +1,20 @@
+{
+  "name": "Draft Graph p95 Latency > 8s",
+  "type": "metric alert",
+  "query": "p95(last_5m):p95:olumi.assistants.draft.latency_ms{*} > 8000",
+  "message": "## Draft Graph p95 Latency Breach\n\nThe p95 latency for draft-graph endpoint has exceeded 8 seconds.\n\n**Current:** {{value}} ms\n**Threshold:** 8000 ms (8s)\n**Environment:** {{env.name}}\n\n**Impact:** Performance SLA breach - users experiencing slow responses.\n\n**Actions:**\n1. Check Anthropic API latency in Datadog\n2. Review recent deployments for regressions\n3. Check if LLM calls are timing out\n4. Consider increasing fixture timeout threshold\n\n**Dashboard:** [Draft Service Metrics](https://app.datadoghq.com/dashboard/draft-service)\n\n@slack-olumi-alerts @pagerduty-on-call",
+  "tags": ["service:olumi-assistants", "team:olumi", "priority:p1"],
+  "options": {
+    "thresholds": {
+      "critical": 8000,
+      "warning": 6000
+    },
+    "notify_no_data": false,
+    "notify_audit": true,
+    "require_full_window": false,
+    "new_group_delay": 60,
+    "include_tags": true,
+    "escalation_message": "P95 latency still above threshold after 15 minutes",
+    "evaluation_delay": 60
+  }
+}

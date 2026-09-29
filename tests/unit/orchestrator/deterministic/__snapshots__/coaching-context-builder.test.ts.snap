@@ -1,0 +1,176 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`snapshot — EVALUATE context (fresh analysis) > matches expected shape 1`] = `
+{
+  "ai_estimated_count": 2,
+  "ask_question_now": false,
+  "biggest_inference": {
+    "factor_id": "f2",
+    "factor_label": "Technical Direction",
+    "reason": "highest sensitivity among AI-estimated factors",
+    "source": "ai_estimated",
+  },
+  "calibration_target": {
+    "factor_id": "f2",
+    "source_label": "Hire Tech Lead",
+    "target_label": "Technical Direction",
+  },
+  "challenge_now": true,
+  "chip_inputs": {
+    "analysis_fresh": true,
+    "dominant_factor_label": "Cost Per Developer",
+    "has_analysis": true,
+    "has_risk_factors": false,
+    "option_mechanism_overlap": false,
+    "stability_band": "moderate",
+    "stage": "evaluate",
+    "top_uncalibrated_factor": "f2",
+  },
+  "coaching_mode": "decide",
+  "critical_gap": {
+    "detail": "No risk factors modelled. What could go wrong?",
+    "type": "missing_factor",
+  },
+  "cta": {
+    "guidance": "Your decision depends heavily on Cost Per Developer. This is well-grounded.",
+    "readiness": "ready",
+  },
+  "drivers": [
+    {
+      "confidence_band": "medium",
+      "factor_id": "f1",
+      "factor_label": "Cost Per Developer",
+      "is_ai_estimated": false,
+      "sensitivity": 0.42,
+    },
+    {
+      "confidence_band": "medium",
+      "factor_id": "f2",
+      "factor_label": "Technical Direction",
+      "is_ai_estimated": true,
+      "sensitivity": 0.25,
+    },
+  ],
+  "headline": {
+    "leading_option": "Hire Tech Lead",
+    "leading_probability": 72,
+    "runner_up": "Hire Two Developers",
+    "runner_up_probability": 28,
+    "stability_band": "moderate",
+    "stability_pct": 55,
+    "win_gap": 44,
+  },
+  "option_mechanism_overlap": false,
+  "prediction_state": "none",
+  "primary_move": "present_findings",
+  "response_posture": "convergent",
+  "risk_factor_count": 0,
+  "top_fragile": {
+    "flip_probability": 0.18,
+    "source_label": "Cost",
+    "target_label": "Delivery Capacity",
+  },
+  "total_factor_count": 3,
+  "tradeoff": {
+    "benefit_a": "Technical Direction",
+    "benefit_b": "Delivery Capacity",
+    "option_a": "Hire Tech Lead",
+    "option_b": "Hire Two Developers",
+  },
+  "triggered_plays": [],
+  "user_provided_count": 1,
+}
+`;
+
+exports[`snapshot — FRAME context > matches expected shape 1`] = `
+{
+  "ai_estimated_count": 0,
+  "ask_question_now": true,
+  "biggest_inference": null,
+  "calibration_target": null,
+  "challenge_now": true,
+  "chip_inputs": {
+    "analysis_fresh": false,
+    "dominant_factor_label": null,
+    "has_analysis": false,
+    "has_risk_factors": false,
+    "option_mechanism_overlap": false,
+    "stability_band": null,
+    "stage": "frame",
+    "top_uncalibrated_factor": null,
+  },
+  "coaching_mode": "orient",
+  "critical_gap": null,
+  "cta": {
+    "guidance": "Tell me more about your decision so I can build a useful model.",
+    "readiness": "not_ready",
+  },
+  "drivers": [],
+  "headline": null,
+  "option_mechanism_overlap": false,
+  "prediction_state": "none",
+  "primary_move": "guide_intake",
+  "response_posture": "exploratory",
+  "risk_factor_count": 0,
+  "top_fragile": null,
+  "total_factor_count": 0,
+  "tradeoff": null,
+  "triggered_plays": [],
+  "user_provided_count": 0,
+}
+`;
+
+exports[`snapshot — IDEATE context (post-draft) > matches expected shape 1`] = `
+{
+  "ai_estimated_count": 2,
+  "ask_question_now": true,
+  "biggest_inference": {
+    "factor_id": "f3",
+    "factor_label": "Delivery Capacity",
+    "reason": "highest edge count among AI-estimated factors",
+    "source": "ai_estimated",
+  },
+  "calibration_target": {
+    "factor_id": "f3",
+    "source_label": "Delivery Capacity",
+    "target_label": "Best hiring strategy",
+  },
+  "challenge_now": true,
+  "chip_inputs": {
+    "analysis_fresh": false,
+    "dominant_factor_label": null,
+    "has_analysis": false,
+    "has_risk_factors": false,
+    "option_mechanism_overlap": false,
+    "stability_band": null,
+    "stage": "ideate",
+    "top_uncalibrated_factor": "f3",
+  },
+  "coaching_mode": "calibrate",
+  "critical_gap": {
+    "detail": "No risk factors modelled. What could go wrong?",
+    "type": "missing_factor",
+  },
+  "cta": {
+    "guidance": "Which trade-off matters most to you?",
+    "readiness": "not_ready",
+  },
+  "drivers": [],
+  "headline": null,
+  "option_mechanism_overlap": false,
+  "prediction_state": "none",
+  "primary_move": "name_tradeoff",
+  "response_posture": "exploratory",
+  "risk_factor_count": 0,
+  "top_fragile": null,
+  "total_factor_count": 3,
+  "tradeoff": {
+    "benefit_a": "Technical Direction",
+    "benefit_b": "Delivery Capacity",
+    "option_a": "Hire Tech Lead",
+    "option_b": "Hire Two Developers",
+  },
+  "triggered_plays": [],
+  "user_provided_count": 1,
+}
+`;

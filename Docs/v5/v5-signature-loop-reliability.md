@@ -1,0 +1,120 @@
+# V5 Signature Loop Reliability — engineering report
+
+Lane: make the core Olumi loop reliable end to end —
+`what would change the outcome → proposed change → "make that update" → applies → rerun → "what changed?"`.
+
+Branch: `claude/intelligent-booth-46f7fd` (off `origin/staging` `f76872c8`). PR base: **`staging`**.
+Single branch, staged commits: **A** route-level suppressors → **B** pending-proposal carry-forward → **D** refresh-continuation guard → **Tests**.
+
+This document holds the two pre-coding deliverables the amendments require (architecture-debt note; proposal consumption-path matrix), the TTL confirmation, and — at the end — the acceptance evidence.
+
+---
+
+## 1. Architecture-debt follow-up note (record, do NOT redesign in this lane)
+
+**Debt.** `src/orchestrator/route-v2.ts` performs **regex / stage classification before the state-aware `TurnExecutor` is reached.** The route decides `draft_graph`, `edit_graph`, chip-click, frame-no-brief etc. using only the request's surface shape (message regex, `stage`, presence of `graphState`) — *before* any code has loaded pending actions, recent turns, the persisted graph, or prior context. The state-aware signals (`tryShortConfirmResume`, `tryStateQueryGuard`, `decideProposedChangeSynthesis`, ContextPack recent turns / persisted graph) all live **inside** `TurnExecutor`, which is the route's final fallthrough.
+
+**Why the same class of bug keeps recurring.** Every symptom this lane fixes is one instance of *the route classifying a turn before the state that would classify it correctly is in scope*:
+- "make that update" → matches `EDIT_GRAPH_POSITIVE_REGEX` → `edit_graph` no-op → wipes the pending proposal (never reaches `tryShortConfirmResume`).
+- "what did you just change?" → matches the same regex → `edit_graph` (never reaches `tryStateQueryGuard`).
+- A non-consuming turn commits an empty `pending_actions` → the next turn's most-recent-turn read returns `[]` → pending proposal wiped.
+- Post-refresh (`stage='frame'`, no `graphState`) → `draft_graph` / frame-no-brief guard → "start over" (never reaches the ContextPack that would have read server-side memory).
+
+**This lane ships targeted guards at the route** (suppress the misclassification when the state that matters is cheaply checkable), **not a router redesign.**
+
+**Follow-up (separate lane, not now).** Robust V5 routing should move more classification *into* the state-aware executor, or introduce a **state-aware pre-router** that loads pending actions / recent-turn existence / persisted graph **once**, up front, and routes on that — instead of each guard re-deriving intent from surface regex. The route would then carry only cheap, unambiguous shortcuts (system events, explicit chip clicks). Until then, each new "wrong-turn-classification" report will keep needing a bespoke route-level guard like the three in this lane.
+
+---
+
+## 2. Proposal consumption / invalidation path matrix (gate before Fix B)
+
+A pending `apply_proposed_change` must never become a **zombie** — re-offered or re-applied after the user already rejected or applied it, or after the graph moved underneath it. Below is every way a proposal leaves the live set and the guard(s) that enforce it. "Carry-forward" = `computeSurvivingPriorPendings` (Fix B, `commit.ts`). "Synthesis" = `decideProposedChangeSynthesis` (`proposed-change-synthesis.ts`). "Resume" = `tryShortConfirmResume` (`deterministic-short-confirm.ts`).
+
+| # | Consumption / invalidation path | Primary guard | Defence-in-depth |
+|---|---|---|---|
+| 1 | **Explicit dismiss / reject** ("no", "cancel", "not now") | `tryProposalDismissal` matches → "OK, no change made." → dismissal commit passes `consumedPendingRefs = dismissed_refs` (**B3**) → carry-forward drops those refs | Negative-control gate in dismissal (won't fire on "no, but add it"); most-recent-turn read would not re-derive a server-only `apply_proposed_change` chip |
+| 2 | **Apply via TurnExecutor proposal resume** ("make that update", "yes", ordinal) | Resume → Synthesis `status='execute'` → handler dispatch → that commit passes `consumedPendingRefs = [applied proposal_ref]` (**B4**) → carry-forward drops it | Idempotency backstop (#9) blocks any second apply |
+| 3 | **Apply via a route-level / chip path** | Today `apply_proposed_change` is **server-only** (not chip-derivable) and only resumes through TurnExecutor (= path 2). Route-level dispatchers (`dispatchEditGraph`, deterministic chip-click) commit their **own** pending set directly (not via `commitTurn`), so they neither carry a proposal forward nor re-emit it (**B5**, documented) | Idempotency backstop (#9); graph-hash supersession (#4/#8) if the path mutated the graph |
+| 4 | **Graph edit that changes the graph hash** | `dispatchEditGraph` commits a new graph; proposal's `preconditions.graph_hash` ≠ current hash → next resume → Synthesis `status='superseded'`; route-level proposal suppressor's graph-hash-safe filter also fails (→ not suppressed) | Carry-forward drops a prior pending whose `graph_hash` ≠ `metadata.graph_hash` when both are known |
+| 5 | **Newer proposal supersedes an older one** | Carry-forward drops any prior pending whose `proposal_ref`/`chip_id` matches a **this-turn** pending (newer wins) | Resume picks the **most-recently-emitted** live candidate (`emitted_at` sort) so even a stale duplicate can't win |
+| 6 | **Wall-clock expiry** (`expires_at_iso` past) | Carry-forward drops when `expires_at_iso ≤ now`; Resume `isExpired` drops; route suppressor skips wall-expired proposals | Malformed `expires_at_iso` → treated as expired (fail-safe), in both Resume and carry-forward |
+| 7 | **Turn-count expiry** (`expires_at_turn_count`) | Carry-forward **decrements** `expires_at_turn_count` by 1 each surviving turn and drops at `≤ 0` — this finally makes the turn-count TTL meaningful (see §3) | Resume `isExpired` drops at `≤ 0` |
+| 8 | **Graph-hash mismatch** (precondition hash ≠ current, incl. analysis-driven changes with no explicit edit) | Synthesis `status='superseded'` (hash check is **first**, before idempotency); route suppressor requires `preconditions.graph_hash === requestGraphHash` to suppress | Carry-forward drops on hash mismatch when both hashes known |
+| 9 | **Already-applied / idempotency backstop** | Synthesis `isAlreadyApplied` matches post-emit handler facts (per-handler canonical matcher, FK-bound, fail-closed) → `status='already_applied'` → "That change is already in place." — **no second mutation** | This is the last line: even if B3/B4 regressed and a consumed proposal resurfaced, a double-apply is structurally impossible |
+
+**Zombie-risk conclusion.** The two highest-risk reappearances — *applied-then-resurfaces* and *rejected-then-resurfaces* — are each closed by **two independent layers**: B4 + idempotency (#2/#9) for applied, and B3 + dismissal-not-re-derivable (#1) for rejected. Graph-moved is closed by Synthesis-superseded **and** carry-forward hash-drop (#4/#8). **B3 is mandatory**, not optional: without it, Fix B's new default `priorPendingActions` would itself resurrect a dismissed proposal (a regression Fix B would introduce). Carry-forward never runs on the route-level dispatchers (B5), so the turn-count decrement happens **exactly once per turn** (the single `commitTurn` wrapper).
+
+---
+
+## 3. Pending lifetime / TTL confirmation (amendment #5)
+
+`PENDING_ACTION_DEFAULT_TURN_TTL = 2` and `PENDING_ACTION_DEFAULT_WALL_TTL_MS = 10 min` are **unchanged** in this lane (no product decision says otherwise; changing them needs separate approval). With Fix B's per-turn decrement (#7) this now means, deliberately:
+
+- **One intervening non-consuming turn still allows confirmation.** Offer on turn N (TTL 2) → non-consuming turn N+1 (carry-forward decrements to 1, survives) → on turn N+2 "make that update" still applies.
+- **A second intervening non-consuming turn exhausts it** (TTL → 0, dropped). Longer back-and-forth requires the user to ask for a fresh suggestion — bounded, predictable, and prevents an indefinitely-lingering stale offer.
+- **Wall-clock cap of 10 minutes** applies independently of turn count.
+- **Expired confirmation phrases now get the helpful no-live-proposal response** (Fix A §amendment #3), not the old `edit_graph` no-op dead-end.
+
+---
+
+## 4. Acceptance evidence
+
+**1. Branch / files changed.** Branch `claude/intelligent-booth-46f7fd` off `origin/staging` `f76872c8`; PR base = `staging`. Source (10): `src/orchestrator/route-v2.ts` (Fix A + D), `src/orchestrator-v5/commit.ts` (B), `src/orchestrator-v5/turn-executor.ts` (B), `src/orchestrator-v5/routing/state-query-guard.ts` (A), `…/routing/deterministic-short-confirm.ts` (A), `…/routing/proposal-dismissal.ts` (B), `…/build-turn-context.ts` (A + D), `…/session/store.ts` (D), `…/session/supabase-store.ts` (D), `src/utils/telemetry.ts` (A + D). Tests/docs (6): `tests/utils/telemetry-events.test.ts` (freeze-gate registration), `tests/integration/orchestrator/route-v2-signature-loop.test.ts` (new), `src/orchestrator-v5/__tests__/commit-carry-forward.test.ts` (new), `src/orchestrator-v5/routing/__tests__/signature-loop-predicates.test.ts` (new), `src/orchestrator-v5/__tests__/proposed-change-route-level.test.ts` (+4 cases), `Docs/v5/v5-signature-loop-reliability.md` (this report). **No `node_modules` / `package/dist` / lockfile / `data/prompts.json` staged** (the last is unrelated worktree churn).
+
+**2. Routing order before → after** (`route-v2.ts`).
+- *Before:* … draft_graph (Stage 3) → edit intercepts (4A) → `editIntentDetected = positive && !negative && !value && !analytical` → `dispatchEditGraph` (4B) → frame-no-brief (Stage 5) → TurnExecutor (Stage 6, where pending-resolution + state-query guard live).
+- *After:* draft_graph **and** frame-no-brief now additionally require `!isContinuationScenario` (Fix D, gated on a `hasPriorTurns` read only at frame-stage + no-graph). The confirmation/state-query resolution is **hoisted ahead of the Stage-4A intercepts** (chip-simplify / post-analysis-label / vague-edit) — this ordering is load-bearing: `tryVagueEditGuard` matches "update the model", so without resolving first a live-proposal confirmation would be claimed as a vague edit and never applied. `editVerbCandidate = positive && !negative && !value && !analytical && !stateQuerySuppressed`, then the **proposal-confirmation resolver** runs for confirmation-shaped messages: live graph-safe proposal → suppress + `bypassEditHandling` (→ skips the intercepts → TurnExecutor makes the authoritative apply/supersede/idempotency decision); no live proposal → no-live-proposal clarification; read failure → suppress (degraded). State-query questions also set `bypassEditHandling`. `editIntentDetected = editVerbCandidate && !proposalConfirmSuppressed`. Net: confirmations and state-query questions can no longer reach the Stage-4A intercepts OR `dispatchEditGraph`; refresh continuations can no longer reach draft_graph / frame-no-brief.
+
+**3. Tests run + results.** `tsc -p tsconfig.build.json --noEmit` = **exit 0** (src clean). Full `tsc --noEmit` = pre-existing test/tool errors only, **0 in any file this lane touched** (verified by filtering). Vitest (per-file, `--testTimeout=30000`): **358 passed / 0 failed** across the 9 touched/new suites, incl. `commit-carry-forward` (10), `signature-loop-predicates` (31), `route-v2-signature-loop` (13), `proposed-change-route-level` (50, +4), `route-v2-edit-lifecycle` (61, unchanged-green), `state-query-after-mutation` (21), `telemetry-events` freeze-gate (11). (NB: a single whole-repo `vitest run` shows ~29 *timeout* flakes under parallel load on this machine — each passes in isolation; not code failures.)
+
+**4. Confirmation APPLIES + CONSUMES the proposal (not merely "edit_graph avoided").** The contract proven for BOTH **"make that update"** and **"update the model"** (the latter has `isValueUpdate=false`/`proposalConfirm=true`, so it takes the resolver path, not the value-update gate): `proposed-change-route-level` — with a live graph-safe proposal each phrase (1) finds the live proposal, (2) applies it (handler dispatched exactly once, zero LLM), (3) consumes it (excluded from the committed pending set), (4) does NOT reappear on the next turn (no double-apply). Route side (`route-v2-signature-loop` T1): both, plus "make that change", emit `proposal_confirm_resolved outcome=suppressed_live`, are NOT routed to `dispatchEditGraph`, and are NOT dead-ended in the no-proposal clarification. **Ordering fix (caught in pre-PR scrutiny):** the resolver is hoisted ahead of `tryVagueEditGuard` (which matched "update the model") so the confirmation reaches the apply path. Negative control: the concrete edit "update market demand to 20" does NOT apply the pending proposal (value-update path).
+
+**5. "what changed?" no longer hijacked.** `route-v2-signature-loop`: "what did you just change?" / "what did that update do?" → `dispatchEditGraph` NOT called, telemetry `v5.edit_graph.state_query_suppressed`; answered downstream by `tryStateQueryGuard` (`state-query-after-mutation` green).
+
+**6. No-live-proposal confirmation behaviour (amendment #3).** "make that update" with no live proposal → deterministic clarification *"I don't have a pending suggested update to apply. Tell me what you want to change, or ask what could change the outcome."*, `dispatchEditGraph` NOT called, `outcome=clarify_none` (and `clarify_expired` / `clarify_hash_mismatch` for stale proposals). The old edit-no-op dead-end is removed for confirmation phrases. Concrete edits ("Set Revenue to 20") are unaffected — they deflect via the value-update gate, not this branch.
+
+**7. Pending-read-failure telemetry (amendment #4).** Read failure → `outcome=suppressed_read_failed` (distinct from `clarify_none`), edit routing suppressed (degraded — never hijacked on a transient error). Proven in `route-v2-signature-loop`. The strict loader `loadMostRecentPendingActionsStrict` surfaces the failure; the swallowing loader is unchanged.
+
+**8. DB discriminator (storage vs routing) + post-refresh route/mode.** Read-only query on staging `etmmuzwxtcjipwphdola` (`v5_conversation_turns`): multi-turn scenarios carry populated `user_message`+`assistant_message` under ONE `scenario_id` (e.g. `ae5d200f…` 6 content turns; `28414e9f…` 2 turns spanning a ~9-hour gap = a resumed/refreshed session). **Storage works → the post-refresh "start over" is a ROUTING bug**, not storage: at `stage='frame'` + no request graph the route hit `frame-no-brief` (or `draft_graph`) and never reached TurnExecutor's server-side memory (`readRecent`). There is no `conversation_history` request field at all, so empty UI history is irrelevant once the turn reaches TurnExecutor. The frame-no-brief guard also does not commit a row, so a start-over turn leaves no trace — consistent with routing. Fix D's `hasPriorTurns` discriminator suppresses both shortcuts for continuations.
+
+**9. Refresh-continuation tests.** `route-v2-signature-loop` D1: prior turns + frame + no graph + brief → `dispatchDraftGraph` NOT called, telemetry `v5.continuation.guard_applied guard=draft_graph`. D1b: non-brief follow-up → `guard=frame_no_brief`, body does NOT contain "I need a single decision question". D2 (negative): fresh scenario (0 prior turns) STILL drafts (`dispatchDraftGraph` called once, no continuation telemetry).
+
+**10. TTL confirmation.** `PENDING_ACTION_DEFAULT_TURN_TTL=2` / 10-min wall TTL UNCHANGED (see §3). Carry-forward decrements the turn count once per turn (`commit-carry-forward` proves 2→1 survive, 1→0 drop; `proposed-change-route-level` proves a committed non-consuming turn carries the proposal at count 1). One intervening non-consuming turn still allows confirmation; longer gaps require a fresh suggestion; expired confirmations get the §6 clarification, not an edit no-op.
+
+**11. Architecture-debt note.** Recorded in §1 — route-v2 classifies before the state-aware executor; future work = a state-aware pre-router. Not redesigned in this lane.
+
+**12. Diff reviewed against `staging`.** `git diff origin/staging...HEAD` is the lane's source+test+doc files only. The branch-UI "huge diff" is the vs-`main` comparison (main is 203 commits behind staging + vendored `node_modules`), not this change. PR base MUST be `staging`.
+
+**13. PR #237 coordination / merge order.** #237 (`chore/v5-p0-2-turn-executor-cleanup`) overlaps this lane on **both `turn-executor.ts` AND `deterministic-short-confirm.ts`** (both alter the deterministic confirmation/resume surface) — Codex review confirmed the extra file. This lane's edits are region-local: `turn-executor.ts` `commitTurn` wrapper (+`priorPendingActions`), dismissal commit + funnel apply commit (+`consumedPendingRefs`); `deterministic-short-confirm.ts` = `PROPOSAL_CONFIRM_PATTERN` extension. No design conflict, but because both touch the confirmation/resume surface the second-to-land needs a **real rebase + full targeted-suite rerun** (not just a mechanical merge). **Recommended order: #257 first (per Paul), then #237 rebases as cleanup.** If #237 lands first, rebase #257 and rerun the full targeted suite + `tsc -p tsconfig.build.json --noEmit`.
+
+**14. Codex review (head `55a6e9ad`) — no blockers.** Confirmed `bypassEditHandling` fires only where it should (live confirmations, no-live confirmations, state-queries, concrete edits, vague edits, carry-forward/zombie-prevention, refresh-continuation); scope/merge-safety clean (16 files, vs `staging`); GitHub "Lint, TypeCheck, Unit Tests" green on `55a6e9ad`; reviewer ran 213 tests passing. **Incorporated:** (1) route resolver `notExpired` now also checks `expires_at_turn_count > 0` so it mirrors TurnExecutor's `isExpired` route-visible expiry (wall AND turn-count); a turn-count-exhausted proposal yields `clarify_expired` (test added). (2) **Invariant wording tightened (2nd-pass review):** `suppressed_live` does NOT mean "executor will apply" — it means **route-visible expiry passed and edit handling is safely bypassed so TurnExecutor makes the AUTHORITATIVE apply / supersede / idempotency decision.** It is not a guarantee of mutation: graph-hash validity is still deferred downstream when the request carried no `graphState`, and already-applied / validator-failure / handler-failure can also prevent the mutation. Corrected in the route comment, this report (§2 + here), and the `proposal_confirm_resolved` telemetry doc. **Accepted as follow-up (reviewer-agreed, non-blocking):** the shared no-live-proposal copy reads slightly broadly for "update the model" — safe + actionable (recovers via "tell me what you want to change"), left as-is to avoid regressing the apt phrases.
+
+**15. Remaining gaps.** (a) **Fix C — behaviour #5 for route-level intercepts**: `vague_edit` / `chip_simplify` / post-analysis-label / edit_graph-no-op + the new no-live-proposal clarification return without committing a turn row (existing chip `task_1fb7f50a`). TurnExecutor clarify/reject paths already persist (#251). (b) **Reset-within-same-scenario**: no payload flag; explicit new/reset/template/import rely on a fresh `scenario_id` (out of scope). (c) Route-level dispatcher carry-forward (`dispatchEditGraph`, chip-click) intentionally omitted (B5) — a graph-moving edit should drop the proposal; documented, not a gap.
+
+**16. Pre-merge advisory Integration Tests — compared to baseline, NOT assumed inherited.** The advisory `Integration Tests` job is RED on both #257 (head, run `27282115081`) and the `staging` baseline at `f76872c8` (run `27242573642`). The failing set was extracted from both CI logs and diffed: **identical** — 32 failing files with identical per-file failure counts, 174 tests failed on both (full list in §16a). The only delta on #257 is **additive**: Test Files 96 passed vs 95, Tests 1019 passed vs 1000 — i.e. #257 adds exactly one passing file (`route-v2-signature-loop.test.ts`, +19 passing) and **zero new failures**. `route-v2-signature-loop` and `route-v2-edit-lifecycle` both pass in CI integration. The failures are infra-dependent (no live LLM provider keys / Supabase in the advisory job → `provider:"unknown"`, `CEE_VALIDATION_FAILED`, `store.loadGraphAndBriefText is not a function`), unrelated to this lane. **Verdict: inherited advisory baseline; #257 introduces no integration regression. No fix attempted (would require approval + is out of lane scope).**
+
+§16a — identical failing files (both head and `f76872c8` baseline): admin.models(1), auth.comprehensive(7), auth.hmac-fallback(1), auth.multi-key(4), cee.analysis-ready-pricing(10), cee.draft-graph.causal-claims(9), cee.draft-graph.coaching-provenance(5), cee.draft-graph.coaching(2), cee.draft-graph.fail-closed(1), cee.draft-graph(5), cee.golden-journeys.telemetry(3), cee.golden-journeys(8), cee.hero-journey.disagreement(2), cee.hero-journey.truncation(1), cee.preflight-enforcement(4), cee.schema-v2(18), cee.signal-smoke(4), cee.status-consistency(5), cee.telemetry(2), cee.unified-pipeline.parity(3), cil-qualitative-lifecycle(5), orchestrate-v2-a1(5), orchestrate-v2-a2(4), orchestrate-v2-chip-click-resume(1), orchestrate-v2-deterministic-value-update(3), orchestrate-v2-fail-closed(4), orchestrate-v2-model-resolution(3), orchestrate-v2-preflight(6), orchestrate-v2-unsupported-action(5), orchestrator/edit-graph-dispatch-add-risk-e2e(2), orchestrator/edit-graph-no-op-recovery-e2e(5), repair-pipeline-validation(30).
+
+---
+
+## 5. Staging acceptance suite (run ONLY after approved merge + deploy)
+
+Nine live journeys on the deployed staging build (one real session unless noted). The first eight are the signature loop + follow-ups; the ninth (added per 2nd-pass review) proves the corrected invariant — *route suppression is not a mutation guarantee.*
+
+1. **"Why?"** — follow-up resolves against the prior answer.
+2. **"the second one"** — ordinal reference resolves.
+3. **"do that"** — confirmation resolves where applicable.
+4. **"what would change the outcome?"** — produces a proposal (pending `apply_proposed_change`).
+5. **"make that update"** — applies the pending proposal.
+6. **rerun** — re-runs analysis on the updated model.
+7. **"what changed?"** — explains the actual applied change (recent_changes-grounded).
+8. **refresh then recall** — after a refresh (same `scenario_id`, no replayed history), a remembered-detail question is answered (continuation, not "start over").
+9. **Suppressed-then-declined** *(corrected-invariant proof)* — prove that when the route suppresses edit handling but TurnExecutor then **declines** the mutation, the user gets a clear, recoverable response (never silent, never false success):
+   a. create a live pending proposal (`what would change the outcome?` → suggestion);
+   b. change the graph so the proposal no longer applies cleanly (e.g. edit a factor / rerun so the analysis-affecting graph hash diverges from the proposal's `preconditions.graph_hash`);
+   c. send "make that update";
+   d. **verify** the assistant does not go silent and does not falsely claim success;
+   e. **verify** the response clearly says it could not apply the suggested update because the model changed / the suggestion is no longer valid, and invites the user to rerun or pick a fresh update.
+   Expected runtime path: route emits `proposal_confirm_resolved` (`suppressed_live` when the request omits graphState so the route can't detect staleness, or `clarify_hash_mismatch` when the request carries the new graph) → if suppressed, TurnExecutor's `decideProposedChangeSynthesis` returns `superseded` → `PROPOSAL_SUPERSEDED_RESPONSE` recovery. The sibling **already-applied** variant (apply, then "make that update" again → `already_applied` → "That change is already in place.") is an acceptable alternative demonstration of the same boundary.
+
+**No merge or deploy performed — awaiting Paul/control approval.** The nine-journey staging acceptance suite runs ONLY after approved merge + deploy.

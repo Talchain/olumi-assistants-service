@@ -1,0 +1,53 @@
+{
+  "meta": {
+    "seed_used": 7,
+    "n_samples": 5000,
+    "response_hash": "sha256:larger-fixture-7777",
+    "compute_ms": 412
+  },
+  "results": [
+    { "option_id": "opt_alpha", "option_label": "Alpha", "win_probability": 0.41, "percentile_p10": 0.33, "percentile_p90": 0.49 },
+    { "option_id": "opt_beta", "option_label": "Beta", "win_probability": 0.35, "percentile_p10": 0.28, "percentile_p90": 0.43 },
+    { "option_id": "opt_gamma", "option_label": "Gamma", "win_probability": 0.24, "percentile_p10": 0.18, "percentile_p90": 0.31 }
+  ],
+  "fact_objects": [
+    { "fact_type": "option_comparison", "fact_id": "f1", "data": { "lead": "opt_alpha", "margin": 0.06 } },
+    { "fact_type": "option_comparison", "fact_id": "f2", "data": { "lead": "opt_alpha", "runner_up": "opt_beta" } },
+    { "fact_type": "sensitivity", "fact_id": "f3", "data": { "factor": "fac_cost", "elasticity": 0.55 } },
+    { "fact_type": "sensitivity", "fact_id": "f4", "data": { "factor": "fac_quality", "elasticity": 0.22 } },
+    { "fact_type": "flip_threshold", "fact_id": "f5", "data": { "factor": "fac_cost", "threshold": 1.18 } }
+  ],
+  "review_cards": [
+    { "card_id": "rc1", "title": "Close race", "body": "Alpha leads by 6pp; margin within robustness band." },
+    { "card_id": "rc2", "title": "Cost sensitivity", "body": "Elasticity to cost is high." }
+  ],
+  "robustness": {
+    "level": "fragile",
+    "fragile_edges": [
+      { "edge_id": "fac_cost->goal_1", "threshold_delta": 0.06 },
+      { "edge_id": "fac_quality->goal_1", "threshold_delta": 0.18 }
+    ]
+  },
+  "decision_brief": {
+    "brief_id": "brief-larger-01",
+    "title": "Three-way comparison",
+    "sections": [
+      { "kind": "summary", "text": "Alpha currently leads with Beta as nearest competitor." },
+      { "kind": "risks", "text": "Cost sensitivity is the primary fragility." }
+    ]
+  },
+  "factor_sensitivity": [
+    { "label": "Cost", "elasticity": 0.55, "direction": "negative" },
+    { "label": "Quality", "elasticity": 0.22, "direction": "positive" },
+    { "label": "Timing", "elasticity": 0.08, "direction": "positive" }
+  ],
+  "constraint_analysis": {
+    "joint_probability": 0.64,
+    "per_constraint": [
+      { "constraint_id": "c_budget", "satisfied_probability": 0.82 },
+      { "constraint_id": "c_time", "satisfied_probability": 0.78 }
+    ]
+  },
+  "response_hash": "sha256:larger-fixture-top-level-7777",
+  "analysis_status": "completed"
+}

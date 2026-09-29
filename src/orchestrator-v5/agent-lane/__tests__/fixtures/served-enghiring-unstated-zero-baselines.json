@@ -1,0 +1,70 @@
+{
+ "_provenance": {
+  "source": "served staging CEE, MG construction sweep enghiring-2 (27 Sep), POST /assist/v1/scenarios/:id/graph after an agent-lane build",
+  "scenario_id": "5ed5728e-92f1-4b23-b86f-ea3e438432ea",
+  "build": "e7d28fd",
+  "kept": "factor nodes only"
+ },
+ "brief": "Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under \u00a3400k?",
+ "nodes": [
+  {
+   "id": "senior_engineers_hired",
+   "kind": "factor",
+   "label": "Senior engineers hired",
+   "category": "controllable",
+   "provenance": "from_brief",
+   "observed_state": {
+    "cap": 10,
+    "unit": "engineers",
+    "value": 0,
+    "source": "brief_extraction",
+    "raw_value": 0,
+    "declared_scale": "unit_interval"
+   }
+  },
+  {
+   "id": "junior_engineers_hired",
+   "kind": "factor",
+   "label": "Junior engineers hired",
+   "category": "controllable",
+   "provenance": "from_brief",
+   "observed_state": {
+    "cap": 15,
+    "unit": "engineers",
+    "value": 0,
+    "source": "brief_extraction",
+    "raw_value": 0,
+    "declared_scale": "unit_interval"
+   }
+  },
+  {
+   "id": "annual_salary_spend",
+   "kind": "factor",
+   "label": "Annual salary spend",
+   "category": "controllable",
+   "provenance": "from_brief",
+   "observed_state": {
+    "cap": 600000,
+    "unit": "GBP/year",
+    "value": 0,
+    "source": "brief_extraction",
+    "raw_value": 0,
+    "declared_scale": "unit_interval"
+   }
+  },
+  {
+   "id": "added_delivery_capacity",
+   "kind": "factor",
+   "label": "Added delivery capacity",
+   "category": "observable",
+   "provenance": "ai_inferred",
+   "observed_state": {
+    "cap": 10,
+    "unit": "FTE-equivalent engineers",
+    "value": 0,
+    "raw_value": 0,
+    "declared_scale": "unit_interval"
+   }
+  }
+ ]
+}

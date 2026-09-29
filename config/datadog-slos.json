@@ -1,0 +1,86 @@
+{
+  "slos": [
+    {
+      "name": "Draft Graph Success Rate",
+      "description": "Percentage of successful draft-graph requests (non-5xx responses)",
+      "type": "metric",
+      "target": 99.0,
+      "warning": 99.5,
+      "timeframe": "7d",
+      "query": {
+        "numerator": "sum:assistants.draft.complete{env:prod}.as_count()",
+        "denominator": "sum:assistants.draft.complete{env:prod}.as_count() + sum:assistants.draft.error{env:prod,status_code:5*}.as_count()"
+      },
+      "tags": [
+        "service:assistants",
+        "env:prod",
+        "slo:draft-graph-success"
+      ]
+    },
+    {
+      "name": "Draft Graph p95 Latency",
+      "description": "95th percentile latency for draft-graph requests",
+      "type": "metric",
+      "target": 12000,
+      "warning": 10000,
+      "timeframe": "7d",
+      "query": {
+        "metric": "p95:assistants.draft.duration{env:prod}"
+      },
+      "threshold_type": "upper",
+      "tags": [
+        "service:assistants",
+        "env:prod",
+        "slo:draft-graph-latency"
+      ]
+    },
+    {
+      "name": "Health Check Availability",
+      "description": "Service health check uptime",
+      "type": "monitor",
+      "target": 99.9,
+      "warning": 99.95,
+      "timeframe": "30d",
+      "monitor_ids": [],
+      "tags": [
+        "service:assistants",
+        "env:prod",
+        "slo:availability"
+      ]
+    },
+    {
+      "name": "Redis Cache Hit Rate",
+      "description": "Percentage of cache hits from Redis backend",
+      "type": "metric",
+      "target": 50.0,
+      "warning": 60.0,
+      "timeframe": "7d",
+      "query": {
+        "numerator": "sum:assistants.cache.hit{env:prod,backend:redis}.as_count()",
+        "denominator": "sum:assistants.cache.hit{env:prod,backend:redis}.as_count() + sum:assistants.cache.miss{env:prod,backend:redis}.as_count()"
+      },
+      "tags": [
+        "service:assistants",
+        "env:prod",
+        "slo:cache-efficiency"
+      ]
+    },
+    {
+      "name": "SSE Completion Rate",
+      "description": "Percentage of SSE streams that complete successfully (vs timeout/abort)",
+      "type": "metric",
+      "target": 95.0,
+      "warning": 97.0,
+      "timeframe": "7d",
+      "query": {
+        "numerator": "sum:assistants.sse.completed{env:prod,sse_end_state:complete}.as_count()",
+        "denominator": "sum:assistants.sse.completed{env:prod}.as_count()"
+      },
+      "tags": [
+        "service:assistants",
+        "env:prod",
+        "slo:sse-reliability"
+      ]
+    }
+  ]
+}

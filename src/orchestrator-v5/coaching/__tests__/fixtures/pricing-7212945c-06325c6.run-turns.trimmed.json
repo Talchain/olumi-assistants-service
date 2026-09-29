@@ -1,0 +1,449 @@
+{
+  "_provenance": {
+    "source_file": "~/.claude/olumi-coaching-20260924/witness-kit/browser/bw-89716c13-8a2f291-pricing-fix2/turns.jsonl",
+    "source_sha256": "8b6a54f8b538aae8b21acce41c3c6d638bb71516854804cf8fc53fbbc60d2761",
+    "turns_kept": [
+      "t1",
+      "t2"
+    ],
+    "source_line_index": {
+      "t1": 0,
+      "t2": 1
+    },
+    "served_build": "CEE 06325c6 · UI 89716c13 (witness TUPLE_BEFORE = TUPLE_AFTER, SAME_TUPLE true)",
+    "route": "POST /agent/v1/turn (agent lane, served wire response, R&C browser witness)",
+    "why_this_fixture": "Pricing brief with a stated churn limit: the automatic first pass (t1) AND the explicit Run (t2) both withheld the leader for the limit (constraint_verdict_withheld); both served a fragile-link card.",
+    "trimmed": true,
+    "trim_note": "Only the Run turns are kept, and of each only: graph_hash, analysis_state (whole), analysis_ready {status, may_run, goal_node_id, freshness, freshness_reason, graph_hash_at_run, current_graph_hash, computed_at, options[{option_id,label}]}, the single analysis_result block {type, computed_against_hash, leading_option_id, summary, win_probabilities, enrichment {robustness, confidence_tier, option_comparison_status, run_provenance, inference_warnings}}, the turn's tools_called, and the run-turn card signal_ids the served build emitted (served_run_turn_cards). Values are byte-identical to the source for every kept field.",
+    "capture_note": "The source holds the ROUTE response only, not the internal run response the Runtime hands to captureAnalysis; runTurnCase reconstructs the capture from the same turn (see fragile-link-challenge-fixtures.ts)."
+  },
+  "scenario_id": "7212945c-ee0a-494f-ab7b-0ca245098327",
+  "turns": {
+    "t1": {
+      "tools_called": [
+        "get_canonical_state",
+        "build_model_from_brief"
+      ],
+      "graph_hash": "c247337beab725ed",
+      "analysis_state": {
+        "run_state": {
+          "kind": "complete_current",
+          "computed_at": "2026-09-25T15:50:13.173Z"
+        },
+        "readiness": {
+          "status": "unknown",
+          "blockers": []
+        },
+        "leader_claim": {
+          "permitted": false,
+          "withheld_reason": "constraint_verdict_withheld"
+        },
+        "robustness": {},
+        "usable_for_prose": true,
+        "usable_for_chips": true,
+        "usable_for_followup": true,
+        "requires_rerun": false,
+        "blocked_unusable": false,
+        "contradictions": []
+      },
+      "analysis_ready": {
+        "status": "ready",
+        "may_run": true,
+        "goal_node_id": "monthly_recurring_revenue_increase",
+        "freshness": "fresh",
+        "freshness_reason": "agent_readback_run_state_current",
+        "graph_hash_at_run": "c247337beab725ed",
+        "current_graph_hash": "c247337beab725ed",
+        "computed_at": "2026-09-25T15:50:13.173Z",
+        "options": [
+          {
+            "option_id": "keep_pro_at_49",
+            "label": "Keep Pro at £49"
+          },
+          {
+            "option_id": "raise_pro_to_59",
+            "label": "Raise Pro to £59"
+          },
+          {
+            "option_id": "raise_pro_to_54",
+            "label": "Raise Pro to £54"
+          }
+        ]
+      },
+      "analysis_result": {
+        "type": "analysis_result",
+        "computed_against_hash": "c247337beab725ed",
+        "leading_option_id": null,
+        "summary": "Olumi ran a first pass on the model it had just drafted. Nothing in it is confirmed yet, so no option is put forward and no result is called reliable. Use it to find what is wrong.",
+        "enrichment": {
+          "robustness": {
+            "near_tie": {
+              "gap": 0.6281999999999941,
+              "is_tie": false,
+              "threshold": 0.1
+            },
+            "robust_edges": [],
+            "fragile_edges": [
+              {
+                "to_id": "monthly_recurring_revenue_increase",
+                "edge_id": "pro_plan_price->monthly_recurring_revenue_increase",
+                "from_id": "pro_plan_price",
+                "visible": true,
+                "severity": "error",
+                "to_label": "Monthly recurring revenue…",
+                "from_label": "Pro plan price",
+                "switch_probability": 0.6756,
+                "alternative_winner_id": "keep_pro_at_49",
+                "alternative_winner_label": "Keep Pro at £49",
+                "marginal_switch_probability": 0.18
+              },
+              {
+                "to_id": "monthly_recurring_revenue_increase",
+                "edge_id": "churn_threshold_breach->monthly_recurring_revenue_increase",
+                "from_id": "churn_threshold_breach",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "Monthly recurring revenue…",
+                "from_label": "Churn threshold breach",
+                "switch_probability": 0.204,
+                "alternative_winner_id": "keep_pro_at_49",
+                "alternative_winner_label": "Keep Pro at £49",
+                "marginal_switch_probability": 0
+              },
+              {
+                "to_id": "active_pro_subscribers",
+                "edge_id": "monthly_churn->active_pro_subscribers",
+                "from_id": "monthly_churn",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "Active Pro subscribers",
+                "from_label": "Monthly churn",
+                "switch_probability": 0.1852,
+                "alternative_winner_id": "keep_pro_at_49",
+                "alternative_winner_label": "Keep Pro at £49",
+                "marginal_switch_probability": 0
+              },
+              {
+                "to_id": "monthly_churn",
+                "edge_id": "price_sensitivity->monthly_churn",
+                "from_id": "price_sensitivity",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "Monthly churn",
+                "from_label": "Price sensitivity",
+                "switch_probability": 0.1732,
+                "alternative_winner_id": "keep_pro_at_49",
+                "alternative_winner_label": "Keep Pro at £49",
+                "marginal_switch_probability": 0
+              },
+              {
+                "to_id": "monthly_recurring_revenue_increase",
+                "edge_id": "active_pro_subscribers->monthly_recurring_revenue_increase",
+                "from_id": "active_pro_subscribers",
+                "visible": false,
+                "severity": "warning",
+                "to_label": "Monthly recurring revenue…",
+                "from_label": "Active Pro subscribers",
+                "switch_probability": 0.1452,
+                "alternative_winner_id": "keep_pro_at_49",
+                "alternative_winner_label": "Keep Pro at £49",
+                "marginal_switch_probability": 0
+              },
+              {
+                "to_id": "churn_threshold_breach",
+                "edge_id": "monthly_churn->churn_threshold_breach",
+                "from_id": "monthly_churn",
+                "visible": false,
+                "severity": "warning",
+                "to_label": "Churn threshold breach",
+                "from_label": "Monthly churn",
+                "switch_probability": 0.1324,
+                "alternative_winner_id": "keep_pro_at_49",
+                "alternative_winner_label": "Keep Pro at £49",
+                "marginal_switch_probability": 0
+              },
+              {
+                "to_id": "monthly_churn",
+                "edge_id": "pro_plan_price->monthly_churn",
+                "from_id": "pro_plan_price",
+                "visible": false,
+                "severity": "warning",
+                "to_label": "Monthly churn",
+                "from_label": "Pro plan price",
+                "switch_probability": 0.0884,
+                "alternative_winner_id": "keep_pro_at_49",
+                "alternative_winner_label": "Keep Pro at £49",
+                "marginal_switch_probability": 0
+              }
+            ]
+          },
+          "confidence_tier": "needs_work",
+          "option_comparison_status": "computed",
+          "run_provenance": {
+            "provisional": true,
+            "initiated_by": "auto_post_construction",
+            "construction_turn_id": "graph_registration:3ef85536-027d-47b0-8b53-645ed7eae1f0"
+          },
+          "inference_warnings": [
+            {
+              "code": "CONSTRAINT_TARGET_UNRELIABLE",
+              "message": "The target on \"Monthly churn\" can't be scored against this model: \"Monthly churn\" is calculated from the factors feeding into it, so the analysis produces a modelled change for it, not a reading on the same scale as your target. Comparing the two would report a near-zero chance for every option no matter how good the options are, so goal-fit probabilities were withheld for this run rather than shown. Setting a current value for \"Monthly churn\" would not change that — it is calculated from its inputs, so it has no measured starting point of its own to anchor to. Your limit is recorded and was left unscored rather than scored against the wrong number.",
+              "severity": "warning"
+            },
+            {
+              "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+              "message": "6 edge E-value entries were omitted from edge_e_values: 6 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+              "severity": "info"
+            },
+            {
+              "code": "CONSTRAINT_FRAME_UNSPECIFIED",
+              "field": "goal_constraints[0].value_frame",
+              "message": "constraint value=0.04 was supplied without goal_constraints[0].value_frame, so the frame it is expressed in is unknown. A level threshold compared against the target's change-from-origin samples yields a structurally impossible probability, so constraint_analysis is omitted rather than guessed. Stamp 'level' or 'delta'.",
+              "severity": "warning"
+            },
+            {
+              "code": "GOAL_DIRECTION_UNATTESTED",
+              "field": "goal_direction",
+              "message": "No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team's stated aim: if the goal is a quantity to reduce, or the aim is to land near a target rather than as high as possible, this ranking answers a different question. Send goal_direction to rank against the stated objective.",
+              "severity": "warning"
+            },
+            {
+              "code": "GOAL_THRESHOLD_NOT_CONVERTIBLE",
+              "field": "nodes[monthly_recurring_revenue_increase].observed_state.baseline",
+              "message": "A 'level' frame requires goal node 'monthly_recurring_revenue_increase' to carry observed_state.baseline to convert the level into the samples' frame, but it carries no observed_state at all.",
+              "severity": "warning"
+            },
+            {
+              "code": "EVPI_UNAVAILABLE",
+              "field": "p_win_sensitivity",
+              "message": "Win-probability sensitivity (p_win_sensitivity) was skipped: its metric is P(joint_goal) and at least one goal constraint could not be resolved into its target's sample frame. Base analysis is unaffected.",
+              "severity": "warning",
+              "elapsed_ms": 1425.2
+            }
+          ]
+        }
+      },
+      "served_run_turn_cards": [
+        "coach:fragile_link:pro_plan_price→monthly_recurring_revenue_increase:c247337beab725ed:2026-09-25T15:50:13.173Z:auto_first_pass"
+      ]
+    },
+    "t2": {
+      "tools_called": [
+        "run_analysis"
+      ],
+      "graph_hash": "c247337beab725ed",
+      "analysis_state": {
+        "run_state": {
+          "kind": "complete_current",
+          "computed_at": "2026-09-25T15:50:30.317Z"
+        },
+        "readiness": {
+          "status": "unknown",
+          "blockers": []
+        },
+        "leader_claim": {
+          "permitted": false,
+          "withheld_reason": "constraint_verdict_withheld",
+          "separation": "separated"
+        },
+        "robustness": {
+          "aggregate_level": "high"
+        },
+        "usable_for_prose": true,
+        "usable_for_chips": true,
+        "usable_for_followup": true,
+        "requires_rerun": false,
+        "blocked_unusable": false,
+        "contradictions": []
+      },
+      "analysis_ready": {
+        "status": "ready",
+        "may_run": true,
+        "goal_node_id": "monthly_recurring_revenue_increase",
+        "freshness": "fresh",
+        "freshness_reason": "agent_readback_run_state_current",
+        "graph_hash_at_run": "c247337beab725ed",
+        "current_graph_hash": "c247337beab725ed",
+        "computed_at": "2026-09-25T15:50:30.317Z",
+        "options": [
+          {
+            "option_id": "keep_pro_at_49",
+            "label": "Keep Pro at £49"
+          },
+          {
+            "option_id": "raise_pro_to_59",
+            "label": "Raise Pro to £59"
+          },
+          {
+            "option_id": "raise_pro_to_54",
+            "label": "Raise Pro to £54"
+          }
+        ]
+      },
+      "analysis_result": {
+        "type": "analysis_result",
+        "computed_against_hash": "c247337beab725ed",
+        "leading_option_id": null,
+        "summary": "Ran analysis on your current scenario. 'Keep Pro at £49' was analysed as no change — the factors it compares against were held at the values your model records today. One limit on your model could not be checked: “Monthly churn”. We could not line it up with anything this analysis measures, so it was not part of the comparison. The part of your model it points at is worked out from other parts, and Olumi cannot yet test a limit on a quantity like that, so it cannot be checked in this model yet; this one stays on the model unchecked. I supplied 3 of the values behind this, because your brief did not state them. They are mine rather than yours. Changing any of them changes what this model implies.",
+        "win_probabilities": {
+          "Keep Pro at £49": 0.17603333333333168,
+          "Raise Pro to £54": 0.019733333333333457,
+          "Raise Pro to £59": 0.8042333333333258
+        },
+        "enrichment": {
+          "robustness": {
+            "level": "high",
+            "near_tie": {
+              "gap": 0.6281999999999941,
+              "is_tie": false,
+              "threshold": 0.1
+            },
+            "is_robust": true,
+            "confidence": 0.8042333333333258,
+            "robust_edges": [],
+            "fragile_edges": [
+              {
+                "to_id": "monthly_recurring_revenue_increase",
+                "edge_id": "pro_plan_price->monthly_recurring_revenue_increase",
+                "from_id": "pro_plan_price",
+                "visible": true,
+                "severity": "error",
+                "to_label": "Monthly recurring revenue…",
+                "from_label": "Pro plan price",
+                "switch_probability": 0.6756,
+                "alternative_winner_id": "keep_pro_at_49",
+                "alternative_winner_label": "Keep Pro at £49",
+                "marginal_switch_probability": 0.18
+              },
+              {
+                "to_id": "monthly_recurring_revenue_increase",
+                "edge_id": "churn_threshold_breach->monthly_recurring_revenue_increase",
+                "from_id": "churn_threshold_breach",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "Monthly recurring revenue…",
+                "from_label": "Churn threshold breach",
+                "switch_probability": 0.204,
+                "alternative_winner_id": "keep_pro_at_49",
+                "alternative_winner_label": "Keep Pro at £49",
+                "marginal_switch_probability": 0
+              },
+              {
+                "to_id": "active_pro_subscribers",
+                "edge_id": "monthly_churn->active_pro_subscribers",
+                "from_id": "monthly_churn",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "Active Pro subscribers",
+                "from_label": "Monthly churn",
+                "switch_probability": 0.1852,
+                "alternative_winner_id": "keep_pro_at_49",
+                "alternative_winner_label": "Keep Pro at £49",
+                "marginal_switch_probability": 0
+              },
+              {
+                "to_id": "monthly_churn",
+                "edge_id": "price_sensitivity->monthly_churn",
+                "from_id": "price_sensitivity",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "Monthly churn",
+                "from_label": "Price sensitivity",
+                "switch_probability": 0.1732,
+                "alternative_winner_id": "keep_pro_at_49",
+                "alternative_winner_label": "Keep Pro at £49",
+                "marginal_switch_probability": 0
+              },
+              {
+                "to_id": "monthly_recurring_revenue_increase",
+                "edge_id": "active_pro_subscribers->monthly_recurring_revenue_increase",
+                "from_id": "active_pro_subscribers",
+                "visible": false,
+                "severity": "warning",
+                "to_label": "Monthly recurring revenue…",
+                "from_label": "Active Pro subscribers",
+                "switch_probability": 0.1452,
+                "alternative_winner_id": "keep_pro_at_49",
+                "alternative_winner_label": "Keep Pro at £49",
+                "marginal_switch_probability": 0
+              },
+              {
+                "to_id": "churn_threshold_breach",
+                "edge_id": "monthly_churn->churn_threshold_breach",
+                "from_id": "monthly_churn",
+                "visible": false,
+                "severity": "warning",
+                "to_label": "Churn threshold breach",
+                "from_label": "Monthly churn",
+                "switch_probability": 0.1324,
+                "alternative_winner_id": "keep_pro_at_49",
+                "alternative_winner_label": "Keep Pro at £49",
+                "marginal_switch_probability": 0
+              },
+              {
+                "to_id": "monthly_churn",
+                "edge_id": "pro_plan_price->monthly_churn",
+                "from_id": "pro_plan_price",
+                "visible": false,
+                "severity": "warning",
+                "to_label": "Monthly churn",
+                "from_label": "Pro plan price",
+                "switch_probability": 0.0884,
+                "alternative_winner_id": "keep_pro_at_49",
+                "alternative_winner_label": "Keep Pro at £49",
+                "marginal_switch_probability": 0
+              }
+            ],
+            "display_verdict": "robust",
+            "confidence_basis": "recommendation_stability_uncalibrated",
+            "display_verdict_reason": "this run held up under the changes we tested",
+            "recommended_option_compliance": "not_assessed",
+            "recommended_option_compliance_reason": "we could not check every limit you set on this run"
+          },
+          "confidence_tier": "needs_work",
+          "option_comparison_status": "computed",
+          "inference_warnings": [
+            {
+              "code": "CONSTRAINT_TARGET_UNRELIABLE",
+              "message": "The target on \"Monthly churn\" can't be scored against this model: \"Monthly churn\" is calculated from the factors feeding into it, so the analysis produces a modelled change for it, not a reading on the same scale as your target. Comparing the two would report a near-zero chance for every option no matter how good the options are, so goal-fit probabilities were withheld for this run rather than shown. Setting a current value for \"Monthly churn\" would not change that — it is calculated from its inputs, so it has no measured starting point of its own to anchor to. Your limit is recorded and was left unscored rather than scored against the wrong number.",
+              "severity": "warning"
+            },
+            {
+              "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+              "message": "6 edge E-value entries were omitted from edge_e_values: 6 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+              "severity": "info"
+            },
+            {
+              "code": "CONSTRAINT_FRAME_UNSPECIFIED",
+              "field": "goal_constraints[0].value_frame",
+              "message": "constraint value=0.04 was supplied without goal_constraints[0].value_frame, so the frame it is expressed in is unknown. A level threshold compared against the target's change-from-origin samples yields a structurally impossible probability, so constraint_analysis is omitted rather than guessed. Stamp 'level' or 'delta'.",
+              "severity": "warning"
+            },
+            {
+              "code": "GOAL_DIRECTION_UNATTESTED",
+              "field": "goal_direction",
+              "message": "No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team's stated aim: if the goal is a quantity to reduce, or the aim is to land near a target rather than as high as possible, this ranking answers a different question. Send goal_direction to rank against the stated objective.",
+              "severity": "warning"
+            },
+            {
+              "code": "GOAL_THRESHOLD_NOT_CONVERTIBLE",
+              "field": "nodes[monthly_recurring_revenue_increase].observed_state.baseline",
+              "message": "A 'level' frame requires goal node 'monthly_recurring_revenue_increase' to carry observed_state.baseline to convert the level into the samples' frame, but it carries no observed_state at all.",
+              "severity": "warning"
+            },
+            {
+              "code": "EVPI_UNAVAILABLE",
+              "field": "p_win_sensitivity",
+              "message": "Win-probability sensitivity (p_win_sensitivity) was skipped: its metric is P(joint_goal) and at least one goal constraint could not be resolved into its target's sample frame. Base analysis is unaffected.",
+              "severity": "warning",
+              "elapsed_ms": 1210.4
+            }
+          ]
+        }
+      },
+      "served_run_turn_cards": [
+        "coach:fragile_link:pro_plan_price→monthly_recurring_revenue_increase:c247337beab725ed:2026-09-25T15:50:30.317Z:explicit_run"
+      ]
+    }
+  }
+}

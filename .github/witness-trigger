@@ -1,0 +1,10 @@
+Touch to fire the structural-delete acceptance witness.
+
+Fired against CEE 4a513781 — all five first-send fixes merged.
+Prior run 32187329790 on 0a274813: 8 PASS / 0 FAIL / 2 UNKNOWN.
+RERUN PASSED (the blocker that held this domain open all day is cleared).
+This run exists to recover the ORPHAN leg — "a second delete on the same
+scenario also succeeds" — which went UNMEASURED there.
+
+CANONICAL-DB stays UNKNOWN by decision: DB-level proof is Milestone B.
+Read LEG BY LEG. exit 3 = INCOMPLETE, not a failure.

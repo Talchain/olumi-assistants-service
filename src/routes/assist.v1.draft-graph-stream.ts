@@ -1,0 +1,513 @@
+import { randomUUID } from "node:crypto";
+import type { FastifyInstance, FastifyReply } from "fastify";
+import { DraftGraphInput } from "../schemas/assist.js";
+import { sanitizeDraftGraphInput } from "./assist.draft-graph.js";
+import { buildCeeErrorResponse } from "../cee/validation/pipeline.js";
+import { runUnifiedPipeline } from "../cee/unified-pipeline/index.js";
+import { enforceRateBuckets } from "../cee/config/limits.js";
+import { getRequestId } from "../utils/request-id.js";
+import { getRequestKeyId, getRequestCallerContext } from "../plugins/auth.js";
+import { contextToTelemetry } from "../context/index.js";
+import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
+import { SSE_HEARTBEAT_INTERVAL_MS, SSE_WRITE_TIMEOUT_MS } from "../config/timeouts.js";
+import { logCeeCall } from "../cee/logging.js";
+import { config } from "../config/index.js";
+import { evaluatePreflightDecision } from "../cee/validation/preflight-decision.js";
+import type { PreflightRejectPayload, NeedsClarificationPayload, PreflightDecision } from "../cee/validation/preflight-decision.js";
+import { formatBriefHeader } from "../cee/signals/brief-header.js";
+import { detectCurrency, buildCurrencyInstruction } from "../cee/signals/currency-signal.js";
+import { parseSchemaVersion, transformResponseToV2 } from "../cee/transforms/index.js";
+import {
+  initStreamState,
+  bufferEvent,
+  markStreamComplete,
+  cleanupStreamState,
+} from "../utils/sse-state.js";
+import { getRedis } from "../platform/redis.js";
+import {
+  SSE_DEGRADED_HEADER_NAME,
+  SSE_DEGRADED_REDIS_REASON,
+  SSE_DEGRADED_KIND_REDIS_UNAVAILABLE,
+} from "../utils/degraded-mode.js";
+
+const EVENT_STREAM = "text/event-stream";
+const SSE_HEADERS = {
+  "content-type": EVENT_STREAM,
+  connection: "keep-alive",
+  "cache-control": "no-cache",
+} as const;
+
+// Rate limiting for CEE SSE streaming uses the shared tiered bucket
+// (enforceRateBuckets, draft tier). The former inline bucket twin was removed
+// in favour of the single derived limiter in src/cee/config/limits.ts.
+
+interface StageEvent {
+  stage: string;
+  payload?: unknown;
+}
+
+async function writeStage(reply: FastifyReply, event: StageEvent): Promise<void> {
+  const line = `event: stage\ndata: ${JSON.stringify(event)}\n\n`;
+  return new Promise<void>((resolve, reject) => {
+    const ok = reply.raw.write(line);
+    if (ok) {
+      resolve();
+    } else {
+      const timeout = setTimeout(() => {
+        reject(new Error("SSE write timeout"));
+      }, SSE_WRITE_TIMEOUT_MS);
+
+      reply.raw.once("drain", () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+    }
+  });
+}
+
+export default async function route(app: FastifyInstance) {
+  const FEATURE_VERSION = "stream-1.0.0";
+
+  app.post("/assist/v1/draft-graph/stream", async (req, reply) => {
+    const start = Date.now();
+    const requestId = getRequestId(req) ?? randomUUID();
+    const keyId = getRequestKeyId(req);
+    const callerContext = getRequestCallerContext(req);
+    const telemetryCtx = callerContext ? contextToTelemetry(callerContext) : { request_id: requestId };
+
+    // Check for v2 schema request via query parameter
+    const schemaVersion = parseSchemaVersion((req.query as Record<string, unknown>)?.schema);
+
+    // Rate limiting: shared draft-tier bucket (fail-closed, sanctioned-key aware).
+    const { allowed, retryAfterSeconds } = enforceRateBuckets({
+      feature: "draft_graph_stream",
+      envVarName: "CEE_STREAM_RATE_LIMIT_RPM",
+      keyId: keyId ?? undefined,
+      ip: req.ip,
+    });
+
+    if (!allowed) {
+      const errorBody = buildCeeErrorResponse(
+        "CEE_RATE_LIMIT",
+        "CEE Draft Stream rate limit exceeded",
+        { retryable: true, requestId, details: { retry_after_seconds: retryAfterSeconds } }
+      );
+
+      emit(TelemetryEvents.CeeDraftGraphFailed, {
+        ...telemetryCtx,
+        latency_ms: Date.now() - start,
+        error_code: "CEE_RATE_LIMIT",
+        http_status: 429,
+      });
+
+      logCeeCall({
+        requestId,
+        capability: "cee_draft_graph_stream",
+        latencyMs: Date.now() - start,
+        status: "limited",
+        errorCode: "CEE_RATE_LIMIT",
+        httpStatus: 429,
+      });
+
+      reply.raw.setHeader("X-CEE-Request-ID", requestId);
+      reply.raw.setHeader("Retry-After", retryAfterSeconds.toString());
+      reply.raw.writeHead(429, SSE_HEADERS);
+      await writeStage(reply, { stage: "COMPLETE", payload: errorBody });
+      reply.raw.end();
+      return reply;
+    }
+
+    // Check Redis availability for degraded mode detection
+    let degradedMode = false;
+    try {
+      const redis = await getRedis();
+      if (!redis) {
+        degradedMode = true;
+        reply.raw.setHeader(SSE_DEGRADED_HEADER_NAME, SSE_DEGRADED_REDIS_REASON);
+        emit(TelemetryEvents.SseDegradedMode, {
+          kind: SSE_DEGRADED_KIND_REDIS_UNAVAILABLE,
+          correlation_id: requestId,
+          endpoint: "/assist/v1/draft-graph/stream",
+        });
+      }
+    } catch (error) {
+      degradedMode = true;
+      reply.raw.setHeader(SSE_DEGRADED_HEADER_NAME, SSE_DEGRADED_REDIS_REASON);
+      emit(TelemetryEvents.SseDegradedMode, {
+        kind: SSE_DEGRADED_KIND_REDIS_UNAVAILABLE,
+        correlation_id: requestId,
+        endpoint: "/assist/v1/draft-graph/stream",
+      });
+      log.warn({ error, correlation_id: requestId }, "Redis unavailable for v1 SSE streaming - degraded mode");
+    }
+
+    // Input validation
+    const parsed = DraftGraphInput.safeParse(req.body);
+    if (!parsed.success) {
+      log.warn({ correlation_id: requestId, validation_error: parsed.error.flatten() }, "v1 stream input validation failed");
+      const errorBody = buildCeeErrorResponse(
+        "CEE_VALIDATION_FAILED",
+        "Invalid input",
+        { retryable: false, requestId, details: { field_errors: parsed.error.flatten() } }
+      );
+
+      emit(TelemetryEvents.CeeDraftGraphFailed, {
+        ...telemetryCtx,
+        latency_ms: Date.now() - start,
+        error_code: "CEE_VALIDATION_FAILED",
+        http_status: 200, // SSE always opens with 200
+      });
+
+      logCeeCall({
+        requestId,
+        capability: "cee_draft_graph_stream",
+        latencyMs: Date.now() - start,
+        status: "error",
+        errorCode: "CEE_VALIDATION_FAILED",
+        httpStatus: 200, // SSE always opens with 200
+      });
+
+      // SSE protocol: always 200 — errors communicated via typed events.
+      reply.raw.setHeader("X-CEE-Request-ID", requestId);
+      reply.raw.writeHead(200, SSE_HEADERS);
+      reply.raw.write(
+        `event: error\ndata: ${JSON.stringify({ code: "CEE_VALIDATION_FAILED", reason: "SCHEMA_VALIDATION_FAILED", message: "Invalid input", details: errorBody.details })}\n\n`
+      );
+      reply.raw.end();
+      return reply;
+    }
+
+    const input = sanitizeDraftGraphInput(parsed.data, req.body);
+
+    // Preflight validation — delegates all policy ladder decisions to the
+    // shared evaluatePreflightDecision() function (identical logic as sync route).
+    //
+    // SSE protocol: the HTTP status is always 200 (stream opened) even for
+    // reject/clarify outcomes — errors and guidance are communicated via events.
+    let preflightDecision: PreflightDecision | undefined;
+    if (config.cee.preflightEnabled) {
+      const decision = preflightDecision = evaluatePreflightDecision(input.brief, {
+        preflightStrict: config.cee.preflightStrict,
+        preflightReadinessThreshold: config.cee.preflightReadinessThreshold,
+      });
+      const { readiness } = decision;
+
+      log.info({
+        request_id: requestId,
+        readiness_score: readiness.score,
+        readiness_level: readiness.level,
+        preflight_valid: readiness.preflight.valid,
+        event: "cee.preflight.assessed",
+      }, `Brief readiness: ${readiness.level} (score: ${readiness.score})`);
+
+      // Emit telemetry (identical fields to sync route — comes from shared decision object).
+      emit(TelemetryEvents.PreflightCompleted, {
+        ...telemetryCtx,
+        ...decision.telemetry,
+      });
+
+      // Emit BriefSignals telemetry (only when signals were computed — skipped on reject)
+      if (decision.briefSignals) {
+        emit(TelemetryEvents.CeeBriefSignals, {
+          ...telemetryCtx,
+          signals_version: "v1",
+          brief_strength: decision.briefSignals.brief_strength,
+          option_count_estimate: decision.briefSignals.option_count_estimate,
+          has_explicit_goal: decision.briefSignals.has_explicit_goal,
+          has_measurable_target: decision.briefSignals.has_measurable_target,
+          baseline_state: decision.briefSignals.baseline_state,
+          has_constraints: decision.briefSignals.has_constraints,
+          has_risks: decision.briefSignals.has_risks,
+          bias_signals: decision.briefSignals.bias_signals.map((b) => b.type),
+          word_count: decision.briefSignals.word_count,
+          numeric_anchor_count: decision.briefSignals.numeric_anchor_count,
+          questions_shown_count: (decision.payload as any)?.clarification_questions?.length ?? 0,
+          readiness_score: decision.telemetry.readiness_score,
+          action: decision.action,
+        });
+      }
+
+      if (decision.action === "reject") {
+        const p = decision.payload as PreflightRejectPayload;
+
+        emit(TelemetryEvents.PreflightRejected, {
+          ...telemetryCtx,
+          latency_ms: Date.now() - start,
+          readiness_score: readiness.score,
+          readiness_level: readiness.level,
+          rejection_reason: p.rejection_reason,
+        });
+
+        logCeeCall({
+          requestId,
+          capability: "cee_draft_graph_stream",
+          latencyMs: Date.now() - start,
+          status: "error",
+          errorCode: "CEE_PREFLIGHT_REJECTED",
+          httpStatus: 200, // SSE always opens with 200
+        });
+
+        reply.raw.setHeader("X-CEE-Request-ID", requestId);
+        reply.raw.writeHead(200, SSE_HEADERS);
+        reply.raw.write(
+          `event: error\ndata: ${JSON.stringify({ code: "CEE_VALIDATION_FAILED", reason: p.rejection_reason, message: p.message })}\n\n`
+        );
+        reply.raw.end();
+        return reply;
+      }
+
+      if (decision.action === "clarify") {
+        const p = decision.payload as NeedsClarificationPayload;
+
+        emit(TelemetryEvents.PreflightRejected, {
+          ...telemetryCtx,
+          latency_ms: Date.now() - start,
+          readiness_score: readiness.score,
+          readiness_level: readiness.level,
+          rejection_reason: "underspecified",
+        });
+
+        logCeeCall({
+          requestId,
+          capability: "cee_draft_graph_stream",
+          latencyMs: Date.now() - start,
+          status: "ok",
+          httpStatus: 200,
+        });
+
+        reply.raw.setHeader("X-CEE-Request-ID", requestId);
+        reply.raw.setHeader("X-CEE-Readiness-Score", readiness.score.toString());
+        reply.raw.writeHead(200, SSE_HEADERS);
+        reply.raw.write(
+          `event: needs_clarification\ndata: ${JSON.stringify(p)}\n\n`
+        );
+        reply.raw.end();
+        return reply;
+      }
+
+      // action === "proceed": apply clarification enforcement (Phase 5) if enabled.
+      if (config.cee.clarificationEnforced) {
+        const allowDirectThreshold = config.cee.clarificationThresholdAllowDirect;
+        const oneRoundThreshold = config.cee.clarificationThresholdOneRound;
+        const completedRounds = parsed.data.clarification_rounds_completed ?? 0;
+
+        let requiredRounds = 0;
+        if (readiness.score < allowDirectThreshold) {
+          if (readiness.score >= oneRoundThreshold) {
+            requiredRounds = 1;
+          } else {
+            requiredRounds = 2;
+          }
+        }
+
+        if (requiredRounds > completedRounds) {
+          const errorBody = buildCeeErrorResponse(
+            "CEE_CLARIFICATION_REQUIRED",
+            "Brief requires clarification before drafting",
+            {
+              retryable: true,
+              requestId,
+              details: {
+                readiness_score: readiness.score,
+                readiness_level: readiness.level,
+                required_rounds: requiredRounds,
+                completed_rounds: completedRounds,
+                suggested_questions: readiness.suggested_questions,
+                clarification_endpoint: "/assist/clarify-brief",
+                hint: `Complete ${requiredRounds - completedRounds} more clarification round(s) before drafting`,
+              },
+            }
+          );
+
+          emit(TelemetryEvents.ClarificationRequired, {
+            ...telemetryCtx,
+            latency_ms: Date.now() - start,
+            readiness_score: readiness.score,
+            readiness_level: readiness.level,
+            required_rounds: requiredRounds,
+            completed_rounds: completedRounds,
+          });
+
+          logCeeCall({
+            requestId,
+            capability: "cee_draft_graph_stream",
+            latencyMs: Date.now() - start,
+            status: "error",
+            errorCode: "CEE_CLARIFICATION_REQUIRED",
+            httpStatus: 200, // SSE always opens with 200
+          });
+
+          // SSE protocol: always 200 — errors communicated via typed events.
+          reply.raw.setHeader("X-CEE-Request-ID", requestId);
+          reply.raw.setHeader("X-CEE-Readiness-Score", readiness.score.toString());
+          reply.raw.writeHead(200, SSE_HEADERS);
+          reply.raw.write(
+            `event: error\ndata: ${JSON.stringify({ code: "CEE_CLARIFICATION_REQUIRED", reason: "CLARIFICATION_REQUIRED", message: "Brief requires clarification before drafting", details: errorBody.details })}\n\n`
+          );
+          reply.raw.end();
+          return reply;
+        }
+      }
+    }
+
+    // ── Thread BriefSignals into pipeline input ────────────────────────
+    if (preflightDecision?.briefSignals) {
+      if (config.cee.briefSignalsHeaderEnabled) {
+        (input as any).briefSignalsHeader = formatBriefHeader(preflightDecision.briefSignals);
+      }
+      if (preflightDecision.briefSignals.bias_signals.length > 0) {
+        (input as any).bias_signals = preflightDecision.briefSignals.bias_signals;
+      }
+    }
+
+    // ── Currency context signal ──────────────────────────────────────
+    const currencySignal = detectCurrency(input.brief);
+    (input as any).currencyInstruction = buildCurrencyInstruction(currencySignal);
+
+    // Initialize SSE response
+    reply.raw.setHeader("X-CEE-API-Version", schemaVersion === "v2" ? "v2" : "v1");
+    reply.raw.setHeader("X-CEE-Feature-Version", FEATURE_VERSION);
+    reply.raw.setHeader("X-CEE-Request-ID", requestId);
+    reply.raw.writeHead(200, SSE_HEADERS);
+
+    // Send initial DRAFTING stage
+    await writeStage(reply, { stage: "DRAFTING" });
+    emit(TelemetryEvents.SSEStarted, { correlation_id: requestId, endpoint: "/assist/v1/draft-graph/stream" });
+
+    let eventSeq = 0;
+
+    // Initialize SSE state for event buffering (if Redis available)
+    // Note: v1 has no resume endpoint — resume token emission removed.
+    if (!degradedMode) {
+      try {
+        await initStreamState(requestId);
+        await bufferEvent(requestId, {
+          seq: eventSeq++,
+          type: "stage",
+          data: JSON.stringify({ stage: "DRAFTING" }),
+          timestamp: Date.now(),
+        });
+      } catch (stateError) {
+        log.debug({ error: stateError, request_id: requestId }, "SSE state initialization skipped");
+        degradedMode = true;
+      }
+    }
+
+    // Heartbeat to keep connection alive
+    const heartbeatInterval = setInterval(() => {
+      try {
+        reply.raw.write(`: heartbeat\n\n`);
+      } catch (error) {
+        clearInterval(heartbeatInterval);
+        log.debug({ error, correlation_id: requestId }, "Heartbeat failed - stopping");
+      }
+    }, SSE_HEARTBEAT_INTERVAL_MS);
+
+    let sseEndState: "complete" | "timeout" | "aborted" | "error";
+
+    try {
+      // Run the unified CEE draft pipeline (same as non-streaming route)
+      const { statusCode, body } = await runUnifiedPipeline(input, req.body, req, {
+        schemaVersion,
+        strictMode: false,
+        includeDebug: false,
+        rawOutput: false,
+        requestStartMs: start,
+      });
+
+      // Determine if this is an error response
+      if (statusCode >= 400) {
+        sseEndState = "error";
+        emit(TelemetryEvents.SSEError, {
+          correlation_id: requestId,
+          status_code: statusCode,
+          sse_end_state: sseEndState,
+        });
+      } else {
+        sseEndState = "complete";
+      }
+
+      // Transform to v2 schema if requested and response is successful
+      let responseBody: unknown = body;
+      if (schemaVersion === "v2" && statusCode === 200 && body && typeof body === "object" && "graph" in body) {
+        responseBody = transformResponseToV2(body as any);
+        log.debug({ request_id: requestId, schema_version: "v2" }, "Transformed stream response to v2 schema");
+      }
+
+      // Send complete event with payload
+      await writeStage(reply, { stage: "COMPLETE", payload: responseBody });
+
+      // Buffer complete event for resume
+      if (!degradedMode) {
+        try {
+          await bufferEvent(requestId, {
+            seq: eventSeq++,
+            type: "stage",
+            data: JSON.stringify({ stage: "COMPLETE", payload: responseBody }),
+            timestamp: Date.now(),
+          });
+          await markStreamComplete(requestId, responseBody, sseEndState === "complete" ? "complete" : "error");
+          emit(TelemetryEvents.SseSnapshotCreated, { request_id: requestId, status: sseEndState });
+        } catch (bufferError) {
+          log.debug({ error: bufferError, request_id: requestId }, "Buffer/snapshot skipped");
+        }
+      }
+
+      emit(TelemetryEvents.SSECompleted, {
+        correlation_id: requestId,
+        stream_duration_ms: Date.now() - start,
+        sse_end_state: sseEndState,
+        status_code: statusCode,
+      });
+
+      logCeeCall({
+        requestId,
+        capability: "cee_draft_graph_stream",
+        latencyMs: Date.now() - start,
+        status: statusCode >= 400 ? "error" : "ok",
+        httpStatus: statusCode,
+      });
+    } catch (error) {
+      sseEndState = "error";
+      log.error({ err: error, correlation_id: requestId }, "v1 SSE draft graph failure");
+
+      const errorBody = buildCeeErrorResponse(
+        "CEE_INTERNAL_ERROR",
+        error instanceof Error ? error.message : "Internal error",
+        { retryable: true, requestId }
+      );
+
+      await writeStage(reply, { stage: "COMPLETE", payload: errorBody });
+
+      emit(TelemetryEvents.SSEError, {
+        correlation_id: requestId,
+        stream_duration_ms: Date.now() - start,
+        error: error instanceof Error ? error.message : "unknown",
+        sse_end_state: sseEndState,
+      });
+
+      if (!degradedMode) {
+        try {
+          await markStreamComplete(requestId, errorBody, "error");
+        } catch (snapshotError) {
+          log.debug({ error: snapshotError, request_id: requestId }, "Error snapshot skipped");
+        }
+      }
+    } finally {
+      clearInterval(heartbeatInterval);
+
+      // Cleanup SSE state
+      if (!degradedMode) {
+        try {
+          await cleanupStreamState(requestId);
+        } catch (cleanupError) {
+          log.debug({ error: cleanupError, request_id: requestId }, "State cleanup skipped");
+        }
+      }
+
+      reply.raw.end();
+    }
+
+    return reply;
+  });
+}

@@ -1,0 +1,586 @@
+/**
+ * ⭐ ROADMAP 2.1261 — route-level pin for repair-leg bare-value binding.
+ *
+ * Reproduces the wire-witnessed A2 journey (deployed #998 `c5e2430`, scenario
+ * a05fefcd-3956-4700-879f-6fc8b09e3905): a MISSING_OPTION_VALUE blocker asked
+ * the user to choose an effect value, and the fully compliant, unit-free
+ * "Set it to 0.12." (req b90d62e0, byte-verbatim below) was re-served the
+ * IDENTICAL unit refusal because nothing bound the bare value to the factor
+ * under discussion. The graph fixture is the A2 shape reduced to the nodes the
+ * decision reads, VALIDATED against `buildCanonicalAnalysisReadyFromGraph`
+ * (it derives exactly the witnessed pair of missing_value blockers — a
+ * fixture the producer disowns proves nothing, trap 16).
+ *
+ * RED AT PRISTINE (#998 c5e24307): every case in the first two describes
+ * fails on the pre-fix route — the message falls through to TurnExecutor's
+ * LLM router (the mocked `chatWithTools` records the call) and no dispatch /
+ * disambiguation happens.
+ *
+ * Harness modelled on `route-v2-configure-option-persisted-anchor.test.ts`.
+ */
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import Fastify from 'fastify';
+import type { FastifyInstance } from 'fastify';
+
+const dispatchEditGraphMock = vi.fn();
+
+vi.mock('../../../src/orchestrator-v5/handlers/edit-graph-dispatch.js', () => ({
+  dispatchEditGraph: dispatchEditGraphMock,
+}));
+
+const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
+const loadGraphMock = vi.fn();
+const readPendingsMock = vi.fn();
+vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
+  getSessionStore: () => ({
+    append: appendMock,
+    readRecent: async () => [],
+    readFactsFor: async () => [],
+    invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
+    invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
+    ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
+    storeDraftGraph: async () => undefined,
+    loadGraph: loadGraphMock,
+    loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
+    readMostRecentPendingActions: readPendingsMock,
+  }),
+  resetSessionStoreForTests: () => {},
+  SessionReadError: class SessionReadError extends Error {},
+}));
+
+const chatWithToolsMock = vi.fn(async () => ({
+  content: [{ type: 'text', text: 'text-only response' }],
+  stop_reason: 'end_turn',
+  usage: { input_tokens: 1, output_tokens: 1 },
+}));
+vi.mock('../../../src/adapters/llm/router.js', () => ({
+  getAdapter: () => ({
+    name: 'test',
+    model: 'test-model',
+    chat: async () => ({ content: 'reply', usage: { input_tokens: 1, output_tokens: 1 } }),
+    chatWithTools: chatWithToolsMock,
+  }),
+  getAdapterWithResolution: () => ({
+    adapter: {
+      name: 'test',
+      model: 'test-model',
+      chat: async () => ({ content: 'reply', usage: { input_tokens: 1, output_tokens: 1 } }),
+      chatWithTools: chatWithToolsMock,
+    },
+    resolution: {
+      task: 'narrate',
+      resolved_model: 'test-model',
+      resolution_source: 'task_default' as const,
+    },
+  }),
+  getMaxTokensFromConfig: () => undefined,
+}));
+
+vi.mock('../../../src/adapters/llm/prompt-loader.js', () => ({
+  getSystemPrompt: async () => 'test system prompt',
+}));
+
+const telemetryEvents: Array<{ name: string; payload: Record<string, unknown> }> = [];
+vi.mock('../../../src/utils/telemetry.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../../src/utils/telemetry.js')>();
+  return {
+    ...original,
+    emit: (name: string, payload: Record<string, unknown>) => {
+      telemetryEvents.push({ name, payload });
+      return original.emit(name as never, payload as never);
+    },
+  };
+});
+
+const { ceeOrchestratorRouteV2 } = await import('../../../src/orchestrator/route-v2.js');
+
+const SCENARIO_ID = '55555555-5555-4555-8555-555555555555';
+
+function edge(from: string, to: string) {
+  return {
+    from,
+    to,
+    strength: { mean: 0.5, std: 0.1 },
+    exists_probability: 1,
+    effect_direction: 'positive',
+  };
+}
+
+/**
+ * The A2 shape: two options, each linked to its own factor. `configured`
+ * lists which options already carry an intervention. Validated against
+ * `buildCanonicalAnalysisReadyFromGraph`: zero configured → the two
+ * witnessed missing_value blockers; opt_pass configured → exactly one;
+ * both configured → none.
+ */
+function buildGraph(configured: readonly ('opt_sub' | 'opt_pass')[] = []) {
+  return {
+    goal_node_id: 'goal_1',
+    nodes: [
+      { id: 'goal_1', kind: 'goal', label: 'Protect margin under new charges' },
+      {
+        id: 'fac_sub_cost',
+        kind: 'factor',
+        label: 'Subcontractor cost as share of affected revenue',
+        category: 'controllable',
+      },
+      {
+        id: 'fac_price_up',
+        kind: 'factor',
+        label: 'Customer price increase applied',
+        category: 'controllable',
+      },
+      {
+        id: 'opt_sub',
+        kind: 'option',
+        label: 'subcontracting inner-city deliveries to a green courier',
+        ...(configured.includes('opt_sub')
+          ? { data: { interventions: { fac_sub_cost: 0.4 } } }
+          : {}),
+      },
+      {
+        id: 'opt_pass',
+        kind: 'option',
+        label: 'paying the daily charges and passing costs to customers',
+        ...(configured.includes('opt_pass')
+          ? { data: { interventions: { fac_price_up: 0.3 } } }
+          : {}),
+      },
+    ],
+    edges: [
+      edge('opt_sub', 'fac_sub_cost'),
+      edge('opt_pass', 'fac_price_up'),
+      edge('fac_sub_cost', 'goal_1'),
+      edge('fac_price_up', 'goal_1'),
+    ],
+  };
+}
+
+/** The witnessed trapped message, byte-verbatim (a2-turn3-request.json). */
+const TRAPPED_MESSAGE = 'Set it to 0.12.';
+
+const EXPECTED_INSTRUCTION =
+  "Set the subcontracting inner-city deliveries to a green courier option's " +
+  'effect on Subcontractor cost as share of affected revenue to 0.12.';
+
+let turnCounter = 0;
+function payload(message: string): Record<string, unknown> {
+  turnCounter += 1;
+  return {
+    kind: 'message',
+    turn_id: `11111111-1111-4111-8111-1111111112${String(turnCounter).padStart(2, '0')}`,
+    scenario_id: SCENARIO_ID,
+    stage: 'frame',
+    message,
+    turn_class: 'frame',
+    source: 'composer',
+  };
+}
+
+function repairEvents() {
+  return telemetryEvents.filter(
+    (e) => e.name === 'v5.edit_graph.repair_value_binding_resolved',
+  );
+}
+
+function makeEditGraphMockResult() {
+  return {
+    response: {
+      response_version: 2 as const,
+      assistant_text: 'Applied edit.',
+      blocks: [] as const,
+      suggested_actions: [] as const,
+      insights: [] as const,
+      stage_indicator: 'frame' as const,
+    },
+    commitPerformed: true,
+  };
+}
+
+async function send(app: FastifyInstance, message: string) {
+  return app.inject({
+    method: 'POST',
+    url: '/orchestrate/v2/turn',
+    payload: payload(message),
+  });
+}
+
+describe('POST /orchestrate/v2/turn — 2.1261 repair-leg bare-value binding', () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    app = Fastify();
+    await ceeOrchestratorRouteV2(app);
+    await app.ready();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(() => {
+    dispatchEditGraphMock.mockReset();
+    appendMock.mockClear();
+    chatWithToolsMock.mockClear();
+    loadGraphMock.mockReset();
+    readPendingsMock.mockReset();
+    readPendingsMock.mockResolvedValue([]);
+    telemetryEvents.length = 0;
+  });
+
+  // ── THE WITNESSED DEAD END, FIXED: two pairs missing → deterministic ASK ──
+
+  it('the trapped message with TWO missing pairs gets a disambiguation naming both — no LLM, no refusal loop', async () => {
+    loadGraphMock.mockResolvedValue(buildGraph());
+    const res = await send(app, TRAPPED_MESSAGE);
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+
+    // The witnessed canned refusal must be gone…
+    expect(body.assistant_text).not.toContain('applying a value in %');
+    // …replaced by an ask that names BOTH candidate pairs and the user value.
+    expect(body.assistant_text).toContain('0.12');
+    expect(body.assistant_text).toContain('Subcontractor cost as share of affected revenue');
+    expect(body.assistant_text).toContain('Customer price increase applied');
+
+    // One executable chip per pair, each carrying the user's value.
+    expect(body.suggested_actions).toHaveLength(2);
+    expect(body.suggested_actions[0].message).toBe(EXPECTED_INSTRUCTION);
+    expect(body.suggested_actions[1].message).toContain('Customer price increase applied');
+    expect(body.suggested_actions[1].message).toContain('0.12');
+
+    // Deterministic: no routing LLM call, no edit dispatch.
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+
+    // The decision is observable.
+    expect(repairEvents()).toHaveLength(1);
+    expect(repairEvents()[0]!.payload).toMatchObject({ outcome: 'ask', pair_count: 2 });
+
+    // Gate-reason integrity: readiness for the UNCHANGED graph rides the turn.
+    expect(body.analysis_ready).toBeDefined();
+  });
+
+  // ── EXACTLY ONE PAIR MISSING → BIND through the edit lane ─────────────────
+
+  it('the trapped message with ONE missing pair BINDS: edit lane dispatched with the advised-format instruction', async () => {
+    loadGraphMock.mockResolvedValue(buildGraph(['opt_pass']));
+    dispatchEditGraphMock.mockResolvedValueOnce(makeEditGraphMockResult());
+
+    const res = await send(app, TRAPPED_MESSAGE);
+
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+    const dispatchArgs = dispatchEditGraphMock.mock.calls[0]![0] as {
+      payload: { message: string };
+      editInstructionOverride?: string;
+    };
+    // The binding instruction is the probe-P1 advised format with the USER's
+    // value; the payload's message stays the user's own bytes.
+    expect(dispatchArgs.editInstructionOverride).toBe(EXPECTED_INSTRUCTION);
+    expect(dispatchArgs.payload.message).toBe(TRAPPED_MESSAGE);
+
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+    expect(repairEvents()).toHaveLength(1);
+    expect(repairEvents()[0]!.payload).toMatchObject({ outcome: 'bind', pair_count: 1 });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════
+  // A2 — THE ANSWERED-ASK CLAIM (ROADMAP 2.1266 / rule 3c).
+  //
+  // ⚠⚠ THIS BLOCK EXISTS BECAUSE THE RESOLVER ALONE WOULD HAVE BEEN DARK CODE
+  // (CLAUDE.md trap 16). Measured at pristine `3e15752e` for the witnessed
+  // sentence: `shouldSuppressEditDispatchForValueUpdate` = TRUE (so
+  // `editVerbCandidate` is false) and `detectConfigureOptionIntent` does not
+  // match (so `configureOptionIntent` is false) — `editIntentDetected` is
+  // FALSE and the turn never reaches `resolveOptionEffectWrite` at all.
+  //
+  // What this site decides is ONLY whether the turn is an edit-lane turn.
+  // WHICH pair binds stays with the resolver, and the assertion below proves
+  // it: no `editInstructionOverride` is composed here, because the resolver
+  // binds the user's own bytes at the dispatch site.
+  // ══════════════════════════════════════════════════════════════════════
+
+  it('an ordinary answer with CONTEXT reaches the edit lane — the user\'s own bytes, no override', async () => {
+    loadGraphMock.mockResolvedValue(buildGraph());
+    dispatchEditGraphMock.mockResolvedValueOnce(makeEditGraphMockResult());
+
+    const message = 'The green courier quote came in lower than we expected - set it to 0.12.';
+    const res = await send(app, message);
+
+    expect(res.statusCode).toBe(200);
+    // THE CLAIM. At pristine this was zero calls and a routing-LLM turn.
+    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+
+    const dispatchArgs = dispatchEditGraphMock.mock.calls[0]![0] as {
+      payload: { message: string };
+      editInstructionOverride?: string;
+    };
+    expect(dispatchArgs.payload.message).toBe(message);
+    // ⭐ NO OVERRIDE: 2.1261's bind rewrites the instruction because its slot
+    // comes from "exactly one pair missing"; rule 3c does not, because the
+    // resolver re-binds the same sentence against the graph it applies to.
+    // A composed override here would be a SECOND writer.
+    expect(dispatchArgs.editInstructionOverride).toBeUndefined();
+    // …and it is not the bare-value binder that claimed it.
+    expect(repairEvents()).toHaveLength(0);
+  });
+
+  // ══════════════════════════════════════════════════════════════════════
+  // A3 — THE SAME SENTENCE WITH A COMMA (ROADMAP 2.1266, RUN-B witness).
+  //
+  // ⚠⚠ THE POINT OF THIS TEST: the case above shipped in #1035 and was LIVE on
+  // deployed CEE `4a513781`. The composed journey of 18 Aug then answered the
+  // product's own ask with the IDENTICAL SHAPE punctuated with a COMMA —
+  //   "That would push sales headcount up a lot, set it to 0.8."
+  // — and the whole journey failed on it: `readMissingValueAnswer` returned
+  // null, THIS PRE-ROUTE NEVER OPENED, the turn fell to the factor-baseline
+  // pre-route, and a factor's own `observed_state` was written 0.5 -> 0.8 while
+  // `interventions` stayed empty.
+  //
+  // The resolver fix alone would have been dark here for exactly the reason
+  // the A2 block above records. This is the route-level proof that it is not.
+  // ══════════════════════════════════════════════════════════════════════
+
+  it('⭐ A3 — the SAME ordinary answer punctuated with a COMMA reaches the edit lane', async () => {
+    loadGraphMock.mockResolvedValue(buildGraph());
+    dispatchEditGraphMock.mockResolvedValueOnce(makeEditGraphMockResult());
+
+    // Byte-for-byte the A2 sentence with its dash replaced by a comma, so the
+    // ONLY difference between this case and the one above is the punctuation
+    // mark — which is precisely what was deciding the entity.
+    const message = 'The green courier quote came in lower than we expected, set it to 0.12.';
+    const res = await send(app, message);
+
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+
+    const dispatchArgs = dispatchEditGraphMock.mock.calls[0]![0] as {
+      payload: { message: string };
+      editInstructionOverride?: string;
+    };
+    expect(dispatchArgs.payload.message).toBe(message);
+    // Still no override — rule 3c re-binds the user's own bytes at the dispatch
+    // site. A composed override here would be a SECOND writer (trap 21).
+    expect(dispatchArgs.editInstructionOverride).toBeUndefined();
+    expect(repairEvents()).toHaveLength(0);
+  });
+
+  it('⭐ A3 TWIN — a COMMA-led answer naming the OTHER option is still NOT claimed', async () => {
+    loadGraphMock.mockResolvedValue(buildGraph());
+    // The discriminator survives the widening: the ONLY difference from the
+    // case above is which option the prose points at. If admitting the comma
+    // had cost the entity check, this would dispatch.
+    await send(app, 'Passing the daily charges to customers is the plan, set it to 0.12.');
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    expect(repairEvents()).toHaveLength(0);
+  });
+
+  it('TWIN — the same shape naming the OTHER option is NOT claimed', async () => {
+    loadGraphMock.mockResolvedValue(buildGraph());
+    // Positive control on the discriminator: the ONLY difference from the case
+    // above is which option the prose points at. Both are value-update phrasing,
+    // both carry the identical answering clause.
+    await send(app, 'Passing the daily charges to customers is the plan - set it to 0.12.');
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    expect(repairEvents()).toHaveLength(0);
+  });
+
+  it('TWIN — with NOTHING missing there is no ask to answer, and no claim', async () => {
+    loadGraphMock.mockResolvedValue(buildGraph(['opt_sub', 'opt_pass']));
+    await send(app, 'The green courier quote came in lower than we expected - set it to 0.12.');
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+  });
+
+  // ── OPPOSITE-DIRECTION TWINS: every one must keep today's route ───────────
+
+  it('the witnessed turn-2 unit message is NEVER claimed — its honest refusal path stays reachable', async () => {
+    loadGraphMock.mockResolvedValue(buildGraph());
+    await send(app, 'The subcontractor cost should be 12% of revenue on the affected routes.');
+    expect(repairEvents()).toHaveLength(0);
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+  });
+
+  it('⭐ AT THE ROUTE: "Set it to 12%." IS now claimed, and as the fraction 0.12', async () => {
+    // ⚠⚠ THIS TEST WAS THE INVERSE ("a unit-bearing \"Set it to 12%.\" is never
+    // claimed") AND ITS PREMISE IS WITHDRAWN. A percent was grouped with
+    // currencies and durations as "unit-bearing"; that grouping was the error.
+    // A currency or a duration is a HUMAN-SCALE quantity whose divisor is a
+    // factor's `scale_frame`, a concept an option effect does not have — so
+    // converting one would INVENT a frame. A percent is NOTATION over the same
+    // dimensionless 0-1 scale and carries its own divisor, and it is now the
+    // form the product's own ask ADVISES (the human calibration: 0% … 100%).
+    //
+    // ⭐ THIS IS THE LIVE-ROUTE HALF of the unit tests, and it is the one that
+    // matters: `route-v2.ts:5471` gates the whole repair pre-route on the
+    // reading being numeric, so a unit-level pass says nothing about whether the
+    // turn is claimed. This asserts the dispatch actually happens.
+    loadGraphMock.mockResolvedValue(buildGraph(['opt_pass']));
+    await send(app, 'Set it to 12%.');
+    expect(repairEvents()).toHaveLength(1);
+    expect(dispatchEditGraphMock).toHaveBeenCalled();
+    // The instruction the edit lane executes carries the CANONICAL spelling —
+    // `readOptionEffectValue` declines a percent sign, so a literal "12%" here
+    // would fail to land two seams later with nothing on screen to explain why.
+    // ⚠ ASSERTED ON THE INSTRUCTION, NOT ON THE WHOLE CALL. The payload also
+    // carries the user's own message verbatim — "Set it to 12%." — which is
+    // correct and must stay; a `not.toContain('12%')` over the whole call
+    // therefore fails for the RIGHT reason and would have been a wrong
+    // assertion. What matters is the sentence the edit lane EXECUTES.
+    // ⚠ ASSERTED ON THE INSTRUCTION SENTENCE, NOT ON THE WHOLE CALL. The payload
+    // also carries the user's own message verbatim — "Set it to 12%." — which is
+    // correct and must stay, so a blanket `not.toContain('12%')` would fail for
+    // the RIGHT reason and be the wrong assertion. What matters is the sentence
+    // the edit lane EXECUTES, whose value slot is re-read by
+    // `readOptionEffectValue`, and which declines a percent sign.
+    const instructions = JSON.stringify(dispatchEditGraphMock.mock.calls)
+      .match(/Set the [^"]*?option's effect on [^"]*?to [^"\s]+/g) ?? [];
+    expect(instructions.length, 'no advised-format instruction was dispatched').toBeGreaterThan(0);
+    expect(instructions.join(' | ')).toContain('to 0.12');
+    expect(instructions.join(' | ')).not.toContain('12%');
+  });
+
+  it('⚠ THE TWIN — a genuinely unit-bearing value is STILL never claimed at the route', async () => {
+    // The direction that must never move. Each of these needs a scale frame the
+    // option-effect seam does not have.
+    for (const message of ['Set it to £5000.', 'Set it to 3 months.', 'Set it to 40k.']) {
+      dispatchEditGraphMock.mockClear();
+      loadGraphMock.mockResolvedValue(buildGraph(['opt_pass']));
+      await send(app, message);
+      expect(dispatchEditGraphMock, message).not.toHaveBeenCalled();
+    }
+  });
+
+  it('⚠ THE OTHER TWIN — an OUT-OF-SCALE figure is never claimed at the route either', async () => {
+    // The live fabrication hole this lane closed: before the fix the
+    // verb-bearing arm applied NO range check, so "Set it to 40000." dispatched
+    // a write of 40000 into a 0-1 slot.
+    for (const message of ['Set it to 40000.', 'Set it to 8.', 'Make it 500.']) {
+      dispatchEditGraphMock.mockClear();
+      loadGraphMock.mockResolvedValue(buildGraph(['opt_pass']));
+      await send(app, message);
+      expect(dispatchEditGraphMock, message).not.toHaveBeenCalled();
+    }
+  });
+
+  it('with NOTHING missing the bare value is not claimed — no repair context, no invented referent', async () => {
+    loadGraphMock.mockResolvedValue(buildGraph(['opt_sub', 'opt_pass']));
+    const res = await send(app, TRAPPED_MESSAGE);
+    expect(res.statusCode).toBe(200);
+    expect(repairEvents()).toHaveLength(0);
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    // The pre-existing route answers the turn; the ask shape never appears.
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text).not.toMatch(/more than one effect value/i);
+  });
+
+  it('a live set_factor_value pending withdraws the claim — an open value clarification owns the turn', async () => {
+    loadGraphMock.mockResolvedValue(buildGraph(['opt_pass']));
+    readPendingsMock.mockResolvedValue([
+      {
+        id: 'pa-1',
+        scenario_id: SCENARIO_ID,
+        chip_id: 'chip-1',
+        action: { kind: 'set_factor_value', factor_id: 'fac_sub_cost', value: 0.5, operator: 'set' },
+        preconditions: {},
+        expires_at_turn_count: 2,
+        expires_at_iso: new Date(Date.now() + 60_000).toISOString(),
+        emitted_at_iso: new Date().toISOString(),
+      },
+    ]);
+    await send(app, TRAPPED_MESSAGE);
+    expect(repairEvents()).toHaveLength(0);
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+  });
+
+  it('⭐ B1 twin: a canvas SELECTION withdraws the claim — the deictic referent is never stolen', async () => {
+    // Review #1000 B1 (execution-proven): "this one" with a selection has an
+    // ESTABLISHED meaning — the SELECTED node (DEICTIC_REFERENCE_PATTERN,
+    // Path B, deterministic-value-update.ts). The pre-route runs BEFORE the
+    // executor sees `selected_elements`, so without the gate it would bind
+    // the NON-selected sole-missing-pair factor: a silent wrong-factor
+    // mutation. With the gate the claim is withdrawn wholesale and the turn
+    // proceeds on the pre-existing route (on this frame-stage, no-brief
+    // payload that is the frame guard; on executor-reaching payloads it is
+    // the deictic path — whose selected-referent meaning is pinned at unit
+    // level below, mirroring the reviewer's base control).
+    loadGraphMock.mockResolvedValue(buildGraph(['opt_pass']));
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        ...payload('Set this one to 0.4.'),
+        selected_elements: { node_ids: ['fac_price_up'] },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    // The claim is withdrawn wholesale: no binding decision, no edit-lane
+    // dispatch, no bind instruction anywhere near this turn.
+    expect(repairEvents()).toHaveLength(0);
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text).not.toContain('Subcontractor cost as share of affected revenue');
+    expect(body.assistant_text).not.toMatch(/more than one effect value/i);
+  });
+
+  it('⭐ B1 unit control: the deictic module resolves "this one" + selection to the SELECTED factor', async () => {
+    // The reviewer's base control, carried into the merged suite: this is the
+    // established meaning the selection gate exists to protect. If this ever
+    // stops holding, the gate's justification changes — RED here forces that
+    // conversation rather than letting the two modules drift apart silently.
+    const { tryDeicticValueUpdate } = await import(
+      '../../../src/orchestrator-v5/routing/deterministic-value-update.js'
+    );
+    const nodes = [
+      { id: 'fac_price_up', kind: 'factor', label: 'Customer price increase applied' },
+      { id: 'fac_sub_cost', kind: 'factor', label: 'Subcontractor cost as share of affected revenue' },
+    ];
+    const lookup = {
+      getNode: (id: string) => nodes.find((n) => n.id === id) ?? null,
+      getEntity: (id: string) => nodes.find((n) => n.id === id) ?? null,
+      listEntitiesByKind: (kind: string) =>
+        kind === 'node' || kind === 'factor' ? nodes : [],
+    } as never;
+    const result = tryDeicticValueUpdate(
+      'Set this one to 0.4.',
+      [{ value: 0.4, unit: null, raw_text: '0.4', operator: 'set', direction: 'set' }] as never,
+      lookup,
+      ['fac_price_up'],
+      (id: string) => nodes.find((n) => n.id === id)?.label ?? null,
+      false,
+    );
+    expect(result.matched).toBe(true);
+    if (result.matched && result.dispatch === 'set_factor_value') {
+      expect(result.candidate.id).toBe('fac_price_up');
+    } else {
+      throw new Error(`unexpected deictic dispatch: ${JSON.stringify(result)}`);
+    }
+  });
+
+  it('B1 twin (broad): ANY selection withdraws the claim, even on the witnessed bare message', async () => {
+    loadGraphMock.mockResolvedValue(buildGraph(['opt_pass']));
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        ...payload(TRAPPED_MESSAGE),
+        selected_elements: { node_ids: ['fac_price_up'] },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(repairEvents()).toHaveLength(0);
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+  });
+
+  it('a pendings read failure withdraws the claim rather than failing the turn', async () => {
+    loadGraphMock.mockResolvedValue(buildGraph(['opt_pass']));
+    readPendingsMock.mockRejectedValue(new Error('store down'));
+    const res = await send(app, TRAPPED_MESSAGE);
+    expect(res.statusCode).toBe(200);
+    expect(repairEvents()).toHaveLength(0);
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+  });
+});

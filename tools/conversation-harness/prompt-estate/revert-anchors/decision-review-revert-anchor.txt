@@ -1,0 +1,33 @@
+# decision_review_default — staging revert anchor (updated 2026-07-31, fix-decision-review-v15 lane)
+# CURRENT staging pin: version 15, content_hash ba4879dd0a714b8f, 33,049 chars
+#   — created+pinned+reloaded 2026-07-31; served hash read back from the live store post-reload and
+#   sampled repeatedly past the ~5-min loader TTL (no instance split), then witnessed on real turns.
+#   Measured before promotion: n=21 (7 fixtures x 3 arms, gpt-4.1, offline) = 21/21 clean, ZERO failing
+#   dimension-observations, vs 7/21 for version 14 at the same n/fixtures/scorer. It carries a
+#   hash-matched PASS promotion report, so decision_review is GATED-PASS and the v14 grandfather
+#   entry was REMOVED (the ratchet tightened).
+# REVERT ANCHOR (the version to PATCH back to if 15 must be pulled): version 14, content_hash b4f15305c2bb32e9
+#   Revert recipe: PATCH /admin/prompts/decision_review_default {stagingVersion: 14} -> POST /admin/prompts/reload
+#   -> verify served from a REAL turn's log prompt_hash (expect b4f15305c2bb32e9).
+#   ⚠ A REVERT IS NOT COMPLETE AT THE STORE. The committed manifest, the canonical export and the
+#   promotion report all bind to ba4879dd0a714b8f; reverting the pointer without reverting those
+#   makes the manifest claim bytes staging no longer serves, and the gate will say so
+#   (MANIFEST_EXPORT_SKEW). Revert the git side in the same move.
+# PRIOR anchor (superseded): version 13, content_hash ac07859bec2dfc77. Version 14 lineage note:
+#   uploaded+pinned+reloaded+served-verified 2026-07-16 ~12:44:50Z; all 3 behavioural checks passed.
+# Production activeVersion = 11 throughout — untouched by this promotion.
+# Naming note: the AMENDED TEXT is called "v15'" in the clause-check docs but landed as PMS VERSION 14.
+#   ⚠ CORRECTED 2026-07-31 (fix-decision-review-v15 lane). This line used to end "Do not create a v15." and the
+#   estate register repeated it as a standing hazard. Read literally it forbids ever advancing the prompt, which is
+#   NOT what it meant and is not what it should say. Derived at the live store the same day: the row's versions run
+#   1..14, the authors numbered their DRAFTS ("v13"/"v14"/"v15"/"v15'") independently of the PMS row version, and the
+#   two sequences are offset by two (row 11 changeNote says "v14"; row 13 says "v15 rewrite"; row 14 says "v15'").
+#   The real instruction is: DO NOT re-upload the SAME TEXT as a new row merely to make the row number match a doc
+#   label. Advancing the prompt with new bytes is fine, and the row it creates will be PMS VERSION 15 — which is a
+#   DIFFERENT artefact from the historical authorial "v15'" (= row 14). Always name the PMS ROW VERSION, never a
+#   draft label, when talking to the admin API.
+#   A measured, NOT-YET-PROMOTED successor exists: tools/orchestrator-eval/drafts/decision_review.v15-draft.txt
+#   (d2267b7ef33b17ee). It is not promoted and this anchor still points at row 14.
+# Prior anchor (superseded): version 11.
+# Known pre-existing oddity (rowed 16 Jul): decision_review serves on gpt-4.1 via env_legacy_tier despite PMS modelConfig
+# claiming claude-sonnet-4-6 — the modelConfig field is a non-governing hand-maintained mirror (trap-12 class).

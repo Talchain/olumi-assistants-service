@@ -1,0 +1,533 @@
+{
+ "_provenance": "THE ADVERSARIAL REVIEWER'S CORPUS FOR CEE PR #1087, lifted verbatim. 88 cases over the noun-form path's ACTUAL input space (a currency-bearing noun form) — the space the 72-case reviewer corpus covers with only NINE silent cases, which is why six screens built on it were each right about one construction and blind to their concept's other realisations. `expect` is the reviewer's independent adjudication, BLIND-ADJUDICATED against doctrine with no code and no tools: DO-NOT-RECORD on 17 of 18, RECORD on 6 of 6 true-positive controls. ORACLE: cases may be ADDED; none may be edited, narrowed or re-authored to suit a fix.",
+ "cases": [
+  {
+   "id": "AD-DESC-01",
+   "expect": "silent",
+   "note": "historical, first-person past — 'we had'",
+   "brief": "Last year we had a budget of £400,000 and it was not enough."
+  },
+  {
+   "id": "AD-DESC-02",
+   "expect": "silent",
+   "note": "historical, passive past",
+   "brief": "The budget was £400,000 last year."
+  },
+  {
+   "id": "AD-DESC-03",
+   "expect": "silent",
+   "note": "historical, 'used to be'",
+   "brief": "Our budget used to be £400,000 before the restructure."
+  },
+  {
+   "id": "AD-DESC-04",
+   "expect": "silent",
+   "note": "lapsed limit",
+   "brief": "The old cost ceiling: £50,000 was lifted in January."
+  },
+  {
+   "id": "AD-DESC-05",
+   "expect": "silent",
+   "note": "descriptive of market, not our decision",
+   "brief": "Deals in this segment typically run on a £90,000 budget."
+  },
+  {
+   "id": "AD-DESC-06",
+   "expect": "silent",
+   "note": "describes a past project's spend",
+   "brief": "The previous programme ran to a £1.2m budget and delivered late."
+  },
+  {
+   "id": "AD-DESC-07",
+   "expect": "silent",
+   "note": "reporting what happened",
+   "brief": "We spent against a £250,000 cap last quarter and came in under."
+  },
+  {
+   "id": "AD-DESC-08",
+   "expect": "silent",
+   "note": "first-person past possession (the head screen admits 'we')",
+   "brief": "In 2024 we had a cap of £30,000 on consultancy."
+  },
+  {
+   "id": "AD-NEG-01",
+   "expect": "silent",
+   "note": "explicit no cap",
+   "brief": "There is no budget cap on this programme."
+  },
+  {
+   "id": "AD-NEG-02",
+   "expect": "silent",
+   "note": "no limit noun-of form",
+   "brief": "We have no hard limit of £250,000 — finance will fund what is needed."
+  },
+  {
+   "id": "AD-NEG-03",
+   "expect": "silent",
+   "note": "'is not fixed' after the statement",
+   "brief": "The budget is £50,000, but that is not fixed."
+  },
+  {
+   "id": "AD-NEG-04",
+   "expect": "silent",
+   "note": "negation in a preceding clause, same sentence",
+   "brief": "We do not want to be constrained, so treat the £50,000 cap as indicative."
+  },
+  {
+   "id": "AD-NEG-05",
+   "expect": "silent",
+   "note": "'never had'",
+   "brief": "We never had a budget of £120,000 for this."
+  },
+  {
+   "id": "AD-NEG-06",
+   "expect": "silent",
+   "note": "'without'",
+   "brief": "We are proceeding without a budget of £120,000 being agreed."
+  },
+  {
+   "id": "AD-NEG-07",
+   "expect": "silent",
+   "note": "'isn't'",
+   "brief": "The budget isn't £50,000 any more."
+  },
+  {
+   "id": "AD-HYP-01",
+   "expect": "silent",
+   "note": "conditional",
+   "brief": "If we had a £50,000 cap we would have to phase the rollout."
+  },
+  {
+   "id": "AD-HYP-02",
+   "expect": "silent",
+   "note": "conditional, noun-of form",
+   "brief": "Suppose the board imposed a budget of £120,000 — what would we cut?"
+  },
+  {
+   "id": "AD-HYP-03",
+   "expect": "silent",
+   "note": "'assuming'",
+   "brief": "Assuming a budget of £120,000, which market do we enter first?"
+  },
+  {
+   "id": "AD-HYP-04",
+   "expect": "silent",
+   "note": "'were we to'",
+   "brief": "Were we to accept a cost ceiling: £50,000 we would need to drop scope."
+  },
+  {
+   "id": "AD-HYP-05",
+   "expect": "silent",
+   "note": "conditional in a LATER clause than the noun",
+   "brief": "A budget of £120,000 would be workable if the board agreed."
+  },
+  {
+   "id": "AD-HYP-06",
+   "expect": "silent",
+   "note": "'in the event that'",
+   "brief": "In the event that finance imposes a £50,000 cap, we phase it."
+  },
+  {
+   "id": "AD-HYP-07",
+   "expect": "silent",
+   "note": "'what if'",
+   "brief": "What if the budget is £50,000 and not £120,000?"
+  },
+  {
+   "id": "AD-OTH-01",
+   "expect": "silent",
+   "note": "competitor, third-person possession",
+   "brief": "Our main competitor has a budget of £2m for this."
+  },
+  {
+   "id": "AD-OTH-02",
+   "expect": "silent",
+   "note": "regulator",
+   "brief": "The regulator sets a cost ceiling: £50,000 per claim."
+  },
+  {
+   "id": "AD-OTH-03",
+   "expect": "silent",
+   "note": "vendor genitive",
+   "brief": "The vendor's budget is £90,000 and they will not move."
+  },
+  {
+   "id": "AD-OTH-04",
+   "expect": "silent",
+   "note": "third party subject, verb 'operates'",
+   "brief": "The incumbent operates on a £2m budget."
+  },
+  {
+   "id": "AD-OTH-05",
+   "expect": "silent",
+   "note": "named third party with 'has'",
+   "brief": "Acme has a hard limit of £250,000 for suppliers."
+  },
+  {
+   "id": "AD-OTH-06",
+   "expect": "silent",
+   "note": "their",
+   "brief": "They said their budget of £2m was typical for the sector."
+  },
+  {
+   "id": "AD-OTH-07",
+   "expect": "silent",
+   "note": "third party, no possession verb — 'imposes'",
+   "brief": "The parent group imposes a budget of £120,000 on every subsidiary."
+  },
+  {
+   "id": "AD-OTH-08",
+   "expect": "silent",
+   "note": "a past project",
+   "brief": "The last project was run to a £30,000 cap by a different team."
+  },
+  {
+   "id": "AD-SOFT-01",
+   "expect": "silent",
+   "note": "'ideal'",
+   "brief": "An ideal budget of £120,000 would let us do both markets."
+  },
+  {
+   "id": "AD-SOFT-02",
+   "expect": "silent",
+   "note": "'target ... around'",
+   "brief": "We are working to a target cap around £50,000."
+  },
+  {
+   "id": "AD-SOFT-03",
+   "expect": "silent",
+   "note": "'roughly'",
+   "brief": "The budget is roughly £50,000."
+  },
+  {
+   "id": "AD-SOFT-04",
+   "expect": "silent",
+   "note": "'ideally'",
+   "brief": "Ideally the budget is £50,000."
+  },
+  {
+   "id": "AD-SOFT-05",
+   "expect": "silent",
+   "note": "'we would like'",
+   "brief": "We would like a budget of £120,000 for the pilot."
+  },
+  {
+   "id": "AD-SOFT-06",
+   "expect": "silent",
+   "note": "'aiming for'",
+   "brief": "We are aiming for a budget of £120,000."
+  },
+  {
+   "id": "AD-SOFT-07",
+   "expect": "silent",
+   "note": "'soft'",
+   "brief": "There is a soft budget of £50,000 which we can flex."
+  },
+  {
+   "id": "AD-SOFT-08",
+   "expect": "silent",
+   "note": "'indicative'",
+   "brief": "An indicative budget of £120,000 has been mentioned."
+  },
+  {
+   "id": "AD-SOFT-09",
+   "expect": "silent",
+   "note": "'up to about'",
+   "brief": "The cap is about £50,000."
+  },
+  {
+   "id": "AD-SOFT-10",
+   "expect": "silent",
+   "note": "'hopefully'",
+   "brief": "Hopefully the budget is £120,000."
+  },
+  {
+   "id": "AD-Q-01",
+   "expect": "silent",
+   "note": "direct question",
+   "brief": "Is a budget of £120,000 realistic for a German launch?"
+  },
+  {
+   "id": "AD-Q-02",
+   "expect": "silent",
+   "note": "question, mid-brief",
+   "brief": "We want to expand. Would a £50,000 cap be enough? Advise."
+  },
+  {
+   "id": "AD-Q-03",
+   "expect": "silent",
+   "note": "indirect question, no '?'",
+   "brief": "I am wondering whether a budget of £120,000 is realistic."
+  },
+  {
+   "id": "AD-Q-04",
+   "expect": "silent",
+   "note": "question with trailing clause after ?",
+   "brief": "Should the budget be £120,000? I am not sure."
+  },
+  {
+   "id": "AD-TP-01",
+   "expect": "fire",
+   "note": "canonical noun form",
+   "brief": "We are deciding whether to expand into Germany. We have a £50,000 cap."
+  },
+  {
+   "id": "AD-TP-02",
+   "expect": "fire",
+   "note": "budget of",
+   "brief": "We need to choose a CRM. The budget of £120,000 is fixed."
+  },
+  {
+   "id": "AD-TP-03",
+   "expect": "fire",
+   "note": "our budget is",
+   "brief": "Our budget is £50,000 and cannot move."
+  },
+  {
+   "id": "AD-TP-04",
+   "expect": "fire",
+   "note": "colon form with qualifier",
+   "brief": "Budget constraint: £400k annual. Decide build vs buy."
+  },
+  {
+   "id": "AD-TP-05",
+   "expect": "fire",
+   "note": "cost ceiling colon",
+   "brief": "Cost ceiling: £50,000. Which vendor?"
+  },
+  {
+   "id": "AD-TP-06",
+   "expect": "fire",
+   "note": "hard limit of",
+   "brief": "We have a hard limit of £250,000 on total programme spend."
+  },
+  {
+   "id": "AD-TP-07",
+   "expect": "fire",
+   "note": "trailing max",
+   "brief": "Pick a vendor. £50k max."
+  },
+  {
+   "id": "AD-TP-08",
+   "expect": "fire",
+   "note": "first-person genitive — LANE DECLARES THIS A KNOWN GAP",
+   "brief": "Our team's budget is £50,000."
+  },
+  {
+   "id": "AD-TP-09",
+   "expect": "fire",
+   "note": "annual budget of",
+   "brief": "We run to an annual budget of £400,000."
+  },
+  {
+   "id": "AD-TP-10",
+   "expect": "fire",
+   "note": "question first, limit in next sentence (lane claims sentence-scoping saves this)",
+   "brief": "Should we expand into Germany this year? The goal is to grow revenue by 20% and the budget is £500,000."
+  },
+  {
+   "id": "AD-CUR-01",
+   "expect": "fire",
+   "note": "dollar",
+   "brief": "We must choose a vendor. Our budget is $120,000."
+  },
+  {
+   "id": "AD-CUR-02",
+   "expect": "fire",
+   "note": "euro k",
+   "brief": "We have a €90k cap on this."
+  },
+  {
+   "id": "AD-CUR-03",
+   "expect": "fire",
+   "note": "lowercase m magnitude",
+   "brief": "We have a £1.5m budget for the programme."
+  },
+  {
+   "id": "AD-CUR-04",
+   "expect": "fire",
+   "note": "400k annual",
+   "brief": "We have a £400k annual budget."
+  },
+  {
+   "id": "AD-CUR-05",
+   "expect": "fire",
+   "note": "bare 50k with currency word after — GBP suffix form",
+   "brief": "Our budget is 50,000 GBP."
+  },
+  {
+   "id": "AD-CUR-06",
+   "expect": "fire",
+   "note": "words: 'five hundred thousand pounds'",
+   "brief": "Our budget is five hundred thousand pounds."
+  },
+  {
+   "id": "AD-CUR-07",
+   "expect": "fire",
+   "note": "million word form",
+   "brief": "We have a £5 million cap on this programme."
+  },
+  {
+   "id": "AD-CUR-08",
+   "expect": "fire",
+   "note": "pounds suffix",
+   "brief": "Our budget is 120,000 pounds."
+  },
+  {
+   "id": "AD-NON-01",
+   "expect": "fire",
+   "note": "headcount noun form — bare number, lane records as deliberate gap",
+   "brief": "We have a hard limit of 12 hires this year."
+  },
+  {
+   "id": "AD-NON-02",
+   "expect": "fire",
+   "note": "percentage cap",
+   "brief": "We have a 4% cap on attrition."
+  },
+  {
+   "id": "AD-NON-03",
+   "expect": "fire",
+   "note": "latency SLA",
+   "brief": "We have a 200ms latency ceiling."
+  },
+  {
+   "id": "AD-NON-04",
+   "expect": "silent",
+   "note": "date, not a numeric ceiling on a factor",
+   "brief": "The deadline is March 2027."
+  },
+  {
+   "id": "AD-NON-05",
+   "expect": "silent",
+   "note": "noun that PREFIXES a limit noun — capital",
+   "brief": "We have £50,000 capital investment available."
+  },
+  {
+   "id": "AD-NON-06",
+   "expect": "silent",
+   "note": "capacity",
+   "brief": "We have £2m capacity in the facility."
+  },
+  {
+   "id": "AD-NON-07",
+   "expect": "silent",
+   "note": "budgeting",
+   "brief": "We are doing £40,000 budgeting work this quarter."
+  },
+  {
+   "id": "AD-NON-08",
+   "expect": "silent",
+   "note": "capex",
+   "brief": "We have £5m capex approved for other programmes."
+  },
+  {
+   "id": "AD-NON-09",
+   "expect": "silent",
+   "note": "'limitations'",
+   "brief": "There are £50,000 limitations we have not modelled."
+  },
+  {
+   "id": "AD-NON-10",
+   "expect": "silent",
+   "note": "'capability'",
+   "brief": "We are buying £50,000 capability from a partner."
+  },
+  {
+   "id": "AD-WIN-01",
+   "expect": "silent",
+   "note": "negation separated by a comma+conjunction (clause cut) — should the cut let this through?",
+   "brief": "We will not commit to anything, and the competitor budget is £2m."
+  },
+  {
+   "id": "AD-WIN-02",
+   "expect": "silent",
+   "note": "question mark then noun form in SAME sentence after a dash",
+   "brief": "Is this realistic — a budget of £120,000?"
+  },
+  {
+   "id": "AD-WIN-03",
+   "expect": "silent",
+   "note": "limit inside a quotation attributed to someone else",
+   "brief": "Legal told us \"your budget is £250,000\" but we have not accepted it."
+  },
+  {
+   "id": "AD-WIN-04",
+   "expect": "silent",
+   "note": "parenthetical third-party attribution",
+   "brief": "A budget of £120,000 (the group's number, not ours) has been floated."
+  },
+  {
+   "id": "AD-WIN-05",
+   "expect": "fire",
+   "note": "real captured-style: avoid governs downtime not budget",
+   "brief": "The goal is to avoid downtime on a £90,000 budget."
+  },
+  {
+   "id": "AD-WIN-06",
+   "expect": "silent",
+   "note": "'not' far back but same clause",
+   "brief": "We are not able to confirm a budget of £120,000."
+  },
+  {
+   "id": "AD-VERB-01",
+   "expect": "fire",
+   "note": "pre-existing verb form control — must be unchanged",
+   "brief": "We must not exceed £250,000."
+  },
+  {
+   "id": "AD-VERB-02",
+   "expect": "fire",
+   "note": "pre-existing floor control",
+   "brief": "Do not, and this is firm, let gross margin drop below 78%."
+  },
+  {
+   "id": "AD-VERB-03",
+   "expect": "fire",
+   "note": "pre-existing: keep under",
+   "brief": "Keep churn under 4%."
+  },
+  {
+   "id": "AD-VERB-04",
+   "expect": "fire",
+   "note": "pre-existing: capped at",
+   "brief": "Spend is capped at £250,000."
+  },
+  {
+   "id": "AD-VERB-05",
+   "expect": "fire",
+   "note": "pre-existing: within budget",
+   "brief": "Deliver within a £4bn budget."
+  },
+  {
+   "id": "AD-DUP-01",
+   "expect": "fire",
+   "note": "verb AND noun form for the same limit — must not double-mint conflicting rows",
+   "brief": "We must keep spend under £250,000. The budget of £250,000 is hard."
+  },
+  {
+   "id": "AD-DUP-02",
+   "expect": "fire",
+   "note": "two DIFFERENT noun limits",
+   "brief": "Our budget is £50,000 and the cost ceiling: £75,000 applies to phase two."
+  },
+  {
+   "id": "AD-MIX-01",
+   "expect": "fire",
+   "note": "long realistic brief with the limit late",
+   "brief": "We are a 40-person B2B SaaS business in Manchester. Growth has stalled at about 12% year on year and the board wants a plan for the next 18 months. Options on the table are entering the German market, doubling down on enterprise in the UK, or building a partner channel. We have a £250,000 budget for whichever route we pick, and we cannot add headcount before Q3."
+  },
+  {
+   "id": "AD-MIX-02",
+   "expect": "silent",
+   "note": "long realistic brief where every money mention is descriptive",
+   "brief": "We are a 40-person B2B SaaS business. Last year we had a budget of £400,000 for growth and spent most of it on paid acquisition with poor returns. Our main competitor has a budget of £2m. The question is where to focus next year given we do not yet know what finance will approve."
+  },
+  {
+   "id": "AD-MIX-03",
+   "expect": "fire",
+   "note": "limit stated after a question",
+   "brief": "Should we build or buy the data platform? Build costs are uncertain. Our budget is £300,000 and the deadline is June."
+  }
+ ]
+}

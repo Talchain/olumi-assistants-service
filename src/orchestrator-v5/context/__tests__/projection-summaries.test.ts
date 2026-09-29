@@ -1,0 +1,368 @@
+/**
+ * Projection summaries — unit tests.
+ */
+
+import { describe, expect, it } from 'vitest';
+
+import type {
+  ContextPackAnalysis,
+  ContextPackGraph,
+} from '../context-pack-assembler.js';
+import {
+  buildAnalysisProjectionSummary,
+  buildStructureProjectionSummary,
+} from '../projection-summaries.js';
+
+const ANALYSIS: ContextPackAnalysis = {
+  status: 'complete',
+  leading_option: { label: 'Hire Senior Engineer', probability: 0.62 },
+  runner_up: { label: 'Hire Two Mid-Level', probability: 0.27 },
+  margin_pp: 35,
+  robustness_band: 'stable',
+  top_drivers: [
+    { factor_label: 'Engineering Capacity', sensitivity_value: 0.65 },
+    { factor_label: 'Hiring Cost', sensitivity_value: -0.42 },
+  ],
+  fragile_edges: [],
+};
+
+function makeGraph(
+  nodes: ReadonlyArray<{ id: string; kind: string; label: string }>,
+  edges: ReadonlyArray<{
+    from: string;
+    to: string;
+    strength: number;
+    edge_type?: 'bidirected';
+    plain_interpretation?: string;
+  }>,
+): ContextPackGraph {
+  const options = nodes
+    .filter((n) => n.kind === 'option')
+    .map((n) => ({ id: n.id, label: n.label }));
+  return {
+    nodes,
+    edges,
+    options,
+    goals: nodes.filter((n) => n.kind === 'goal'),
+    constraints: [],
+    counts: {
+      nodes: nodes.length,
+      edges: edges.length,
+      options: options.length,
+      goals: nodes.filter((n) => n.kind === 'goal').length,
+      constraints: 0,
+    },
+  };
+}
+
+describe('buildAnalysisProjectionSummary', () => {
+  it('returns null when analysis is null', () => {
+    expect(buildAnalysisProjectionSummary(null)).toBeNull();
+  });
+
+  it('passes through fields without computing new metrics (F.6 invariant)', () => {
+    const summary = buildAnalysisProjectionSummary(ANALYSIS);
+    expect(summary).not.toBeNull();
+    expect(summary?.status).toBe('complete');
+    expect(summary?.leading_option?.label).toBe('Hire Senior Engineer');
+    expect(summary?.leading_option?.probability).toBe(0.62);
+    expect(summary?.runner_up?.label).toBe('Hire Two Mid-Level');
+    expect(summary?.margin_pp).toBe(35);
+    expect(summary?.robustness_band).toBe('stable');
+    expect(summary?.top_drivers).toHaveLength(2);
+    // V5 state-trust: `staleness_reason` removed from the projection
+    // entirely. The field MUST NOT be present.
+    expect('staleness_reason' in (summary as object)).toBe(false);
+  });
+
+  // V5-LANE-B-STRUCTURAL-01: fragile_edges projected for the explain_results
+  // validation beat — pass-through labels only, pre-filtered to renderable.
+  it('projects fragile_edges as label pass-through (F.6 — no derivation)', () => {
+    const summary = buildAnalysisProjectionSummary({
+      ...ANALYSIS,
+      fragile_edges: [
+        { from_label: 'Local Senior Hire Programme', to_label: 'Q3 Roadmap Delivery Capacity' },
+      ],
+    });
+    expect(summary?.fragile_edges).toEqual([
+      { from_label: 'Local Senior Hire Programme', to_label: 'Q3 Roadmap Delivery Capacity' },
+    ]);
+  });
+
+  it('drops non-renderable fragile edges (blank endpoint label on either side)', () => {
+    const summary = buildAnalysisProjectionSummary({
+      ...ANALYSIS,
+      fragile_edges: [
+        { from_label: '', to_label: 'Q3 Roadmap Delivery Capacity' },
+        { from_label: 'Local Senior Hire Programme', to_label: '   ' },
+        { from_label: 'Kept From', to_label: 'Kept To' },
+      ],
+    });
+    expect(summary?.fragile_edges).toEqual([
+      { from_label: 'Kept From', to_label: 'Kept To' },
+    ]);
+  });
+
+  it('empty fragile_edges projects as an empty array', () => {
+    expect(buildAnalysisProjectionSummary(ANALYSIS)?.fragile_edges).toEqual([]);
+  });
+
+  it('defends against a producer that omits fragile_edges entirely (→ empty array, no throw)', () => {
+    // The field is typed non-optional, but chip-click-dispatch hand-builds
+    // the analysis object; the `?. ?? []` guard keeps projection from
+    // throwing if a future producer drops it. Cast to reach the path.
+    const { fragile_edges: _omitted, ...withoutFragileEdges } = ANALYSIS;
+    const summary = buildAnalysisProjectionSummary(
+      withoutFragileEdges as unknown as ContextPackAnalysis,
+    );
+    expect(summary?.fragile_edges).toEqual([]);
+  });
+});
+
+describe('buildStructureProjectionSummary', () => {
+  it('returns goal label, top causal links sorted by |strength| desc, and counts', () => {
+    const graph = makeGraph(
+      [
+        { id: 'g1', kind: 'goal', label: 'Q3 Throughput' },
+        { id: 'f1', kind: 'factor', label: 'Engineering Capacity' },
+        { id: 'f2', kind: 'factor', label: 'Hiring Cost' },
+        { id: 'f3', kind: 'factor', label: 'Marketing Spend' },
+        { id: 'opt1', kind: 'option', label: 'Hire Senior' },
+      ],
+      [
+        { from: 'f1', to: 'g1', strength: 0.65 },
+        { from: 'f2', to: 'g1', strength: -0.42 },
+        { from: 'f3', to: 'g1', strength: 0.1 },
+        { from: 'f1', to: 'f2', strength: 0.3 },
+      ],
+    );
+    const summary = buildStructureProjectionSummary(graph, {
+      relationshipDetailStatus: 'canonical_strict',
+    });
+    expect(summary.goal_label).toBe('Q3 Throughput');
+    expect(summary.factor_count).toBe(3);
+    expect(summary.option_count).toBe(1);
+    expect(summary.top_causal_links).toHaveLength(3);
+    // Sorted by |strength| desc — 0.65 > 0.42 > 0.3.
+    expect(summary.top_causal_links[0].label_from).toBe('Engineering Capacity');
+    expect(summary.top_causal_links[0].label_to).toBe('Q3 Throughput');
+    expect(summary.top_causal_links[0].strength).toBe(0.65);
+    expect(summary.top_causal_links[1].strength).toBe(-0.42);
+    expect(summary.top_causal_links[2].strength).toBe(0.3);
+  });
+
+  it('extracts named-factor pathways when the user message mentions a factor by label', () => {
+    const graph = makeGraph(
+      [
+        { id: 'g1', kind: 'goal', label: 'Throughput' },
+        { id: 'f1', kind: 'factor', label: 'Engineering Capacity' },
+        { id: 'f2', kind: 'factor', label: 'Hiring Cost' },
+      ],
+      [
+        { from: 'f1', to: 'g1', strength: 0.65 },
+        { from: 'f2', to: 'g1', strength: -0.42 },
+        { from: 'f1', to: 'f2', strength: 0.2 },
+      ],
+    );
+    const summary = buildStructureProjectionSummary(graph, {
+      messageText: 'How does Engineering Capacity affect this decision?',
+      relationshipDetailStatus: 'canonical_strict',
+    });
+    expect(summary.named_factor_label).toBe('Engineering Capacity');
+    expect(summary.named_factor_pathways).toHaveLength(2);
+    // Only the two edges touching Engineering Capacity, sorted by |strength|.
+    expect(summary.named_factor_pathways[0].strength).toBe(0.65);
+    expect(summary.named_factor_pathways[1].strength).toBe(0.2);
+  });
+
+  it('returns no named_factor_label when message does not mention a factor', () => {
+    const graph = makeGraph(
+      [{ id: 'g1', kind: 'goal', label: 'Throughput' }],
+      [],
+    );
+    const summary = buildStructureProjectionSummary(graph, {
+      messageText: 'Give me a summary of the model.',
+    });
+    expect(summary.named_factor_label).toBeUndefined();
+    expect(summary.named_factor_pathways).toEqual([]);
+  });
+
+  it('skips edges whose endpoints have no resolvable label', () => {
+    const graph = makeGraph(
+      [
+        { id: 'g1', kind: 'goal', label: 'Goal' },
+        { id: 'f1', kind: 'factor', label: 'Real Factor' },
+      ],
+      [
+        { from: 'f1', to: 'g1', strength: 0.5 },
+        // ghost-node edge: 'unknown_id' is not in the node list
+        { from: 'unknown_id', to: 'g1', strength: 0.9 },
+      ],
+    );
+    const summary = buildStructureProjectionSummary(graph, {
+      relationshipDetailStatus: 'canonical_strict',
+    });
+    expect(summary.top_causal_links).toHaveLength(1);
+    expect(summary.top_causal_links[0].label_from).toBe('Real Factor');
+  });
+
+  it('handles empty graphs gracefully', () => {
+    const graph = makeGraph([], []);
+    const summary = buildStructureProjectionSummary(graph);
+    expect(summary.goal_label).toBeNull();
+    expect(summary.top_causal_links).toEqual([]);
+    expect(summary.factor_count).toBe(0);
+    expect(summary.option_count).toBe(0);
+  });
+
+  it('withholds strength ranking when strict canonical detail is unavailable', () => {
+    const graph = makeGraph(
+      [
+        { id: 'f1', kind: 'factor', label: 'Demand Signal' },
+        { id: 'g1', kind: 'goal', label: 'Growth Goal' },
+      ],
+      [{ from: 'f1', to: 'g1', strength: 0 }],
+    );
+    const summary = buildStructureProjectionSummary(graph, {
+      messageText: 'How does Demand Signal connect to Growth Goal?',
+      relationshipDetailStatus: 'unavailable',
+    });
+    expect(summary.relationship_detail_status).toBe('unavailable');
+    // ⭐ THE INVARIANT IS "NO STRENGTH", NOT "NO STRUCTURE" (the title's own
+    // words). This assertion read `toEqual([])` from #1184 until the collapse
+    // it caused was measured: a non-strict turn dropped every directed link
+    // and the generic explanation fell to a single refusal sentence, while
+    // `named_factor_pathways` two lines below kept projecting the SAME
+    // connector without its strength. Presence and direction survive a
+    // withheld snapshot; the quantity does not, and that is what is asserted.
+    expect(summary.top_causal_links).toEqual([
+      {
+        label_from: 'Demand Signal',
+        label_to: 'Growth Goal',
+        edge_type: 'directed',
+      },
+    ]);
+    expect(summary.named_factor_pathways).toEqual([
+      {
+        label_from: 'Demand Signal',
+        label_to: 'Growth Goal',
+        edge_type: 'directed',
+      },
+    ]);
+  });
+
+  it('does not rank a bidirected connector as causal and preserves its type for fallback', () => {
+    const graph = makeGraph(
+      [
+        { id: 'f1', kind: 'factor', label: 'Brand Sentiment' },
+        { id: 'g1', kind: 'goal', label: 'Quarterly Profit' },
+      ],
+      [{ from: 'f1', to: 'g1', strength: 0.5, edge_type: 'bidirected' }],
+    );
+    const summary = buildStructureProjectionSummary(graph, {
+      messageText: 'How does Brand Sentiment relate to Quarterly Profit?',
+      relationshipDetailStatus: 'canonical_strict',
+    });
+    expect(summary.top_causal_links).toEqual([]);
+    expect(summary.named_factor_pathways[0]).toMatchObject({
+      edge_type: 'bidirected',
+      strength: 0.5,
+    });
+  });
+
+  it('fails weak rather than selecting a duplicate factor label by graph order', () => {
+    const graph = makeGraph(
+      [
+        { id: 'f1', kind: 'factor', label: 'Shared Signal' },
+        { id: 'f2', kind: 'factor', label: 'Shared Signal' },
+        { id: 'g1', kind: 'goal', label: 'Growth Goal' },
+      ],
+      [
+        { from: 'f1', to: 'g1', strength: 0.7 },
+        { from: 'f2', to: 'g1', strength: -0.7 },
+      ],
+    );
+    const summary = buildStructureProjectionSummary(graph, {
+      messageText: 'How does Shared Signal affect Growth Goal?',
+      relationshipDetailStatus: 'canonical_strict',
+    });
+    expect(summary.named_factor_ambiguous).toBe(true);
+    expect(summary.named_factor_label).toBeUndefined();
+    expect(summary.named_factor_pathways).toEqual([]);
+  });
+
+  it('fails weak on duplicate labels for a generic ranking question too', () => {
+    const graph = makeGraph(
+      [
+        { id: 'f1', kind: 'factor', label: 'Shared Signal' },
+        { id: 'f2', kind: 'factor', label: 'shared-signal' },
+        { id: 'g1', kind: 'goal', label: 'Growth Goal' },
+      ],
+      [
+        { from: 'f1', to: 'g1', strength: 0.9 },
+        { from: 'f2', to: 'g1', strength: -0.8 },
+      ],
+    );
+    const summary = buildStructureProjectionSummary(graph, {
+      messageText: 'What most influences my model?',
+      relationshipDetailStatus: 'canonical_strict',
+    });
+
+    expect(summary.relationship_detail_status).toBe('unavailable');
+    expect(summary.top_causal_links).toEqual([]);
+  });
+
+  it('deduplicates exact connector twins and fails weak on conflicting twins', () => {
+    const nodes = [
+      { id: 'f1', kind: 'factor', label: 'Demand' },
+      { id: 'g1', kind: 'goal', label: 'Growth' },
+    ];
+    const exact = buildStructureProjectionSummary(
+      makeGraph(nodes, [
+        { from: 'f1', to: 'g1', strength: 0.7 },
+        { from: 'f1', to: 'g1', strength: 0.7 },
+      ]),
+      { relationshipDetailStatus: 'canonical_strict' },
+    );
+    expect(exact.relationship_detail_status).toBe('canonical_strict');
+    expect(exact.top_causal_links).toHaveLength(1);
+
+    const conflict = buildStructureProjectionSummary(
+      makeGraph(nodes, [
+        { from: 'f1', to: 'g1', strength: 0.7 },
+        { from: 'f1', to: 'g1', strength: -0.7 },
+      ]),
+      { relationshipDetailStatus: 'canonical_strict' },
+    );
+    expect(conflict.relationship_detail_status).toBe('unavailable');
+    // Conflicting twins disagree about STRENGTH and interpretation; they agree
+    // the directed connector exists and which way it points. So the detail
+    // status demotes and the quantity is withheld — but the topology claim is
+    // uncontested and is still safe to state. Asserting the absence of
+    // `strength` is the invariant the previous `toEqual([])` was standing in
+    // for, and it fails for a reason a reader can name.
+    expect(conflict.top_causal_links).toEqual([
+      { label_from: 'Demand', label_to: 'Growth', edge_type: 'directed' },
+    ]);
+    expect('strength' in conflict.top_causal_links[0]).toBe(false);
+  });
+
+  it('normalises bidirected endpoint order before detecting semantic twins', () => {
+    const graph = makeGraph(
+      [
+        { id: 'f1', kind: 'factor', label: 'Demand' },
+        { id: 'f2', kind: 'factor', label: 'Sentiment' },
+      ],
+      [
+        { from: 'f1', to: 'f2', edge_type: 'bidirected', strength: 0.4 },
+        { from: 'f2', to: 'f1', edge_type: 'bidirected', strength: -0.4 },
+      ],
+    );
+    const summary = buildStructureProjectionSummary(graph, {
+      relationshipDetailStatus: 'canonical_strict',
+    });
+
+    expect(summary.relationship_detail_status).toBe('unavailable');
+    expect(summary.top_causal_links).toEqual([]);
+  });
+});

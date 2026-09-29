@@ -1,0 +1,138 @@
+# Typecheck drift baseline — full `tsc --noEmit` (tsconfig.json: src + tests).
+# Consumed by scripts/ci/typecheck-ratchet.sh (CI job "Typecheck Drift (ratchet)").
+# These are PRE-EXISTING test-file type errors, frozen here so the ratchet tolerates
+# them while FAILING on any NEW erroring file or any increase past the total count.
+# Regenerated 2026-07-22 at current reality (Codex F2): the prior baseline pinned
+# 462 errors across 136 files, captured before #615 deleted the dead V1 belt; reality
+# had fallen to 280 across 96 (40 stale files no longer exist to error), leaving 182
+# errors of silent headroom under the ratchet. Recaptured on branch a1/codex-gate-hygiene off
+# origin/staging 08a42b54e1873e9894df80dbfddae2be83bac2d5 (pnpm install, after pnpm openapi:generate).
+# Goal: shrink toward zero, then retire the ratchet. FOLLOW-UP (noted in PR): upgrade
+# the ratchet from file-set + total-count to PER-FILE counts so intra-baseline drift
+# (removing one error while adding another, net-zero) is also caught.
+# UPDATED 2026-07-23 (ROADMAP 1.192 PR): +2 files added — PRE-EXISTING wave-1 drift
+# from #646 (55b14b15, the what-if counterfactual lens) whose two erroring test
+# files were added AFTER the 2026-07-22 regen and never baselined (a stale-baseline
+# broken-alarm, trap-7). Their errors are schema-INDEPENDENT (vitest mock 'never';
+# CEE-local AnalysisProjectionSummary 'staleness_reason'), unrelated to the 0.23
+# re-vendor. Count 280→282 reflects reality; no 1.192 file errors under full tsc.
+# UPDATED 2026-08-11 (link-R1 C1 round 2, #918): `scripts/**/*.ts` was added to
+# tsconfig.json's `include` because it was in NEITHER tsconfig — measured, not
+# assumed: at c1fabe15, `tsc -p tsconfig.build.json --listFiles` and `tsc -p
+# tsconfig.json --listFiles` both returned 0 hits for scripts/. That blindness let
+# `scripts/capture-goal-constraints-wire.ts:89` keep calling
+# `draftResultToOlumiResponse` with 4 arguments after the 5th became required —
+# TS2554, invisible to every gate, in the file whose own header calls it "the
+# cross-repo proof artefact". The offending call site is FIXED in the same PR, so
+# it is deliberately NOT baselined; bringing scripts/ under the full typecheck is
+# what makes the NEXT such strand fail loud (a non-baseline file with errors is a
+# hard ratchet failure). The 5 files added below are PRE-EXISTING drift in scripts/
+# that this PR merely made visible — none is touched by it, and each was measured
+# at this tip: set-model-configs.test.ts (2 × TS2540 read-only writeFileSync),
+# validate-with-engine.ts (3 × TS18046 unknown), pipeline-trace.ts (2 × TS2322),
+# evidence-pack-cli.ts (1 × TS2322), migrate-prompts.ts (1 × TS2345). Count
+# 282→291 = exactly those 9. Fixing them is a separate, out-of-scope change.
+# count=291
+scripts/admin/__tests__/set-model-configs.test.ts
+scripts/evidence-pack-cli.ts
+scripts/migrate-prompts.ts
+scripts/pipeline-trace.ts
+scripts/validate-with-engine.ts
+src/adapters/isl/__tests__/counterfactual-client.test.ts
+src/cee/decision-review/__tests__/invoke.test.ts
+src/cee/unified-pipeline/stages/__tests__/boundary.test.ts
+src/orchestrator-v5/__tests__/build-turn-context-direct-answer-facts.test.ts
+src/orchestrator-v5/__tests__/d1-followup-fixes.test.ts
+src/orchestrator-v5/__tests__/phase3-lifecycle.test.ts
+src/orchestrator-v5/__tests__/response-finaliser.test.ts
+src/orchestrator-v5/__tests__/route-v2-output-safety.test.ts
+src/orchestrator-v5/__tests__/short-confirm-route-level.test.ts
+src/orchestrator-v5/__tests__/turn-executor-failure-responses.test.ts
+src/orchestrator-v5/__tests__/turn-executor-handler.test.ts
+src/orchestrator-v5/__tests__/turn-executor-validator-log-privacy.test.ts
+src/orchestrator-v5/coaching/__tests__/decision-review-enricher.test.ts
+src/orchestrator-v5/compose/__tests__/chip-generator.test.ts
+src/orchestrator-v5/compose/__tests__/output-safety.test.ts
+src/orchestrator-v5/compose/__tests__/phase3-blocks.test.ts
+src/orchestrator-v5/context/cqe/__tests__/extract-quantities.test.ts
+src/orchestrator-v5/debug/__tests__/turn-debug-store.test.ts
+src/orchestrator-v5/format/__tests__/prose-sanitation-corpus.test.ts
+src/orchestrator-v5/handlers/__tests__/edit-graph-dispatch-fact-emission.test.ts
+src/orchestrator-v5/handlers/__tests__/edit-graph-dispatch.test.ts
+src/orchestrator-v5/routing/__tests__/clarification-resume.test.ts
+src/orchestrator-v5/routing/__tests__/route-with-tool-use-obs-schema.test.ts
+src/orchestrator-v5/routing/__tests__/route-with-tool-use-prompt-size.test.ts
+src/orchestrator-v5/routing/__tests__/route-with-tool-use.test.ts
+src/orchestrator-v5/signals/__tests__/coaching-signals.test.ts
+src/orchestrator-v5/tools/handlers/__tests__/add-constraint-risk-forwarding.test.ts
+src/orchestrator-v5/tools/handlers/__tests__/add-constraint.test.ts
+src/orchestrator-v5/tools/handlers/__tests__/adjust-edge-strength.test.ts
+src/orchestrator-v5/tools/handlers/__tests__/explain-results.test.ts
+src/orchestrator-v5/tools/handlers/__tests__/explanation-fallback.test.ts
+src/orchestrator-v5/tools/handlers/__tests__/integration-bef4470b.test.ts
+src/orchestrator-v5/tools/handlers/__tests__/integration-explain-results-post-analysis.test.ts
+src/orchestrator-v5/tools/handlers/__tests__/run-analysis-permissive-status.test.ts
+src/orchestrator-v5/tools/handlers/__tests__/run-analysis-timing.test.ts
+src/orchestrator-v5/tools/handlers/__tests__/run-analysis.test.ts
+src/orchestrator-v5/tools/handlers/__tests__/set-factor-value.test.ts
+src/orchestrator-v5/tools/handlers/__tests__/what-would-flip-counterfactual-extension.test.ts
+src/orchestrator-v5/tools/handlers/__tests__/what-would-flip.test.ts
+src/orchestrator-v5/tools/handlers/d1-shared/__tests__/mutation-persistence.test.ts
+tests/contract/endpoint-feature-matrix.test.ts
+tests/contract/field-coverage-audit.test.ts
+tests/contract/post-analysis-wrapper.test.ts
+tests/contract/v5-golden-path-acceptance.test.ts
+tests/contracts/schema-self-test.test.ts
+tests/fixtures/cqe-fixtures.ts
+tests/integration/cee.analysis-ready.test.ts
+tests/integration/cee.status-consistency.test.ts
+tests/integration/orchestrate-v2-a1.test.ts
+tests/integration/orchestrate-v2-a2.test.ts
+tests/integration/orchestrator/edit-graph-recent-changes-e2e.test.ts
+tests/integration/phase1-behavioural.test.ts
+tests/integration/phase1-text-only.test.ts
+tests/integration/phase1-validation-rejection.test.ts
+tests/integration/proxy-v5-preflight.test.ts
+tests/integration/slice-c2-concurrent-analysis.test.ts
+tests/integration/slice-c2-run-analysis-mocked.test.ts
+tests/integration/v5-explain-then-yes-flagship.test.ts
+tests/integration/v5-short-confirm-resume.test.ts
+tests/unit/anthropic.draft-graph-params.test.ts
+tests/unit/anthropic.streaming.test.ts
+tests/unit/cee.bidirected-edges.test.ts
+tests/unit/cee.boundary.hardening.test.ts
+tests/unit/cee.causal-claims-validation.test.ts
+tests/unit/cee.factor-enricher.test.ts
+tests/unit/cee.graph-data-integrity.test.ts
+tests/unit/cee.schema-v2.test.ts
+tests/unit/cee.unified-pipeline.options-identical-bypass.test.ts
+tests/unit/cee.validation-pipeline/validate-graph.test.ts
+tests/unit/cee.value-uncertainty.test.ts
+tests/unit/cil-phase2-analysis-ready.test.ts
+tests/unit/decision-review-route-grounding.test.ts
+tests/unit/decision-review-science-claims-route.test.ts
+tests/unit/deterministic-sweep-mixed-fixture.test.ts
+tests/unit/draft-coaching-narrow.test.ts
+tests/unit/golden-fixtures.test.ts
+tests/unit/graph-validator.coaching-refs.test.ts
+tests/unit/mc25.coaching-boundary-validation.test.ts
+tests/unit/orchestrator.envelope.test.ts
+tests/unit/orchestrator/analysis-ready-recompute.test.ts
+tests/unit/orchestrator/context/budget.test.ts
+tests/unit/orchestrator/context/decision-continuity.test.ts
+tests/unit/orchestrator/contract-validator.test.ts
+tests/unit/orchestrator/deterministic/response-composer-contract.test.ts
+tests/unit/orchestrator/envelope.test.ts
+tests/unit/orchestrator/graph-structure-validator.test.ts
+tests/unit/orchestrator/patch-validation.test.ts
+tests/unit/orchestrator/pipeline/phase5-model-receipt.test.ts
+tests/unit/orchestrator/tools/draft-graph.test.ts
+tests/unit/orchestrator/tools/edit-graph-bare-array-safe-envelope.test.ts
+tests/unit/orchestrator/tools/edit-graph-id-leak.test.ts
+tests/unit/orchestrator/tools/edit-graph-no-op-telemetry.test.ts
+tests/unit/orchestrator/tools/edit-graph.test.ts
+tests/unit/prompt-text-version.test.ts
+tests/unit/shared-schemas.strength-validation.test.ts
+tests/unit/simple-repair-connectivity.test.ts
+tests/unit/unified-pipeline.signal-fix.test.ts
+tests/unit/v5.route-with-tool-use.cache-shape.test.ts

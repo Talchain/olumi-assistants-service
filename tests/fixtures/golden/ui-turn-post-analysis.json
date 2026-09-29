@@ -1,0 +1,45 @@
+{
+  "message": "Explain the analysis results",
+  "scenario_id": "scn-analysis-001",
+  "client_turn_id": "ct-analysis-001",
+  "conversation_history": [
+    {
+      "role": "user",
+      "content": "Run the analysis"
+    },
+    {
+      "role": "assistant",
+      "content": "I've completed the analysis. Here are the results.",
+      "tool_calls": []
+    }
+  ],
+  "graph_state": {
+    "nodes": [
+      { "id": "goal_1", "kind": "goal", "label": "Maximize Revenue" },
+      { "id": "opt_1", "kind": "option", "label": "Option A" },
+      { "id": "opt_2", "kind": "option", "label": "Option B" },
+      { "id": "fac_1", "kind": "factor", "label": "Cost" },
+      { "id": "fac_2", "kind": "factor", "label": "Quality" }
+    ],
+    "edges": [
+      { "from": "fac_1", "to": "goal_1", "strength": { "mean": 0.7, "std": 0.1 } },
+      { "from": "fac_2", "to": "goal_1", "strength": { "mean": 0.5, "std": 0.15 } }
+    ]
+  },
+  "analysis_state": {
+    "analysis_status": "complete",
+    "meta": { "response_hash": "abc123" },
+    "option_comparison": [
+      { "option_id": "opt_1", "option_label": "Option A", "win_probability": 0.65 },
+      { "option_id": "opt_2", "option_label": "Option B", "win_probability": 0.35 }
+    ],
+    "robustness": { "is_robust": false, "level": "low", "recommendation_stability": 0.69 },
+    "factor_sensitivity": [
+      { "factor_id": "fac_1", "label": "Cost", "sensitivity": 0.45 }
+    ],
+    "edge_sensitivity": [],
+    "critiques": [],
+    "flip_thresholds": [],
+    "drivers": []
+  }
+}

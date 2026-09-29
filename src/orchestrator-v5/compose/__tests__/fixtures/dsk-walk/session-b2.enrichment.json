@@ -1,0 +1,1212 @@
+{
+  "option_comparison": [
+    {
+      "option_id": "opt_energy",
+      "option_label": "Energy Efficiency Retrofit",
+      "id": "opt_energy",
+      "label": "Energy Efficiency Retrofit",
+      "outcome": {
+        "mean": 0.08267173192556089,
+        "std": 0.10315527989313586,
+        "p10": -0.04613559477445012,
+        "p50": 0.08446843704444254,
+        "p90": 0.21138261723413493,
+        "n_samples": 10000,
+        "n_valid_samples": 10000,
+        "validity_ratio": 1
+      },
+      "status": "computed",
+      "win_probability": 0.4363
+    },
+    {
+      "option_id": "opt_oven",
+      "option_label": "Second Production Oven Line",
+      "id": "opt_oven",
+      "label": "Second Production Oven Line",
+      "outcome": {
+        "mean": -0.008407553334934445,
+        "std": 0.1213641795769087,
+        "p10": -0.16018080266141718,
+        "p50": -0.009215685984500836,
+        "p90": 0.14446146618874484,
+        "n_samples": 10000,
+        "n_valid_samples": 10000,
+        "validity_ratio": 1
+      },
+      "status": "computed",
+      "win_probability": 0.07583333333333335
+    },
+    {
+      "option_id": "opt_packing",
+      "option_label": "Automated Packing Cell",
+      "id": "opt_packing",
+      "label": "Automated Packing Cell",
+      "outcome": {
+        "mean": 0.025942895504643106,
+        "std": 0.11537722956530547,
+        "p10": -0.12011731202907092,
+        "p50": 0.02671041504235348,
+        "p90": 0.1695410987127695,
+        "n_samples": 10000,
+        "n_valid_samples": 10000,
+        "validity_ratio": 1
+      },
+      "status": "computed",
+      "win_probability": 0.1413833333333333
+    },
+    {
+      "option_id": "opt_retail",
+      "option_label": "New Retail Concession",
+      "id": "opt_retail",
+      "label": "New Retail Concession",
+      "outcome": {
+        "mean": -0.005383521936547492,
+        "std": 0.11984136568888422,
+        "p10": -0.15356573531519035,
+        "p50": -0.005292791990551177,
+        "p90": 0.14550363838865274,
+        "n_samples": 10000,
+        "n_valid_samples": 10000,
+        "validity_ratio": 1
+      },
+      "status": "computed",
+      "win_probability": 0.07708333333333335
+    },
+    {
+      "option_id": "opt_status_quo",
+      "option_label": "Defer All Projects (Status Quo)",
+      "id": "opt_status_quo",
+      "label": "Defer All Projects (Status Quo)",
+      "outcome": {
+        "mean": 0.0001712994114422094,
+        "std": 0.04907815025504806,
+        "p10": -0.060940069761087214,
+        "p50": 0.00008092853053762503,
+        "p90": 0.06124719227608055,
+        "n_samples": 10000,
+        "n_valid_samples": 10000,
+        "validity_ratio": 1
+      },
+      "status": "computed",
+      "win_probability": 0.05650000000000002
+    },
+    {
+      "option_id": "opt_vans",
+      "option_label": "Refrigerated Delivery Vans",
+      "id": "opt_vans",
+      "label": "Refrigerated Delivery Vans",
+      "outcome": {
+        "mean": 0.047604908380106226,
+        "std": 0.1099054910144338,
+        "p10": -0.09025296313345589,
+        "p50": 0.04751860083479795,
+        "p90": 0.1841948147430389,
+        "n_samples": 10000,
+        "n_valid_samples": 10000,
+        "validity_ratio": 1
+      },
+      "status": "computed",
+      "win_probability": 0.2129
+    }
+  ],
+  "factor_sensitivity": [
+    {
+      "factor_id": "fac_flour_price",
+      "factor_label": "Wholesale Flour Price",
+      "influence_score": 1,
+      "influence_rank": 1,
+      "sensitivity_score": -0.2284523809523809,
+      "elasticity": 1,
+      "direction": "negative",
+      "importance_rank": 1,
+      "value_of_information": 0,
+      "confidence": 0.46765,
+      "confidence_source": "plot_unified_from_isl_bootstrap",
+      "confidence_provenance": {
+        "computation_source": "plot_unified_from_isl_bootstrap",
+        "formula_version": "plot_unified_v3",
+        "is_provisional": true,
+        "calibration_status": "provisional_pending_pilot_calibration",
+        "input_quality": "standard"
+      },
+      "confidence_components": {
+        "structural_certainty": 0.5,
+        "sampling_stability": 0.25
+      },
+      "source": "graph",
+      "flip_risk_category": "correlated",
+      "attribution_stability": "low",
+      "elasticity_std": 0.0087059,
+      "rank_flip_rate": 0.1,
+      "stability_method": "bootstrap_20",
+      "value_defaulted": true,
+      "importance_basis": "graph_structural",
+      "driver_label": "biggest",
+      "evpi_percentage_points": 0,
+      "evpi_method": "heuristic",
+      "evidence_hint": false
+    },
+    {
+      "factor_id": "fac_energy",
+      "factor_label": "Energy Retrofit Activation",
+      "influence_score": 0.39356435643564364,
+      "influence_rank": 2,
+      "sensitivity_score": 0,
+      "elasticity": 0,
+      "direction": "positive",
+      "importance_rank": 2,
+      "value_of_information": 0,
+      "confidence": 0.3,
+      "confidence_source": "plot_unified_from_isl_bootstrap",
+      "confidence_provenance": {
+        "computation_source": "plot_unified_from_isl_bootstrap",
+        "formula_version": "plot_unified_v3",
+        "is_provisional": true,
+        "calibration_status": "provisional_pending_pilot_calibration",
+        "input_quality": "standard"
+      },
+      "confidence_components": {
+        "structural_certainty": 0.5,
+        "sampling_stability": 0
+      },
+      "zero_reason": "intervention_override",
+      "source": "graph",
+      "flip_risk_category": "isolated",
+      "attribution_stability": "negligible",
+      "elasticity_std": 0,
+      "rank_flip_rate": 0.05,
+      "stability_method": "bootstrap_20",
+      "importance_basis": "graph_structural",
+      "driver_label": "moderate",
+      "range_derivation_source": "default"
+    },
+    {
+      "factor_id": "fac_vans",
+      "factor_label": "Refrigerated Van Fleet Investment",
+      "influence_score": 0.23267326732673282,
+      "influence_rank": 3,
+      "sensitivity_score": 0,
+      "elasticity": 0,
+      "direction": "positive",
+      "importance_rank": 3,
+      "value_of_information": 0,
+      "confidence": 0.43420000000000003,
+      "confidence_source": "plot_unified_from_isl_bootstrap",
+      "confidence_provenance": {
+        "computation_source": "plot_unified_from_isl_bootstrap",
+        "formula_version": "plot_unified_v3",
+        "is_provisional": true,
+        "calibration_status": "provisional_pending_pilot_calibration",
+        "input_quality": "standard"
+      },
+      "confidence_components": {
+        "structural_certainty": 0.5,
+        "sampling_stability": 0.25
+      },
+      "zero_reason": "intervention_override",
+      "source": "graph",
+      "flip_risk_category": "negligible",
+      "attribution_stability": "low",
+      "elasticity_std": 0,
+      "rank_flip_rate": 0.5,
+      "stability_method": "bootstrap_20",
+      "importance_basis": "graph_structural",
+      "driver_label": "moderate",
+      "range_derivation_source": "default"
+    },
+    {
+      "factor_id": "fac_packing",
+      "factor_label": "Automated Packing Investment",
+      "influence_score": 0.12747524752475262,
+      "influence_rank": 4,
+      "sensitivity_score": 0,
+      "elasticity": 0,
+      "direction": "positive",
+      "importance_rank": 4,
+      "value_of_information": 0,
+      "confidence": 0.39690000000000003,
+      "confidence_source": "plot_unified_from_isl_bootstrap",
+      "confidence_provenance": {
+        "computation_source": "plot_unified_from_isl_bootstrap",
+        "formula_version": "plot_unified_v3",
+        "is_provisional": true,
+        "calibration_status": "provisional_pending_pilot_calibration",
+        "input_quality": "standard"
+      },
+      "confidence_components": {
+        "structural_certainty": 0.5,
+        "sampling_stability": 0.25
+      },
+      "zero_reason": "intervention_override",
+      "source": "graph",
+      "flip_risk_category": "isolated",
+      "attribution_stability": "low",
+      "elasticity_std": 0,
+      "rank_flip_rate": 0.2,
+      "stability_method": "bootstrap_20",
+      "importance_basis": "graph_structural",
+      "driver_label": "minor",
+      "range_derivation_source": "default"
+    },
+    {
+      "factor_id": "fac_oven",
+      "factor_label": "Oven Line Capacity Expansion",
+      "influence_score": 0.027227722772277002,
+      "influence_rank": 5,
+      "sensitivity_score": 0,
+      "elasticity": 0,
+      "direction": "negative",
+      "importance_rank": 5,
+      "value_of_information": 0,
+      "confidence": 0.36995,
+      "confidence_source": "plot_unified_from_isl_bootstrap",
+      "confidence_provenance": {
+        "computation_source": "plot_unified_from_isl_bootstrap",
+        "formula_version": "plot_unified_v3",
+        "is_provisional": true,
+        "calibration_status": "provisional_pending_pilot_calibration",
+        "input_quality": "standard"
+      },
+      "confidence_components": {
+        "structural_certainty": 0.5,
+        "sampling_stability": 0.25
+      },
+      "zero_reason": "intervention_override",
+      "source": "graph",
+      "flip_risk_category": "negligible",
+      "attribution_stability": "low",
+      "elasticity_std": 0,
+      "rank_flip_rate": 0.25,
+      "stability_method": "bootstrap_20",
+      "importance_basis": "graph_structural",
+      "driver_label": "minor",
+      "range_derivation_source": "default"
+    },
+    {
+      "factor_id": "fac_retail",
+      "factor_label": "Retail Concession Launch",
+      "influence_score": 0.0037128712871287127,
+      "influence_rank": 6,
+      "sensitivity_score": 0,
+      "elasticity": 0,
+      "direction": "negative",
+      "importance_rank": 6,
+      "value_of_information": 0,
+      "confidence": 0.3625,
+      "confidence_source": "plot_unified_from_isl_bootstrap",
+      "confidence_provenance": {
+        "computation_source": "plot_unified_from_isl_bootstrap",
+        "formula_version": "plot_unified_v3",
+        "is_provisional": true,
+        "calibration_status": "provisional_pending_pilot_calibration",
+        "input_quality": "standard"
+      },
+      "confidence_components": {
+        "structural_certainty": 0.5,
+        "sampling_stability": 0.25
+      },
+      "zero_reason": "intervention_override",
+      "source": "graph",
+      "flip_risk_category": "negligible",
+      "attribution_stability": "low",
+      "elasticity_std": 0,
+      "rank_flip_rate": 0.5,
+      "stability_method": "bootstrap_20",
+      "importance_basis": "graph_structural",
+      "driver_label": "minor",
+      "range_derivation_source": "default"
+    }
+  ],
+  "robustness": {
+    "fragile_edges": [
+      {
+        "edge_id": "fac_packing->risk_flour_margin",
+        "from_id": "fac_packing",
+        "to_id": "risk_flour_margin",
+        "switch_probability": 0.3172,
+        "marginal_switch_probability": 0.12,
+        "alternative_winner_id": "opt_packing",
+        "from_label": "Automated Packing Investment",
+        "to_label": "Flour Cost Margin Squeeze",
+        "severity": "warning",
+        "visible": true,
+        "alternative_winner_label": "Automated Packing Cell"
+      },
+      {
+        "edge_id": "fac_energy->out_profit_uplift",
+        "from_id": "fac_energy",
+        "to_id": "out_profit_uplift",
+        "switch_probability": 0.3164,
+        "marginal_switch_probability": 0.14,
+        "alternative_winner_id": "opt_vans",
+        "from_label": "Energy Retrofit Activation",
+        "to_label": "Operating Profit Uplift",
+        "severity": "warning",
+        "visible": true,
+        "alternative_winner_label": "Refrigerated Delivery Vans"
+      },
+      {
+        "edge_id": "fac_flour_price->out_profit_uplift",
+        "from_id": "fac_flour_price",
+        "to_id": "out_profit_uplift",
+        "switch_probability": 0.2264,
+        "marginal_switch_probability": 0,
+        "alternative_winner_id": "opt_vans",
+        "from_label": "Wholesale Flour Price",
+        "to_label": "Operating Profit Uplift",
+        "severity": "warning",
+        "visible": true,
+        "alternative_winner_label": "Refrigerated Delivery Vans"
+      },
+      {
+        "edge_id": "fac_flour_price->risk_flour_margin",
+        "from_id": "fac_flour_price",
+        "to_id": "risk_flour_margin",
+        "switch_probability": 0.216,
+        "marginal_switch_probability": 0,
+        "alternative_winner_id": "opt_vans",
+        "from_label": "Wholesale Flour Price",
+        "to_label": "Flour Cost Margin Squeeze",
+        "severity": "warning",
+        "visible": true,
+        "alternative_winner_label": "Refrigerated Delivery Vans"
+      },
+      {
+        "edge_id": "out_profit_uplift->goal_profit",
+        "from_id": "out_profit_uplift",
+        "to_id": "goal_profit",
+        "switch_probability": 0.2156,
+        "marginal_switch_probability": 0.02,
+        "alternative_winner_id": "opt_vans",
+        "from_label": "Operating Profit Uplift",
+        "to_label": "Raise Group Operating Profit by 8% Within 18 Months",
+        "severity": "warning",
+        "visible": true,
+        "alternative_winner_label": "Refrigerated Delivery Vans"
+      },
+      {
+        "edge_id": "risk_flour_margin->goal_profit",
+        "from_id": "risk_flour_margin",
+        "to_id": "goal_profit",
+        "switch_probability": 0.2128,
+        "marginal_switch_probability": 0.07,
+        "alternative_winner_id": "opt_vans",
+        "from_label": "Flour Cost Margin Squeeze",
+        "to_label": "Raise Group Operating Profit by 8% Within 18 Months",
+        "severity": "warning",
+        "visible": true,
+        "alternative_winner_label": "Refrigerated Delivery Vans"
+      },
+      {
+        "edge_id": "fac_energy->risk_flour_margin",
+        "from_id": "fac_energy",
+        "to_id": "risk_flour_margin",
+        "switch_probability": 0.18361303060217177,
+        "marginal_switch_probability": 0.07,
+        "alternative_winner_id": "opt_vans",
+        "from_label": "Energy Retrofit Activation",
+        "to_label": "Flour Cost Margin Squeeze",
+        "severity": "warning",
+        "visible": true,
+        "alternative_winner_label": "Refrigerated Delivery Vans"
+      }
+    ],
+    "robust_edges": [
+      {
+        "edge_id": "fac_oven->risk_flour_margin",
+        "from_id": "fac_oven",
+        "to_id": "risk_flour_margin",
+        "from_label": "Oven Line Capacity Expansion",
+        "to_label": "Flour Cost Margin Squeeze",
+        "alternative_winner_id": null,
+        "alternative_winner_label": null
+      },
+      {
+        "edge_id": "fac_retail->out_profit_uplift",
+        "from_id": "fac_retail",
+        "to_id": "out_profit_uplift",
+        "from_label": "Retail Concession Launch",
+        "to_label": "Operating Profit Uplift",
+        "alternative_winner_id": null,
+        "alternative_winner_label": null
+      },
+      {
+        "edge_id": "fac_retail->risk_flour_margin",
+        "from_id": "fac_retail",
+        "to_id": "risk_flour_margin",
+        "from_label": "Retail Concession Launch",
+        "to_label": "Flour Cost Margin Squeeze",
+        "alternative_winner_id": null,
+        "alternative_winner_label": null
+      },
+      {
+        "edge_id": "fac_vans->out_profit_uplift",
+        "from_id": "fac_vans",
+        "to_id": "out_profit_uplift",
+        "from_label": "Refrigerated Van Fleet Investment",
+        "to_label": "Operating Profit Uplift",
+        "alternative_winner_id": null,
+        "alternative_winner_label": null
+      }
+    ],
+    "is_robust": false,
+    "level": "very_low",
+    "confidence": 0.4363,
+    "confidence_basis": "recommendation_stability_uncalibrated",
+    "recommended_option_id": "opt_energy",
+    "recommended_option_label": "Energy Efficiency Retrofit",
+    "near_tie": {
+      "is_tie": false,
+      "top_option_id": "opt_energy",
+      "second_option_id": "opt_vans",
+      "tied_option_ids": [
+        "opt_energy"
+      ],
+      "gap": 0.22340000000000002,
+      "threshold": 0.1
+    },
+    "display_verdict": "fragile",
+    "display_verdict_reason": "small changes could flip this result"
+  },
+  "decision_review": {
+    "narrative_summary": "Energy Efficiency Retrofit comes out ahead by a margin of about 22 percentage points, but the lead is not firm, as large uncertainty remains due to the unknown Wholesale Flour Price. This is the critical factor making the result unsettled.",
+    "story_headlines": {
+      "opt_energy": "Energy Efficiency Retrofit leads when flour prices make cost savings most valuable.",
+      "opt_vans": "Refrigerated Delivery Vans could come out ahead if flour prices or retrofit savings differ.",
+      "opt_oven": "Second Production Oven Line is less advantaged without market shifts in throughput demand.",
+      "opt_packing": "Automated Packing Cell comes close if it alleviates margin pressure from flour prices.",
+      "opt_retail": "New Retail Concession's performance hinges on stable input costs and local market uptake."
+    },
+    "robustness_explanation": {
+      "summary": "The ordering holds in about 44% of variations on current numbers, with large swings possible depending on Wholesale Flour Price.",
+      "primary_risk": "The relationship from Wholesale Flour Price to Operating Profit Uplift is the biggest threat to the result.",
+      "stability_factors": [
+        "Energy costs and capital expenditures are fixed, anchoring other uncertainties."
+      ],
+      "fragility_factors": [
+        "The link from Wholesale Flour Price to Operating Profit Uplift could shift the result.",
+        "The link from Energy Retrofit Activation to Operating Profit Uplift could tip the result toward another project."
+      ]
+    },
+    "readiness_rationale": "The uncertainty in the Wholesale Flour Price remains substantial, making the comparison finely balanced. Better evidence on likely flour prices would make any choice more dependable.",
+    "evidence_enhancements": {
+      "fac_flour_price": {
+        "specific_action": "Commission forward market research and consult agricultural price forecasts to narrow the projected range of Wholesale Flour Price.",
+        "rationale": "This price is the single biggest unknown, and clarifying it would make the project rankings much more stable.",
+        "evidence_type": "market_research",
+        "decision_hygiene": "Estimate the likely price distribution before reviewing forecasts, to check for bias."
+      }
+    },
+    "scenario_contexts": {
+      "fac_energy->out_profit_uplift": {
+        "trigger_description": "If the impact of Energy Retrofit Activation on Operating Profit Uplift is weaker than modelled,",
+        "consequence": "then Refrigerated Delivery Vans overtakes Energy Efficiency Retrofit."
+      },
+      "fac_packing->risk_flour_margin": {
+        "trigger_description": "If Automated Packing Investment offsets more of the Flour Cost Margin Squeeze,",
+        "consequence": "then Automated Packing Cell overtakes Energy Efficiency Retrofit."
+      }
+    },
+    "flip_thresholds": [
+      {
+        "factor_id": "fac_energy",
+        "factor_label": "Energy Retrofit Activation",
+        "current_display": "0",
+        "flip_display": "41%",
+        "narrative": "If Energy Retrofit Activation moves from 0 to 41%, Refrigerated Delivery Vans would overtake Energy Efficiency Retrofit as the leading option."
+      }
+    ],
+    "bias_findings": [],
+    "key_assumptions": [
+      "The link from Wholesale Flour Price to Operating Profit Uplift is assumed to reflect how flour input costs translate into group profit across products.",
+      "Energy, labour and capital costs are treated as fixed with no further volatility anticipated, based on the contracts listed in the brief."
+    ],
+    "decision_quality_prompts": [
+      {
+        "question": "What is the base rate for capital projects like Energy Efficiency Retrofit achieving expected profit lifts when input cost pressures are high?",
+        "principle": "Outside view and reference class forecasting",
+        "applies_because": "There is high uncertainty in the flour price and limited historical calibration for how profit uplifts play out under uncertainty.",
+        "dsk_claim_id": "DSK-T-002",
+        "evidence_strength": "strong",
+        "dsk_protocol_id": "DSK-P-002"
+      }
+    ],
+    "produced_at": "2026-08-05T10:22:21.607Z"
+  },
+  "option_comparison_status": "computed",
+  "edge_e_values": [
+    {
+      "edge_id": "fac_energy::out_profit_uplift",
+      "from_id": "fac_energy",
+      "to_id": "out_profit_uplift",
+      "from_label": "Energy Retrofit Activation",
+      "to_label": "Operating Profit Uplift",
+      "e_value": 1,
+      "flip_direction": "decrease",
+      "current_mean": 0.16703296703296702,
+      "flip_mean": 0.106618,
+      "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 10,
+        "band_min": 0.010398,
+        "band_median": 0.143083,
+        "band_max": 0.265775,
+        "band_width": 0.255377,
+        "seed_flip_means": [
+          0.118521,
+          0.233905,
+          0.265775,
+          0.128274,
+          0.256675,
+          0.010398,
+          0.173547,
+          0.10695,
+          0.157892,
+          0.114974
+        ]
+      }
+    },
+    {
+      "edge_id": "fac_energy::risk_flour_margin",
+      "from_id": "fac_energy",
+      "to_id": "risk_flour_margin",
+      "from_label": "Energy Retrofit Activation",
+      "to_label": "Flour Cost Margin Squeeze",
+      "e_value": 3.9786,
+      "flip_direction": "increase",
+      "current_mean": 0.03392857142857142,
+      "flip_mean": 0.134987,
+      "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 9,
+        "band_min": -0.081156,
+        "band_median": 0.146998,
+        "band_max": 0.389527,
+        "band_width": 0.470683,
+        "seed_flip_means": [
+          0.119498,
+          null,
+          -0.007645,
+          0.252717,
+          -0.009467,
+          0.389527,
+          0.146998,
+          0.270134,
+          -0.081156,
+          0.264582
+        ]
+      }
+    },
+    {
+      "edge_id": "fac_oven::out_profit_uplift",
+      "from_id": "fac_oven",
+      "to_id": "out_profit_uplift",
+      "from_label": "Oven Line Capacity Expansion",
+      "to_label": "Operating Profit Uplift",
+      "e_value": 1.8571,
+      "flip_direction": "increase",
+      "current_mean": 0.1913919413919414,
+      "flip_mean": 0.355438,
+      "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 10,
+        "band_min": 0.239102,
+        "band_median": 0.453921,
+        "band_max": 0.582927,
+        "band_width": 0.343825,
+        "seed_flip_means": [
+          0.409853,
+          0.239102,
+          0.582927,
+          0.367336,
+          0.510859,
+          0.460881,
+          0.467401,
+          0.488773,
+          0.335382,
+          0.446962
+        ]
+      }
+    },
+    {
+      "edge_id": "fac_oven::risk_flour_margin",
+      "from_id": "fac_oven",
+      "to_id": "risk_flour_margin",
+      "from_label": "Oven Line Capacity Expansion",
+      "to_label": "Flour Cost Margin Squeeze",
+      "e_value": 1,
+      "flip_direction": "decrease",
+      "current_mean": 0.2374999999999999,
+      "flip_mean": 0.047842,
+      "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 9,
+        "band_min": -0.164352,
+        "band_median": -0.047913,
+        "band_max": 0.251512,
+        "band_width": 0.415864,
+        "seed_flip_means": [
+          0.042759,
+          null,
+          -0.047913,
+          0.03442,
+          -0.063043,
+          -0.097635,
+          -0.164352,
+          -0.041235,
+          0.251512,
+          -0.064834
+        ]
+      }
+    },
+    {
+      "edge_id": "fac_packing::out_profit_uplift",
+      "from_id": "fac_packing",
+      "to_id": "out_profit_uplift",
+      "from_label": "Automated Packing Investment",
+      "to_label": "Operating Profit Uplift",
+      "e_value": 1.5882,
+      "flip_direction": "increase",
+      "current_mean": 0.17399267399267399,
+      "flip_mean": 0.27633,
+      "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 10,
+        "band_min": 0.239037,
+        "band_median": 0.330449,
+        "band_max": 0.455498,
+        "band_width": 0.216461,
+        "seed_flip_means": [
+          0.321885,
+          0.239102,
+          0.373948,
+          0.339013,
+          0.255361,
+          0.371514,
+          0.455352,
+          0.455498,
+          0.252166,
+          0.239037
+        ]
+      }
+    },
+    {
+      "edge_id": "fac_packing::risk_flour_margin",
+      "from_id": "fac_packing",
+      "to_id": "risk_flour_margin",
+      "from_label": "Automated Packing Investment",
+      "to_label": "Flour Cost Margin Squeeze",
+      "e_value": 1,
+      "flip_direction": "decrease",
+      "current_mean": 0.15267857142857139,
+      "flip_mean": 0.028986,
+      "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 9,
+        "band_min": -0.142732,
+        "band_median": -0.066476,
+        "band_max": 0.087399,
+        "band_width": 0.230131,
+        "seed_flip_means": [
+          -0.00641,
+          null,
+          -0.142732,
+          -0.005103,
+          0.006991,
+          -0.140706,
+          -0.122582,
+          -0.066476,
+          0.087399,
+          -0.067562
+        ]
+      }
+    },
+    {
+      "edge_id": "fac_retail::out_profit_uplift",
+      "from_id": "fac_retail",
+      "to_id": "out_profit_uplift",
+      "from_label": "Retail Concession Launch",
+      "to_label": "Operating Profit Uplift",
+      "e_value": 2.0966,
+      "flip_direction": "increase",
+      "current_mean": 0.1565934065934066,
+      "flip_mean": 0.328321,
+      "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 10,
+        "band_min": 0.19604,
+        "band_median": 0.306918,
+        "band_max": 0.63054,
+        "band_width": 0.4345,
+        "seed_flip_means": [
+          0.19604,
+          0.262429,
+          0.210764,
+          0.353989,
+          0.63054,
+          0.51078,
+          0.293319,
+          0.522527,
+          0.262322,
+          0.320517
+        ]
+      }
+    },
+    {
+      "edge_id": "fac_retail::risk_flour_margin",
+      "from_id": "fac_retail",
+      "to_id": "risk_flour_margin",
+      "from_label": "Retail Concession Launch",
+      "to_label": "Flour Cost Margin Squeeze",
+      "e_value": 1,
+      "flip_direction": "decrease",
+      "current_mean": 0.18660714285714283,
+      "flip_mean": -0.009181,
+      "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 9,
+        "band_min": -0.230269,
+        "band_median": -0.091381,
+        "band_max": 0.170492,
+        "band_width": 0.400761,
+        "seed_flip_means": [
+          -0.091381,
+          null,
+          0.01328,
+          -0.219192,
+          -0.045476,
+          -0.230269,
+          -0.112411,
+          -0.093636,
+          0.170492,
+          -0.086992
+        ]
+      }
+    },
+    {
+      "edge_id": "fac_vans::out_profit_uplift",
+      "from_id": "fac_vans",
+      "to_id": "out_profit_uplift",
+      "from_label": "Refrigerated Van Fleet Investment",
+      "to_label": "Operating Profit Uplift",
+      "e_value": 1.4538,
+      "flip_direction": "increase",
+      "current_mean": 0.1391941391941392,
+      "flip_mean": 0.202356,
+      "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 10,
+        "band_min": 0.154529,
+        "band_median": 0.211867,
+        "band_max": 0.388775,
+        "band_width": 0.234246,
+        "seed_flip_means": [
+          0.182674,
+          0.216069,
+          0.207666,
+          0.185247,
+          0.268343,
+          0.387777,
+          0.319524,
+          0.388775,
+          0.195633,
+          0.154529
+        ]
+      }
+    },
+    {
+      "edge_id": "fac_vans::risk_flour_margin",
+      "from_id": "fac_vans",
+      "to_id": "risk_flour_margin",
+      "from_label": "Refrigerated Van Fleet Investment",
+      "to_label": "Flour Cost Margin Squeeze",
+      "e_value": 1,
+      "flip_direction": "decrease",
+      "current_mean": 0.06785714285714284,
+      "flip_mean": -0.019727,
+      "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 9,
+        "band_min": -0.336926,
+        "band_median": -0.169839,
+        "band_max": -0.015052,
+        "band_width": 0.321874,
+        "seed_flip_means": [
+          -0.169839,
+          null,
+          -0.015052,
+          -0.122885,
+          -0.213747,
+          -0.182665,
+          -0.123154,
+          -0.097061,
+          -0.23277,
+          -0.336926
+        ]
+      }
+    },
+    {
+      "edge_id": "out_profit_uplift::goal_profit",
+      "from_id": "out_profit_uplift",
+      "to_id": "goal_profit",
+      "from_label": "Operating Profit Uplift",
+      "to_label": "Raise Group Operating Profit by 8% Within 18 Months",
+      "e_value": 1,
+      "flip_direction": "decrease",
+      "current_mean": 0.65,
+      "flip_mean": 0.078931,
+      "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 10,
+        "band_min": -0.023563,
+        "band_median": -0.000001,
+        "band_max": 0.823726,
+        "band_width": 0.847289,
+        "seed_flip_means": [
+          -0.000001,
+          -0.000001,
+          -0.000001,
+          0.221262,
+          -0.000001,
+          -0.023563,
+          -0.000001,
+          -0.000001,
+          0.823726,
+          0.211129
+        ]
+      }
+    },
+    {
+      "edge_id": "risk_flour_margin::goal_profit",
+      "from_id": "risk_flour_margin",
+      "to_id": "goal_profit",
+      "from_label": "Flour Cost Margin Squeeze",
+      "to_label": "Raise Group Operating Profit by 8% Within 18 Months",
+      "e_value": 1,
+      "flip_direction": "increase",
+      "current_mean": -0.55,
+      "flip_mean": -0.061485,
+      "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 10,
+        "band_min": -0.382702,
+        "band_median": 0.103681,
+        "band_max": 0.329572,
+        "band_width": 0.712274,
+        "seed_flip_means": [
+          -0.060574,
+          0.329572,
+          0.038331,
+          0.106369,
+          0.07291,
+          0.170902,
+          0.307531,
+          0.100993,
+          -0.382702,
+          0.147902
+        ]
+      }
+    }
+  ],
+  "inference_warnings": [
+    {
+      "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+      "message": "2 edge E-value entries were omitted from edge_e_values: 2 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+      "severity": "info"
+    }
+  ],
+  "confidence_tier": "fair",
+  "flip_thresholds": [
+    {
+      "factor_id": "fac_energy",
+      "factor_label": "Energy Retrofit Activation",
+      "current_value": 0,
+      "flip_value": 0.411689,
+      "direction": "increase",
+      "alternative_winner_id": "opt_vans",
+      "alternative_winner_label": "Refrigerated Delivery Vans",
+      "flip_reason": "found",
+      "iterations_used": 0,
+      "probes_used": 0
+    },
+    {
+      "factor_id": "fac_flour_price",
+      "factor_label": "Wholesale Flour Price",
+      "current_value": 0,
+      "flip_value": null,
+      "alternative_winner_id": null,
+      "alternative_winner_label": null,
+      "flip_reason": "structurally_invariant",
+      "iterations_used": 0,
+      "probes_used": 0,
+      "no_flip_in_range": true
+    },
+    {
+      "factor_id": "fac_oven",
+      "factor_label": "Oven Line Capacity Expansion",
+      "current_value": 0,
+      "flip_value": null,
+      "alternative_winner_id": null,
+      "alternative_winner_label": null,
+      "flip_reason": "no_effect_within_bounds",
+      "iterations_used": 0,
+      "probes_used": 0,
+      "no_flip_in_range": true
+    },
+    {
+      "factor_id": "fac_packing",
+      "factor_label": "Automated Packing Investment",
+      "current_value": 0,
+      "flip_value": null,
+      "alternative_winner_id": null,
+      "alternative_winner_label": null,
+      "flip_reason": "no_effect_within_bounds",
+      "iterations_used": 0,
+      "probes_used": 0,
+      "no_flip_in_range": true
+    },
+    {
+      "factor_id": "fac_retail",
+      "factor_label": "Retail Concession Launch",
+      "current_value": 0,
+      "flip_value": null,
+      "alternative_winner_id": null,
+      "alternative_winner_label": null,
+      "flip_reason": "no_effect_within_bounds",
+      "iterations_used": 0,
+      "probes_used": 0,
+      "no_flip_in_range": true
+    },
+    {
+      "factor_id": "fac_vans",
+      "factor_label": "Refrigerated Van Fleet Investment",
+      "current_value": 0,
+      "flip_value": null,
+      "alternative_winner_id": null,
+      "alternative_winner_label": null,
+      "flip_reason": "no_effect_within_bounds",
+      "iterations_used": 0,
+      "probes_used": 0,
+      "no_flip_in_range": true
+    }
+  ],
+  "decision_brief": {
+    "brief_id": "be24ead8-f978-4e14-a4a4-52454fd8784c",
+    "version": "1",
+    "created_at": "2026-08-05T10:22:10.694Z",
+    "headline": "Energy Efficiency Retrofit currently leads, but the outcome is highly uncertain. However, the 44% recommendation stability indicates the decision could shift with new information. Define tie-breaker criteria or gather additional evidence.",
+    "options": [
+      {
+        "option_id": "opt_energy",
+        "label": "Energy Efficiency Retrofit",
+        "win_probability": 0.4363,
+        "rank": 1
+      },
+      {
+        "option_id": "opt_vans",
+        "label": "Refrigerated Delivery Vans",
+        "win_probability": 0.2129,
+        "rank": 2
+      },
+      {
+        "option_id": "opt_packing",
+        "label": "Automated Packing Cell",
+        "win_probability": 0.1413833333333333,
+        "rank": 3
+      },
+      {
+        "option_id": "opt_retail",
+        "label": "New Retail Concession",
+        "win_probability": 0.07708333333333335,
+        "rank": 4
+      },
+      {
+        "option_id": "opt_oven",
+        "label": "Second Production Oven Line",
+        "win_probability": 0.07583333333333335,
+        "rank": 5
+      },
+      {
+        "option_id": "opt_status_quo",
+        "label": "Defer All Projects (Status Quo)",
+        "win_probability": 0.05650000000000002,
+        "rank": 6
+      }
+    ],
+    "top_drivers": [
+      {
+        "factor_label": "Wholesale Flour Price",
+        "sensitivity": 1,
+        "direction": "negative"
+      }
+    ],
+    "key_assumptions": [
+      "Wholesale Flour Price"
+    ],
+    "what_would_change": [
+      "Wholesale Flour Price → Operating Profit Uplift",
+      "Wholesale Flour Price → Flour Cost Margin Squeeze",
+      "Operating Profit Uplift → Raise Group Operating Profit by 8% Within 18 Months",
+      "Flour Cost Margin Squeeze → Raise Group Operating Profit by 8% Within 18 Months"
+    ],
+    "robustness": "fragile",
+    "warnings": [
+      {
+        "code": "DOMINANT_FACTOR",
+        "message": "One factor dominates. What would change if Wholesale Flour Price had less influence?",
+        "severity": "warning"
+      },
+      {
+        "code": "INFLUENTIAL_EXTERNALS",
+        "message": "External factors Wholesale Flour Price significantly affect your outcome but are inherently uncertain. How might you bound these?",
+        "severity": "warning"
+      },
+      {
+        "code": "M2_UNAVAILABLE",
+        "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+        "severity": "warning"
+      }
+    ],
+    "headline_banded": {
+      "text": "Energy Efficiency Retrofit is slightly ahead.",
+      "band": "slightly_ahead",
+      "leader_option_id": "opt_energy",
+      "leader_label": "Energy Efficiency Retrofit",
+      "runner_up_option_id": "opt_vans",
+      "runner_up_label": "Refrigerated Delivery Vans",
+      "win_probability_gap": 0.22340000000000002,
+      "robustness_gated": false,
+      "doctrine": "provisional_doctrine_v0"
+    },
+    "defaulted_assumptions": [
+      {
+        "factor_label": "Wholesale Flour Price",
+        "note": "No starting value was provided for \"Wholesale Flour Price\" — the analysis used a default. Setting a real value or range would make this result more trustworthy.",
+        "source": "value_defaulted",
+        "doctrine": "provisional_doctrine_v0"
+      }
+    ],
+    "robustness_caveat": {
+      "text": "This ranking was fragile under the perturbations tested — small changes to assumptions could change which option leads.",
+      "basis": "is_robust",
+      "doctrine": "provisional_doctrine_v0"
+    },
+    "warning_codes": [],
+    "analysis_summary": {
+      "leading_option": "Energy Efficiency Retrofit",
+      "win_probability": 0.4363,
+      "robustness_band": "fragile"
+    }
+  },
+  "factor_evppi": [
+    {
+      "factor_id": "fac_flour_price",
+      "evppi": 0.000001,
+      "evppi_raw": 0.000001,
+      "baseline_max_expected_utility": 0.082672,
+      "conditional_max_expected_utility": 0.082673,
+      "units": "outcome",
+      "method": "regression_evppi_v1",
+      "regression_degree": 4,
+      "n_samples": 10000,
+      "clamped_low": false,
+      "clamped_high": false,
+      "noise_floor": 0.000053,
+      "status": "below_resolution",
+      "correlation_active": false
+    }
+  ],
+  "decision_evpi": 0.0423991182426858,
+  "p_win_sensitivity": [
+    {
+      "factor_id": "fac_energy",
+      "p_win_delta": 0.034792,
+      "p_win_delta_percentage_points": 3.48,
+      "current_metric": 0.433458,
+      "perfect_metric": 0.46825,
+      "metric_type": "p_win_recommended",
+      "method": "p_win_delta_at_mean_v1",
+      "n_samples": 2000,
+      "status": "resolved",
+      "clamped": false,
+      "noise_floor": 0.03099,
+      "noise_floor_method": "z95_worst_case_bernoulli_diff",
+      "labelling_doctrine": "provisional_doctrine_v0"
+    },
+    {
+      "factor_id": "fac_retail",
+      "p_win_delta": 0.008042,
+      "p_win_delta_percentage_points": 0.8,
+      "current_metric": 0.433458,
+      "perfect_metric": 0.4415,
+      "metric_type": "p_win_recommended",
+      "method": "p_win_delta_at_mean_v1",
+      "n_samples": 2000,
+      "status": "below_resolution",
+      "clamped": false,
+      "noise_floor": 0.03099,
+      "noise_floor_method": "z95_worst_case_bernoulli_diff",
+      "labelling_doctrine": "provisional_doctrine_v0"
+    },
+    {
+      "factor_id": "fac_vans",
+      "p_win_delta": 0.006875,
+      "p_win_delta_percentage_points": 0.69,
+      "current_metric": 0.433458,
+      "perfect_metric": 0.440333,
+      "metric_type": "p_win_recommended",
+      "method": "p_win_delta_at_mean_v1",
+      "n_samples": 2000,
+      "status": "below_resolution",
+      "clamped": false,
+      "noise_floor": 0.03099,
+      "noise_floor_method": "z95_worst_case_bernoulli_diff",
+      "labelling_doctrine": "provisional_doctrine_v0"
+    },
+    {
+      "factor_id": "fac_oven",
+      "p_win_delta": 0.006142,
+      "p_win_delta_percentage_points": 0.61,
+      "current_metric": 0.433458,
+      "perfect_metric": 0.4396,
+      "metric_type": "p_win_recommended",
+      "method": "p_win_delta_at_mean_v1",
+      "n_samples": 2000,
+      "status": "below_resolution",
+      "clamped": false,
+      "noise_floor": 0.03099,
+      "noise_floor_method": "z95_worst_case_bernoulli_diff",
+      "labelling_doctrine": "provisional_doctrine_v0"
+    },
+    {
+      "factor_id": "fac_packing",
+      "p_win_delta": 0,
+      "p_win_delta_percentage_points": 0,
+      "current_metric": 0.433458,
+      "perfect_metric": 0.433167,
+      "metric_type": "p_win_recommended",
+      "method": "p_win_delta_at_mean_v1",
+      "n_samples": 2000,
+      "status": "below_resolution",
+      "clamped": true,
+      "noise_floor": 0.03099,
+      "noise_floor_method": "z95_worst_case_bernoulli_diff",
+      "labelling_doctrine": "provisional_doctrine_v0"
+    },
+    {
+      "factor_id": "fac_flour_price",
+      "p_win_delta": 0,
+      "p_win_delta_percentage_points": 0,
+      "current_metric": 0.433458,
+      "perfect_metric": 0.428667,
+      "metric_type": "p_win_recommended",
+      "method": "p_win_delta_at_mean_v1",
+      "n_samples": 2000,
+      "status": "below_resolution",
+      "clamped": true,
+      "noise_floor": 0.03099,
+      "noise_floor_method": "z95_worst_case_bernoulli_diff",
+      "labelling_doctrine": "provisional_doctrine_v0"
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+# Research prompt placeholder
+# This file is not used by the research evaluator — it uses web_search_preview directly.

@@ -1,0 +1,494 @@
+import type { FastifyInstance } from "fastify";
+import { z } from "zod";
+import { assessGraphReadiness } from "../cee/graph-readiness/index.js";
+import type { GraphReadinessAssessment } from "../cee/graph-readiness/index.js";
+import { buildCeeErrorResponse } from "../cee/validation/pipeline.js";
+import { resolveCeeRateLimit } from "../cee/config/limits.js";
+import { getRequestId } from "../utils/request-id.js";
+import { getRequestKeyId, getRequestCallerContext } from "../plugins/auth.js";
+import { contextToTelemetry } from "../context/index.js";
+import { emit, TelemetryEvents } from "../utils/telemetry.js";
+import { logCeeCall } from "../cee/logging.js";
+import { Graph } from "../schemas/graph.js";
+import { AnalysisReadyPayload } from "../schemas/analysis-ready.js";
+import {
+  assessRouteAdmission,
+  type MayRun,
+  type RouteReadinessBlocker,
+  type RouteReadinessCritique,
+  type RouteScaffoldPlan,
+} from "../cee/graph-readiness/canonical-readiness.js";
+import { loadPersistedScenarioStateStrict } from "../orchestrator-v5/build-turn-context.js";
+
+import type { GraphV1 } from "../contracts/plot/engine.js";
+
+interface CEETraceMeta {
+  request_id?: string;
+  correlation_id?: string;
+  engine?: Record<string, unknown>;
+}
+
+/**
+ * ONE response, from ONE assessor.
+ *
+ * The route used to return two different shapes under two different
+ * `X-CEE-API-Version` values, chosen by the REQUEST BODY SHAPE. Both are gone:
+ * the fields that were "V3-only" are now always present, because they are
+ * always derivable — they come from the graph, not from the caller's cache.
+ *
+ * The two halves answer DIFFERENT QUESTIONS and are grouped that way
+ * deliberately. Conflating them is what allowed a quality heuristic to answer
+ * an admission question for as long as it did.
+ */
+interface CEEGraphReadinessResponseV1 {
+  // ── Coaching: "how good is this model?" (legacy quality assessor) ──
+  // ⭐ EVERY FIELD IN THIS GROUP IS SCOPED TO THE REQUEST GRAPH, ALWAYS — see
+  //    `coaching_assessed_from`. Membership of the group is what declares the
+  //    scope, so a field must not be added here unless it reads `input.graph`.
+  readiness_score: number;
+  readiness_level: "ready" | "fair" | "needs_work";
+  confidence_level: "high" | "medium" | "low";
+  confidence_explanation: string;
+  quality_factors: GraphReadinessAssessment["quality_factors"];
+  /**
+   * WHICH MODEL THE COACHING HALF ABOVE DESCRIBES. Constant `"request_graph"`,
+   * and declared rather than left implicit for one measured reason: `assessed_from`
+   * scopes the ADMISSION half only, and a consumer reading `assessed_from:
+   * "persisted"` off a flat envelope will take the score and the factor count to
+   * be persisted-scoped too. They are not, and that is deliberate — coaching
+   * answers "how good is the model you are LOOKING AT?", a question about the
+   * canvas, so it must follow the caller's bytes even when a scenario is named.
+   *
+   * ⚠ NOT REDUNDANT WITH `assessed_from`, AND NOT TO BE ALIGNED WITH IT. The two
+   * stamps answer different questions (CLAUDE.md trap 21) and are REQUIRED to
+   * differ whenever a caller supplies a `scenario_id` whose persisted graph is
+   * not the one it posted. Re-pointing either half at the other's graph to make
+   * them agree destroys the distinction rather than fixing it.
+   */
+  coaching_assessed_from: "request_graph";
+
+  // ── Admission: "may analysis run?" (canonical assessor, sole authority) ──
+  can_run_analysis: boolean;
+  /**
+   * THE field a Run gate should read — the run path's own predicate, computed
+   * once, server-side. See {@link MayRun}: three-valued, and the honest consumer
+   * shape is `may_run !== false`, never `may_run === true`.
+   */
+  may_run: MayRun;
+  blocker_reason?: string;
+  /**
+   * WHICH MODEL THE ADMISSION HALF WAS ASSESSED FROM — **this group only**, not
+   * the envelope. `persisted` = the same read the run path performs;
+   * `request_graph` = the caller's own bytes. The coaching half carries its own
+   * stamp (`coaching_assessed_from`) and is always the caller's bytes; reading
+   * this field as if it scoped the whole response is the mistake that stamp exists
+   * to foreclose.
+   *
+   * ⭐ DECLARED RATHER THAN ASSUMED. A readiness verdict over the request graph is
+   * a verdict about the CLIENT'S copy of the model, and the run assesses the
+   * PERSISTED one — so the two can legitimately differ and the difference used to
+   * be invisible. Stamping it means a divergence is a reportable fact instead of a
+   * mystery. (The route previously chose its whole ASSESSOR by request-body shape,
+   * which made the verdict a function of browser cache state; that is gone, and
+   * this stamp is what stops the weaker version of it returning unnoticed.)
+   */
+  assessed_from: "persisted" | "request_graph";
+  options_ready: number;
+  options_total: number;
+  goal_node_valid: boolean;
+  issues: string[];
+  critiques?: RouteReadinessCritique[];
+  scaffold_plan: RouteScaffoldPlan;
+  /**
+   * Per-option, per-factor blockers. Additive, and the reason a blocked verdict
+   * is actionable: `option_id` + `factor_id` + a human message let the UI name
+   * the option and the field instead of rendering a count.
+   */
+  readiness_issues: RouteReadinessBlocker[];
+
+  // ── Coaching (continued): three more REQUEST-GRAPH-scoped fields ──────────
+  // They sit below the admission block for wire-order reasons only. They are
+  // computed from `input.graph`, so `coaching_assessed_from` — not
+  // `assessed_from` — is the stamp that describes them.
+  evidence_quality?: {
+    /** Count of edges with strong evidence */
+    strong: number;
+    /** Count of edges with moderate evidence */
+    moderate: number;
+    /** Count of edges with weak evidence (assumptions/hypotheses) */
+    weak: number;
+    /** Count of edges with no provenance */
+    none: number;
+    /** Human-readable summary */
+    summary: string;
+  };
+  /**
+   * Count of nodes with kind === "factor" (all categories) **in the REQUEST
+   * graph** — the canvas the caller is looking at, never the persisted model.
+   *
+   * ⚠ MEASURED, AND THE REASON THIS SENTENCE EXISTS (2026-09-08, discriminating
+   * pair on one scenario with the persisted graph held constant): a request graph
+   * of 0 nodes returned `total_factor_count: 0` and a request graph of 19 nodes
+   * returned `8`, while every admission field — `may_run`, `options_total`,
+   * `goal_node_valid` — stayed put. The count was already request-scoped and
+   * simply did not say so, under an `assessed_from: "persisted"` stamp that read
+   * as if it covered the envelope.
+   *
+   * ⚠ AND WHY IT WAS NOT RE-POINTED AT THE PERSISTED GRAPH: `readiness_score`,
+   * `quality_factors` and `evidence_quality` are request-scoped by the same
+   * deliberate design (the coaching half describes the canvas). Moving this one
+   * field alone would half-align the envelope and leave a subtler split than the
+   * one it set out to close; moving them all would repeal the coaching/admission
+   * distinction the route is built on. The concepts are named apart instead.
+   */
+  total_factor_count: number;
+  /**
+   * Count of quality assessment dimensions (legacy `quality_factors.length`).
+   * Request-graph-scoped, being a property of the coaching assessment itself.
+   */
+  user_question_count: number;
+  trace?: CEETraceMeta;
+}
+
+// Input validation schema - supports both V1/V2 (options in graph) and V3 (options in analysis_ready)
+const GraphReadinessInput = z.object({
+  graph: Graph,
+  analysis_ready: AnalysisReadyPayload.optional(),
+  /**
+   * ⭐ MOVE 3 — assess the PERSISTED model when the caller can name it.
+   *
+   * ADDITIVE AND OPTIONAL BY NECESSITY, not by preference: guest and pre-save
+   * callers have no scenario, so requiring it would break them. When it IS
+   * supplied, readiness performs the IDENTICAL read the run path performs
+   * (`loadPersistedScenarioStateStrict`), which removes the last way for the panel
+   * and the run to assess different models. Either way the response STAMPS which
+   * source was used — see `assessed_from`.
+   */
+  scenario_id: z.string().min(1).optional(),
+});
+
+type GraphReadinessInputT = z.infer<typeof GraphReadinessInput>;
+
+// Rate limiting
+type BucketState = {
+  count: number;
+  windowStart: number;
+};
+
+const WINDOW_MS = 60_000;
+const MAX_BUCKETS = 10_000;
+const MAX_BUCKET_AGE_MS = WINDOW_MS * 10;
+const graphReadinessBuckets = new Map<string, BucketState>();
+
+function pruneBuckets(map: Map<string, BucketState>, now: number): void {
+  if (map.size <= MAX_BUCKETS) return;
+
+  for (const [key, state] of map) {
+    if (now - state.windowStart > MAX_BUCKET_AGE_MS) {
+      map.delete(key);
+    }
+  }
+
+  if (map.size <= MAX_BUCKETS) return;
+
+  let toRemove = map.size - MAX_BUCKETS;
+  for (const key of map.keys()) {
+    if (toRemove <= 0) break;
+    map.delete(key);
+    toRemove -= 1;
+  }
+}
+
+function checkRateLimit(key: string, limit: number): { allowed: boolean; retryAfterSeconds: number } {
+  const now = Date.now();
+  pruneBuckets(graphReadinessBuckets, now);
+  let state = graphReadinessBuckets.get(key);
+
+  if (!state) {
+    state = { count: 0, windowStart: now };
+    graphReadinessBuckets.set(key, state);
+  }
+
+  if (now - state.windowStart >= WINDOW_MS) {
+    state.count = 0;
+    state.windowStart = now;
+  }
+
+  if (state.count >= limit) {
+    const resetAt = state.windowStart + WINDOW_MS;
+    const diffMs = Math.max(0, resetAt - now);
+    const retryAfterSeconds = Math.max(1, Math.ceil(diffMs / 1000));
+    return { allowed: false, retryAfterSeconds };
+  }
+
+  state.count += 1;
+  return { allowed: true, retryAfterSeconds: 0 };
+}
+
+export default async function route(app: FastifyInstance) {
+  const RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_GRAPH_READINESS_RATE_LIMIT_RPM");
+  const FEATURE_VERSION = "graph-readiness-1.0.0";
+
+  app.post("/assist/v1/graph-readiness", async (req, reply) => {
+    const start = Date.now();
+    const requestId = getRequestId(req);
+
+    const keyId = getRequestKeyId(req) || undefined;
+    const apiKeyPresent = Boolean(keyId);
+    const callerCtx = getRequestCallerContext(req);
+    const telemetryCtx = callerCtx ? contextToTelemetry(callerCtx) : { request_id: requestId };
+
+    emit(TelemetryEvents.CeeGraphReadinessRequested, {
+      ...telemetryCtx,
+      feature: "cee_graph_readiness",
+      api_key_present: apiKeyPresent,
+    });
+
+    // Rate limiting
+    const rateKey = keyId || req.ip || "unknown";
+    const { allowed, retryAfterSeconds } = checkRateLimit(rateKey, RATE_LIMIT_RPM);
+    if (!allowed) {
+      const errorBody = buildCeeErrorResponse(
+        "CEE_RATE_LIMIT",
+        "CEE Graph Readiness rate limit exceeded",
+        {
+          retryable: true,
+          requestId,
+          details: { retry_after_seconds: retryAfterSeconds },
+        },
+      );
+
+      emit(TelemetryEvents.CeeGraphReadinessFailed, {
+        ...telemetryCtx,
+        latency_ms: Date.now() - start,
+        error_code: "CEE_RATE_LIMIT",
+        http_status: 429,
+      });
+
+      logCeeCall({
+        requestId,
+        capability: "cee_graph_readiness",
+        latencyMs: Date.now() - start,
+        status: "limited",
+        errorCode: "CEE_RATE_LIMIT",
+        httpStatus: 429,
+      });
+
+      reply.header("Retry-After", retryAfterSeconds.toString());
+      reply.header("X-CEE-API-Version", "v1");
+      reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
+      reply.header("X-CEE-Request-ID", requestId);
+      reply.code(429);
+      return reply.send(errorBody);
+    }
+
+    // Input validation
+    const parsed = GraphReadinessInput.safeParse(req.body);
+    if (!parsed.success) {
+      const errorBody = buildCeeErrorResponse("CEE_VALIDATION_FAILED", "invalid input", {
+        retryable: false,
+        requestId,
+        details: { field_errors: parsed.error.flatten() },
+      });
+
+      emit(TelemetryEvents.CeeGraphReadinessFailed, {
+        ...telemetryCtx,
+        latency_ms: Date.now() - start,
+        error_code: "CEE_VALIDATION_FAILED",
+        http_status: 400,
+      });
+
+      logCeeCall({
+        requestId,
+        capability: "cee_graph_readiness",
+        latencyMs: Date.now() - start,
+        status: "error",
+        errorCode: "CEE_VALIDATION_FAILED",
+        httpStatus: 400,
+      });
+
+      reply.header("X-CEE-API-Version", "v1");
+      reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
+      reply.header("X-CEE-Request-ID", requestId);
+      reply.code(400);
+      return reply.send(errorBody);
+    }
+
+    const input = parsed.data as GraphReadinessInputT;
+
+    try {
+      const graph = input.graph as unknown as GraphV1;
+
+      const trace: CEETraceMeta = {
+        request_id: requestId,
+        correlation_id: requestId,
+        engine: {},
+      };
+
+      // ======================================================================
+      // ONE ASSESSOR.
+      //
+      // The admission verdict ("may analysis run?") comes from
+      // `assessRouteAdmission` → `assessCanonicalAnalysisReadiness`, the same
+      // whole-model authority the TURN path uses. It reads the GRAPH and
+      // nothing else, so the route and the turn cannot answer the same
+      // question with different predicates on one deploy.
+      //
+      // `input.analysis_ready` is still ACCEPTED — the deployed UI sends it
+      // whenever its cache is warm — but is deliberately NOT read. It is client
+      // cache, and letting it select the assessor was the defect: a fresh
+      // session and a warmed session received OPPOSITE verdicts for the same
+      // graph, because the UI populates it only from its own cached state.
+      //
+      // The legacy assessor still runs, for COACHING ONLY: quality factors,
+      // evidence quality, the confidence prose. It can no longer answer the
+      // admission question — `GraphReadinessAssessment` no longer carries
+      // `can_run_analysis` or `blocker_reason` at all, so the hardcoded `true`
+      // literal is not merely unread, it is unrepresentable.
+      // ======================================================================
+      // ⭐ MOVE 3 — ONE ASSESSOR, OVER PERSISTED STATE WHERE THERE IS ANY.
+      //
+      // The strict read is used deliberately: it returns a null graph ONLY when
+      // the store is reachable and nothing is stored, and THROWS on a store/RPC
+      // failure. So a transient outage cannot be silently misread as "nothing
+      // persisted" and quietly downgrade us to the client's copy — the caller gets
+      // a retryable 500 instead, which is the truthful answer.
+      //
+      // ⚠ AND THE FALLBACK IS NOT A FAILURE PATH. `null` here is the genuine
+      // pre-save case (guest sessions, a draft not yet committed). Assessing the
+      // request graph is the RIGHT answer for those callers; it is only wrong when
+      // it happens SILENTLY, which is what `assessed_from` fixes.
+      let assessedGraph: unknown = input.graph;
+      let assessedFrom: CEEGraphReadinessResponseV1["assessed_from"] = "request_graph";
+      if (input.scenario_id) {
+        const persisted = await loadPersistedScenarioStateStrict(input.scenario_id);
+        if (persisted.graph !== null && persisted.graph !== undefined) {
+          assessedGraph = persisted.graph;
+          assessedFrom = "persisted";
+        }
+      }
+
+      const admission = assessRouteAdmission(assessedGraph);
+      // Coaching stays on the graph the caller sent. It answers "how good is the
+      // model you are looking at?", which is a question about the CANVAS — and it
+      // is not an admission answer, so it cannot reintroduce the divergence Move 3
+      // closes. Trap 21: name the question each authority answers before making
+      // them agree.
+      const coaching = assessGraphReadiness(graph);
+
+      const totalFactorCount = (graph.nodes ?? []).filter(
+        (n: any) => n.kind === "factor",
+      ).length;
+
+      const response: CEEGraphReadinessResponseV1 = {
+        readiness_score: coaching.readiness_score,
+        readiness_level: coaching.readiness_level,
+        confidence_level: coaching.confidence_level,
+        confidence_explanation: coaching.confidence_explanation,
+        quality_factors: coaching.quality_factors,
+        // ⚠ THIS STAMP IS A CLAIM ABOUT THE LINE ABOVE IT — `coaching` is
+        // computed from `graph`, i.e. `input.graph`. It is held true from two
+        // directions, and neither alone is sufficient:
+        //   · the TYPE. The field is declared `"request_graph"` and nothing
+        //     else, so a literal saying otherwise does not compile. Widening
+        //     the declared union is therefore the only way to move this stamp,
+        //     which makes the move a visible interface change rather than a
+        //     one-word edit.
+        //   · the discriminating pair in
+        //     `tests/integration/cee.graph-readiness.starter-roundtrip.test.ts`,
+        //     which posts a request graph that DIFFERS from the persisted one
+        //     and pins two coaching-group members (`total_factor_count`,
+        //     `evidence_quality`) to the request graph's numbers. Re-point
+        //     either at `assessedGraph` and it REDs.
+        coaching_assessed_from: "request_graph",
+
+        can_run_analysis: admission.can_run_analysis,
+        may_run: admission.may_run satisfies MayRun,
+        blocker_reason: admission.blocker_reason,
+        assessed_from: assessedFrom,
+        options_ready: admission.options_ready,
+        options_total: admission.options_total,
+        goal_node_valid: admission.goal_node_valid,
+        issues: admission.issues,
+        critiques: admission.critiques,
+        scaffold_plan: admission.scaffold_plan,
+        readiness_issues: admission.readiness_issues,
+
+        evidence_quality: coaching.evidence_quality,
+        total_factor_count: totalFactorCount,
+        user_question_count: coaching.quality_factors.length,
+        trace,
+      };
+
+      const latencyMs = Date.now() - start;
+
+      emit(TelemetryEvents.CeeGraphReadinessCompleted, {
+        ...telemetryCtx,
+        latency_ms: latencyMs,
+        readiness_score: coaching.readiness_score,
+        readiness_level: coaching.readiness_level,
+        can_run_analysis: admission.can_run_analysis,
+        may_run: String(admission.may_run),
+        assessed_from: assessedFrom,
+        total_factor_count: totalFactorCount,
+        user_question_count: coaching.quality_factors.length,
+        options_ready: admission.options_ready,
+        options_total: admission.options_total,
+        // The payload no longer selects an assessor. Recorded so a live capture
+        // can CONFIRM the two request shapes converge on one verdict, rather
+        // than that being an assumption about deployed behaviour.
+        analysis_ready_present: Boolean(input.analysis_ready?.options?.length),
+      });
+
+      logCeeCall({
+        requestId,
+        capability: "cee_graph_readiness",
+        latencyMs,
+        status: "ok",
+        httpStatus: 200,
+      });
+
+      // ONE version. The route previously emitted `v3` or `v1` according to the
+      // request shape — two versions for two assessors. There is one assessor
+      // now, so `v1` is the honest single value: the response is a superset of
+      // the old v1 body, and every field the old v3 body carried is still here.
+      reply.header("X-CEE-API-Version", "v1");
+      reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
+      reply.header("X-CEE-Request-ID", requestId);
+      reply.code(200);
+      return reply.send(response);
+    } catch (err) {
+      const errorBody = buildCeeErrorResponse(
+        "CEE_INTERNAL_ERROR",
+        err instanceof Error ? err.message : "Internal error",
+        {
+          retryable: true,
+          requestId,
+        },
+      );
+
+      emit(TelemetryEvents.CeeGraphReadinessFailed, {
+        ...telemetryCtx,
+        latency_ms: Date.now() - start,
+        error_code: "CEE_INTERNAL_ERROR",
+        http_status: 500,
+        error_message: err instanceof Error ? err.message : String(err),
+      });
+
+      logCeeCall({
+        requestId,
+        capability: "cee_graph_readiness",
+        latencyMs: Date.now() - start,
+        status: "error",
+        errorCode: "CEE_INTERNAL_ERROR",
+        httpStatus: 500,
+      });
+
+      reply.header("X-CEE-API-Version", "v1");
+      reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
+      reply.header("X-CEE-Request-ID", requestId);
+      reply.code(500);
+      return reply.send(errorBody);
+    }
+  });
+}

@@ -1,0 +1,448 @@
+{
+ "_provenance": {
+  "source": "DL browser witness bf-20260926T054503Z, turns.jsonl line 1 (turn 0, served 2026-09-26T05:46:11Z)",
+  "field": "json.draft_graph",
+  "served_graph_hash": "76ff1994ef4d5986",
+  "served_said": "The analysis can run now; it will leave out \"Status Quo\" until its levels are set.",
+  "served_reason": "RUN_WILL_EXCLUDE_OPTIONS",
+  "run_computed_option_ids": [
+   "status_quo",
+   "59_ai_release",
+   "54_ai_release"
+  ]
+ },
+ "nodes": [
+  {
+   "id": "decision_mrr",
+   "kind": "decision",
+   "label": "Decision: MRR",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "mrr",
+   "kind": "goal",
+   "label": "MRR",
+   "provenance": "from_brief",
+   "goal_threshold": 0.8,
+   "goal_threshold_cap": 25000,
+   "goal_threshold_raw": 20000,
+   "goal_threshold_unit": "GBP/month",
+   "goal_threshold_frame": "level",
+   "goal_threshold_cap_provenance": "target_derived_headroom"
+  },
+  {
+   "id": "status_quo",
+   "kind": "option",
+   "label": "Status Quo",
+   "provenance": "ai_inferred",
+   "is_baseline": true
+  },
+  {
+   "id": "49_ai_release",
+   "kind": "option",
+   "label": "\u00a349 AI Release",
+   "provenance": "ai_inferred",
+   "interventions": {
+    "pro_plan_price": {
+     "value": 0.245,
+     "source": "brief_extraction"
+    }
+   }
+  },
+  {
+   "id": "59_ai_release",
+   "kind": "option",
+   "label": "\u00a359 AI Release",
+   "provenance": "from_brief",
+   "interventions": {
+    "pro_plan_price": {
+     "value": 0.295,
+     "source": "brief_extraction"
+    }
+   }
+  },
+  {
+   "id": "54_ai_release",
+   "kind": "option",
+   "label": "\u00a354 AI Release",
+   "provenance": "ai_inferred",
+   "interventions": {
+    "pro_plan_price": {
+     "value": 0.27,
+     "source": "cee_hypothesis"
+    }
+   }
+  },
+  {
+   "id": "pro_plan_price",
+   "kind": "factor",
+   "label": "Pro plan price",
+   "category": "controllable",
+   "provenance": "from_brief",
+   "observed_state": {
+    "cap": 200,
+    "unit": "GBP/month",
+    "value": 0.245,
+    "source": "brief_extraction",
+    "raw_value": 49,
+    "declared_scale": "unit_interval"
+   }
+  },
+  {
+   "id": "ai_feature_adoption",
+   "kind": "factor",
+   "label": "AI feature adoption",
+   "category": "controllable",
+   "provenance": "ai_inferred",
+   "scale_frame": 100,
+   "observed_state": {
+    "unit": "% of eligible Pro customers",
+    "value": 0,
+    "source": "cee_inference",
+    "raw_value": 0,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "new_pro_conversion_rate",
+   "kind": "factor",
+   "label": "New Pro conversion rate",
+   "category": "observable",
+   "provenance": "ai_inferred",
+   "scale_frame": 100,
+   "observed_state": {
+    "unit": "%",
+    "value": 0.04,
+    "source": "cee_inference",
+    "raw_value": 4,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "monthly_churn_rate",
+   "kind": "factor",
+   "label": "Monthly churn rate",
+   "category": "observable",
+   "provenance": "ai_inferred",
+   "scale_frame": 100,
+   "observed_state": {
+    "unit": "%",
+    "value": 0.07,
+    "source": "cee_inference",
+    "raw_value": 7,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "pro_subscriber_base",
+   "kind": "factor",
+   "label": "Pro subscriber base",
+   "category": "observable",
+   "provenance": "ai_inferred",
+   "scale_frame": 2000,
+   "observed_state": {
+    "unit": "subscribers",
+    "value": 0.125,
+    "source": "cee_inference",
+    "raw_value": 250,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "price_sensitivity_churn",
+   "kind": "risk",
+   "label": "Price-sensitivity churn",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "weak_ai_feature_uptake",
+   "kind": "risk",
+   "label": "Weak AI feature uptake",
+   "provenance": "ai_inferred"
+  }
+ ],
+ "edges": [
+  {
+   "to": "status_quo",
+   "from": "decision_mrr",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "49_ai_release",
+   "from": "decision_mrr",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "59_ai_release",
+   "from": "decision_mrr",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "54_ai_release",
+   "from": "decision_mrr",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "ai_feature_adoption",
+   "from": "49_ai_release",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "pro_plan_price",
+   "from": "49_ai_release",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "ai_feature_adoption",
+   "from": "59_ai_release",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "pro_plan_price",
+   "from": "59_ai_release",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "ai_feature_adoption",
+   "from": "54_ai_release",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "pro_plan_price",
+   "from": "54_ai_release",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "pro_plan_price",
+   "from": "status_quo",
+   "origin": "repair",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "mrr",
+   "from": "pro_plan_price",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "price_sensitivity_churn",
+   "from": "pro_plan_price",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "monthly_churn_rate",
+   "from": "price_sensitivity_churn",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "weak_ai_feature_uptake",
+   "from": "ai_feature_adoption",
+   "strength": {
+    "std": 0.125,
+    "mean": -0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "negative",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "new_pro_conversion_rate",
+   "from": "weak_ai_feature_uptake",
+   "strength": {
+    "std": 0.125,
+    "mean": -0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "negative",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "new_pro_conversion_rate",
+   "from": "ai_feature_adoption",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "pro_subscriber_base",
+   "from": "new_pro_conversion_rate",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "pro_subscriber_base",
+   "from": "monthly_churn_rate",
+   "strength": {
+    "std": 0.125,
+    "mean": -0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "negative",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "mrr",
+   "from": "pro_subscriber_base",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  }
+ ],
+ "goal_constraints": [
+  {
+   "unit": "%",
+   "label": "Monthly churn rate",
+   "value": 10,
+   "node_id": "monthly_churn_rate",
+   "operator": "<=",
+   "provenance": "explicit",
+   "constraint_id": "agent-lane:monthly_churn_rate:<="
+  }
+ ]
+}

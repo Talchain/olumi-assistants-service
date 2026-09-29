@@ -1,0 +1,1328 @@
+/**
+ * ROADMAP 2.467 — `register_graph`: THE DETERMINISTIC WHOLE-GRAPH WRITE SEAM.
+ *
+ * ── WHY THIS ROUTE EXISTS AT ALL ───────────────────────────────────────────
+ * Canvas import performs ZERO server-side persistence, and run turns carry no
+ * graph. The analyse path is UI → CEE → PLoT → ISL with **CEE reloading its OWN
+ * persisted graph**, so after an import the results describe the pre-import
+ * server graph while the imported one is on screen. That was witnessed on a real
+ * browser on 4 Aug (analysis naming the OLD graph's nodes ×44, the sentinel ×0,
+ * old rows re-bound BY NODE ID to the imported labels under an affirmative
+ * "Analysis reflects the current model."). An interim UI mitigation (#592,
+ * witnessed prevented 5 Aug) stopped the product ASSERTING that the mismatch was
+ * fine. It did not make the import work. This route is what makes it work: it
+ * puts the imported graph where CEE will actually read it.
+ *
+ * ── WHY IT IS NOT THE LLM EDIT TOOL (design review amendment A8, BINDING) ──
+ * `propose_structural_edit` is architecturally incapable of this job, for three
+ * independent byte-level reasons:
+ *   · CAPS — referee `PROPOSAL_CAP = 8` envelopes and pipeline
+ *     `MAX_PATCH_OPERATIONS = 15`, against imports that run to
+ *     `GRAPH_MAX_NODES`/`GRAPH_MAX_EDGES` (50/100). A multi-batch train breaks
+ *     the atomicity a registration requires.
+ *   · BASE-HASH CURRENCY — every edit envelope must prove currency against the
+ *     SERVER graph. An import wants to REPLACE that graph regardless of its hash.
+ *   · FABRICATION — expressing a whole-graph replace as op diffs means the LLM
+ *     computes the diff, which is precisely the 2.461 class the edit tool exists
+ *     to kill.
+ * So: no LLM in the loop, no ops, no referee. One graph in, one graph stored.
+ *
+ * ── THE ORDER OF THE CHECKS IS THE DESIGN ──────────────────────────────────
+ *   0. identity     — headers only, before any state read (the read route's
+ *                     rule: a refusal must not become an existence oracle).
+ *   1. UUID syntax  — `scenarios.id` is a UUID column.
+ *   2. PAYLOAD      — shape, caps, kind/type normalisation, ingress parse. All
+ *                     of it BEFORE any database work, so a malformed body costs
+ *                     no round trip and cannot be used to probe scenarios.
+ *   3. ownership    — the SAME shared pre-flight the turn route runs.
+ *                     ⚠ Ownership here is the VERIFIED TOKEN SUBJECT alone
+ *                     (`CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE` at the call
+ *                     site), which makes CEE_REQUIRE_USER_JWT load-bearing
+ *                     rather than a rollback lever: with it OFF — its DEFAULT,
+ *                     and unguarded in that direction — no caller is ever
+ *                     identified and every OWNED scenario is refused to its
+ *                     OWN owner across all six /assist/v1/scenarios/*
+ *                     endpoints. Disclosed at boot
+ *                     (`config.scenario_ownership_posture`, server.ts) and
+ *                     pinned in the suite as a KNOWN MISCONFIGURATION.
+ *   4. the base read— the trusted CAS base, from the SERVER's own bytes.
+ *   5. the write    — projected, hashed, atomic.
+ *
+ * ⚠ (2) BEFORE (3) IS DELIBERATE AND IS THE INVERSE OF THE READ ROUTE'S ORDER,
+ *   for the opposite reason. The read route gates on EXISTENCE first because
+ *   `authorizeScenarioOwnership` upserts, and a read must never create the row
+ *   it reads. A WRITE legitimately creates: a freshly-imported scenario has no
+ *   row yet, and refusing it would make import-into-a-new-scenario impossible —
+ *   which is the second import route (`ScenarioSwitcher → importScenarioFromFile`
+ *   mints a NEW scenario id). Validating first means a hostile caller cannot
+ *   grow `scenarios` with junk payloads; the rate limiter bounds the rest, and
+ *   the turn route already carries this exact property.
+ *
+ * ── WHAT MAKES IT ATOMIC, AND WHY NOT `store_draft_graph` ──────────────────
+ * `scenarios.graph` and `scenarios.graph_identity_hash` MUST move in one
+ * statement. `append_turn_atomic_v3`/`_v4` (reached through `store.append`) do
+ * exactly that under a `SELECT … FOR UPDATE` row lock, stamping
+ * `p_incoming_graph_identity_hash` from the single normaliser authority. The
+ * lighter `store_draft_graph` RPC does NOT write the identity hash, so using it
+ * would leave the column describing a graph we no longer store — silently
+ * poisoning every later CAS compare, which reads that column as its base.
+ *
+ * ⚠ UPDATED (C3 closure) — this used to end "there is exactly one correct
+ * writer here and it is `store.append`". The atomicity argument above is
+ * unchanged and still the reason, but the call is now
+ * `appendCheckedGraphWrite` (`orchestrator-v5/persist-graph-write.ts`), which
+ * enforces the terminal structural invariants and then performs that same
+ * `store.append`. The correction matters rather than being cosmetic: while this
+ * route called `store.append` directly it was the ONLY `scenarios.graph` writer
+ * that skipped those invariants, so a registration could persist a violation
+ * the turn path refuses fail-closed.
+ *
+ * The write is expressed as a `direct_answer` turn with `handler_id: null` —
+ * the DL-7 precedent the system-event dispatcher already uses for
+ * server-initiated, non-conversational commits (`system-events/dispatch.ts`).
+ * That is not incidental: a graph replacement IS a state transition worth a row
+ * in the turn log, and piggy-backing on the sanctioned writer is what buys the
+ * atomicity above.
+ *
+ * ── FRESHNESS AND ANALYSIS STATE CLEAR THEMSELVES, BY CONSTRUCTION ─────────
+ * Nothing here has to "clear the analysis". CEE stores no analysis snapshot and
+ * no `last_result_hash` on `scenarios`; `deriveAnalysisFreshness` DERIVES the
+ * verdict by comparing the newest `run_analysis` fact's `graph_hash_at_run`
+ * against `computeAnalysisAffectingGraphHash(currentGraph)` at read time. The
+ * moment this route replaces the graph, that comparison diverges and the verdict
+ * flips to `graph_hash_diverged` on its own. Pending actions self-invalidate the
+ * same way (`pending-action.ts`, reason `graph_hash_changed`) — but ONLY if the
+ * bytes we hash are the bytes we store, which is why `projectGraphForPersistence`
+ * runs BEFORE the hash and before the write, never after.
+ *
+ * ⚠ THE CAS BASE IS READ FROM THE SERVER, NEVER FROM THE REQUEST. The trusted
+ *   base rule (`SessionTurnWrite.expectedGraphIdentityHash`) exists because a
+ *   CAS that validates a write against the very graph being written always
+ *   "matches". Under a `shadow` RPC posture this is telemetry; under `enforce`
+ *   it becomes a real guard, and this route is written so that promotion needs
+ *   no change here.
+ *
+ *   ⭐ THE POSTURE IS NOW OBSERVABLE — DERIVE IT, DO NOT READ IT HERE.
+ *   This sentence used to assert "the deployed `CEE_V5_GRAPH_CAS_RPC=shadow`
+ *   posture" while `resolveGraphCasCapability` in `config/index.ts` asserted
+ *   staging runs `MODE=observe` + `RPC=enforce`. One was stale, neither was
+ *   evidence, and the deployed value — living only in the Render dashboard —
+ *   was unobservable from any client. Both sites were left pointing at each
+ *   other so no reader picked one at random.
+ *
+ *   Since 18 Sep 2026 `/healthz` publishes the resolved capability:
+ *
+ *       curl -s https://cee-staging.onrender.com/healthz | jq .graph_cas
+ *
+ *   ⛔ Do not restore a posture claim to this header. Behaviour here must
+ *   still be correct under BOTH postures — that requirement never depended on
+ *   knowing which one is deployed, which is exactly why the two prose claims
+ *   were able to disagree for a month without anything failing.
+ *
+ * ── WHAT THIS ROUTE DOES NOT DO ────────────────────────────────────────────
+ * · It does not run an LLM, compose a response, or touch the referee.
+ * · It does not merge. A registration is a REPLACE — the client's graph is the
+ *   graph. Merging would re-introduce the "two models, one screen" ambiguity.
+ * · It does not accept layout. `scenarios.graph` holds no positions; a caller
+ *   that sends them will simply have them hashed and stored, so the client is
+ *   responsible for projecting canvas → wire before calling. (The read route's
+ *   `layout_present` reports on that, measured rather than promised.)
+ * · It does not mint an identity scheme: `graph_identity_hash` is
+ *   `computeGraphIdentityHash`, identity.v1, the single normaliser authority,
+ *   and it is an OPAQUE CEE-issued token — consumers store and compare it
+ *   CEE-to-CEE gated on `projection_version`, and never recompute it locally.
+ */
+
+import type { FastifyInstance } from "fastify";
+
+import { GRAPH_MAX_EDGES, GRAPH_MAX_NODES } from "../config/graphCaps.js";
+import { normaliseGraphNodeKindField } from "../orchestrator-v5/graph-registration/normalise-node-kind.js";
+import { CEE_OWNED_EDGE_FIELDS } from "../orchestrator-v5/graph-management/field-safety.js";
+import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-extensions.js";
+import { GraphStateIngressSchema } from "../orchestrator-v5/boundary/request-extensions.js";
+import type { GraphStateIngress } from "../orchestrator-v5/boundary/request-extensions.js";
+import {
+  authorizeScenarioOwnership,
+  CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
+  resolveVerifiedIdentityOrRefuse,
+} from "../orchestrator/route-v2-preflight.js";
+import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
+import { computeExpectedGraphCasHashes } from "../orchestrator-v5/context/graph-cas-conflict.js";
+import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
+import { appendCheckedGraphWrite, assertNoIntroducedGraphViolations } from "../orchestrator-v5/persist-graph-write.js";
+import { buildAtomicCommittedModelVersion } from "../orchestrator-v5/commit.js";
+import { PersistedGraphInvariantError } from "../orchestrator-v5/persisted-graph-invariants.js";
+import { getSessionStore } from "../orchestrator-v5/session/index.js";
+import { registrationRequestHash, registrationTurnId } from "../orchestrator-v5/graph-registration/registration-identity.js";
+import { GraphStaleWriteError } from "../orchestrator-v5/session/store.js";
+import { runWithPendingTurnFence, TurnFenceRejectedError } from "../orchestrator-v5/session/turn-fence.js";
+import { admitCurrentTurnFence } from "../orchestrator/turn-fence-prehandler.js";
+import { normaliseBriefText } from "../orchestrator-v5/session/normalise-brief-text.js";
+import { resolveCeeRateLimit } from "../cee/config/limits.js";
+import { buildErrorV1 } from "../utils/errors.js";
+import { getRequestId } from "../utils/request-id.js";
+import { log } from "../utils/telemetry.js";
+import { loadMostRecentPendingActionsIntegrityStrict } from "../orchestrator-v5/build-turn-context.js";
+import {
+  emitHoldLapseTelemetry,
+  threadHoldsThroughMutatingCommit,
+} from "../orchestrator-v5/handlers/hold-thread-through.js";
+import type { PendingAction } from "../orchestrator-v5/session/pending-action.js";
+
+/** Wire schema discriminator. Frozen — the UI lane builds against this. */
+
+/**
+ * ⭐ AN ABSENT `goal_constraints` IS "NO STATEMENT", NOT "NO LIMITS" (#70 5852105101).
+ * Measured on staging: a register whose graph omitted the key replaced the
+ * persisted list with nothing (1 → 0), so a writer that registers nodes and edges
+ * alone erased limits the user had stated in chat. An explicit list — `[]`
+ * included — is the caller's statement and is written as sent. The UI's own
+ * hydration reads the same way: a null canvas list "cannot say no limit".
+ * A stored limit whose node the new graph no longer holds is not carried: it has
+ * nothing left to constrain. `stored` is the server read the CAS is bound to, so a
+ * graph that moved between that read and the write is refused, never merged.
+ */
+function withStoredLimitsWhenUnstated<T extends { nodes: ReadonlyArray<{ id?: unknown }> }>(
+  graph: T,
+  submitted: Record<string, unknown>,
+  stored: unknown,
+): T {
+  if (Object.prototype.hasOwnProperty.call(submitted, "goal_constraints")) return graph;
+  if (stored === null || typeof stored !== "object") return graph;
+  const limits = (stored as { goal_constraints?: unknown }).goal_constraints;
+  if (!Array.isArray(limits) || limits.length === 0) return graph;
+  const nodeIds = new Set(graph.nodes.map((n) => String(n.id)));
+  const carried = limits.filter(
+    (c) => c !== null && typeof c === "object" && nodeIds.has(String((c as { node_id?: unknown }).node_id)),
+  );
+  return carried.length === 0 ? graph : { ...graph, goal_constraints: carried };
+}
+
+type EdgeRecord = Record<string, unknown>;
+
+const isEdgeRecord = (value: unknown): value is EdgeRecord =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+/** An edge "carries" an id when the key holds a value; the match then needs both to carry it. */
+const carriesId = (edge: EdgeRecord): boolean => edge.id !== undefined && edge.id !== null;
+
+/** `from` + `to`, and `id` when BOTH carry one. */
+function sameEdgeKey(a: EdgeRecord, b: EdgeRecord): boolean {
+  if (a.from !== b.from || a.to !== b.to) return false;
+  return !(carriesId(a) && carriesId(b)) || a.id === b.id;
+}
+
+/** Exact numeric equality; both absent also counts as equal. A non-number never matches. */
+const sameNumber = (a: unknown, b: unknown): boolean =>
+  a === b && (a === undefined || typeof a === "number");
+
+/**
+ * The edge's analysis-affecting numbers, compared exactly: `strength.mean`, `strength.std`, `exists_probability`
+ * and `effect_direction`. Unequal means the caller asserted new values, so none of the stored stamps describe them.
+ */
+function sameAnalysisNumbers(a: EdgeRecord, b: EdgeRecord): boolean {
+  const sa = isEdgeRecord(a.strength) ? a.strength : {};
+  const sb = isEdgeRecord(b.strength) ? b.strength : {};
+  return (
+    sameNumber(sa.mean, sb.mean) &&
+    sameNumber(sa.std, sb.std) &&
+    sameNumber(a.exists_probability, b.exists_probability) &&
+    a.effect_direction === b.effect_direction
+  );
+}
+
+/**
+ * ⭐ AN OMITTED CEE-OWNED EDGE FIELD IS "NO STATEMENT", NOT "ERASE IT" — the edge half of the rule above.
+ *
+ * SERVED on CEE `dd456fe` (scratch scenario `01500753`, 28 Sep): register → the user's `edge_strength_edit` → a
+ * UI-shaped re-register. The UI rebuilds every edge from a fixed key list (`buildRegistrationGraph`: `from, to,
+ * strength, exists_probability, effect_direction, edge_type` + `origin`), and this route stores the caller's graph,
+ * so the edited edge lost `exists_defaulted`, `std_defaulted`, `provenance` and `provenance_display` and the untouched
+ * Olumi edge lost `defaulted` and `provenance`. The analysis hash did not move (its edge projection excludes all of
+ * them), so nothing noticed. The UI registers on import, snapshot restore, file import, opening a saved example and a
+ * reload re-arm of a saved example.
+ *
+ * THE RULE. A submitted edge that matches EXACTLY ONE stored edge (`from` + `to`, and `id` when both carry one), with
+ * no other submitted edge claiming that stored edge, AND whose analysis-affecting numbers are EXACTLY equal, gets the
+ * stored value of each CEE-owned edge field (`CEE_OWNED_EDGE_FIELDS`, derived in `field-safety.ts`) it OMITS:
+ *   · a field the caller SENT is its statement and is never overwritten;
+ *   · changed numbers mean the caller asserted new values (an import of a different model): nothing is carried and
+ *     the edge stands as sent;
+ *   · an ambiguous match (duplicate endpoint pairs on either side) carries nothing.
+ * Nodes are not touched here: the witness measured them byte-identical across a UI re-register.
+ *
+ * Bound to the SAME server read as the CAS base, and applied BEFORE the persistence projection, the invariant checks
+ * and the hash, so what is stored is what is hashed. The carried fields are outside the analysis projection, so an
+ * unchanged edge's carry cannot move `graph_hash`; it returns the identity hash to the stored one.
+ */
+function withStoredEdgeFactsWhenUnstated<T extends { edges: ReadonlyArray<EdgeRecord> }>(
+  graph: T,
+  stored: unknown,
+): T {
+  if (!isEdgeRecord(stored) || !Array.isArray(stored.edges)) return graph;
+  const storedEdges = stored.edges.filter(isEdgeRecord);
+  if (storedEdges.length === 0) return graph;
+
+  let changed = false;
+  const edges = graph.edges.map((edge) => {
+    const candidates = storedEdges.filter((s) => sameEdgeKey(edge, s));
+    if (candidates.length !== 1) return edge;
+    const match = candidates[0]!;
+    if (graph.edges.filter((e) => sameEdgeKey(e, match)).length !== 1) return edge;
+    if (!sameAnalysisNumbers(edge, match)) return edge;
+
+    const carried: EdgeRecord = {};
+    for (const field of CEE_OWNED_EDGE_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(edge, field)) continue;
+      if (match[field] === undefined) continue;
+      carried[field] = structuredClone(match[field]);
+    }
+    if (Object.keys(carried).length === 0) return edge;
+    changed = true;
+    return { ...edge, ...carried };
+  });
+  return changed ? { ...graph, edges } : graph;
+}
+
+export const SCENARIO_GRAPH_REGISTRATION_SCHEMA =
+  "scenario_graph_registration.v1" as const;
+
+/** `scenarios.id` is a UUID column, so a non-UUID id cannot name a row. */
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * ⭐ A REGISTER THREADS LIVE CONSENT HOLDS THROUGH ITS WRITE (served 26 Sep
+ * 03:1xZ on CEE `e3b0844`, #70 5842670630): a register of the UNCHANGED graph
+ * returned 200 with the same hash, and the user's held add-option then read
+ * "that proposal is no longer available". This write omitted `pending_actions`,
+ * the RPC defaulted it to `[]`, and the pending read takes only the newest row —
+ * so every register (the UI's re-registers and imports, and the Agent's own
+ * register-based value writes) destroyed every pending approval.
+ *
+ * The SAME seam the other mutating writers use (#1947): each prior pending is
+ * threaded over the bytes this register stores — a still-valid hold is
+ * re-pinned to their hash, an invalidated one lapses with telemetry
+ * (`site: graph_registration`; a register composes no prose, so there is no
+ * notice to carry), and every other pending passes through untouched.
+ * `appliedOperations: []`: a register is a whole-graph replace with no
+ * per-operation record, and nothing it stores is credited as FULFILLING an
+ * offer — it may re-send the very graph the offer was made on.
+ *
+ * NOT a conversational turn, so no turn-TTL decrement (the commit carry-forward
+ * owns that on real turns). Returns `undefined` — today's write, no
+ * `pending_actions` key — when there is nothing to thread or the read failed;
+ * the failure is logged, never silent.
+ */
+async function threadLiveHoldsThroughRegistration(input: {
+  readonly scenarioId: string;
+  readonly turnId: string;
+  readonly requestId: string;
+  readonly graphForStore: unknown;
+  readonly graphHashForStore: string | null;
+}): Promise<readonly PendingAction[] | undefined> {
+  let prior: readonly PendingAction[];
+  try {
+    prior = await loadMostRecentPendingActionsIntegrityStrict(input.scenarioId, input.requestId);
+  } catch (err) {
+    log.warn(
+      {
+        event: "v5.scenario_graph_register.pending_wipe_risk",
+        request_id: input.requestId,
+        scenario_id: input.scenarioId,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      "Graph registration — prior pending read failed; the register writes without threading live holds",
+    );
+    return undefined;
+  }
+  if (prior.length === 0) return undefined;
+  const result = threadHoldsThroughMutatingCommit({
+    priorPendingActions: prior,
+    graphAfterCommit: input.graphForStore,
+    graphHashAfterCommit: input.graphHashForStore,
+    appliedOperations: [],
+    nowMs: Date.now(),
+    scenarioId: input.scenarioId,
+    turnId: input.turnId,
+    requestId: input.requestId,
+  });
+  emitHoldLapseTelemetry(result.lapsed, {
+    requestId: input.requestId,
+    scenarioId: input.scenarioId,
+    turnId: input.turnId,
+    site: "graph_registration",
+  });
+  return result.threaded;
+}
+
+export default async function route(app: FastifyInstance) {
+  // Tier DERIVED from RATE_BUCKET_REGISTRY. This is a WRITE — it is registered
+  // in the `coach` tier, not `read`: `read` fails OPEN on limiter error
+  // (availability over strictness for cheap traffic), and a whole-graph
+  // replacement is not traffic we want waved through when the limiter is blind.
+  const RATE_LIMIT_MAX = resolveCeeRateLimit(
+    "CEE_SCENARIO_GRAPH_REGISTER_RATE_LIMIT_RPM",
+  );
+
+  app.post<{ Params: { scenario_id: string } }>(
+    "/assist/v1/scenarios/:scenario_id/graph/register",
+    {
+      // The repo's own limiter, per-route — the `proxy-v5-turn.ts` stop-rung
+      // pattern, expressed through the sanctioned plugin so CodeQL's
+      // `js/missing-rate-limiting` query can SEE it (a bespoke in-handler check
+      // is invisible to the scanner and to every future reviewer).
+      //
+      // The bucket is per CLIENT (`req.ip`, the plugin default), for the same
+      // reason as the sibling read route: through the `/bff/cee/*` edge every
+      // visitor arrives carrying the SAME injected assist key, so a key-derived
+      // bucket would be one product-wide shared-fate throttle.
+      config: {
+        rateLimit: {
+          max: RATE_LIMIT_MAX,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    async (req, reply) => {
+      const requestId = getRequestId(req);
+      const scenarioId = req.params.scenario_id;
+      const startedAt = Date.now();
+
+      /**
+       * THE ONE REFUSAL for anything scenario-shaped. Absent scenario, someone
+       * else's scenario, malformed id, ownership oracle down — all answer these
+       * exact bytes, for the read route's reason: a refusal that named its
+       * cause would be an enumeration oracle over other people's decisions.
+       */
+      const refuse = () =>
+        reply
+          .code(404)
+          .send(
+            buildErrorV1(
+              "NOT_FOUND",
+              "No registrable graph for that scenario.",
+              {},
+              requestId,
+            ),
+          );
+
+      /**
+       * A PAYLOAD refusal, by contrast, names its cause in full. The caller
+       * supplied these bytes, so telling them what is wrong with them leaks
+       * nothing — and a registration that fails silently is exactly the class
+       * of defect this route exists to close.
+       */
+      const invalid = (
+        code: string,
+        message: string,
+        details: Record<string, unknown> = {},
+      ) =>
+        reply
+          .code(422)
+          // `ErrorCode` is a deliberately coarse SHARED family
+          // (`BAD_INPUT | UNAUTHENTICATED | FORBIDDEN | NOT_FOUND |
+          // RATE_LIMITED | INTERNAL`) with a status mapping in
+          // `getStatusCodeForErrorCode`. The precise, actionable reason rides
+          // in `details.code`, and the HTTP status carries the class. Widening
+          // that union from a build lane would change a contract every route
+          // shares — not this slice's call to make.
+          .send(buildErrorV1("BAD_INPUT", message, { code, ...details }, requestId));
+
+      const unavailable = () =>
+        reply
+          .code(503)
+          .send(
+            buildErrorV1(
+              "INTERNAL",
+              "The graph could not be registered right now.",
+              {},
+              requestId,
+            ),
+          );
+
+      // ── 0. Identity, from headers only, before ANY read of server state ──
+      const resolved = await resolveVerifiedIdentityOrRefuse(req, requestId);
+      if (!resolved.ok) {
+        return reply.code(resolved.status).send(resolved.error);
+      }
+
+      // ── 1. Syntax ───────────────────────────────────────────────────────
+      if (!UUID_PATTERN.test(scenarioId)) {
+        return refuse();
+      }
+
+      // ── 2. The payload, in full, before any database work ───────────────
+      const extensions = parseRequestExtensions(req.body, requestId);
+      if (!extensions.ok) {
+        return refuse();
+      }
+
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      // Additive initial-context contract: string or absent/null. Reuse the
+      // canonical brief bound, but reject truncation instead of losing words.
+      // This is outside the graph/hash and uses the SAME atomic append below:
+      // the RPC seeds only an empty brief_text, preserving existing user text.
+      if (body.brief_text != null && typeof body.brief_text !== "string") {
+        return invalid("BRIEF_INVALID", "`brief_text` must be a string when supplied.");
+      }
+      // An OPTIONAL caller-named operation. Validated before any database work:
+      // it becomes part of the durable idempotency key, so a malformed one must
+      // never reach the RPC.
+      if (body.operation_id != null && (typeof body.operation_id !== "string" || !UUID_PATTERN.test(body.operation_id))) {
+        return invalid("OPERATION_ID_INVALID", "`operation_id` must be a UUID when supplied.");
+      }
+      const operationId = typeof body.operation_id === "string" ? body.operation_id : undefined;
+      // An OPTIONAL caller assertion: "write this ONLY if the model is still the
+      // one I read". Validated before any database work, like `operation_id`.
+      if (body.expected_graph_hash != null && (typeof body.expected_graph_hash !== "string" || body.expected_graph_hash.length === 0)) {
+        return invalid("EXPECTED_GRAPH_HASH_INVALID", "`expected_graph_hash` must be a non-empty string when supplied.");
+      }
+      const callerExpectedGraphHash =
+        typeof body.expected_graph_hash === "string" ? body.expected_graph_hash : undefined;
+      /**
+       * ⭐⭐ THE IDENTITY-SPACE EXPECTATION. Additive, optional, and it closes a
+       * counterexample the analysis-space one provably cannot.
+       *
+       * ⛔ THE GAP, MEASURED. `expected_graph_hash` is compared in ANALYSIS space
+       * (`computeAnalysisAffectingGraphHash`), whose projection EXCLUDES labels.
+       * So a caller that reads a graph, thinks, and writes a whole-graph snapshot
+       * back can have an intervening RENAME pass the comparison and be silently
+       * overwritten by its stale copy of that node. Reviewed counterexample on
+       * CEE #1743: "caller reads label L, another writer renames it, frame update
+       * follows — retain the new label or refuse, never restore L."
+       *
+       * ⭐ EVERY PIECE ALREADY EXISTED; only the comparison was missing. The read
+       * route returns `graph_identity_hash` (`assist.v1.scenario-graph.ts:536`),
+       * this route already COMPUTES `expectedGraphIdentityHash` from its own base
+       * read (the `store.loadGraph` + `computeExpectedGraphCasHashes` block below)
+       * and hands it to the atomic RPC in the `append` call — it simply never
+       * checked it against anything the caller claimed. ⚠ Line numbers are
+       * deliberately NOT cited: two earlier drafts of this docblock shipped
+       * staging line numbers that pointed at unrelated code in this same file.
+       *
+       * ⚠ IT IS A SEPARATE FIELD, NOT A WIDENING OF THE OTHER. The two hashes
+       * answer different questions over different projections and must never be
+       * substituted (see the read route's own warning at `:551`). A caller may
+       * send either, both, or neither; sending nothing is unaffected, byte for
+       * byte.
+       */
+      /**
+       * ⛔⛔ THE SHAPE IS THE identity.v1 ENVELOPE, NOT A BARE STRING — and the
+       * first cut of this field got that wrong in a way no test could see.
+       *
+       * The only documented source for a caller's expectation is the read route,
+       * and it emits the PRODUCER'S OWN RETURN VALUE:
+       * `graph_identity_hash: computeGraphIdentityHash(graph)`
+       * (`assist.v1.scenario-graph.ts:536-538`), whose type is
+       * `GraphIdentityHash | null` = `{ kind, value, algorithm, projection_version,
+       * graph_schema_version, normaliser_version }` (`context/graph-identity.ts:84-91`).
+       * Internally this route compares the 64-hex `.value`, because
+       * `hashesForRawGraph` extracts it (`context/graph-cas-conflict.ts:186`).
+       *
+       * So "a caller echoes back what it read" — the one workflow this field
+       * exists for — produced a 422, and a caller that stringified it produced
+       * the literal `"[object Object]"`. Measured on CEE #1743, whose `readGraph`
+       * did exactly that: once this route enforced the field, EVERY Agent frame
+       * write would have been refused 409 and the user told a competing writer
+       * had moved the model when none had. A fabricated concurrency claim at
+       * industrial scale, from two halves of one seam that never met.
+       *
+       * Both spellings are therefore accepted and normalised to the `.value`:
+       * the envelope (what the wire carries) and a bare 64-hex string (what an
+       * internal caller holding a `.value` already has). Neither is invented
+       * here — the envelope's `.value` IS the comparison space.
+       *
+       * ⭐ AND EXPLICIT `null` MEANS SOMETHING, distinct from omitting the key.
+       * `computeExpectedGraphCasHashes` maps an absent, unparseable or
+       * identity-empty graph to `null`, so `null` is exactly what the read route
+       * returns for the EMPTY scenario this route exists to populate. Without
+       * this branch a caller could not express "I expect there to be no graph",
+       * and — worse — sending the `null` it had just read silently disabled the
+       * check and took an unconditional write. Explicit `null` now asserts
+       * absence; omitting the key still means "do not check", byte for byte.
+       */
+      const identityKeySupplied = Object.prototype.hasOwnProperty.call(
+        body,
+        "expected_graph_identity_hash",
+      );
+      const rawExpectedIdentity: unknown = body.expected_graph_identity_hash;
+      /** A 64-hex value to compare, once normalised out of either spelling. */
+      let callerExpectedIdentityHash: string | undefined;
+      /** The caller asserts the scenario holds NO hashable graph. */
+      let callerExpectsNoGraph = false;
+      if (identityKeySupplied && rawExpectedIdentity !== undefined) {
+        if (rawExpectedIdentity === null) {
+          callerExpectsNoGraph = true;
+        } else if (typeof rawExpectedIdentity === "string") {
+          if (rawExpectedIdentity.length === 0) {
+            return invalid(
+              "EXPECTED_GRAPH_IDENTITY_HASH_INVALID",
+              "`expected_graph_identity_hash` must be a non-empty hash, the `graph_identity_hash` object the read route returned, or null to assert there is no graph.",
+            );
+          }
+          callerExpectedIdentityHash = rawExpectedIdentity;
+        } else if (typeof rawExpectedIdentity === "object" && !Array.isArray(rawExpectedIdentity)) {
+          const envelopeValue = (rawExpectedIdentity as { value?: unknown }).value;
+          if (typeof envelopeValue !== "string" || envelopeValue.length === 0) {
+            return invalid(
+              "EXPECTED_GRAPH_IDENTITY_HASH_INVALID",
+              "`expected_graph_identity_hash` was an object without a non-empty string `value`; send the `graph_identity_hash` the read route returned, unaltered.",
+            );
+          }
+          callerExpectedIdentityHash = envelopeValue;
+        } else {
+          return invalid(
+            "EXPECTED_GRAPH_IDENTITY_HASH_INVALID",
+            "`expected_graph_identity_hash` must be a hash string, the `graph_identity_hash` object the read route returned, or null to assert there is no graph.",
+          );
+        }
+      }
+      const brief = normaliseBriefText(body.brief_text);
+      if (brief.truncated) {
+        return invalid("BRIEF_INVALID", "`brief_text` exceeds the supported brief length.");
+      }
+      const submitted = body.graph;
+      if (submitted === null || typeof submitted !== "object" || Array.isArray(submitted)) {
+        return invalid("GRAPH_MISSING", "A `graph` object is required.");
+      }
+
+      const submittedRecord = submitted as Record<string, unknown>;
+      const submittedNodes = submittedRecord.nodes;
+      const submittedEdges = submittedRecord.edges;
+      if (!Array.isArray(submittedNodes) || !Array.isArray(submittedEdges)) {
+        return invalid(
+          "GRAPH_SHAPE_INVALID",
+          "`graph.nodes` and `graph.edges` must both be arrays.",
+        );
+      }
+
+      // An EMPTY graph is refused rather than stored. Registering emptiness
+      // would silently destroy a real server-side model, and no import produces
+      // it: `graphImportDigest` on the UI side returns null for an empty graph
+      // for the same reason.
+      if (submittedNodes.length === 0) {
+        return invalid("GRAPH_EMPTY", "A graph with no nodes cannot be registered.");
+      }
+
+      // Caps BEFORE normalisation, so a hostile 10k-node array is rejected in
+      // O(1) rather than walked.
+      if (submittedNodes.length > GRAPH_MAX_NODES) {
+        return invalid("GRAPH_TOO_LARGE", "This model has too many nodes to register.", {
+          nodes: submittedNodes.length,
+          max_nodes: GRAPH_MAX_NODES,
+        });
+      }
+      if (submittedEdges.length > GRAPH_MAX_EDGES) {
+        return invalid("GRAPH_TOO_LARGE", "This model has too many connections to register.", {
+          edges: submittedEdges.length,
+          max_edges: GRAPH_MAX_EDGES,
+        });
+      }
+
+      // 2.467c — the kind/type pair, resolved once, BEFORE anything hashes or
+      // stores these bytes. A divergent-field file is REFUSED, not guessed at.
+      const normalised = normaliseGraphNodeKindField(submitted);
+      if (!normalised.ok) {
+        return invalid(
+          normalised.reason === "divergent_node_kind"
+            ? "GRAPH_NODE_KIND_DIVERGENT"
+            : "GRAPH_NODE_KIND_MISSING",
+          normalised.reason === "divergent_node_kind"
+            ? "Some nodes declare two different kinds. Fix the file and import again."
+            : "Some nodes declare no kind. Fix the file and import again.",
+          { node_ids: normalised.nodeIds },
+        );
+      }
+
+      // The ingress parse is the contract gate: ids, kinds, labels, from/to.
+      // It runs on the NORMALISED bytes, because a `type`-only node would
+      // otherwise fail here for a reason we already know how to fix.
+      const parsed = GraphStateIngressSchema.safeParse(normalised.graph);
+      if (!parsed.success) {
+        return invalid(
+          "GRAPH_CONTRACT_INVALID",
+          "This model does not match the graph contract.",
+          { issues: parsed.error.issues.slice(0, 10) },
+        );
+      }
+
+      // ── 3. Ownership — the SAME pre-flight the turn route runs ──────────
+      let owned: Awaited<ReturnType<typeof authorizeScenarioOwnership>>;
+      try {
+        owned = await authorizeScenarioOwnership(
+          scenarioId,
+          // Ownership on this surface is derived from the verified token
+          // subject. A request-supplied identifier is not an input to that
+          // decision, so the sentinel is passed rather than the parsed
+          // extension. See the constant for why this is expressed here and not
+          // in the shared function.
+          CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
+          resolved.identity,
+          requestId,
+        );
+      } catch (err) {
+        log.warn(
+          {
+            event: "v5.scenario_graph_register.ownership_read_failed",
+            request_id: requestId,
+            scenario_id: scenarioId,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          "Graph registration — ownership pre-flight threw; failing closed",
+        );
+        return unavailable();
+      }
+      if (!owned.ok) {
+        log.warn(
+          {
+            event: "v5.scenario_graph_register.refused_not_owner",
+            request_id: requestId,
+            scenario_id: scenarioId,
+            reason: owned.reason,
+          },
+          "Graph registration — caller is not authorized for this scenario",
+        );
+        return refuse();
+      }
+
+      const store = getSessionStore();
+
+      // ── 4. The trusted CAS base — the SERVER's bytes, never the request's ─
+      // ⛔ A READ FAILURE REFUSES THE WRITE (retryable 503), REVERSED 28 Sep 2026 (writer audit
+      // finding 9). This read used to degrade to "uninstrumented", on the premise that failing
+      // would leave the user "permanently unable to register". Measured: `loadGraph` throws only
+      // on a store ERROR (a missing row is `null`, `supabase-store.ts` loadGraphAndBriefText), so a
+      // throw is an outage, not a stuck scenario, and a retry succeeds once it clears. The degrade
+      // was not neutral: with no stored bytes, the #2080 limit carry and the #2162 edge-fact carry
+      // both carry nothing and the RPC writes with NO CAS, so a UI register that omits
+      // `goal_constraints` wholesale-erased the stored limits on a transient error.
+      let expectedGraphIdentityHash: string | null | undefined;
+      let expectedGraphAnalysisHash: string | null | undefined;
+      // The SAME server-read bytes serve two different questions: the trusted
+      // CAS base (hashes, below) and the invariant BASELINE handed to the
+      // persistence floor. Hoisted out of the try so the floor can see it —
+      // `undefined` after a failed read, which the floor treats as "no
+      // baseline", i.e. observe-only. That is the correct degrade: a read
+      // failure must not start refusing registrations it cannot adjudicate.
+      let baseGraphForInvariants: unknown;
+      try {
+        const base = await store.loadGraph(scenarioId);
+        baseGraphForInvariants = base;
+        const hashes = computeExpectedGraphCasHashes(base);
+        expectedGraphIdentityHash = hashes.expectedGraphIdentityHash;
+        expectedGraphAnalysisHash = hashes.expectedGraphAnalysisHash;
+      } catch (err) {
+        log.warn(
+          {
+            event: "v5.scenario_graph_register.base_read_failed",
+            request_id: requestId,
+            scenario_id: scenarioId,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          "Graph registration — base read failed; refusing (nothing written, retryable)",
+        );
+        return unavailable();
+      }
+
+      // An absent `goal_constraints` keeps the stored limits, and an unchanged edge keeps the
+      // stored CEE-owned facts the caller omitted (see the helpers). Both are bound to the SAME
+      // server read as the CAS base above.
+      const graphToRegister = withStoredEdgeFactsWhenUnstated(
+        withStoredLimitsWhenUnstated(parsed.data, submittedRecord, baseGraphForInvariants),
+        baseGraphForInvariants,
+      );
+
+      /**
+       * ⛔ A CALLER'S EXPECTATION IS CHECKED BEFORE ANY WRITE, AGAINST THE
+       * SERVER'S OWN READ.
+       *
+       * Without this, this route's CAS base is only ever the server's own read
+       * a moment ago: it closes the route's read→write window and says nothing
+       * about the model the CALLER approved. Independent review of #1712
+       * (CHANGES_REQUIRED at 3674539 and ecb45282) measured the consequence on
+       * the Agent's one-approval path: an unrelated edit after the user approved
+       * a starting point was absorbed, and the approval landed on a model the
+       * user never saw, reported as applied. `factor_value_edit` carries no base
+       * at all (0.55, `.strict()`), so no existing primitive made a value write
+       * conditional on the approved model.
+       *
+       * The comparison is in ANALYSIS space — the same `graph_hash` the read
+       * route returns and a proposal is bound to (`computeAnalysisAffectingGraphHash`
+       * over the same ingress parse). Equality here, plus the atomic RPC's
+       * identity CAS on this very base at write time, means the bytes written
+       * sit on the model the caller named. A caller that sends nothing is
+       * unaffected, byte for byte.
+       *
+       * ⚠ A failed base read cannot adjudicate an expectation, so it refuses as
+       * our outage (503) rather than writing unconditionally.
+       */
+      if (callerExpectedGraphHash !== undefined) {
+        if (expectedGraphIdentityHash === undefined) {
+          return unavailable();
+        }
+        if (expectedGraphAnalysisHash !== callerExpectedGraphHash) {
+          log.warn(
+            {
+              event: "v5.scenario_graph_register.expected_graph_hash_stale",
+              request_id: requestId,
+              scenario_id: scenarioId,
+              expected: callerExpectedGraphHash,
+              current: expectedGraphAnalysisHash ?? null,
+            },
+            "Graph registration — the model changed since the caller read it; nothing written",
+          );
+          return reply
+            .code(409)
+            .send(
+              buildErrorV1(
+                "BAD_INPUT",
+                "This model changed since it was read. Nothing was written — read it again first.",
+                {
+                  code: "GRAPH_STALE",
+                  // ⭐ WHICH expectation failed, and BOTH pairs, always. A caller
+                  // that sent both could previously not tell which one refused it,
+                  // and read `undefined` from the pair it had not been told about —
+                  // so it could not resync. Both hashes are in scope at both sites.
+                  failed_expectation: "analysis",
+                  expected_graph_hash: callerExpectedGraphHash,
+                  current_graph_hash: expectedGraphAnalysisHash ?? null,
+                  expected_graph_identity_hash: callerExpectedIdentityHash ?? null,
+                  current_graph_identity_hash: expectedGraphIdentityHash ?? null,
+                },
+                requestId,
+              ),
+            );
+        }
+      }
+
+      /**
+       * The identity-space half of the same rule, and it refuses the case the
+       * block above cannot see. Same failure mode on an unreadable base: a read
+       * we could not perform cannot adjudicate an expectation, so it is our
+       * outage (503) rather than a write we cannot justify.
+       *
+       * ⚠ `GRAPH_STALE` is kept as the code because it is the same fact to a
+       * caller — the model moved, nothing was written — and callers already
+       * branch on it. The identity fields distinguish WHICH expectation failed
+       * for anyone who needs to know.
+       */
+      if (callerExpectsNoGraph) {
+        // The caller read an empty scenario and is writing the first graph into
+        // it. `null` is a real expectation, and this is the one place it can be
+        // adjudicated: if a graph has appeared since, the caller's whole premise
+        // ("there is nothing here yet") is false and its write would be the
+        // overwrite this route exists to prevent.
+        if (expectedGraphIdentityHash === undefined) {
+          return unavailable();
+        }
+        /**
+         * ⛔⛔ AND "no hashable graph" IS NOT "no graph". Accepted from independent
+         * review of #1810.
+         *
+         * `hashesForRawGraph` maps a graph that is PRESENT BUT UNPARSEABLE to
+         * `identity: null`, exactly as it maps an absent one
+         * (`context/graph-cas-conflict.ts` — a failed `GraphStateIngressSchema`
+         * safeParse returns `{parseFailed: true, identity: null}`). So an absence
+         * assertion would have passed against stored malformed bytes and REPLACED
+         * them — the very overwrite this field exists to prevent, and flatly
+         * contrary to the wording of the refusal below.
+         *
+         * `baseGraphForInvariants` is the RAW read, so raw presence is decidable
+         * independently of hashability. A genuinely absent graph may proceed; a
+         * present one that cannot be hashed must refuse, because we cannot show it
+         * is safe to discard and a caller asserting emptiness has not asked to.
+         */
+        const rawGraphPresent = baseGraphForInvariants !== null && baseGraphForInvariants !== undefined;
+        /**
+         * ⛔ AN ENTITY-LESS STORED GRAPH IS ABSENT FOR THIS ASSERTION (create-only construction,
+         * #69 5834761926 / 5834838346). `{nodes:[], edges:[]}` parses, has no identity, and is
+         * raw-present, so the guard below refused ordinary creation into an emptied scenario as
+         * "content that could not be read". There is nothing in it to protect. A present graph that
+         * does NOT parse as that still refuses: that is the case the guard exists for.
+         */
+        const rawGraphEntityLess = (() => {
+          if (baseGraphForInvariants === null || typeof baseGraphForInvariants !== "object") return false;
+          const { nodes, edges } = baseGraphForInvariants as { nodes?: unknown; edges?: unknown };
+          return Array.isArray(nodes) && nodes.length === 0 && Array.isArray(edges) && edges.length === 0;
+        })();
+        /**
+         * ⛔ AN IDENTICAL RETRY IS ITS OWN REPLAY, NOT A COMPETING WRITER. A construction whose
+         * response was lost is retried with the SAME operation and the SAME bytes; by then the graph
+         * it wrote is present, so the absence check below refused it before the replay arm inside
+         * the atomic writer could return the original receipt. Only a PROVEN identical commit — the
+         * derived turn id already holds this exact request hash — passes through; the writer then
+         * replays (SQL replay precedes CAS) and writes nothing. A different request under the same
+         * operation, no committed turn, or a read that fails all still refuse: none proves a replay.
+         */
+        const identicalCommittedReplay = async (): Promise<boolean> => {
+          if (operationId === undefined || typeof store.readCommittedTurn !== "function") return false;
+          try {
+            const committed = await store.readCommittedTurn(scenarioId, registrationTurnId(scenarioId, operationId));
+            if (committed === null) return false;
+            const bytes = projectGraphForPersistence(graphToRegister, {
+              scenarioId,
+              turnClass: "direct_answer",
+              source: "graph_registration",
+            });
+            return committed.request_hash === registrationRequestHash(bytes, brief.value);
+          } catch {
+            return false;
+          }
+        };
+        const replayOfThisOperation =
+          rawGraphPresent && !rawGraphEntityLess ? await identicalCommittedReplay() : false;
+        if (expectedGraphIdentityHash === null && rawGraphPresent && !rawGraphEntityLess && !replayOfThisOperation) {
+          log.warn(
+            {
+              event: "v5.scenario_graph_register.expected_absent_graph_unhashable",
+              request_id: requestId,
+              scenario_id: scenarioId,
+            },
+            "Graph registration — the caller expected no graph and one exists that could not be hashed; nothing written",
+          );
+          return reply
+            .code(409)
+            .send(
+              buildErrorV1(
+                "BAD_INPUT",
+                "This model already holds content that could not be read, and this was written expecting it to be empty. Nothing was written — read it again first.",
+                {
+                  code: "GRAPH_STALE",
+                  failed_expectation: "absence",
+                  expected_graph_identity_hash: null,
+                  // ⚠ NOT a hash: there is none, and saying so is the honest answer
+                  // rather than reporting `null` as though the model were empty.
+                  current_graph_identity_hash: null,
+                  current_graph_unhashable: true,
+                  expected_graph_hash: callerExpectedGraphHash ?? null,
+                  current_graph_hash: expectedGraphAnalysisHash ?? null,
+                },
+                requestId,
+              ),
+            );
+        }
+        if (expectedGraphIdentityHash !== null && !replayOfThisOperation) {
+          log.warn(
+            {
+              event: "v5.scenario_graph_register.expected_absent_graph_present",
+              request_id: requestId,
+              scenario_id: scenarioId,
+              current: expectedGraphIdentityHash,
+            },
+            "Graph registration — the caller expected no graph and one exists; nothing written",
+          );
+          return reply
+            .code(409)
+            .send(
+              buildErrorV1(
+                "BAD_INPUT",
+                "This model already has content, and this was written expecting it to be empty. Nothing was written — read it again first.",
+                {
+                  code: "GRAPH_STALE",
+                  failed_expectation: "absence",
+                  expected_graph_identity_hash: null,
+                  current_graph_identity_hash: expectedGraphIdentityHash,
+                  expected_graph_hash: callerExpectedGraphHash ?? null,
+                  current_graph_hash: expectedGraphAnalysisHash ?? null,
+                },
+                requestId,
+              ),
+            );
+        }
+      }
+      if (callerExpectedIdentityHash !== undefined) {
+        if (expectedGraphIdentityHash === undefined) {
+          return unavailable();
+        }
+        if (expectedGraphIdentityHash !== callerExpectedIdentityHash) {
+          log.warn(
+            {
+              event: "v5.scenario_graph_register.expected_graph_identity_hash_stale",
+              request_id: requestId,
+              scenario_id: scenarioId,
+              expected: callerExpectedIdentityHash,
+              current: expectedGraphIdentityHash ?? null,
+            },
+            "Graph registration — the model's identity changed since the caller read it (a rename or another non-analysis edit); nothing written",
+          );
+          return reply
+            .code(409)
+            .send(
+              buildErrorV1(
+                "BAD_INPUT",
+                // ⛔ NOT "someone edited it". The evidence is only that the
+                // server's identity hash is not the caller's — which is also true
+                // when the persisted graph became UNPARSEABLE and nobody touched
+                // it (`hashesForRawGraph` returns `identity: null` on a failed
+                // parse, `context/graph-cas-conflict.ts:179-181`), and when the
+                // graph was deleted. Naming a cause we have not established is
+                // the same fabrication as claiming a competing writer.
+                "The model on the server is not the one this was based on. Nothing was written — read it again first.",
+                {
+                  code: "GRAPH_STALE",
+                  failed_expectation: "identity",
+                  expected_graph_identity_hash: callerExpectedIdentityHash,
+                  current_graph_identity_hash: expectedGraphIdentityHash ?? null,
+                  expected_graph_hash: callerExpectedGraphHash ?? null,
+                  current_graph_hash: expectedGraphAnalysisHash ?? null,
+                },
+                requestId,
+              ),
+            );
+        }
+      }
+
+      // ── 5. Project, then hash, then write — in that order ────────────────
+      // `projectGraphForPersistence` is the single definition of "the form in
+      // which a graph is persisted". Hashing before it would advertise an
+      // identity for bytes we do not store, which is the exact ordering defect
+      // `commit.ts` was restructured to close.
+      const graphForStore = projectGraphForPersistence(graphToRegister, {
+        scenarioId,
+        turnClass: "direct_answer",
+        source: "graph_registration",
+      });
+
+      const turnId = registrationTurnId(scenarioId, operationId);
+      const requestHash = registrationRequestHash(graphForStore, brief.value);
+      // THE CANONICAL RECEIPT, captured rather than discarded. The RPC builds
+      // it and `SupabaseSessionStore` parses it onto the append outcome; this
+      // route threw that outcome away, which is why a freshly constructed model
+      // had no version identity any caller could cite.
+      let appendOutcome: Awaited<ReturnType<typeof appendCheckedGraphWrite>> | undefined;
+
+      /**
+       * ⛔ A REGISTRATION THAT WRITES A GRAPH MUST LEAVE A VERSION BEHIND.
+       *
+       * Until this, the write below carried no `modelVersion`, so
+       * `supabase-store.ts` took its NON-VERSIONED branch
+       * (`if (write.modelVersion !== undefined)`) and the RPC was never asked
+       * for a version at all. The version was not lost — it was never
+       * requested. MEASURED on deployed staging: a model built through this
+       * route wrote 28 nodes with `model_versions = 0` and
+       * `current_model_version_id = NULL`, while the conventional route minted
+       * one for the identical brief. A user's first model had no version to
+       * reread, no receipt, and no rollback point.
+       *
+       * ⭐ The SAME builder the turn path uses, not a second one — the brief
+       *    forbids duplicate controllers, and `append_turn_atomic_v5` stays the
+       *    only writer either way.
+       *
+       * ⚠ `creation_kind` is deliberately left as the carrier's
+       *   `committed_mutation`: the RPC REQUIRES exactly that value from any
+       *   caller (it raises `creation/source turn carrier mismatch` otherwise)
+       *   and decides the stored value itself —
+       *   `CASE WHEN NOT v_has_versions THEN 'initial' ELSE 'committed_mutation' END`.
+       *   So a first registration is correctly recorded as `initial` without
+       *   this route asserting anything about lineage. Verified against the
+       *   deployed function body and against the data: all 3,162 scenario-first
+       *   versions are `initial`, and `committed_mutation` never appears first.
+       */
+      const versionPlan = buildAtomicCommittedModelVersion(graphForStore, {
+        scenario_id: scenarioId,
+        turn_id: turnId,
+        baseGraphForInvariants,
+      });
+
+      try {
+        // C3 — THE SHARED PERSISTENCE FLOOR, not `store.append` directly. This
+        // route and `commitDirectAnswer` are the only two `scenarios.graph`
+        // writers, and until this change only the turn path enforced the
+        // terminal structural invariants: a registration could persist a
+        // violation the turn path refuses fail-closed. They answer different
+        // questions (a TURN vs a REGISTRATION — no LLM, no composed response,
+        // `response_emitted: false`), so they are not merged; what they share
+        // is HOW a graph persists, and that now has one owner.
+        /**
+         * ⛔ A REGISTRATION IS A GRAPH WRITE, SO IT TAKES A PLACE IN THE FENCE.
+         *
+         * MEASURED on deployed staging (Paul's OpenAI test, 22 Sep 23:22:42Z and
+         * 23:42:15Z, scenario 450acd25): both registrations logged level-50
+         * `v5.turn_fence.no_ingress_fence` — "a GRAPH WRITE reached the store
+         * with no ingress fence handle; it is proceeding UNFENCED". The fence is
+         * bound by `turnFencePreHandler` on `/orchestrate/v2/turn` only, so this
+         * route — the other `scenarios.graph` writer — never had a slot, and the
+         * store's one non-refusing gap let it through.
+         *
+         * Same two steps as the turn ingress, in the same order: bind the slot
+         * for THIS write's identity, then claim AFTER admission (auth, body
+         * validation and ownership all passed above), so a request this route
+         * refuses never advances the scenario's generation. The store then
+         * enforces it exactly as it does for a turn: superseded/stopped refuse,
+         * a failed claim refuses fail-closed.
+         *
+         * ⭐ RETRY STAYS SAFE. The claim is idempotent on (scenario_id, turn_id)
+         * and `registrationTurnId` is derived from the operation id, so a replay
+         * re-reads its ORIGINAL generation; the atomic RPC decides replay of an
+         * already-committed turn before its fence gate (20260806120000 + the
+         * 2.738(a) move to the top of the function), so the replay returns the
+         * original row and receipt rather than a superseded refusal. And a first
+         * graph onto an empty scenario is exempt from OLTF2 by design.
+         */
+        /**
+         * ⛔ REFUSE A STRUCTURALLY INVALID GRAPH BEFORE IT CLAIMS A GENERATION.
+         *
+         * Independent review of #1706 (CHANGES_REQUIRED at 19a0d8b5 and
+         * 614296be): the claim below ran BEFORE the persistence floor's
+         * invariant check, so an ingress-valid but structurally refused
+         * registration (a duplicate node id) still advanced the scenario's
+         * generation — superseding an earlier VALID in-flight turn while writing
+         * nothing itself. The same terminal check now runs first, on the exact
+         * bytes and the same trusted baseline the floor uses, and throws the
+         * same `PersistedGraphInvariantError` the catch below maps to 422. The
+         * floor inside `appendCheckedGraphWrite` is kept: nothing may mutate the
+         * graph between the two, and a second check is the cheap half of that.
+         */
+        assertNoIntroducedGraphViolations({
+          graph: graphForStore,
+          identity: { scenario_id: scenarioId, turn_id: turnId, turn_class: "direct_answer" },
+          writesGraph: true,
+          baseGraphForInvariants,
+          source: "graph_registration",
+        });
+        appendOutcome = await runWithPendingTurnFence(scenarioId, turnId, async () => {
+          await admitCurrentTurnFence();
+          // Inside the fence, so no turn can commit a newer hold between this
+          // read and the write that carries it.
+          const threadedPendings = await threadLiveHoldsThroughRegistration({
+            scenarioId,
+            turnId,
+            requestId,
+            graphForStore,
+            graphHashForStore: computeExpectedGraphCasHashes(graphForStore).expectedGraphAnalysisHash,
+          });
+          return appendCheckedGraphWrite({
+          store,
+          writesGraph: true,
+          // Only what THIS registration introduces can refuse it — a scenario
+          // whose stored graph is already invalid stays registrable.
+          //
+          // ⚠ EXCEPT ON A FRESH SCENARIO, WHERE THIS IS ABSOLUTE — a stated
+          // decision, not a side effect. `store.loadGraph` returns `null` (never
+          // `undefined`) for an absent scenario or a NULL `graph` column, and the
+          // floor's observe-only degrade keys on a STRICT `=== undefined`. So a
+          // `null` base takes the DELTA branch against an EMPTY baseline and
+          // every violation counts as introduced: A FIRST IMPORT INTO AN EMPTY
+          // SCENARIO IS FULLY FAIL-CLOSED (422), which is the dominant import
+          // journey. That is deliberate — `GraphStateIngressSchema` enforces
+          // neither node-id uniqueness nor edge referential integrity, so such
+          // imports previously received a silent 200 and stored a graph the turn
+          // path would refuse. The observe-only degrade is reached only by the
+          // base-READ-FAILURE catch above, which leaves this variable at its
+          // declared `undefined`. See the JSDoc on `baseGraphForInvariants` in
+          // `persist-graph-write.ts`; both branches are pinned by identity in
+          // this route's suite.
+          baseGraphForInvariants,
+          source: "graph_registration",
+          write: {
+            scenario_id: scenarioId,
+            turn_id: turnId,
+            // DL-7 PR B precedent (system-events/dispatch.ts): a server-initiated
+            // commit that composes no assistant prose is a `direct_answer` with a
+            // null handler_id. The DB CHECK enforces
+            // `(turn_class = 'handler') = (handler_id IS NOT NULL)`.
+            turn_class: "direct_answer",
+            handler_id: null,
+            request_hash: requestHash,
+            response_emitted: false,
+            llm_calls_used: 0,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: [],
+            graph: graphForStore,
+            // Present only when the carrier says this graph is versionable; a
+            // `none`/`skip` outcome leaves the write byte-identical to before.
+            ...(versionPlan.kind === "plan" ? { modelVersion: versionPlan.write } : {}),
+            ...(brief.value === undefined ? {} : { briefText: brief.value }),
+            ...(threadedPendings === undefined ? {} : { pending_actions: threadedPendings }),
+            expectedGraphIdentityHash,
+            expectedGraphAnalysisHash,
+          },
+          });
+        });
+      } catch (err) {
+        if (err instanceof TurnFenceRejectedError) {
+          // A later-started write on this scenario owns the graph now, or the
+          // user stopped it: nothing was written, and saying so is a 409 the
+          // caller can act on (re-read, then import again). A fence we could
+          // not claim or read is OUR outage, not a conflict — a retryable 503.
+          const conflict = err.verdict === "superseded" || err.verdict === "stopped";
+          log.warn(
+            {
+              event: "v5.scenario_graph_register.fence_refused",
+              request_id: requestId,
+              scenario_id: scenarioId,
+              verdict: err.verdict,
+              generation: err.generation,
+              max_generation: err.maxGeneration,
+            },
+            "Graph registration — refused by the turn fence; nothing written",
+          );
+          if (!conflict) return unavailable();
+          return reply
+            .code(409)
+            .send(
+              buildErrorV1(
+                "BAD_INPUT",
+                err.verdict === "stopped"
+                  ? "This change was stopped, so nothing was imported."
+                  : "A newer change to this model started while you were importing. Nothing was written — reload and import again.",
+                { code: err.verdict === "stopped" ? "TURN_STOPPED" : "TURN_SUPERSEDED" },
+                requestId,
+              ),
+            );
+        }
+        if (err instanceof PersistedGraphInvariantError) {
+          // The caller supplied these bytes, so name what is wrong with them —
+          // the `invalid()` doctrine. A 503 would be actively misleading: it
+          // invites a retry of a payload that can never succeed.
+          log.warn(
+            {
+              event: "v5.scenario_graph_register.invariant_violation",
+              request_id: requestId,
+              scenario_id: scenarioId,
+              introduced: err.violations.map((v) => ({
+                code: v.code,
+                count: v.count,
+                entity_ids: v.entity_ids,
+              })),
+            },
+            "Graph registration — refused: this graph introduces a structural violation; nothing written",
+          );
+          return invalid(
+            "GRAPH_INVARIANT_VIOLATION",
+            "This model has a structural problem and was not imported.",
+            {
+              violations: err.violations.map((v) => ({
+                code: v.code,
+                count: v.count,
+                entity_ids: v.entity_ids,
+              })),
+            },
+          );
+        }
+        if (err instanceof GraphStaleWriteError) {
+          // Atomic in-transaction CAS refused: the whole turn rolled back and
+          // nothing was clobbered. This is a 409, never a silent overwrite and
+          // never a 5xx — the caller can re-read and re-confirm.
+          log.warn(
+            {
+              event: "v5.scenario_graph_register.cas_conflict",
+              request_id: requestId,
+              scenario_id: scenarioId,
+            },
+            "Graph registration — CAS conflict; nothing written",
+          );
+          return reply
+            .code(409)
+            .send(
+              buildErrorV1(
+                // See the `invalid()` note: the shared `ErrorCode` family has
+                // no CONFLICT member, so 409 is carried by the HTTP status and
+                // the reason by `details.code`.
+                "BAD_INPUT",
+                "This model changed while you were importing. Reload and import again.",
+                { code: "GRAPH_STALE" },
+                requestId,
+              ),
+            );
+        }
+        log.error(
+          {
+            event: "v5.scenario_graph_register.commit_failed",
+            request_id: requestId,
+            scenario_id: scenarioId,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          "Graph registration — commit failed",
+        );
+        return unavailable();
+      }
+
+      /**
+       * ⛔ A REUSED OPERATION ID WITH A DIFFERENT GRAPH IS A REFUSAL, NOT A SUCCESS.
+       *
+       * The durable key held: the RPC's `(scenario_id, turn_id)` arm returned the
+       * row already there and wrote nothing. Answering 200 `registered: true`
+       * with THIS request's identity hash would tell the caller its graph is
+       * stored when the stored graph is the earlier one — the exact false
+       * "Updated X" the store's classifier docblock measured on the turn path.
+       */
+      if (appendOutcome?.priorTurnConflict === true) {
+        log.warn(
+          {
+            event: "v5.scenario_graph_register.operation_id_reused",
+            request_id: requestId,
+            scenario_id: scenarioId,
+          },
+          "Graph registration — operation_id reused with a different graph; nothing written",
+        );
+        return reply
+          .code(409)
+          .send(
+            buildErrorV1(
+              "BAD_INPUT",
+              "This import was already recorded with a different model. Nothing was changed.",
+              { code: "OPERATION_ID_REUSED" },
+              requestId,
+            ),
+          );
+      }
+
+      const identity = computeGraphIdentityHash(graphForStore as GraphStateIngress);
+
+      log.info(
+        {
+          event: "v5.scenario_graph_register.registered",
+          request_id: requestId,
+          scenario_id: scenarioId,
+          node_count: parsed.data.nodes.length,
+          edge_count: parsed.data.edges.length,
+          kind_fields_normalised: normalised.changedNodeCount,
+        },
+        "Graph registration — imported graph is now the persisted graph",
+      );
+
+      return reply.code(200).send({
+        schema: SCENARIO_GRAPH_REGISTRATION_SCHEMA,
+        scenario_id: scenarioId,
+        registered: true,
+        // ADDITIVE: present only when this request replayed a registration that
+        // was already committed under the same operation id. The receipt below
+        // is then the ORIGINAL one, not a second version.
+        ...(appendOutcome?.replayedPriorTurn === true ? { replayed: true } : {}),
+        // The ACKNOWLEDGEMENT. This is what lets a client stop saying
+        // "cannot confirm": the server has the graph, and this token names it.
+        graph_identity_hash: identity,
+        // ADDITIVE: the ANALYSIS-space hash of the bytes this registration
+        // stored — the same value the read route will report as `graph_hash`.
+        // A caller chaining a further CAS-gated edit on its OWN write needs
+        // exactly this, and re-reading to obtain it would absorb any foreign
+        // change made in between.
+        graph_hash: computeExpectedGraphCasHashes(graphForStore).expectedGraphAnalysisHash,
+        // ADDITIVE and optional: present only when this registration actually
+        // wrote a version. The skip arm omits the KEY rather than sending null,
+        // so a client never has to tell "no version written" apart from
+        // "version unknown". Identity only — attribution is deliberately not
+        // exposed on a service-key-reachable route.
+        ...(appendOutcome?.modelVersionReceipt === undefined
+          ? {}
+          : {
+              model_version: {
+                mutation_id: appendOutcome.modelVersionReceipt.mutation_id,
+                version_id: appendOutcome.modelVersionReceipt.version_id,
+                version_number: appendOutcome.modelVersionReceipt.version_number,
+                creation_kind: appendOutcome.modelVersionReceipt.creation_kind,
+                graph_identity_hash: appendOutcome.modelVersionReceipt.graph_identity_hash,
+                analysis_affecting_hash:
+                  appendOutcome.modelVersionReceipt.analysis_affecting_hash,
+              },
+            }),
+        node_count: parsed.data.nodes.length,
+        edge_count: parsed.data.edges.length,
+        kind_fields_normalised: normalised.changedNodeCount,
+        request_id: requestId,
+      });
+    },
+  );
+}

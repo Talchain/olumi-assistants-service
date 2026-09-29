@@ -1,0 +1,411 @@
+{
+ "stated_items": [
+  {
+   "kind": "goal",
+   "source_quote": "15% ARR growth next year without engineering attrition getting worse",
+   "role": "target"
+  },
+  {
+   "kind": "option",
+   "source_quote": "bet the next two quarters on the AI copilot",
+   "role": "target"
+  },
+  {
+   "kind": "option",
+   "source_quote": "finally do the platform rewrite",
+   "role": "target"
+  },
+  {
+   "kind": "option",
+   "source_quote": "neither",
+   "role": "target"
+  },
+  {
+   "kind": "figure",
+   "source_quote": "lift win rate from 22% to 30%",
+   "value": 30,
+   "unit": "%",
+   "role": "context"
+  },
+  {
+   "kind": "figure",
+   "source_quote": "that number came from Marcus polling 15 AEs on Slack, so treat accordingly",
+   "role": "context"
+  },
+  {
+   "kind": "figure",
+   "source_quote": "+\u00a315/seat/month on our 40,000 seats",
+   "value": 15,
+   "unit": "\u00a3/seat/month",
+   "role": "context"
+  },
+  {
+   "kind": "figure",
+   "source_quote": "up to \u00a37.2m a year if attach were 100%",
+   "value": 7200000,
+   "unit": "\u00a3",
+   "role": "context"
+  },
+  {
+   "kind": "figure",
+   "source_quote": "25% attach feels honest, call it \u00a31.8m",
+   "value": 1800000,
+   "unit": "\u00a3",
+   "role": "context"
+  },
+  {
+   "kind": "figure",
+   "source_quote": "Elena's team said 6 engineers for 8 months once you include evals and the safety review",
+   "value": 6,
+   "unit": "engineers",
+   "role": "context"
+  },
+  {
+   "kind": "figure",
+   "source_quote": "LLM serving cost is the thing nobody can pin down: finance modelled \u00a33 per seat per month, could be half that or triple depending on caching",
+   "value": 3,
+   "unit": "\u00a3/seat/month",
+   "role": "context"
+  },
+  {
+   "kind": "figure",
+   "source_quote": "year one is more like 10%, so \u00a3700k in year one \u2014 the \u00a31.8m is a year-three number",
+   "value": 700000,
+   "unit": "\u00a3",
+   "role": "context"
+  },
+  {
+   "kind": "constraint",
+   "source_quote": "legal has NOT confirmed this, and if it's wrong the whole thing is dead in enterprise, which is 60% of revenue",
+   "role": "constraint",
+   "direction": "floor"
+  },
+  {
+   "kind": "figure",
+   "source_quote": "rewrite = 10 engineers, 12 months, and history says double whatever engineering estimates on this codebase",
+   "value": 10,
+   "unit": "engineers",
+   "role": "context"
+  },
+  {
+   "kind": "figure",
+   "source_quote": "the monolith adds roughly 30% drag to every feature",
+   "value": 30,
+   "unit": "%",
+   "role": "context"
+  },
+  {
+   "kind": "figure",
+   "source_quote": "we lost two staff engineers to it last year",
+   "value": 2,
+   "unit": "engineers",
+   "role": "context"
+  },
+  {
+   "kind": "constraint",
+   "source_quote": "the board approved \u00a32m for strategic initiatives. Realistically it's \u00a31.2m after the security remediation eats its share",
+   "value": 1200000,
+   "unit": "\u00a3",
+   "role": "constraint",
+   "direction": "ceiling"
+  },
+  {
+   "kind": "constraint",
+   "source_quote": "the copilot must demo at Camunda Days on 14 May 2027",
+   "role": "constraint",
+   "direction": "ceiling"
+  },
+  {
+   "kind": "figure",
+   "source_quote": "three competitors shipped copilots in the last two quarters, PMM says we're 12 months behind already",
+   "role": "context"
+  },
+  {
+   "kind": "figure",
+   "source_quote": "deploys take 45 minutes",
+   "value": 45,
+   "unit": "minutes",
+   "role": "context"
+  }
+ ],
+ "claims": [
+  {
+   "claim_kind": "factor",
+   "label": "Copilot Year-One Revenue",
+   "basis": [
+    12
+   ],
+   "category": "controllable",
+   "value": 700000,
+   "sets_to": 700000
+  },
+  {
+   "claim_kind": "factor",
+   "label": "LLM Serving Cost",
+   "basis": [
+    10
+   ],
+   "category": "external"
+  },
+  {
+   "claim_kind": "factor",
+   "label": "Data-Processing Legal Clearance",
+   "basis": [
+    13
+   ],
+   "category": "observable"
+  },
+  {
+   "claim_kind": "factor",
+   "label": "Engineering Capacity Consumed",
+   "basis": [
+    9,
+    14
+   ],
+   "category": "controllable"
+  },
+  {
+   "claim_kind": "factor",
+   "label": "Platform Velocity Drag",
+   "basis": [
+    15
+   ],
+   "category": "observable"
+  },
+  {
+   "claim_kind": "factor",
+   "label": "Engineering Attrition Risk",
+   "basis": [
+    16
+   ],
+   "category": "observable"
+  },
+  {
+   "claim_kind": "factor",
+   "label": "Competitive Window",
+   "basis": [
+    19
+   ],
+   "category": "external"
+  },
+  {
+   "claim_kind": "factor",
+   "label": "Available Strategic Budget",
+   "basis": [
+    17
+   ],
+   "category": "observable",
+   "value": 1200000
+  },
+  {
+   "claim_kind": "option_refinement",
+   "label": "Rewrite First, Then Copilot (Sequenced)",
+   "basis": [
+    1,
+    2
+   ]
+  },
+  {
+   "claim_kind": "causal_link",
+   "label": "Copilot option sets year-one revenue factor",
+   "basis": [
+    1,
+    12
+   ],
+   "effect": "positive",
+   "sets_to": 700000,
+   "from_stated": 1,
+   "to_claim": 0
+  },
+  {
+   "claim_kind": "causal_link",
+   "label": "Copilot option sets engineering capacity consumed",
+   "basis": [
+    1,
+    9
+   ],
+   "effect": "positive",
+   "sets_to": 0.8,
+   "from_stated": 1,
+   "to_claim": 3
+  },
+  {
+   "claim_kind": "causal_link",
+   "label": "Rewrite option sets platform velocity drag reduction",
+   "basis": [
+    2,
+    15
+   ],
+   "effect": "negative",
+   "sets_to": 0.0,
+   "from_stated": 2,
+   "to_claim": 4
+  },
+  {
+   "claim_kind": "causal_link",
+   "label": "Rewrite option sets engineering capacity consumed",
+   "basis": [
+    2,
+    14
+   ],
+   "effect": "positive",
+   "sets_to": 1.0,
+   "from_stated": 2,
+   "to_claim": 3
+  },
+  {
+   "claim_kind": "causal_link",
+   "label": "Status quo sets revenue factor to zero uplift",
+   "basis": [
+    3
+   ],
+   "effect": "positive",
+   "sets_to": 0,
+   "from_stated": 3,
+   "to_claim": 0
+  },
+  {
+   "claim_kind": "causal_link",
+   "label": "Sequenced option sets engineering capacity consumed high",
+   "basis": [
+    8
+   ],
+   "effect": "positive",
+   "sets_to": 1.0,
+   "from_claim": 8,
+   "to_claim": 3
+  },
+  {
+   "claim_kind": "causal_link",
+   "label": "Sequenced option sets platform velocity drag to zero after rewrite",
+   "basis": [
+    8,
+    15
+   ],
+   "effect": "negative",
+   "sets_to": 0.0,
+   "from_claim": 8,
+   "to_claim": 4
+  },
+  {
+   "claim_kind": "causal_link",
+   "label": "Copilot year-one revenue drives ARR growth goal",
+   "basis": [
+    0,
+    12
+   ],
+   "effect": "positive",
+   "strength": 0.55,
+   "from_claim": 0,
+   "to_stated": 0
+  },
+  {
+   "claim_kind": "causal_link",
+   "label": "LLM serving cost erodes copilot revenue contribution",
+   "basis": [
+    10
+   ],
+   "effect": "negative",
+   "strength": 0.4,
+   "from_claim": 1,
+   "to_claim": 0
+  },
+  {
+   "claim_kind": "causal_link",
+   "label": "Legal clearance gates enterprise copilot revenue",
+   "basis": [
+    13
+   ],
+   "effect": "positive",
+   "strength": 0.75,
+   "from_claim": 2,
+   "to_claim": 0
+  },
+  {
+   "claim_kind": "causal_link",
+   "label": "Engineering capacity consumed increases attrition risk",
+   "basis": [
+    16
+   ],
+   "effect": "positive",
+   "strength": 0.5,
+   "from_claim": 3,
+   "to_claim": 5
+  },
+  {
+   "claim_kind": "causal_link",
+   "label": "Platform velocity drag suppresses feature throughput and ARR growth",
+   "basis": [
+    15
+   ],
+   "effect": "negative",
+   "strength": 0.35,
+   "from_claim": 4,
+   "to_stated": 0
+  },
+  {
+   "claim_kind": "causal_link",
+   "label": "Engineering attrition risk threatens ARR growth goal",
+   "basis": [
+    0,
+    16
+   ],
+   "effect": "negative",
+   "strength": 0.45,
+   "from_claim": 5,
+   "to_stated": 0
+  },
+  {
+   "claim_kind": "causal_link",
+   "label": "Competitive window pressure reduces revenue upside if delayed",
+   "basis": [
+    19
+   ],
+   "effect": "negative",
+   "strength": 0.5,
+   "from_claim": 6,
+   "to_claim": 0
+  },
+  {
+   "claim_kind": "causal_link",
+   "label": "Available budget constrains which options are viable",
+   "basis": [
+    17
+   ],
+   "effect": "positive",
+   "strength": 0.3,
+   "from_claim": 7,
+   "to_stated": 0
+  },
+  {
+   "claim_kind": "prior",
+   "label": "LLM serving cost prior: wide uncertainty, finance midpoint \u00a33/seat/month, could be \u00a31.50 to \u00a39",
+   "basis": [
+    10
+   ],
+   "value": 3
+  },
+  {
+   "claim_kind": "prior",
+   "label": "Legal clearance probability is binary and unconfirmed \u2014 treat as coin-flip until legal responds",
+   "basis": [
+    13
+   ]
+  },
+  {
+   "claim_kind": "prior",
+   "label": "Win rate lift from 22% to 30% is based on 15 AE Slack poll \u2014 high uncertainty, treat as optimistic prior",
+   "basis": [
+    4,
+    5
+   ]
+  },
+  {
+   "claim_kind": "prior",
+   "label": "Rewrite duration likely 18-24 months given historical doubling pattern on this codebase",
+   "basis": [
+    14
+   ]
+  }
+ ]
+}

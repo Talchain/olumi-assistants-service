@@ -1,0 +1,103 @@
+name: OpenAPI Validation
+
+on:
+  pull_request:
+    # Always run on PRs (required check) - path filtering done in job
+  # No `feat/**` push trigger: a feature branch is validated by its PR above.
+  # The push copy ran a second time on the same SHA (see ci.yml `on:`).
+  push:
+    branches:
+      - main
+    paths:
+      - 'openapi.yaml'
+      - 'src/**/*.ts'
+      - '.github/workflows/openapi-validation.yml'
+  workflow_dispatch:  # Allow manual triggering for required status checks
+
+permissions:
+  contents: read
+  packages: read
+
+# A newer push to a PR supersedes that PR's older run. A run on main or staging
+# gets a group of its OWN (keyed on run_id), so it is never cancelled — neither
+# in progress nor while PENDING. `cancel-in-progress: false` alone does NOT give
+# that: GitHub still replaces a pending run when a newer one joins the same
+# group (measured: 50 of 119 staging CI runs, 48h to 24 Sep 2026, under
+# ci.yml's shared-group block).
+concurrency:
+  group: ${{ github.workflow }}-${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging') && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/staging' && github.ref != 'refs/heads/main' }}
+
+jobs:
+  validate:
+    name: Validate OpenAPI Spec
+    runs-on: ubuntu-latest
+    timeout-minutes: 10  # Prevent hanging jobs
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Fetch all history for changed files detection
+
+      - name: Check for relevant file changes
+        id: changes
+        run: |
+          # For PRs, check if any relevant files changed
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch origin ${{ github.base_ref }}
+            CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+            if echo "$CHANGED_FILES" | grep -qE '^(openapi\.yaml|src/.*\.ts|\.github/workflows/openapi-validation\.yml)$'; then
+              echo "relevant_changes=true" >> $GITHUB_OUTPUT
+              echo "✅ Relevant files changed - will validate"
+            else
+              echo "relevant_changes=false" >> $GITHUB_OUTPUT
+              echo "⏭️  No relevant files changed - skipping validation"
+            fi
+          else
+            echo "relevant_changes=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install pnpm
+        if: steps.changes.outputs.relevant_changes == 'true'
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        if: steps.changes.outputs.relevant_changes == 'true'
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        if: steps.changes.outputs.relevant_changes == 'true'
+        run: pnpm install --frozen-lockfile
+        env:
+          NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
+
+      - name: Validate OpenAPI spec
+        if: steps.changes.outputs.relevant_changes == 'true'
+        run: pnpm openapi:validate
+
+      - name: Generate TypeScript types
+        if: steps.changes.outputs.relevant_changes == 'true'
+        run: pnpm openapi:generate
+
+      - name: Check for type generation issues
+        if: steps.changes.outputs.relevant_changes == 'true'
+        run: |
+          if [ ! -f "src/generated/openapi.d.ts" ]; then
+            echo "ERROR: TypeScript types were not generated"
+            exit 1
+          fi
+          echo "✅ TypeScript types generated successfully"
+
+      - name: Upload generated types as artifact
+        if: steps.changes.outputs.relevant_changes == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-types
+          path: src/generated/openapi.d.ts
+          retention-days: 7

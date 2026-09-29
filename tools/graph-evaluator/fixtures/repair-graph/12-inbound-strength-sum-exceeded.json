@@ -1,0 +1,44 @@
+{
+  "id": "rg-12-inbound-strength-sum-exceeded",
+  "name": "INBOUND_STRENGTH_SUM_EXCEEDED — sum > 1.0 on outcome node",
+  "description": "out_profit has 3 inbound directed edges summing to |0.55|+|0.50|+|0.45|=1.50. Repair must reduce the highest-magnitude edge until sum ≤ 1.0, preserving sign.",
+  "brief": "We're evaluating how multiple factors drive profit. The inbound strength sum exceeds 1.0 on out_profit.",
+  "graph": {
+    "nodes": [
+      {"id": "dec_ops", "kind": "decision", "label": "Operations Strategy"},
+      {"id": "opt_efficiency", "kind": "option", "label": "Efficiency Focus", "data": {"interventions": {"fac_cost_reduction": 1.0, "fac_automation": 0.8}}},
+      {"id": "opt_growth", "kind": "option", "label": "Growth Focus", "data": {"interventions": {"fac_cost_reduction": 0.3, "fac_automation": 0.4}}},
+      {"id": "fac_cost_reduction", "kind": "factor", "label": "Cost Reduction", "category": "controllable", "data": {"value": 0.4, "extractionType": "inferred", "factor_type": "cost", "uncertainty_drivers": ["Target TBD"]}},
+      {"id": "fac_automation", "kind": "factor", "label": "Automation Level", "category": "controllable", "data": {"value": 0.3, "extractionType": "inferred", "factor_type": "other", "uncertainty_drivers": ["Tool selection pending"]}},
+      {"id": "fac_pricing_power", "kind": "factor", "label": "Pricing Power", "category": "external", "prior": {"distribution": "uniform", "range_min": 0.0, "range_max": 1.0}},
+      {"id": "out_profit", "kind": "outcome", "label": "Profit Margin"},
+      {"id": "goal_profitability", "kind": "goal", "label": "Sustainable Profitability"}
+    ],
+    "edges": [
+      {"from": "dec_ops", "to": "opt_efficiency", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "dec_ops", "to": "opt_growth", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_efficiency", "to": "fac_cost_reduction", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_efficiency", "to": "fac_automation", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_growth", "to": "fac_cost_reduction", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_growth", "to": "fac_automation", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "fac_cost_reduction", "to": "out_profit", "strength": {"mean": 0.55, "std": 0.18}, "exists_probability": 0.85, "effect_direction": "positive"},
+      {"from": "fac_automation", "to": "out_profit", "strength": {"mean": 0.50, "std": 0.20}, "exists_probability": 0.80, "effect_direction": "positive"},
+      {"from": "fac_pricing_power", "to": "out_profit", "strength": {"mean": 0.45, "std": 0.18}, "exists_probability": 0.75, "effect_direction": "positive"},
+      {"from": "out_profit", "to": "goal_profitability", "strength": {"mean": 0.70, "std": 0.15}, "exists_probability": 0.90, "effect_direction": "positive"}
+    ]
+  },
+  "violations": [
+    {"code": "INBOUND_STRENGTH_SUM_EXCEEDED", "node_or_edge": "out_profit", "detail": "Sum of absolute inbound strength.mean values = 1.50 (>1.0). Reduce highest-magnitude inbound edge."}
+  ],
+  "expected": {
+    "violations_addressed": ["INBOUND_STRENGTH_SUM_EXCEEDED"],
+    "preserve_node_ids": ["dec_ops", "opt_efficiency", "opt_growth", "fac_cost_reduction", "fac_automation", "fac_pricing_power", "out_profit", "goal_profitability"],
+    "forbidden_edges": [],
+    "required_edges": [],
+    "no_bridge_edges": false,
+    "preserve_bidirected": false,
+    "check_external_prior": false,
+    "check_inbound_sum_node": "out_profit",
+    "no_json_comments": true
+  }
+}

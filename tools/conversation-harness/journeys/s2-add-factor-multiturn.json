@@ -1,0 +1,11 @@
+{
+  "comment": "S2 add-factor multi-turn — answer the tool's follow-up, then a bare 'yes' with a competing NEWER offer on the table (S2F3 elicits fresh suggestions before the yes). Measures which offer the bare yes binds to: the wire shows the interpretation, the L0 diff shows what actually changed in DB. Dims: D9 (edit-intent -> applied-in-DB), D1, D3.",
+  "requires_seeded_scenario": true,
+  "dims": ["D9", "D1", "D3"],
+  "turns": [
+    { "id": "S2F1", "stage": "analyse", "message": "Add a factor for regulatory approval risk", "turn_class_hint": "edit", "edit_intent": true },
+    { "id": "S2F2", "stage": "analyse", "message": "It mainly affects whether we ship on time — connect it to the goal.", "turn_class_hint": "edit" },
+    { "id": "S2F3", "stage": "analyse", "message": "What else should I improve in this model?", "turn_class_hint": "coach" },
+    { "id": "S2F4", "stage": "analyse", "message": "yes", "turn_class_hint": "edit" }
+  ]
+}

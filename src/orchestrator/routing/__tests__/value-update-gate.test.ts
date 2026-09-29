@@ -1,0 +1,459 @@
+/**
+ * Unit tests for `isValueUpdatePhrasing` — the value-update negative
+ * gate used by route-v2 to bypass the fragile edit_graph LLM JSON
+ * dispatch path for clear value-update phrasings.
+ *
+ * Table-driven so future regressions (e.g. additional filler tokens,
+ * new kind keywords) are easy to lock in. Each table row is a test
+ * input plus its expected gate verdict (`true` = suppress edit_graph,
+ * `false` = stay on the edit_graph route).
+ *
+ * Mirrors the integration tests in
+ * tests/integration/orchestrator/route-v2-edit-graph.test.ts but at
+ * the predicate boundary so failures point directly at the gate
+ * module without HTTP / Fastify / mocks in the failure path.
+ */
+import { describe, it, expect } from 'vitest';
+
+import {
+  isValueUpdatePhrasing,
+  shouldSuppressEditDispatchForValueUpdate,
+  __testOnly,
+} from '../value-update-gate.js';
+
+interface Case {
+  readonly label: string;
+  readonly message: string;
+  readonly expect: boolean; // true = suppress (gate matches)
+}
+
+const SUPPRESS_CASES: ReadonlyArray<Case> = [
+  // Clause A — set/update X to <numeric or fuzzy non-structural Y>
+  { label: 'set numeric',                       message: 'set churn to 5%',                                                expect: true },
+  { label: 'update categorical',                message: 'update existing team maturity to mid-weight developers',         expect: true },
+  { label: 'update categorical with "to be"',   message: 'update the existing team maturity to be mid-weight developers',  expect: true },
+  // Clause A — `change` X to <numeric or fuzzy non-structural Y>.
+  // Admitted 2026-09-14. The first two are VERBATIM LIVE CAPTURES, not
+  // invented phrasings: both were label-only renames in production.
+  {
+    label: 'change + currency (live capture 20260811T012704Z-fresh-5e036e)',
+    message: 'Change Annual CRM Spend to £63,000.',
+    expect: true,
+  },
+  {
+    label: 'change + "from X to Y" (live capture, label-value-divergence.ts:7)',
+    message: 'change the raise option from $49 to $39',
+    expect: true,
+  },
+  { label: 'change + bare numeric',              message: 'change churn to 79',                                            expect: true },
+  { label: 'change + currency',                  message: 'change churn to £79',                                           expect: true },
+  { label: 'change + percentage',                message: 'change churn to 79%',                                           expect: true },
+  { label: 'change + possessive option price',   message: "Change the Premium option's price to £79",                      expect: true },
+  { label: 'change + categorical (set/update twin)', message: 'change the existing team maturity to mid-weight developers', expect: true },
+  // Clause B — increase/decrease/etc X by Y
+  { label: 'increase by numeric',               message: 'increase price by 10%',                                          expect: true },
+  { label: 'decrease by fuzzy',                 message: 'decrease the cost by half',                                      expect: true },
+  { label: 'lower by fuzzy',                    message: 'Lower the cost factor by a notch',                               expect: true },
+  // Original failing user prompt with leading preamble
+  {
+    label: 'preamble + categorical update',
+    message:
+      'All of our developers are middleweight, so please update the existing team maturity to be mid-weight developers',
+    expect: true,
+  },
+  // Clause C — goal-target phrasings (lane 20). The live staging leak
+  // (scenario 55df6984…, turn fac8dc19…, 2026-07-07): "set a success
+  // target OF …" carries no " to ", missed clause A, dispatched to
+  // edit_graph, and the edit LLM wrote non-contract fields onto the
+  // goal node under a false "Success target … set" receipt. Goal-target
+  // registration is add_constraint's contract (the only writer of
+  // goal_threshold_raw/_unit/_cap/goal_threshold), so these phrasings
+  // must reach the TurnExecutor tool-use path.
+  {
+    label: 'goal target "of" (live leak, verbatim)',
+    message:
+      'Set a success target of a 15% cost reduction on the goal Reduce Operating Costs',
+    expect: true,
+  },
+  {
+    label: 'goal target "of" without goal name',
+    message: 'Set a success target of a 15% cost reduction',
+    expect: true,
+  },
+  {
+    label: 'goal target "to" (lane-15 dead-end phrasing)',
+    message: 'Set the success target to a 15% increase',
+    expect: true,
+  },
+  { label: 'goal target raise',                 message: 'Raise the success target to 20%',                                expect: true },
+  { label: 'goal target update at',             message: 'Update our success target at 90% retention',                     expect: true },
+
+  // Clause D — constraint phrasings (add_constraint dead-letter fix).
+  // PR #464 shipped an honest refusal for value-edits on non-factor nodes
+  // whose closing sentence promises "ask me to add a constraint on it" and
+  // renders a `chip_prompt_refuse_constraint` chip replaying
+  // "Add a constraint on <label>." That text hit EDIT_GRAPH_POSITIVE_REGEX
+  // via `add`, was NOT caught by any clause here (`add` is excluded from
+  // clauses A/B as structural), dispatched to the V4 edit_graph LLM — which
+  // has NO constraint operation — and no-opped into the
+  // buildEditClarifyFallbackParts clarifier. Live-proven: 3 probes, 0 blocks,
+  // exit_path edit_graph, no constraint EVER added, INCLUDING a fully
+  // specified probe (so under-specification was never the cause).
+  // `add_constraint` is registered (registry.ts) and the router tool-schema
+  // teaches it, so these phrasings MUST reach the TurnExecutor tool-use path.
+  {
+    label: 'constraint — the refusal chip verbatim (under-specified)',
+    message: 'Add a constraint on Key Talent Attrition.',
+    expect: true,
+  },
+  {
+    label: 'constraint — fully specified (live probe 2, verbatim)',
+    message: 'Add a constraint on Key Talent Attrition of at most 0.5.',
+    expect: true,
+  },
+  {
+    label: 'constraint on a factor (live probe 3, verbatim)',
+    message: 'Add a constraint on Office Rent Cost of at most 0.5.',
+    expect: true,
+  },
+  { label: 'constraint — bare add',             message: 'Add a constraint',                                               expect: true },
+  { label: 'constraint — plural',               message: 'Add constraints on Office Rent Cost',                            expect: true },
+  { label: 'constraint — "put a constraint"',   message: 'Put a constraint on the cost factor',                            expect: true },
+  { label: 'constraint — "apply a constraint"', message: 'Apply a constraint to Key Talent Attrition below 0.5',           expect: true },
+  { label: 'constraint — "place a constraint"', message: 'Place a hard constraint on headcount',                           expect: true },
+];
+
+const NON_SUPPRESS_CASES: ReadonlyArray<Case> = [
+  // A4 deterministic clarification — must reach edit_graph dispatcher
+  { label: 'A4 add as a risk',                  message: 'Add team dynamics as a risk',                                    expect: false },
+  // Structural intent with NO filler
+  { label: 'structural include',                message: 'update the model to include market dynamics',                    expect: false },
+  // Structural intent with adverbial fillers (filler-window guard)
+  { label: 'structural "to also include"',      message: 'update the model to also include market dynamics',               expect: false },
+  { label: 'structural "to better reflect"',    message: 'update the model to better reflect market dynamics',             expect: false },
+  { label: 'structural "to just capture"',      message: 'update the model to just capture supply risk',                   expect: false },
+  { label: 'structural "to actually incorporate"', message: 'update the model to actually incorporate market dynamics',    expect: false },
+  { label: 'structural "to now contain"',       message: 'update the model to now contain churn factor',                   expect: false },
+  // Kind change — must reach edit_graph dispatcher
+  { label: 'kind change "to a factor"',         message: 'set goal to a factor',                                           expect: false },
+  // Kind change with filler ("to be a factor", "to become an outcome") — kind-target filler-window guard
+  { label: 'kind change "to be a factor"',      message: 'set goal to be a factor',                                        expect: false },
+  { label: 'kind change "to be an outcome"',    message: 'update risk X to be an outcome',                                 expect: false },
+  { label: 'kind change "to become a decision"', message: 'update the model to become a decision',                         expect: false },
+  { label: 'kind change "to become an option"', message: 'update node X to become an option',                              expect: false },
+  { label: 'kind change "to factor" no article', message: 'set X to factor',                                               expect: false },
+  // Verbs deliberately excluded from the gate
+  { label: 'verb "remove" excluded',            message: 'remove salary cost pressure',                                    expect: false },
+  // `change` KIND/STRUCTURAL twins. ⚠ LABEL CORRECTED 2026-09-14: this row
+  // read 'verb "change" excluded' and was passing for the WRONG REASON —
+  // the verb exclusion made EVERY `change` message false, so the row proved
+  // nothing about kind discrimination. `change` is now in
+  // VALUE_UPDATE_VERBS_TO and these rows are load-bearing for the first
+  // time: each one reaches the pattern and is rejected by
+  // STRUCTURAL_OR_KIND_LOOKAHEAD / META_NOUN_GUARD on the MESSAGE.
+  // Opposite-direction twins of the `change` SUPPRESS rows above — the
+  // gate guards two opposite harms (GAP: a value instruction renames a
+  // label; LIE: a kind instruction writes a number) and one direction
+  // alone cannot validate it.
+  { label: 'change kind target (no article)',   message: 'change risk X to outcome',                                       expect: false },
+  { label: 'change kind target "to a factor"',  message: 'change X to a factor',                                           expect: false },
+  { label: 'change kind filler "to be a risk"', message: 'change X to be a risk',                                          expect: false },
+  { label: 'change kind bare "to factor"',      message: 'change X to factor',                                             expect: false },
+  { label: 'change plural kind "to become options"', message: 'change nodes to become options',                            expect: false },
+  { label: 'change structural "to include"',    message: 'change the model to include market dynamics',                    expect: false },
+  { label: 'change structural filler "to also include"', message: 'change the model to also include market dynamics',      expect: false },
+  { label: 'change meta-noun "the model"',      message: 'change the model to be more realistic',                          expect: false },
+  { label: 'change meta-noun "the graph"',      message: 'change the graph to be more accurate',                           expect: false },
+  { label: 'change meta-noun "the diagram"',    message: 'change the diagram to be cleaner',                               expect: false },
+  { label: 'change meta-noun no article',       message: 'change model to better represent churn',                         expect: false },
+  // `change` is NOT admitted to clause B (`by`) — that verb set is
+  // quantity-directional (increase/decrease/reduce/raise/lower).
+  { label: 'change + "by" not admitted',        message: 'change churn by 10',                                             expect: false },
+  { label: 'verb "add" excluded',               message: 'add market competition as a factor',                             expect: false },
+  // Edge-strength phrasing — `raise` without `by` is not a value-update
+  { label: 'raise X (no by)',                   message: 'raise the strength of the market risk edge',                     expect: false },
+  // Existing legacy regression-locks
+  { label: 'increase budget to NUMERIC (legacy)', message: 'Increase the budget to 300k',                                  expect: false },
+  { label: 'tweak (no by)',                     message: 'Tweak the probability on the regulatory edge slightly',          expect: false },
+  // Trivial non-edits
+  { label: 'meta question',                     message: 'What about team dynamics?',                                      expect: false },
+  { label: 'plain greeting',                    message: 'Hello',                                                          expect: false },
+  // Goal-target NON-edits (lane 20) — questions/descriptions about the
+  // target carry no gate verb driving the noun, and must not be swept.
+  { label: 'goal target question',              message: 'What is our success target?',                                    expect: false },
+  { label: 'goal target explain',               message: 'Explain the success target',                                     expect: false },
+
+  // Meta-noun guard — model-quality requests with "the model" / "the
+  // graph" / "the diagram" as the verb's object are whole-graph
+  // structural changes, never value updates.
+  { label: 'meta-noun "the model" + quality',   message: 'update the model to be more realistic',                          expect: false },
+  { label: 'meta-noun "the model" + quality',   message: 'update the model to be more complete',                           expect: false },
+  { label: 'meta-noun "the model" + represent', message: 'update the model to better represent churn',                     expect: false },
+  { label: 'meta-noun "the graph"',             message: 'update the graph to be more accurate',                           expect: false },
+  { label: 'meta-noun "the diagram"',           message: 'update the diagram to be cleaner',                               expect: false },
+  { label: 'meta-noun "model" no article',      message: 'update model to better reflect market dynamics',                 expect: false },
+
+  // Plural kind targets — same kind-change semantics as singulars; must
+  // remain on edit_graph.
+  { label: 'plural kind "to be risks"',         message: 'set X to be risks',                                              expect: false },
+  { label: 'plural kind "to become options"',   message: 'update nodes to become options',                                 expect: false },
+  { label: 'plural kind "to be factors"',       message: 'set the goals to be factors',                                    expect: false },
+
+  // Clause D negatives — the constraint clause must stay NARROW.
+  // The clause requires a constraint-INTENT verb driving the noun within a
+  // tight window. Removal is NOT add_constraint's contract (the handler
+  // only adds), so `remove`/`delete` MUST stay on the edit_graph route —
+  // routing them to TurnExecutor would trade one dead end for another.
+  { label: 'constraint removal stays on edit_graph',   message: 'Remove the constraint on Office Rent Cost',               expect: false },
+  { label: 'constraint deletion stays on edit_graph',  message: 'Delete the constraint on churn',                          expect: false },
+  // `set` is EXCLUDED from clause D and this row is the lock.
+  // Suppressing edit_graph sends the message to TurnExecutor, whose first
+  // stop is the deterministic value-update pre-route. That module's
+  // EDIT_VERB_PATTERN contains `set` but NOT `add` (measured), and the
+  // module has no notion of "constraint"/"at most" — so a suppressed
+  // "Set a constraint on churn of at most 5%" would satisfy its
+  // verb + quantity + factor-candidate predicates and silently set
+  // churn's VALUE to 5% instead of registering a 5% CEILING. A wrong
+  // mutation is strictly worse than the dead end clause D fixes. Keeping
+  // this false leaves the phrasing exactly where it is today.
+  // Re-admitting `set` REQUIRES teaching the deterministic pre-route to
+  // stand down on constraint phrasings first — if you flip this row,
+  // that work is your precondition, not an afterthought.
+  { label: '"set a constraint" excluded (deterministic pre-route collision)', message: 'Set a constraint on churn of at most 5%', expect: false },
+  // Questions / descriptions about constraints carry no constraint-intent
+  // verb driving the noun and must not be swept into the gate.
+  { label: 'constraint question',               message: 'What constraints do I have?',                                    expect: false },
+  { label: 'constraint explain',                message: 'Explain the constraint on churn',                                expect: false },
+  { label: 'constraint describe',               message: 'Describe the constraints in my model',                           expect: false },
+  // Distant co-occurrence — the noun is not the verb's object. The tight
+  // token window keeps these out (mirrors clause C's rationale).
+  {
+    label: 'constraint distant co-occurrence',
+    message: 'Update the model and then tell me how you would describe the constraint',
+    expect: false,
+  },
+  // Structural `add` requests WITHOUT the constraint noun must be
+  // untouched — these are add_node territory and are pinned by
+  // route-v2-edit-lifecycle test #5.
+  { label: 'add risk (structural, unchanged)',  message: 'Add a risk for coordination overhead',                           expect: false },
+  { label: 'add factor (structural, unchanged)', message: 'add market competition as a factor',                            expect: false },
+  // Structural `add_node` requests that merely CONTAIN "constraint" as
+  // part of the new node's NAME. Clause D requires the constraint noun to
+  // be the verb's DIRECT OBJECT precisely so these are not stolen from
+  // edit_graph: a first-draft clause D using clause C's looser
+  // `(?:\s+\S+){0,4}?` token window matched BOTH of these (measured), which
+  // would have silently broken structural add_node for any node whose label
+  // ends in "constraint". Locked here so a future widening fails loudly.
+  { label: 'add factor NAMED "...constraint"',  message: 'Add a factor for budget constraint',                             expect: false },
+  { label: 'add risk NAMED "...constraint"',    message: 'Add a risk called supply constraint',                            expect: false },
+];
+
+describe('isValueUpdatePhrasing — table-driven gate behaviour', () => {
+  describe('cases that MUST suppress edit_graph (route to D1 / Sonnet)', () => {
+    for (const c of SUPPRESS_CASES) {
+      it(`suppresses: ${c.label} — ${JSON.stringify(c.message)}`, () => {
+        expect(isValueUpdatePhrasing(c.message)).toBe(true);
+      });
+    }
+  });
+
+  describe('cases that MUST keep edit_graph dispatch', () => {
+    for (const c of NON_SUPPRESS_CASES) {
+      it(`keeps:   ${c.label} — ${JSON.stringify(c.message)}`, () => {
+        expect(isValueUpdatePhrasing(c.message)).toBe(false);
+      });
+    }
+  });
+
+  describe('predicate exhaustiveness', () => {
+    it('returns false for empty string', () => {
+      expect(isValueUpdatePhrasing('')).toBe(false);
+    });
+    it('returns false for whitespace-only', () => {
+      expect(isValueUpdatePhrasing('   \n\t  ')).toBe(false);
+    });
+    it('is case-insensitive', () => {
+      expect(isValueUpdatePhrasing('SET CHURN TO 5%')).toBe(true);
+      expect(isValueUpdatePhrasing('Set Churn To 5%')).toBe(true);
+    });
+  });
+
+  describe('shouldSuppressEditDispatchForValueUpdate — part-accounting stand-down (2026-07-20)', () => {
+    it('suppresses a PURE value update exactly as isValueUpdatePhrasing does', () => {
+      expect(shouldSuppressEditDispatchForValueUpdate('set churn to 5%')).toBe(true);
+      expect(shouldSuppressEditDispatchForValueUpdate('increase price by 10%')).toBe(true);
+    });
+
+    it("suppresses #549's value+value compound (no structural part — the batch lane owns it)", () => {
+      // NB: labels must not contain a literal kind keyword ('Factor X'),
+      // or the PRE-EXISTING kind-change lookahead already keeps the
+      // message on the edit lane — that behaviour is untouched.
+      expect(
+        shouldSuppressEditDispatchForValueUpdate(
+          'Set Marketing Budget to 0.6 and Sales Budget to 0.8',
+        ),
+      ).toBe(true);
+    });
+
+    // POSITIVE CONTROL (mutation-checked 2026-07-20). Each case below FIRST
+    // asserts `isValueUpdatePhrasing` is TRUE, so the stand-down is provably
+    // the thing that flips the suppressor to false. Without that control the
+    // assertion is VACUOUS: the obvious phrasing
+    // "...and add a new factor called Shipping costs" puts the kind noun
+    // 'factor' inside the gate's OWN kind-change scan window, so the gate
+    // already returns false and `toBe(false)` passes for the wrong reason
+    // (reverting the stand-down left this suite green — the defect that
+    // prompted this control).
+    const REACHABLE_MIXED = [
+      'Increase Support cost by 10 and add a new factor called Shipping costs',
+      'Set Support cost to 30 and create one called Shipping costs',
+      'Set Support cost to 30 and remove the Localisation factor',
+      'Set Support cost to 30 and link it to Gross margin',
+      'Add a new factor called Shipping costs and set Support cost to 30',
+    ] as const;
+
+    it.each(REACHABLE_MIXED)(
+      'STANDS DOWN for a mixed value+structural message so the edit lane serves both halves: %s',
+      (message) => {
+        // Positive control: the gate itself DOES fire on this phrasing...
+        expect(isValueUpdatePhrasing(message)).toBe(true);
+        // ...and the stand-down is what releases it to the edit lane.
+        // Pre-fix, this suppressed edit dispatch and the deterministic lane
+        // silently swallowed the structural half (rehearsal defect A class).
+        expect(shouldSuppressEditDispatchForValueUpdate(message)).toBe(false);
+      },
+    );
+
+    it('never suppresses what isValueUpdatePhrasing never suppressed (structural-only messages)', () => {
+      expect(
+        shouldSuppressEditDispatchForValueUpdate('add a new factor called Shipping costs'),
+      ).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // Clause-A verb parity (2026-09-14, the `change` admission).
+  // -------------------------------------------------------------------
+  describe('clause-A verb parity — the discrimination is per-MESSAGE, not per-VERB', () => {
+    // PRECONDITION PIN. Without this, every assertion below passes
+    // VACUOUSLY if `change` is ever removed from the array again: the
+    // DISCRIMINATED table would still agree (all three false) and the
+    // VALUE table would simply not be reached with a third verb. This
+    // makes such a removal fail loudly, by name.
+    it('clause A carries exactly set / update / change', () => {
+      expect([...__testOnly.VALUE_UPDATE_VERBS_TO]).toEqual(['set', 'update', 'change']);
+    });
+
+    // Messages whose KIND / STRUCTURAL / META-NOUN character is carried by
+    // the MESSAGE. Every clause-A verb must agree that these stay on
+    // edit_graph. Measured at the pristine tip BEFORE `change` was
+    // admitted: all three verbs were already false on every row here —
+    // which is the evidence that the verb exclusion bought no
+    // discrimination it did not already have.
+    const DISCRIMINATED = [
+      'X to a factor',
+      'risk X to outcome',
+      'X to be a risk',
+      'X to factor',
+      'nodes to become options',
+      'the model to be more realistic',
+      'the model to include market dynamics',
+      'the graph to be more accurate',
+      'the diagram to be cleaner',
+    ] as const;
+
+    // Messages that are unambiguously value-bearing.
+    const VALUE_BEARING = [
+      'churn to 79%',
+      'churn to £79',
+      'Annual CRM Spend to £63,000.',
+      'the existing team maturity to mid-weight developers',
+    ] as const;
+
+    it.each(DISCRIMINATED)(
+      'every clause-A verb keeps a kind/structural message on edit_graph: "<verb> %s"',
+      (tail) => {
+        for (const verb of __testOnly.VALUE_UPDATE_VERBS_TO) {
+          expect(isValueUpdatePhrasing(`${verb} ${tail}`)).toBe(false);
+        }
+      },
+    );
+
+    it.each(VALUE_BEARING)(
+      'every clause-A verb routes a value message to the value path: "<verb> %s"',
+      (tail) => {
+        for (const verb of __testOnly.VALUE_UPDATE_VERBS_TO) {
+          expect(isValueUpdatePhrasing(`${verb} ${tail}`)).toBe(true);
+        }
+      },
+    );
+  });
+
+  // -------------------------------------------------------------------
+  // KNOWN GAP — pinned honestly rather than left invisible.
+  // -------------------------------------------------------------------
+  describe('KNOWN GAP: clause A over-reaches on "the constraint on X to <qty>"', () => {
+    /**
+     * `<verb> the constraint on churn to 5%` is claimed by clause A and
+     * routed to the value path, where it can set churn's VALUE to 5%
+     * instead of registering a 5% CEILING — the exact harm documented at
+     * CONSTRAINT_INTENT_VERBS (which excludes `set` from clause D for this
+     * reason, while clause A admits it one clause earlier).
+     *
+     * ⚠ THIS IS PRE-EXISTING AND VERB-GENERAL, NOT INTRODUCED BY THE
+     * `change` ADMISSION — measured at the pristine tip, the `set` and
+     * `update` arms were ALREADY true there. Admitting `change` extends an
+     * existing over-reach from two verbs to three; it does not create it.
+     * Closing it requires teaching the deterministic pre-route to stand
+     * down on constraint phrasings first (the precondition
+     * CONSTRAINT_INTENT_VERBS already names), which is a separate change
+     * with its own review — deliberately NOT bundled here.
+     *
+     * Pinned as an EXACT set so the suite REDs if it grows OR shrinks: a
+     * new verb joining clause A shows up here, and the day the pre-route
+     * is taught, these flip and this block must be revisited rather than
+     * silently continuing to pass.
+     */
+    const CONSTRAINT_OVERREACH = ['set', 'update', 'change'] as const;
+
+    it('every clause-A verb currently over-claims the constraint phrasing', () => {
+      const claimed = [...__testOnly.VALUE_UPDATE_VERBS_TO].filter((verb) =>
+        isValueUpdatePhrasing(`${verb} the constraint on churn to 5%`),
+      );
+      expect(claimed).toEqual([...CONSTRAINT_OVERREACH]);
+    });
+
+    it('the over-reach is the " to <qty>" form ONLY — "of at most" stays out', () => {
+      // ⚠ MEASURED, not assumed — the first assertion here was written from
+      // the author's head as `true` and the measurement refuted it.
+      // "of at most 5%" carries NO ` to `, so clause A cannot fire and
+      // clause D's `set` exclusion holds: it stays on edit_graph, exactly
+      // as CONSTRAINT_INTENT_VERBS intends. The two phrasings differ by one
+      // preposition and route to opposite lanes.
+      expect(isValueUpdatePhrasing('Set a constraint on churn of at most 5%')).toBe(false);
+      // Contrast control — the probe can see a TRUE in the same family, so
+      // the `false` above is a discrimination and not a dead assertion.
+      expect(isValueUpdatePhrasing('Add a constraint on Key Talent Attrition.')).toBe(true);
+    });
+  });
+
+  describe('__testOnly module-state immutability', () => {
+    it('exposes frozen keyword arrays (cannot be mutated by tests)', () => {
+      expect(Object.isFrozen(__testOnly)).toBe(true);
+      expect(Object.isFrozen(__testOnly.STRUCTURAL_KEYWORDS)).toBe(true);
+      expect(Object.isFrozen(__testOnly.KIND_KEYWORDS)).toBe(true);
+      expect(Object.isFrozen(__testOnly.META_NOUNS)).toBe(true);
+      expect(Object.isFrozen(__testOnly.VALUE_UPDATE_VERBS_TO)).toBe(true);
+      expect(Object.isFrozen(__testOnly.VALUE_UPDATE_VERBS_BY)).toBe(true);
+    });
+
+    it('mutation attempts on frozen arrays throw or no-op', () => {
+      expect(() => {
+        // Cast away readonly to attempt the mutation that
+        // Object.freeze must reject.
+        (__testOnly.STRUCTURAL_KEYWORDS as unknown as string[]).push('hacked');
+      }).toThrow();
+      expect(__testOnly.STRUCTURAL_KEYWORDS).not.toContain('hacked');
+    });
+  });
+});

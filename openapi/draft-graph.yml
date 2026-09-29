@@ -1,0 +1,39 @@
+openapi: 3.1.0
+info:
+  title: Assist Draft Graph API
+  version: 0.1.0
+paths:
+  /assist/draft-graph:
+    post:
+      summary: Draft a decision graph for a brief
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../src/schemas/assist.ts#/DraftGraphInput
+      responses:
+        "200":
+          description: Drafted graph
+          content:
+            application/json:
+              schema:
+                $ref: ../src/schemas/assist.ts#/DraftGraphOutput
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: ../src/schemas/assist.ts#/ErrorV1
+        "429":
+          description: Cost guard exceeded
+          content:
+            application/json:
+              schema:
+                $ref: ../src/schemas/assist.ts#/ErrorV1
+        "500":
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: ../src/schemas/assist.ts#/ErrorV1

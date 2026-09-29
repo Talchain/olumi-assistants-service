@@ -1,0 +1,4 @@
+ WARN  Issue while reading "/Users/paulslee/Documents/GitHub/.worktrees/cee-draft-speed/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/Users/paulslee/Documents/GitHub/.worktrees/cee-draft-speed/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+schema: ANTHROPIC_EDIT_GRAPH_SCHEMA, serialized 995 bytes
+PASS | claude-sonnet-4-6 | 995B | 3458ms | grammar compiled (HTTP 200)

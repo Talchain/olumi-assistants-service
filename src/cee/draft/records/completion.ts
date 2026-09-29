@@ -1,0 +1,1999 @@
+/**
+ * THE COMPLETION PASS — one focused turn that closes the gaps pass 1 left.
+ *
+ * ── WHY A SECOND PASS AT ALL, AND WHAT SETTLED IT ──────────────────────────
+ * Not a hunch: a decisive probe (2026-08-12, `round6/PROBE-RESULT.md`) showed
+ * the missing connectivity was PRESENT IN THE BRIEF and simply not stated. Shown
+ * its own emission and the verdict on it, the model cleared EVERY blocking class
+ * on both long briefs in one turn — B1's `MISSING_BRIDGE ×1 · NO_PATH_TO_GOAL ×6
+ * · NO_EFFECT_PATH ×6` and B3's `INVALID_EDGE_TYPE ×3` all went to zero, with 0
+ * unresolvable references across 63 new claims. The alternative branch — asking
+ * the USER for the missing links — was pre-committed and NOT reached, because on
+ * these briefs the information was never absent.
+ *
+ * ── THE FOUR PROPERTIES THIS MODULE EXISTS TO HOLD ─────────────────────────
+ *
+ * 1. **CLAIMS ONLY.** The completion grammar has no `stated_items` at all, so a
+ *    fabricated user quote is STRUCTURALLY IMPOSSIBLE rather than merely
+ *    forbidden. Reusing the draft grammar would have been easier and is exactly
+ *    wrong: `stated_items` carries `minItems: 1`, so the second turn would be
+ *    REQUIRED to re-emit the user's words — an invitation to paraphrase them,
+ *    with the paraphrase then wearing a `stated` provenance badge. The schema is
+ *    built from `buildDraftClaimItemSchema()`, never restated (trap 12).
+ *
+ * 2. **APPEND-ONLY.** Existing claims keep their indices, so every reference
+ *    already on the wire stays valid; new claims land at `base + k` and the
+ *    model is TOLD `base` so it can reference its own additions. `stated_items`
+ *    is carried through untouched and the merge asserts it.
+ *
+ * 3. **THE VERDICT, NEVER AN ANSWER.** The model is shown what did not resolve
+ *    and what shape is illegal — derived from the projector's own disclosures —
+ *    and the legal vocabulary. It is never shown a suggested edge. A completion
+ *    pass that proposed the answer would be the machine authoring the user's
+ *    causal model, which is the failure this whole mechanism exists to prevent.
+ *
+ * 4. **BOTH CLASSES IN ONE ASK.** The probe's round 1 asked only about orphaned
+ *    references; the three illegal shapes the projector already knew about
+ *    survived the merge and re-appeared as `INVALID_EDGE_TYPE ×3`. A one-class
+ *    ask leaves the other class standing, and we knew about it the whole time.
+ *
+ * ── ⚠⚠ HOW PASS 2 IS BOUNDED, AND WHY IT IS NOT THE RUNAWAY DETECTOR ───────
+ * The streaming runaway detector cannot bound this call, and pretending it does
+ * would be the worst kind of imaginary guarantee. Measured (#923 review): the
+ * completion pass emits `claim_kind` at roughly character 12, so EVERY
+ * detector gate — stall, hard ceiling, total chars — lifts on the first delta.
+ * The detector gives pass 2 essentially no protection.
+ *
+ * So pass 2 does not rely on it. **The call is NON-STREAMING**, which removes
+ * the streaming detector from the picture entirely rather than leaving a
+ * lifted one in place looking like a bound, and it is held by two limits this
+ * module owns and states:
+ *
+ *   RECORDS_COMPLETION_MAX_TOKENS  — an output ceiling (the probe's largest
+ *                                    completion was 35 claims)
+ *   RECORDS_COMPLETION_WALL_MS     — a hard wall-clock abort the caller applies
+ *                                    with an AbortSignal (probe: 19.2 s for the
+ *                                    35-claim completion, 4.0 s for the 3-claim
+ *                                    one)
+ *
+ * On ANY failure — abort, provider error, unparseable output, a merge that would
+ * disturb `stated_items` — the caller keeps PASS 1's projection unchanged. The
+ * completion is strictly additive, so its failure mode is "no improvement",
+ * never "worse than not trying". That property is asserted by a test whose cases
+ * CAN trigger the transformation, not by two cases that could never have been
+ * changed either way (trap 13d).
+ */
+import {
+  buildDraftClaimItemSchema,
+  type DraftInferenceClaim,
+  type DraftRecordSet,
+} from "./grammar.js";
+import {
+  type RecordProjection,
+  STATED_ITEM_DROP_KIND,
+  UNRESCUABLE_EDGE_SHAPES,
+  projectedKindAfterNormalisation,
+} from "./projector.js";
+import { buildInterventionSignature } from "../../../validators/graph-validator.js";
+import { ALLOWED_EDGES } from "../../../validators/graph-validator.types.js";
+import { BUCKET_C_CODES } from "../../unified-pipeline/stages/repair/bucket-c-codes.js";
+
+/**
+ * Output ceiling for the completion turn. The probe's largest real completion
+ * was 35 claims; this is a comfortable multiple of that and well under any
+ * budget the draft call itself uses.
+ */
+export const RECORDS_COMPLETION_MAX_TOKENS = 3000;
+
+/**
+ * Hard wall-clock bound the caller enforces with an AbortSignal. The probe
+ * measured 19.2 s (35 claims) and 4.0 s (3 claims) for this turn against a
+ * ~8–9k-character focused prompt.
+ *
+ * ⚠ This number is also a GATE-5 commitment, not just a safety limit. Gate 5
+ * compares the TWO-PASS TOTAL against arm A's committed p50, so an unbounded
+ * second call could pass every correctness gate and fail the latency one.
+ */
+export const RECORDS_COMPLETION_WALL_MS = 35_000;
+
+/** One thing the completion turn is asked about. */
+export interface CompletionAskItem {
+  readonly kind:
+    | "unresolved_reference"
+    | "illegal_shape"
+    | "unconnected_record"
+    | "option_without_chain"
+    /**
+     * ⭐⭐ THERE IS NO GOAL NODE AT ALL — and until this kind existed, nothing
+     * asked. See the derivation on `enumerateCompletionAsk`: the two
+     * connectivity items below are both gated on `goalIds.length > 0`, so a
+     * goal-less graph — the worst graph the projector can produce — received an
+     * ask that was SILENT about the one thing wrong with it.
+     */
+    | "no_goal"
+    /**
+     * ⭐⭐ A STATED LIMIT NAMED WHAT IT APPLIES TO AND THE PROJECTOR REFUSED THE
+     * BINDING — the reference did not resolve, or it resolved to something that
+     * cannot carry a threshold.
+     *
+     * ⛔ ITS OWN KIND, AND THE KIND IS THE WHOLE MECHANISM — not a copy change.
+     * `isModelAnswerableAskItem` is keyed on `kind`, so folding these into
+     * `unresolved_reference` makes them INHERIT "answerable" from a kind whose
+     * other members are genuinely answerable on the claim axis, and the grammar
+     * is never consulted. The repair here is a change to `applies_to_stated` /
+     * `applies_to_claim` on a `stated_items[]` entry, which the completion turn
+     * cannot express — see the derivation on `isModelAnswerableAskItem`. Put to
+     * the model anyway it is an advertised action terminating in refusal, the
+     * class this estate already shipped once on the Research CTA.
+     *
+     * ⚠ The user still sees every one of these: each reason carries a notice
+     * kind in `NOTICE_KIND_BY_REASON`, which is a different path, and the item
+     * stays in `ask.items` for telemetry and `shouldKeepCompletion`.
+     */
+    | "constraint_target_unbindable"
+    | "no_chain_reaches_goal"
+    | "no_outcome_or_risk"
+    | "options_indistinguishable";
+  readonly detail: string;
+  /**
+   * ⭐⭐ THE VALIDATOR CODE THIS ITEM PREDICTS, or `null` when the item is a
+   * projector DISCLOSURE about something the validator will never see.
+   *
+   * **REQUIRED, not optional, and that is the whole mechanism.** A new ask kind
+   * cannot be added without an explicit decision about which of the two it is —
+   * the compiler refuses the push site otherwise. An optional field would
+   * default a new kind to "harmless" silently, which is the fail-OPEN direction
+   * and the exact hand-maintained-mirror shape this estate keeps paying for.
+   *
+   * The two classes are distinguished STRUCTURALLY, not by judgement:
+   *
+   * - `null` — the item was built from `projection.dropped`. Those edges are
+   *   NOT in `projection.graph`, so no validator stage can raise anything about
+   *   them. The disclosure exists for the user and for this ask; it carries no
+   *   consequence for the draft's validity.
+   * - a code — the item was computed on `projection.graph`, i.e. on the exact
+   *   structure the validator receives. The code names what it will raise.
+   *
+   * Whether a named code BLOCKS is then read from the sweep's own routing
+   * (`BUCKET_C_CODES`), never restated here: see `isBlockingAskItem`.
+   */
+  readonly validatorCode: string | null;
+}
+
+export interface CompletionAsk {
+  readonly items: readonly CompletionAskItem[];
+  /** `claims.length` at the time of the ask — the index the model's first new claim will take. */
+  readonly baseClaimIndex: number;
+}
+
+/**
+ * ⭐⭐ IS THIS ASK ITEM ONE THAT BLOCKS A DRAFT?
+ *
+ * Derived twice over, so neither derivation has to be trusted alone:
+ *   1. the item must name a validator code at all (built from the graph the
+ *      validator sees, not from the projector's dropped list), and
+ *   2. that code must be routed to **Bucket C** by
+ *      `bucket-c-codes.ts` — the sweep's single authority for "cannot be
+ *      repaired deterministically; the draft does not pass on this".
+ *
+ * `BUCKET_C_CODES` is IMPORTED, never retyped. When a code leaves Bucket C —
+ * `CYCLE_DETECTED` already did, to Bucket A — this classification moves with it
+ * on the next build, with nothing for anyone to remember.
+ */
+/**
+ * ⭐⭐ CAN THE COMPLETION TURN ACTUALLY ANSWER THIS ITEM?
+ *
+ * A DIFFERENT QUESTION FROM `isBlockingAskItem`, AND THE DISTINCTION IS THE
+ * WHOLE POINT (trap 21 — two questions under one name is the estate's chronic
+ * defect). "Does this block the draft?" and "is there a legal response to this?"
+ * are independent, and `no_goal` is the case that separates them: it blocks, and
+ * NOTHING the completion grammar admits can clear it.
+ *
+ * ── WHY `no_goal` IS UNANSWERABLE, over the complete claim axis ─────────────
+ * Its repair is *"file the objective as a `stated_items` entry of kind `goal`"*,
+ * and the completion turn cannot do that, three times over:
+ *   · `buildRecordsCompletionSchema()` exposes ONLY `claims`, with
+ *     `additionalProperties: false` — a `stated_items` key is rejected before the
+ *     answer is read;
+ *   · `goal` is not in `DRAFT_RECORD_CLAIM_KINDS`, so it cannot arrive on the
+ *     claim axis either (`outcome` and `risk` can, which is the contrast that
+ *     shows this is a real gap and not a blind read);
+ *   · `mergeCompletionClaims` returns `stated_items_disturbed` if `stated_items`
+ *     is present AT ALL, so literal compliance DISCARDS THE ENTIRE COMPLETION —
+ *     including the claims that would have repaired every OTHER item on the same
+ *     draft. All three goal-less corpus briefs carry 6-12 other items, so that is
+ *     a reachable regression, not a hypothetical one.
+ *
+ * ⚠ AND THE PROMPT CANNOT NAME A TARGET ON THIS CASE: `buildRecordsCompletionPrompt`'s
+ * `goalLines` block is conditional on a goal EXISTING, so no `to_stated: N` is
+ * offered precisely here — while the same message says *"Emit ONLY new claims"*.
+ *
+ * ⭐ THE FABRICATION-SAFETY ARGUMENT AND THE UNANSWERABILITY ARE ONE SENTENCE.
+ * *"The completion grammar carries no `stated_items`, so the second turn cannot
+ * fabricate a user quote"* is exactly why raising the ask is safe and exactly why
+ * it cannot be answered. The first version of this change drew one consequence
+ * from that fact and not the other, and put an unanswerable instruction to the
+ * model — an advertised action terminating in refusal, which is the defect class
+ * this estate has already shipped once on the Research CTA.
+ *
+ * ── DERIVED, NOT MIRRORED (trap 12) ────────────────────────────────────────
+ * The kind is listed, but the VERDICT is read from the completion grammar at
+ * call time. The day `stated_items` is added to `buildRecordsCompletionSchema`,
+ * `no_goal` becomes answerable and reaches the model automatically, with nothing
+ * for anyone to remember. A hardcoded `false` would go stale silently in the
+ * fail-CLOSED direction — permanently withholding an ask that had become legal.
+ */
+const ASK_KINDS_NEEDING_A_STATED_ITEM: ReadonlySet<CompletionAskItem["kind"]> = new Set([
+  "no_goal",
+]);
+
+/**
+ * ⭐⭐ THE TWO VERBS, NAMED APART — this set used to hold both, and that was
+ * trap 21 in miniature (its own comment said "SAME GATE, SAME REASON, DIFFERENT
+ * VERB", which is the tell).
+ *
+ * `no_goal` needs a `stated_items` entry ADDED, and remains withheld: this
+ * grammar still cannot mint the user's words.
+ * A refused limit needs fields on an EXISTING entry CHANGED, which
+ * `constraint_corrections` now expresses without touching `source_quote` or
+ * `kind` — so it is answerable, and only it.
+ */
+const ASK_KINDS_NEEDING_A_CONSTRAINT_CORRECTION: ReadonlySet<CompletionAskItem["kind"]> = new Set([
+  "constraint_target_unbindable",
+]);
+
+export function isModelAnswerableAskItem(item: CompletionAskItem): boolean {
+  const properties = buildRecordsCompletionSchema().properties as Record<string, unknown> | undefined;
+  const has = (k: string): boolean =>
+    properties !== undefined && Object.prototype.hasOwnProperty.call(properties, k);
+  // ⚠ STILL DERIVED FROM THE GRAMMAR, NEVER HARDCODED — same reason as before:
+  // a literal `true` here would go stale in the fail-OPEN direction, putting an
+  // ask to the model that it has no field to answer with, which is an advertised
+  // action terminating in refusal.
+  if (ASK_KINDS_NEEDING_A_STATED_ITEM.has(item.kind)) return has("stated_items");
+  if (ASK_KINDS_NEEDING_A_CONSTRAINT_CORRECTION.has(item.kind)) return has("constraint_corrections");
+  return true;
+}
+
+/**
+ * The ask items that are worth spending a provider turn on. Exported because the
+ * TURN GATE reads it too: a draft whose only complaint is unanswerable must buy
+ * no completion call at all.
+ */
+export function modelAnswerableAskItems(
+  ask: CompletionAsk,
+): readonly CompletionAskItem[] {
+  return ask.items.filter(isModelAnswerableAskItem);
+}
+
+export function isBlockingAskItem(item: CompletionAskItem): boolean {
+  return item.validatorCode !== null && BUCKET_C_CODES.has(item.validatorCode);
+}
+
+/**
+ * ⭐⭐ THE KEEP/DISCARD MEASURE FOR A COMPLETION PASS.
+ *
+ * Counts only the ask items that correspond to a blocking validator class. The
+ * non-blocking disclosures are excluded BY DERIVATION (they carry `null`
+ * because the projector already dropped their edges), not by a list of kinds
+ * someone has to keep current.
+ *
+ * ── WHY THIS EXISTS, MEASURED ─────────────────────────────────────────────
+ * The first comparator counted NODES, and read the option-duplication merge's
+ * legitimate 8→6 collapse as harm. The second counted ALL ask items, and in the
+ * round-7 acceptance block DISCARDED 7 of 11 completion passes — including two
+ * whose graphs plainly improved (`ask 5→8` while `nodes 6→9`, `edges 4→12`; and
+ * `ask 2→2` while `edges 17→25`). Both were counting the artefact instead of
+ * the harm (trap 23), and the second did it because the ask mixes two classes
+ * that do not carry the same consequence. Two rounds on one predicate is the
+ * signal to stop guessing and DERIVE the thing being measured (trap 22f) —
+ * which is what the `validatorCode`/`BUCKET_C_CODES` pair does.
+ */
+export function countBlockingAskItems(ask: CompletionAsk): number {
+  return ask.items.filter(isBlockingAskItem).length;
+}
+
+/**
+ * ⭐⭐ THE DECISION ITSELF — keep this completion pass, or throw it away?
+ *
+ * **KEEP IFF IT DOES NOT INCREASE THE BLOCKING CLASSES. A TIE IS A KEEP.**
+ *
+ * ── WHY NON-WORSENING RATHER THAN STRICT IMPROVEMENT ───────────────────────
+ * The property the completion has to hold is stated at its own call site:
+ * *"the completion can only ever add; it can never be the reason a draft got
+ * worse"*. That is a NON-WORSENING property, so the test that enforces it is
+ * `<=`. Requiring strict improvement enforces a DIFFERENT property — "the
+ * completion must have fixed something" — which is not a safety property at
+ * all, and it is what threw away run 18's `edges 17→25` at an unchanged
+ * blocking count of 2→0… and run 14's, and run 10's.
+ *
+ * The merge is append-only and already refuses an empty completion, so a tie
+ * with claims added is a strictly richer causal model at no validity cost.
+ *
+ * ── WHY IT LIVES HERE AND NOT AT THE CALL SITE ─────────────────────────────
+ * It was an inline expression in the adapter through two wrong versions, where
+ * no test could reach it: a spec could only RESTATE the comparison, and a
+ * restatement agrees with itself whatever the adapter does. Naming it puts the
+ * real decision under the mutants.
+ */
+/**
+ * ⭐⭐ THE IDENTITY OF AN ASK ITEM — what it is ABOUT, not how many there are.
+ *
+ * Built from the same two fields the ask's own de-duplicator uses (`kind` +
+ * `detail`), so an item's identity here and its uniqueness there cannot drift
+ * apart. `detail` is what names the entity — the option, the record, the
+ * reference — which is exactly the part a count throws away.
+ */
+export function askItemIdentity(item: CompletionAskItem): string {
+  return JSON.stringify([item.kind, item.detail]);
+}
+
+/**
+ * ⭐⭐ DID PASS 2 REGRESS ANY PROTECTED PASS-1 CONTENT?
+ *
+ * ── WHY A SEPARATE QUESTION FROM THE ASK COMPARISON ────────────────────────
+ * The ask measures VALIDITY — will the draft be blocked? This measures
+ * PRESERVATION — is the user's first-pass content still theirs? A completion can
+ * leave validity untouched (or improve it) while quietly rewriting pass 1, and
+ * an audit produced all three shapes: an intervention on a stated option
+ * overwritten; a stated figure removed from the graph entirely; a stated option's
+ * merged refinement reclassified back out, taking the option's intervention with
+ * it and leaving it disconnected. Two questions, and answering both with the ask
+ * count is how all three passed (trap 21).
+ *
+ * ── THE THREE INVARIANTS, WRITTEN AGAINST THE SPEC ─────────────────────────
+ * The property at the call site is *"the completion can only ever ADD"*. So the
+ * invariants are stated as append-only over pass 1, NOT as the negation of the
+ * three failures above — a guard written to the shape of the failure in hand is
+ * blind to the fourth shape (trap 13d):
+ *
+ *   (a) EXISTENCE — every node on the pass-1 graph is still on the pass-2 graph.
+ *   (b) NO OVERWRITE — every intervention pass 1 established still holds its
+ *       pass-1 value. New keys are free; changed ones are not.
+ *   (c) NO RECLASSIFICATION — every refinement pass 1 merged into a node is
+ *       still merged into it.
+ *
+ * Additions are unconstrained in all three. That is the whole asymmetry: this
+ * cannot refuse a completion for being richer, only for being destructive.
+ */
+export function completionRegressesProtectedContent(
+  before: RecordProjection,
+  after: RecordProjection,
+  opts?: {
+    /**
+     * ⭐⭐ THE PASS-1 OPTION EFFECTS ARE NOT TRUSTWORTHY ON THIS EMISSION, so
+     * this guard must not defend them against the repair path.
+     *
+     * MEASURED 15 Sep 2026. On a compound brief every option→factor link was
+     * off by +1; two were provably invalid and refused, and the other four were
+     * KEPT WRONG — the person was shown "hold at £49" priced at £59. The
+     * completion pass then ASKED the right question (`ref_out_of_range` →
+     * `unresolved_reference`, model-answerable) and RETURNED THE RIGHT ANSWER
+     * (`0.59→0.49`, `0.7→0.6`) — and THIS GUARD DISCARDED THE WHOLE COMPLETION
+     * as a preservation violation.
+     *
+     * So the repair path already worked and the guard threw it away. The guard
+     * was not wrong in general: overwriting a pass-1 intervention IS normally a
+     * regression. It was wrong to treat a DEMONSTRABLY UNRELIABLE value as
+     * protected content.
+     *
+     * ⛔ SCOPED TO OPTION-NODE INTERVENTIONS AND NOTHING ELSE. Every other limb
+     * — `intervention_removed`, `removed_undisclosed`, the two absorption
+     * receipts, and the same check on non-option nodes — is untouched, so a
+     * completion still cannot delete content or reclassify an absorption.
+     * Absent ⇒ byte-identical to before.
+     */
+    readonly optionEffectsUnreliable?: boolean;
+  },
+): readonly string[] {
+  const optionEffectsUnreliable = opts?.optionEffectsUnreliable === true;
+  const violations: string[] = [];
+  const afterById = new Map(after.graph.nodes.map((n) => [n.id, n]));
+
+  // ⭐⭐ A DISAPPEARANCE IS NOT AUTOMATICALLY A LOSS — AND THE FIRST VERSION OF
+  // THIS FUNCTION GOT THAT WRONG, WHICH IS WHY THIS NOTE EXISTS.
+  //
+  // Written as a flat "every pass-1 node must still be on the pass-2 graph", it
+  // reported three violations on `round7-completion-pass07` — a HISTORIC CAPTURE
+  // whose completion took blocking items 7 → 0. The nodes had not been lost: they
+  // had been MERGED into their stated options, which is the projector's own
+  // deliberate, disclosed, content-preserving operation (`merged_refinements`
+  // records exactly what was folded and into what). The guard would have thrown
+  // away one of the best completion passes on record, for doing its job.
+  //
+  // The property is not "nothing may disappear" — the projector legitimately
+  // merges and demotes — it is "nothing may disappear SILENTLY". So a node's
+  // absence is a violation only when nothing in the pass-2 projection accounts
+  // for it. That is the same distinction this codebase draws everywhere else:
+  // the harm was never the operation, it was the silence.
+  // ⭐⭐ ABSORBED, NOT MERELY MENTIONED — AND THE DIFFERENCE IS THE WHOLE GUARD.
+  //
+  // The first version of this set was built from `after.dropped`, i.e. "anything
+  // the projection said something about". That is too weak by exactly the case
+  // this function exists to catch: a pass-1 stated figure pruned as
+  // `unconnected_to_goal` IS in `dropped` — and it has still been DELETED. The
+  // completion invalidated the edge that held it to the goal, the figure left the
+  // user's graph, and a disclosure-shaped test would have called that accounted
+  // for and kept the pass.
+  //
+  // Absorption is the narrower, correct question: was this content FOLDED INTO A
+  // SURVIVING NODE? Only two operations do that, and both record it on the
+  // survivor's provenance — a merge writes `merged_refinements`, a demote writes
+  // `undeveloped_duplicates`. A prune writes neither, because nothing absorbed
+  // it. So the set is built from the ABSORPTION RECORDS alone, which are also the
+  // only entries that can name a survivor to point at.
+  // ⚠⚠ C1 — KEYED BY IDENTITY, NOT BY LABEL, AND THE FIRST VERSION WAS THE VERY
+  // DEFECT THIS FILE FIXES ONE FUNCTION AWAY.
+  //
+  // The absorption set was built from bare LABEL STRINGS, and the excuse was
+  // `accountedFor.has(node.label)` — so a deletion of protected pass-1 content was
+  // silently excused whenever ANY UNRELATED survivor's merge record happened to
+  // carry the same string. Demonstrated by an adversarial review:
+  //
+  //     before: "Churn is 10%" + "Improve onboarding"
+  //     after : "Churn is 10%" DELETED; "Improve onboarding".merged_refinements
+  //             = ["Churn is 10%"]   ← an unrelated node absorbed the same label
+  //     ⇒ violations = []            ← the deletion excused
+  //
+  // That is an assertion bound to a VALUE PREDICATE ANOTHER OBJECT SATISFIES —
+  // trap 19, the exact shape `shouldKeepCompletion`'s identity binding below was
+  // written to remove, reproduced inside its own load-bearing guard.
+  //
+  // The absorption records name a LABEL, not an id, so identity is reconstructed
+  // from the pair that actually did the absorbing: a disappearance is excused only
+  // when a survivor that is ITSELF still on the graph records having absorbed this
+  // node's label AND that survivor is not the node in question. Keying by
+  // `(survivor_id, label)` ties the excuse to a specific, checkable event.
+  const accountedFor = new Set<string>();
+  for (const [survivorId, prov] of Object.entries(after.provenance)) {
+    if (!afterById.has(survivorId)) continue; // an absorber that itself vanished excuses nothing
+    for (const label of prov.merged_refinements ?? []) accountedFor.add(`${survivorId}␟${label}`);
+    // The cause-side twin. Omitting it would leave a legitimately-absorbed label
+    // unaccounted and manufacture a false completion gap — the absorption is the
+    // same shape and the same direction, only the parent's kind differs.
+    for (const label of prov.merged_restatements ?? []) accountedFor.add(`${survivorId}␟${label}`);
+    for (const label of prov.undeveloped_duplicates ?? []) accountedFor.add(`${survivorId}␟${label}`);
+  }
+  /**
+   * ⚠⚠ AND KEYING BY `(survivor, label)` WAS STILL NOT ENOUGH — the first repair
+   * for C1 did not fix C1, and the test caught it.
+   *
+   * Tying the excuse to a specific surviving absorber stops a VANISHED absorber
+   * from excusing anything, which is a real improvement. But the reviewer's case
+   * survived it untouched: an unrelated survivor recording the same label still
+   * satisfied "some survivor absorbed this string", because the absorption records
+   * carry a LABEL and never the absorbed node's id. Binding to a slightly more
+   * specific value predicate is not binding by identity.
+   *
+   * ⭐ SO THE DISCRIMINATOR IS DERIVED FROM WHAT THE TWO OPERATIONS ACTUALLY
+   * ABSORB, which the provenance fields state exactly: `merged_refinements` holds
+   * *"labels of `option_refinement` claims merged into this STATED option"* and
+   * `undeveloped_duplicates` holds *"labels of MODEL options withdrawn"*. **Both
+   * consume MODEL-ORIGIN content only.** Neither can consume a node the user
+   * stated — there is no operation in this projector that folds a user's own
+   * figure into anything.
+   *
+   * Therefore: a `stated` node's disappearance is NEVER excusable, whatever any
+   * label says, and only an `ai_inferred` node can be absorbed. That is a claim
+   * about the producer's semantics rather than about string equality, so a
+   * coincidence of labels can no longer buy an excuse.
+   *
+   * ── ⚠ THE RESIDUAL, ROWED RATHER THAN LEFT IMPLIED (ROADMAP 2.1093) ────────
+   * This is a DOMAIN RESTRICTION, not a full identity binding, and the difference
+   * is reachable: an `ai_inferred` node's deletion can still be excused by an
+   * unrelated survivor that happens to record the same label. The protected class
+   * that matters — the user's own stated content — is closed, and the residual is
+   * bounded to model-authored nodes, so the harm is "a model contribution vanished
+   * unremarked" rather than "the user's words vanished".
+   *
+   * ⚠ IT IS NOT CLOSED HERE BECAUSE THE DATA DOES NOT EXIST TO CLOSE IT: the
+   * absorption records (`merged_refinements`, `undeveloped_duplicates`) carry
+   * LABELS ONLY. A real identity binding needs the projector to record the
+   * ABSORBED NODE'S ID alongside the label, which changes a published provenance
+   * shape and its consumers — a separate change with its own review. Pinned by a
+   * test asserting exactly this residual, so it is visible in the suite rather
+   * than living in a comment nobody runs.
+   */
+  const wasAbsorbed = (nodeId: string, label: string): boolean => {
+    if (before.provenance[nodeId]?.provenance_class === "stated") return false;
+    for (const survivorId of afterById.keys()) {
+      if (survivorId === nodeId) continue;
+      if (accountedFor.has(`${survivorId}␟${label}`)) return true;
+    }
+    return false;
+  };
+
+  for (const node of before.graph.nodes) {
+    // ⚠ PROTECTED CONTENT IS THE USER'S AND THE MODEL'S — NOT THE PROJECTOR'S
+    // OWN SCAFFOLDING. The `decision` node ("Decision-to-option scaffold minted
+    // by the projector", `provenance_class: "projector_structural"`) is minted
+    // FRESH on every projection and its id is derived from the option set, so it
+    // legitimately changes id the moment an option is added — which a completion
+    // is supposed to do. Counting that as destroyed content made the guard fire
+    // on both historic captures for the one node neither pass had anything to do
+    // with. The three classes are distinguished for exactly this kind of
+    // question; a two-class reading of them is what the sidecar's own note warns
+    // about.
+    if (before.provenance[node.id]?.provenance_class === "projector_structural") continue;
+    const survivor = afterById.get(node.id);
+    if (!survivor) {
+      if (!wasAbsorbed(node.id, node.label)) {
+        violations.push(`removed_undisclosed:${node.id}:${node.label}`);
+      }
+      continue;
+    }
+    const beforeInterventions = (node.data as { interventions?: Record<string, number> } | undefined)
+      ?.interventions;
+    if (beforeInterventions) {
+      const afterInterventions =
+        (survivor.data as { interventions?: Record<string, number> } | undefined)?.interventions ?? {};
+      for (const [factorId, value] of Object.entries(beforeInterventions)) {
+        if (!(factorId in afterInterventions)) {
+          violations.push(`intervention_removed:${node.id}:${factorId}`);
+        } else if (afterInterventions[factorId] !== value) {
+          // ⭐ THE ONE EXEMPTION — see `optionEffectsUnreliable` on the signature.
+          // A restatement of a provably-suspect option effect is the repair, not
+          // a regression. Non-option nodes stay fully protected either way.
+          //
+          // ⛔⛔ AND IT IS BOUNDED TO AI-AUTHORED MAGNITUDES, on an independent
+          // review finding (Codex, 15 Sep): the emission-level signal would
+          // otherwise let ONE invalid reference license overwriting an
+          // UNRELATED, USER-GROUNDED intervention elsewhere on the graph. A
+          // magnitude stamped `brief_extraction` is a number the projector
+          // VERIFIED against the brief bytes; it stays protected whatever the
+          // reference set is doing, because overwriting the user's own figure is
+          // a fabrication risk and this estate does not trade one for the other.
+          //
+          // ⚠ RESIDUE, NAMED RATHER THAN SWALLOWED: a `brief_extraction`
+          // magnitude attached to the WRONG option by a bad reference is now
+          // preserved on that wrong option. That is misattribution rather than
+          // fabrication — the lesser harm, and the disclosure path still reports
+          // the invalid references. Pinned by `C2` in the trust spec.
+          const magnitudeSource = (
+            node.data as { intervention_details?: Record<string, { source?: string }> } | undefined
+          )?.intervention_details?.[factorId]?.source;
+          const exemptible =
+            optionEffectsUnreliable
+            && node.kind === "option"
+            && magnitudeSource === "cee_hypothesis";
+          if (!exemptible) {
+            violations.push(
+              `intervention_overwritten:${node.id}:${factorId}:${value}->${afterInterventions[factorId]}`,
+            );
+          }
+        }
+      }
+    }
+    // ⭐ BOTH ABSORPTION RECEIPTS ARE PROTECTED, NOT JUST THE OPTION-SIDE ONE.
+    // `merged_restatements` is the cause-side twin of `merged_refinements`: same
+    // append-only discipline, same direction (MODEL content into a USER-stated
+    // node), same accounting in `completionRegressesProtectedContent` above. A
+    // guard that watched only one of them would let a completion pass silently
+    // drop a label the other had legitimately absorbed — an asymmetric guard is
+    // a guard watching one door.
+    for (const [field, tag] of [
+      ["merged_refinements", "refinement_reclassified"],
+      ["merged_restatements", "restatement_reclassified"],
+    ] as const) {
+      const beforeMerged = before.provenance[node.id]?.[field] ?? [];
+      if (beforeMerged.length === 0) continue;
+      const afterMerged = new Set(after.provenance[node.id]?.[field] ?? []);
+      for (const label of beforeMerged) {
+        if (!afterMerged.has(label)) violations.push(`${tag}:${node.id}:${label}`);
+      }
+    }
+  }
+  return violations;
+}
+
+/**
+ * ⭐⭐ THE DECISION ITSELF — keep this completion pass, or throw it away?
+ *
+ * **KEEP IFF IT ADDS NO NEW BLOCKING CLASS *AND* REGRESSES NO PROTECTED PASS-1
+ * CONTENT.**
+ *
+ * ── WHY NON-WORSENING RATHER THAN STRICT IMPROVEMENT ───────────────────────
+ * The property the completion has to hold is stated at its own call site:
+ * *"the completion can only ever add; it can never be the reason a draft got
+ * worse"*. That is a NON-WORSENING property, so the test that enforces it is
+ * `<=`. Requiring strict improvement enforces a DIFFERENT property — "the
+ * completion must have fixed something" — which is not a safety property at
+ * all, and it is what threw away run 18's `edges 17→25` at an unchanged
+ * blocking count of 2→0… and run 14's, and run 10's.
+ *
+ * ── ⭐⭐ WHY A COUNT WAS NOT ENOUGH, AND THIS IS THE R1 REMEDIATION ──────────
+ * The previous version was `countBlockingAskItems(after) <= countBlockingAskItems(before)`.
+ * An audit walked straight through it: a completion took the blocking item from
+ * `hold` to `hire` — **1 → 1** — and the comparator, seeing only the count,
+ * called that unchanged. A blocking problem had not been fixed; a DIFFERENT
+ * option had been broken, and the arithmetic could not tell the two apart. This
+ * estate has a name for that shape: an assertion bound to a VALUE PREDICATE that
+ * another object satisfies, rather than to the OBJECT ITSELF (trap 19) — here
+ * raised from a test to the comparator that gates the merge.
+ *
+ * So the test is now on the SET of blocking identities: no identity may appear
+ * after that was not there before. A count can be held equal by a swap; a set
+ * cannot. Note this is still non-worsening, not strict improvement — resolving
+ * one blocking item and introducing none is a keep, and resolving none while
+ * introducing none is also a keep.
+ *
+ * ── WHY THE PROJECTIONS ARE A REQUIRED ARGUMENT ────────────────────────────
+ * Because the preservation question CANNOT be asked without them, and an
+ * optional parameter would let a call site skip it silently — defaulting the
+ * dangerous case to "fine", which is the fail-OPEN direction and the exact
+ * hand-maintained-mirror shape this file already refuses elsewhere. Required
+ * means the compiler asks every call site the question.
+ */
+export function shouldKeepCompletion(
+  before: CompletionAsk,
+  after: CompletionAsk,
+  projections: { readonly before: RecordProjection; readonly after: RecordProjection },
+  /**
+   * ⭐⭐ ONE PRESERVATION DERIVATION, REUSED — NOT A SECOND ONE THAT CAN DRIFT.
+   *
+   * P1 found by independent review (Codex, 15 Sep) on the first version of this
+   * change, and it made the whole repair INERT: the adapter computed
+   * `completionRegressesProtectedContent(...)` WITH the trust exemption for its
+   * telemetry, and this function then re-ran the SAME guard WITHOUT it for the
+   * decision that actually matters. So `violationsWithExemption` read `[]` while
+   * `shouldKeepCompletion` still returned false, and the completion carrying the
+   * correct magnitudes was discarded exactly as before.
+   *
+   * Two call sites answering one question is trap 12. The remedy is not to
+   * thread the flag twice and hope they stay in step: the caller passes the
+   * violations it ALREADY derived, and this function reuses them. A future
+   * caller that passes nothing still gets a correct, conservative answer,
+   * because the fallback derives with the same options.
+   */
+  opts?: {
+    readonly optionEffectsUnreliable?: boolean;
+    /** Already derived by the caller — reused verbatim so the two cannot disagree. */
+    readonly preservationViolations?: readonly string[];
+  },
+): boolean {
+  const blockingBefore = new Set(before.items.filter(isBlockingAskItem).map(askItemIdentity));
+  for (const item of after.items) {
+    if (!isBlockingAskItem(item)) continue;
+    if (!blockingBefore.has(askItemIdentity(item))) return false;
+  }
+  const preservationViolations =
+    opts?.preservationViolations
+    ?? completionRegressesProtectedContent(projections.before, projections.after, {
+      optionEffectsUnreliable: opts?.optionEffectsUnreliable === true,
+    });
+  return preservationViolations.length === 0;
+}
+
+/**
+ * THE ORACLE, derived from the projection's OWN disclosures plus the two
+ * connectivity predicates, read at the validator's bytes.
+ *
+ * ⚠ DELIBERATELY NOT THE FULL VALIDATOR, AND NOT THE ENUMERATION ORACLE. Both
+ * over-report against the live pipeline: measured on one identical 18-node /
+ * 23-edge graph, the live `post_sweep_authoritative` phase reported 3 errors
+ * where the enumeration oracle raised 4 blocking and 15 total, because the
+ * oracle runs only one stage of the deterministic sweep. Asking the model to fix
+ * a class the live pipeline would never have raised spends a turn manufacturing
+ * claims for a problem that does not exist — and every one of those claims is a
+ * causal assertion presented to the user.
+ *
+ * So the ask is built ONLY from things this projector itself observed:
+ * references it refused, shapes it rejected, records it could not place, and
+ * reachability computed on its own emitted edges.
+ *
+ * ── ⚠ THE THREE NAMED COVERAGE LIMITS, CLOSED (round 9) ────────────────────
+ * The v4 version of this note listed three Bucket-C codes as invisible to the
+ * ask. Each is now adjudicated rather than left open.
+ *
+ * ⭐⭐ MISSING_BRIDGE — **NOW PREDICTED. The v4 note was WRONG about it**, and
+ * said so in the strongest terms: *"a bare draft fails this on inventory, not on
+ * connectivity"* and *"no completion pass can see that coming"*. Derived at the
+ * sweep's bytes: `fixFactorGoalEdges` (`deterministic-sweep.ts:963-1059`) RUNS
+ * UNCONDITIONALLY and **MINTS AN `outcome` NODE** for every `factor → goal`
+ * edge. `MISSING_BRIDGE` (`graph-validator.ts:384`) is
+ * `outcomes.length === 0 && risks.length === 0`. So one surviving `factor → goal`
+ * edge makes it structurally unable to fire, and the code is a CONNECTIVITY
+ * symptom after all — entailed by the same collapse that produces
+ * `NO_PATH_TO_GOAL`, not an independent inventory gap.
+ *
+ * MEASURED before this item was written, on the eleven banked round-7 passes at
+ * both phases (22 rows, `round9/instruments/r9-d2-missing-bridge.ts`): the
+ * predicate below and the oracle's `MISSING_BRIDGE` agree **22/22, with ZERO
+ * rows where a bridge was available and the code still fired**. The
+ * refutation question was stated before the run, and a contrast control
+ * (`NO_PATH_TO_GOAL`, present in 10 rows) proves the probe discriminates rather
+ * than reading blind zeros (trap 13e).
+ *
+ * INVALID_EDGE_TYPE — **askable in principle, DELIBERATELY NOT ASKED.** Every
+ * shape the projector's kind gate ADMITS is admitted because a NAMED repair
+ * rescues it (`projector.ts` UNRESCUABLE_EDGE_SHAPES derivation). Asking the
+ * model to restate a shape the pipeline repairs spends a turn manufacturing
+ * causal claims for a problem that does not exist, and every such claim is an
+ * assertion shown to the user. ⚠ ONE ADMITTED SHAPE IS FLAG-GATED: `option →
+ * goal` is rescued by `fixOptionGoalShortcut` behind `optionShortcutRepair`
+ * (default true). Under a posture where that flag is false the code becomes
+ * reachable and unasked. Named rather than glossed; the deployed value of that
+ * flag is not derived here.
+ *
+ * INSUFFICIENT_OPTIONS — **two harms under one code (trap 21), and they split.**
+ * `graph-validator.ts:366-382` raises it for BOTH `< MIN_OPTIONS` and
+ * `> MAX_OPTIONS`.
+ *   · too many  — UNASKABLE BY DESIGN. The projector already caps by dropping
+ *                 REFINEMENTS and never a stated option, because dropping one
+ *                 narrows the user's own choice set. The only repair left is
+ *                 amputating an option the user named. Refused.
+ *   · too few   — ASKABLE (the completion can mint an option via
+ *                 `option_refinement`) and deliberately NOT asked here: it means
+ *                 asking the model to AUTHOR an alternative the user did not
+ *                 name, which is a product-authorship decision outside this
+ *                 lane's remit. Rowed, not silently skipped.
+ */
+/**
+ * ⭐⭐ A COMPLETE LIMIT THAT NAMES NOTHING TO LIMIT — DERIVED FROM THE RECORD,
+ * NOT FROM A DISCLOSURE, AND THAT CHOICE IS THE WHOLE DESIGN.
+ *
+ * Measured by replaying the 15 Sep live captures through this projector in
+ * three arms:
+ *   A  as captured (no `value`)     rows=0  askFields=["target","value","unit"]
+ *   B  + value, reference kept      rows=0  askFields=["target"]
+ *   D  + value, NO reference        rows=0  askFields=[]        <- nothing asked
+ *
+ * ⛔ THE OBVIOUS PROMPT FIX WAS REFUTED BEFORE IT SHIPPED. In 4 of 4 captures the
+ * model emits the limit with a direction and no `value`, so "teach it to carry
+ * the number" looks right. It is not: it moves every capture from A to B or D,
+ * and D IS SILENT. `constraint_value_unstated` is today the most informative
+ * state a lost limit can reach, and that change would have made the product
+ * quieter while losing the limit just the same.
+ *
+ * ⛔⛔ AND IT IS DELIBERATELY NOT A NEW `dropped` ROW. The first attempt emitted
+ * one from the projector and it cost EIGHT tests across five files, one of them
+ * a genuine regression: this node is ALSO disclosed by the connectivity prune,
+ * the consumer keys by `node_id`, and a second, magnitude-less row displaced the
+ * prune's row — `stated-magnitude-survives-withdrawal` went red with "magnitude
+ * lost at the wire ... expected undefined to be 1200000". The projector's own
+ * pass-2c comment already says a second entry for one event is a duplicate. It
+ * is right, and this derivation obeys it.
+ *
+ * A constraint carrying a direction AND a threshold AND no `applies_to_*` is
+ * unbindable BY CONSTRUCTION — the projector collects a binding only when a
+ * reference is present — so no projection evidence is needed to know it.
+ *
+ * ⚠ THIS ASKS FOR A SUBJECT, NOT A CAUSAL LINK, and that is why it is safe where
+ * `unconnected_to_goal` is not. The user already stated the bound, so naming
+ * what it bounds is retrieval; inventing an edge to the goal would be
+ * fabrication and nothing here asks for one. Every target the model names still
+ * faces SAFETY 1 and SAFETY 2, and an unconnected constraint is still pruned
+ * exactly as before.
+ */
+function statedLimitsThatNameNoSubject(
+  records: { readonly stated_items: readonly unknown[] },
+): ReadonlyArray<{ index: number; quote: string }> {
+  const out: Array<{ index: number; quote: string }> = [];
+  records.stated_items.forEach((raw, index) => {
+    const item = raw as {
+      kind?: string;
+      source_quote?: unknown;
+      direction?: unknown;
+      value?: unknown;
+      applies_to_stated?: unknown;
+      applies_to_claim?: unknown;
+    };
+    if (item.kind !== "constraint") return;
+    if (item.direction === undefined) return;
+    if (typeof item.value !== "number") return;
+    if (item.applies_to_stated !== undefined || item.applies_to_claim !== undefined) return;
+    out.push({ index, quote: typeof item.source_quote === "string" ? item.source_quote : "" });
+  });
+  return out;
+}
+
+export function enumerateCompletionAsk(
+  records: DraftRecordSet,
+  projection: RecordProjection,
+): CompletionAsk {
+  const items: CompletionAskItem[] = [];
+  const seen = new Set<string>();
+  const push = (item: CompletionAskItem) => {
+    const key = `${item.kind}|${item.detail}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    items.push(item);
+  };
+
+  for (const limit of statedLimitsThatNameNoSubject(records)) {
+    push({
+      kind: "constraint_target_unbindable",
+      detail: `"${limit.quote}" \u2014 this limit does not say what it bounds, so nothing is holding it; name the factor or outcome it applies to`,
+      validatorCode: null,
+    });
+  }
+
+  for (const d of projection.dropped) {
+    switch (d.reason) {
+      case "unparseable_ref":
+      case "ref_out_of_range":
+      case "ref_target_not_a_node":
+      case "missing_ref":
+      case "ambiguous_ref":
+        // ⭐⭐ THESE FIVE REASONS ARRIVE FROM THE SAME RESOLVER ON TWO DIFFERENT
+        // PATHS, AND ONLY ONE OF THEM IS ANSWERABLE (trap 21 — two questions
+        // under one name).
+        //
+        // · a CAUSAL-LINK endpoint failed  → the repair is to re-emit the claim
+        //   with a corrected `to_claim` / `to_stated`, which is exactly what the
+        //   completion grammar admits. Answerable, and asked.
+        // · a STATED LIMIT's `applies_to_*` failed → the repair is a write to a
+        //   `stated_items[]` entry, which the completion grammar cannot express.
+        //   Unanswerable, and withheld by `isModelAnswerableAskItem`.
+        //
+        // ⛔ THE REASON CANNOT DISCRIMINATE — it is identical on both paths. The
+        // producer's own `claim_kind` can, and it is IMPORTED rather than
+        // re-spelled here so the two cannot drift (trap 12). Keying this on a
+        // list of reasons would have been a hand-maintained mirror of
+        // `projector.ts`'s `refuse()` helper, and would have left every shared
+        // reason open — a guard watching one door (trap 22b).
+        push(
+          d.claim_kind === STATED_ITEM_DROP_KIND
+            ? {
+                kind: "constraint_target_unbindable",
+                detail: `"${d.label}" — ${d.to_ref ?? "(no target)"} did not resolve (${d.reason}), so this limit is not attached to anything on the model`,
+                validatorCode: null,
+              }
+            : {
+                kind: "unresolved_reference",
+                detail: `"${d.label}" — ${d.from_ref ?? "(no from)"} → ${d.to_ref ?? "(no to)"} did not resolve (${d.reason})`,
+                // NON-BLOCKING BY CONSTRUCTION: this edge is in
+                // `projection.dropped`, which is disjoint from
+                // `projection.graph.edges`. The validator is handed the graph, so
+                // it cannot raise anything about an edge that never entered it.
+                validatorCode: null,
+              },
+        );
+        break;
+      // ⭐⭐ THE COPY NAMES THE RULE THAT FIRED, AND THE OLD SENTENCE WAS FALSE.
+      //
+      // It read: `a link from a <from_kind> to a <to_kind> is not a shape this
+      // model can hold`. For the one edge rule that is **measurably untrue** —
+      // `factor → factor` IS a shape this model holds, and the banked live
+      // emission proves it in the same replay that produces this ask: claims[19]
+      // (`Engineering Capacity Consumed → Engineering Attrition Risk`) is a
+      // factor→factor link and it survives onto the graph. What is refused is not
+      // the SHAPE but the TARGET — a factor an option already sets is
+      // `controllable` (`inferFactorCategories`, `graph-validator.ts:83-134`) and
+      // `ALLOWED_EDGES` admits `factor → factor` only into `observable`/`external`.
+      //
+      // The cost of the false version is not cosmetic. This text is what the
+      // completion turn is shown, so telling the model that factor→factor is
+      // unholdable teaches it away from a LEGAL and load-bearing shape — the
+      // rational repair for a model told this is to stop drawing them at all.
+      // A disclosure that over-generalises a refusal degrades the next draft.
+      //
+      // `refusal_rule` is read from the producer rather than inferred from the
+      // kind pair, so this stays true if the gate's internals move (trap 12).
+      // ⭐ A STATED LIMIT NAMED A TARGET THE PROJECTOR REFUSED TO BIND IT TO.
+      //
+      // These two are DELIBERATELY NOT folded into `unresolved_reference` above.
+      // That kind means "the reference did not resolve"; these mean it resolved
+      // PERFECTLY and the target was still wrong — a different question with a
+      // different repair (trap 21), and the copy has to say which or the model
+      // will re-emit the same index. The limit itself is NOT lost: it is on the
+      // graph in the user's own words, with its own threshold. What is being
+      // asked for is the binding.
+      case "constraint_target_not_measurable":
+        push({
+          kind: "constraint_target_unbindable",
+          detail: `"${d.label}" — ${d.to_ref ?? "(no target)"} is not a measured quantity, so it cannot carry a threshold; point this limit at the factor or outcome it bounds`,
+          // NON-BLOCKING BY CONSTRUCTION, same as every reason above it: the
+          // refusal withheld a BINDING, and the graph the validator is handed is
+          // exactly the graph it would have been handed without the reference.
+          validatorCode: null,
+        });
+        break;
+      case "constraint_value_unstated":
+        push({
+          kind: "constraint_target_unbindable",
+          detail: `"${d.label}" — this limit has no threshold we can apply, so it is not being enforced; if it states one, give its value, its direction and what it bounds`,
+          validatorCode: null,
+        });
+        break;
+      case "constraint_target_unit_mismatch":
+        push({
+          kind: "constraint_target_unbindable",
+          detail: `"${d.label}" — ${d.to_ref ?? "(no target)"} measures a different quantity from this limit, so binding it would change what the limit means; point it at the node measured in the same unit`,
+          validatorCode: null,
+        });
+        break;
+      case "ref_kind_illegal":
+        push({
+          kind: "illegal_shape",
+          detail:
+            d.refusal_rule === "option_controlled_target"
+              ? `"${d.label}" — this points into a factor an option already sets, so it cannot also be driven by another factor; point it at what that factor AFFECTS instead`
+              : `"${d.label}" — a link from a ${d.from_kind} to a ${d.to_kind} is not a shape this model can hold`,
+          // NON-BLOCKING BY CONSTRUCTION, same reason: the projector's kind gate
+          // refused this edge AT EMISSION. It is disclosed, not carried.
+          validatorCode: null,
+        });
+        break;
+      // ⚠⚠ `unconnected_to_goal` IS DELIBERATELY NOT ASKED ABOUT, and the first
+      // version of this function did ask. MEASURED on B1: it produced an ask of
+      // 40 items of which 24 were stated figures — "£3.1m cash", "NRR is 112%",
+      // "TAM is supposedly €400m" — that the model had correctly declined to
+      // connect because they do not bear on the goal.
+      //
+      // Three things are wrong with asking:
+      //   · The projector WITHHOLDS these records from the graph precisely so
+      //     they cannot manufacture `NO_PATH_TO_GOAL`. The validator never sees
+      //     them, so they are not a failure — they are the disclosure that
+      //     PREVENTS one.
+      //   · Asking is PRESSURE TO INVENT a causal link for a figure that has
+      //     none, and zero false authorship is the property this whole mechanism
+      //     exists to defend. The grammar refuses to floor `claims` for exactly
+      //     this reason; an ask that lists every unconnected figure would
+      //     reintroduce the pressure the grammar declined to apply.
+      //   · Fidelity does not depend on it. Stated content survives in
+      //     `stated_items` whether or not it becomes a node, and that is what the
+      //     fidelity postcondition measures.
+      //
+      // `option_budget_exceeded`, `refinement_merged_into_stated_option` and
+      // `factor_merged_into_stated_cause` are likewise projector DECISIONS, not
+      // gaps: asking about any of them would ask the model to undo a deliberate,
+      // disclosed choice.
+      //
+      // ⭐ AND THE THREE DEMOTE REASONS ARE LISTED EXPLICITLY BELOW rather than
+      // left to `default`, so their silence is a DECISION. A demote is a
+      // projector RESOLUTION, not a gap in the record set: the model gave two
+      // options the same intervention signature, and the projector has already
+      // withdrawn the one the user did not write, disclosed it, and recorded it
+      // on the survivor's provenance. Asking would invite the model to re-add
+      // the alternative it just lost — and round 9 (D4) MEASURED that the
+      // append-only completion cannot retract, so the ask would create the
+      // duplication it was written to remove. `endpoint_demoted_duplicate` goes
+      // with them: that link resolved perfectly well and the projector withdrew
+      // what it pointed at. The coaching question — "what would make these two
+      // different?" — belongs to the USER, not to a second model turn.
+      // ⭐ `disconnected_by_shape_gate` IS SILENT HERE **DELIBERATELY**, and for a
+      // different reason than its neighbours — listed explicitly so the silence is
+      // a decision rather than a `default` (this file's own standard).
+      //
+      // It is not silent because asking would pressure the model to invent (the
+      // `unconnected_to_goal` argument): the model already drew this link and
+      // needs no pressure. It is silent because **the ask already exists one level
+      // up**. The very link whose refusal caused this withdrawal was disclosed as
+      // `ref_kind_illegal` above and IS asked about, as `illegal_shape`, naming
+      // the rule and the repair. Adding a node-level item would ask the same
+      // question twice about the same defect — and since the completion is
+      // append-only (round 9 / D4), a second ask is a second chance to re-add a
+      // link the projector has just refused on purpose.
+      //
+      // ⚠ The consequence is a PROPERTY worth stating: every
+      // `disconnected_by_shape_gate` disclosure has a matching `ref_kind_illegal`
+      // ask by construction, because the counterfactual predicate that mints it
+      // can only fire when a refused link exists on the node's path to the goal.
+      // If that ever stops being true, the record becomes silent in BOTH places.
+      case "disconnected_by_shape_gate":
+      case "unconnected_to_goal":
+      case "undeveloped_duplicate_of_stated":
+      case "undeveloped_duplicate_of_model":
+      case "endpoint_demoted_duplicate":
+      default:
+        break;
+    }
+  }
+
+  // The two connectivity predicates, derived at `graph-validator.ts`:
+  //   NO_EFFECT_PATH  (:822) — each option needs ≥1 DIRECT factor target that
+  //                            reaches the goal.
+  //   NO_PATH_TO_GOAL (:620) — every node except the decision must reach the
+  //                            goal. When nothing terminates at the goal at
+  //                            all, this fires on essentially every node.
+  //
+  // ⚠ CORRECTED HERE, at the validator's bytes. The v4 version of this comment
+  // named `MISSING_BRIDGE (:384)` as "satisfied by ANY chain terminating at the
+  // goal". It is not: `:384` reads
+  //   `if (outcomes.length === 0 && risks.length === 0)` → "Graph must have at
+  //   least 1 outcome or risk node"
+  // — a NODE-INVENTORY check with nothing to do with reachability. Both codes
+  // are Bucket C so the keep/discard verdict is unchanged either way, but a
+  // wrong code in the one place a later reader looks up the mapping is how the
+  // next lane inherits a false premise. `MISSING_BRIDGE` is NOT predicted by
+  // any item this function emits — see the coverage note on `enumerateCompletionAsk`.
+  const { nodes, edges } = projection.graph;
+  const kindById = new Map(nodes.map((n) => [n.id, n.kind]));
+  const incoming = new Map<string, string[]>();
+  for (const e of edges) {
+    const list = incoming.get(e.to);
+    if (list) list.push(e.from);
+    else incoming.set(e.to, [e.from]);
+  }
+  const goalIds = nodes.filter((n) => n.kind === "goal").map((n) => n.id);
+  const reachesGoal = new Set<string>();
+  const stack = [...goalIds];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (reachesGoal.has(current)) continue;
+    reachesGoal.add(current);
+    for (const from of incoming.get(current) ?? []) stack.push(from);
+  }
+
+  for (const node of nodes) {
+    if (node.kind !== "option") continue;
+    const hasEffectPath = edges.some(
+      (e) => e.from === node.id && kindById.get(e.to) === "factor" && reachesGoal.has(e.to),
+    );
+    if (!hasEffectPath) {
+      push({
+        kind: "option_without_chain",
+        detail: `the option "${node.label}" has no chain of causal_links that reaches the goal`,
+        validatorCode: "NO_EFFECT_PATH",
+      });
+    }
+  }
+  // ⭐⭐ THE GOAL IS NAMED BY ITS STATED INDEX AND ITS FIELD — round 9.
+  //
+  // Run 8 collapsed a 5-node graph to nothing because the ONE link intended for
+  // the goal was written with `to_claim`. It resolved successfully, to a factor;
+  // nothing reached the goal; every derived factor was withheld as
+  // `unconnected_to_goal`; and all ten of the completion's links died attached
+  // to a withheld node, disclosed once rather than once each.
+  //
+  // The grammar CANNOT prevent this and no schema can: `{"to_claim": 0}` is
+  // well-formed, in range, and denotes a real node of a legal kind. Its
+  // wrongness is a fact about what the model MEANT. A schema constrains
+  // documents, not intentions (round9/DERIVATIONS.md D1). So the ask carries the
+  // target explicitly instead — the stated index AND the field name — which is
+  // the one thing the v4 prompt never said.
+  const goalStatedIndices = records.stated_items
+    .map((s, i) => (s.kind === "goal" ? i : -1))
+    .filter((i) => i >= 0);
+  const goalTargetPhrase =
+    goalStatedIndices.length > 0
+      ? goalStatedIndices.map((i) => `\`to_stated: ${i}\` (${JSON.stringify(records.stated_items[i]!.source_quote)})`).join(" or ")
+      : null;
+
+  // ⭐⭐ NO GOAL AT ALL — THE ROOT CAUSE THE OTHER TWO ITEMS CANNOT SEE.
+  //
+  // MEASURED on the frozen governed corpus, at this tip
+  // (`tools/graph-evaluator/scripts/rederive-canonical-readiness.ts`): three of
+  // fourteen briefs produced graphs with ZERO goal nodes, and `NO_GOAL` is the
+  // ONLY remaining blocker on two of them once the deterministic sweep has run
+  // (05-product-feature and 10-many-observables, post-sweep findings 1 and 1).
+  // So this single silence is what stands between those two briefs and an
+  // analysable model.
+  //
+  // ⚠ AND IT IS A SILENCE WITH THREE CAUSES, ALL THE SAME PREDICATE. A missing
+  // goal disables `no_chain_reaches_goal` (immediately below), `no_outcome_or_risk`
+  // (below that), AND the projector's own unconnected-node prune
+  // (`projector.ts:1899`) — every one of them gated on a goal existing. The graph
+  // is worst exactly where every guard switches off. The sweep repairs the orphan
+  // consequence (`ORPHAN_NODE` 26 → 3 across the corpus); nothing repaired the cause.
+  //
+  // In all three briefs the model KNEW the goal: it emitted links labelled
+  // *"… reaches goal"* / *"… harms goal"* aimed at a stated item that projected to
+  // `option` or `factor`, and every one was refused as an unrescuable shape. So the
+  // ask is for the FILING, not for the objective — the model is told where a goal
+  // has to live, because `instruction.ts:210` already says *"The goal is a
+  // stated_item … The goal is never one of your claims"* and this is the case where
+  // it did not comply.
+  //
+  // ⚠⚠ THE ASK MAY NOT PROPOSE A GOAL, and that is a hard constraint rather than a
+  // style choice. The only candidate labels available here are the model's OWN
+  // inferences (10-many-observables carries an `outcome` literally labelled
+  // *"Business Health Goal"*); offering one back would hand an invented objective
+  // the authority of the user's own words, and an inverted or invented objective is
+  // the estate's ratified never-do (trap 22f — where it cannot be determined, make
+  // the AMBIGUITY the product and ask). The completion grammar carries no
+  // `stated_items` at all, so the second turn cannot answer with a fabricated user
+  // quote even if it tried; this item's wording keeps the ASK equally clean.
+  //
+  // `MISSING_GOAL` is Bucket C (`bucket-c-codes.ts`), so `isBlockingAskItem`
+  // classifies this as blocking by IMPORT rather than by anything restated here.
+  if (goalIds.length === 0) {
+    push({
+      kind: "no_goal",
+      detail:
+        "this model has no goal, so nothing can be analysed against anything — file the objective the user stated as a `stated_items` entry of kind `goal`, quoting their own words, and link what you already emitted to it with `to_stated`",
+      validatorCode: "MISSING_GOAL",
+    });
+  }
+
+  if (goalIds.length > 0 && !edges.some((e) => reachesGoal.has(e.from) && e.from !== e.to && reachesGoal.has(e.to))) {
+    push({
+      kind: "no_chain_reaches_goal",
+      detail:
+        goalTargetPhrase === null
+          ? "nothing you emitted terminates at the goal"
+          : `nothing you emitted terminates at the goal — the goal is ${goalTargetPhrase}, and a link reaches it with that exact field, never with \`to_claim\``,
+      validatorCode: "NO_PATH_TO_GOAL",
+    });
+  }
+
+  // ⭐⭐ MISSING_BRIDGE, PREDICTED — see the derivation on this function.
+  //
+  // Post-normalisation kinds, taken from the projector's own exported map rather
+  // than a second copy of `normalisation.ts` NODE_KIND_MAP. A bridge exists if
+  // the graph already carries an outcome/risk node, OR if any `factor → goal`
+  // edge survives — because the sweep mints an outcome for every one of those.
+  if (goalIds.length > 0) {
+    const hasBridgeNode = nodes.some((n) => {
+      const k = projectedKindAfterNormalisation(n.kind);
+      return k === "outcome" || k === "risk";
+    });
+    const sweepWillMintOutcome = edges.some(
+      (e) =>
+        projectedKindAfterNormalisation(kindById.get(e.from) ?? "") === "factor" &&
+        projectedKindAfterNormalisation(kindById.get(e.to) ?? "") === "goal",
+    );
+    if (!hasBridgeNode && !sweepWillMintOutcome) {
+      push({
+        kind: "no_outcome_or_risk",
+        // The ask is for the OUTCOME the options produce, stated as the model's
+        // own `factor` claim and linked to the goal. It is NOT an invitation to
+        // restate the user: the completion grammar has no `stated_items` at all,
+        // so a fabricated user quote is structurally impossible here rather than
+        // merely forbidden, and the claim carries the `ai_inferred` badge the
+        // projector gives every claim-derived node.
+        detail:
+          goalTargetPhrase === null
+            ? "nothing in this model is an outcome or a risk — name the outcome the options produce as a factor claim, and link it to the goal"
+            : `nothing in this model is an outcome or a risk, so there is nothing between the options and the goal — name the outcome(s) these options actually produce as your own \`factor\` claim, and link that factor to the goal with ${goalTargetPhrase}`,
+        validatorCode: "MISSING_BRIDGE",
+      });
+    }
+  }
+
+  // OPTIONS_IDENTICAL (`graph-validator.ts:841`) — two options the analysis
+  // cannot tell apart. The signature is computed with the validator's OWN
+  // EXPORTED `buildInterventionSignature`, never a retyped copy: that function's
+  // docblock records that measurement harnesses previously restated its
+  // semantics and drifted out of agreement with the thing they measured.
+  //
+  // MEASURED on B3: "finally do the platform rewrite" and the refinement
+  // "Rewrite First, Then Copilot (Sequenced)" carry byte-identical signatures
+  // (`475a18b9:1.0000|dbc7be0a:0.0000`). They are genuinely different
+  // alternatives — one sequences the work, one does not — and the model simply
+  // never said how they differ. That is a gap the brief can close, so it is
+  // askable; the ask is phrased to permit "it does not" because a difference
+  // manufactured only to clear this check decides the RANKING, which is the
+  // user's call. ⚠ NOT because the number would be read as the user's own —
+  // an uncited magnitude is stamped `cee_hypothesis` by the projector
+  // (`projector.ts:1712-1717`), and that premise is v9's, withdrawn at v10.
+  {
+    const bySignature = new Map<string, string[]>();
+    for (const node of nodes) {
+      if (node.kind !== "option") continue;
+      const interventions = (node.data as { interventions?: Record<string, number> } | undefined)?.interventions;
+      if (!interventions) continue;
+      const signature = buildInterventionSignature(interventions);
+      const list = bySignature.get(signature);
+      if (list) list.push(node.label);
+      else bySignature.set(signature, [node.label]);
+    }
+    for (const labels of bySignature.values()) {
+      if (labels.length < 2) continue;
+      push({
+        kind: "options_indistinguishable",
+        detail: `${labels.map((l) => `"${l}"`).join(" and ")} change the same factors to the same levels, so nothing can tell them apart`,
+        validatorCode: "OPTIONS_IDENTICAL",
+      });
+    }
+  }
+
+  return { items, baseClaimIndex: records.claims.length };
+}
+
+/**
+ * The completion turn's grammar — CLAIMS ONLY.
+ *
+ * `stated_items` is absent, so the second turn cannot restate the user's words
+ * even if it wanted to. Built from the draft grammar's own claim-item builder,
+ * so a change to the claim shape moves both passes together.
+ */
+/**
+ * ⭐⭐⭐ THE CORRECTION AXIS — SUBJECT, ROLE AND VALUE TRAVEL TOGETHER OR NOT AT ALL.
+ *
+ * WHY IT EXISTS. `constraint_target_unbindable` is raised today, is correct
+ * today, and was UNANSWERABLE today: repairing a refused limit is a change to
+ * `applies_to_*` on an existing `stated_items[]` entry, and this grammar carried
+ * only `claims`. So the pipeline asked the one question it could not accept an
+ * answer to. Measured: the brief's "keeping monthly churn under 4%" reached the
+ * graph in 0 of 20 pricing drafts while the goal from the same sentence bound.
+ *
+ * ⛔ IT IS NOT `stated_items`, AND THAT IS THE WHOLE POINT. Exposing
+ * `stated_items` would let the second turn restate the user's words. This axis
+ * cannot: it carries no `source_quote` and no `kind`, so a correction can only
+ * say WHAT AN EXISTING LIMIT APPLIES TO and WHAT IT BOUNDS — never what the user
+ * said. `mergeCompletionConstraintCorrections` enforces that at the bytes, and
+ * `stated_items_disturbed` still refuses a wholesale rewrite.
+ *
+ * ⭐ `direction` AND `value` ARE REQUIRED ALONGSIDE THE SUBJECT. A subject
+ * without a role is a limit with no operator — and this projector has already
+ * paid for that: an unstated direction defaulted to `<=` turns "must stay above"
+ * into its exact opposite. A subject without a value is a bound with nothing to
+ * bound. Requiring all three means the model cannot half-answer.
+ *
+ * ⭐ AND OMISSION IS A LEGAL ANSWER — the negative control this mechanism must
+ * keep passing. "legal has NOT confirmed this… which is 60% of revenue" is a
+ * QUALITATIVE limit whose span happens to contain a number that is not its
+ * threshold. A previous attempt (#1513) read that 60% deterministically and
+ * fabricated a floor. The model declines here by emitting no entry, and a
+ * qualitative constraint stays qualitative.
+ */
+function buildConstraintCorrectionSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      stated_index: { type: "integer" },
+      direction: { type: "string", enum: ["floor", "ceiling"] },
+      value: { type: "number" },
+      unit: { type: "string" },
+      applies_to_claim: { type: "integer" },
+      applies_to_stated: { type: "integer" },
+    },
+    required: ["stated_index", "direction", "value"],
+    additionalProperties: false,
+  };
+}
+
+export function buildRecordsCompletionSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      claims: { type: "array", items: buildDraftClaimItemSchema() },
+      constraint_corrections: { type: "array", items: buildConstraintCorrectionSchema() },
+    },
+    required: ["claims"],
+    additionalProperties: false,
+  };
+}
+
+/**
+ * ⭐⭐ THE LEGAL EDGE VOCABULARY THE COMPLETION TURN IS SHOWN — DERIVED, NEVER
+ * RESTATED.
+ *
+ * ── WHY THIS EXISTS ────────────────────────────────────────────────────────
+ * Round 6 PROVED the model restates within the legal vocabulary when it is shown
+ * one: B3's three `INVALID_EDGE_TYPE` links were re-pointed correctly in 3.9 s
+ * with nothing invented. The v4 completion prompt then HAND-RESTATED the shapes
+ * in prose, and on the round-7 block **14 completion links across runs 16 and 22
+ * were dropped `ref_kind_illegal` in bulk** — 7 and 7, almost all `factor →
+ * factor` into an option-controlled factor. The prompt stated that rule and the
+ * model broke it anyway. A restatement is a hand-maintained mirror of three
+ * different authorities (trap 12), and this one had already drifted from all of
+ * them.
+ *
+ * ── ⭐ TWO AUTHORITIES, EACH ASKED THE QUESTION IT ACTUALLY ANSWERS ────────
+ * It would be easy — and wrong — to derive this from the projector's own gate
+ * alone. `UNRESCUABLE_EDGE_SHAPES` answers *"what will I refuse to carry?"*. The
+ * model needs the answer to *"what should I emit?"*, and those are two questions
+ * under one name (trap 21). `option → goal` is the case that separates them: the
+ * projector ADMITS it, but it is rescued only by `fixOptionGoalShortcut` behind
+ * the `optionShortcutRepair` flag, and an option that shortcuts to the goal has
+ * no direct factor target, which is exactly what `NO_EFFECT_PATH` (:822) fires
+ * on. Telling the model that shape is legal would buy one class of failure with
+ * another.
+ *
+ * So:
+ *   · what to EMIT comes from `ALLOWED_EDGES` — the validator's own matrix —
+ *     restricted to the kinds a model-emitted reference can actually land on,
+ *     plus the one shape an UNCONDITIONAL repair extends it by;
+ *   · what is DROPPED OUTRIGHT comes from the projector's own
+ *     `UNRESCUABLE_EDGE_SHAPES` — the set that actually did the dropping.
+ * Neither is retyped, and each classification is asserted COMPLETE below, so a
+ * new rule in either authority fails loud instead of silently going unstated.
+ */
+const MODEL_REACHABLE_KIND_PHRASE: Readonly<Record<string, string>> = {
+  option: "an option",
+  factor: "a factor",
+  // ⭐ WIDENED 2026-08-14. A `risk` node now has TWO model-reachable sources —
+  // a `constraint` the user stated (which `NODE_KIND_MAP` normalises to `risk`)
+  // and, since the grammar widening, a `risk` CLAIM. The phrase names both,
+  // because the completion turn references records by index and needs to
+  // recognise either as the thing at the other end of the arrow.
+  risk: "a risk (or a constraint you recorded)",
+  // ⭐ MOVED 2026-08-14 out of `MODEL_UNREACHABLE_KIND_REASON`, where it carried
+  // the sentence *"never emitted by the model; the sweep mints it from a
+  // factor→goal edge"*. That was TRUE when written and is now FALSE — and while
+  // it stood, `renderLegalEdgeVocabulary` silently DROPPED both `factor →
+  // outcome` and `outcome → goal` from the legal list (an unphraseable kind is
+  // skipped), so a completion turn was never shown the shape that ends a chain
+  // honestly and could only reach the goal by the `factor → goal` shortcut the
+  // sweep then had to repair.
+  outcome: "an outcome",
+  goal: "the goal",
+};
+
+/**
+ * Kinds that appear in the authorities but that NO model-emitted reference can
+ * reach. Each carries its reason; the completeness assertion below refuses any
+ * kind that is in neither table.
+ */
+const MODEL_UNREACHABLE_KIND_REASON: Readonly<Record<string, string>> = {
+  // The decision node is projector-structural and has no wire reference.
+  decision: "projector-structural; the model has no way to name it",
+};
+
+/**
+ * The ONE shape `ALLOWED_EDGES` omits and an UNCONDITIONAL repair adds back.
+ *
+ * ⚠ THIS ENTRY IS HAND-WRITTEN, WHICH IS EXACTLY THE THING THIS FILE OTHERWISE
+ * REFUSES TO DO — so it is guarded rather than trusted. `assertVocabularyIsComplete`
+ * refuses it if it ever appears in `ALLOWED_EDGES` (then it is not an extension)
+ * or in `UNRESCUABLE_EDGE_SHAPES` (then it is not legal). Where a list cannot be
+ * derived, the mirror must FAIL LOUD on drift rather than assume good (trap 12).
+ */
+const UNCONDITIONALLY_REPAIRED_SHAPES: readonly { from: string; to: string; note: string }[] = [
+  {
+    from: "factor",
+    to: "goal",
+    note: "this is how a chain ends, and every model needs at least one chain that ends here",
+  },
+];
+
+/** Every kind either authority mentions must be classified. Throws if not. */
+function assertVocabularyIsComplete(): void {
+  const kinds = new Set<string>();
+  for (const rule of ALLOWED_EDGES) {
+    kinds.add(rule.fromKind);
+    kinds.add(rule.toKind);
+  }
+  for (const shape of UNRESCUABLE_EDGE_SHAPES) {
+    const [from, to] = shape.split("->");
+    if (from) kinds.add(from);
+    if (to) kinds.add(to);
+  }
+  const unclassified = [...kinds].filter(
+    (k) => !(k in MODEL_REACHABLE_KIND_PHRASE) && !(k in MODEL_UNREACHABLE_KIND_REASON),
+  );
+  if (unclassified.length > 0) {
+    throw new Error(
+      `records completion vocabulary is incomplete: unclassified node kind(s) ${unclassified.join(", ")} — ` +
+        "classify each as model-reachable or model-unreachable before this prompt can be built",
+    );
+  }
+  for (const ext of UNCONDITIONALLY_REPAIRED_SHAPES) {
+    if (ALLOWED_EDGES.some((r) => r.fromKind === ext.from && r.toKind === ext.to)) {
+      throw new Error(
+        `${ext.from}->${ext.to} is in ALLOWED_EDGES and is therefore not a repair extension — remove it from UNCONDITIONALLY_REPAIRED_SHAPES`,
+      );
+    }
+    if (UNRESCUABLE_EDGE_SHAPES.has(`${ext.from}->${ext.to}`)) {
+      throw new Error(
+        `${ext.from}->${ext.to} is in UNRESCUABLE_EDGE_SHAPES and is therefore not legal to emit — remove it from UNCONDITIONALLY_REPAIRED_SHAPES`,
+      );
+    }
+  }
+}
+
+/**
+ * The vocabulary block, rendered in the model's own terms.
+ *
+ * Exported so a test can assert it against BOTH authorities rather than against
+ * a copy of its own output.
+ */
+export function renderLegalEdgeVocabulary(): string {
+  assertVocabularyIsComplete();
+
+  const phrase = (kind: string): string | null => MODEL_REACHABLE_KIND_PHRASE[kind] ?? null;
+
+  const legal: string[] = [];
+  const seen = new Set<string>();
+  for (const rule of ALLOWED_EDGES) {
+    const from = phrase(rule.fromKind);
+    const to = phrase(rule.toKind);
+    if (from === null || to === null) continue;
+    const key = `${rule.fromKind}->${rule.toKind}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    legal.push(`- ${from} → ${to}`);
+  }
+  for (const ext of UNCONDITIONALLY_REPAIRED_SHAPES) {
+    const from = phrase(ext.from);
+    const to = phrase(ext.to);
+    if (from === null || to === null) continue;
+    const key = `${ext.from}->${ext.to}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    legal.push(`- ${from} → ${to} — ${ext.note}`);
+  }
+
+  // The forbidden half, grouped by source kind so the list stays readable. Built
+  // from the projector's own set, so a shape that stops being unrescuable stops
+  // being listed here on the next build.
+  const forbiddenByFrom = new Map<string, string[]>();
+  for (const shape of [...UNRESCUABLE_EDGE_SHAPES].sort()) {
+    const [from, to] = shape.split("->");
+    if (from === undefined || to === undefined) continue;
+    const fromPhrase = phrase(from);
+    const toPhrase = phrase(to);
+    if (fromPhrase === null || toPhrase === null) continue;
+    const list = forbiddenByFrom.get(fromPhrase);
+    if (list) list.push(toPhrase);
+    else forbiddenByFrom.set(fromPhrase, [toPhrase]);
+  }
+  const forbidden = [...forbiddenByFrom.entries()].map(
+    ([from, tos]) => `- ${from} → ${tos.join(", ")}`,
+  );
+
+  return [
+    // ⚠ DELIBERATELY "use these and no others" RATHER THAN "every other shape is
+    // discarded". The second is FALSE: `option → constraint` and `factor →
+    // constraint` are neither in this legal list nor in the unrescuable set —
+    // the pipeline REPAIRS them. A directive the model should follow is not the
+    // same claim as a fact about what the pipeline does, and stating the second
+    // when we mean the first is exactly the guarantee-shaped falsehood this
+    // estate keeps paying for.
+    "Use these shapes and no others:",
+    ...legal,
+    "",
+    "One further rule, and it is the one your last set of links broke most often:",
+    "**nothing may point INTO a factor that an option acts on.** A factor an option changes is",
+    "where a chain STARTS. If something else bears on it, connect that influence to a factor",
+    "FURTHER ALONG the chain, or to the goal.",
+    "",
+    "These shapes are dropped outright — nothing downstream can rescue them:",
+    ...forbidden,
+  ].join("\n");
+}
+
+/** Render the record set for the model, with the exact indices its references must use. */
+function renderRecordsForAsk(records: DraftRecordSet): string {
+  const stated = records.stated_items
+    .map((s, i) => {
+      // Keep the declared interpretation visible while completion repairs links.
+      // A quote and magnitude alone do not distinguish a current level from a
+      // target, or identify which quantity a stated limit bounds.
+      const declared = [
+        ...(s.role !== undefined ? [`role=${s.role}`] : []),
+        ...(s.direction !== undefined ? [`direction=${s.direction}`] : []),
+        ...(s.applies_to_stated !== undefined ? [`applies_to_stated=stated_items[${s.applies_to_stated}]`] : []),
+        ...(s.applies_to_claim !== undefined ? [`applies_to_claim=claims[${s.applies_to_claim}]`] : []),
+      ];
+      return `  stated_items[${i}] ${s.kind}: ${JSON.stringify(s.source_quote)}${typeof s.value === "number" ? ` (value ${s.value}${s.unit ? ` ${s.unit}` : ""})` : ""}${declared.length > 0 ? ` [${declared.join(", ")}]` : ""}`;
+    })
+    .join("\n");
+  const claims = records.claims
+    .map((c, i) => {
+      const from = c.from_stated !== undefined ? `stated_items[${c.from_stated}]` : c.from_claim !== undefined ? `claims[${c.from_claim}]` : "";
+      const to = c.to_stated !== undefined ? `stated_items[${c.to_stated}]` : c.to_claim !== undefined ? `claims[${c.to_claim}]` : "";
+      const link = from || to ? `  ${from} → ${to}` : "";
+      return `  claims[${i}] ${c.claim_kind}: ${JSON.stringify(c.label)}${link}`;
+    })
+    .join("\n");
+  return `stated_items:\n${stated}\n\nclaims:\n${claims}`;
+}
+
+/**
+ * The completion prompt.
+ *
+ * States the verdict and the legal vocabulary; never a suggested edge. The
+ * "do not invent" clause is load-bearing and is phrased as a PERMISSION to
+ * return nothing, because a completion turn that feels obliged to produce
+ * claims will produce them.
+ *
+ * ⭐⭐ TWO QUESTIONS, NAMED APART (CLAUDE.md trap 21). This prompt answers both
+ * and they have OPPOSITE answers, so collapsing them is how the contradiction
+ * below got written in the first place:
+ *
+ *   "may I add a RECORD the brief does not support?"  — NO. The closing
+ *     paragraph forbids it, and it is the property this whole mechanism exists
+ *     to defend.
+ *   "may I estimate a MAGNITUDE the brief does not state?" — YES, and it must
+ *     agree with `DRAFT_RECORDS_INSTRUCTION`'s
+ *     `## HOW MUCH EACH OPTION MOVES WHAT IT CHANGES`, because pass 2's links
+ *     are merged into pass 1's record set and projected as ONE graph.
+ *
+ * ⚠ v9's WITHDRAWN RULE SURVIVED HERE IN TWO PLACES, AND THEY WERE CLOSED
+ * SEPARATELY. The general rule above lost its clause *"— but only where the
+ * brief gives you the basis for it"* on 2026-09-05 (#1349), which carried the
+ * draft's magnitude policy across word for word. Its SIBLING was left standing
+ * seventeen lines below — *"Use only levels the brief gives you the basis for.
+ * Do not invent a number to tell them apart …"* — so the contradiction stopped
+ * being one BETWEEN two prompts and became one INSIDE this prompt: two opposite
+ * answers to the same question, to one model, in one turn. #1349's guard cannot
+ * see it, because its negative is scoped to the exact string *"but only where
+ * the brief gives you the basis for it"* (trailing *"for it"*), which the
+ * sibling does not contain. This change closes the sibling.
+ *
+ * The premise BOTH clauses rested on ("a guessed number is read as the user's
+ * own") is refuted at the projector's bytes: `bindDirectStatedMagnitude`
+ * (`projector.ts:1632`; stamp at `:1712-1717`) marks an UNCITED option→factor
+ * magnitude `cee_hypothesis`, and only a value equal to a stated figure that
+ * VERIFIES against the brief bytes is ever stamped `brief_extraction`
+ * (`:1799`). Agreement is pinned by
+ * `__tests__/sets-to-policy-agreement.test.ts`, which derives BOTH strings from
+ * their modules rather than copying either.
+ *
+ * ⚠ AND IT IS UNMEASURED. A prompt cannot be unit-tested for behaviour; the
+ * spec pins only that the two rules do not contradict. Whether it moves usable
+ * interventions per option is an OUTCOME question, and no instrument in this
+ * repo answers it yet.
+ */
+export function buildRecordsCompletionPrompt(args: {
+  brief: string;
+  records: DraftRecordSet;
+  ask: CompletionAsk;
+}): string {
+  const { brief, records, ask } = args;
+  // ⭐ ONLY THE ANSWERABLE ITEMS ARE PUT TO THE MODEL. `no_goal` is withheld here
+  // — it stays visible to `shouldKeepCompletion` and to telemetry, because it is
+  // a true statement about the draft, but there is no legal response to it in
+  // this grammar and asking anyway is an instruction that can only be refused.
+  // See `isModelAnswerableAskItem`.
+  const problems = modelAnswerableAskItems(ask)
+    .map((i) => `- ${i.detail}`)
+    .join("\n");
+  // The goal's stated index, named explicitly so pass 2 always has the correct
+  // target. Run 8's completion emitted TEN well-formed links and contributed
+  // zero nodes and zero edges, because the one link that had to reach the goal
+  // used `to_claim`. The v4 prompt's only reference instruction named the claim
+  // namespace and nothing else.
+  const goalLines = records.stated_items
+    .map((s, i) => (s.kind === "goal" ? `- the goal is \`stated_items[${i}]\` ${JSON.stringify(s.source_quote)} — reach it with \`to_stated: ${i}\`` : null))
+    .filter((l): l is string => l !== null);
+  return [
+    "## COMPLETE THE RECORD SET YOU JUST EMITTED",
+    "",
+    "You emitted the record set below for this brief. Some of it does not join up.",
+    "Add the causal_link claims that close the gaps — and ONLY those.",
+    "",
+    "### The brief",
+    brief,
+    "",
+    "### What you emitted",
+    renderRecordsForAsk(records),
+    "",
+    "### What does not join up",
+    problems,
+    "",
+    "Any link listed above as an illegal shape has already been DISCARDED — it is not on the model",
+    "and you cannot edit it. If the connection it was reaching for is real, state it again as a NEW",
+    "link with a legal shape.",
+    "",
+    "### What to emit now",
+    `Emit ONLY new claims. Your first new claim will be claims[${ask.baseClaimIndex}], the next`,
+    `claims[${ask.baseClaimIndex + 1}], and so on. Everything above keeps the index it already has.`,
+    "",
+    // ⭐⭐ SHOWN ONLY WHEN A LIMIT WAS ACTUALLY REFUSED. Every draft would
+    // otherwise pay tokens for an instruction about a situation it is not in,
+    // and an instruction present on turns where it cannot apply is how a prompt
+    // teaches the model to use a field speculatively.
+    ...(ask.items.some((i) => i.kind === "constraint_target_unbindable")
+      ? [
+          "### A limit that could not be attached to anything",
+          "For each limit listed above as unattached, you may emit one `constraint_corrections`",
+          "entry saying what it bounds:",
+          "- `stated_index` — that limit's position in `stated_items`.",
+          "- `applies_to_claim` OR `applies_to_stated` — EXACTLY ONE — the position of the thing",
+          "  the limit bounds. Not the goal: a goal is what is being reached, not a measured",
+          "  quantity a limit can bound.",
+          "- `direction` — `ceiling` if the user must stay below it, `floor` if above.",
+          "- `value`, plus `unit` where the user gave one.",
+          "Subject, direction and value travel together. A subject with no value bounds nothing,",
+          "and a value with no direction is as likely to invert the user's meaning as honour it.",
+          "",
+          "LEAVE THE ENTRY OUT when the limit states no number. \"Legal has not confirmed this\" is",
+          "a real constraint with no threshold, and a number elsewhere in the same sentence — as in",
+          "\"...dead in enterprise, which is 60% of revenue\" — is usually describing something else,",
+          "not the limit. An omitted correction keeps the limit qualitative, which is correct and",
+          "costs nothing. A wrong one asserts a bound the user never set.",
+          "",
+        ]
+      : []),
+    "### Which list a reference points into — the field says which, and it is not interchangeable",
+    "- `from_stated` / `to_stated` — a position in `stated_items`, the list of things the USER said.",
+    "- `from_claim` / `to_claim` — a position in `claims`, the list of things YOU said.",
+    ...(goalLines.length > 0
+      ? [
+          "",
+          ...goalLines,
+          "`to_claim` can never reach the goal: the goal is not in `claims`, so a `to_claim` link",
+          "lands on a factor instead and the whole chain behind it is dropped as unconnected.",
+        ]
+      : []),
+    "",
+    "### The shapes a link can take",
+    renderLegalEdgeVocabulary(),
+    "",
+    "Set `effect` to `positive` or `negative` on every link. On a link FROM an option TO a factor,",
+    "set `sets_to` to the level that factor takes under that option, in the factor's own unit.",
+    "",
+    // ⭐⭐ THE MAGNITUDE POLICY IS THE DRAFT'S, WORD FOR WORD (`instruction.ts`,
+    // `## HOW MUCH EACH OPTION MOVES WHAT IT CHANGES`) — re-wrapped for this
+    // array, not reworded.
+    //
+    // Until 2026-09-05 this clause ended *"— but only where the brief gives you
+    // the basis for it"*: v9's withholding rule, which the DRAFT prompt deleted
+    // on 2026-08-30 and this prompt kept. Both prompts answer ONE question —
+    // "how much does this option move this factor?" — so that was a
+    // hand-maintained mirror (trap 12), not two authorities answering different
+    // questions (trap 21).
+    //
+    // The consequence was self-defeating: this pass exists to close
+    // `option_without_chain` / `NO_EFFECT_PATH`, and it closed them while
+    // withholding the magnitude on exactly the edges it had just created — so
+    // every new option→factor pair raised `MISSING_OPTION_VALUE`
+    // (`analysis-ready-helper.ts:734`) and the user was asked to type the number
+    // in by hand. `instruction.ts:99-113` records the draft-side measurement:
+    // 20 of 23 fresh journeys, and *"THE MODEL WAS NOT FAILING TO COMPLY; IT WAS
+    // COMPLYING."*
+    //
+    // ⭐ NOTHING NEW IS TRUSTED BY THIS CHANGE, and that is not inherited from
+    // the draft side — it is a property of the seam. `anthropic.ts:2076`
+    // re-projects the MERGED record set through `projectRecordsToGraph`, whose
+    // signature takes `(records, brief?)` and carries NO pass or turn argument:
+    // it is structurally incapable of telling a completion-produced claim from a
+    // draft-produced one. So an uncited magnitude from this prompt is stamped
+    // `cee_hypothesis` and a cited one `brief_extraction`, by the same
+    // `bindDirectStatedMagnitude` and on the same evidence.
+    //
+    // `basis` is emittable here: `buildRecordsCompletionSchema` reuses
+    // `buildDraftClaimItemSchema` (`grammar.ts:516`), and this prompt renders
+    // `stated_items` above, so the indices resolve.
+    //
+    // Kept in agreement by `completion-magnitude-policy-agrees-with-draft.test.ts`,
+    // which EXTRACTS these paragraphs from the draft instruction rather than
+    // holding a third copy — so the next drift on either side REDs.
+    "Where the brief gives you the figure — a number the user stated, or a change they described —",
+    "use that, and set `basis` to the stated_items it came from. Where the brief does not give you a",
+    "figure, give your best estimate, reasoned from what the brief does tell you: the scale of the",
+    "numbers already in it, and the direction and rough size of the change this option describes.",
+    "Keep the factor's own unit, and keep your estimates consistent across the options, so the",
+    "comparison between them means something.",
+    "An ordinal statement alone supplies an ordering, not a scale or numeric gaps.",
+    "Keep that statement and its conditions in the cited `stated_items`; do not",
+    "turn the ordering alone into `sets_to` values, probabilities or scale endpoints.",
+    "",
+    "Leave `sets_to` out only where you genuinely cannot form a defensible estimate even from the",
+    "brief's own scale. That is a truthful answer, and it also stops the analysis running on that",
+    "option — so do not reach for it merely because you are unsure of the exact number. An estimate",
+    "you can defend is worth more to the user than a gap they must fill before they can see anything",
+    "at all.",
+    "",
+    "Where two options are listed above as indistinguishable: the analysis cannot compare them, and",
+    "a model carrying such a pair is rejected outright — so leaving them as they are is not a safe",
+    "answer. Separate them using what the brief SAYS: a factor one of them acts on and the other",
+    "does not, or the same factor at different levels via `sets_to`, estimated the same way as",
+    "above and kept consistent across the options. What you must not do is manufacture a difference",
+    "you cannot defend: an estimated LEVEL leaves the ranking to the analysis, but a GAP invented",
+    "only to clear this check decides that ranking here, and the ranking is the user's to make — a",
+    "worse failure than the rejection.",
+    "",
+    "Do not restate anything the user said; you cannot, and you do not need to.",
+    "Do not add a factor or a link the brief does not support. If a gap above cannot be closed from",
+    "the brief, leave it open — an honest gap is a better answer than an invented link, and an empty",
+    "`claims` list is a valid response.",
+  ].join("\n");
+}
+
+export type CompletionMergeResult =
+  | { ok: true; records: DraftRecordSet; added: number; corrections_applied?: number }
+  | { ok: false; reason: "stated_items_disturbed" | "no_new_claims" };
+
+/** One model-supplied repair of a limit the projector refused to bind. */
+export interface ConstraintCorrection {
+  readonly stated_index: number;
+  readonly direction: "floor" | "ceiling";
+  readonly value: number;
+  readonly unit?: string;
+  readonly applies_to_claim?: number;
+  readonly applies_to_stated?: number;
+}
+
+/**
+ * ⭐⭐⭐ APPLY A CORRECTION TO AN EXISTING LIMIT — AND TO NOTHING ELSE.
+ *
+ * Four refusals, each closing a way this could become a rewrite of the user:
+ *
+ *  1. THE TARGET MUST ALREADY BE A `constraint`. A correction cannot convert a
+ *     goal, an option or a figure into a limit, and cannot mint one.
+ *  2. `source_quote` AND `kind` ARE NEVER READ. They are not on the correction
+ *     schema, so the user's own words are structurally out of reach — not merely
+ *     unmodified by convention.
+ *  3. EXACTLY ONE SUBJECT NAMESPACE, or the correction is dropped. Both or
+ *     neither is the same contradiction the projector already refuses to resolve
+ *     by preference on a causal link; it is refused here for the same reason.
+ *  4. ONE CORRECTION PER CONSTRAINT. A second entry for the same index is
+ *     dropped rather than allowed to win by arriving later — an ordering-
+ *     dependent result is not a result.
+ *
+ * ⛔ IT VALIDATES NOTHING ABOUT WHETHER THE SUBJECT IS RIGHT, deliberately. The
+ * projector's existing safeties — `MINTABLE_TARGET_KINDS` and the unit-family
+ * check — are the authority on that and run unchanged afterwards. A correction
+ * naming a goal will be refused there exactly as the original was. This function
+ * decides only that a correction is SHAPED like a repair, never that it is true.
+ */
+/**
+ * ⭐⭐⭐ WHICH LIMITS THE COMPLETION WAS ACTUALLY ASKED TO REPAIR.
+ *
+ * P1 from independent review: without this, a completion asked to repair limit
+ * A could rewrite limit B — reproduced by flipping an already-bound churn
+ * ceiling `<= 0.04` into a floor `>= 0.9` while a LEGAL-only ask was the sole
+ * question on the turn. The row kept the user's unchanged "under 4%" quote and
+ * `provenance: "explicit"`, preservation violations were empty, and the keep
+ * gate said true.
+ *
+ * ⛔ THE LESSON, NAMED BECAUSE I HAD IT BACKWARDS: my own test asserted that
+ * `source_quote` survives byte-for-byte and I treated that as the safety
+ * property. QUOTE PRESERVATION IS NOT MEANING PRESERVATION. The words were
+ * intact and the limit said the opposite thing.
+ *
+ * Derived from the projection's own refusals, never from a list anyone
+ * maintains: a limit is repairable exactly when the projector refused to bind
+ * it and said so.
+ */
+export type ConstraintRepairField = "target" | "value" | "direction" | "unit";
+
+/**
+ * ⭐⭐⭐ WHICH FIELDS OF WHICH LIMIT THIS TURN MAY CHANGE.
+ *
+ * Second finding on the same review, and the row was the wrong granularity:
+ * scoping to the ROW still let a TARGET repair arrive carrying `direction:
+ * "floor", value: 0.9` and overwrite a standing `<= 0.04` whose own quote says
+ * "under 4%". Repairing the reference is not licence to restate the limit.
+ *
+ * A field is editable only when it is the faulty or missing datum:
+ *  · `target`    — a target refusal fired, or the item names no target at all
+ *  · `value`     — the item carries no usable threshold
+ *  · `direction` — the item states no direction
+ *  · `unit`      — the unit is absent, or was refused as the wrong quantity
+ *
+ * Everything else is PRESERVED from what the user already had. Derived from the
+ * projection's own refusals plus the record itself, so nothing here is a list
+ * anyone maintains.
+ */
+export function repairableConstraintFields(
+  base: DraftRecordSet,
+  projection: { readonly dropped: ReadonlyArray<{ readonly reason: string; readonly stated_index?: number }> },
+): ReadonlyMap<number, ReadonlySet<ConstraintRepairField>> {
+  const out = new Map<number, Set<ConstraintRepairField>>();
+  for (const d of projection.dropped) {
+    if (!REPAIRABLE_CONSTRAINT_REASONS.has(d.reason)) continue;
+    const i = d.stated_index;
+    if (typeof i !== "number") continue;
+    const item = base.stated_items[i] as
+      | { value?: unknown; unit?: unknown; direction?: unknown; applies_to_claim?: unknown; applies_to_stated?: unknown }
+      | undefined;
+    if (!item) continue;
+    const fields = out.get(i) ?? new Set<ConstraintRepairField>();
+    // ⛔⛔ "CHECKED AND WRONG" AND "NEVER CHECKED" ARE TWO DIFFERENT ANSWERS AND
+    // MUST NOT SHARE A RULE (trap 21). `TARGET_REFUSAL_REASONS` means the
+    // binding pass resolved this reference and rejected the node it reached.
+    // `REASONS_WITH_AN_UNCHECKED_TARGET` means the binding pass NEVER RAN, so
+    // nothing has ever looked at the reference — and treating that as
+    // checked-and-fine is what locked the captured case into a dead end.
+    if (TARGET_REFUSAL_REASONS.has(d.reason)
+      || REASONS_WITH_AN_UNCHECKED_TARGET.has(d.reason)
+      || (item.applies_to_claim === undefined && item.applies_to_stated === undefined)) fields.add("target");
+    if (typeof item.value !== "number") fields.add("value");
+    if (item.direction === undefined) fields.add("direction");
+    // ⛔⛔ A KNOWN UNIT IS NEVER EDITABLE — not even on a unit MISMATCH.
+    //
+    // This line used to add "unit" whenever `constraint_target_unit_mismatch`
+    // fired, on the reasoning that a unit refusal is about the unit. It is not:
+    // the mismatch says the LIMIT and its TARGET measure different quantities,
+    // and the likely fault is the TARGET. Independent review reproduced the
+    // consequence — keep the wrong cost target, change the unit to £, and
+    // "keeping monthly churn under 4%" binds as `<= £4` with the user's own
+    // quote and `provenance: "explicit"`, kept, no preservation violations.
+    //
+    // So the unit the user stated is preserved, and only an ABSENT unit may be
+    // supplied. Repairing a stated unit needs its own evidence and its own
+    // path; it is not a side effect of fixing a reference.
+    if (item.unit === undefined) fields.add("unit");
+    out.set(i, fields);
+  }
+
+  // Same derivation, same scope, same justification as the ask above. ONLY
+  // `target` opens: the direction, value and unit are exactly what the user
+  // stated, and nothing here has any basis for changing them.
+  for (const limit of statedLimitsThatNameNoSubject(base)) {
+    const fields = out.get(limit.index) ?? new Set<ConstraintRepairField>();
+    fields.add("target");
+    out.set(limit.index, fields);
+  }
+
+  return out;
+}
+
+/** Refusals that are ABOUT the target, so the target is the datum to repair. */
+/**
+ * ⭐⭐ THE REFUSALS THAT FIRE BEFORE THE BINDING PASS RUNS.
+ *
+ * Measured on the live capture of 15 Sep 2026, five pass-1 record sets: in FOUR
+ * OF FOUR that carried the user's limit the model emitted the constraint with a
+ * `direction` and NO `value`, putting the number in a separate `figure`. The
+ * projector collects a binding only inside `typeof item.value === "number"`, so
+ * with no threshold it never reaches SAFETY 1 and the reference is never
+ * resolved against a node. `constraint_value_unstated` therefore says nothing
+ * whatsoever about whether the target is right.
+ *
+ * ⛔ AND IN 2 OF THOSE 4 THE TARGET WAS THE GOAL (`applies_to_stated: 0`), which
+ * can never carry a threshold (`MINTABLE_TARGET_KINDS` is `outcome`/`factor`).
+ * Without this set those turns were handed `value` and `unit` and forbidden the
+ * one field that was actually wrong, so the very next projection refused the
+ * bind again and the connectivity prune removed the user's limit outright.
+ *
+ * ⚠ THIS IS NOT A BLANKET "ALWAYS LET THE MODEL RE-POINT". A reference the
+ * binding pass DID check and accept produces no disclosure at all, so it never
+ * reaches this map — pinned by the negative control in
+ * `unchecked-constraint-target.test.ts`, which must stay green in both
+ * directions.
+ */
+const REASONS_WITH_AN_UNCHECKED_TARGET: ReadonlySet<string> = new Set([
+  "constraint_value_unstated",
+]);
+
+const TARGET_REFUSAL_REASONS: ReadonlySet<string> = new Set([
+  "constraint_target_not_measurable",
+  "constraint_target_unit_mismatch",
+  "unparseable_ref",
+  "ref_out_of_range",
+  "ref_target_not_a_node",
+  "missing_ref",
+  "ambiguous_ref",
+]);
+
+/** Back-compat view for callers that only need "may this row be touched at all". */
+export function repairableConstraintIndices(
+  projection: { readonly dropped: ReadonlyArray<{ readonly reason: string; readonly stated_index?: number }> },
+): ReadonlySet<number> {
+  const out = new Set<number>();
+  for (const d of projection.dropped) {
+    if (!REPAIRABLE_CONSTRAINT_REASONS.has(d.reason)) continue;
+    if (typeof d.stated_index === "number") out.add(d.stated_index);
+  }
+  return out;
+}
+
+/**
+ * The refusal reasons that a `constraint_corrections` entry can answer. Kept
+ * beside `enumerateCompletionAsk`'s own cases so the two cannot drift: a reason
+ * that raises the ask must appear here, or the model is asked a question whose
+ * answer will then be discarded.
+ */
+const REPAIRABLE_CONSTRAINT_REASONS: ReadonlySet<string> = new Set([
+  "constraint_target_not_measurable",
+  "constraint_target_unit_mismatch",
+  "constraint_value_unstated",
+  "unparseable_ref",
+  "ref_out_of_range",
+  "ref_target_not_a_node",
+  "missing_ref",
+  "ambiguous_ref",
+]);
+
+export function applyConstraintCorrections(
+  base: DraftRecordSet,
+  corrections: readonly ConstraintCorrection[],
+  /**
+   * The limits this turn was asked to repair — see
+   * {@link repairableConstraintIndices}. REQUIRED, not optional: an optional
+   * scope defaults to "anything", which is the P1 this parameter exists to
+   * close, and a caller that forgets it would silently restore the hole.
+   */
+  repairable: ReadonlyMap<number, ReadonlySet<ConstraintRepairField>>,
+): { stated_items: DraftRecordSet["stated_items"]; applied: number } {
+  /**
+   * ⭐⭐ CONFLICTING CORRECTIONS ARE REFUSED, NOT RESOLVED BY POSITION.
+   *
+   * Second P1 from the same review: this was first-wins, so two opposite
+   * corrections for one limit produced `<= 0.04` or `>= 0.9` depending only on
+   * which arrived first, and BOTH passed the real keep gate. My own comment
+   * beside it read "an ordering-dependent result is not a result" — the
+   * principle was right and the code did the other thing.
+   *
+   * ⚠ AND MY TEST COULD NOT SEE IT. `C5` asserted only that the SECOND entry
+   * does not win, which first-wins satisfies. A guard that passes under the
+   * defect it names is the shape this estate's tests exist to hunt.
+   *
+   * The whole group is dropped. One unambiguous correction still applies.
+   */
+  const perIndex = new Map<number, number>();
+  for (const c of corrections) {
+    if (!Number.isInteger(c?.stated_index)) continue;
+    perIndex.set(c.stated_index, (perIndex.get(c.stated_index) ?? 0) + 1);
+  }
+  const contested = new Set([...perIndex].filter(([, n]) => n > 1).map(([i]) => i));
+  const seen = new Set<number>();
+  const items = base.stated_items.map((item) => item);
+  let applied = 0;
+  for (const c of corrections) {
+    const i = c.stated_index;
+    if (!Number.isInteger(i) || i < 0 || i >= items.length) continue;
+    // ⛔ ONLY A LIMIT THIS TURN WAS ASKED ABOUT. An already-bound limit the
+    // completion was not questioned on is not its to change.
+    const editable = repairable.get(i);
+    if (editable === undefined) continue;
+    if (contested.has(i)) continue;
+    if (seen.has(i)) continue;
+    const target = items[i]!;
+    if ((target as { kind?: string }).kind !== "constraint") continue;
+    if ((c.applies_to_claim === undefined) === (c.applies_to_stated === undefined)) continue;
+    if (typeof c.value !== "number" || !Number.isFinite(c.value)) continue;
+    if (c.direction !== "floor" && c.direction !== "ceiling") continue;
+    // ⛔⛔ ONLY THE FAULTY OR MISSING DATUM. A target repair arriving with a
+    // direction and a value does NOT get to restate the limit: the reviewer
+    // reproduced `floor 0.9` overwriting a standing `<= 0.04` whose own quote
+    // reads "under 4%". Repairing a reference is not licence to change what the
+    // user said the limit IS.
+    const mayUnit = editable.has("unit") && c.unit !== undefined;
+    const mayTarget = editable.has("target");
+    // A correction that could change nothing permitted is not an answer.
+    if (!editable.has("direction") && !editable.has("value") && !mayUnit && !mayTarget) continue;
+    seen.add(i);
+    // ⚠ BUILT BY CONDITIONAL SPREAD, NOT BY MUTATING A `Record<string, unknown>`.
+    // The mutable form needed `as unknown as` twice, which the forbidden-boundary
+    // ratchet counts and correctly refused: a cast through `unknown` discards the
+    // very typing that makes this write safe to reason about.
+    items[i] = {
+      ...target,
+      ...(editable.has("direction") ? { direction: c.direction } : {}),
+      ...(editable.has("value") ? { value: c.value } : {}),
+      ...(mayUnit ? { unit: c.unit } : {}),
+      ...(mayTarget
+        ? (c.applies_to_claim !== undefined
+            ? { applies_to_claim: c.applies_to_claim, applies_to_stated: undefined }
+            : { applies_to_stated: c.applies_to_stated, applies_to_claim: undefined })
+        : {}),
+    } as typeof target;
+    applied += 1;
+  }
+  // ⭐⭐ NOTHING CHANGED ⇒ THE ORIGINAL ARRAY, BY REFERENCE — one guard, not two.
+  //
+  // `namespace-merge-and-completion.test.ts` asserts this pass-through with
+  // `Object.is`, because "the user's items are untouched" is a claim about
+  // IDENTITY; a fresh array with equal contents is a weaker claim that would
+  // slip past deep equality. My first version rebuilt unconditionally and broke
+  // it on turns with NO corrections at all — CI caught that, my own suite did not.
+  //
+  // ⚠ A SECOND, EARLIER `corrections.length === 0` RETURN WAS REMOVED RATHER
+  // THAN KEPT. It read as belt-and-braces and was strictly redundant: a mutant
+  // deleting it killed nothing, because this guard already covers the empty
+  // case. An unreachable branch is one no test can ever kill, which is the shape
+  // this module's own tests exist to hunt.
+  return applied === 0
+    ? { stated_items: base.stated_items, applied: 0 }
+    : { stated_items: items, applied };
+}
+
+/**
+ * APPEND-ONLY MERGE. Existing claims keep their indices; `stated_items` is
+ * carried through by reference-equality of content and asserted unchanged.
+ *
+ * The `stated_items_disturbed` branch cannot be reached through the completion
+ * grammar (which has no `stated_items`), and exists anyway: the property that
+ * the user's own words are untouched is the one this mechanism must never
+ * discover it lost, and a guarantee that rests on "the schema wouldn't let it"
+ * is a guarantee with no witness.
+ */
+export function mergeCompletionClaims(
+  base: DraftRecordSet,
+  completion: {
+    stated_items?: unknown;
+    claims?: DraftInferenceClaim[];
+    constraint_corrections?: readonly ConstraintCorrection[];
+  },
+  /** Which fields of which limits this turn may change. Empty ⇒ nothing applies. */
+  repairable: ReadonlyMap<number, ReadonlySet<ConstraintRepairField>> = new Map(),
+): CompletionMergeResult {
+  if (completion.stated_items !== undefined) return { ok: false, reason: "stated_items_disturbed" };
+  const added = completion.claims ?? [];
+  const { stated_items, applied } = applyConstraintCorrections(
+    base,
+    completion.constraint_corrections ?? [],
+    repairable,
+  );
+  // ⭐ A CORRECTION ON ITS OWN IS A REAL ANSWER. `no_new_claims` used to be the
+  // only verdict when `claims` was empty, and it is still correct when nothing
+  // at all came back — but a turn that repaired a refused limit and proposed no
+  // new claim has done exactly what was asked of it, and discarding that as
+  // "empty" would make the ask unanswerable again by a different route.
+  if (added.length === 0 && applied === 0) return { ok: false, reason: "no_new_claims" };
+  return {
+    ok: true,
+    records: { stated_items, claims: [...base.claims, ...added] },
+    added: added.length,
+    ...(applied > 0 ? { corrections_applied: applied } : {}),
+  };
+}

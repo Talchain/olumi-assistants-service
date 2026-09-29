@@ -1,0 +1,262 @@
+/**
+ * Tests for configurable MAX_PATCH_OPERATIONS (C.2).
+ * Verifies that the max operations limit reads from config.cee.maxPatchOperations.
+ */
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// ============================================================================
+// Mocks — must be declared before imports
+// ============================================================================
+
+vi.mock("../../../../src/adapters/llm/prompt-loader.js", () => ({
+  getSystemPrompt: vi.fn().mockResolvedValue("You are editing a graph."),
+  // The edit/review lanes resolve prompt bytes AND identity in ONE bound
+  // `getSystemPromptSnapshot` call. A mock factory REPLACES the module, so
+  // omitting this export hands the code under test `undefined` (trap 12).
+  // Content and meta mirror the two mocks above deliberately: production
+  // binds them to one resolution, and the mock must not model them as
+  // independently divergent.
+  getSystemPromptSnapshot: vi.fn().mockResolvedValue({
+    content: "You are editing a graph.",
+    meta: { source: 'default', prompt_version: 'v2' },
+  }),
+}));
+
+let mockMaxPatchOperations = 15; // default
+
+vi.mock("../../../../src/config/index.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../../../src/config/index.js")>();
+  return {
+    ...original,
+    config: new Proxy(original.config, {
+      get(target, prop) {
+        if (prop === "cee") {
+          return new Proxy(Reflect.get(target, prop) as object, {
+            get(ceeTarget, ceeProp) {
+              if (ceeProp === "maxRepairRetries") return 0;
+              if (ceeProp === "maxPatchOperations") return mockMaxPatchOperations;
+              if (ceeProp === "patchPreValidationEnabled") return false;
+              if (ceeProp === "patchBudgetEnabled") return false;
+              // CEE_EDIT_CAP_SPLIT went DEFAULT-ON 18 Jul (Paul-ratified). This
+              // suite isolates the configurable-cap MECHANISM via the legacy bare
+              // MAX_OPERATIONS_EXCEEDED rejection, so it pins the split flag OFF
+              // (the kill-switch path). The default-ON split behaviour is covered
+              // by trust-spine-red-edit-cap-split.test.ts.
+              if (ceeProp === "editCapSplitEnabled") return false;
+              return Reflect.get(ceeTarget, ceeProp);
+            },
+          });
+        }
+        return Reflect.get(target, prop);
+      },
+    }),
+  };
+});
+
+import { handleEditGraph } from "../../../../src/orchestrator/tools/edit-graph.js";
+import type { ConversationContext, GraphPatchBlockData } from "../../../../src/orchestrator/types.js";
+import type { LLMAdapter } from "../../../../src/adapters/llm/types.js";
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function makeContext(): ConversationContext {
+  return {
+    graph: {
+      nodes: [
+        { id: "goal_1", kind: "goal", label: "Revenue" },
+        { id: "factor_1", kind: "factor", label: "Price" },
+      ],
+      edges: [
+        {
+          from: "factor_1",
+          to: "goal_1",
+          strength: { mean: 0.5, std: 0.1 },
+          exists_probability: 0.9,
+          effect_direction: "positive",
+        },
+      ],
+    } as unknown as ConversationContext["graph"],
+    analysis_response: null,
+    framing: null,
+    messages: [],
+    scenario_id: "test-scenario",
+  };
+}
+
+function makeAdapter(responseJson: unknown): LLMAdapter {
+  return {
+    name: "test",
+    model: "test-model",
+    chat: vi.fn().mockResolvedValue({
+      content: JSON.stringify(responseJson),
+    }),
+    draftGraph: vi.fn(),
+    repairGraph: vi.fn(),
+    suggestOptions: vi.fn(),
+    clarifyBrief: vi.fn(),
+    critiqueGraph: vi.fn(),
+    explainDiff: vi.fn(),
+  } as unknown as LLMAdapter;
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+describe("Configurable MAX_PATCH_OPERATIONS (C.2)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockMaxPatchOperations = 15; // reset to default
+  });
+
+  it("default (no env var): rejects at 16 operations", async () => {
+    mockMaxPatchOperations = 15;
+    const ops = Array.from({ length: 16 }, (_, i) => ({
+      op: "update_node",
+      path: "factor_1",
+      value: { label: `Label ${i}` },
+    }));
+    const adapter = makeAdapter(ops);
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Bulk edit",
+      adapter,
+      "req-1",
+      "turn-1",
+      { maxRetries: 0 },
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.status).toBe("rejected");
+    expect(data.rejection?.reason).toContain("max 15");
+    expect(data.rejection?.code).toBe("MAX_OPERATIONS_EXCEEDED");
+  });
+
+  it("MAX_PATCH_OPERATIONS=20: rejects at 21, accepts 20", async () => {
+    mockMaxPatchOperations = 20;
+
+    // 21 operations — should be rejected
+    const tooMany = Array.from({ length: 21 }, (_, i) => ({
+      op: "update_node",
+      path: "factor_1",
+      value: { label: `Label ${i}` },
+    }));
+    const adapterTooMany = makeAdapter(tooMany);
+
+    const result1 = await handleEditGraph(
+      makeContext(),
+      "Bulk edit",
+      adapterTooMany,
+      "req-1",
+      "turn-1",
+      { maxRetries: 0 },
+    );
+
+    const data1 = result1.blocks[0].data as GraphPatchBlockData;
+    expect(data1.status).toBe("rejected");
+    expect(data1.rejection?.reason).toContain("max 20");
+
+    // 20 operations — should be accepted
+    const exactMax = Array.from({ length: 20 }, (_, i) => ({
+      op: "update_node",
+      path: "factor_1",
+      value: { label: `Label ${i}` },
+    }));
+    const adapterExactMax = makeAdapter(exactMax);
+
+    const result2 = await handleEditGraph(
+      makeContext(),
+      "Batch edit",
+      adapterExactMax,
+      "req-2",
+      "turn-2",
+    );
+
+    const data2 = result2.blocks[0].data as GraphPatchBlockData;
+    expect(data2.status).toBe("proposed");
+    expect(data2.operations).toHaveLength(20);
+  });
+
+  it("V5 A4 — user-facing rejection text is friendly with recovery chip (no raw counts/Zod)", async () => {
+    mockMaxPatchOperations = 15;
+    const ops = Array.from({ length: 16 }, (_, i) => ({
+      op: "update_node",
+      path: "factor_1",
+      value: { label: `Label ${i}` },
+    }));
+    const adapter = makeAdapter(ops);
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Bulk edit",
+      adapter,
+      "req-friendly",
+      "turn-friendly",
+      { maxRetries: 0 },
+    );
+
+    // Block-level rejection.reason still carries the raw text for diagnostics.
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.rejection?.code).toBe("MAX_OPERATIONS_EXCEEDED");
+
+    // User-facing assistantText is the centralised friendly copy.
+    expect(result.assistantText).toBeTruthy();
+    expect(result.assistantText).not.toMatch(/\boperation(s)?\b/i);
+    expect(result.assistantText).not.toMatch(/\bpatch\b/i);
+    expect(result.assistantText).not.toMatch(/\bmax(?:imum)?\s+(?:of\s+)?\d+/i);
+    expect(result.assistantText).not.toMatch(/\b\d+\s+(?:operation|edge|node)/i);
+    expect(result.assistantText).toMatch(/smaller steps/i);
+
+    // At least one recovery chip.
+    expect(result.suggestedActions?.length ?? 0).toBeGreaterThanOrEqual(1);
+    expect(result.suggestedActions?.[0].label).toBeTruthy();
+  });
+
+  it("existing edit_graph tests unaffected (default 15 still rejects at 16)", async () => {
+    mockMaxPatchOperations = 15;
+    const ops = Array.from({ length: 15 }, (_, i) => ({
+      op: "update_node",
+      path: "factor_1",
+      value: { label: `Label ${i}` },
+    }));
+    const adapter = makeAdapter(ops);
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Batch edit",
+      adapter,
+      "req-1",
+      "turn-1",
+    );
+
+    const data = result.blocks[0].data as GraphPatchBlockData;
+    expect(data.status).toBe("proposed");
+    expect(data.operations).toHaveLength(15);
+  });
+
+  it("R7 (NB-2): labels diagnostics.failure_code so the cap rejection is distinct (not null) in the turn event", async () => {
+    mockMaxPatchOperations = 15;
+    const ops = Array.from({ length: 16 }, (_, i) => ({
+      op: "update_node",
+      path: "factor_1",
+      value: { label: `Label ${i}` },
+    }));
+    const result = await handleEditGraph(
+      makeContext(),
+      "Bulk edit",
+      makeAdapter(ops),
+      "req-r7-nb2",
+      "turn-r7-nb2",
+      { maxRetries: 0 },
+    );
+
+    expect(result.wasRejected).toBe(true);
+    // Previously null → the highest-frequency cap rejection was unmeasurable.
+    expect(result.diagnostics?.failure_code).toBe("max_operations_exceeded");
+    // Distinct from the other structural rejection codes.
+    expect(result.diagnostics?.failure_code).not.toBe("graph_structure_invalid");
+  });
+});

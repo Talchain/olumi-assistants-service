@@ -1,0 +1,215 @@
+{
+  "stated_items": [
+    {
+      "kind": "goal",
+      "source_quote": "reaching £20k MRR within 12 months",
+      "role": "target",
+      "is_baseline": false
+    },
+    {
+      "kind": "constraint",
+      "source_quote": "keeping monthly churn under 4%",
+      "direction": "ceiling"
+    },
+    {
+      "kind": "option",
+      "source_quote": "increase the Pro plan price from £49 to £59 per month with the next Pro feature release",
+      "is_baseline": false
+    },
+    {
+      "kind": "figure",
+      "source_quote": "£49",
+      "value": 49,
+      "unit": "£"
+    },
+    {
+      "kind": "figure",
+      "source_quote": "£59",
+      "value": 59,
+      "unit": "£"
+    },
+    {
+      "kind": "figure",
+      "source_quote": "£20k MRR",
+      "value": 20000,
+      "unit": "£"
+    },
+    {
+      "kind": "figure",
+      "source_quote": "12 months",
+      "value": 12,
+      "unit": "months"
+    },
+    {
+      "kind": "figure",
+      "source_quote": "4%",
+      "value": 4,
+      "unit": "%"
+    }
+  ],
+  "claims": [
+    {
+      "claim_kind": "option_refinement",
+      "label": "Hold Pro Price at £49",
+      "basis": [],
+      "is_baseline": true
+    },
+    {
+      "claim_kind": "option_refinement",
+      "label": "Raise Pro Price to £59 with Feature Release",
+      "basis": [
+        2
+      ],
+      "is_baseline": false
+    },
+    {
+      "claim_kind": "option_refinement",
+      "label": "Raise Pro Price to £59 Immediately",
+      "basis": [
+        2
+      ],
+      "is_baseline": false
+    },
+    {
+      "claim_kind": "factor",
+      "label": "Pro Plan Monthly Price",
+      "basis": [
+        3,
+        4
+      ]
+    },
+    {
+      "claim_kind": "factor",
+      "label": "Perceived Value of Feature Release",
+      "basis": [
+        2
+      ]
+    },
+    {
+      "claim_kind": "factor",
+      "label": "Price Sensitivity of Pro Customers",
+      "basis": []
+    },
+    {
+      "claim_kind": "outcome",
+      "label": "Monthly Recurring Revenue",
+      "basis": [
+        5
+      ]
+    },
+    {
+      "claim_kind": "risk",
+      "label": "Pro Customer Churn Rate",
+      "basis": [
+        1
+      ]
+    },
+    {
+      "claim_kind": "risk",
+      "label": "New Customer Conversion Rate Drop",
+      "basis": []
+    },
+    {
+      "claim_kind": "prior",
+      "label": "Elasticity of Demand at £49–£59 Range",
+      "basis": []
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Holding price at £49 keeps Pro Plan Monthly Price at current level",
+      "from_claim": 0,
+      "to_claim": 3,
+      "effect": "positive",
+      "sets_to": 49
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Raising price to £59 with feature release sets Pro Plan Monthly Price to £59",
+      "from_claim": 1,
+      "to_claim": 3,
+      "effect": "positive",
+      "sets_to": 59
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Raising price to £59 immediately sets Pro Plan Monthly Price to £59",
+      "from_claim": 2,
+      "to_claim": 3,
+      "effect": "positive",
+      "sets_to": 59
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Raising price with feature release increases Perceived Value of Feature Release",
+      "from_claim": 1,
+      "to_claim": 4,
+      "effect": "positive",
+      "sets_to": 0.75
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Holding price leaves Perceived Value of Feature Release at baseline",
+      "from_claim": 0,
+      "to_claim": 4,
+      "effect": "positive",
+      "sets_to": 0.4
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Raising price immediately without feature release leaves Perceived Value low",
+      "from_claim": 2,
+      "to_claim": 4,
+      "effect": "positive",
+      "sets_to": 0.2
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Higher Pro Plan Monthly Price increases Monthly Recurring Revenue",
+      "from_claim": 3,
+      "to_claim": 6,
+      "effect": "positive"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Higher price with low perceived value increases Pro Customer Churn Rate",
+      "from_claim": 5,
+      "to_claim": 7,
+      "effect": "positive"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Higher Perceived Value of Feature Release reduces Pro Customer Churn Rate",
+      "from_claim": 4,
+      "to_claim": 7,
+      "effect": "negative"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Higher price reduces New Customer Conversion Rate",
+      "from_claim": 3,
+      "to_claim": 8,
+      "effect": "positive"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Monthly Recurring Revenue positively drives MRR goal",
+      "from_claim": 6,
+      "to_stated": 0,
+      "effect": "positive"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Pro Customer Churn Rate negatively impacts MRR goal",
+      "from_claim": 7,
+      "to_stated": 0,
+      "effect": "negative"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "New Customer Conversion Rate Drop negatively impacts MRR goal",
+      "from_claim": 8,
+      "to_stated": 0,
+      "effect": "negative"
+    }
+  ]
+}

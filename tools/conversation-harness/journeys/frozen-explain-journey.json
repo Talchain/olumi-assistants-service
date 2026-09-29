@@ -1,0 +1,12 @@
+{
+ "comment": "Post-ship live sample for v42.2j (explain_* answer_text landing). Pre-seeded frozen graph → FA0 deterministic analysis, then explanation-handler turns. For explanation handlers suppressOrientation=true, so the served assistant_text IS action.explanation.answer_text — measure its length/substance to read the served answer_text population. F-prefixed ids (no cross-round collision).",
+ "turns": [
+  { "id": "FA0", "stage": "analyse", "message": "Run the analysis" },
+  { "id": "FE1", "stage": "analyse", "message": "Why is the leading option performing best?" },
+  { "id": "FE2", "stage": "analyse", "message": "What does the analysis tell you about each factor's influence?" },
+  { "id": "FE3", "stage": "analyse", "message": "What could change the outcome of this analysis?" },
+  { "id": "FE4", "stage": "analyse", "message": "What would need to be true for a different option to come out ahead?" },
+  { "id": "FE5", "stage": "analyse", "message": "Walk me through why the analysis favours the leading option." },
+  { "id": "FE6", "stage": "analyse", "message": "Which assumptions is this result most sensitive to?" }
+ ]
+}

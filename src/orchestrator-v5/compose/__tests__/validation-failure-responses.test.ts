@@ -1,0 +1,1273 @@
+import { describe, it, expect } from 'vitest';
+
+import { composeValidationFailure } from '../validation-failure-responses.js';
+import type { ComposeContext } from '../types.js';
+import type { GraphLookup, ValidationError } from '../../routing/validator.js';
+import type { HandlerValidationRegistry } from '../../routing/validator.js';
+
+const REGISTRY: HandlerValidationRegistry = {
+  run_analysis: {
+    handler_id: 'run_analysis',
+    accepted_entity_kinds: ['option'],
+    confirmation_template: 'ok',
+  },
+};
+
+const EMPTY_CTX: ComposeContext = { handlerRegistry: REGISTRY };
+
+function graphWith(entities: Array<{ id: string; label: string; kind: string }>): GraphLookup {
+  return {
+    findEntityById(id) {
+      const m = entities.find((e) => e.id === id);
+      return m ? { id: m.id, kind: m.kind as never, label: m.label } : null;
+    },
+    listEntitiesByKind(kind) {
+      return entities
+        .filter((e) => e.kind === kind)
+        .map((e) => ({ id: e.id, label: e.label }));
+    },
+  };
+}
+
+function composeFor(error: ValidationError, ctx: ComposeContext = EMPTY_CTX) {
+  return composeValidationFailure(error, ctx, 'frame');
+}
+
+const FORBIDDEN_WORDS = /\b(recommended|recommendation|winner)\b/i;
+const EM_DASH = /[—–]/;
+
+function countSentences(text: string): number {
+  const matches = text.match(/[.!?](?=\s|$)/g);
+  return matches ? matches.length : 0;
+}
+
+function assertStyle(text: string): void {
+  expect(text).not.toMatch(FORBIDDEN_WORDS);
+  expect(text).not.toMatch(EM_DASH);
+  expect(countSentences(text)).toBeLessThanOrEqual(3);
+}
+
+describe('composeValidationFailure — HANDLER_NOT_FOUND', () => {
+  it('offers curated handler chips when registry has user-facing handlers', () => {
+    const { response, template_id } = composeFor({
+      code: 'HANDLER_NOT_FOUND',
+      message: 'Unknown handler',
+      details: { handler_id: 'mystery_handler', registered: ['run_analysis'] },
+    });
+    expect(template_id).toBe('handler_not_found');
+    expect(response.assistant_text).toMatch(/don't recognise/i);
+    expect(response.suggested_actions.length).toBeGreaterThan(0);
+    expect(response.suggested_actions[0]?.action_type).toBe('run_analysis');
+    expect(response.assistant_text).not.toContain('mystery_handler');
+    assertStyle(response.assistant_text);
+  });
+
+  it('falls back to a text-prompt chip when registry has no user-facing handlers', () => {
+    const { response } = composeFor(
+      {
+        code: 'HANDLER_NOT_FOUND',
+        message: 'Unknown handler',
+        details: { handler_id: 'x' },
+      },
+      { handlerRegistry: {} },
+    );
+    expect(response.suggested_actions.length).toBe(1);
+    expect(response.suggested_actions[0]?.action_type).toBeUndefined();
+  });
+});
+
+describe('composeValidationFailure — ENTITY_RESOLUTION_AMBIGUOUS', () => {
+  it('emits one chip per candidate when candidates present', () => {
+    const { response, template_id } = composeFor({
+      code: 'ENTITY_RESOLUTION_AMBIGUOUS',
+      message: 'ambiguous',
+      details: {
+        entity_kind: 'option',
+        candidates: [
+          { id: 'a', label: 'Option A' },
+          { id: 'b', label: 'Option B' },
+        ],
+      },
+    });
+    expect(template_id).toBe('ambiguous_with_candidates');
+    expect(response.suggested_actions.length).toBe(2);
+    expect(response.suggested_actions[0]?.label).toBe('Option A');
+    expect(response.suggested_actions[0]?.message).toMatch(/I meant Option A/);
+    assertStyle(response.assistant_text);
+  });
+
+  it('falls back when candidates absent', () => {
+    const { response, template_id } = composeFor({
+      code: 'ENTITY_RESOLUTION_AMBIGUOUS',
+      message: 'ambiguous',
+      details: { entity_kind: 'option' },
+    });
+    expect(template_id).toBe('ambiguous_no_candidates');
+    expect(response.suggested_actions.length).toBe(1);
+    assertStyle(response.assistant_text);
+  });
+});
+
+describe('composeValidationFailure — ENTITY_KIND_MISMATCH', () => {
+  // AMENDED 2026-07-27 (entity-kind repair). The old copy ended "Try asking
+  // about a specific option, or describe what you'd like to change." — which
+  // was actively misleading, because live evidence shows the overwhelmingly
+  // common target of this refusal is an OUTCOME node, not an option. It also
+  // named no next step the user could act on.
+  //
+  // Two shapes now, distinguished by whether the graph resolved the entity:
+  //   resolved  → we know what it is, so say we found it
+  //   otherwise → we genuinely don't, so say that
+  // Neither names our taxonomy; the no-jargon assertions below are unchanged
+  // and still enforced. When a graph is available the branch offers real
+  // entity chips instead (covered separately).
+  const KIND_MISMATCH_UNRESOLVED =
+    /^I wasn't sure what you meant by .+\. Tell me what you'd like to change\.$/;
+  const KIND_MISMATCH_RESOLVED =
+    /^I found .+, but I can't make that change to it\. Tell me what you'd like to change\.$/;
+  const INTERNAL_KIND_LABELS = ['node', 'edge', 'goal', 'constraint'] as const;
+
+  it('uses proposed_label when present and no longer suggests an inapplicable option', () => {
+    const { response, template_id } = composeFor({
+      code: 'ENTITY_KIND_MISMATCH',
+      message: 'kind mismatch',
+      details: {
+        handler_id: 'run_analysis',
+        proposed_kind: 'node',
+        accepted_kinds: ['option'],
+        proposed_label: 'Churn Risk',
+      },
+    });
+    expect(template_id).toBe('kind_mismatch');
+    expect(response.assistant_text).toMatch(KIND_MISMATCH_UNRESOLVED);
+    expect(response.assistant_text).toContain('Churn Risk');
+    // The dead end this branch used to be.
+    expect(response.assistant_text).not.toMatch(/specific option/i);
+    expect(response.suggested_actions.length).toBe(1);
+    assertStyle(response.assistant_text);
+  });
+
+  it('does not leak internal kind labels — graph-resolved mismatch', () => {
+    const { response, template_id } = composeFor({
+      code: 'ENTITY_KIND_MISMATCH',
+      message: 'mismatch',
+      details: {
+        entity_id: 'fac_churn',
+        proposed_kind: 'option',
+        resolved_kind: 'node',
+        proposed_label: 'Churn Risk',
+        resolved_label: 'Churn Risk',
+      },
+    });
+    expect(template_id).toBe('kind_mismatch_resolved');
+    expect(response.assistant_text).toMatch(KIND_MISMATCH_RESOLVED);
+    expect(response.assistant_text).toContain('Churn Risk');
+    expect(response.assistant_text).not.toContain('fac_churn');
+    for (const label of INTERNAL_KIND_LABELS) {
+      expect(response.assistant_text).not.toMatch(new RegExp(`\\b${label}\\b`, 'i'));
+    }
+    assertStyle(response.assistant_text);
+  });
+
+  it('renders cleanly across every EntityKind enum value with no jargon leak', () => {
+    const KINDS = ['node', 'edge', 'option', 'goal', 'constraint'] as const;
+    for (const proposed of KINDS) {
+      for (const resolved of [...KINDS, undefined]) {
+        const { response, template_id } = composeFor({
+          code: 'ENTITY_KIND_MISMATCH',
+          message: 'mismatch',
+          details: {
+            proposed_kind: proposed,
+            ...(resolved ? { resolved_kind: resolved } : { accepted_kinds: ['option'] }),
+            proposed_label: 'Some Entity',
+          },
+        });
+        expect(template_id).toBe(resolved ? 'kind_mismatch_resolved' : 'kind_mismatch');
+        expect(response.assistant_text).toMatch(
+          resolved ? KIND_MISMATCH_RESOLVED : KIND_MISMATCH_UNRESOLVED,
+        );
+        for (const label of INTERNAL_KIND_LABELS) {
+          expect(response.assistant_text).not.toMatch(new RegExp(`\\b${label}\\b`, 'i'));
+        }
+        expect(response.assistant_text).not.toMatch(/\bkind\b/i);
+        assertStyle(response.assistant_text);
+      }
+    }
+  });
+
+  it('a subject it cannot name gets a sentence that claims nothing about the user', () => {
+    // ⚠ THIS TEST PREVIOUSLY PINNED THE DEFECT. It asserted
+    // KIND_MISMATCH_UNRESOLVED here — i.e. that a proposal carrying NO label at
+    // all still produced "I wasn't sure what you meant by that item." It was
+    // written as a `safeLabel` fallback check and, in doing so, froze a
+    // sentence that tells the user two things the payload does not contain:
+    // that they referred to an "item", and that their wording was unclear.
+    //
+    // Live cost, 3 Sep 2026 capture (turn index 2, 14:01:16Z): the user asked
+    // "Why are all of the outcome and risk strengths 50%?" — naming nothing —
+    // and was told the product could not tell what they meant by "that item".
+    // They re-asked twice.
+    //
+    // The assertion now binds to the honest sentence, and keeps the two things
+    // the original was actually protecting: the id must not leak, and the
+    // template id must not move.
+    const { response, template_id } = composeFor({
+      code: 'ENTITY_KIND_MISMATCH',
+      message: 'mismatch',
+      details: {
+        proposed_kind: 'node',
+        accepted_kinds: ['option'],
+      },
+    });
+    expect(template_id).toBe('kind_mismatch');
+    expect(response.assistant_text).toBe(
+      "I couldn't match that to anything in your model. Tell me what you'd like to change.",
+    );
+    // The claims that must NOT survive an unnamed subject.
+    expect(response.assistant_text).not.toMatch(/wasn't sure what you meant/i);
+    expect(response.assistant_text).not.toMatch(/that item/i);
+    expect(response.suggested_actions.length).toBe(1);
+    assertStyle(response.assistant_text);
+  });
+
+  it('a NAMED subject keeps the existing copy byte-for-byte', () => {
+    // The discriminating twin. Without it the change above could have replaced
+    // the sentence for EVERY kind mismatch, which would lose real information
+    // on the path that works — a fix that closes one direction by opening the
+    // other (CLAUDE.md trap 22b).
+    const { response, template_id } = composeFor({
+      code: 'ENTITY_KIND_MISMATCH',
+      message: 'mismatch',
+      details: {
+        proposed_kind: 'node',
+        proposed_label: 'Sales Headcount Investment',
+        accepted_kinds: ['option'],
+      },
+    });
+    expect(template_id).toBe('kind_mismatch');
+    expect(response.assistant_text).toBe(
+      "I wasn't sure what you meant by Sales Headcount Investment. Tell me what you'd like to change.",
+    );
+  });
+
+  it('offers real entity chips from the accepted kinds when a graph is available', () => {
+    // The affordance the old branch lacked entirely. `run_analysis` accepts
+    // 'option', so the refusal names the options the user could have meant
+    // instead of leaving them to guess.
+    const graph = graphWith([
+      { id: 'opt_a', label: 'Standardise on Dell XPS', kind: 'option' },
+      { id: 'opt_b', label: 'Standardise on MacBook Pro', kind: 'option' },
+      { id: 'fac_x', label: 'Hardware Unit Cost', kind: 'node' },
+    ]);
+    const { response, template_id, chip_type } = composeFor(
+      {
+        code: 'ENTITY_KIND_MISMATCH',
+        message: 'mismatch',
+        details: {
+          handler_id: 'run_analysis',
+          entity_id: 'fac_x',
+          proposed_kind: 'option',
+          resolved_kind: 'node',
+          accepted_kinds: ['option'],
+          resolved_label: 'Hardware Unit Cost',
+        },
+      },
+      { handlerRegistry: REGISTRY, graph },
+    );
+    expect(template_id).toBe('kind_mismatch_resolved_with_siblings');
+    expect(chip_type).toBe('entity_suggestion');
+    expect(response.suggested_actions.map((a) => a.label)).toEqual([
+      'Standardise on Dell XPS',
+      'Standardise on MacBook Pro',
+    ]);
+    expect(response.assistant_text).toContain('Hardware Unit Cost');
+    for (const label of INTERNAL_KIND_LABELS) {
+      expect(response.assistant_text).not.toMatch(new RegExp(`\\b${label}\\b`, 'i'));
+    }
+    // Chips must never leak ids either.
+    for (const action of response.suggested_actions) {
+      expect(`${action.label} ${action.message}`).not.toMatch(/\b(opt_a|opt_b|fac_x)\b/);
+    }
+    assertStyle(response.assistant_text);
+  });
+});
+
+describe('composeValidationFailure — ENTITY_NOT_FOUND', () => {
+  it('offers sibling chips when graph is present', () => {
+    const graph = graphWith([
+      { id: 'opt_a', label: 'Option A', kind: 'option' },
+      { id: 'opt_b', label: 'Option B', kind: 'option' },
+    ]);
+    const { response, template_id } = composeFor(
+      {
+        code: 'ENTITY_NOT_FOUND',
+        message: 'missing',
+        details: {
+          entity_id: 'opt_missing',
+          entity_kind: 'option',
+          entity_label: 'Missing Option',
+        },
+      },
+      { handlerRegistry: REGISTRY, graph },
+    );
+    expect(template_id).toBe('entity_not_found_with_siblings');
+    expect(response.assistant_text).toContain('Missing Option');
+    expect(response.suggested_actions.length).toBe(2);
+    expect(response.assistant_text).not.toContain('opt_missing');
+    assertStyle(response.assistant_text);
+  });
+
+  it('falls back to text-prompt chip when graph absent', () => {
+    const { response, template_id } = composeFor({
+      code: 'ENTITY_NOT_FOUND',
+      message: 'missing',
+      details: { entity_id: 'opt_x', entity_kind: 'option' },
+    });
+    expect(template_id).toBe('entity_not_found_no_siblings');
+    expect(response.assistant_text).not.toContain('opt_x');
+    expect(response.suggested_actions.length).toBe(1);
+    assertStyle(response.assistant_text);
+  });
+
+  it('never leaks the raw ID when label absent', () => {
+    const { response } = composeFor({
+      code: 'ENTITY_NOT_FOUND',
+      message: 'missing',
+      details: { entity_id: 'fac_churn_x7', entity_kind: 'node' },
+    });
+    expect(response.assistant_text).not.toContain('fac_churn_x7');
+    expect(response.assistant_text).toContain('that node');
+  });
+});
+
+describe('composeValidationFailure — ENTITY_RESOLUTION_SUSPICIOUS', () => {
+  it('shows both candidate labels and emits a chip for each', () => {
+    const { response, template_id } = composeFor({
+      code: 'ENTITY_RESOLUTION_SUSPICIOUS',
+      message: 'suspicious',
+      details: {
+        entity_id: 'opt_a',
+        chosen: { id: 'opt_a', label: 'Option A', dice: 0.2 },
+        closer_candidate: { id: 'opt_b', label: 'Option B', dice: 0.8 },
+        delta: 0.6,
+      },
+    });
+    expect(template_id).toBe('resolution_suspicious');
+    expect(response.assistant_text).toContain('Option A');
+    expect(response.assistant_text).toContain('Option B');
+    expect(response.suggested_actions.length).toBe(2);
+    assertStyle(response.assistant_text);
+  });
+});
+
+describe('composeValidationFailure — PRECONDITION_UNMET', () => {
+  it('emits a specific template for run_analysis + no_options_defined', () => {
+    const { response, template_id } = composeFor({
+      code: 'PRECONDITION_UNMET',
+      message: 'no options',
+      details: { handler_id: 'run_analysis', reason: 'no_options_defined' },
+    });
+    expect(template_id).toBe('precondition_no_options');
+    expect(response.assistant_text).toMatch(/option to compare/);
+    expect(response.suggested_actions[0]?.label).toBe('Add an option');
+    assertStyle(response.assistant_text);
+  });
+
+  it('emits a generic template for unknown preconditions', () => {
+    const { response, template_id } = composeFor({
+      code: 'PRECONDITION_UNMET',
+      message: 'strange',
+      details: { handler_id: 'something_else', reason: 'unknown' },
+    });
+    expect(template_id).toBe('precondition_generic');
+    expect(response.suggested_actions.length).toBe(1);
+    assertStyle(response.assistant_text);
+  });
+});
+
+describe('composeValidationFailure — PARAMETER_INVALID', () => {
+  it('substitutes parameter, constraint and sanitised actual value', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'bad param',
+      details: {
+        parameter: 'value',
+        issue: 'Number must be less than or equal to 1',
+        actual_value: 1.5,
+        constraint_description: 'a number between 0 and 1',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid');
+    expect(response.assistant_text).toContain('value');
+    // ROADMAP 2.380 (FIX 3) — this line used to assert
+    //   toContain('a number between 0 and 1')
+    // i.e. it PINNED the validator-jargon leak: `describeSchema`'s raw
+    // `_def.checks` reading, rendered verbatim to the user. The live form of
+    // the same defect was "'strength' needs to be a number between -1 and 1."
+    // The constraint description must now NOT reach the user; product copy
+    // replaces it. The value echo is unchanged and still asserted below.
+    expect(response.assistant_text).not.toContain('a number between 0 and 1');
+    expect(response.assistant_text).not.toContain("'value'");
+    expect(response.assistant_text).toContain('1.5');
+    expect(response.suggested_actions[0]?.label).toBe('Try a different value');
+    assertStyle(response.assistant_text);
+  });
+
+  it('copes when constraint_description or actual_value are missing', () => {
+    const { response } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'bad',
+      details: { parameter: 'value' },
+    });
+    expect(response.assistant_text).toContain('value');
+    expect(response.suggested_actions.length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix B — missing-value copy hardening (CEE V5 Golden Journey row 7
+// workstream). The validator's `missing_value` branch must produce a
+// helpful, user-readable message — never the "unknown" sentinel that
+// previously leaked from `sanitiseForUser(undefined)`.
+// ---------------------------------------------------------------------------
+
+describe('composeValidationFailure — PARAMETER_INVALID missing_value (Fix B)', () => {
+  it('rejection_reason=missing_value with no actual_value → helpful copy, no "unknown" leak', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'value parameter is missing',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'missing_value',
+        handler_id: 'set_factor_value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid_missing_value');
+    expect(response.assistant_text).not.toContain('unknown');
+    expect(response.assistant_text).not.toContain('You gave');
+    // Must guide the user toward supplying a value.
+    expect(response.assistant_text.toLowerCase()).toContain("couldn't tell what value");
+    expect(response.suggested_actions.length).toBeGreaterThan(0);
+    assertStyle(response.assistant_text);
+  });
+
+  it('rejection_reason=missing_value with actual_value=null → helpful copy, no "unknown" leak', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'value parameter is missing',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'missing_value',
+        actual_value: null,
+        handler_id: 'set_factor_value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid_missing_value');
+    expect(response.assistant_text).not.toContain('unknown');
+    expect(response.assistant_text.toLowerCase()).toContain("couldn't tell what value");
+    assertStyle(response.assistant_text);
+  });
+
+  it('real invalid scalar value (1.5 with constraint 0–1) keeps the existing "You gave" copy unchanged', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'bad param',
+      details: {
+        parameter: 'value',
+        issue: 'Number must be less than or equal to 1',
+        actual_value: 1.5,
+        constraint_description: 'a number between 0 and 1',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid');
+    expect(response.assistant_text).toContain('1.5');
+    expect(response.assistant_text).toContain('You gave');
+    assertStyle(response.assistant_text);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Compound-value hardening. The general PARAMETER_INVALID fallback rendered
+// "You gave [complex value]." on a multi-effect edit whose `actual_value` is
+// an object: `sanitiseForUser` maps objects to the '[complex value]' sentinel,
+// which slipped past the prior 'unknown'-only guard. The echo is now gated on
+// the RAW input type — dropped for any non-scalar, kept for a genuine finite
+// scalar — so a future sentinel can never leak the same way.
+// ---------------------------------------------------------------------------
+
+describe('composeValidationFailure — PARAMETER_INVALID non-scalar actual_value', () => {
+  it('compound-value edit drops the "You gave …" clause instead of leaking "[complex value]"', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'Parameter "value" failed schema: Expected number, received object',
+      details: {
+        parameter: 'value',
+        issue: 'Expected number, received object',
+        actual_value: { magnitude: 0.2, effects: ['cost', 'quality'], direction: 'increase' },
+        constraint_description: 'a valid value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid');
+    // The exact live leak must be gone…
+    expect(response.assistant_text).not.toContain('You gave');
+    expect(response.assistant_text).not.toContain('[complex value]');
+    expect(response.assistant_text).not.toBe(
+      "'value' needs to be a valid value. You gave [complex value].",
+    );
+    // …and the surrounding copy is kept verbatim.
+    // ROADMAP 2.380 (FIX 3): this used to assert the jargon sentence
+    //   "'value' needs to be a valid value."
+    // — the quoted internal field name plus `describeSchema`'s raw constraint.
+    // Product copy replaces it. What this test is FOR — that a non-scalar
+    // actual_value drops the echo rather than leaking a sentinel — is
+    // unchanged and still asserted above.
+    expect(response.assistant_text).toBe(
+      "I couldn't use that as the value. Tell me the number you want and I'll set it.",
+    );
+    expect(response.suggested_actions[0]?.label).toBe('Try a different value');
+    assertStyle(response.assistant_text);
+  });
+
+  it('array actual_value is also treated as non-scalar and dropped', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'bad param',
+      details: {
+        parameter: 'value',
+        issue: 'Expected number, received array',
+        actual_value: [1, 2, 3],
+        constraint_description: 'a valid value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid');
+    expect(response.assistant_text).not.toContain('You gave');
+    assertStyle(response.assistant_text);
+  });
+
+  // Positive control — the guard must DISCRIMINATE, not blanket-suppress: a
+  // genuine scalar still echoes back.
+  it('scalar number actual_value still renders "You gave 42000."', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'bad param',
+      details: {
+        parameter: 'value',
+        issue: 'Number must be less than or equal to 40000',
+        actual_value: 42000,
+        constraint_description: 'a number below 40000',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid');
+    expect(response.assistant_text).toContain('You gave 42000.');
+    assertStyle(response.assistant_text);
+  });
+
+  it('scalar boolean actual_value still renders "You gave false."', () => {
+    const { response } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'bad param',
+      details: {
+        parameter: 'enabled',
+        issue: 'Expected true',
+        actual_value: false,
+        constraint_description: 'true or false',
+      },
+    });
+    expect(response.assistant_text).toContain('You gave false.');
+    assertStyle(response.assistant_text);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1.16 diagnosis cluster items A1/A2/B — composer honesty for the remaining
+// set_factor_value rejection reasons. The validator threads a sanitised,
+// user-readable `details.issue` (e.g. "Value £250,000 exceeds the factor's
+// cap of £200,000.") for every predicate rejection, but the composer only
+// had branches for missing_value / bare_ratio_on_unit_factor — everything
+// else collapsed into the useless "'value' needs to be a valid value."
+// ---------------------------------------------------------------------------
+
+describe('composeValidationFailure — PARAMETER_INVALID value_exceeds_cap (items A1+A2, 1.16)', () => {
+  const FULL_DETAILS = {
+    parameter: 'value',
+    rejection_reason: 'value_exceeds_cap',
+    issue: "Value £250,000 exceeds the factor's cap of £200,000.",
+    handler_id: 'set_factor_value',
+    unit: '£',
+    value: 250000,
+    operator: 'set',
+    factor_id: 'fac_migration',
+    factor_label: 'Migration Cost',
+    suggested_cap: 320000,
+  };
+
+  it('renders the honest cap message, never the generic fallback', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: "Value £250,000 exceeds the factor's cap of £200,000.",
+      details: FULL_DETAILS,
+    });
+    expect(template_id).toBe('parameter_invalid_value_exceeds_cap');
+    expect(response.assistant_text).toContain('£250,000');
+    expect(response.assistant_text).toContain('£200,000');
+    expect(response.assistant_text).not.toContain('needs to be a valid value');
+    expect(response.assistant_text).not.toContain('unknown');
+    assertStyle(response.assistant_text);
+  });
+
+  it('A2: explicit unit + set operator + suggested cap → user-consented rescale chip', () => {
+    const { response } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'cap exceeded',
+      details: FULL_DETAILS,
+    });
+    const rescale = response.suggested_actions.find((a) => a.id === 'chip_prompt_rescale_extend_cap');
+    expect(rescale).toBeDefined();
+    expect(rescale?.label).toBe('Set to £250,000 and extend the scale');
+    // The replay message must (a) name the factor so the pending-action
+    // resumer can label-match it, (b) carry NO digits and NO edit verb so
+    // the clarification-resume pre-route claims it instead of the
+    // deterministic value-update path (which would drop the cap).
+    expect(rescale?.message).toBe('Extend the scale for Migration Cost and use the new value.');
+    expect(rescale?.message).not.toMatch(/\d/);
+    // A fallback prompt chip is still present alongside.
+    expect(response.suggested_actions.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('A2 negative: no rescale chip without an explicit unit', () => {
+    const { unit: _unit, ...noUnit } = FULL_DETAILS;
+    const { response } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'cap exceeded',
+      details: { ...noUnit, issue: "Value 250000 exceeds the factor's cap of 200000." },
+    });
+    expect(response.suggested_actions.find((a) => a.id === 'chip_prompt_rescale_extend_cap')).toBeUndefined();
+    expect(response.suggested_actions.length).toBeGreaterThan(0);
+  });
+
+  it('A2 negative: no rescale chip for delta operators (suggested cap covers the stated value only)', () => {
+    const { response } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'cap exceeded',
+      details: { ...FULL_DETAILS, operator: 'increase' },
+    });
+    expect(response.suggested_actions.find((a) => a.id === 'chip_prompt_rescale_extend_cap')).toBeUndefined();
+  });
+
+  it('A2 negative: no rescale chip without a factor label (resumer could not match the replay)', () => {
+    const { factor_label: _label, ...noLabel } = FULL_DETAILS;
+    const { response } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'cap exceeded',
+      details: noLabel,
+    });
+    expect(response.suggested_actions.find((a) => a.id === 'chip_prompt_rescale_extend_cap')).toBeUndefined();
+  });
+
+  // PR #413 review FIXUP 2 — degrade-only label gate. The chip's replay is
+  // only deterministic when the resumer can claim it: a label containing a
+  // digit ("Phase 2 Cost") or an edit verb ("Set-up Cost" — \bset\b matches
+  // across the hyphen) makes the rendered replay message trip the resumer's
+  // EDIT_VERB_OR_QUANTITY_PATTERN negative gate, so the click would fall to
+  // the LLM WITHOUT the cap and loop the same honest failure. Suppress the
+  // chip whenever the rendered message fails the resumer's own predicate;
+  // the honest copy and the retry prompt remain.
+  it('A2 negative (FIXUP 2): label containing a digit ("Phase 2 Cost") suppresses the chip', () => {
+    const { response } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'cap exceeded',
+      details: { ...FULL_DETAILS, factor_label: 'Phase 2 Cost' },
+    });
+    expect(response.suggested_actions.find((a) => a.id === 'chip_prompt_rescale_extend_cap')).toBeUndefined();
+    // Degrade-only: honest copy + a prompt chip still present.
+    expect(response.assistant_text).toContain('£250,000');
+    expect(response.suggested_actions.length).toBeGreaterThan(0);
+  });
+
+  it('A2 negative (FIXUP 2): label containing an edit verb ("Set-up Cost") suppresses the chip', () => {
+    const { response } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'cap exceeded',
+      details: { ...FULL_DETAILS, factor_label: 'Set-up Cost' },
+    });
+    expect(response.suggested_actions.find((a) => a.id === 'chip_prompt_rescale_extend_cap')).toBeUndefined();
+  });
+});
+
+describe('composeValidationFailure — PARAMETER_INVALID remaining rejection reasons (item A1, 1.16)', () => {
+  it('bare_number_outside_cap → renders the sanitised issue', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'outside range',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'bare_number_outside_cap',
+        issue: "Value 250000 is outside the factor's expected range [0, 200000] and no unit was given.",
+        handler_id: 'set_factor_value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid_bare_number_outside_cap');
+    expect(response.assistant_text).toContain('250000');
+    expect(response.assistant_text).not.toContain('needs to be a valid value');
+    expect(response.suggested_actions.length).toBeGreaterThan(0);
+  });
+
+  it('cap_non_positive → renders the sanitised issue', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'bad cap',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'cap_non_positive',
+        issue: 'Cap must be positive (received -5).',
+        handler_id: 'set_factor_value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid_cap_non_positive');
+    expect(response.assistant_text).toContain('Cap must be positive');
+    expect(response.assistant_text).not.toContain('needs to be a valid value');
+    expect(response.suggested_actions.length).toBeGreaterThan(0);
+  });
+
+  it('B: delta_no_existing_value → names the entity and offers an absolute-set chip', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'no existing value',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'delta_no_existing_value',
+        issue: 'This factor has no recorded current value to adjust from.',
+        handler_id: 'set_factor_value',
+        factor_label: 'Team Size',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid_delta_no_existing_value');
+    expect(response.assistant_text).toContain('Team Size');
+    expect(response.assistant_text.toLowerCase()).toContain("doesn't have a recorded value yet");
+    expect(response.assistant_text).not.toContain('needs to be a valid value');
+    const chip = response.suggested_actions[0];
+    expect(chip?.message).toContain('Team Size');
+    assertStyle(response.assistant_text);
+  });
+
+  it('B: delta_no_existing_value without a label falls back to neutral phrasing', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'no existing value',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'delta_no_existing_value',
+        handler_id: 'set_factor_value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid_delta_no_existing_value');
+    expect(response.assistant_text.toLowerCase()).toContain("doesn't have a recorded value yet");
+    expect(response.assistant_text).not.toContain('that item');
+    assertStyle(response.assistant_text);
+  });
+
+  it('general fallback: constraint_description absent but issue present → renders the issue', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'unit mismatch',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'unit_mismatch',
+        issue: 'This factor uses £; the value provided is in %.',
+        handler_id: 'set_factor_value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid_issue');
+    expect(response.assistant_text).toContain('This factor uses £');
+    expect(response.assistant_text).not.toContain('needs to be a valid value');
+    expect(response.suggested_actions.length).toBeGreaterThan(0);
+  });
+
+  it('generic path unchanged when neither issue nor constraint_description exist', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'bad',
+      details: { parameter: 'value' },
+    });
+    expect(template_id).toBe('parameter_invalid');
+    // ROADMAP 2.380 (FIX 3) — was toContain('needs to be a valid value'), the
+    // jargon template. The point of this case is that the generic path still
+    // produces actionable copy when the error carries neither an issue nor a
+    // constraint description; that is what is asserted now.
+    expect(response.assistant_text).toBe(
+      "I couldn't use that as the value. Tell me the number you want and I'll set it.",
+    );
+    expect(response.suggested_actions.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Value/unit honesty — bare_ratio_on_unit_factor clarification branch.
+// A bare sub-1 value on a unit-bearing factor reads as a proportion, not a
+// value in that unit. The copy must be honest, unit-aware, NOT currency-
+// specific, and never leak the "unknown" sentinel.
+// ---------------------------------------------------------------------------
+
+describe('composeValidationFailure — PARAMETER_INVALID bare_ratio_on_unit_factor', () => {
+  it('currency unit (£) → names the unit, no "unknown" leak', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: '0.3 looks like a proportion',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'bare_ratio_on_unit_factor',
+        unit: '£',
+        handler_id: 'set_factor_value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid_bare_ratio_on_unit_factor');
+    expect(response.assistant_text).toContain('proportion');
+    expect(response.assistant_text).toContain('value in £');
+    expect(response.assistant_text).toContain('amount in £');
+    expect(response.assistant_text).not.toContain('unknown');
+    expect(response.suggested_actions.length).toBeGreaterThan(0);
+    assertStyle(response.assistant_text);
+  });
+
+  it('percentage unit (%) → reads as "a percentage", not "value in %"', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'proportion',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'bare_ratio_on_unit_factor',
+        unit: '%',
+        handler_id: 'set_factor_value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid_bare_ratio_on_unit_factor');
+    expect(response.assistant_text).toContain('a percentage');
+    expect(response.assistant_text).toContain('the percentage');
+    // Must not produce the awkward / currency-shaped "value in %".
+    expect(response.assistant_text).not.toContain('value in %');
+    expect(response.assistant_text).not.toContain('unknown');
+    assertStyle(response.assistant_text);
+  });
+
+  it('count-like unit (people) → names the unit, not currency-shaped', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'proportion',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'bare_ratio_on_unit_factor',
+        unit: 'people',
+        handler_id: 'set_factor_value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid_bare_ratio_on_unit_factor');
+    expect(response.assistant_text).toContain('value in people');
+    expect(response.assistant_text).toContain('amount in people');
+    expect(response.assistant_text).not.toContain('£');
+    expect(response.assistant_text).not.toContain('unknown');
+    assertStyle(response.assistant_text);
+  });
+
+  it('missing unit → unit-neutral fallback with multi-unit examples, no "unknown" leak', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'proportion',
+      details: {
+        parameter: 'value',
+        rejection_reason: 'bare_ratio_on_unit_factor',
+        handler_id: 'set_factor_value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid_bare_ratio_on_unit_factor');
+    expect(response.assistant_text).toContain('with its unit');
+    expect(response.assistant_text).not.toContain('unknown');
+    expect(response.suggested_actions.length).toBeGreaterThan(0);
+    assertStyle(response.assistant_text);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// task_99f83f0d — "You gave unknown." leak must die for ANY PARAMETER_INVALID
+// path that omits actual_value (invalid_operator, graph predicates), not only
+// the missing_value branch. The clause drops; the constraint guidance stays.
+// ---------------------------------------------------------------------------
+
+describe('composeValidationFailure — PARAMETER_INVALID undefined actual (task_99f83f0d)', () => {
+  it('actual_value omitted (no missing_value reason) → no "You gave unknown." leak', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'invalid operator',
+      details: { parameter: 'value', constraint_description: 'a valid value' },
+    });
+    expect(template_id).toBe('parameter_invalid');
+    expect(response.assistant_text).not.toContain('You gave');
+    expect(response.assistant_text).not.toContain('unknown');
+    // Guidance is preserved — ROADMAP 2.380 (FIX 3) replaced the jargon
+    // template ("needs to be a valid value") with product copy. The property
+    // this test exists for, that an absent actual_value never renders
+    // "You gave unknown.", is asserted above and is unchanged.
+    expect(response.assistant_text).toBe(
+      "I couldn't use that as the value. Tell me the number you want and I'll set it.",
+    );
+    assertStyle(response.assistant_text);
+  });
+
+  it('genuine scalar still renders "You gave X" (no regression)', () => {
+    const { response } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'bad',
+      details: { parameter: 'value', actual_value: 1.5, constraint_description: 'a number between 0 and 1' },
+    });
+    expect(response.assistant_text).toContain('You gave 1.5');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// task_99f83f0d — option-intervention misroute containment. When a
+// set_factor_value is refused because the user implied an option-specific
+// intervention edit, the composer must clarify (graph already unchanged) and
+// must NOT attach an auto-routing chip that could loop back into the misroute.
+// ---------------------------------------------------------------------------
+
+describe('composeValidationFailure — OPTION_INTERVENTION_MISROUTE', () => {
+  it('clarifies option-vs-factor, names the factor, and offers a text prompt only', () => {
+    const { response, template_id, chip_type } = composeFor({
+      code: 'OPTION_INTERVENTION_MISROUTE',
+      message: 'set_factor_value refused — option-intervention edit implied',
+      details: { handler_id: 'set_factor_value', factor_label: 'Annual Support Cost' },
+    });
+    expect(template_id).toBe('option_intervention_misroute');
+    expect(chip_type).toBe('text_prompt');
+    expect(response.assistant_text).toContain("option's intervention");
+    expect(response.assistant_text).toContain('Annual Support Cost');
+    // Reassures the user nothing was mutated.
+    expect(response.assistant_text.toLowerCase()).toContain("haven't changed anything");
+    // No value/handler-id leak.
+    expect(response.assistant_text).not.toContain('set_factor_value');
+    // Exactly one chip, and it must NOT carry an action_type (no re-route).
+    expect(response.suggested_actions.length).toBe(1);
+    expect(response.suggested_actions[0]?.action_type).toBeUndefined();
+    assertStyle(response.assistant_text);
+  });
+
+  it('reads cleanly when no factor_label is supplied', () => {
+    const { response, template_id } = composeFor({
+      code: 'OPTION_INTERVENTION_MISROUTE',
+      message: 'refused',
+      details: { handler_id: 'set_factor_value' },
+    });
+    expect(template_id).toBe('option_intervention_misroute');
+    expect(response.assistant_text).toContain("the factor's own value");
+    expect(response.assistant_text).not.toContain('that item');
+    assertStyle(response.assistant_text);
+  });
+});
+
+describe('composeValidationFailure — VALUE_UNIT_UNRESOLVED (P0-A)', () => {
+  it('clarifies the unresolved value/unit, names the factor, reassures nothing changed, one text prompt', () => {
+    const { response, template_id, chip_type } = composeFor({
+      code: 'VALUE_UNIT_UNRESOLVED',
+      message: 'set_factor_value refused — value unit unresolved',
+      details: { handler_id: 'set_factor_value', factor_label: 'Marketing budget', user_unit_family: 'count', factor_unit_family: 'currency' },
+    });
+    expect(template_id).toBe('value_unit_unresolved');
+    expect(chip_type).toBe('text_prompt');
+    expect(response.assistant_text).toContain('Marketing budget');
+    expect(response.assistant_text.toLowerCase()).toContain("haven't changed anything");
+    // No handler-id / internal family enum leak in the user copy.
+    expect(response.assistant_text).not.toContain('set_factor_value');
+    expect(response.assistant_text).not.toContain('count');
+    expect(response.assistant_text).not.toContain('currency');
+    // One chip, no re-route action_type (a replay would drop the unit and loop).
+    expect(response.suggested_actions.length).toBe(1);
+    expect(response.suggested_actions[0]?.action_type).toBeUndefined();
+    assertStyle(response.assistant_text);
+  });
+
+  it('reads cleanly when no factor_label is supplied', () => {
+    const { response, template_id } = composeFor({
+      code: 'VALUE_UNIT_UNRESOLVED',
+      message: 'refused',
+      details: { handler_id: 'set_factor_value' },
+    });
+    expect(template_id).toBe('value_unit_unresolved');
+    expect(response.assistant_text).toContain('that factor');
+    assertStyle(response.assistant_text);
+  });
+});
+
+describe('composeValidationFailure — response shape', () => {
+  // v5-exclusive-cee P0 follow-up: HANDLER_NOT_FOUND is now the ONE
+  // validation-error branch that surfaces with a different wire code —
+  // FEATURE_NOT_ENABLED (via UNSUPPORTED_ACTION) — because the semantic
+  // is "the action is declared in the contract but no handler is
+  // registered in this deployment." All other validator codes keep
+  // the INTERNAL_ERROR wire code.
+  it('HANDLER_NOT_FOUND returns FEATURE_NOT_ENABLED with reason + handler_id + retryable:false', () => {
+    const { response } = composeFor({
+      code: 'HANDLER_NOT_FOUND',
+      message: 'unknown',
+      details: { handler_id: 'x' },
+    });
+    const block = response.blocks[0];
+    expect(block?.type).toBe('error');
+    if (block?.type === 'error') {
+      expect(block.error_code).toBe('FEATURE_NOT_ENABLED');
+      expect(block.details?.failure_origin).toBe('validator');
+      expect(block.details?.error_code).toBe('HANDLER_NOT_FOUND');
+      expect(block.details?.reason).toBe('handler_not_registered');
+      expect(block.details?.handler_id).toBe('x');
+      expect(block.details?.retryable).toBe(false);
+    }
+  });
+
+  it('other validator codes still return INTERNAL_ERROR with failure_origin=validator', () => {
+    const { response } = composeFor({
+      code: 'ENTITY_NOT_FOUND',
+      message: 'no such entity',
+      details: { entity_id: 'opt-a', entity_kind: 'option' },
+    });
+    const block = response.blocks[0];
+    expect(block?.type).toBe('error');
+    if (block?.type === 'error') {
+      expect(block.error_code).toBe('INTERNAL_ERROR');
+      expect(block.details?.failure_origin).toBe('validator');
+      expect(block.details?.error_code).toBe('ENTITY_NOT_FOUND');
+    }
+  });
+
+  // v5-exclusive-cee P1 follow-up: retryability is false by default for
+  // validator failures. All 7 current validator codes are deterministic
+  // input faults — retrying the same turn with the same inputs will
+  // always fail. A client that sees retryable:true would enter a
+  // pointless retry loop. The previous implementation had the default
+  // inverted (retryable:true unless HANDLER_NOT_FOUND); this test locks
+  // in the corrected semantics per validator code.
+  describe('retryability per validator code', () => {
+    const allValidatorCodes: Array<{
+      code: ValidationError['code'];
+      details?: Record<string, unknown>;
+    }> = [
+      { code: 'HANDLER_NOT_FOUND', details: { handler_id: 'set_factor_value' } },
+      { code: 'ENTITY_NOT_FOUND', details: { entity_id: 'opt-x', entity_kind: 'option' } },
+      { code: 'ENTITY_KIND_MISMATCH', details: { entity_kind: 'node' } },
+      { code: 'ENTITY_RESOLUTION_AMBIGUOUS', details: { entity_kind: 'option' } },
+      { code: 'ENTITY_RESOLUTION_SUSPICIOUS', details: { entity_kind: 'option' } },
+      { code: 'PARAMETER_INVALID', details: { parameter_name: 'value' } },
+      { code: 'OPTION_INTERVENTION_MISROUTE', details: { factor_label: 'Annual Support Cost' } },
+      { code: 'VALUE_UNIT_UNRESOLVED', details: { factor_label: 'Marketing budget' } },
+      { code: 'PRECONDITION_UNMET', details: { reason: 'no_options_defined' } },
+    ];
+
+    it.each(allValidatorCodes)(
+      '$code → retryable=false (deterministic input fault)',
+      ({ code, details }) => {
+        const { response } = composeFor({ code, message: `test ${code}`, details: details ?? {} });
+        const block = response.blocks[0];
+        expect(block?.type).toBe('error');
+        if (block?.type === 'error') {
+          expect(block.details?.retryable).toBe(false);
+        }
+      },
+    );
+  });
+
+  it('every reachable code returns at least one chip and a typed chip_type', () => {
+    const codes: ValidationError['code'][] = [
+      'HANDLER_NOT_FOUND',
+      'ENTITY_KIND_MISMATCH',
+      'ENTITY_NOT_FOUND',
+      'ENTITY_RESOLUTION_AMBIGUOUS',
+      'ENTITY_RESOLUTION_SUSPICIOUS',
+      'PARAMETER_INVALID',
+      'OPTION_INTERVENTION_MISROUTE',
+      'VALUE_UNIT_UNRESOLVED',
+      'PRECONDITION_UNMET',
+    ];
+    for (const code of codes) {
+      const { response, chip_type } = composeFor({ code, message: '', details: {} });
+      expect(response.suggested_actions.length).toBeGreaterThan(0);
+      expect(chip_type).not.toBeNull();
+      expect(['action', 'text_prompt', 'entity_suggestion']).toContain(chip_type);
+    }
+  });
+});
+
+describe('composeValidationFailure — chip_type classification', () => {
+  it('HANDLER_NOT_FOUND with curated handlers → action chip', () => {
+    const { chip_type } = composeFor({
+      code: 'HANDLER_NOT_FOUND',
+      message: '',
+      details: { handler_id: 'x' },
+    });
+    expect(chip_type).toBe('action');
+  });
+
+  it('ENTITY_RESOLUTION_AMBIGUOUS with candidates → entity_suggestion', () => {
+    const { chip_type } = composeFor({
+      code: 'ENTITY_RESOLUTION_AMBIGUOUS',
+      message: '',
+      details: {
+        entity_kind: 'option',
+        candidates: [{ id: 'a', label: 'A' }],
+      },
+    });
+    expect(chip_type).toBe('entity_suggestion');
+  });
+
+  it('ENTITY_RESOLUTION_SUSPICIOUS → entity_suggestion', () => {
+    const { chip_type } = composeFor({
+      code: 'ENTITY_RESOLUTION_SUSPICIOUS',
+      message: '',
+      details: {
+        chosen: { label: 'A' },
+        closer_candidate: { label: 'B' },
+      },
+    });
+    expect(chip_type).toBe('entity_suggestion');
+  });
+
+  it('ENTITY_NOT_FOUND with graph siblings → entity_suggestion', () => {
+    const graph = graphWith([
+      { id: 'opt_a', label: 'Option A', kind: 'option' },
+    ]);
+    const { chip_type } = composeFor(
+      {
+        code: 'ENTITY_NOT_FOUND',
+        message: '',
+        details: { entity_id: 'x', entity_kind: 'option' },
+      },
+      { handlerRegistry: REGISTRY, graph },
+    );
+    expect(chip_type).toBe('entity_suggestion');
+  });
+
+  it('PARAMETER_INVALID → text_prompt', () => {
+    const { chip_type } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: '',
+      details: { parameter: 'value' },
+    });
+    expect(chip_type).toBe('text_prompt');
+  });
+});
+
+describe('composeValidationFailure — chip emit invariant (P0)', () => {
+  it('never emits explain_result or other non-functional actions even when registry contains them', () => {
+    // Registry deliberately includes non-functional handlers to test that
+    // curatedHandlerChips's USER_FACING_HANDLERS gate blocks them at emit time.
+    const fullRegistry: HandlerValidationRegistry = {
+      run_analysis: { handler_id: 'run_analysis', accepted_entity_kinds: ['option'], confirmation_template: 'ok' },
+      explain_result: { handler_id: 'explain_result', accepted_entity_kinds: [], confirmation_template: 'nope' },
+      compare_options: { handler_id: 'compare_options', accepted_entity_kinds: [], confirmation_template: 'nope' },
+      what_would_flip: { handler_id: 'what_would_flip', accepted_entity_kinds: [], confirmation_template: 'nope' },
+    };
+    const { response } = composeFor(
+      { code: 'HANDLER_NOT_FOUND', message: 'test', details: { handler_id: 'explain_result' } },
+      { handlerRegistry: fullRegistry },
+    );
+    const emittedActionTypes = response.suggested_actions
+      .map((c) => c.action_type)
+      .filter(Boolean);
+    expect(emittedActionTypes).not.toContain('explain_result');
+    expect(emittedActionTypes).not.toContain('compare_options');
+    expect(emittedActionTypes).not.toContain('what_would_flip');
+    // run_analysis is the only functional action and must be present
+    expect(emittedActionTypes).toContain('run_analysis');
+  });
+});
+
+describe('composeValidationFailure — ENTITY_NOT_FOUND cap', () => {
+  it('caps sibling chips at 4', () => {
+    const graph = graphWith([
+      { id: 'o1', label: 'One', kind: 'option' },
+      { id: 'o2', label: 'Two', kind: 'option' },
+      { id: 'o3', label: 'Three', kind: 'option' },
+      { id: 'o4', label: 'Four', kind: 'option' },
+      { id: 'o5', label: 'Five', kind: 'option' },
+      { id: 'o6', label: 'Six', kind: 'option' },
+    ]);
+    const { response } = composeFor(
+      {
+        code: 'ENTITY_NOT_FOUND',
+        message: '',
+        details: { entity_id: 'x', entity_kind: 'option' },
+      },
+      { handlerRegistry: REGISTRY, graph },
+    );
+    expect(response.suggested_actions.length).toBe(4);
+  });
+});
+
+// I2: regression guard — unlabeled graph nodes must NEVER surface id-shaped
+// tokens in chip labels, chip messages, or assistant_text. The adapter
+// historically substituted id into label; this test proves the belt-and-
+// braces safeLabel rejection keeps us safe even if a regression resurfaces.
+describe('composeValidationFailure — no id-like tokens leak', () => {
+  it('ENTITY_NOT_FOUND: unlabeled siblings do not leak ids into chips or text', () => {
+    // Simulate a regressed adapter that substitutes id into label (the old
+    // bug). safeLabel's id-shape rejection MUST fall back to "that option".
+    const graph: GraphLookup = {
+      findEntityById: () => null,
+      listEntitiesByKind: () => [
+        { id: 'opt_abc', label: 'opt_abc' },
+        { id: 'opt_xyz', label: null },
+        { id: 'fac_churn_x7', label: 'fac_churn_x7' },
+      ],
+    };
+    const { response } = composeFor(
+      {
+        code: 'ENTITY_NOT_FOUND',
+        message: '',
+        details: { entity_id: 'opt_missing', entity_kind: 'option' },
+      },
+      { handlerRegistry: REGISTRY, graph },
+    );
+
+    const allText = [
+      response.assistant_text,
+      ...response.suggested_actions.map((c) => `${c.label} ${c.message}`),
+    ].join(' ');
+
+    // None of the raw ids or id-shaped fallbacks should appear anywhere.
+    expect(allText).not.toContain('opt_abc');
+    expect(allText).not.toContain('opt_xyz');
+    expect(allText).not.toContain('opt_missing');
+    expect(allText).not.toContain('fac_churn_x7');
+
+    // Chip labels must all be the kind-based fallback — never an id.
+    for (const chip of response.suggested_actions) {
+      expect(chip.label).toMatch(/^that option$/);
+    }
+  });
+
+  it('ENTITY_RESOLUTION_SUSPICIOUS: id-shaped chosen/closer labels degrade to kind fallback', () => {
+    const { response } = composeFor({
+      code: 'ENTITY_RESOLUTION_SUSPICIOUS',
+      message: '',
+      details: {
+        chosen: { id: 'opt_a', label: 'opt_a' },
+        closer_candidate: { id: 'opt_b', label: 'opt_b' },
+      },
+    });
+    expect(response.assistant_text).not.toContain('opt_a');
+    expect(response.assistant_text).not.toContain('opt_b');
+  });
+
+  it('ENTITY_RESOLUTION_SUSPICIOUS with entity_kind uses "that {kind}" fallback not "that item"', () => {
+    const { response } = composeFor({
+      code: 'ENTITY_RESOLUTION_SUSPICIOUS',
+      message: '',
+      details: {
+        entity_kind: 'option',
+        chosen: { id: 'opt_a', label: 'opt_a' },
+        closer_candidate: { id: 'opt_b', label: 'opt_b' },
+      },
+    });
+    expect(response.assistant_text).toContain('that option');
+    expect(response.assistant_text).not.toContain('that item');
+    for (const chip of response.suggested_actions) {
+      expect(chip.label).toBe('that option');
+    }
+  });
+});

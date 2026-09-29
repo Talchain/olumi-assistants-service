@@ -1,0 +1,79 @@
+{
+  "name": "validation-repair-retry",
+  "description": "Tests repair observability - shows validation attempt with repairs_triggered=true when structural repairs applied inline",
+  "brief": "Should we automate the process or keep it manual?",
+  "endpoint": "draft_graph",
+  "recorded_response": {
+    "graph": {
+      "version": "1",
+      "default_seed": 42,
+      "nodes": [
+        { "id": "decision_1", "kind": "decision", "label": "Automate or keep manual?" },
+        { "id": "opt_automate", "kind": "option", "label": "Automate the process" },
+        { "id": "opt_manual", "kind": "option", "label": "Keep manual" },
+        { "id": "fac_efficiency", "kind": "factor", "label": "Process Efficiency" },
+        { "id": "fac_cost", "kind": "factor", "label": "Implementation Cost" },
+        { "id": "outcome_productivity", "kind": "outcome", "label": "Team Productivity" },
+        { "id": "goal_1", "kind": "goal", "label": "Maximize team output" }
+      ],
+      "edges": [
+        { "from": "decision_1", "to": "opt_automate", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "decision_1", "to": "opt_manual", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "opt_automate", "to": "fac_efficiency", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "opt_automate", "to": "fac_cost", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "opt_manual", "to": "fac_efficiency", "strength_mean": 1, "strength_std": 0.01, "belief_exists": 1, "effect_direction": "positive" },
+        { "from": "fac_efficiency", "to": "outcome_productivity", "strength_mean": 0.7, "strength_std": 0.15, "belief_exists": 0.9, "effect_direction": "positive" },
+        { "from": "fac_cost", "to": "outcome_productivity", "strength_mean": -0.3, "strength_std": 0.1, "belief_exists": 0.8, "effect_direction": "negative" },
+        { "from": "outcome_productivity", "to": "goal_1", "strength_mean": 0.85, "strength_std": 0.1, "belief_exists": 1, "effect_direction": "positive" }
+      ],
+      "meta": { "roots": [], "leaves": [], "suggested_positions": {}, "source": "assistant" }
+    },
+    "validation": {
+      "passed": true,
+      "errors": [],
+      "warnings": []
+    },
+    "_observability": {
+      "validation": {
+        "attempts": 1,
+        "passed": true,
+        "total_rules_checked": 12,
+        "failed_rules": [],
+        "repairs_triggered": true,
+        "repair_types": ["structural_edge_canonicalisation"],
+        "retry_triggered": false,
+        "attempt_records": [
+          {
+            "attempt": 1,
+            "passed": true,
+            "rules_checked": 12,
+            "failed_rules": [],
+            "repairs_triggered": true,
+            "repair_types": ["structural_edge_canonicalisation"],
+            "retry_triggered": false,
+            "latency_ms": 5,
+            "timestamp": "2026-01-31T15:00:00.000Z"
+          }
+        ],
+        "total_latency_ms": 5
+      }
+    }
+  },
+  "assertions": {
+    "has_decision_node": true,
+    "has_goal_node": true,
+    "option_count_gte": 2,
+    "validation_passes": true,
+    "observability_has_attempt_records": true,
+    "observability_repairs_triggered": true,
+    "observability_attempt_record_shape": {
+      "index": 0,
+      "required_keys": ["attempt", "passed", "rules_checked", "repairs_triggered", "latency_ms", "timestamp"],
+      "expected": {
+        "attempt": 1,
+        "passed": true,
+        "repairs_triggered": true
+      }
+    }
+  }
+}

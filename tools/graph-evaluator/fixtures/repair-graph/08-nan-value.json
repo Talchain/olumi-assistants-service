@@ -1,0 +1,39 @@
+{
+  "id": "rg-08-nan-value",
+  "name": "NAN_VALUE — edge strength contains NaN",
+  "description": "A causal edge has strength.mean=null (NaN). Repair must replace with the canonical positive causal default (0.5) preserving effect_direction.",
+  "brief": "Hiring senior engineers should improve delivery quality but the strength estimate is missing.",
+  "graph": {
+    "nodes": [
+      {"id": "dec_hiring", "kind": "decision", "label": "Senior Hiring Decision"},
+      {"id": "opt_hire_senior", "kind": "option", "label": "Hire Senior Engineers", "data": {"interventions": {"fac_senior_headcount": 1.0}}},
+      {"id": "opt_hire_junior", "kind": "option", "label": "Hire Junior Engineers", "data": {"interventions": {"fac_senior_headcount": 0.2}}},
+      {"id": "fac_senior_headcount", "kind": "factor", "label": "Senior Engineer Headcount", "category": "controllable", "data": {"value": 0.3, "extractionType": "inferred", "factor_type": "other", "uncertainty_drivers": ["Sourcing timeline unknown"]}},
+      {"id": "fac_code_review", "kind": "factor", "label": "Code Review Rigour", "category": "observable", "data": {"value": 0.5, "extractionType": "observed"}},
+      {"id": "out_delivery_quality", "kind": "outcome", "label": "Delivery Quality"},
+      {"id": "goal_quality", "kind": "goal", "label": "High Quality Delivery"}
+    ],
+    "edges": [
+      {"from": "dec_hiring", "to": "opt_hire_senior", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "dec_hiring", "to": "opt_hire_junior", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_hire_senior", "to": "fac_senior_headcount", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_hire_junior", "to": "fac_senior_headcount", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "fac_senior_headcount", "to": "out_delivery_quality", "strength": {"mean": null, "std": 0.20}, "exists_probability": 0.80, "effect_direction": "positive"},
+      {"from": "fac_code_review", "to": "out_delivery_quality", "strength": {"mean": 0.55, "std": 0.18}, "exists_probability": 0.82, "effect_direction": "positive"},
+      {"from": "out_delivery_quality", "to": "goal_quality", "strength": {"mean": 0.70, "std": 0.15}, "exists_probability": 0.90, "effect_direction": "positive"}
+    ]
+  },
+  "violations": [
+    {"code": "NAN_VALUE", "node_or_edge": "fac_senior_headcount -> out_delivery_quality", "detail": "strength.mean is null/NaN. Replace with canonical default."}
+  ],
+  "expected": {
+    "violations_addressed": ["NAN_VALUE"],
+    "preserve_node_ids": ["dec_hiring", "opt_hire_senior", "opt_hire_junior", "fac_senior_headcount", "fac_code_review", "out_delivery_quality", "goal_quality"],
+    "forbidden_edges": [],
+    "required_edges": [{"from": "fac_senior_headcount", "to": "out_delivery_quality"}],
+    "no_bridge_edges": false,
+    "preserve_bidirected": false,
+    "check_external_prior": false,
+    "no_json_comments": true
+  }
+}

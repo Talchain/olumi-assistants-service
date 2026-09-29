@@ -1,0 +1,49 @@
+{
+  "id": "vg-04-bidirected-skip",
+  "name": "Bidirected edges must be skipped",
+  "description": "Graph with 2 bidirected edges alongside 6 causal edges. Expect: output contains exactly 6 edges (bidirected skipped), plus bridge edges.",
+  "brief": "We're deciding whether to acquire a competitor. The target company has $5M ARR with 85% gross margins. Integration costs are estimated at $1.5M over 18 months. There's a known correlation between employee morale and product quality at the target — unmeasured confounders exist. Market share and pricing power are also correlated through industry dynamics.",
+  "graph": {
+    "nodes": [
+      {"id": "dec_acquire", "kind": "decision", "label": "Acquisition Decision"},
+      {"id": "opt_acquire", "kind": "option", "label": "Acquire Target", "data": {"interventions": {"fac_integration": 0.9}}},
+      {"id": "opt_pass", "kind": "option", "label": "Pass on Deal", "data": {"interventions": {"fac_integration": 0.0}}},
+      {"id": "fac_integration", "kind": "factor", "label": "Integration Investment", "category": "controllable", "data": {"value": 0.0, "unit": "USD", "factor_type": "cost"}},
+      {"id": "fac_morale", "kind": "factor", "label": "Employee Morale", "category": "observable", "data": {"value": 0.6, "factor_type": "sentiment"}},
+      {"id": "fac_quality", "kind": "factor", "label": "Product Quality", "category": "observable", "data": {"value": 0.7, "factor_type": "quality"}},
+      {"id": "fac_share", "kind": "factor", "label": "Combined Market Share", "category": "observable", "data": {"value": 0.15, "factor_type": "market"}},
+      {"id": "fac_pricing_power", "kind": "factor", "label": "Pricing Power", "category": "observable", "data": {"value": 0.5, "factor_type": "pricing"}},
+      {"id": "out_synergy", "kind": "outcome", "label": "Revenue Synergies"},
+      {"id": "out_cost", "kind": "outcome", "label": "Total Integration Cost"},
+      {"id": "goal_value", "kind": "goal", "label": "Maximise Deal Value"}
+    ],
+    "edges": [
+      {"from": "dec_acquire", "to": "opt_acquire", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "dec_acquire", "to": "opt_pass", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_acquire", "to": "fac_integration", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "opt_pass", "to": "fac_integration", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0, "effect_direction": "positive"},
+      {"from": "fac_integration", "to": "out_synergy", "strength": {"mean": 0.45, "std": 0.15}, "exists_probability": 0.82, "effect_direction": "positive"},
+      {"from": "fac_quality", "to": "out_synergy", "strength": {"mean": 0.35, "std": 0.12}, "exists_probability": 0.78, "effect_direction": "positive"},
+      {"from": "fac_integration", "to": "out_cost", "strength": {"mean": 0.60, "std": 0.15}, "exists_probability": 0.92, "effect_direction": "positive"},
+      {"from": "fac_share", "to": "out_synergy", "strength": {"mean": 0.20, "std": 0.10}, "exists_probability": 0.70, "effect_direction": "positive"},
+      {"from": "fac_pricing_power", "to": "out_synergy", "strength": {"mean": 0.15, "std": 0.08}, "exists_probability": 0.65, "effect_direction": "positive"},
+      {"from": "fac_morale", "to": "out_cost", "strength": {"mean": -0.30, "std": 0.15}, "exists_probability": 0.72, "effect_direction": "negative"},
+      {"from": "out_synergy", "to": "goal_value", "strength": {"mean": 0.55, "std": 0.12}, "exists_probability": 0.90, "effect_direction": "positive"},
+      {"from": "out_cost", "to": "goal_value", "strength": {"mean": -0.45, "std": 0.12}, "exists_probability": 0.92, "effect_direction": "negative"},
+      {"from": "fac_morale", "to": "fac_quality", "edge_type": "bidirected", "strength": {"mean": 0, "std": 0.01}, "exists_probability": 1.0},
+      {"from": "fac_share", "to": "fac_pricing_power", "edge_type": "bidirected", "strength": {"mean": 0, "std": 0.01}, "exists_probability": 1.0}
+    ]
+  },
+  "expected": {
+    "in_scope_edges": [
+      {"from": "fac_integration", "to": "out_synergy"},
+      {"from": "fac_quality", "to": "out_synergy"},
+      {"from": "fac_integration", "to": "out_cost"},
+      {"from": "fac_share", "to": "out_synergy"},
+      {"from": "fac_pricing_power", "to": "out_synergy"},
+      {"from": "fac_morale", "to": "out_cost"},
+      {"from": "out_synergy", "to": "goal_value"},
+      {"from": "out_cost", "to": "goal_value"}
+    ]
+  }
+}
