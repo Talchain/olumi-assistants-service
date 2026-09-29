@@ -1,0 +1,182 @@
+{
+  "arm": "pragmatic_m1_direct_manual",
+  "brief": "paul-mrr",
+  "source_sha256": "8a8b61432e4f799688d1d757df74632570295a0483192a8ff74fb455bb9a2911",
+  "commit": "59643202823cf0b2a621479a26310495e79e4a12",
+  "evidence_level": "real_constructor_canonical_registration_and_cold_read",
+  "graph": {
+    "edges": [
+      {
+        "to": "raise_pro_price_to_59",
+        "from": "should_we_raise_our_pro_plan_price_from_49_to_59_a_month",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "pro_plan_price",
+        "from": "raise_pro_price_to_59",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      }
+    ],
+    "nodes": [
+      {
+        "id": "should_we_raise_our_pro_plan_price_from_49_to_59_a_month",
+        "kind": "decision",
+        "label": "Should we raise our Pro plan…",
+        "provenance": "from_brief",
+        "description": "Should we raise our Pro plan price from £49 to £59 a month?"
+      },
+      {
+        "id": "mrr",
+        "kind": "goal",
+        "label": "MRR",
+        "provenance": "from_brief",
+        "source_quote": "want MRR above £85k within a year",
+        "goal_direction": ">",
+        "goal_threshold": 0.8,
+        "observed_state": {
+          "cap": 106250,
+          "unit": "£/month",
+          "value": 0.7058823529411765,
+          "source": "brief_extraction",
+          "baseline": 0.7058823529411765,
+          "raw_value": 75000,
+          "source_span": {
+            "end": 105,
+            "start": 97,
+            "number_end": 101,
+            "number_start": 97
+          },
+          "source_quote": "£75k MRR"
+        },
+        "threshold_source": "brief_extraction",
+        "goal_threshold_cap": 106250,
+        "goal_threshold_raw": 85000,
+        "goal_horizon_months": 12,
+        "goal_threshold_unit": "£/month",
+        "goal_threshold_frame": "level",
+        "goal_threshold_cap_provenance": "target_derived_headroom"
+      },
+      {
+        "id": "raise_pro_price_to_59",
+        "kind": "option",
+        "label": "Raise Pro price to £59",
+        "provenance": "from_brief",
+        "source_quote": "raise our Pro plan price from £49 to £59 a month",
+        "interventions": {
+          "pro_plan_price": {
+            "unit": "£ per subscriber per month",
+            "value": 0.295,
+            "source": "brief_extraction",
+            "raw_value": 59,
+            "source_span": {
+              "end": 58,
+              "start": 29,
+              "number_end": 50,
+              "number_start": 47
+            },
+            "source_quote": "price from £49 to £59 a month",
+            "target_match": {
+              "node_id": "pro_plan_price",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          }
+        }
+      },
+      {
+        "id": "pro_plan_price",
+        "kind": "factor",
+        "label": "Pro plan price",
+        "category": "controllable",
+        "provenance": "from_brief",
+        "source_quote": "price from £49",
+        "observed_state": {
+          "cap": 200,
+          "unit": "£ per subscriber per month",
+          "value": 0.245,
+          "source": "brief_extraction",
+          "raw_value": 49,
+          "source_span": {
+            "end": 43,
+            "start": 29,
+            "number_end": 43,
+            "number_start": 40
+          },
+          "source_quote": "price from £49",
+          "declared_scale": "unit_interval"
+        }
+      },
+      {
+        "id": "monthly_churn",
+        "kind": "factor",
+        "label": "Monthly churn",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100
+      },
+      {
+        "id": "pro_plan_paying_subscribers",
+        "kind": "factor",
+        "label": "Pro plan paying subscribers",
+        "category": "observable",
+        "provenance": "from_brief",
+        "source_quote": "have 1,500 paying subscribers",
+        "observed_state": {
+          "cap": 10000,
+          "unit": "subscribers",
+          "value": 0.15,
+          "source": "brief_extraction",
+          "raw_value": 1500,
+          "source_span": {
+            "end": 92,
+            "start": 63,
+            "number_end": 73,
+            "number_start": 68
+          },
+          "source_quote": "have 1,500 paying subscribers",
+          "declared_scale": "unit_interval"
+        }
+      }
+    ],
+    "goal_constraints": [
+      {
+        "unit": "%",
+        "label": "Monthly churn",
+        "value": 5,
+        "node_id": "monthly_churn",
+        "operator": "<=",
+        "provenance": "explicit",
+        "value_frame": "level",
+        "source_quote": "churn must stay below 5%",
+        "constraint_id": "agent-lane:monthly_churn:<=",
+        "operator_as_stated": "<"
+      }
+    ]
+  },
+  "questions": [
+    "Does your \"MRR\" goal cover all plans together or the Pro plan only?",
+    "Does \"MRR\" get there within 12 months? The model holds the deadline; no result answers that yet.",
+    "What is \"Monthly churn\" today? Your limit (less than 5%) cannot be checked until the model has its current level."
+  ],
+  "capture": {
+    "provider_attempt": 58,
+    "registered_graph_hash": "a3cd6f93f37dfef5",
+    "source_artifact": "/Users/paulslee/Documents/GitHub/.worktrees/cee-constructor-A-recovered-20260929/.artifacts/alternative-constructor/manual-a-5964320/direct-score-record.jsonl"
+  }
+}

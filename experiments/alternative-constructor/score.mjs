@@ -63,6 +63,18 @@ function observations(graph) {
   for (const c of graph.goal_constraints ?? []) out.push({ node: byId.get(c.node_id) ?? {}, owner: c, entity: label(byId.get(c.node_id)) || c.label, role: 'limit', value: c.value, unit: c.unit, operator: c.operator_as_stated ?? c.operator, sources: [c], user: USER.has(c.provenance), frame: c.value_frame, target_exists: byId.has(c.node_id) });
   return out;
 }
+// Bounded Paul regression: a matching subscriber count does not license assigning
+// the whole population to the Pro plan. Only an explicit count-and-population
+// assertion in the original source does; the model's quote/label cannot attest it.
+function unsupportedProSubscriberScope(observation, brief) {
+  if (observation.role !== 'current' || !/\bpro(?:\s+plan)?\s+(?:paying\s+)?subscribers?\b/i.test(String(observation.node?.label ?? ''))) return false;
+  const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const count = `(?:${[String(observation.value), observation.value.toLocaleString('en-GB')].map(escape).join('|')})`;
+  const direct = new RegExp(`\\b${count}\\s+(?:Pro(?:\\s+plan)?\\s+(?:paying\\s+)?subscribers?|paying\\s+Pro(?:\\s+plan)?\\s+subscribers?)\\b`, 'i');
+  const allPro = new RegExp(`\\ball\\s+${count}\\s+(?:paying\\s+)?subscribers?\\s+are\\s+(?:on\\s+)?(?:the\\s+)?Pro(?:\\s+plan)?(?:\\s+subscribers?)?\\b`, 'i');
+  return !brief.text.split(/(?<=[.!?])\s+|\n/).some((clause) =>
+    !/\?|\b(?:not|whether|if|assume|assuming|might|may)\b/i.test(clause) && (direct.test(clause) || allPro.test(clause)));
+}
 export function scoreRecord(record, cases = manifest.briefs) {
   const brief = cases.find((b) => b.id === record.brief);
   if (!brief) throw new Error(`Unknown case ${record.brief}; no silent fallback scoring`);
@@ -71,10 +83,18 @@ export function scoreRecord(record, cases = manifest.briefs) {
   const graph = record.canonical_graph ?? record.graph ?? { nodes: [], edges: [] };
   const obs = observations(graph);
   const failures = [];
+  const unsupportedPopulation = new Set(obs.filter((o) => unsupportedProSubscriberScope(o, brief)));
+  // Authority failures come first, and the narrowed claim cannot also earn a
+  // retained-fact credit just because its number/unit and source text match.
+  for (const o of unsupportedPopulation) failures.push({
+    kind: o.user ? 'unsupported_population_narrowing' : 'unstated_canonical_population_narrowing',
+    entity: o.entity, role: o.role, value: o.value, unit: o.unit,
+    claimed_scope: 'Pro plan subscribers', expected_scope: 'unresolved from original source',
+  });
   const facts = brief.facts.map((f) => {
     const semantic = obs.filter((o) => o.role === f.role && matches(f.entity, o.entity) && (!f.option || matches(f.option, label(o.owner))));
     const value = semantic.filter((o) => numberEqual(o.value, f.value));
-    const correct = value.filter((o) => unitMatches(f.unit, o.unit) && (!f.operator || o.operator === f.operator));
+    const correct = value.filter((o) => !unsupportedPopulation.has(o) && unitMatches(f.unit, o.unit) && (!f.operator || o.operator === f.operator));
     const source = correct.map((o) => sourceResult(o.sources, f, brief));
     const retained = correct.length > 0;
     if (!retained) failures.push({ kind: 'omission_or_semantic_error', fact: f.id, expected: { role: f.role, value: f.value, unit: f.unit, operator: f.operator }, observed: semantic.map(({ role, value, unit, operator }) => ({ role, value, unit, operator })) });
@@ -179,7 +199,7 @@ export function scoreRecord(record, cases = manifest.briefs) {
   return {
     arm: record.arm ?? record.label, brief: brief.id, rep: record.rep, evidence_level: record.evidence_level ?? 'admitted_registration_payload_only',
     model_present: modelPresent, facts, options: optionRows, identity, authority,
-    fidelity: { facts_retained: facts.filter((f) => f.retained).length, facts_total: facts.length, source_bound: facts.filter((f) => f.source_bound).length, user_options_retained: optionRows.filter((o) => o.retained).length, user_options_total: optionRows.length, negative_findings: failures.length, false_user_claims: failures.filter((f) => ['invented_or_misassigned_user_number', 'invented_user_option', 'inferred_identity_stamped_user'].includes(f.kind)).length, unstated_canonical_content: failures.filter((f) => f.kind.startsWith('unstated_canonical_')).length, source_binding_failures: failures.filter((f) => f.kind === 'source_unbound').length, failures },
+    fidelity: { facts_retained: facts.filter((f) => f.retained).length, facts_total: facts.length, source_bound: facts.filter((f) => f.source_bound).length, user_options_retained: optionRows.filter((o) => o.retained).length, user_options_total: optionRows.length, negative_findings: failures.length, false_user_claims: failures.filter((f) => ['invented_or_misassigned_user_number', 'invented_user_option', 'inferred_identity_stamped_user', 'unsupported_population_narrowing'].includes(f.kind)).length, unstated_canonical_content: failures.filter((f) => f.kind.startsWith('unstated_canonical_')).length, source_binding_failures: failures.filter((f) => f.kind === 'source_unbound').length, failures },
     scientific_usability: { verified_analysis: record.evidence_level === 'shared_spine_journey' && record.analysis_verified === true, inferred_sized_edges: sizedWithoutUserEvidence.length, identity, unsupported_relationships: record.constructor_diagnostics?.unknown_relationships ?? null },
     complexity: { nodes: graph.nodes?.length ?? 0, edges: graph.edges?.length ?? 0, provider_attempts: record.provider_calls?.length ?? record.structured_raw?.length ?? null, transforms: record.constructor_diagnostics?.transforms ?? null },
     recovery: { pending_evidence_available: Array.isArray(pending), facts: pendingFacts, retained_pending_only: pendingFacts.filter((f) => f.retained_pending && !f.canonical_retained).length, continuation_verified: record.recovery_verified === true },
