@@ -24,6 +24,7 @@
  */
 
 import { withRunStateFreshness } from '../orchestrator-v5/agent-lane/analysis-ready-freshness.js';
+import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
@@ -809,7 +810,7 @@ export function timedDispatch(inner: InternalDispatch, ledger: DispatchTiming[],
   };
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string> }> {
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -841,6 +842,8 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   let notModelled: NotModelledManifest | undefined;
   /** B5: the selected run's per-limit rows (`analysis_limit_verdicts`), same fact and gates as `analysisResult`. */
   let limitVerdicts: StoredLimitVerdicts | undefined;
+  /** 0.63.0: the selected run's STORED goal certainty (`analysis_goal_certainty`), same fact and gates as `analysisResult`. */
+  let goalCertainty: StoredGoalCertainty | undefined;
   /**
    * C46 × R3-4 (Canonical criterion 1): the carriers the selected run's engine evaluated
    * (`analysis_identity_evaluated_node_ids`), same fact and gates as `analysisResult`. `undefined` = not attested.
@@ -887,6 +890,8 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
       notModelled = notModelledOfRead(after.json.not_modelled);
       // Only a pair the 0.60 contract accepts, with at least one row, is carried: absent = not attested.
       limitVerdicts = readLimitVerdicts(after.json.analysis_limit_verdicts) ?? undefined;
+      // 0.63.0: only an array the published contract accepts is carried (`[]` included): absent = not recorded.
+      goalCertainty = readStoredGoalCertainty(after.json.analysis_goal_certainty);
       // A product the run's engine evaluated is not one it "adds up": the Agent's view reads it from the SAME read.
       identityEvaluated = readEvaluatedIdentityNodeIds(after.json.analysis_identity_evaluated_node_ids);
       /**
@@ -1015,7 +1020,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated };
+  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -2250,7 +2255,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * BEFORE the reply is composed, because the Run offer below keys on the
      * readiness this same response carries.
      */
-    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated } = await readBackState(readingDispatch, scenarioId);
+    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty } = await readBackState(readingDispatch, scenarioId);
 
     // ⛔ This turn's approval results go with it ONLY on the approve chip's fast path: it puts no authorise_change in
     // the history (only its words and Olumi's status), so they are the only record of which proposal it applied
@@ -2698,6 +2703,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * fact, under the SAME gates, as the `analysis_result` this turn carries. Absent = not attested.
        */
       ...(limitVerdicts !== undefined ? { limit_verdicts: limitVerdicts } : {}),
+      /**
+       * ⭐ 0.63.0 (DL 5883197828; Canvas 5887080467): the run's STORED goal certainty as a SIDECAR root key, the B5
+       * pattern above. A user-clicked Run reaches the UI on this TURN (the cold read applies only at boot/reload), so the
+       * turn carries the SAME array the cold read's `analysis_goal_certainty` does: the graph read takes it off the SAME
+       * fact, under the SAME gates, as this turn's `analysis_result`. Never recomputed here. Absent = not recorded.
+       */
+      ...(goalCertainty !== undefined ? { goal_certainty: goalCertainty } : {}),
       /**
        * ⭐ SAY WHICH PATH SERVED THIS TURN.
        *
