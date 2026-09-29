@@ -46,12 +46,21 @@ describe('source-bound option identity containment', () => {
     expect(result.mayNameLeadingOption).toBe(true);
     expect(result.missing).toEqual([]);
   });
-  it('names a genuinely absent candidate only with complete analysed-set bindings', () => {
+  it('AIQ 5887822471: an unbound listed candidate NO registered option declares is NOT claimed missing — it is named as unverified', () => {
+    // Complete analysed-set bindings alone no longer prove an omission: the drafter may have DROPPED the premium tier or
+    // the phrase may be a parser fragment, and nothing on the graph tells the two apart.
     const result = deriveIntakeOptionReconciliation(BRIEF, BOUND.slice(0, 2));
-    expect(result.state).toBe('options_missing');
-    expect(result.missing.map((option) => option.text)).toEqual(['introducing a premium tier']);
+    expect(result.state).toBe('identity_unverified');
+    expect(result.missing).toEqual([]);
+    expect(result.unbound.map((option) => option.text)).toEqual(['introducing a premium tier']);
     // A third, unbound option could be the premium tier: absence is no longer proven.
     expectUnknown([...BOUND.slice(0, 2), OPTIONS[2]]);
+  });
+  it('AIQ 5887822471: a candidate bound to a REGISTERED option the Run did not analyse (gated out) IS claimed missing, by name', () => {
+    const result = deriveIntakeOptionReconciliation(BRIEF, BOUND.slice(0, 2), { options: BOUND });
+    expect(result.state).toBe('options_missing');
+    expect(result.missing.map((option) => option.text)).toEqual(['introducing a premium tier']);
+    expect(result.unbound).toEqual([]);
   });
   it('reads existing OptionV3 extraction quotes without rewording them', () => {
     const options = BOUND.map(({ source_quote, ...option }) => ({
@@ -164,4 +173,60 @@ it('contains the exact persisted pricing witness without inferring a duplicate o
   ]);
   expect(result.missing).toEqual([]);
   expect(result.mayNameLeadingOption).toBe(false);
+});
+
+describe('AIQ 5887822471 / DL 5887922249 — three outcomes, each claim only as strong as its binding', () => {
+  const HELD = { id: 'carry_on', label: 'Carry on as now', is_baseline: true };
+  const PROPOSED = { id: 'moderate_rise', label: 'Moderate rise', proposed_by: 'olumi' };
+
+  it('RECONCILED: exact quotes on every listed candidate + a TYPED status quo with no quote → a leader may be named', () => {
+    const result = deriveIntakeOptionReconciliation(BRIEF, [...BOUND, HELD]);
+    expect(result.state).toBe('reconciled');
+    expect(result.mayNameLeadingOption).toBe(true);
+  });
+  it('RECONCILED: Olumi\'s typed proposal (`proposed_by: \'olumi\'`) needs no binding; the type is read off the registered node', () => {
+    expect(deriveIntakeOptionReconciliation(BRIEF, [...BOUND, PROPOSED]).state).toBe('reconciled');
+    // The wire option carries no type; the same-snapshot graph node does (MG writes the marker on the option node).
+    const wire = [...BOUND, { id: 'moderate_rise', label: 'Moderate rise' }];
+    const graph = { options: wire, nodes: [{ ...PROPOSED, kind: 'option' }] };
+    expect(deriveIntakeOptionReconciliation(BRIEF, wire, graph).state).toBe('reconciled');
+  });
+  it('UNVERIFIED: an UNTYPED extra option the Run analysed with nothing binding it withholds, and is named by id', () => {
+    const result = deriveIntakeOptionReconciliation(BRIEF, [...BOUND, { id: 'moderate_rise', label: 'Moderate rise' }]);
+    expect(result.state).toBe('identity_unverified');
+    expect(result.unbound_option_ids).toEqual(['moderate_rise']);
+    expect(result.unbound).toEqual([]);
+  });
+  it('UNVERIFIED: a label or an origin flag never types an option — only the typed fields do', () => {
+    const labelled = { id: 'status_quo', label: 'Status quo', origin: 'ai', provenance: { source: 'ai_proposed' } };
+    expect(deriveIntakeOptionReconciliation(BRIEF, [...BOUND, labelled]).state).toBe('identity_unverified');
+  });
+  it('FRAGMENT: a listed phrase that is not an option (the support brief) is named as unverified, NEVER `options_missing`', () => {
+    const brief = 'The options are: outsourcing first-line support, removing 5 support roles, or saving £320k a year.';
+    const analysed = [
+      { id: 'outsource', label: 'Outsource support', source_quote: 'outsourcing first-line support' },
+      { id: 'remove_roles', label: 'Remove roles', source_quote: 'removing 5 support roles' },
+      { ...HELD },
+    ];
+    const result = deriveIntakeOptionReconciliation(brief, analysed, { options: analysed });
+    expect(result.state).toBe('identity_unverified');
+    expect(result.missing).toEqual([]);
+    expect(result.unbound.map((option) => option.text)).toEqual(['saving £320k a year']);
+  });
+  it('MIXED: one candidate gated out + one no option declares → unverified, naming only the undeclared one', () => {
+    const brief = 'The options are raising prices, introducing a premium tier, or cutting support hours.';
+    const registered = [
+      { id: 'raise_prices', label: 'Raise prices', source_quote: 'raising prices' },
+      { id: 'premium_tier', label: 'Premium tier', source_quote: 'introducing a premium tier' },
+    ];
+    const result = deriveIntakeOptionReconciliation(brief, registered.slice(0, 1), { options: registered });
+    expect(result.state).toBe('identity_unverified');
+    expect(result.unbound.map((option) => option.text)).toEqual(['cutting support hours']);
+  });
+  it('AMBIGUOUS: two different registered options quoting the gated-out candidate prove nothing → unverified', () => {
+    const registered = [...BOUND, { id: 'premium_tier_2', label: 'Premium', source_quote: 'introducing a premium tier' }];
+    const result = deriveIntakeOptionReconciliation(BRIEF, BOUND.slice(0, 2), { options: registered });
+    expect(result.state).toBe('identity_unverified');
+    expect(result.missing).toEqual([]);
+  });
 });

@@ -9,7 +9,7 @@
 export type IntakeCompletenessState =
   | 'not_applicable' // No readable explicit enumeration to reconcile.
   | 'reconciled' // Every enumerated candidate has a validated binding.
-  | 'options_missing' // Complete binding of the analysed set proves an omission.
+  | 'options_missing' // A listed candidate bound to a DECLARED option the Run did not analyse (AIQ 5887822471).
   | 'identity_unverified'; // Coverage cannot be established from saved lineage.
 
 /**
@@ -90,6 +90,8 @@ export const INTAKE_MAY_NAME_LEADING_OPTION: Readonly<
 export const INTAKE_IS_NOT_A_CONSTRAINT_VERDICT = true as const;
 
 import { MAY_NAME_LEADING_OPTION, type PersistedClaimSafety } from './constraint-feasibility.js';
+import { readIsBaseline } from '../../cee/baseline-identity.js';
+import { isOlumiProposedOption } from '../../orchestrator-v5/context/olumi-proposed-option.js';
 
 /** One option the brief spelled out. Tokens aid extraction, never identity. */
 export interface EnumeratedOption {
@@ -116,6 +118,15 @@ export interface IntakeOptionReconciliation {
    * these, so it can never say "an option is missing" without saying which.
    */
   readonly missing: readonly EnumeratedOption[];
+  /**
+   * AIQ 5887822471: on `identity_unverified`, the listed candidates NOTHING binds — a parser fragment or an option the
+   * drafter dropped, which by construction cannot be told apart, so neither is claimed. The typed reason names them so
+   * the reply can ask the one clearable question ("Is ‘…’ one of the options you want compared?"). `[]` when the
+   * lineage itself is conflicting (nothing can be named truthfully) and on every other state.
+   */
+  readonly unbound: readonly EnumeratedOption[];
+  /** On `identity_unverified`: the analysed options with no binding that the graph does not type as not the user's. */
+  readonly unbound_option_ids: readonly string[];
 }
 
 function reconciliation(
@@ -123,6 +134,8 @@ function reconciliation(
   parts: {
     enumerated?: readonly EnumeratedOption[];
     missing?: readonly EnumeratedOption[];
+    unbound?: readonly EnumeratedOption[];
+    unbound_option_ids?: readonly string[];
   } = {},
 ): IntakeOptionReconciliation {
   return {
@@ -130,6 +143,8 @@ function reconciliation(
     mayNameLeadingOption: INTAKE_MAY_NAME_LEADING_OPTION[state],
     enumerated: parts.enumerated ?? [],
     missing: parts.missing ?? [],
+    unbound: parts.unbound ?? [],
+    unbound_option_ids: parts.unbound_option_ids ?? [],
   };
 }
 
@@ -414,11 +429,34 @@ function provenanceGroups(source: unknown): readonly (readonly unknown[])[] {
 }
 
 /**
- * A missing candidate is provable only after EVERY analysed option has a
- * unique, validated source binding. An unbound option could be the apparently
- * missing candidate under an authored label. Unknown never grants permission.
- * provenanceSource may restore quotes lost in the analysis projection, joined
- * solely by the same option ID from the same scenario snapshot.
+ * An analysed option the GRAPH TYPES as not the user's (AIQ 5887822471; DL 5887922249): a held or added status quo
+ * (`is_baseline` / `is_status_quo`, read by the canonical `readIsBaseline`), or Olumi's proposal (`proposed_by: 'olumi'`,
+ * `isOlumiProposedOption`). Typed fields only: a label, its similarity to the brief or an origin flag never qualifies.
+ */
+function typedNotTheUsers(records: readonly Record<string, unknown>[]): boolean {
+  return records.some((r) => readIsBaseline(r as never) === true || r.is_status_quo === true || isOlumiProposedOption(r));
+}
+
+type Binding =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'bound'; readonly candidate: EnumeratedOption }
+  /** One valid quote that is not a listed candidate's exact text. */
+  | { readonly kind: 'unmatched' }
+  /** Invalid, conflicting or ambiguous lineage: two quotes, an empty one, or an exact text that occurs twice. */
+  | { readonly kind: 'conflict' };
+
+/**
+ * THE THREE OUTCOMES, EACH CLAIM ONLY AS STRONG AS ITS BINDING (AIQ 5887822471; DL 5887922249). The Run passes its
+ * analysed set (`optionsSource`) and the same-snapshot registered graph (`provenanceSource`), which is the
+ * discriminating pair:
+ *   · `reconciled` — every listed candidate is bound by an EXACT, unique `source_quote` to an analysed option, and every
+ *     analysed option is bound or typed as not the user's. Only then may a leader be named.
+ *   · `options_missing` — a POSITIVE claim, made only when every unbound candidate is bound to a registered graph option
+ *     the Run did NOT analyse (constructed, then gated out). The one case where the candidate is known to be an option.
+ *   · `identity_unverified` — everything else: an untyped analysed option nothing binds, or a listed phrase no option
+ *     binds (a parser fragment or a dropped option — indistinguishable, so neither is claimed; `unbound` names it).
+ * Conflicting or ambiguous lineage withholds and names nothing. Labels and their token overlap are never identity
+ * evidence. provenanceSource may restore quotes lost in the analysis projection, joined solely by the same option ID.
  */
 export function deriveIntakeOptionReconciliation(
   briefText: string | null | undefined,
@@ -432,40 +470,74 @@ export function deriveIntakeOptionReconciliation(
   const options = readOptionRecords(optionsSource);
   if (options.length === 0) return unknownIdentity();
   const groups = provenanceGroups(provenanceSource ?? optionsSource);
+
+  const bindingOf = (quotes: readonly unknown[]): Binding => {
+    if (quotes.length === 0) return { kind: 'none' };
+    if (quotes.some((quote) => typeof quote !== 'string' || quote.length === 0)) return { kind: 'conflict' };
+    const uniqueQuotes = new Set(quotes as string[]);
+    if (uniqueQuotes.size !== 1) return { kind: 'conflict' };
+    const quote = [...uniqueQuotes][0]!;
+    const matches = enumerated.filter((candidate) => candidate.text === quote);
+    if (matches.length === 0) return { kind: 'unmatched' };
+    // Exact text alone is insufficient when its source occurrence is ambiguous.
+    const at = briefText.indexOf(quote);
+    if (matches.length !== 1 || at < 0 || briefText.indexOf(quote, at + 1) !== -1) return { kind: 'conflict' };
+    return { kind: 'bound', candidate: matches[0]! };
+  };
+  /** The same-ID records across the carriers, or null when a carrier holds the ID ambiguously. */
+  const recordsWithId = (id: string): Record<string, unknown>[] | null => {
+    const out: Record<string, unknown>[] = [];
+    for (const group of groups) {
+      const matching = group.filter((entry) => isRecord(entry) && (entry.id === id || entry.option_id === id));
+      if (matching.length > 1 || (matching.length === 1 && optionId(matching[0]) !== id)) return null;
+      if (matching.length === 1 && isRecord(matching[0])) out.push(matching[0]);
+    }
+    return out;
+  };
+
   const seenIds = new Set<string>();
   const bound = new Set<EnumeratedOption>();
+  const untypedUnbound: string[] = [];
   for (const option of options) {
     const id = optionId(option);
     if (id === null || !isRecord(option) || seenIds.has(id)) return unknownIdentity();
     seenIds.add(id);
-    const quotes = sourceQuotes(option);
-    for (const group of groups) {
-      const matching = group.filter((entry) => isRecord(entry) && (entry.id === id || entry.option_id === id));
-      if (matching.length > 1 || (matching.length === 1 && optionId(matching[0]) !== id)) return unknownIdentity();
-      if (matching.length === 1 && isRecord(matching[0])) {
-        quotes.push(...sourceQuotes(matching[0]));
-      }
+    const sameId = recordsWithId(id);
+    if (sameId === null) return unknownIdentity();
+    const binding = bindingOf([...sourceQuotes(option), ...sameId.flatMap((r) => sourceQuotes(r))]);
+    if (binding.kind === 'conflict') return unknownIdentity();
+    if (binding.kind === 'bound') {
+      if (bound.has(binding.candidate)) return unknownIdentity();
+      bound.add(binding.candidate);
+      continue;
     }
-    if (quotes.length === 0 || quotes.some((quote) => typeof quote !== 'string' || quote.length === 0)) {
-      return unknownIdentity();
-    }
-    const uniqueQuotes = new Set(quotes as string[]);
-    if (uniqueQuotes.size !== 1) return unknownIdentity();
-    const quote = [...uniqueQuotes][0]!;
-    const matches = enumerated.filter((candidate) => candidate.text === quote);
-    // Exact text alone is insufficient when its source occurrence is ambiguous.
-    const at = briefText.indexOf(quote);
-    if (matches.length !== 1 || at < 0 || briefText.indexOf(quote, at + 1) !== -1) {
-      return unknownIdentity();
-    }
-    const candidate = matches[0]!;
-    if (bound.has(candidate)) return unknownIdentity();
-    bound.add(candidate);
+    if (!typedNotTheUsers([option, ...sameId])) untypedUnbound.push(id);
   }
-  const missing = enumerated.filter((candidate) => !bound.has(candidate));
-  return missing.length > 0
+  const unbound = enumerated.filter((candidate) => !bound.has(candidate));
+  if (untypedUnbound.length > 0) {
+    return reconciliation('identity_unverified', { enumerated, unbound, unbound_option_ids: untypedUnbound });
+  }
+  if (unbound.length === 0) return reconciliation('reconciled', { enumerated });
+
+  // Constructed, then gated out: a REGISTERED graph option the Run did not analyse whose exact quote binds the candidate.
+  const declaredBy = new Map<EnumeratedOption, string | null>();
+  for (const group of groups) {
+    for (const record of group) {
+      const id = optionId(record);
+      if (id === null || !isRecord(record) || seenIds.has(id)) continue;
+      const sameId = recordsWithId(id);
+      if (sameId === null) continue;
+      const binding = bindingOf([...sourceQuotes(record), ...sameId.flatMap((r) => sourceQuotes(r))]);
+      if (binding.kind !== 'bound') continue;
+      const held = declaredBy.get(binding.candidate);
+      // Two different registered options quoting one candidate: ambiguous, so it proves nothing.
+      declaredBy.set(binding.candidate, held === undefined || held === id ? id : null);
+    }
+  }
+  const missing = unbound.filter((candidate) => typeof declaredBy.get(candidate) === 'string');
+  return missing.length === unbound.length
     ? reconciliation('options_missing', { enumerated, missing })
-    : reconciliation('reconciled', { enumerated });
+    : reconciliation('identity_unverified', { enumerated, unbound: unbound.filter((c) => !missing.includes(c)) });
 }
 
 /**
