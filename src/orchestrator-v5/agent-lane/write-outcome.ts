@@ -71,7 +71,7 @@ const REFUSAL_WORDS: Record<string, string> = {
   construction_failed: 'the model builder could not produce a usable model this time — ask me to try again',
   admitted_graph_invalid: 'what came back did not form a valid model, so nothing was saved — ask me to try again',
   registration_refused: 'it could not be saved to this decision — ask me to try again',
-  option_name_ambiguous: 'your brief uses one name for an option and for something else in the model, so they could not be told apart and nothing was saved — tell me what the option changes, in different words, and ask me to build it again',
+  option_name_ambiguous: 'the model uses one name for an option and for something else in the model, so they could not be told apart and nothing was saved — tell me what the option changes, in different words, and ask me to build it again',
   /**
    * ⛔ EVERY CODE A WRITE TOOL RETURNS HAS WORDS (fix/agent-never-shows-instructions-or-codes). Until now these fell
    * through to "the change was refused (<code>)": `authoriseChange` / `confirmHeld` (`not_found`), `applyCompound`
