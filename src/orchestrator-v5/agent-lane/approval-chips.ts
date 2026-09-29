@@ -37,7 +37,7 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   // A set of link strengths: ONE button records the whole set, as one commit (DL #72 5871594233).
   propose_link_strengths: { label: 'Record these links', message: 'Yes, record those.' },
   // The user's own stated effect on one link ("every £1 loses us about 50"), written through the level door's link_effect.
-  propose_link_effect: { label: 'Record your figure', message: 'Yes, record that.' },
+  propose_link_effect: { label: 'Record this reading', message: 'Yes, record that reading.' },
   // The goal's success target the user stated, written through the product's typed target writer.
   propose_goal_target: { label: 'Set this target', message: 'Yes, set that target.' },
   // SLICE C2: a new risk, held on the product's own seam like the add-option (`gmh_`, the product's words on the button).
@@ -158,9 +158,11 @@ export function approvalChipsFor(
   }
   const reading = readingShownFor(tool, labelSourceFor?.(proposalId));
   if (reading !== undefined) return [{ id: approvalChipIdFor(proposalId), ...reading, message: approve.message }, AMEND_CHIP];
-  const effectReading = linkEffectReadingFor(tool, labelSourceFor?.(proposalId));
-  if (effectReading !== undefined) {
-    return [{ id: approvalChipIdFor(proposalId), label: approve.label, message: approve.message, detail: effectReading }, AMEND_CHIP];
+  // ⛔ A link's stated effect is approvable ONLY on a card showing its exact reading (PR Review's fifth CR): none, no button.
+  if (tool === 'propose_link_effect') {
+    const effectReading = linkEffectReadingFor(tool, labelSourceFor?.(proposalId));
+    return effectReading === undefined ? []
+      : [{ id: approvalChipIdFor(proposalId), label: approve.label, message: approve.message, detail: effectReading }, AMEND_CHIP];
   }
   return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, labelSourceFor?.(proposalId)), message: approve.message }, AMEND_CHIP];
 }

@@ -1823,7 +1823,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
     /** Every tool runs as THIS request: its scenario, its user, and the user's own words (`stated-by-user.ts`). */
     const typedNow = typedByUser(body) ? message : null;
-    const toolCtx: AgentToolContext = { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
+    const toolCtx: AgentToolContext = { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow),
+      ...(approvedProposal !== undefined ? { typed_approval_of: approvedProposal } : {}) };
     if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
 
     /**
@@ -2287,10 +2288,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⛔ On a FRESH worker the process-local `lastApproveOffer` is empty (Codex #1823 5819308426: "if Run lands
     // on a fresh worker, the process-local carry can be absent"), so the chip also comes from the carrier the
     // rehydration above restored from the latest answer row — the exact words the offer used.
+    // ⛔ A link's stated effect the Agent tried to approve from the user's words is recorded only from its card
+    // (`approve_on_the_card`, PR Review's fifth CR on #2275): the reply points to that card, so the card is offered again.
+    const toTheCard = result.tool_results.flatMap((r) => {
+      const x = r as { reason?: unknown; proposal_id?: unknown } | undefined;
+      return x?.reason === 'approve_on_the_card' && typeof x.proposal_id === 'string' ? [x.proposal_id] : [];
+    });
     const carriedApproval = ((): OfferedAction[] => {
-      if (fastPath !== 'run') return [];
+      // Not when this turn prepared a proposal of its own: that one's card is the offer.
+      const preparedNow = result.tool_calls.some((c) => c.name !== 'authorise_change' && c.ok && typeof c.proposal_id === 'string');
+      if (fastPath !== 'run' && (toTheCard.length === 0 || preparedNow)) return [];
       const id = executableWaitingProposal(scenarioId, userId, graphHash);
-      if (id === undefined) return [];
+      if (id === undefined || (fastPath !== 'run' && !toTheCard.includes(id))) return [];
       const chip = [lastApproveOffer.get(approveKey), carriedProposals.get(approveKey)?.chip]
         .find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === id);
       return chip !== undefined ? [chip, AMEND_CHIP] : [];

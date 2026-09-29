@@ -2048,6 +2048,12 @@ export function createAgentCapabilities(
       || typeof e.amount_unit !== 'string' || typeof e.per_source_change_unit !== 'string') {
       return notApplied('unreadable_proposal', 'This link\u2019s size could not be read from the stored proposal, so nothing was recorded. Offer to prepare it again.');
     }
+    // ⛔ ONLY FROM THE CARD (PR Review's fifth CR): the user's figure is recorded only when they press the button that shows
+    // the exact reading it records (`approvalChipsFor`), never from their words to the model.
+    if (ctx.typed_approval_of !== parent.proposal_id) {
+      return notApplied('approve_on_the_card', 'Nothing was recorded: the user\u2019s own figure for a link is recorded only when they press the '
+        + 'button that shows exactly what will be recorded. Point them to that button; never record it from their words.');
+    }
     if (approvedRead.graph_hash !== parent.base_graph_identity_hash) {
       return notApplied('model_changed_since_approval', 'The model changed after this was prepared, so nothing was recorded. Read it again and propose afresh.');
     }

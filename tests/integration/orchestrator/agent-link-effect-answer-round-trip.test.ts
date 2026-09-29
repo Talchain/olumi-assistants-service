@@ -125,7 +125,7 @@ describe('journey C: the user\'s stated link effect, through the real door, is s
     const a = agent(SAID);
     const p = await a.caps.proposeLinkEffect!(a.ctx, ARGS);
     expect(p.ok, JSON.stringify(p)).toBe(true);
-    const out = await a.caps.authoriseChange(a.ctx, { proposal_id: String(p.proposal_id) });
+    const out = await a.caps.authoriseChange({ ...a.ctx, typed_approval_of: String(p.proposal_id) }, { proposal_id: String(p.proposal_id) });
     expect(out.ok, JSON.stringify(out)).toBe(true);
     expect(rows.size, 'ONE commit').toBe(1);
     const e = edgeOf();
@@ -149,7 +149,7 @@ describe('journey C: the user\'s stated link effect, through the real door, is s
     const g = persisted as { edges: Array<Record<string, any>> };
     const e = g.edges.find((x) => x.from === 'pro_plan_price' && x.to === 'pro_plan_paying_subscribers')!;
     e.provenance = { ...(e.provenance ?? {}), reasoning: 'changed by another turn' };
-    const out = await a.caps.authoriseChange(a.ctx, { proposal_id: String(p.proposal_id) });
+    const out = await a.caps.authoriseChange({ ...a.ctx, typed_approval_of: String(p.proposal_id) }, { proposal_id: String(p.proposal_id) });
     expect(out.ok).toBe(false);
     expect(rows.size, 'nothing written').toBe(0);
     expect(edgeOf().provenance?.magnitude).toBeUndefined();

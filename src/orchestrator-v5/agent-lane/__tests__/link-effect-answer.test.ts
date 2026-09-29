@@ -27,6 +27,8 @@ const C = served('served-journey-c-price-subscribers-unsized-5411da8.json');
 const A = served('served-journey-a-price-churn-0df78f4.json');
 const BEYOND = served('served-price-subscribers-beyond-range-0df78f4-d2.json');
 const ctxSaying = (user_text: string) => ({ scenario_id: '550e8400-e29b-41d4-a716-4466554400a7', authenticated_user_id: null, request_id: 'r', user_text });
+/** The route's context when the user PRESSED the approve card for `proposalId` (`typedApprovalOf`, bound by the route). */
+const ctxPressing = (proposalId: string) => ({ ...ctxSaying('Yes, record that reading.'), typed_approval_of: proposalId });
 
 function world(graph: Json) {
   const store = new ProposalStore();
@@ -107,6 +109,9 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     ['every £1 increase in the Pro price loses us 50 paying subscribers', -50, 1],
     ['If the Pro price falls by £1 we gain about 50 paying subscribers', 50, -1],
     ['each £1 on the Pro price means 50 fewer paying subscribers', -50, 1],
+    // The £1 IS the change: "by £1" after the move, or its own move straight after (PR Review's fifth CR, the kept shapes).
+    ['If the Pro price rises by £1 we lose about 50 paying subscribers', -50, 1],
+    ['A £1 Pro price increase loses us about 50 paying subscribers', -50, 1],
     // Several sentences where ONE states it; the model's own colon-prefixed quote (live replay, 29 Sep).
     ['We checked last quarter. Every £1 on the Pro price loses us about 50 paying subscribers', -50, 1],
     ['From our last two price changes: every £1 on the Pro price loses us about 50 paying subscribers', -50, 1],
@@ -158,6 +163,15 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     // PR Review's fourth CR (@ ce3cd9d0): £1 is today's LEVEL of the price, not a £1 rise — no change is sized.
     ['With Pro price £1 today, raising it loses 50 paying subscribers.',
       'With Pro price £1 today, raising it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_not_a_change'],
+    // PR Review's fifth CR (@ db47673d), its exact string: the comma ends "£1" as today's price; the rise has no size.
+    ['With Pro price £1, raising it loses 50 paying subscribers.',
+      'With Pro price £1, raising it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_not_a_change'],
+    ['At a Pro price of £1, raising it loses 50 paying subscribers.',
+      'At a Pro price of £1, raising it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_not_a_change'],
+    // A NAMED under-claim (unchanged by the fifth CR): the move four words from the source's name reads as the target's —
+    // the Agent asks them to say it again, never records it.
+    ['If we raise the Pro price by £1 we lose about 50 paying subscribers.',
+      'If we raise the Pro price by £1 we lose about 50 paying subscribers', -50, 1, 'not_the_users_statement', 'direction_not_stated'],
     // A NAMED under-claim: the source only implied ("a £10 rise") — the Agent asks, never infers the price.
     ['A £10 rise loses us about 500 paying subscribers.', 'A £10 rise loses us about 500 paying subscribers', -500, 10,
       'not_the_users_statement', 'end_not_named'],
@@ -191,18 +205,46 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     const chips = approvalChipsFor([{ name: 'propose_link_effect', ok: true, mutated: false, proposal_id: id }],
       () => ({ proposal: store.get(id), result: r as never }));
     const approve = chips.find((c) => c.id === approvalChipIdFor(id))!;
-    expect(approve.label).toBe('Record your figure');
+    expect(approve.label).toBe('Record this reading'); // AIQ 5885199635: a reading the user confirms
     expect(approve.detail).toMatch(/^Record: \+.*1.* on "Pro plan price" \u2192 \u221250 .*subscribers.* in "Pro plan paying subscribers" \u2014 from your words: "every £1 on the Pro price loses us about 50 paying subscribers"$/);
   });
 
-  it('the card shows NO reading when the proposer\'s result and the stored proposal disagree (never the Agent\'s prose)', async () => {
+  it('NO CARD, NO BUTTON (PR Review\'s fifth CR): the proposer\'s result and the stored proposal disagree → nothing to approve', async () => {
     const { caps, store } = world(C);
     const r = await caps.proposeLinkEffect!(ctxSaying(SUBS_SAID), SUBS_ARGS) as Json;
     const id = String(r.proposal_id);
+    const ask = [{ name: 'propose_link_effect', ok: true, mutated: false, proposal_id: id }];
+    // Control: the SAME proposal with its own result has its card.
+    expect(approvalChipsFor(ask, () => ({ proposal: store.get(id), result: r as never })).map((c) => c.id)).toContain(approvalChipIdFor(id));
     const other = { ...r, link: { ...r.link, your_words: 'something else' } };
-    const chips = approvalChipsFor([{ name: 'propose_link_effect', ok: true, mutated: false, proposal_id: id }],
-      () => ({ proposal: store.get(id), result: other as never }));
-    expect(chips.find((c) => c.id === approvalChipIdFor(id))).not.toHaveProperty('detail');
+    expect(approvalChipsFor(ask, () => ({ proposal: store.get(id), result: other as never }))).toEqual([]);
+    expect(approvalChipsFor(ask)).toEqual([]); // no source to read the reading from at all
+  });
+
+  it('ONLY FROM THE CARD (PR Review\'s fifth CR): the Agent approving from the user\'s "yes" records nothing; the card then does', async () => {
+    const graph = structuredClone(C);
+    const d: InternalDispatch = async (path) => {
+      if (path.endsWith('/graph')) return { status: 200, json: { graph, graph_hash: computeAnalysisAffectingGraphHash(graph as never) } };
+      throw new Error(`unexpected dispatch ${path}`);
+    };
+    let doorCalls = 0;
+    const commitOptionLevels = async (): Promise<CommitOptionLevelsResult> => {
+      doorCalls += 1;
+      const e = (graph.edges as Json[]).find((x) => x.from === 'pro_plan_price' && x.to === 'pro_plan_paying_subscribers')!;
+      e.provenance = { ...(e.provenance ?? {}), ...THEIRS };
+      return { status: 'committed', graph_hash: 'h-after', receipt: null, already_applied: false, committed_levels: [], links_resized: [] };
+    };
+    const caps = createAgentCapabilities(d, new ProposalStore(), undefined, 'full', undefined, { commitOptionLevels });
+    const r = await caps.proposeLinkEffect!(ctxSaying(SUBS_SAID), SUBS_ARGS) as Json;
+    const id = String(r.proposal_id);
+    for (const ctx of [ctxSaying('Yes, record that.'), ctxPressing('prop_0123456789abcdef0123456789abcdef')]) {
+      const said = await caps.authoriseChange(ctx, { proposal_id: id }) as Json;
+      expect(said).toEqual(expect.objectContaining({ ok: false, mutated: false, reason: 'approve_on_the_card' }));
+      expect(String(said.detail)).not.toMatch(/approve_on_the_card/); // never the raw code in the words
+    }
+    expect(doorCalls, 'nothing written from words, or from another proposal\'s card').toBe(0);
+    expect(await caps.authoriseChange(ctxPressing(id), { proposal_id: id })).toEqual(expect.objectContaining({ ok: true, applied: true }));
+    expect(doorCalls).toBe(1);
   });
 
   it('the tool is registered: dispatchTool routes propose_link_effect to the capability', async () => {
@@ -222,12 +264,13 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
   });
 
   it('RED (live replay on served C + 0929 D2, 29 Sep: 6/6 prepared, 0 chips): the prepared change is OFFERED — one approve chip for it', async () => {
-    const { caps } = world(C);
+    const { caps, store } = world(C);
     const r = await caps.proposeLinkEffect!(ctxSaying(SUBS_SAID), SUBS_ARGS) as Json;
-    const chips = approvalChipsFor([{ name: 'propose_link_effect', ok: true, mutated: false, proposal_id: String(r.proposal_id) }]);
+    const chips = approvalChipsFor([{ name: 'propose_link_effect', ok: true, mutated: false, proposal_id: String(r.proposal_id) }],
+      (id) => ({ proposal: store.get(id), result: r as never }));
     const approve = chips.filter((c) => c.id.startsWith('agent-approve-proposal:'));
     expect(approve.map((c) => c.id)).toEqual([approvalChipIdFor(String(r.proposal_id))]);
-    expect(approve[0]!.label).toBe('Record your figure');
+    expect(approve[0]!.label).toBe('Record this reading');
   });
 
   const BEYOND_SAID = 'From our last two price changes: every £1 on the Pro price loses us about 50 paying subscribers.';
@@ -271,7 +314,7 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     const store = new ProposalStore();
     const caps = createAgentCapabilities(d, store, undefined, 'full', undefined, { commitOptionLevels });
     const r = await caps.proposeLinkEffect!(ctxSaying(SUBS_SAID), SUBS_ARGS) as Json;
-    return await caps.authoriseChange(ctxSaying('yes'), { proposal_id: String(r.proposal_id) }) as Json;
+    return await caps.authoriseChange(ctxPressing(String(r.proposal_id)), { proposal_id: String(r.proposal_id) }) as Json;
   };
   const THEIRS = { source: 'user_specified', magnitude: 'user_stated',
     natural_effect: { amount: -50, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: 'GBP per month' } };
@@ -289,7 +332,7 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
   it('FAIL CLOSED without the level door: approving writes nothing and says so (never a strength-only or register fallback)', async () => {
     const { caps } = world(C);
     const r = await caps.proposeLinkEffect!(ctxSaying(SUBS_SAID), SUBS_ARGS) as Json;
-    const out = await caps.authoriseChange(ctxSaying('yes'), { proposal_id: String(r.proposal_id) }) as Json;
+    const out = await caps.authoriseChange(ctxPressing(String(r.proposal_id)), { proposal_id: String(r.proposal_id) }) as Json;
     expect(out).toEqual(expect.objectContaining({ ok: false, mutated: false, reason: 'link_effect_writer_unavailable' }));
   });
 });

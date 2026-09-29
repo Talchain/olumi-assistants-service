@@ -100,6 +100,12 @@ export interface AgentToolContext {
    * the user's only when named here (`bandTheUserWrote`): a band word elsewhere in the conversation is about something else.
    */
   readonly user_turn_text?: string;
+  /**
+   * The proposal THIS request's typed approve chip names (`typedApprovalOf`), bound by the route — never model output.
+   * A link's stated effect is written only from that button, which shows the exact reading it records (PR Review's
+   * fifth CR on #2275): a free-text "yes" to the model never records it.
+   */
+  readonly typed_approval_of?: string;
 }
 
 export interface ToolDefinition {

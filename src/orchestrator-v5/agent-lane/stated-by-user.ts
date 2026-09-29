@@ -769,6 +769,8 @@ const SOURCE_REACH = 6;
  * raising it loses 50 paying subscribers" writes £1 as today's LEVEL, beside "price", and sizes no rise.
  */
 const DELTA_BEFORE = /^(?:every|each|per)$/;
+/** Words that may stand between a move and "by £1" ("raise the Pro price by £1", "raising it by £1"). */
+const BY_LINK = /^(?:the|a|an|our|its|it|their|them|we|you|prices?)$/;
 const AMOUNT_REACH = 4;
 /** The quote's sentences: split at ! ? ; : a new line, or a period — except a period BETWEEN digits ("0.5", "£1.50"). */
 const sentencesOf = (q: string): string[] => q.split(/[!?;:\n]|(?<!\d)\.|\.(?!\d)/).map((x) => x.trim()).filter((x) => x !== '');
@@ -832,8 +834,14 @@ function linkEffectInOneSentence(
   // A figure's own digits ("0.5" → 0, 5) are never words standing between it and what it sizes.
   const inFigure = (i: number): boolean => [perFigure, amountFigure].some((f) => tokens[i]!.at >= (f.index ?? 0)
     && tokens[i]!.at < (f.index ?? 0) + f.matchedText.length);
+  // Punctuation ends a phrase (PR Review's fifth CR: "£1, raising it"): a comma, dash or bracket between two words breaks them.
+  const unbroken = (a: number, b: number): boolean => {
+    const [x, y] = a < b ? [a, b] : [b, a];
+    return !/[,;:()\u2013\u2014]/.test(q.slice(tokens[x]!.at + tokens[x]!.w.length, tokens[y]!.at));
+  };
   const joined = (a: number, b: number, reach: number, link: (w: string) => boolean): boolean => a >= 0 && b >= 0
-    && Math.abs(a - b) <= reach && tokens.slice(Math.min(a, b) + 1, Math.max(a, b)).every((t, k) => inFigure(Math.min(a, b) + 1 + k) || link(t.w));
+    && Math.abs(a - b) <= reach && unbroken(a, b)
+    && tokens.slice(Math.min(a, b) + 1, Math.max(a, b)).every((t, k) => inFigure(Math.min(a, b) + 1 + k) || link(t.w));
   const sourceLabel = wordsOf(ends.source);
   // "£1 increase", "£10 rise", "£1 we add": right after the source's figure. "the price falls", "raise the price": beside
   // a word naming the source. "add … to the Pro price": up to four words before it.
@@ -856,11 +864,19 @@ function linkEffectInOneSentence(
     || sourceLabel.some((x) => sameWord(x, w));
   if (!targetMoves.some((m) => joined(amountAt, m, AMOUNT_REACH, (w) => AMOUNT_LINK.test(w)))
     || !sourceAt.some((s) => joined(perAt, s, SOURCE_REACH, sourceLinkWord))) return 'figure_not_bound';
-  const moveAt = tokens.flatMap((t, i) => (MOVE_UP.test(t.w) || MOVE_DOWN.test(t.w) ? [i] : []));
-  const distributive = perAt > 0 && DELTA_BEFORE.test(tokens[perAt - 1]!.w);
-  if (!distributive && !moveAt.some((m) => joined(perAt, m, SOURCE_REACH, (w) => SOURCE_LINK.test(w) || sourceLabel.some((x) => sameWord(x, w))))) {
-    return 'source_figure_not_a_change';
-  }
+  // The source's figure is itself IN a change phrase (PR Review's fifth CR: "With Pro price £1, raising it" is today's
+  // price, then a rise of no stated size): distributive ("every £1"), its own move straight after ("£10 rise", "£1 price
+  // increase"), or "by £1" after a move ("falls by £1", "raise the Pro price by £1").
+  const isMove = (w: string): boolean => MOVE_UP.test(w) || MOVE_DOWN.test(w);
+  const isLabel = (w: string): boolean => sourceLabel.some((x) => sameWord(x, w));
+  const distributive = perAt > 0 && DELTA_BEFORE.test(tokens[perAt - 1]!.w) && unbroken(perAt - 1, perAt);
+  const moveAfter = [1, 2, 3].some((d) => perAt + d < tokens.length && isMove(tokens[perAt + d]!.w) && unbroken(perAt, perAt + d)
+    && tokens.slice(perAt + 1, perAt + d).every((t, k) => inFigure(perAt + 1 + k) || isLabel(t.w)));
+  const byAfterMove = perAt > 1 && tokens[perAt - 1]!.w === 'by' && tokens.slice(Math.max(0, perAt - 7), perAt - 1).some((t, k, xs) => {
+    const m = Math.max(0, perAt - 7) + k;
+    return isMove(t.w) && unbroken(m, perAt) && xs.slice(k + 1).every((u) => BY_LINK.test(u.w) || isLabel(u.w));
+  });
+  if (!distributive && !moveAfter && !byAfterMove) return 'source_figure_not_a_change';
   if (target !== Math.sign(effect.amount)) return 'direction_contradicts';
   if (source === 0 ? effect.per_source_change < 0 : source !== Math.sign(effect.per_source_change)) {
     return source === 0 ? 'direction_not_stated' : 'direction_contradicts';
