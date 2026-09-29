@@ -160,7 +160,7 @@ import { registrationTurnId } from '../../graph-registration/registration-identi
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel } from '../goal-current-level.js';
 import { sayFigureExactly, sayFigureRead } from '../say-figure.js';
-import { isChangeFrame, sayLimitInFrame } from '../limit-frame.js';
+import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
 import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
@@ -970,6 +970,12 @@ function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'ana
           ...(trio.goal_threshold_unit === undefined ? {} : { unit: trio.goal_threshold_unit }),
           ...(str(frame) ? { frame } : {}),
           ...(comparator === null ? {} : { comparator, comparator_in_words: LIMIT_OPERATOR_WORDS[comparator] }),
+          // R1 S4-core: a target stated as a change from today says so in words ("down 15% from today"), so the Agent never
+          // reads the stored fraction as a level of the goal's unit (`sayGoalChange`). A level carries no `in_words`, as before.
+          ...((): Record<string, string> => {
+            const said = sayGoalChange(frame, trio.goal_threshold_raw!, trio.goal_threshold_unit, (v, u) => targetFigure(v, u ?? ''), (n as { goal_direction?: unknown }).goal_direction);
+            return said === undefined ? {} : { in_words: said };
+          })(),
         },
       }),
     };
@@ -2536,6 +2542,14 @@ export function createAgentCapabilities(
             : `The model has more than one goal (${goals.map((x) => `"${x.label}"`).join(', ')}), so nothing was prepared: it is not clear which one this target is for. Ask the user which goal they mean.` };
       }
       const goal = goals[0]!;
+      // ⛔ R1 S4-core: a target stated as a CHANGE from today ("cut the bill by 15%": `goal_threshold_frame` `change_rel`,
+      // a fraction). This path writes a LEVEL target, so it would silently turn the user's change into a level. Refused by
+      // name until a change can be edited as a change; the goal doors refuse it too (`add-constraint.ts`, `goal-target-edit.ts`).
+      if (isChangeFrame((goal as { goal_threshold_frame?: unknown }).goal_threshold_frame)) {
+        return { ok: false, mutated: false, refusal: 'goal_is_a_change',
+          detail: `The goal "${goal.label}" is stated as a change from today, and this path cannot yet change a target stated that way, so nothing was prepared. `
+            + 'Tell the user plainly, and never offer a level target in its place.' };
+      }
       // The target writer's own bounds: an at-least target must be a positive number (`add-constraint.ts`), said in its words.
       if (type === 'at_least' && !(value > 0)) {
         return { ok: false, mutated: false, refusal: 'target_not_positive',

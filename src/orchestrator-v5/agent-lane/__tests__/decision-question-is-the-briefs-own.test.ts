@@ -47,7 +47,7 @@ const link = (from: string, to: string, direction: 'positive' | 'negative') =>
 function pricing(question: string | null | undefined, optionLabels: [string, string] = ['Keep Pro at £49', 'Raise Pro to £59']): Record<string, unknown> {
   return {
     goal: {
-      metric: 'MRR', operator: '>=', target_stated: true, value: 100000, unit: 'GBP', horizon_months: 12, provenance: 'explicit',
+      metric: 'MRR', operator: '>=', target_stated: true, frame: 'level', value: 100000, unit: 'GBP', horizon_months: 12, provenance: 'explicit',
       baseline_known: true, baseline_value: 75000, baseline_provenance: 'explicit', scope: null,
     },
     constraints: [],
@@ -79,7 +79,7 @@ function midmarket(question: string | null): Record<string, unknown> {
   const options = ['Build a dedicated mid-market tier', 'Partner with system integrators', 'Acquire a smaller competitor'];
   return {
     goal: {
-      metric: 'Mid-market customers', operator: '>=', target_stated: true, value: 200, unit: 'customers', horizon_months: 12,
+      metric: 'Mid-market customers', operator: '>=', target_stated: true, frame: 'level', value: 200, unit: 'customers', horizon_months: 12,
       provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null,
     },
     constraints: [],

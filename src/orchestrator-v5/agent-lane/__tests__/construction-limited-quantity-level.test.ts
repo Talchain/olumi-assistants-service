@@ -38,7 +38,7 @@ const est = (factor_label: string, value: number, unit: string, provenance = 'ai
 /** Journey C's shape: churn is limited (level frame), acted on by no option, and — in the served 3/17 — left with no level. */
 function journeyC(churnBaseline: number | null, frame: 'level' | 'change_abs' = 'level', churnKnown = false) {
   return {
-    goal: { metric: 'MRR', operator: '>=', target_stated: true, value: 100000, unit: 'GBP', horizon_months: 6, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'ai_proposed', scope: null },
+    goal: { metric: 'MRR', operator: '>=', target_stated: true, frame: 'level', value: 100000, unit: 'GBP', horizon_months: 6, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'ai_proposed', scope: null },
     constraints: [{ metric: 'Monthly churn rate', operator: '<', value: 4, unit: '%', provenance: 'explicit', frame }],
     options: [
       { label: 'Raise Pro price to £59', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [est('Pro plan price', 59, 'GBP per month', 'explicit')] },

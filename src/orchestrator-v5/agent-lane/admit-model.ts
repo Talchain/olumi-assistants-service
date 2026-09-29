@@ -96,6 +96,12 @@ export interface CandidateModel {
     target_stated?: boolean;
     value: number | null;
     /**
+     * R1 (0.61.0): the frame the target is stated in. `change_rel`: `value` is the signed PERCENTAGE ("cut by 15%" → −15);
+     * `change_abs`: the signed change in the metric's own `unit`. Optional because the banked contract has no such field:
+     * absent means `level`, exactly what an older candidate meant.
+     */
+    frame?: 'level' | 'change_abs' | 'change_rel';
+    /**
      * The goal metric's CURRENT level, when there is one. Optional because the
      * banked contract has no such field: absent means no current level, which is
      * exactly what an older candidate meant. `baseline_known: true` is a figure
@@ -2475,6 +2481,77 @@ function goalLevelIsEstimated(goal: CandidateModel['goal']): boolean {
   return !(goal.baseline_known === true && (goal.baseline_provenance ?? goal.provenance) === 'explicit');
 }
 
+/**
+ * ⭐ R1 S4-core — A GOAL TARGET STATED AS A CHANGE FROM TODAY (`@talchain/schemas` 0.61.0; ISL S2 served).
+ *
+ * The stored figure is the contract's: `change_rel` → the fraction r ("cut by 15%": the drafter's −15 → −0.15);
+ * `change_abs` → c, the change in the metric's own `unit`. `goal_threshold_unit` stays the METRIC's unit (the unit of
+ * its current level); the frame says how to read the figure.
+ *
+ * P(goal) needs today's level: ISL reads r as a change of r·b_raw on the raw range PLoT sends as [0, goal_threshold_cap]
+ * (and pairs an absolute change with the level resolver at b + c). So ONLY beside a current level the USER stated (the
+ * level path's own `goalLevelIsEstimated` rule), the goal gets its base on ONE cap taken from the LEVEL scale — the
+ * larger of today's level and the target level, through the one cap rule (`resolveGoalThresholdCapWithProvenance`) —
+ * and `goal_threshold` = r (a relative change is scale-free) or c ÷ cap. Otherwise the frame and the figure are kept,
+ * no threshold is written (no goal fit), and the build says what is missing. A base is never guessed or derived.
+ *
+ * The level path's direction checks (`admitStatedGoalLevel`: a level already past the target inverts a `>=` frame) are
+ * LEVEL logic and do not apply: a change carries its own sign, and its comparator is the direction (`goal-direction.ts`).
+ */
+export function admitStatedGoalChange(
+  goal: CandidateModel['goal'],
+  raw: number,
+  /**
+   * ⛔ PR Review CR on #2262 @ 338e4268: today's level is the USER's only if the brief writes it about THIS goal
+   * (`goalLevelTheUserWrote`, injected: stated-by-user.ts imports this module). REQUIRED.
+   */
+  userWroteLevel: (value: number, unit: unknown) => boolean,
+): {
+  readonly node: Partial<AdmittedNode>;
+  readonly withheld?: string;
+} {
+  const frame = goal.frame === 'change_rel' ? 'change_rel' : 'change_abs';
+  const unit = goal.unit ? goal.unit : undefined;
+  const stored = frame === 'change_rel' ? raw / 100 : raw;
+  const node: Partial<AdmittedNode> = { ...(unit ? { goal_threshold_unit: unit } : {}), goal_threshold_frame: frame, goal_threshold_raw: stored };
+  const sign = raw > 0 ? '+' : '';
+  const change = frame === 'change_rel' ? `${sign}${raw}%` : `${sign}${raw}${unit ? ` ${unit}` : ''}`;
+  const today = goal.baseline_value;
+  if (typeof today !== 'number' || !Number.isFinite(today)) {
+    return { node, withheld:
+      `"${goal.metric}" is a goal to change by ${change} from today, and its current level was not stated, so no chance of ` +
+      `reaching it can be shown: a change is measured from today's level of "${goal.metric}".` };
+  }
+  if (goalLevelIsEstimated(goal)) {
+    return { node, withheld:
+      `Olumi's own estimate of the current level of "${goal.metric}" (${today}) was not used, so no chance of a change of ` +
+      `${change} is shown: that figure would rest on a guess, not on anything you said.` };
+  }
+  if (!userWroteLevel(today, goal.unit)) {
+    return { node, withheld:
+      `The current level of "${goal.metric}" (${today}) is not a figure your brief states for it, so no chance of a ` +
+      `change of ${change} is shown: a change is measured from today's level. Tell me the current level of ` +
+      `"${goal.metric}" and the chance of reaching it can be shown.` };
+  }
+  const target = frame === 'change_rel' ? today * (1 + stored) : today + stored;
+  const resolved = today > 0 && target >= 0 ? resolveGoalThresholdCapWithProvenance(undefined, Math.max(today, target), goal.unit, undefined) : null;
+  if (resolved === null) {
+    return { node, withheld:
+      `The current level of "${goal.metric}" (${today}) and a change of ${change} from it do not sit on a scale starting at ` +
+      'zero, so no chance of reaching it can be shown. If either figure is wrong, say which and it can be corrected.' };
+  }
+  return {
+    node: {
+      ...node,
+      goal_threshold_cap: resolved.cap,
+      goal_threshold_cap_provenance: resolved.provenance,
+      goal_threshold: frame === 'change_rel' ? stored : stored / resolved.cap,
+      // Only a level the user stated for this goal reaches here (`goalLevelIsEstimated`, `userWroteLevel` above).
+      observed_state: briefGoalObservedState(today / resolved.cap, goal.unit, today, resolved.cap),
+    },
+  };
+}
+
 /** #1840's goal `observed_state` for a level the brief states: `{ value: B, baseline: B, unit?, source, raw_value, cap }`. */
 function briefGoalObservedState(normalised: number, unit: string | null | undefined, raw: number, cap: number): NonNullable<AdmittedNode['observed_state']> {
   return { value: normalised, baseline: normalised, ...(unit ? { unit } : {}), source: 'brief_extraction', raw_value: raw, cap };
@@ -2554,11 +2631,16 @@ export function admitCandidateModel(
   widened: WidenerAdditions = {},
   /** The user's brief, which the decision node's question must be copied from (`decisionEntityFor`). */
   brief?: string,
+  /**
+   * Whether the brief writes a figure as TODAY'S level of this candidate's goal (`goalLevelTheUserWrote`, injected:
+   * stated-by-user.ts imports this module). Absent ⇒ no level is the user's: a change goal gets no base (fail closed).
+   */
+  goalLevelStated: (value: number, unit: unknown) => boolean = () => false,
 ): AdmittedModel {
   const declared = new Set(candidateModel.options
     .filter((o) => readIsBaseline({ ...(typeof o.is_status_quo === 'boolean' ? { is_baseline: o.is_status_quo } : {}) }) === true)
     .map((o) => canonicalLabel(o.label)));
-  const first = admitOnce(candidateModel, widened, brief);
+  const first = admitOnce(candidateModel, widened, brief, goalLevelStated);
   const verdict = judgeOptionIdentity(first, declared);
   // Never withhold a name another entity shares: removing its links would take that entity's with it.
   const otherNames = new Set([
@@ -2580,6 +2662,7 @@ export function admitCandidateModel(
       ...(widened.proposed_links !== undefined ? { proposed_links: widened.proposed_links.filter((l) => !names(l)) } : {}),
     },
     brief,
+    goalLevelStated,
   );
   const options_withheld: WithheldOption[] = withheld.map((w) => ({
     option: w.option, like: w.like, reason: 'option_indistinct', sentence: indistinctStep(w.option, w.like),
@@ -2604,6 +2687,7 @@ function admitOnce(
   candidateModel: CandidateModel,
   widened: WidenerAdditions,
   brief: string | undefined,
+  goalLevelStated: (value: number, unit: unknown) => boolean,
 ): AdmittedModel {
   const { model, restated: restatedChanges } = restateSignedPercentChanges(candidateModel);
 
@@ -2719,6 +2803,21 @@ function admitOnce(
             ...(model.goal.unit ? { goal_threshold_unit: model.goal.unit } : {}),
             goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
           };
+        }
+        // ⭐ R1 S4-core: a target stated as a CHANGE from today is written as one (`admitStatedGoalChange`); a level
+        // target takes the path below, unchanged.
+        if (model.goal.frame === 'change_abs' || model.goal.frame === 'change_rel') {
+          const change = admitStatedGoalChange(model.goal, raw, goalLevelStated);
+          if (change.withheld !== undefined) {
+            loss.push({
+              field_path: `nodes[${slugId(model.goal.metric)}].observed_state.baseline`,
+              before: model.goal.baseline_value ?? null,
+              after: null,
+              reason: change.withheld,
+              severity: 'warn',
+            } as RepairEntry);
+          }
+          return change.node;
         }
         const resolved = resolveGoalThresholdCapWithProvenance(
           undefined, raw, model.goal.unit, undefined,

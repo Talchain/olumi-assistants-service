@@ -43,6 +43,8 @@
  * pattern `^Set …` cannot fire on it.
  */
 
+import { sayGoalChange } from '../agent-lane/limit-frame.js';
+
 /**
  * Honest fallback shipped instead of a false registration receipt.
  * The example phrasing routes to the sanctioned add_constraint path on the
@@ -72,10 +74,12 @@ export const GOAL_TARGET_NOT_SAVED_TEXT =
 export function formatGoalTargetNotSavedText(persistedGraph: unknown): string {
   const surviving = extractPersistedGoalTarget(persistedGraph);
   if (surviving === null) return GOAL_TARGET_NOT_SAVED_TEXT;
-  const valueText =
-    surviving.unit !== undefined ? `${surviving.value}${surviving.unit}` : `${surviving.value}`;
+  // R1 S4-core: a target stated as a change from today is said as the change ("(down 15% from today)"), never "-0.15%".
+  const change = sayGoalChange(surviving.frame, surviving.value, surviving.unit, (v, u) => (u !== undefined ? `${v}${u}` : `${v}`), surviving.held);
+  const target = change !== undefined ? `target (${change})`
+    : `target of ${surviving.unit !== undefined ? `${surviving.value}${surviving.unit}` : `${surviving.value}`}`;
   return (
-    `I couldn't apply that change — your previous target of ${valueText} is ` +
+    `I couldn't apply that change — your previous ${target} is ` +
     'still registered and the analysis will score against it. Restate the ' +
     'new target in one message, including the value and the goal it ' +
     'applies to — for example: "set a success target of 15%".'
@@ -115,7 +119,7 @@ export function formatGoalTargetNotSavedText(persistedGraph: unknown): string {
  */
 export function extractPersistedGoalTarget(
   graph: unknown,
-): { readonly value: number; readonly unit?: string } | null {
+): { readonly value: number; readonly unit?: string; readonly frame?: string; readonly held?: string } | null {
   if (graph === null || graph === undefined || typeof graph !== 'object') {
     return null;
   }
@@ -134,6 +138,9 @@ export function extractPersistedGoalTarget(
         ...(typeof node.goal_threshold_unit === 'string'
           ? { unit: node.goal_threshold_unit }
           : {}),
+        // R1 S4-core: the frame rides with the figure, so no reader prints a change from today as a level.
+        ...(typeof node.goal_threshold_frame === 'string' ? { frame: node.goal_threshold_frame } : {}),
+        ...(typeof node.goal_direction === 'string' ? { held: node.goal_direction } : {}),
       };
     }
   }

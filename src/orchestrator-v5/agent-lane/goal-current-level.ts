@@ -383,6 +383,16 @@ export async function proposeGoalCurrentLevel(
   const node = goal as typeof goal & { goal_threshold_raw?: unknown; goal_threshold_cap?: unknown; goal_threshold_frame?: unknown; goal_threshold_unit?: unknown };
   const target = node.goal_threshold_raw;
   const cap = node.goal_threshold_cap;
+  // ⛔ R1 S4-core: a target stated as a CHANGE from today ("cut by 15%") HAS a target — the old sentence below said it
+  // had none. Recording its current level here would also need the change's scale written beside it; until that slice,
+  // this says the true reason and prepares nothing. (A brief that states today's level gets its base at construction.)
+  if (node.goal_threshold_frame === 'change_rel' || node.goal_threshold_frame === 'change_abs') {
+    return refuse(
+      'goal_is_a_change',
+      `"${goal.label}" is a goal to change by a stated amount from today, and a current level for a goal stated that way ` +
+      'cannot be recorded here yet. Nothing was prepared. Tell the user plainly; never offer a level target instead.',
+    );
+  }
   if (!num(target) || !num(cap) || cap <= 0 || node.goal_threshold_frame !== 'level') {
     return refuse(
       'no_target',
