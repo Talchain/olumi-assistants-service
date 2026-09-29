@@ -1224,14 +1224,15 @@ export async function buildModelFromBrief(
   }
 
   const faithfulM1 = constructionPolicy === 'm1';
-  // Keep current-best's product admission rule for both arms. M1 inspects its
-  // result before partitioning, then asks the same rule about what remains.
+  // M1 has no source-bound proof that a part and the goal share scope. Numeric
+  // reconciliation alone cannot supply that meaning, so M1 leaves inferred
+  // definitions outside admission. The default keeps current-best's rule.
   const mintOrFold = (c0: CandidateModel): { model: CandidateModel; folded: FoldedCarrier | null; dropped: DroppedGoalProduct[] } => {
+    if (faithfulM1) return { model: c0, folded: null, dropped: [] };
     const { model: c, dropped } = unconfirmGoalProducts(c0, brief);
     const minted = withReconcilingProductIdentity(c, brief);
     return minted !== c ? { model: minted, folded: null, dropped } : { ...foldProductCarrierIntoGoal(c, brief), dropped };
   };
-  // Reuse MG's existing identity proof before deciding which intermediate additions can be left out.
   const firstProof = faithfulM1 ? mintOrFold(candidate) : { model: candidate, folded: null, dropped: [] };
   const firstPartition = faithfulM1 ? partitionM1Candidate(firstProof.model, brief) : null;
   let m1Proposals: readonly M1Proposal[] = firstPartition?.proposals ?? [];
@@ -1651,7 +1652,10 @@ export async function buildModelFromBrief(
   // analysis; asked here, in the channel the Agent already reads, never only in prose. Ahead of the
   // deadline question (merge of staging #1939): both lead the parked questions, so neither is cut by
   // the five-question cap.
-  openQuestions.unshift(...admitted.loss.filter((l) => /\.goal_scope$/.test(l.field_path)).map((l) => l.reason));
+  const scope = candidate.goal.scope;
+  openQuestions.unshift(...(faithfulM1 && scope?.stated_in_brief === false
+    ? [`Does your "${candidate.goal.metric}" goal cover ${scope.modelled} or ${scope.alternative}?`]
+    : admitted.loss.filter((l) => /\.goal_scope$/.test(l.field_path)).map((l) => l.reason)));
 
   const markedNodes = markOlumiOptions(quoteListedOptions(goalNodes, candidate, brief), candidate, brief);
   const optionKeys = faithfulM1 ? admittedOptionKeys(markedNodes, candidate.options) : new Map();

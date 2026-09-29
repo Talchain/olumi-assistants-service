@@ -8,9 +8,12 @@ import type { InternalDispatch } from '../../src/orchestrator-v5/agent-lane/runt
 // @ts-ignore local experiment scorer
 import { scoreRecord } from './score.mjs';
 
-const fixture = JSON.parse(readFileSync(new URL('../../src/orchestrator-v5/agent-lane/__tests__/fixtures/m1-four-captured-candidates-20260929.json', import.meta.url), 'utf8')) as {
-  cases: { id: string; brief: string; candidates: CandidateModel[] }[];
+const fixtureSource = process.argv[3] ?? new URL('../../src/orchestrator-v5/agent-lane/__tests__/fixtures/m1-four-captured-candidates-20260929.json', import.meta.url);
+const saved = JSON.parse(readFileSync(fixtureSource, 'utf8')) as {
+  cases?: { id: string; brief: string; candidates: CandidateModel[] }[];
+  brief?: string; candidate?: CandidateModel;
 };
+const fixture = { cases: saved.cases ?? [{ id: 'paul-mrr', brief: saved.brief!, candidates: [saved.candidate!] }] };
 const out = resolve(process.argv[2] ?? '.artifacts/alternative-constructor/m1-partition-replay.jsonl');
 const records: unknown[] = [];
 for (const policy of ['current', 'm1'] as const) for (const row of fixture.cases) {

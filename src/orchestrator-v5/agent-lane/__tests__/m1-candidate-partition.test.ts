@@ -156,3 +156,47 @@ describe('M1 authority and recovery controls', () => {
     expect(next.proposals.some((p) => p.field_path === 'factors[Monthly churn].baseline_value')).toBe(true);
   });
 });
+
+
+describe('M1 saved live target-scope regression', () => {
+  const live = JSON.parse(readFileSync(new URL('./fixtures/m1-live-paul-inferred-carrier-20260929.json', import.meta.url), 'utf8')) as { brief: string; candidate: CandidateModel };
+
+  it('does not fold an inferred Pro-plan identity onto unresolved all-plan MRR or recreate its default edges', async () => {
+    const { graph, result, call } = await build(live.candidate, live.brief);
+    expect(result.ok).toBe(true);
+    expect(call).toHaveBeenCalledTimes(1);
+    const goal = graph.nodes.find((n: Rec) => n.kind === 'goal');
+    expect(goal.observed_state.raw_value).toBe(75000);
+    expect(goal.nonlinear_identity).toBeUndefined();
+    expect(graph.edges.filter((e: Rec) => e.to === goal.id)).toHaveLength(0);
+    expect(graph.nodes.some((n: Rec) => /Pro plan MRR|Non-Pro MRR/.test(n.description ?? n.label))).toBe(false);
+    const questions = result.open_questions as string[];
+    expect(questions.some((q) => /MRR/.test(q) && /all plans/.test(q) && /Pro plan/.test(q))).toBe(true);
+    expect(questions.join(' ')).not.toMatch(/accounts for your|is worked out as|£1\.5k|so the model measures|treats it as all-plan/i);
+    expect((result.constructor_proposals as Rec[]).some((p) => p.kind === 'definition')).toBe(true);
+  });
+
+  it('keeps an inferred direct goal identity outside M1 even when its scope flag says resolved', async () => {
+    const candidate = structuredClone(live.candidate);
+    candidate.goal.scope = { modelled: 'the Pro plan only', alternative: 'all plans', stated_in_brief: true };
+    candidate.identities = [{ ...candidate.identities![0]!, outcome: candidate.goal.metric }];
+    candidate.links = candidate.identities[0]!.factors.map((from) => ({ from, to: candidate.goal.metric, provenance: 'inferred', direction: 'positive' }));
+    const { graph } = await build(candidate, live.brief);
+    const goal = graph.nodes.find((n: Rec) => n.kind === 'goal');
+    expect(goal.nonlinear_identity).toBeUndefined();
+    expect(graph.edges.filter((e: Rec) => e.to === goal.id)).toHaveLength(0);
+  });
+
+  it('continues to carry an explicit user definition through existing admission', async () => {
+    const candidate = structuredClone(live.candidate);
+    candidate.goal.scope = { modelled: 'the Pro plan only', alternative: 'all plans', stated_in_brief: true };
+    candidate.goal.baseline_value = 73500;
+    candidate.identities = [{ ...candidate.identities![0]!, outcome: candidate.goal.metric, provenance: 'explicit' }];
+    candidate.links = candidate.identities[0]!.factors.map((from) => ({ from, to: candidate.goal.metric, provenance: 'explicit', direction: 'positive' }));
+    const brief = live.brief.replace('£75k MRR', '£73.5k MRR') + ' MRR means Pro-plan MRR only and equals Average realised Pro price multiplied by Pro paying subscribers.';
+    const { graph, result } = await build(candidate, brief);
+    expect(result.ok).toBe(true);
+    const goal = graph.nodes.find((n: Rec) => n.kind === 'goal');
+    expect(goal.nonlinear_identity).toMatchObject({ operation: 'product', stated_in_brief: true });
+  });
+});
