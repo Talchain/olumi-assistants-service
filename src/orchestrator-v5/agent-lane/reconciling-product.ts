@@ -16,6 +16,7 @@
  */
 import type { CandidateModel } from './admit-model.js';
 import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
+import { CURRENCY_SYMBOL_TO_CODE } from '../../cee/extraction/numeric-parser.js';
 import { figureTheUserWrote, levelWrittenApartFromTarget } from './stated-by-user.js';
 
 /** ISL `robustness_analyzer_v2.py` `IDENTITY_RECONCILIATION_TOLERANCE`: the same share, never a looser one. */
@@ -177,7 +178,8 @@ export function withReconcilingProductIdentity(candidate: CandidateModel, brief:
 /** A goal product the draft declared whose units provably don't combine into the goal's: dropped, and said. */
 export interface DroppedGoalProduct { readonly goal: string; readonly factors: readonly string[]; readonly into: string }
 
-const SYMBOL: Readonly<Record<string, string>> = { GBP: '£', USD: '$', EUR: '€' };
+/** The goal currency's own symbol, DERIVED from the one currency vocabulary (never a second list: ROADMAP 2.972's guard). */
+const symbolOf = (code: string): string => Object.entries(CURRENCY_SYMBOL_TO_CODE).find(([, c]) => c === code)?.[0] ?? code;
 type Identity = NonNullable<CandidateModel['identities']>[number];
 
 /**
@@ -203,7 +205,7 @@ function clashInto(candidate: CandidateModel, i: Identity): string | null {
     return m !== null && m.period === null && typeof f.unit === 'string' ? { ...f, unit: `${f.unit} per ${g.period}` } : f;
   };
   if (unitsCompose(goal.unit, goal.metric, atGoalPeriod(a), atGoalPeriod(b)).kind !== 'no') return null;
-  return `${SYMBOL[g.code] ?? g.code} per ${g.period}`;
+  return `${symbolOf(g.code)} per ${g.period}`;
 }
 
 /**
