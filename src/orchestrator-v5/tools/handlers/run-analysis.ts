@@ -1917,7 +1917,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       undefined,
       leaderEstimatedTargetIds,
       // (a) and WHOSE figure an estimate_only row was checked against (DL CR 5859853452), from the same one walk.
-      collectLimitLevelOwners(graphForAnalysis, ratifiedConstraints),
+      // R-c: with the options PLoT scores, so a change limit moved only through unsized parts is withheld.
+      collectLimitLevelOwners(graphForAnalysis, ratifiedConstraints, finalWireOptions),
       strictThresholdPins,
     );
     // ⚠ NO TELEMETRY EVENT FOR THE UNMEASURED-TARGET PARTITION, AND THAT IS A

@@ -12,6 +12,7 @@
  * is left out, never named by guess.
  */
 import { readRatifiedConstraints, type StoredLimitVerdicts } from '../../orchestrator/context/constraint-feasibility.js';
+import { PARTS_IDENTITY_UNMODELLED_REASON, PLACEHOLDER_PARTS_REASON } from '../../orchestrator/context/placeholder-parts.js';
 import { log } from '../../utils/telemetry.js';
 import { limitCheckAsks } from './limited-level-ask.js';
 
@@ -41,12 +42,25 @@ const q = (label: string): string => `‘${label}’`;
  */
 export const OFF_SCALE_LIMIT_REASONS: ReadonlySet<string> = new Set(['threshold_unframed', 'threshold_clamped', 'CONSTRAINT_OUT_OF_DOMAIN']);
 
+/**
+ * R-c (AI Quality 5881541947): a limit withheld because the options move its quantity only through parts the model has
+ * not sized (or combines by an identity the engine does not honour yet). A today-level cannot make it checkable, so it
+ * carries no today-level ask. Nor a link-size ask yet: nothing can write the user's answer as a sized link today, and an
+ * ask the model cannot act on is its own over-claim (AI Quality 5882619314; Runtime's code-read 5882633365).
+ */
+const PARTS_LIMIT_SENTENCES: ReadonlyMap<string, string> = new Map([
+  [PLACEHOLDER_PARTS_REASON, 'Olumi’s links from its parts to it are placeholders, not estimates.'],
+  [PARTS_IDENTITY_UNMODELLED_REASON, 'the model cannot yet combine its parts the way they really combine.'],
+]);
+
 /** One sentence per state (and, for `estimate_only`, per whose figure it was checked against). */
 function sentenceFor(label: string, state: LimitCheck['state'], reason: string | undefined): string {
   if (state === 'scored') return `${q(label)} was checked against the figures in your model.`;
   if (state === 'unscored' && reason !== undefined && OFF_SCALE_LIMIT_REASONS.has(reason)) {
     return `${q(label)} couldn’t be checked: the limit doesn’t sit on the scale the model holds for it.`;
   }
+  const parts = state === 'unscored' && reason !== undefined ? PARTS_LIMIT_SENTENCES.get(reason) : undefined;
+  if (parts !== undefined) return `${q(label)} cannot be checked in this model yet: ${parts}`;
   if (state === 'unscored') return `${q(label)} cannot be checked in this model yet.`;
   if (reason === 'level_user_assumption') return `${q(label)} was checked, against a figure you accepted as an assumption.`;
   // Only how it was checked. What the user can give instead is MG's ask (DL ruling 5865003207: one wording, one producer).
@@ -94,9 +108,10 @@ export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdict
     const limit = limits.find((c) => c.constraint_id === row.constraint_id);
     const label = (limit?.label ?? '').trim() !== '' ? limit!.label!.trim() : nodeLabel(limit?.node_id ?? null);
     if (label === null) continue;
-    // A today-level ask only where a level could make the limit checkable: never on a scored or an off-scale limit.
-    const offScale = row.state === 'unscored' && typeof row.reason === 'string' && OFF_SCALE_LIMIT_REASONS.has(row.reason);
-    const ask = row.state === 'scored' || offScale ? undefined : asks.get(row.constraint_id);
+    // A today-level ask only where a level could make the limit checkable: never on a scored, an off-scale or a parts limit.
+    const levelCannotHelp = row.state === 'unscored' && typeof row.reason === 'string'
+      && (OFF_SCALE_LIMIT_REASONS.has(row.reason) || PARTS_LIMIT_SENTENCES.has(row.reason));
+    const ask = row.state === 'scored' || levelCannotHelp ? undefined : asks.get(row.constraint_id);
     out.push({ constraint_id: row.constraint_id, limit: label, state: row.state, say: sentenceFor(label, row.state, row.reason), ...(ask !== undefined ? { ask } : {}) });
   }
   return out.length > 0 ? out : undefined;
