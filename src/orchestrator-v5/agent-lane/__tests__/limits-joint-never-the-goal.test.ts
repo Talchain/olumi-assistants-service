@@ -81,3 +81,61 @@ describe('served row 3 (joint 0.7591 > P(goal) 0.57): the live result and the ke
     expect(JSON.stringify(keptOf(r))).not.toMatch(/probability_of_joint_goal/);
   });
 });
+
+// PR Review CR @ 0e1fd8c1: every option-result carrier `option-result-source.ts` reads, not only the current one.
+const WITHHOLD = { code: 'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', message: 'Not shown.', node_ids: ['mrr'] };
+// A stale copy with a DISTINCT P(goal) (0.8317), a distinct stale win figure (0.6123) and the raw joint, in each legacy
+// shape. Under the withhold the copy itself must be gone, not only its goal figures: 0.6123 is the discriminator.
+const STALE = [
+  { option_id: 'raise_59', label: 'Raise to £59', win_probability: 0.6123, probability_of_goal: 0.8317, probability_of_joint_goal: 0.7591 },
+  { option_id: 'keep_49', label: 'Keep £49', win_probability: 0.3877, probability_of_goal: 0.1, probability_of_joint_goal: 0.9 },
+];
+const LEGACY_SHAPES: ReadonlyArray<readonly [string, Json]> = [
+  ['results[]', { results: STALE }],
+  ['results.options', { results: { option_comparison: [], options: STALE } }],
+  ['results.option_results', { results: { option_results: STALE } }],
+  ['decision_brief.options', { decision_brief: { headline: 'x', options: STALE } }],
+];
+const bothInputs = async (enrichment: Json): Promise<readonly [Json, Json]> => {
+  const live = await runOf(enrichment);
+  return [live, keptOf(live)];
+};
+
+describe('a withheld run (#416) with an EMPTY current carrier and a stale numeric copy: nothing reaches either Agent input', () => {
+  for (const [shape, legacy] of LEGACY_SHAPES) {
+    it(`${shape}: no withheld P(goal), no raw joint — live and kept`, async () => {
+      const [live, kept] = await bothInputs({ option_comparison: [], inference_warnings: [WITHHOLD], ...legacy });
+      expect(live.claim_permissions.leader_may_be_named, 'precondition: the permitted (kept-in-full) path').toBe(true);
+      for (const [name, input] of [['live', live], ['kept', kept]] as const) {
+        const text = JSON.stringify(input.result);
+        expect(text, name).not.toMatch(/probability_of_goal|probability_of_joint_goal|0\.8317/);
+        expect(text, `${name}: the stale copy itself is removed, not only its goal figures`).not.toMatch(/0\.6123/);
+        expect(text, `${name}: the typed withhold itself survives`).toMatch(/GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED/);
+      }
+    });
+  }
+
+  it('a current row that still carried a P(goal) under the withhold loses it (fail closed); its limits figure is renamed', async () => {
+    const [live, kept] = await bothInputs({ option_comparison: STALE, inference_warnings: [WITHHOLD] });
+    for (const input of [live, kept]) {
+      const rows = input.result.enrichment.option_comparison as Json[];
+      expect(rows[0]).toEqual({ option_id: 'raise_59', label: 'Raise to £59', win_probability: 0.6123, all_limits_hold_probability: 0.7591 });
+    }
+  });
+});
+
+describe('CONTROL — no withhold: every legacy carrier is KEPT, its P(goal) intact and its joint renamed', () => {
+  for (const [shape, legacy] of LEGACY_SHAPES) {
+    it(`${shape}: P(goal) 0.8317 present; the joint only as all_limits_hold_probability`, async () => {
+      const [live, kept] = await bothInputs({ option_comparison: ROW3, ...legacy });
+      for (const input of [live, kept]) {
+        const text = JSON.stringify(input.result);
+        expect(text).toMatch(/"probability_of_goal":0\.8317/);
+        expect(text, 'present control for the removal discriminator').toMatch(/0\.6123/);
+        expect(text).not.toMatch(/probability_of_joint_goal/);
+        expect(text).toMatch(/"all_limits_hold_probability":0\.7591/);
+        expect(input.result.limits_note).toBe(ALL_LIMITS_HOLD_NOTE);
+      }
+    });
+  }
+});
