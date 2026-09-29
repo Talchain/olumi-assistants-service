@@ -112,3 +112,28 @@ describe('propose_starting_point says a level the user gave as theirs — the re
     expect(r.note.startsWith(OLD_NOTE)).toBe(true);
   });
 });
+
+/**
+ * AIQ 5881683705 (R11 × #70): an Olumi value the user CONFIRMED as-is (`source: cee_inference` + `reviewed_by_user`) is
+ * REVIEW, not authorship. It keeps the assumption wording and is never said as "your figure" — authorship is read
+ * only from what the user WROTE (`usersOwn`), never from a review stamp.
+ */
+describe('a confirmed-as-is Olumi value is never said as the user\'s figure (AIQ row)', () => {
+  it('reviewed_by_user on an Olumi value + the user wrote no number → no your_figure, assumption wording kept', async () => {
+    const reviewed = JSON.parse(JSON.stringify(paulGraph)) as { nodes: { id: string; observed_state?: Record<string, unknown> }[] };
+    const churn = reviewed.nodes.find((n) => n.id === 'monthly_churn')!;
+    churn.observed_state = { ...churn.observed_state, source: 'cee_inference', reviewed_by_user: { intent: 'confirm' } };
+    const d: InternalDispatch = async (path) => {
+      if (path.endsWith('/graph')) return { status: 200, json: { graph: reviewed, graph_hash: 'h0' } };
+      throw new Error(`unexpected dispatch ${path}`);
+    };
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(d, store);
+    const r = await caps.proposeAssumptions(ctxSaying('I checked Olumi\'s churn estimate and it looks right, but nudge it up a little.'),
+      { assumptions: [{ ...CHURN, basis: 'Olumi\'s estimate, nudged up as asked' }] }) as R;
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(authorOf(store, r.proposal_id, 'monthly_churn')).toBe('model_proposed');
+    expect(r.assumptions[0]).not.toHaveProperty('your_figure');
+    expect(r.note).toMatch(ASSUMPTION_WORDS);
+  });
+});
