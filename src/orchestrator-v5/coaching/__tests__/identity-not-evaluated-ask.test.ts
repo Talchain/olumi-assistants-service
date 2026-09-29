@@ -85,6 +85,67 @@ describe('the ask, one per typed reason (AIQ 5860888736)', () => {
     expect(a.assistant_text).toBe('I can\'t put “Pro paying subscribers” on the same scale as “MRR”: what unit is it in?');
   });
 
+  // ⛔ R3 (#72 5884883932, DL 5884896233): ISL's rule 1 frames the identity NODE as well as its operands. When every
+  // operand has its unit and the TARGET has none, the ask named the operands again ("what unit is each of them in?")
+  // for units the user already gave (Canvas 5884821547), and never asked about the one missing: the target's.
+  it('RED — identity_frame_missing with every operand in its unit and the TARGET unitless: asks for the target only', () => {
+    const g = clone(F.graph);
+    delete node(g, 'mrr').observed_state;
+    const a = composeIdentityNotEvaluatedAsk(typed({ withheld_reason: 'identity_frame_missing' }), g)!;
+    expect(a).toMatchObject({ reason: 'identity_frame_missing', node_id: 'mrr', chip_label: 'Give its unit' });
+    expect(a.assistant_text).toBe(
+      `I can't work out “MRR” as ${FORMULA} without knowing what “MRR” is measured in: `
+      + 'what unit is it in, and roughly what is it today or what are you aiming for?',
+    );
+    for (const operand of ['Pro plan price', 'Pro paying subscribers', 'Other MRR growth']) {
+      expect(a.chip_message).not.toContain(operand);
+    }
+    expect(a.assistant_text).not.toMatch(NEVER);
+  });
+
+  it('SERVED (Canvas 5885532009, CEE 0ba55d2): the frameless target is an OUTCOME, so the ask names it and asks only for today', () => {
+    const S = JSON.parse(readFileSync(
+      new URL('./fixtures/served-identity-frame-missing-outcome-target-0ba55d2.json', import.meta.url), 'utf8',
+    )) as Rec;
+    // Precondition, read off the served graph: target frameless; both operands in their units; the goal is another node.
+    expect(node(S.graph, 'pro_mrr').kind).toBe('outcome');
+    expect(node(S.graph, 'pro_mrr').observed_state ?? null).toBeNull();
+    expect(node(S.graph, 'pro_mrr').goal_threshold_unit ?? null).toBeNull();
+    expect(node(S.graph, 'pro_price').observed_state.unit).toBe('£ per subscriber per month');
+    expect(node(S.graph, 'paying_pro_subscribers').observed_state.unit).toBe('subscribers');
+    const critiques = [{
+      code: 'IDENTITY_NOT_EVALUATED',
+      affected_node_ids: ['pro_mrr', 'pro_price', 'paying_pro_subscribers'],
+      identity: { node_id: 'pro_mrr', operation: 'product', participants: ['pro_price', 'paying_pro_subscribers'], withheld_reason: 'identity_frame_missing' },
+    }];
+    const a = composeIdentityNotEvaluatedAsk(critiques, S.graph)!;
+    // An outcome has no target of its own: "what are you aiming for?" would ask for a figure nothing can hold (AIQ 5885470243).
+    expect(a.assistant_text).toBe(
+      'I can\'t work out “Pro MRR” as “Pro price” × “Paying Pro subscribers” without knowing what “Pro MRR” is measured in: '
+      + 'what unit is it in, and roughly what is it today?',
+    );
+    expect(a.chip_message).toBe('Ask me which unit “Pro MRR” is in.');
+  });
+
+  it('CONTROL: a goal whose unit is on its threshold (goal_threshold_unit) is framed, so the operand fallback stands', () => {
+    const g = clone(F.graph);
+    delete node(g, 'mrr').observed_state;
+    node(g, 'mrr').goal_threshold_unit = '£ per month';
+    const a = composeIdentityNotEvaluatedAsk(typed({ withheld_reason: 'identity_frame_missing' }), g)!;
+    expect(a.assistant_text).toBe(
+      'I can\'t put “Pro plan price”, “Pro paying subscribers” and “Other MRR growth” on the same scale as “MRR”: '
+      + 'what unit is each of them in?',
+    );
+  });
+
+  it('CONTROL: an operand with no unit is still the one named, even when the target has none too', () => {
+    const g = clone(F.graph);
+    delete node(g, 'mrr').observed_state;
+    delete node(g, 'pro_paying_subscribers').observed_state.unit;
+    const a = composeIdentityNotEvaluatedAsk(typed({ withheld_reason: 'identity_frame_missing' }), g)!;
+    expect(a.assistant_text).toBe('I can\'t put “Pro paying subscribers” on the same scale as “MRR”: what unit is it in?');
+  });
+
   it('every reason: never "failed", never a raw code', () => {
     for (const reason of ['identity_inconsistent', 'identity_operand_missing', 'identity_zero_level', 'identity_frame_missing']) {
       const g = clone(F.graph);
@@ -132,6 +193,12 @@ describe('sayFigure — the input class, not the served example (≥10 unit shap
     [3, '% per month', 'Monthly churn', '3% per month'],
     [12.5, '', 'Score', '12.5'],
     [0.333333, 'ratio', 'Share', '0.33 ratio'],
+    // AIQ 5887805333: the per-item price unit (#2291) and the slash forms read as money, never "49 GBP/subscriber/month".
+    [49, 'GBP/subscriber/month', 'Pro plan price', '£49 / subscriber / month'],
+    [49, '£/subscriber/month', 'Pro plan price', '£49 / subscriber / month'],
+    [49, 'GBP per subscriber per month', 'Pro plan price', '£49 per subscriber per month'],
+    [75000, 'GBP/month', 'MRR', '£75,000 / month'],
+    [73500.4, 'GBP/month', 'MRR', '£73,500 / month'],
   ])('%s %s → %s', (v, unit, label, said) => {
     expect(sayFigure(v, unit, label)).toBe(said);
   });
