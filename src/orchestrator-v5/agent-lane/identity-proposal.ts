@@ -20,8 +20,9 @@
  *  · the units compose as a money rate × a count into the goal's money per period (`unitsCompose`, one source with the
  *    mint), with or without the per-item denominator: the drafter's typed unit licenses nothing (AIQ 5891286280).
  */
-import { RECONCILIATION_TOLERANCE, unitsCompose } from './reconciling-product.js';
+import { RECONCILIATION_TOLERANCE, readMoneyTotal, unitsCompose } from './reconciling-product.js';
 import { sayFigure } from './say-figure.js';
+import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 
 export interface IdentityProposal {
@@ -53,6 +54,24 @@ function usersLevel(node: Rec): { value: number; unit: string } | null {
   return { value, unit };
 }
 
+/**
+ * Another goal parent as the carrier card reads it: its UNIT first, then its figure (AIQ 5894530998 condition 1: a
+ * figure-less "£/year" parent must refuse the card as a figured one does). `money`: the unit is money (any currency,
+ * scale or period). `inGoalTerms`: a money TOTAL in the GOAL'S OWN currency AND period (`readMoneyTotal`). `figure`: the
+ * stored level, or null when there is none. `users`: the figure is the user's own.
+ * ⛔ PR Review 5894085840 / AIQ 5894306110 (B): "£1,500 per year" beside a monthly MRR is the same £ and a different
+ * quantity. Money NOT in the goal's terms refuses the card (`proposeOnCarrier`), with a figure or without one.
+ */
+function otherParent(node: Rec | undefined, goal: { code: string; period: 'month' | 'year' } | null): { figure: number | null; money: boolean; inGoalTerms: boolean; users: boolean } {
+  const os = isRec(node?.observed_state) ? node!.observed_state as Rec : undefined;
+  const unit = text(os?.unit);
+  const money = unit !== undefined && readCurrencyUnitWithQualifiers(unit).kind === 'currency';
+  const m = money && goal !== null ? readMoneyTotal(unit, text(node?.label) ?? '') : null;
+  const inGoalTerms = m !== null && m.code === goal!.code && m.period === goal!.period;
+  const figure = typeof os?.raw_value === 'number' && Number.isFinite(os.raw_value) ? os.raw_value : null;
+  return { figure, money, inGoalTerms, users: figure !== null && classifyValueSource(os?.source) === 'user_stated' };
+}
+
 const carriesIdentity = (node: Rec): boolean => node.nonlinear_identity !== undefined && node.nonlinear_identity !== null;
 
 /** Olumi's own product reading on the goal, awaiting the user's Yes (`stated_in_brief: false`): its factor ids, else null. */
@@ -63,6 +82,14 @@ function unconfirmedProduct(node: Rec): readonly string[] | null {
 }
 
 export function proposeProductIdentity(graph: unknown): IdentityProposal | null {
+  return proposeOnGoal(graph) ?? proposeOnCarrier(graph);
+}
+
+type Rec2 = Rec;
+interface Level { readonly id: string; readonly label: string; readonly value: number; readonly unit: string }
+
+/** The goal's level and its non-option parents, or null when there is not exactly one goal with the user's level. */
+function goalAndParents(graph: unknown): { goal: Rec2; goalId: string; goalLabel: string; o: { value: number; unit: string }; byId: Map<string, Rec2>; parentIds: string[]; edges: Rec2[] } | null {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
   const goals = nodes.filter((n) => n.kind === 'goal');
@@ -71,39 +98,129 @@ export function proposeProductIdentity(graph: unknown): IdentityProposal | null 
   const goalId = text(goal.id);
   const goalLabel = text(goal.label);
   const o = usersLevel(goal);
-  const reading = unconfirmedProduct(goal);
-  if (goalId === undefined || goalLabel === undefined || o === null || (carriesIdentity(goal) && reading === null)) return null;
-
+  if (goalId === undefined || goalLabel === undefined || o === null) return null;
   const byId = new Map(nodes.flatMap((n) => (typeof n.id === 'string' ? [[n.id, n] as const] : [])));
   const parentIds = [...new Set(edges.filter((e) => e.to === goalId && typeof e.from === 'string').map((e) => e.from as string))]
     .filter((id) => { const k = byId.get(id)?.kind; return k !== 'option' && k !== 'decision'; });
-  if (parentIds.length !== 2) return null;
-  // Olumi's reading must be over exactly these two parents: any other product is not this card's to confirm.
-  if (reading !== null && (reading.length !== 2 || !reading.every((f) => parentIds.includes(f)))) return null;
-  const parts = parentIds.map((id) => {
+  return { goal, goalId, goalLabel, o, byId, parentIds, edges };
+}
+
+/** The user's two stated factors among `ids` (each a factor with the user's level and no identity of its own), or null. */
+function usersFactors(ids: readonly string[], byId: Map<string, Rec2>): [Level, Level] | null {
+  if (ids.length !== 2) return null;
+  const parts = ids.map((id) => {
     const n = byId.get(id);
     const level = n !== undefined ? usersLevel(n) : null;
-    return n !== undefined && n.kind === 'factor' && !carriesIdentity(n) && level !== null
-      ? { id, label: text(n.label) ?? id, ...level }
-      : null;
+    return n !== undefined && n.kind === 'factor' && !carriesIdentity(n) && level !== null ? { id, label: text(n.label) ?? id, ...level } : null;
   });
-  if (parts[0] == null || parts[1] == null) return null;
-  const [p, q] = [parts[0], parts[1]];
-  if (Math.abs(o.value - p.value * q.value) > RECONCILIATION_TOLERANCE * Math.abs(o.value)) return null;
+  return parts[0] != null && parts[1] != null ? [parts[0], parts[1]] : null;
+}
 
+/** The card's reading of `p` × `q` as the goal's money per period, or null when the parts do not reconcile or compose. */
+function reading(goal: Rec2, goalLabel: string, o: { value: number; unit: string }, p: Level, q: Level) {
+  if (Math.abs(o.value - p.value * q.value) > RECONCILIATION_TOLERANCE * Math.abs(o.value)) return null;
   const goalUnit = text(goal.goal_threshold_unit) ?? o.unit;
   const c = unitsCompose(goalUnit, goalLabel, { unit: p.unit, label: p.id }, { unit: q.unit, label: q.id });
   // FORK (iii): composing units make the card, with or without the denominator; nothing is silent.
   if (c.kind === 'no') return null;
-  const rate = c.rate === p.id ? p : q;
-  const count = c.rate === p.id ? q : p;
-  const money = (v: number): string => sayFigure(v, c.code);
-  const words = `Is “${goalLabel}” your “${rate.label}” × “${count.label}”? `
-    + `${money(rate.value)} × ${sayFigure(count.value, '')} = ${money(rate.value * count.value)}, close to your ${money(o.value)}. `
+  return { rate: c.rate === p.id ? p : q, count: c.rate === p.id ? q : p, code: c.code };
+}
+
+/** The goal itself: its own two user-stated parents, bare or carrying only Olumi's reading over exactly them. */
+function proposeOnGoal(graph: unknown): IdentityProposal | null {
+  const g = goalAndParents(graph);
+  if (g === null) return null;
+  const { goal, goalId, goalLabel, o, byId, parentIds } = g;
+  const own = unconfirmedProduct(goal);
+  if (carriesIdentity(goal) && own === null) return null;
+  if (parentIds.length !== 2) return null;
+  // Olumi's reading must be over exactly these two parents: any other product is not this card's to confirm.
+  if (own !== null && (own.length !== 2 || !own.every((f) => parentIds.includes(f)))) return null;
+  const parts = usersFactors(parentIds, byId);
+  if (parts === null) return null;
+  const r = reading(goal, goalLabel, o, parts[0], parts[1]);
+  if (r === null) return null;
+  const money = (v: number): string => sayFigure(v, r.code);
+  const words = `Is “${goalLabel}” your “${r.rate.label}” × “${r.count.label}”? `
+    + `${money(r.rate.value)} × ${sayFigure(r.count.value, '')} = ${money(r.rate.value * r.count.value)}, close to your ${money(o.value)}. `
     // AIQ 5888571809: the card says what "Yes" does. It does NOT run anything: an approval runs nothing (Paul's ruling,
     // #63 5812069638; enforced server-side), so the Run stays the user's own press (Runtime 5888628288 option (b)).
     + `If yes, Olumi will calculate “${goalLabel}” that way, and you can run the analysis again.`;
   // Canonical #2292's door takes at most 400 characters of card words (5888513620): a card it would refuse is not issued.
   if (words.length > CARD_WORDS_MAX) return null;
-  return { outcome_id: goalId, operation: 'product', factor_ids: [rate.id, count.id], words };
+  return { outcome_id: goalId, operation: 'product', factor_ids: [r.rate.id, r.count.id], words };
+}
+
+/**
+ * ⛔ AIQ 5892754930 (3): a Yes makes the goal this carrier PLUS the goal's other parents, so the card names the first of
+ * them (and how many more) and whose figure it is, from the graph. "That gives your £75,000" only where the figures add
+ * up to the goal within ISL's 5%; otherwise the card says the goal also adds them, and claims no sum.
+ * ⛔ PR Review 5894085840: a figure is said, and summed, only as money in the goal's own currency AND period. Money in
+ * any other terms never reaches here (the card is refused, AIQ 5894306110 (B)); a non-money parent (a count, a %, no
+ * unit) is named by whose it is alone, as something the goal depends on, and no sum is claimed.
+ */
+function besideTheCarrier(others: readonly string[], byId: Map<string, Rec>, goalMoney: { code: string; period: 'month' | 'year' } | null, code: string, product: number, goal: number, goalLabel: string): string {
+  const money = (v: number): string => sayFigure(v, code);
+  const first = others[0];
+  if (first === undefined) return `, close to your ${money(goal)} “${goalLabel}”.`;
+  const parents = others.map((id) => otherParent(byId.get(id), goalMoney));
+  const l = parents[0]!;
+  const who = l.figure === null ? 'no figure yet' : l.users ? 'your figure' : 'Olumi\'s estimate';
+  const whose = l.figure !== null && l.inGoalTerms ? `${who}, ${money(l.figure)}` : who;
+  const named = `“${text(byId.get(first)?.label) ?? first}” (${whose})${others.length > 1 ? ` (and ${others.length - 1} more)` : ''}`;
+  const sum = parents.every((x) => x.inGoalTerms && x.figure !== null) ? product + parents.reduce((t, x) => t + x.figure!, 0) : null;
+  // ⛔ AIQ 5894530998 condition 2: only money in the goal's own terms is ADDED to it; anything else (a count, a %, a
+  // node with no unit) is something the goal DEPENDS ON — a count is never said to be added to money.
+  return sum !== null && Math.abs(sum - goal) <= RECONCILIATION_TOLERANCE * Math.abs(goal)
+    ? `; with ${named} that gives your ${money(goal)} “${goalLabel}”.`
+    : `, close to your ${money(goal)} “${goalLabel}”, which also ${l.inGoalTerms ? 'adds' : 'depends on'} ${named}.`;
+}
+
+/**
+ * ⛔ AN ANSWERABLE WITHHOLD FOR A CARRIER BESIDE ANOTHER GOAL PARENT (DL owner call 5892120941; AIQ 5892069497's
+ * measured dead end, 1/19 served Paul-brief goals: `pro_plan_mrr` = £49 × 1,500 beside a second parent of MRR).
+ *
+ * PLoT #420 (d) withholds the goal's chance when a goal parent carries Olumi's product in the card domain, but the goal
+ * card above needs the goal's OWN two parents, so the user saw "…hasn't been confirmed…" with nothing to press. This
+ * offers the same reading on that carrier: Olumi's stored product (`stated_in_brief: false`) over the carrier's own two
+ * parents, both the user's stated factors, their product within ISL's 5% of the GOAL's stated level, the units composing
+ * into the goal's money per period. Exactly ONE such carrier, or no card (two would be a guess). Nothing is folded and no
+ * other parent is dropped: the Yes (Canonical's door) sets only the carrier's `stated_in_brief`. The goal card wins when
+ * both could apply.
+ */
+function proposeOnCarrier(graph: unknown): IdentityProposal | null {
+  const g = goalAndParents(graph);
+  if (g === null || carriesIdentity(g.goal)) return null;
+  const { goal, goalLabel, o, byId, parentIds, edges } = g;
+  // The goal's own money per period, read as `reading` reads it: the terms another parent's figure must be in to be added.
+  const goalMoney = readMoneyTotal(text(goal.goal_threshold_unit) ?? o.unit, goalLabel);
+  const found: IdentityProposal[] = [];
+  for (const id of parentIds) {
+    const carrier = byId.get(id);
+    // Any node kind PLoT #420's `goalCarrierIds` reads (served run 2's carrier is a FACTOR holding Olumi's £73,500).
+    if (carrier === undefined) continue;
+    const product = unconfirmedProduct(carrier);
+    if (product === null || product.length !== 2) continue;
+    const carrierParents = [...new Set(edges.filter((e) => e.to === id && typeof e.from === 'string').map((e) => e.from as string))]
+      .filter((pid) => { const k = byId.get(pid)?.kind; return k !== 'option' && k !== 'decision'; });
+    if (carrierParents.length !== 2 || !product.every((f) => carrierParents.includes(f))) continue;
+    const parts = usersFactors(carrierParents, byId);
+    if (parts === null) continue;
+    const r = reading(goal, goalLabel, o, parts[0], parts[1]);
+    if (r === null) continue;
+    // ⛔ AIQ 5894306110 (B): REFUSE, not reword. A Yes makes the goal this carrier plus its other parents; money in another
+    // period, an unreadable period, a per-item price, a scale or another currency would make that sum dimensionally
+    // wrong, so the card would endorse a wrong structure. The carrier stays withheld (PLoT #420's no-card words).
+    const others = parentIds.filter((p) => p !== id);
+    if (others.some((pid) => { const p = otherParent(byId.get(pid), goalMoney); return p.money && !p.inGoalTerms; })) continue;
+    const carrierLabel = text(carrier.label) ?? id;
+    const money = (v: number): string => sayFigure(v, r.code);
+    const made = r.rate.value * r.count.value;
+    const words = `Is “${carrierLabel}” your “${r.rate.label}” × “${r.count.label}”? `
+      + `${money(r.rate.value)} × ${sayFigure(r.count.value, '')} = ${money(made)}${besideTheCarrier(others, byId, goalMoney, r.code, made, o.value, goalLabel)} `
+      + `If yes, Olumi will calculate “${carrierLabel}” that way, and you can run the analysis again.`;
+    if (words.length > CARD_WORDS_MAX) continue;
+    found.push({ outcome_id: id, operation: 'product', factor_ids: [r.rate.id, r.count.id], words });
+  }
+  return found.length === 1 ? found[0]! : null;
 }

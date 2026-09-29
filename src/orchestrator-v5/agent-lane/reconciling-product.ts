@@ -89,6 +89,16 @@ function readMoney(unit: unknown, label: string): { code: string; period: Period
   return { code: r.currencyCode, period, per: denominators.length === 1 ? denominators[0]!.map(singular) : null };
 }
 
+/**
+ * A stored money TOTAL in terms a goal's figure can be added to (PR Review 5894085840 on #2305): ONE unscaled currency,
+ * no per-item denominator, and a period — the unit's own, else the node's name's ("Other-plan MRR"). Null when any part
+ * is unreadable: "£1,500 per year" is never added into a monthly MRR.
+ */
+export function readMoneyTotal(unit: unknown, label: string): { code: string; period: 'month' | 'year' } | null {
+  const m = readMoney(unit, label);
+  return m === null || m.mixed === true || m.per !== null || m.period === null ? null : { code: m.code, period: m.period };
+}
+
 /** A COUNT: words only ("subscribers", "paying customers") — no currency, no %, no period, no "per" (a rate). */
 function readCount(unit: unknown): string[] | null {
   if (typeof unit !== 'string' || !/^[a-z][a-z\s-]*$/i.test(unit.trim())) return null;

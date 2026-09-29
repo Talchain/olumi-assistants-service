@@ -47,11 +47,15 @@ describe('the card on the served graphs', () => {
   it('FORK (iii) (R3 5891486222): served run 1 (Olumi\'s own product on the goal, the "99.8%" reply) → the card, over exactly its two parents', () => {
     expect(proposeProductIdentity(served(1))?.factor_ids).toStrictEqual(['pro_plan_price', 'paying_subscribers']);
   });
-  it('NO CARD: the user\'s own product (stated_in_brief: true, e.g. after the card\'s Yes) and run 2 (one intermediate parent)', () => {
+  it('NO CARD: the user\'s own product (stated_in_brief: true, e.g. after the card\'s Yes)', () => {
     const g = served(1);
     node(g, 'mrr').nonlinear_identity.stated_in_brief = true;
     expect(proposeProductIdentity(g)).toBeNull();
-    expect(proposeProductIdentity(served(2))).toBeNull();
+  });
+  // DL 5892120941: run 2's goal has one intermediate parent, a FACTOR carrying Olumi's product, which PLoT #420 (d)
+  // withholds. The goal card cannot apply (not the goal's own two parents); the card on the carrier does.
+  it('run 2 (one intermediate parent, a factor holding Olumi\'s product) → the card on the CARRIER, not the goal', () => {
+    expect(proposeProductIdentity(served(2))).toMatchObject({ outcome_id: 'pro_plan_mrr', operation: 'product', factor_ids: ['pro_plan_price', 'pro_paying_subscribers'] });
   });
   it('NO CARD: Olumi\'s product over OTHER factors than the goal\'s two parents is not this card\'s to confirm', () => {
     const g = served(1);
@@ -102,5 +106,106 @@ describe('NO CARD — one change on run 0\'s served graph each', () => {
     ['card words past the #2292 door\'s 400 characters (a 400-character label)', (g: Json) => { node(g, 'pro_plan_price').label = 'P'.repeat(400); }],
   ] as const)('%s', (_why, f) => {
     expect(proposeProductIdentity(edit(f))).toBeNull();
+  });
+});
+
+// ⛔ DL owner call 5892120941 (AIQ 5892069497's dead end, 1/19 served Paul-brief goals): Olumi's product on a CARRIER beside
+// another goal parent was withheld by PLoT #420 (d) with nothing to press. The card offers the same reading on the carrier.
+// Fixture: that registered graph, served on CEE `ed49d44` (AIQ pb5 run 4): `pro_plan_mrr` = price × subscribers beside
+// Olumi's `other_plan_mrr` (£1,500), goal MRR £75,000. Each negative control changes exactly one thing on it.
+const BESIDE = JSON.parse(readFileSync(new URL('./fixtures/served-paul-mrr-carrier-beside-residual-ed49d44.json', import.meta.url), 'utf8')) as { graph: Json };
+const beside = (): Json => structuredClone(BESIDE.graph);
+
+describe('a card-domain carrier BESIDE another goal parent (the 1/19 served dead end)', () => {
+  it('PRECONDITION: MRR has no identity; its parents are the carrier and Olumi\'s £1,500; the carrier holds Olumi\'s price × subscribers', () => {
+    const g = beside();
+    expect(node(g, 'mrr').nonlinear_identity).toBeUndefined();
+    expect(g.edges.filter((e: Json) => e.to === 'mrr').map((e: Json) => e.from).sort()).toStrictEqual(['other_plan_mrr', 'pro_plan_mrr']);
+    expect(node(g, 'pro_plan_mrr').nonlinear_identity).toStrictEqual({ operation: 'product', factor_ids: ['pro_plan_price', 'paying_subscribers'], stated_in_brief: false });
+    expect([node(g, 'other_plan_mrr').observed_state.raw_value, node(g, 'other_plan_mrr').observed_state.source]).toStrictEqual([1500, 'cee_inference']);
+  });
+  it('RED: the card on the CARRIER, its own two factors, the user\'s arithmetic against the goal\'s £75,000', () => {
+    const g = beside();
+    const label = (id: string): string => node(g, id).label;
+    expect(proposeProductIdentity(g)).toStrictEqual({
+      outcome_id: 'pro_plan_mrr',
+      operation: 'product',
+      factor_ids: ['pro_plan_price', 'paying_subscribers'],
+      // AIQ 5892754930 (3): the Yes makes MRR the carrier PLUS its other parent, so the card names it and whose figure it is.
+      words: `Is “${label('pro_plan_mrr')}” your “${label('pro_plan_price')}” × “${label('paying_subscribers')}”? £49 × 1,500 = £73,500; with “${label('other_plan_mrr')}” (Olumi's estimate, £1,500) that gives your £75,000 “${label('mrr')}”. If yes, Olumi will calculate “${label('pro_plan_mrr')}” that way, and you can run the analysis again.`,
+    });
+    expect(proposeProductIdentity(g)!.words.length).toBeLessThanOrEqual(CARD_WORDS_MAX);
+  });
+  // AIQ 5892754930 (3): whose figure the other parent is; "that gives" only when the figures add up to the goal (5%).
+  it.each<[string, (g: Json) => void, string]>([
+    ['the other parent is the user\'s figure', (g) => { node(g, 'other_plan_mrr').observed_state.source = 'brief_extraction'; }, '; with “Other-plan MRR” (your figure, £1,500) that gives your £75,000 “MRR”.'],
+    // AIQ 5894530998 condition 2: with no unit nothing says it is money in the goal's terms, so the goal DEPENDS ON it.
+    ['the other parent has no figure (and so no unit)', (g) => { delete node(g, 'other_plan_mrr').observed_state; }, ', close to your £75,000 “MRR”, which also depends on “Other-plan MRR” (no figure yet).'],
+    ['the other parent has no figure yet, in the goal\'s own terms (£/month)', (g) => { node(g, 'other_plan_mrr').observed_state = { unit: '£/month' }; }, ', close to your £75,000 “MRR”, which also adds “Other-plan MRR” (no figure yet).'],
+    ['the figures do not add up to the goal (£10,000 beside £73,500)', (g) => { node(g, 'other_plan_mrr').observed_state.raw_value = 10000; }, ', close to your £75,000 “MRR”, which also adds “Other-plan MRR” (Olumi\'s estimate, £10,000).'],
+    ['two other parents', (g) => { g.edges.push({ ...g.edges.find((e: Json) => e.from === 'other_plan_mrr' && e.to === 'mrr'), id: 'churn_to_mrr', from: 'monthly_churn_rate' }); }, ', close to your £75,000 “MRR”, which also adds “Other-plan MRR” (Olumi\'s estimate, £1,500) (and 1 more).'],
+  ])('WORDS: %s', (_why, change, clause) => {
+    const g = beside();
+    change(g);
+    expect(node(g, 'other_plan_mrr').label).toBe('Other-plan MRR');
+    expect(proposeProductIdentity(g)?.words).toContain(`£49 × 1,500 = £73,500${clause} If yes,`);
+  });
+  // ⛔ PR Review 5894085840 + AIQ 5894306110 (B): money in the goal's own currency AND period, or NO CARD. Each row
+  // changes ONE field of the other parent on the served graph. A Yes would make MRR a period-mismatched sum, so the card is
+  // refused (not reworded): the carrier stays withheld with PLoT #420's no-card words.
+  it.each<[string, (n: Json) => void]>([
+    ['RED (PR Review\'s row): £1,500 per YEAR beside a monthly MRR', (n) => { n.observed_state.unit = '£/year'; }],
+    ['the same, spelled "GBP per annum"', (n) => { n.observed_state.unit = 'GBP per annum'; }],
+    ['an unreadable period: a period-less £ on a node whose name carries none ("Other-plan revenue")', (n) => { n.label = 'Other-plan revenue'; n.observed_state.unit = '£'; }],
+    ['a per-item price ("£ per seat per month"), not a total', (n) => { n.observed_state.unit = '£ per seat per month'; }],
+    ['a scaled figure ("£k/month")', (n) => { n.observed_state.unit = '£k/month'; n.observed_state.raw_value = 1.5; }],
+    ['another currency ("$/month")', (n) => { n.observed_state.unit = '$/month'; }],
+  ])('NO CARD: other-parent money not in the goal\'s terms — %s', (_why, change) => {
+    const g = beside();
+    change(node(g, 'other_plan_mrr'));
+    expect(proposeProductIdentity(g)).toBeNull();
+  });
+  // AIQ 5894530998 condition 2: a count is never said to be ADDED to money; the goal DEPENDS ON it.
+  it('a NON-money figure beside the carrier (a count) is named by whose it is, as something MRR depends on; neither said nor summed', () => {
+    const g = beside();
+    node(g, 'other_plan_mrr').observed_state.unit = 'subscribers';
+    const words = proposeProductIdentity(g)?.words ?? '';
+    expect(words).toContain('£49 × 1,500 = £73,500, close to your £75,000 “MRR”, which also depends on “Other-plan MRR” (Olumi\'s estimate). If yes,');
+    expect(words).not.toMatch(/\badds\b/);
+  });
+  // AIQ 5894530998 condition 1: the UNIT is read before the figure, so a figure-less parent in another period refuses too.
+  it('NO CARD: a FIGURE-LESS other parent whose money is in another period (£/year, no raw_value)', () => {
+    const g = beside();
+    node(g, 'other_plan_mrr').observed_state = { unit: '£/year' };
+    expect(proposeProductIdentity(g)).toBeNull();
+  });
+  it.each<[string, string]>([
+    ['"GBP per month"', 'GBP per month'],
+    ['a period-less £ on a node NAMED for its period ("Other-plan MRR")', '£'],
+  ])('CONTROL — the same period, so the sum is said: %s', (_why, unit) => {
+    const g = beside();
+    node(g, 'other_plan_mrr').observed_state.unit = unit;
+    expect(proposeProductIdentity(g)?.words).toContain('£49 × 1,500 = £73,500; with “Other-plan MRR” (Olumi\'s estimate, £1,500) that gives your £75,000 “MRR”. If yes,');
+  });
+  it('the card is not a write: the graph is byte-identical after it', () => {
+    const g = beside();
+    const before = JSON.stringify(g);
+    proposeProductIdentity(g);
+    expect(JSON.stringify(g)).toBe(before);
+  });
+  it.each<[string, (g: Json) => void]>([
+    ['the carrier\'s product is the user\'s (after the Yes)', (g) => { node(g, 'pro_plan_mrr').nonlinear_identity.stated_in_brief = true; }],
+    ['a subscriber count Olumi estimated', (g) => { node(g, 'paying_subscribers').observed_state.source = 'cee_inference'; }],
+    ['the product 18% off the goal (£90,000 against 49 × 1,500 = £73,500)', (g) => { node(g, 'mrr').observed_state.raw_value = 90000; }],
+    ['a third parent into the carrier', (g) => { g.edges.push({ ...g.edges.find((e: Json) => e.to === 'pro_plan_mrr'), from: 'monthly_churn_rate' }); }],
+    ['a SECOND qualifying carrier (two would be a guess)', (g) => {
+      g.nodes.push({ ...structuredClone(node(g, 'pro_plan_mrr')), id: 'pro_plan_mrr_2', label: 'Pro plan MRR (copy)' });
+      g.edges.push(...g.edges.filter((e: Json) => e.to === 'pro_plan_mrr' || e.from === 'pro_plan_mrr').map((e: Json) => ({ ...e, id: `${e.id}_2`, from: e.from === 'pro_plan_mrr' ? 'pro_plan_mrr_2' : e.from, to: e.to === 'pro_plan_mrr' ? 'pro_plan_mrr_2' : e.to })));
+    }],
+    ['units that do not compose (the count typed as £)', (g) => { node(g, 'paying_subscribers').observed_state.unit = '£/month'; }],
+  ])('NO CARD: %s', (_why, change) => {
+    const g = beside();
+    change(g);
+    expect(proposeProductIdentity(g)).toBeNull();
   });
 });
