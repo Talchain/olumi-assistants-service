@@ -272,7 +272,7 @@ const REQUEST_ID = 'req-level-limit-baseline-wire';
  * points", as the sizer says a percentage level on 100), so
  * R-c's parts predicate lets the level carry. Unsized (a bare placeholder), churn carries nothing (AI Quality 5882087383).
  */
-function persistedGraph(churnRaw: number, sized = true) {
+function persistedGraph(churnRaw: number, sized: boolean | 'user' = true) {
   return GraphV3.parse({
     nodes: [
       { id: 'goal_mrr', kind: 'goal', label: 'MRR' },
@@ -288,7 +288,10 @@ function persistedGraph(churnRaw: number, sized = true) {
       { from: 'fac_price', to: 'goal_mrr', strength: { mean: 0.6, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
       {
         from: 'fac_price', to: 'fac_churn', strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive',
-        ...(sized ? { provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: { amount: 1, amount_unit: 'percentage points', per_source_change: 10, per_source_change_unit: 'GBP per month', strength_mean: 0.3, strength_mean_frame: 'edge_strength' } } } : {}),
+        ...(sized === 'user'
+          // Paul's "price sensitivity is very high" as served (lock rep1 A, 5900778834): the user's strength, no natural size.
+          ? { provenance: { source: 'user_specified' } }
+          : sized ? { provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: { amount: 1, amount_unit: 'percentage points', per_source_change: 10, per_source_change_unit: 'GBP per month', strength_mean: 0.3, strength_mean_frame: 'edge_strength' } } } : {}),
       },
       { from: 'fac_churn', to: 'goal_mrr', strength: { mean: -0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'negative' },
     ],
@@ -317,7 +320,7 @@ function makeInvocation(): HandlerInvocation {
   } as HandlerInvocation;
 }
 
-async function payloadFor(churnRaw: number, limit: Record<string, unknown>, sized = true) {
+async function payloadFor(churnRaw: number, limit: Record<string, unknown>, sized: boolean | 'user' = true) {
   const graph = persistedGraph(churnRaw, sized);
   const before = JSON.stringify(graph);
   const snapshot: RunAnalysisScenarioSnapshot = {
@@ -364,6 +367,11 @@ describe('WIRE: run_analysis sends the level the model holds NOW', () => {
   it('R-c at the wire: the same limit with the price → churn link UNSIZED reaches PLoT with no baseline', async () => {
     const os = await payloadFor(7, { value: 10, unit: '%', value_frame: 'level' }, false);
     expect(os.baseline).toBeUndefined();
+  });
+
+  it('⭐ A PJ-A3 at the wire: the same link with the USER\'s own strength (`user_specified`, no natural size) carries the baseline', async () => {
+    const os = await payloadFor(7, { value: 10, unit: '%', value_frame: 'level' }, 'user');
+    expect(os.baseline).toBeCloseTo(0.07, 12);
   });
 
   it('CONTROL at the wire: an unframed limit reaches PLoT with no baseline', async () => {

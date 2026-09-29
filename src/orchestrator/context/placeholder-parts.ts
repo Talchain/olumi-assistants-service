@@ -58,6 +58,18 @@ function linkIsSized(edge: Rec, unitById: ReadonlyMap<unknown, string | undefine
 }
 
 /**
+ * ⛔ A STRENGTH THE USER STATED IS THEIRS, NOT A PLACEHOLDER (lock A PJ-A3, R3 #72 5900778834; AIQ 5900753496; MG
+ * 5900810410). Paul's "price sensitivity is very high" is written as `provenance.source: 'user_specified'` with no
+ * natural size, so `linkIsSized` read it as unsized and R-c dropped churn's baseline: his churn ≤ 4% limit went unscored
+ * exactly when he strengthened the link into it. The P then rests on the user's own stated strength — what the limit
+ * should reflect — so for R-c it counts as authored. Only R-c reads this; the goal-certainty rule keeps `sizedLinkTest`.
+ */
+function userStatedStrength(edge: Rec): boolean {
+  const p = isRec(edge.provenance) ? edge.provenance : undefined;
+  return p?.source === 'user_specified';
+}
+
+/**
  * THE ONE "is this link sized" test, over a graph's nodes: a link Olumi or the user sized, in the unit of the node it
  * points at, written for the mean it now holds. Shared with the goal-certainty rule (`goal-certainty.ts`), so the two
  * rulings (AI Quality 5882087383, 5882366427) read one definition of "unsized".
@@ -129,7 +141,7 @@ export function placeholderPartsFinding(
         const at = walk.shift();
         for (const e of edges) {
           if (e.from !== at || !onPath.has(e.to)) continue;
-          if (!linkIsSized(e, unitById)) return { reason: PLACEHOLDER_PARTS_REASON, partId };
+          if (!linkIsSized(e, unitById) && !userStatedStrength(e)) return { reason: PLACEHOLDER_PARTS_REASON, partId };
           if (e.to !== targetId && !reached.has(e.to)) {
             reached.add(e.to);
             walk.push(e.to);
