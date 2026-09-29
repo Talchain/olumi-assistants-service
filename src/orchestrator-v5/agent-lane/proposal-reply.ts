@@ -315,8 +315,21 @@ export function userFiguresTheCallLeaves(args: unknown, userMessage: string): st
     const esc = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return (s.match(new RegExp(`(?<![\\d.,])${esc}(?![\\d]|[.,]\\d)`, 'g')) ?? []).length;
   };
+  const amounts = findStatedAmounts(userMessage);
+  /**
+   * ⛔ A UNITLESS VALUE THAT COULD BE TWO KINDS CARRIES NEITHER (AIQ meaning 5880894832, Codex CR #3 on #2263): with
+   * "£4 and 4%" written, a bare `4` is £4 or 4%, so it is ambiguous. It evidences neither, and the turn narrates (asks)
+   * rather than guessing which. A bare value whose written candidates share ONE kind and currency is not ambiguous.
+   */
+  const identity = (x: { kind?: unknown; currencyCode?: string }): string => `${String(x.kind)}|${x.currencyCode ?? ''}`;
+  c.nums.forEach((n, i) => {
+    if (n.unit !== null) return;
+    const kinds = new Set(amounts.filter((x) => evidences(n, x as { magnitude: number; kind?: unknown; currencyCode?: string }) === 'bare')
+      .map((x) => identity(x as { kind?: unknown; currencyCode?: string })));
+    if (kinds.size > 1) used.add(i);
+  });
   const left: string[] = [];
-  for (const a of findStatedAmounts(userMessage)) {
+  for (const a of amounts) {
     const text = a.matchedText.trim();
     const amount = a as { magnitude: number; kind?: unknown; currencyCode?: string };
     const pick = (want: 'unit' | 'bare'): number => c.nums.findIndex((n, i) => !used.has(i) && evidences(n, amount) === want);

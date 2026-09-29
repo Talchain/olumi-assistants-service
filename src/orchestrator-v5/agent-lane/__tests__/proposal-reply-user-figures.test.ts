@@ -53,8 +53,16 @@ describe('Codex CHANGES_REQUIRED on #2263: one carried value never stands for tw
   it('RED (the counterexample): { value: 4, unit: GBP } carries £4, never 4%', () => {
     expect(userFiguresTheCallLeaves({ value: 4, unit: 'GBP' }, 'Price rose £4 and churn rose 4%')).toEqual(['4%']);
   });
-  it('RED: a bare 4 stands for ONE of £4 / 4%, never both', () => {
-    expect(userFiguresTheCallLeaves({ value: 4 }, 'Price rose £4 and churn rose 4%')).toEqual(['4%']);
+  it('RED (AIQ 5880894832, Codex CR #3): a unitless 4 with "£4 and 4%" written carries NEITHER — ask, never guess', () => {
+    expect(userFiguresTheCallLeaves({ value: 4 }, 'Price rose £4 and churn rose 4%')).toEqual(['£4', '4%']);
+    expect(composeProposalReply('propose_link_strength', { whole_request: true, value: 4 }, LINK, 'Price rose £4 and churn rose 4%')).toBeNull();
+  });
+  it('CONTROL: a unitless 4 is not ambiguous when only one kind is written — it carries that figure, once', () => {
+    expect(userFiguresTheCallLeaves({ value: 4 }, 'Price rose £4.')).toEqual([]);
+    expect(userFiguresTheCallLeaves({ value: 4 }, 'Price rose £4, and £4 again next year.')).toEqual(['£4']);
+  });
+  it('AIQ row: the user writes "£4 and 4%", the proposal carries a single GBP-typed 4 → exactly one figure is uncarried', () => {
+    expect(userFiguresTheCallLeaves({ value: 4, unit: 'GBP' }, 'Price rose £4 and churn rose 4%')).toEqual(['4%']);
   });
   it('RED (kind, with enough values): two GBP-typed 4s carry £4, still never 4%', () => {
     expect(userFiguresTheCallLeaves({ levels: [{ value: 4, unit: 'GBP' }, { value: 4, unit: 'GBP' }] }, 'Price rose £4 and churn rose 4%')).toEqual(['4%']);
