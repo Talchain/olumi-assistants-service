@@ -18,7 +18,7 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { proposeProductIdentity } from '../identity-proposal.js';
 import { approvalChipsFor, approvalChipIdFor } from '../approval-chips.js';
-import { readingOfIdentityApproval } from '../identity-card.js';
+import { identityCardToIssue, readingOfIdentityApproval } from '../identity-card.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 
 type Json = Record<string, any>;
@@ -94,6 +94,29 @@ describe('the issue point: a Run offers the card once per revision', () => {
     await w.caps.proposeIdentity!(ctxSaying('Is MRR price times subscribers?'));
     const again = await w.caps.runAnalysis(ctxSaying('Run it'), { reason: 'Run it.' }) as Json;
     expect(again).not.toHaveProperty('identity_card');
+  });
+});
+
+describe('the route issues the card when the Agent did not (served 3727537: 0/3 typed Runs called propose_identity)', () => {
+  it('a Run saying a card is waiting, with no proposal in the turn → the route issues it, and the button shows the words', async () => {
+    const w = world(served(1));
+    const run = await w.caps.runAnalysis(ctxSaying('Run the analysis'), { reason: 'Run it.' }) as Json;
+    const calls = [{ name: 'run_analysis', ok: true, mutated: false }];
+    expect(identityCardToIssue(calls, [run])).toBe(true);
+    const issued = await dispatchTool('propose_identity', '{}', ctxSaying('Run the analysis'), w.caps) as Json;
+    const chips = approvalChipsFor([...calls, { name: 'propose_identity', ok: true, mutated: false, proposal_id: String(issued.proposal_id) }],
+      (id) => ({ proposal: w.store.get(id), result: issued as never }));
+    expect(chips[0]).toEqual(expect.objectContaining({ label: 'Yes, calculate it that way', detail: proposeProductIdentity(served(1))!.words }));
+    expect(w.s.writes).toBe(0);
+  });
+
+  it('not when the Agent already proposed it, not on an approval turn, not when no card is waiting', async () => {
+    const waiting = [{ identity_card: { available: true, note: 'x' } }];
+    expect(identityCardToIssue([{ name: 'run_analysis' }, { name: 'propose_identity' }], waiting)).toBe(false);
+    expect(identityCardToIssue([{ name: 'authorise_change' }, { name: 'run_analysis' }], waiting)).toBe(false);
+    const run = await world(confirmed(1)).caps.runAnalysis(ctxSaying('Run it'), { reason: 'Run it.' }) as Json;
+    expect(identityCardToIssue([{ name: 'run_analysis' }], [run])).toBe(false);
+    expect(identityCardToIssue([{ name: 'run_analysis' }], [{ identity_card: { available: false } }, null, undefined])).toBe(false);
   });
 });
 

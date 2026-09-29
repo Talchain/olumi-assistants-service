@@ -57,6 +57,20 @@ export function identityCardHintFor(card: IdentityProposal | null, alreadyOffere
   return card === null || alreadyOffered ? undefined : { available: true, note: IDENTITY_CARD_NOTE };
 }
 
+/**
+ * ⭐ THE ROUTE ISSUES THE CARD WHEN THE AGENT DID NOT (R3, served CEE `3727537`: 0/3 typed Runs called `propose_identity`
+ * after the Run's `identity_card` note, and the Run chip's interpreter runs with `tool_choice: 'none'`, so it never can).
+ * True when a Run in this turn says a card is waiting and nothing in the turn proposed one; the route then dispatches the
+ * SAME `propose_identity` tool once. It writes nothing: the button, with its stored words, is the only way to a Yes.
+ */
+export function identityCardToIssue(
+  toolCalls: readonly { readonly name: string }[],
+  toolResults: readonly unknown[],
+): boolean {
+  if (toolCalls.some((c) => c.name === 'propose_identity' || c.name === 'authorise_change')) return false;
+  return toolResults.some((r) => (r as { identity_card?: { available?: unknown } } | null | undefined)?.identity_card?.available === true);
+}
+
 type IdentityRefusalCode = 'reading_not_confirmed' | 'superseded' | 'not_admissible' | 'carrier_conflict' | 'already_carried' | string;
 
 /** Plain words for a door refusal (`identity_<code>`, Canonical 5888513620). Never the code itself. */
