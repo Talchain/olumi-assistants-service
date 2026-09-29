@@ -29,7 +29,7 @@ const est = (factor_label: string, value: number, unit: string, provenance = 'ai
 /** Journey C run 2's shape: MRR declared price × subscribers; the subscribers acted on by no option and limited by nothing. */
 function journeyC(subscribers: number | null, withProduct = true) {
   return {
-    goal: { metric: 'MRR', operator: '>=', target_stated: true, value: 100000, unit: 'GBP', horizon_months: 6, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'ai_proposed', scope: null },
+    goal: { metric: 'MRR', operator: '>=', target_stated: true, frame: 'level', value: 100000, unit: 'GBP', horizon_months: 6, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'ai_proposed', scope: null },
     constraints: [],
     options: [
       { label: 'Features and price rise', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [est('Pro plan price', 59, 'GBP per month', 'explicit')] },

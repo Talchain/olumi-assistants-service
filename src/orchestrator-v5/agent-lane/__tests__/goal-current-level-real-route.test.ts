@@ -286,7 +286,10 @@ describe('RE-VALIDATED AT APPLY TIME — the goal\'s target must be the one the 
 
   it('RED: the goal moved to the delta frame after the proposal → superseded, nothing written', async () => {
     const { h, r, hashSame } = await raceOn((g) => { g.goal_threshold_frame = 'delta'; });
-    expect(hashSame, 'PREMISE: the frame is outside the analysis hash, so the store\'s base check passes').toBe(true);
+    // Since schemas 0.61.0 (projection v2, DL 5871412823 / AIQ 5871459631) the frame IS an analysis-hash input, so the
+    // hash now catches this race too; the apply-time re-validation below stays as defence in depth (the unit row keeps
+    // the case the hash cannot see).
+    expect(hashSame, 'the frame is an analysis-hash input (projection v2+)').toBe(false);
     expect(r.applied, JSON.stringify(r)).not.toBe(true);
     expect(r.refusal).toBe('superseded');
     expect(h.appends).toHaveLength(0);

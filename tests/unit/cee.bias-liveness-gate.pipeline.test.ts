@@ -129,7 +129,10 @@ vi.mock("../../src/cee/transforms/analysis-ready.js", () => ({
   extractConstraintDropBlockers: vi.fn().mockReturnValue([]),
 }));
 
-vi.mock("../../src/schemas/cee-v3.js", () => ({
+// The REAL module, with only the two stubs this suite needs. A bare factory hid every other export, and since the
+// analysis hash reads the goal's derived direction (Shared Data row 1) its import chain reaches `EdgeV3`.
+vi.mock("../../src/schemas/cee-v3.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/schemas/cee-v3.js")>()),
   CEEGraphResponseV3: {
     safeParse: vi.fn((input: unknown) => ({ success: true, data: input })),
   },

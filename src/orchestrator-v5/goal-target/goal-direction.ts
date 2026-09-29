@@ -164,6 +164,13 @@ function ceilingTargetIsALevelOnItsNode(graph: unknown, goalNodeId: unknown): bo
     && targetUnit !== null && unit(level.unit) === targetUnit;
 }
 
+/** R1 S4-core: the goal's target is typed as a change from today (`goal_threshold_frame` `change_abs` | `change_rel`). */
+function goalTargetIsATypedChange(graph: unknown, goalNodeId: unknown): boolean {
+  if (typeof goalNodeId !== 'string' || goalNodeId === '') return false;
+  const frame = readNodes(graph).find((n) => n.id === goalNodeId)?.goal_threshold_frame;
+  return frame === 'change_abs' || frame === 'change_rel';
+}
+
 /**
  * The sense a HELD comparator attests: `'minimise'` for a ceiling (`'<='`, `'<'`), otherwise `undefined` (a floor
  * is today's maximiser, never sent). ONE reading, shared by the wire (`resolveGoalDirection`) and by admission of a
@@ -186,6 +193,11 @@ export function resolveGoalDirection(
   // held floor, an unproven ceiling, no comparator — reads exactly as base: the label classifier (DL E13, 5872375159:
   // "nothing else moves"; a held floor's own sense belongs to S4, with the typed frame).
   if (heldComparatorSense(readHeldGoalComparator(graph, goalNodeId)) === 'minimise' && ceilingTargetIsALevelOnItsNode(graph, goalNodeId)) {
+    return { direction: 'minimise', provenance: 'stated_comparator' };
+  }
+  // ⭐ R1 S4-core: a target TYPED as a change from today ("cut by 15%" → `change_rel` −0.15, held `<=`) needs no level
+  // proof — the frame is the proof S1 waited for. Its held ceiling is its direction; a held floor stays today's maximiser.
+  if (heldComparatorSense(readHeldGoalComparator(graph, goalNodeId)) === 'minimise' && goalTargetIsATypedChange(graph, goalNodeId)) {
     return { direction: 'minimise', provenance: 'stated_comparator' };
   }
   const derived = directionFromGoalLabel(graph, goalNodeId);

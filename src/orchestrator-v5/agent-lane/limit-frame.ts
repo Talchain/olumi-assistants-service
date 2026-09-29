@@ -66,3 +66,27 @@ export function sayLimitInFrame(args: {
   }
   return `${words[operator]} ${figure(value, unit)}`;
 }
+
+/**
+ * ⭐ A GOAL TARGET STATED AS A CHANGE FROM TODAY, IN WORDS (R1 S4-core; goal consumer map 28 Sep). The stored figure is
+ * the contract's (`change_rel` r, `change_abs` c), so a display that prints "<raw> <unit>" would say "-0.15 GBP per month".
+ * Said instead as the change: `change_rel` −0.15 → "down 15% from today"; `change_abs` 5000 GBP → "up 5000 GBP from
+ * today" (`figure` is the caller's own formatter). `undefined` for a level (or no frame): the caller says it as before.
+ *
+ * With the goal's HELD comparator (`goal_direction`, the user's own operator) the bound is said too, from the one word
+ * table limits use (`changeWords`): a cut held `<=` is "down at least 15% from today", held `<` (strict, ISL #209)
+ * "down more than 15%" (AI Quality 5880974047: without it the words read as exactly 15%). No held comparator → no word.
+ */
+export function sayGoalChange(
+  frame: unknown,
+  stored: number,
+  unit: string | undefined,
+  figure: (value: number, unit: string | undefined) => string,
+  held?: unknown,
+): string | undefined {
+  if (frame !== 'change_rel' && frame !== 'change_abs') return undefined;
+  const dir = stored < 0 ? 'down' : 'up';
+  const bound = held === '>=' || held === '<=' || held === '>' || held === '<' ? `${changeWords(held, stored >= 0)} ` : '';
+  if (frame === 'change_rel') return `${dir} ${bound}${Math.round(Math.abs(stored) * 100 * 1e6) / 1e6}% from today`;
+  return `${dir} ${bound}${figure(Math.abs(stored), unit)} from today`;
+}

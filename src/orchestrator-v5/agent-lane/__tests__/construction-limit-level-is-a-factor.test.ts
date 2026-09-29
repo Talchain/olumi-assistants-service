@@ -56,7 +56,7 @@ const link = (from: string, to: string, direction: 'positive' | 'negative') => (
 function outcomeDraft(over: Record<string, unknown> = {}) {
   return {
     goal: {
-      metric: 'MRR', operator: '>=', target_stated: true, value: 20000, unit: 'GBP per month', horizon_months: 12, provenance: 'explicit',
+      metric: 'MRR', operator: '>=', target_stated: true, frame: 'level', value: 20000, unit: 'GBP per month', horizon_months: 12, provenance: 'explicit',
       baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null,
     },
     constraints: [CHURN_LIMIT],
@@ -95,7 +95,7 @@ function outcomeDraft(over: Record<string, unknown> = {}) {
 function factorDraft() {
   return {
     goal: {
-      metric: 'Monthly recurring revenue (MRR)', operator: '>=', target_stated: true, value: 20000, unit: 'GBP per month', horizon_months: 12,
+      metric: 'Monthly recurring revenue (MRR)', operator: '>=', target_stated: true, frame: 'level', value: 20000, unit: 'GBP per month', horizon_months: 12,
       provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null,
     },
     constraints: [CHURN_LIMIT],

@@ -19,6 +19,7 @@
  * output is not in the capture); FIDELITY proves its admission is the served node, limit row and ask, byte for byte.
  */
 import { describe, it, expect } from 'vitest';
+import { asCurrentDraft } from './pre-r1-capture.js';
 import { readFileSync } from 'node:fs';
 import { Ajv } from 'ajv';
 import type { CandidateModel } from '../admit-model.js';
@@ -36,7 +37,8 @@ type Draft = Record<string, unknown> & {
   factors: Array<Record<string, unknown> & { label: string }>;
   outcomes: Array<{ label: string; provenance: string }>;
 };
-const FX = JSON.parse(readFileSync(new URL('./fixtures/served-journey-c-churn-outcome-c35f1c7.json', import.meta.url), 'utf8')) as {
+// Pre-R1 capture, replayed through today's contract (`asCurrentDraft`: goal `frame: 'level'`; bytes untouched).
+const FX = asCurrentDraft(JSON.parse(readFileSync(new URL('./fixtures/served-journey-c-churn-outcome-c35f1c7.json', import.meta.url), 'utf8'))) as {
   brief: string;
   served: { draft_graph: Graph; construction_trace: unknown; level_ask_question: string };
   served_contrast: { run1: { monthly_churn_node: Node; construction_trace: unknown } };

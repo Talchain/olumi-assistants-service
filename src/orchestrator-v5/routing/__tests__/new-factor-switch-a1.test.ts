@@ -38,6 +38,7 @@ import { nodeProvenanceDisplay, valueSourceAuthorship } from '../../../cee/trans
 import { projectEntity } from '../../agent-lane/runtime/agent-capabilities.js';
 import { checkPersistedGraphInvariants } from '../../persisted-graph-invariants.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
+import { rebindCapture } from '../../../../tests/helpers/legacy-analysis-hash-v2.js';
 
 type Json = Record<string, any>;
 
@@ -49,9 +50,12 @@ const STORED = projectGraphForPersistence(structuredClone(GRAPH)) as Json;
 const HASH = computeAnalysisAffectingGraphHash(STORED as never)!;
 
 /** Executed at base 770a477c without this change (see the fixture's `_provenance`; re-recorded from 15e332b2 when brought current). */
-const BASE = JSON.parse(
+const BASE_RECORDED = JSON.parse(
   readFileSync(new URL('./fixtures/a1-base-contrast-770a477c.json', import.meta.url), 'utf8'),
 ) as { specs: Record<string, Json>; outputs: Record<string, Json> };
+// Shared Data row 1 (projection v3): the base record's stored hash is proven to be the pre-0.62.0 projection of STORED,
+// then rebound to the current projection wherever it appears (tests/helpers/legacy-analysis-hash-v2.ts).
+const BASE = rebindCapture(BASE_RECORDED, STORED, BASE_RECORDED.outputs.stored_hash as unknown as string);
 
 const OPT = '146aa89d';
 const FAC = 'fac_existing_customers_grandfathered';

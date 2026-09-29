@@ -38,7 +38,7 @@ const STATED_TOTAL: Scope = { modelled: 'all plans together', alternative: 'the 
 function pricing(metric: string, scope: Scope, unknowns: string[] = []): Record<string, unknown> {
   return {
     goal: {
-      metric, operator: '>=', target_stated: true, value: 20000, unit: 'GBP', horizon_months: 12, provenance: 'explicit',
+      metric, operator: '>=', target_stated: true, frame: 'level', value: 20000, unit: 'GBP', horizon_months: 12, provenance: 'explicit',
       baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope,
     },
     constraints: [],

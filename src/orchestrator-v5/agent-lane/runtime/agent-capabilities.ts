@@ -132,7 +132,8 @@ import { CANVAS_BAND_WORD, edgeBandFromMagnitude, EDGE_STRENGTH_MIDPOINTS } from
 import { runWithApprovedAdoption } from '../approved-adoption-context.js';
 import { runWithStatedLinkBand } from '../stated-link-band-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
-import { factorUnitOf, unitPhraseFamily, unitsConflict } from '../unit-conflict.js';
+import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
+import { newFactorScopeIn } from '../figure-scope.js';
 import { classifyUnitScaleClass } from '../../../cee/draft/records/unit-scale-class.js';
 import { unitFamilyOf } from '../../routing/value-unit-resolution.js';
 import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
@@ -159,7 +160,7 @@ import { registrationTurnId } from '../../graph-registration/registration-identi
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel } from '../goal-current-level.js';
 import { sayFigureExactly, sayFigureRead } from '../say-figure.js';
-import { isChangeFrame, sayLimitInFrame } from '../limit-frame.js';
+import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
 import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
@@ -181,35 +182,8 @@ function scopeIn(g: { readonly nodes: readonly { readonly label?: unknown; reado
   return { target, others };
 }
 
-/**
- * ⛔ THE ADD-FACTOR DOOR'S SCOPE (PJ-E-FIG, DL CHANGES_REQUIRED on #2235): whose figure a NEW factor's value is. Target: the
- * new factor's own label. Others: every quantity in the model (`scopeIn`) PLUS the other new factors in this call — so on
- * "Senior engineers cost £120k a year each and juniors £65k a year each" a swap (senior 65000) or the £400k limit is never
- * this factor's. RIVALS (`EntityScope.rivals`): the others that could HOLD this figure. A factor measured in another kind
- * of unit ("New senior engineers hired", engineers, for a £ figure) and a risk (a likelihood, for any figure not a
- * percentage) cannot, so the words they share with the target ("senior") stay the target's; every word of their own
- * still marks a figure as not the target's. STRICT (`EntityScope.strict`): journey E's typed "£120,000 per senior engineer
- * and £65,000 per junior engineer" binds each figure to its owner, and a figure nobody's words own, among two or more, is refused.
- */
-export function newFactorScopeIn(
-  g: { readonly raw?: unknown; readonly nodes: readonly { readonly id?: unknown; readonly label?: unknown; readonly kind?: unknown; readonly observed_state?: unknown }[] },
-  target: string,
-  figureUnit: string,
-  inCall: readonly { readonly label: string; readonly unit: string }[],
-): EntityScope {
-  const percentOrUnknown = ((f) => f === null || f === 'percent')(unitPhraseFamily(figureUnit));
-  const quantities = g.nodes.filter((n) => n.kind !== 'option' && n.kind !== 'decision' && typeof n.label === 'string' && n.label !== '' && n.label !== target);
-  const siblings = inCall.filter((s) => s.label !== '' && s.label !== target);
-  const couldHold = (n: (typeof quantities)[number]): boolean => (n.kind === 'risk' ? percentOrUnknown
-    : n.kind !== 'factor' || unitsConflict(figureUnit, factorUnitOf(g.raw, n as { id?: unknown; observed_state?: unknown })) === null);
-  return {
-    target: [target],
-    others: [...quantities.map((n) => n.label as string), ...siblings.map((s) => s.label)],
-    rivals: [...quantities.filter(couldHold).map((n) => n.label as string), ...siblings.filter((s) => unitsConflict(figureUnit, s.unit) === null).map((s) => s.label)],
-    // The strict reading (DL ruling on the #2235 re-review): this door alone; every other door reads as before.
-    strict: true,
-  };
-}
+// `newFactorScopeIn` moved to `../figure-scope.ts` (one predicate for the Agent's doors and the chat writers, AIQ 5882852814).
+export { newFactorScopeIn };
 
 /**
  * The LIMIT door's scope (DL #2195 CHANGES_REQUIRED 5863720934, served journey-C budget limits): the user calls a limit
@@ -996,6 +970,12 @@ function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'ana
           ...(trio.goal_threshold_unit === undefined ? {} : { unit: trio.goal_threshold_unit }),
           ...(str(frame) ? { frame } : {}),
           ...(comparator === null ? {} : { comparator, comparator_in_words: LIMIT_OPERATOR_WORDS[comparator] }),
+          // R1 S4-core: a target stated as a change from today says so in words ("down 15% from today"), so the Agent never
+          // reads the stored fraction as a level of the goal's unit (`sayGoalChange`). A level carries no `in_words`, as before.
+          ...((): Record<string, string> => {
+            const said = sayGoalChange(frame, trio.goal_threshold_raw!, trio.goal_threshold_unit, (v, u) => targetFigure(v, u ?? ''), (n as { goal_direction?: unknown }).goal_direction);
+            return said === undefined ? {} : { in_words: said };
+          })(),
         },
       }),
     };
@@ -1781,6 +1761,8 @@ export function createAgentCapabilities(
       const event = {
         kind: 'factor_value_edit' as const,
         target_id: o.path,
+        // A figure the user approved is authorship even when it equals Olumi's (schemas 0.62.0; AIQ 5881494849).
+        intent: 'set' as const,
         ...(targetCap !== undefined
           ? { value: v.value / targetCap, raw_value: v.value }
           : { value: v.value }),
@@ -2560,6 +2542,14 @@ export function createAgentCapabilities(
             : `The model has more than one goal (${goals.map((x) => `"${x.label}"`).join(', ')}), so nothing was prepared: it is not clear which one this target is for. Ask the user which goal they mean.` };
       }
       const goal = goals[0]!;
+      // ⛔ R1 S4-core: a target stated as a CHANGE from today ("cut the bill by 15%": `goal_threshold_frame` `change_rel`,
+      // a fraction). This path writes a LEVEL target, so it would silently turn the user's change into a level. Refused by
+      // name until a change can be edited as a change; the goal doors refuse it too (`add-constraint.ts`, `goal-target-edit.ts`).
+      if (isChangeFrame((goal as { goal_threshold_frame?: unknown }).goal_threshold_frame)) {
+        return { ok: false, mutated: false, refusal: 'goal_is_a_change',
+          detail: `The goal "${goal.label}" is stated as a change from today, and this path cannot yet change a target stated that way, so nothing was prepared. `
+            + 'Tell the user plainly, and never offer a level target in its place.' };
+      }
       // The target writer's own bounds: an at-least target must be a positive number (`add-constraint.ts`), said in its words.
       if (type === 'at_least' && !(value > 0)) {
         return { ok: false, mutated: false, refusal: 'target_not_positive',
