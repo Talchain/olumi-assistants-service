@@ -293,8 +293,6 @@ const ContextPackAnalysisSchema = z
      * the winner is feasible.
      */
     constraint_infeasible_note: z.string().optional(),
-    /** ⛔ Absent stays absent: the run withheld its goal figures, or an option has none (see `ContextPackAnalysis`). */
-    figures_withheld: z.object({ reason_code: z.string().nullable(), note: z.string().min(1) }).strict().optional(),
   })
   .strict();
 

@@ -84,38 +84,12 @@ export function analysisResultForAgent(result: unknown): unknown {
   if (enrichment !== undefined) {
     const { factor_sensitivity: _structural, ...rest } = enrichment;
     const brief = recordOf(rest.decision_brief);
-    let limitsRenamed = false;
     if (brief !== undefined) {
       const { top_drivers: _drivers, ...briefRest } = brief;
-      // ⛔ LIMITS ARE NOT THE GOAL (AIQ 5887531086; DL 5887546998): the brief's `goal_fit` is the LEADER's limits-only joint
-      // (PLoT `decision-brief.ts`), so the Agent never sees it under that name.
-      const summary = recordOf(briefRest.analysis_summary);
-      if (summary !== undefined && 'goal_fit' in summary) {
-        const { goal_fit: _jointOfLeader, ...summaryRest } = summary;
-        briefRest.analysis_summary = summaryRest;
-        limitsRenamed = true;
-      }
       rest.decision_brief = briefRest;
     }
-    // Each option's `probability_of_joint_goal` is how often ALL the user's limits hold together — never the goal's target.
-    if (Array.isArray(rest.option_comparison)) {
-      rest.option_comparison = rest.option_comparison.map((row) => {
-        const r = recordOf(row);
-        if (r === undefined || !('probability_of_joint_goal' in r)) return row;
-        const { probability_of_joint_goal: joint, ...others } = r;
-        limitsRenamed = true;
-        return { ...others, all_limits_hold_probability: joint };
-      });
-    }
     out.enrichment = rest;
-    if (limitsRenamed) out.limits_note = ALL_LIMITS_HOLD_NOTE;
   }
   out.decision_sensitivity = decisionSensitivityOf(enrichment);
   return out;
 }
-
-/** What the Agent is told about the limits-only figure (AIQ 5887531086: its own fact, in the UI's register). */
-export const ALL_LIMITS_HOLD_NOTE =
-  '`all_limits_hold_probability` is how often ALL the user\u2019s limits hold together in the model runs. It does NOT include '
-  + 'the goal\u2019s target: never call it a chance of reaching the goal, a goal fit or a target fit, and never combine it with '
-  + 'the goal. Say it, if at all, as "all your limits hold in N% of model runs (this does not include the goal\u2019s target)".';

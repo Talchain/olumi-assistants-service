@@ -54,12 +54,6 @@
  * consumer's coverage, so single-sourcing regresses none of them.
  */
 
-/**
- * PLoT #416's code for a run that withheld its per-option goal figures (a declared identity on the goal's path was not
- * evaluated). ONE definition: the Agent lane re-exports it (`goal-chance-withheld.ts`).
- */
-export const GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED = 'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED';
-
 function readRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -83,29 +77,6 @@ function filterObjectEntries(arr: readonly unknown[]): ReadonlyArray<Record<stri
  * Returns `[]` only when no source is present or non-empty.
  */
 export function readOptionResultSources(
-  envelope: Record<string, unknown>,
-): ReadonlyArray<ReadonlyArray<Record<string, unknown>>> {
-  const sources = readEverySource(envelope);
-  // ⛔ ABSENT STAYS ABSENT (AIQ 5886457733; DL 5886379820): when the run WITHHELD its per-option goal figures, a
-  // downstream copy (`results[]`, `decision_brief.options`) is never read in their place. Current-first only.
-  return runWithheldGoalFigures(envelope) ? sources.slice(0, 1) : sources;
-}
-
-/**
- * The run's typed decision that its per-option goal figures are withheld (PLoT #416's ONE carrier: an
- * `inference_warnings` entry with code `GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED`). The code decides, never the words.
- */
-export function runWithheldGoalFigures(envelope: Record<string, unknown>): boolean {
-  return goalFiguresWithheldWarning(envelope) !== undefined;
-}
-
-/** That warning (the first), or `undefined`. */
-export function goalFiguresWithheldWarning(envelope: Record<string, unknown>): Record<string, unknown> | undefined {
-  const warnings = Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings : [];
-  return filterObjectEntries(warnings).find((w) => w.code === GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED);
-}
-
-function readEverySource(
   envelope: Record<string, unknown>,
 ): ReadonlyArray<ReadonlyArray<Record<string, unknown>>> {
   const sources: Array<ReadonlyArray<Record<string, unknown>>> = [];

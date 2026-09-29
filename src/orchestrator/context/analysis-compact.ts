@@ -13,7 +13,7 @@ import { log } from "../../utils/telemetry.js";
 import { config } from "../../config/index.js";
 import { resolveInfluenceDirection, type InfluenceDirection } from "./influence-direction.js";
 import { readDriverInfluenceScore } from "./driver-influence.js";
-import { goalFiguresWithheldWarning, winnerOptionResultSource } from "./option-result-source.js";
+import { winnerOptionResultSource } from "./option-result-source.js";
 import { deriveWinnerConstraintInfeasibility } from "./constraint-feasibility.js";
 import { isRecommendableTypedOption } from "../../orchestrator-v5/tools/handlers/recommendable-option.js";
 
@@ -24,10 +24,8 @@ import { isRecommendableTypedOption } from "../../orchestrator-v5/tools/handlers
 export interface OptionSummary {
   option_id: string;
   option_label: string;
-  /** `null` = ABSENT: the run gave no figure (AIQ 5886457733: an absent figure is never 0, and never ranks). */
-  win_probability: number | null;
-  /** `null` = ABSENT, as `win_probability`. */
-  outcome_mean: number | null;
+  win_probability: number;
+  outcome_mean: number;
   outcome_p10?: number;
   outcome_p90?: number;
   probability_of_goal?: number;
@@ -50,8 +48,8 @@ export interface OptionSummary {
 /** Purpose-specific comparison entry for LLM context (Brief B contract). */
 export interface OptionComparisonEntry {
   label: string;
-  win_probability: number | null;
-  mean: number | null;
+  win_probability: number;
+  mean: number;
   p10: number;
   p90: number;
 }
@@ -159,12 +157,6 @@ export interface AnalysisResponseSummary {
    * gate is off or the winner is feasible.
    */
   constraint_infeasible_note?: string;
-  /**
-   * ⛔ The run WITHHELD its per-option goal figures (PLoT #416's typed warning, `GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED`):
-   * its code, the goal-path nodes it names and PLoT's own words. It travels where a winner would have been; absent
-   * when the run carried no such warning.
-   */
-  figures_withheld?: { code: string; node_ids: string[]; message: string };
   analysis_status: string;
 }
 
@@ -222,28 +214,18 @@ function getResultsArray(response: V2RunResponseEnvelope): unknown[] {
   return [];
 }
 
-/** Win probability descending, ABSENT last (never ranked as 0); tiebreak by option_id lexicographic. */
-function byWinProbabilityDesc(a: OptionSummary, b: OptionSummary): number {
-  if (a.win_probability === null || b.win_probability === null) {
-    if (a.win_probability !== b.win_probability) return a.win_probability === null ? 1 : -1;
-    return a.option_id.localeCompare(b.option_id);
-  }
-  const probDiff = b.win_probability - a.win_probability;
-  if (probDiff !== 0) return probDiff;
-  return a.option_id.localeCompare(b.option_id);
-}
-
 /**
  * Derive a winner from sorted option summaries.
  * Tiebreak: first by option_id lexicographic (deterministic).
  */
 function deriveWinner(options: OptionSummary[]): AnalysisResponseSummary['winner'] | null {
   if (options.length === 0) return null;
-  // ⛔ NO WINNER FROM ABSENT FIGURES (AIQ 5886457733): one option with no win probability means the ranking is not
-  // known, so no option is crowned — never the lowest id "at 0%".
-  if (options.some((o) => o.win_probability === null)) return null;
   // options is already sorted by win_probability descending; tiebreak by option_id
-  const sorted = [...options].sort(byWinProbabilityDesc);
+  const sorted = [...options].sort((a, b) => {
+    const probDiff = b.win_probability - a.win_probability;
+    if (probDiff !== 0) return probDiff;
+    return a.option_id.localeCompare(b.option_id);
+  });
   const first = sorted[0];
   return {
     option_id: first.option_id,
@@ -780,11 +762,11 @@ export function compactAnalysis(
         const optionLabel = typeof r.option_label === 'string'
           ? r.option_label
           : optionId;
-        const winProb = typeof r.win_probability === 'number' ? r.win_probability : null;
+        const winProb = typeof r.win_probability === 'number' ? r.win_probability : 0;
         // Support both flat (outcome_mean) and nested (outcome.mean) shapes
         const outcomeObj = (r.outcome && typeof r.outcome === 'object') ? r.outcome as Record<string, unknown> : null;
         const outcomeMean = typeof r.outcome_mean === 'number' ? r.outcome_mean
-          : (outcomeObj && typeof outcomeObj.mean === 'number' ? outcomeObj.mean : null);
+          : (outcomeObj && typeof outcomeObj.mean === 'number' ? outcomeObj.mean : 0);
         const outcomeP10 = typeof r.outcome_p10 === 'number' ? r.outcome_p10
           : (outcomeObj && typeof outcomeObj.p10 === 'number' ? outcomeObj.p10 : undefined);
         const outcomeP90 = typeof r.outcome_p90 === 'number' ? r.outcome_p90
@@ -808,8 +790,12 @@ export function compactAnalysis(
         if (typeof r.status === 'string') summary.status = r.status;
         return summary;
       })
-      // Sort by win_probability descending, ABSENT last, tiebreak by option_id lexicographic
-      .sort(byWinProbabilityDesc);
+      // Sort by win_probability descending, tiebreak by option_id lexicographic
+      .sort((a, b) => {
+        const probDiff = b.win_probability - a.win_probability;
+        if (probDiff !== 0) return probDiff;
+        return a.option_id.localeCompare(b.option_id);
+      });
 
     // Status gate (shared with the direct receipt in run-analysis.ts and the
     // downstream projectAnalysis / decision-review enricher): a FAILED /
@@ -853,11 +839,8 @@ export function compactAnalysis(
     // over the RECOMMENDABLE options only (a failed option is never the winner
     // nor the runner-up it is measured against). recommendableOptions preserves
     // the win_probability-descending order of `options`.
-    // ⛔ An absent figure defines no margin (no winner is crowned from one, above).
-    const lead = recommendableOptions[0]?.win_probability;
-    const second = recommendableOptions[1]?.win_probability;
-    const margin = winner !== null && typeof lead === 'number' && typeof second === 'number'
-      ? lead - second
+    const margin = recommendableOptions.length >= 2
+      ? recommendableOptions[0].win_probability - recommendableOptions[1].win_probability
       : null;
     // margin_pp: margin in percentage points, rounded to 1 dp. Pre-computed
     // upstream so the V5 assembler stays passthrough-only (F.6).
@@ -866,8 +849,7 @@ export function compactAnalysis(
       : Math.round(margin * 1000) / 10;
 
     const summary: AnalysisResponseSummary = {
-      // No winner: the empty id says so, and its probability is ABSENT, never 0.
-      winner: winner ?? { option_id: '', option_label: '', win_probability: null },
+      winner: winner ?? { option_id: '', option_label: '', win_probability: 0 },
       options,
       top_drivers: topDrivers,
       robustness_level: robustnessLevel,
@@ -879,15 +861,6 @@ export function compactAnalysis(
 
     if (optionResults.length > 0) {
       summary.option_results = optionResults;
-    }
-    // ⛔ The run's typed withhold travels in place of a winner (AIQ 5886457733: "the typed reason travels instead").
-    const withheld = goalFiguresWithheldWarning(response as Record<string, unknown>);
-    if (withheld !== undefined) {
-      summary.figures_withheld = {
-        code: String(withheld.code),
-        node_ids: Array.isArray(withheld.node_ids) ? withheld.node_ids.filter((id): id is string => typeof id === 'string') : [],
-        message: typeof withheld.message === 'string' ? withheld.message.trim() : '',
-      };
     }
     if (constraintTensions !== undefined) {
       summary.constraint_tensions = constraintTensions;
