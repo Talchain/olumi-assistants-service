@@ -241,6 +241,13 @@ describe('R1 S4-core — today\'s level of a goal stated as a CHANGE is recorded
     expect(sent.observed_state).toMatchObject({ baseline: 12000 / scale.goal_threshold_cap, raw_value: 12000 });
   });
 
+  it('S4CL-1b: with the goal\'s held ">=" the label says the bound — "(target up at least 10% from today)" (AIQ 5880974047)', async () => {
+    const g = changeGoal('change_rel', 0.1);
+    goalOf(g).goal_direction = '>=';
+    const proposed = await setup(g).call(TOOL, T2) as ToolResult & { public_label?: string };
+    expect(proposed.public_label).toContain('(target up at least 10% from today)');
+  });
+
   it('S4CL-2 RED: "grow MRR by £5,000" (change_abs) → goal_threshold = c ÷ cap, written with the level', async () => {
     const s = setup(changeGoal('change_abs', 5000));
     const proposed = await s.call(TOOL, T2) as ToolResult & { proposal_id?: string };

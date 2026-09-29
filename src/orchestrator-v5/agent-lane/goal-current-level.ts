@@ -455,7 +455,7 @@ export async function proposeGoalCurrentLevel(
       return refuse(
         'not_admitted',
         `${withUnit(raw)} as today's level of "${goal.label}" and a change of ` +
-        `${sayGoalChange(changeFrame, target as number, goalUnit, (v) => withUnit(v))} do not sit on a scale starting at zero, ` +
+        `${sayGoalChange(changeFrame, target as number, goalUnit, (v) => withUnit(v), (goal as { goal_direction?: unknown }).goal_direction)} do not sit on a scale starting at zero, ` +
         'so nothing was prepared. Ask the user which figure is wrong.',
       );
     }
@@ -501,7 +501,7 @@ export async function proposeGoalCurrentLevel(
   };
   // The target as the user reads it: a level in its unit, or the change from today ("down 15% from today").
   const targetSaid = changeFrame !== null
-    ? sayGoalChange(changeFrame, target as number, goalUnit, (v) => withUnit(v))!
+    ? sayGoalChange(changeFrame, target as number, goalUnit, (v) => withUnit(v), (goal as { goal_direction?: unknown }).goal_direction)!
     : withUnit(target as number);
   // ⛔ THE USER'S OWN FIGURE AND UNIT, as they gave it — never relabelled in the goal's unit — plus, when a stated
   // suffix was scaled, what it is recorded as. The target and a replaced record are the goal's own, in its unit.
