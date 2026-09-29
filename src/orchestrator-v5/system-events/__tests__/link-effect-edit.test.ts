@@ -10,7 +10,7 @@ import { convertLinkEffect } from '../../../cee/magnitude/link-effect.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
-import { applyLinkEffectEdit, linkEffectEdgeToken, type ApplyLinkEffectEditParams } from '../link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken, type ApplyLinkEffectEditParams } from '../link-effect-edit.js';
 
 type Rec = Record<string, any>;
 
@@ -37,8 +37,12 @@ const STATED = { amount: -50, amount_unit: 'subscribers', per_source_change: 1, 
 const revisionOf = (g: unknown, from = 'price', to = 'subs') =>
   ({ graph_hash: computeAnalysisAffectingGraphHash(g as never)!, edge_token: linkEffectEdgeToken(g, from, to)! });
 
+/** What an approval carries: the token of the reading the card SHOWED (AIQ 5885290014) — here, of exactly this write. */
+const approved = (p: Omit<ApplyLinkEffectEditParams, 'reading_token'>): ApplyLinkEffectEditParams =>
+  ({ ...p, reading_token: linkEffectReadingToken(p) });
+
 function params(over: Partial<ApplyLinkEffectEditParams> = {}, graph: Rec = storedGraph()): ApplyLinkEffectEditParams {
-  return {
+  const p = {
     persistedGraph: graph,
     from: 'price',
     to: 'subs',
@@ -48,6 +52,7 @@ function params(over: Partial<ApplyLinkEffectEditParams> = {}, graph: Rec = stor
     quote: 'every £1 on the price loses us about 50 subscribers',
     ...over,
   };
+  return Object.hasOwn(over, 'reading_token') ? (p as ApplyLinkEffectEditParams) : approved(p);
 }
 
 const edgeOf = (g: unknown) => (g as Rec).edges.find((e: Rec) => e.from === 'price' && e.to === 'subs') as Rec;
@@ -108,6 +113,32 @@ describe('link effect writer — refuses what it cannot do exactly (fail closed,
     if (r.kind === 'refused') expect(r.reason).toBe(reason);
   };
 
+  // AIQ 5885290014 ("proposer, not stamper", belt and braces): `user_stated` needs an approval of a DISPLAYED reading.
+  it('reading_not_confirmed: an approval carrying NO reading token (no reading was shown) writes nothing', () => {
+    refused(params({ reading_token: undefined as unknown as string }), 'reading_not_confirmed');
+  });
+
+  it('reading_not_confirmed: the card showed −50 per £1 but the write asks for −500 per £1 — nothing written', () => {
+    const shown = linkEffectReadingToken({ from: 'price', to: 'subs', effect: { ...STATED }, quote: 'every £1 on the price loses us about 50 subscribers' });
+    refused(params({ effect: { ...STATED, amount: -500 }, reading_token: shown }), 'reading_not_confirmed');
+  });
+
+  it('reading_not_confirmed: the card showed a different sentence than the one the write stores', () => {
+    const shown = linkEffectReadingToken({ from: 'price', to: 'subs', effect: { ...STATED }, quote: 'our budget is £1 and we have 50 subscribers' });
+    refused(params({ reading_token: shown }), 'reading_not_confirmed');
+  });
+
+  it('reading_not_confirmed: the card showed the reading on ANOTHER link', () => {
+    const shown = linkEffectReadingToken({ from: 'subs', to: 'mrr', effect: { ...STATED }, quote: 'every £1 on the price loses us about 50 subscribers' });
+    refused(params({ reading_token: shown }), 'reading_not_confirmed');
+  });
+
+  it('CONTROL: the token is key-order independent — the same reading built in another order writes', () => {
+    const reordered = linkEffectReadingToken({ quote: 'every £1 on the price loses us about 50 subscribers', to: 'subs', from: 'price',
+      effect: { per_source_change_unit: '£', per_source_change: 1, amount_unit: 'subscribers', amount: -50 } });
+    expect(applyLinkEffectEdit(params({ reading_token: reordered })).kind).toBe('mutated');
+  });
+
   it('edge_not_found: no such link', () => refused(params({ to: 'mrr' }), 'edge_not_found'));
 
   // DL 5882808387: bound to the prepared REVISION, not only mean/direction/magnitude.
@@ -157,9 +188,9 @@ describe('link effect writer — refuses what it cannot do exactly (fail closed,
       edges: [{ from: 'price', to: 'churn', strength: { mean: 0.2, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive',
         provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' } }],
     };
-    const r = applyLinkEffectEdit({ persistedGraph: g, from: 'price', to: 'churn', quote: 'every £1 on the price adds half a point of churn',
+    const r = applyLinkEffectEdit(approved({ persistedGraph: g, from: 'price', to: 'churn', quote: 'every £1 on the price adds half a point of churn',
       effect: { amount: 0.5, amount_unit: 'percentage points', per_source_change: 1, per_source_change_unit: '£' },
-      expected: revisionOf(g, 'price', 'churn') });
+      expected: revisionOf(g, 'price', 'churn') }));
     expect(r.kind, JSON.stringify(r)).toBe('mutated');
     if (r.kind !== 'mutated') return;
     const e = (r.mutatedGraph as Rec).edges[0];
