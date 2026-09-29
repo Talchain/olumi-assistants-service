@@ -54,6 +54,7 @@ import { droppedGoalProductLine, unconfirmGoalProducts, withReconcilingProductId
 import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-reading.js';
 import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
+import { refitFramesForStatedEffects } from '../refit-frames.js';
 import { creditStatedFactorLevels, figureTheUserWrote, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
@@ -1623,7 +1624,11 @@ export async function buildModelFromBrief(
   // the five-question cap.
   openQuestions.unshift(...admitted.loss.filter((l) => /\.goal_scope$/.test(l.field_path)).map((l) => l.reason));
 
-  const graph = {
+  // ⭐ A USER-STATED SIZE FITS THE FRAMES BY WIDENING ITS TARGET, every natural size held (AIQ 5895140735; DL 5897504696):
+  // served MRR run 4 (57997d1) stated £49 per subscriber on a 106,250 MRR frame (β 2.31), so the Run clamped the user's
+  // effect and withheld the chance. Refused (and left to the Run's honest clamp withhold) when a level is set on the
+  // target, a spread would move, a new link would be cut, or the target is a bounded scale.
+  const graph = refitFramesForStatedEffects({
     // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
     // An option Olumi added carries `proposed_by: 'olumi'` (the Run's filter and the analysis hash read it; never the brief).
     nodes: markOlumiOptions(goalNodes, candidate, brief),
@@ -1631,7 +1636,7 @@ export async function buildModelFromBrief(
     ...(admitted.goal_constraints.length > 0
       ? { goal_constraints: admitted.goal_constraints }
       : {}),
-  };
+  } as Record<string, any>).graph as { nodes: typeof goalNodes; edges: typeof admitted.edges; goal_constraints?: typeof admitted.goal_constraints };
 
   // Never persist a graph the product cannot then read.
   const parsed = GraphV3.safeParse(graph);
