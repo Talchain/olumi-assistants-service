@@ -167,12 +167,24 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
         const counted = quantity.claim.unit.counted_object;
         const escaped = counted.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const sourceNamesCount = new RegExp(`\\b${escaped}\\b`, 'i').test(numberSource.quote);
+        const literal = quantity.claim.number.literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const countPhrase = `${literal}\\s+${escaped}`;
+        // A new-hire count is not total workforce headcount. Accept the direct
+        // action or its immediately coordinated alternative ("hire X or Y").
+        // Do not borrow "hire" from another sentence or from the display label.
+        const prefix = brief.slice(0, numberSource.start);
+        const directHire = new RegExp(`^hire\\s+${countPhrase}$`, 'i').test(numberSource.quote);
+        const coordinatedHire = new RegExp(`^${countPhrase}$`, 'i').test(numberSource.quote)
+          && /\bhire\s+(?:[\w,-]+\s+){1,6}or\s+$/i.test(prefix);
+        const hireStart = directHire ? numberSource.start : prefix.search(/\bhire\s+(?:[\w,-]+\s+){1,6}or\s+$/i);
+        const sourceNamesHiring = (directHire || coordinatedHire)
+          && !/\b(?:not|never|without|avoid)\s*$/i.test(brief.slice(0, hireStart));
         const sourceOwnsClaim = ownerSource.start <= source.source.start && ownerSource.end >= source.source.end
           && source.source.start <= numberSource.start && source.source.end >= numberSource.end;
         const quantityRef = `option_quantity:${option.entity_ref}:${quantity.claim.ref}`;
-        if (sourceNamesCount && sourceOwnsClaim && !allRefs.includes(quantityRef) && !nodes.has(quantityRef)) {
+        if (sourceNamesCount && sourceNamesHiring && sourceOwnsClaim && !allRefs.includes(quantityRef) && !nodes.has(quantityRef)) {
           target = {
-            id: sourceEntityId(quantityRef), kind: 'factor', label: counted,
+            id: sourceEntityId(quantityRef), kind: 'factor', label: `${counted} to hire`,
             category: 'controllable', provenance: 'from_brief', source_quote: numberSource.quote,
             description: numberSource.quote, scale_frame: defaultFrameFor(quantity.value),
           };

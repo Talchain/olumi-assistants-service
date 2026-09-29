@@ -14,7 +14,7 @@ describe('source-first projection of option-owned quantities', () => {
     const options = result.graph.nodes.filter((node) => node.kind === 'option');
     const factors = result.graph.nodes.filter((node) => node.kind === 'factor');
     expect(options).toHaveLength(2);
-    expect(factors.map((node) => node.label)).toEqual(['senior engineers', 'junior engineers']);
+    expect(factors.map((node) => node.label)).toEqual(['senior engineers to hire', 'junior engineers to hire']);
     expect(factors.every((node) => node.observed_state === undefined)).toBe(true);
     for (const [index, option] of options.entries()) {
       const factor = factors[index];
@@ -56,7 +56,7 @@ describe('source-first projection of option-owned quantities', () => {
       captured.meaning.quantities[0].role = role;
       const result = compileSourceMeaning(captured.brief, captured.meaning);
       expect(result.graph.nodes.find((node) => node.id === sourceEntityId('o1'))?.interventions).toEqual({});
-      expect(result.graph.nodes.some((node) => node.kind === 'factor' && node.label === 'senior engineers')).toBe(false);
+      expect(result.graph.nodes.some((node) => node.kind === 'factor' && node.label === 'senior engineers to hire')).toBe(false);
     }
   });
 
@@ -68,6 +68,28 @@ describe('source-first projection of option-owned quantities', () => {
     const result = compileSourceMeaning(captured.brief, captured.meaning);
     expect(result.graph.nodes.find((node) => node.id === sourceEntityId('o1'))?.interventions).toEqual({});
     expect(result.graph.nodes.every((node) => node.observed_state === undefined)).toBe(true);
+  });
+
+  it('does not turn existing workforce into new hires even if extraction says proposed level', () => {
+    const captured = hiring();
+    captured.brief = 'We already have two senior engineers.';
+    const source = { quote: 'already have two senior engineers', start: null, end: null };
+    captured.meaning.entities = [{ ...captured.meaning.entities.find((entity) => entity.ref === 'o1')!, source }];
+    captured.meaning.quantities = [{ ...captured.meaning.quantities[0], number: { ...captured.meaning.quantities[0].number, source } }];
+    captured.meaning.options = [{ ...captured.meaning.options[0], interventions: [{ ...captured.meaning.options[0].interventions[0], source }] }];
+    captured.meaning.unknowns = [];
+    const result = compileSourceMeaning(captured.brief, captured.meaning);
+    expect(result.graph.nodes.filter((node) => node.kind === 'factor')).toHaveLength(0);
+    expect(result.graph.nodes.find((node) => node.id === sourceEntityId('o1'))?.interventions).toEqual({});
+    expect(result.trace.projected_option_quantities).toBe(0);
+  });
+
+  it('does not treat a negated hire action as a positive hiring count', () => {
+    const captured = hiring();
+    captured.brief = captured.brief.replace('Should we hire', 'Should we not hire');
+    const result = compileSourceMeaning(captured.brief, captured.meaning);
+    expect(result.graph.nodes.filter((node) => node.kind === 'factor')).toHaveLength(0);
+    expect(result.trace.projected_option_quantities).toBe(0);
   });
 
   it('uses stable source references when display labels change', () => {
