@@ -145,8 +145,18 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
     return refuse('unconvertible');
   }
 
-  // ── THE CONSTRUCTION PATH'S OWN SIZING ────────────────────────────────────────────────────────────────────────────
+  // ── NEVER A SILENT REVERSAL (Runtime 5883054365, reproduced on served journey C) ─────────────────────────────────
+  // The stated sign must agree with the STORED link's: its `effect_direction`, else the sign of its mean. A user who says
+  // the link runs the other way is correcting Olumi's direction — that is the reversal door (`propose_link_strength`
+  // with the user's direction words), never a side effect of sizing. `sizeLink`'s own check compares the figure with
+  // itself, so this one is the guard.
   const direction = effect.amount < 0 ? 'negative' : 'positive';
+  const storedMean = isRec(edge.strength) && finite(edge.strength.mean) ? edge.strength.mean : 0;
+  const storedDirection = edge.effect_direction === 'positive' || edge.effect_direction === 'negative' ? edge.effect_direction
+    : storedMean < 0 ? 'negative' : storedMean > 0 ? 'positive' : null;
+  if (storedDirection !== null && storedDirection !== direction) return refuse('sign_conflict');
+
+  // ── THE CONSTRUCTION PATH'S OWN SIZING ────────────────────────────────────────────────────────────────────────────
   const sizing = sizeLink(
     { direction, effect_amount: effect.amount, effect_per_source_change: effect.per_source_change, user_stated: true },
     sourceNode,

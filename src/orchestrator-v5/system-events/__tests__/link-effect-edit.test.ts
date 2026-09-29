@@ -189,6 +189,15 @@ describe('link effect writer — refuses what it cannot do exactly (fail closed,
     refused(params({}, g), 'definitional_link');
   });
 
+  it('sign_conflict: a stated effect running AGAINST the stored link is refused, never a silent reversal (Runtime 5883054365)', () => {
+    // Stored price → subs is negative; "+50 subscribers per £1" says the other way.
+    refused(params({ effect: { ...STATED, amount: 50 } }), 'sign_conflict');
+    // A link stored with no direction word reads its mean's sign.
+    const g = storedGraph();
+    delete g.edges[0].effect_direction;
+    refused(params({ effect: { ...STATED, amount: 50 } }, g), 'sign_conflict');
+  });
+
   it('quote_invalid: the approval must carry the user\'s own words (1..400 chars)', () => {
     refused(params({ quote: '' }), 'quote_invalid');
     refused(params({ quote: 'x'.repeat(401) }), 'quote_invalid');
