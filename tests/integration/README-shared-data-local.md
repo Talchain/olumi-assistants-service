@@ -54,6 +54,35 @@ in-process writer test starts after route authorization. AI summary narration ha
 no provider credentials here and uses its existing fallback. Browser, authorization
 and narration quality require their own real entry paths.
 
+## Local HTTP and browser path
+
+```sh
+env -u ANTHROPIC_API_KEY pnpm exec tsx scripts/dev/shared-data-api.mjs --port 8791
+# In the corresponding UI checkout:
+node scripts/shared-data-ui.mjs
+# Back in CEE, register an owned model for the browser:
+node scripts/dev/shared-data-seed.mjs
+```
+
+The API boots the real server, Agent route, ownership checks and graph CAS, with
+both CORS and the proxy limited to `http://127.0.0.1:5178`. Existing OpenAI and PLoT
+credentials are allowlisted from local files; shared Supabase values are discarded.
+The API and PostgREST verify the same local ES256 test-user token. Service access
+retains its separate HMAC token. No anonymous grants or ownership bypass are added.
+This verifies the token/ownership path, not an email or OAuth sign-in flow.
+
+Load the private `browser-auth.json` in a fresh Playwright browser, then open the
+seed script's `/#/scenario/...` URL. That file contains only the local SDK session:
+no model, report or conversation is preloaded. The UI wrapper enables the existing
+manual-edit dispatcher and V5 analysis path; the legacy direct-run path is off.
+Vite uses a private cache even when the checkout shares installed dependencies.
+
+`shared-data-turn.mjs` sends one real Agent turn and captures a subsequent cold
+read. `--read-only --label <name>` captures a read without an Agent call. Evidence
+is written to the private experiment directory without request credentials.
+The live API uses code-default prompts because the local prompt store is absent;
+its narration must not be described as staging-identical or an AI quality pass.
+
 Stop the transport with Ctrl-C, then `node scripts/dev/shared-data-db.mjs stop`.
 Only the two experiment containers stop; their local data is retained for reuse.
 Rollback code by returning to DL base `0f9db88d`; shared deployments are unchanged.

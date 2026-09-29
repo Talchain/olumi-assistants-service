@@ -15,15 +15,16 @@ const scenarioId = arg('--scenario', seed.scenarioId);
 if (!/^[0-9a-f-]{36}$/.test(scenarioId)) throw new Error('Scenario UUID required');
 const payload = { kind: 'message', source: 'composer', stage: 'analyse', turn_class: 'decide',
   scenario_id: scenarioId, turn_id: randomUUID(), message: arg('--message', 'Run the analysis and explain the result from this Run.') };
-const response = await fetch('http://127.0.0.1:8791/proxy/v5/turn', { method: 'POST',
+const readOnly = process.argv.includes('--read-only');
+const response = readOnly ? { status: null, ok: true } : await fetch('http://127.0.0.1:8791/proxy/v5/turn', { method: 'POST',
   headers: { 'content-type': 'application/json', origin: 'http://127.0.0.1:5178', authorization: `Bearer ${token}` },
   body: JSON.stringify(payload), signal: AbortSignal.timeout(180000) });
-const body = await response.json();
+const body = readOnly ? {} : await response.json();
 const readResponse = await fetch(`http://127.0.0.1:5178/bff/cee/scenarios/${scenarioId}/graph`, { method: 'POST',
   headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: '{}', signal: AbortSignal.timeout(30000) });
 const read = await readResponse.json();
 const path = resolve(stateDir, `${label}.json`);
-writeFileSync(path, JSON.stringify({ at: new Date().toISOString(), request: payload, status: response.status, body,
+writeFileSync(path, JSON.stringify({ at: new Date().toISOString(), request: readOnly ? null : payload, status: response.status, body,
   readStatus: readResponse.status, read }, null, 2), { mode: 0o600 });
 console.log(JSON.stringify({ status: response.status, readStatus: readResponse.status, scenarioId,
   reply: body.assistant_text, blockTypes: body.blocks?.map(b => b.type),
