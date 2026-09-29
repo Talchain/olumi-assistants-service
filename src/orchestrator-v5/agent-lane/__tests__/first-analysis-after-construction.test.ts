@@ -11,6 +11,7 @@
  * REQUEST (`built.mutated === true && built.replayed !== true`), with the (construction turn K,
  * revision H) prior fact as defence in depth. Every retry shape must fail that gate.
  */
+import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
@@ -46,7 +47,7 @@ const candidate = (optionLabel: string) => ({
 /** The stamp of the Run the post-run graph read selects. */
 const READ_RUN_AT = '2026-09-24T18:00:00.000Z';
 
-function product(opts: { reportReplay?: boolean; guest?: boolean; certain?: { optionId: string; hash?: string; recorded?: unknown[]; executedAt?: string } } = {}) {
+function product(opts: { reportReplay?: boolean; guest?: boolean; certain?: { optionId: string; hash?: string; recorded?: unknown[]; executedAt?: string }; readGraph?: unknown } = {}) {
   const reportReplay = opts.reportReplay ?? true;
   let registered = false;
   const versions: { version_id: string; sequence: number; creation: { kind: string; mutation_id: string; source_turn_id: string } }[] = [];
@@ -89,7 +90,7 @@ function product(opts: { reportReplay?: boolean; guest?: boolean; certain?: { op
       status: 200,
       json: registered
         ? {
-          graph: READY_GRAPH, graph_hash: hash(),
+          graph: opts.readGraph ?? READY_GRAPH, graph_hash: hash(),
           analysis_state: ran ? { run_state: { kind: 'complete_current', computed_at: READ_RUN_AT }, leader_claim: { permitted: false, withheld_reason: 'auto_initiated' } } : { run_state: { kind: 'never_run' }, leader_claim: { permitted: false } },
           ...(ran ? { analysis_result: { type: 'analysis_result', summary: 'A provisional first pass.',
             // Goal certainty (DL 5887061638): the first pass's per-option P(goal) and the Run stamp that binds it.
@@ -279,3 +280,20 @@ describe('goal certainty rides the first analysis too (DL 5887061638; the call-s
     expect(await firstPass()).not.toHaveProperty('goal_certainty');
   });
 });
+
+describe('the confirm card on the first pass (DL 5888399097; `../identity-card.ts`)', () => {
+  // R3's served ed49d44 run-0 stored model: MRR's parents are the user's £49 ("£/month") and 1,500, no identity.
+  const RUN0 = (JSON.parse(readFileSync(new URL('./fixtures/served-paul-mrr-ed49d44.json', import.meta.url), 'utf8')) as
+    { runs: { run: number; graph: unknown }[] }).runs.find((r) => r.run === 0)!.graph;
+
+  it('RED: a first pass whose read model holds a reading tells the Agent a card is waiting; the ordinary model does not', async () => {
+    const call: CallStructuredModel = async () => ({ text: JSON.stringify(candidate('Hire a tech lead')) });
+    const withCard = (await build(capsFor(product({ readGraph: RUN0 }), call))).first_analysis as Record<string, any>;
+    expect(withCard.ran).toBe(true);
+    expect(withCard.identity_card).toEqual(expect.objectContaining({ available: true }));
+    const without = (await build(capsFor(product(), call))).first_analysis as Record<string, any>;
+    expect(without.ran).toBe(true);
+    expect(without).not.toHaveProperty('identity_card');
+  });
+});
+
