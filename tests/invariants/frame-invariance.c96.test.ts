@@ -7,6 +7,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import { frameInvariance, frameOf, reframe } from '../helpers/frame-invariance.js';
+import { carryStatedLevelSpread } from '../../src/orchestrator-v5/tools/handlers/stated-level-spread.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync(new URL('../fixtures/served/c96fc4bb-saved-graph.json', import.meta.url), 'utf8')) as { graph: Rec };
@@ -136,6 +137,24 @@ describe('frame invariance — the oracle on the served c96 graph', () => {
     expect(frameInvariance(g, reframe(g, 'csat', 10))).toEqual(['bounded_scale csat 5 → 10 (top 5)']);
     expect(frameInvariance(c96(), reframe(c96(), 'mrr', 500_000))).toEqual([]); // control: money is not bounded
     expect(frameInvariance(g, reframe(g, 'sla', 12))).toEqual([]); // tightening the source fits it without touching CSAT
+  });
+
+  it('PR Review CR 5898213793: a STATED factor widened keeps its wire spread exact (1e-4 both); Olumi\'s estimate moves 10 → 50 and is refused', () => {
+    const row = (source: string): Rec => ({ nodes: [
+      { id: 'x', kind: 'factor', label: 'X', observed_state: { value: 0.2, raw_value: 20, cap: 100, source: 'brief_extraction' } },
+      { id: 'y', kind: 'factor', label: 'Y', observed_state: { value: 0.4, raw_value: 40, cap: 100, source } },
+    ], edges: [{ from: 'x', to: 'y', strength: { mean: 3 } }] });
+    const wireStd = (g: Rec): unknown => (carryStatedLevelSpread(g) as Rec).nodes.find((n: Rec) => n.id === 'y').observed_state.std;
+    // Stated: the Run's wire (carryStatedLevelSpread) sends Y at 1e-4 on BOTH frames, so PLoT samples it exactly both times.
+    const stated = row('brief_extraction');
+    const widened = reframe(stated, 'y', 500);
+    expect([wireStd(stated), wireStd(widened)]).toEqual([1e-4, 1e-4]);
+    expect(frameInvariance(stated, widened)).toEqual([]);
+    // Olumi's estimate: no wire std, so PLoT's default max(0.1, 0.15·value) on the frame: 10 → 50 natural → refused.
+    const olumi = row('cee_inference');
+    const widenedOlumi = reframe(olumi, 'y', 500);
+    expect([wireStd(olumi), wireStd(widenedOlumi)]).toEqual([undefined, undefined]);
+    expect(frameInvariance(olumi, widenedOlumi)).toEqual(['spread_moved y 10.00 → 50.00 (floor-bound)']);
   });
 
   it('⭐ R3: no frame below the node\'s own level or an option\'s value for it', () => {
