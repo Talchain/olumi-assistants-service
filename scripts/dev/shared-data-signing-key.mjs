@@ -23,3 +23,16 @@ export function publicJwkOf(privateJwk) {
   const { d: _secret, ...publicJwk } = privateJwk;
   return publicJwk;
 }
+
+/** The experiment's one synthetic user ({id: uuid}), created once at mode 600. The DB runner seeds it into the local
+ * `auth.users` (tables whose user_id references it); the API script signs its token for it. */
+export function ensureLocalUser(stateDir) {
+  const file = resolve(stateDir, 'api-user.json');
+  if (!existsSync(file)) {
+    try { writeFileSync(file, JSON.stringify({ id: randomUUID() }), { mode: 0o600, flag: 'wx' }); }
+    catch (error) { if (error?.code !== 'EEXIST') throw error; }
+  }
+  const user = JSON.parse(readFileSync(file, 'utf8'));
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(user.id)) throw new Error('api-user.json id is not a UUID');
+  return user;
+}
