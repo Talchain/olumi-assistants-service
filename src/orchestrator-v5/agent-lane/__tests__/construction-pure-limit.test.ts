@@ -139,6 +139,11 @@ describe('CONTRAST — shapes that must NOT change', () => {
   it('the ONLY exemption: a goal declared as an identity containing the spend keeps the edge', () => {
     unchanged(candidate((c) => {
       c.identities = [{ outcome: 'ship the new platform', operation: 'product', factors: ['Annual salary spend', 'Engineering delivery capacity'], provenance: 'inferred' }];
+      // #2319: Olumi's product is declared only over parts with a level above 0 today (the served draft holds both at 0).
+      for (const f of c.factors as Json[]) {
+        if (f.label === 'Annual salary spend') f.baseline_value = 800_000;
+        if (f.label === 'Engineering delivery capacity') f.baseline_value = 10;
+      }
     }));
   });
 

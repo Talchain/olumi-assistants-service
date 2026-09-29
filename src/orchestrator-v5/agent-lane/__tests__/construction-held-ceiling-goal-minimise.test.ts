@@ -136,7 +136,9 @@ describe('a ceiling the user WROTE: the run minimises, and the stated current le
     expect(goal.observed_state).toStrictEqual({
       value: 1, baseline: 1, unit: '£k/month', source: 'brief_extraction', raw_value: 45, cap: 45,
     });
-    expect(said(result)).not.toMatch(/was not used|cannot be calculated correctly yet/);
+    // #2319: Olumi's product over the share (0 today) is refused and said; that line is not about the goal's level.
+    expect(said(result).split(' · ').filter((l) => !l.includes('multiplied together, but')).join(' · '))
+      .not.toMatch(/was not used|cannot be calculated correctly yet/);
     // One request: the level ISL reads AND the sense it reads it with (a level without `minimise` is the untruth).
     const req = await plotRequestFor(graph);
     expect(goalOnWire(req, goal.id).observed_state).toMatchObject({ value: 1, baseline: 1, raw_value: 45, cap: 45 });

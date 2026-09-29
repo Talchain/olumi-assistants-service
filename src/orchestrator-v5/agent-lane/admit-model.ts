@@ -1681,15 +1681,20 @@ export function unlevelledProductQuestions(admitted: Pick<AdmittedModel, 'nodes'
   const parts = (admitted.unlevelled_product_parts ?? []).map((id) => admitted.nodes.find((n) => n.id === id)).filter((n) => n !== undefined);
   if (goal === undefined || parts.length === 0) return [];
   const level = (n: AdmittedNode): number | undefined => n.observed_state?.value;
+  // ‘…’ like the other readings the user sees (AIQ 5898886960).
+  const named = (labels: readonly string[]): string => {
+    const q = labels.map((l) => `‘${l}’`);
+    return q.length <= 1 ? (q[0] ?? '') : `${q.slice(0, -1).join(', ')} and ${q[q.length - 1]}`;
+  };
   const none = parts.filter((n) => level(n) === undefined).map((n) => n.label);
   const zero = parts.filter((n) => level(n) !== undefined).map((n) => n.label);
   const state = [
-    none.length > 0 ? `${quotedList(none)} ${none.length === 1 ? 'has' : 'have'} no figure yet` : null,
-    zero.length > 0 ? `${quotedList(zero)} ${zero.length === 1 ? 'is' : 'are'} 0 today` : null,
+    none.length > 0 ? `${named(none)} ${none.length === 1 ? 'has' : 'have'} no figure yet` : null,
+    zero.length > 0 ? `${named(zero)} ${zero.length === 1 ? 'is' : 'are'} 0 today` : null,
   ].filter((x) => x !== null).join(' and ');
   return [
-    `What do you expect ${quotedList(parts.map((n) => n.label))} to be? ${state.charAt(0).toUpperCase()}${state.slice(1)}, so Olumi adds up `
-    + `their effects on "${goal.label}" instead of multiplying them: treat the comparison as a rough approximation until you say.`,
+    `What do you expect ${named(parts.map((n) => n.label))} to be? ${state.charAt(0).toUpperCase()}${state.slice(1)}, so Olumi adds up `
+    + `their effects on ‘${goal.label}’ instead of multiplying them: treat the comparison as a rough approximation until you say.`,
   ];
 }
 

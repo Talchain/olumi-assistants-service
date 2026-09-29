@@ -10,6 +10,7 @@
  * which figures would let it be worked out that way.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { Ajv } from 'ajv';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
@@ -66,8 +67,8 @@ function run0(over: { share?: number | null; rate?: number | null; provenance?: 
 
 type Graph = { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
 
-async function build(wire: Record<string, unknown>): Promise<{ graph: Graph; out: unknown }> {
-  expect(strict(wire), JSON.stringify(strict.errors)).toBe(true);
+async function build(wire: Record<string, unknown>, brief = BRIEF, validate = true): Promise<{ graph: Graph; out: unknown }> {
+  if (validate) expect(strict(wire), JSON.stringify(strict.errors)).toBe(true);
   let registered: unknown = null;
   const call = (async () => ({ text: JSON.stringify(wire) })) as unknown as CallStructuredModel;
   const dispatch: InternalDispatch = async (path, body) => {
@@ -77,14 +78,14 @@ async function build(wire: Record<string, unknown>): Promise<{ graph: Graph; out
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief(SCENARIO, BRIEF, dispatch, call);
+  const out = await buildModelFromBrief(SCENARIO, brief, dispatch, call);
   expect((out as { ok: boolean }).ok, JSON.stringify(out)).toBe(true);
   return { graph: registered as Graph, out };
 }
 
 const carriers = (g: Graph): string[] => g.nodes.filter((n) => n.nonlinear_identity !== undefined).map((n) => n.id as string);
 
-const Q = 'What do you expect "GCP workload share" and "GCP saving rate" to be? "GCP workload share" and "GCP saving rate" have no figure yet, so Olumi adds up their effects on "Monthly spend" instead of multiplying them: treat the comparison as a rough approximation until you say.';
+const Q = 'What do you expect ‘GCP workload share’ and ‘GCP saving rate’ to be? ‘GCP workload share’ and ‘GCP saving rate’ have no figure yet, so Olumi adds up their effects on ‘Monthly spend’ instead of multiplying them: treat the comparison as a rough approximation until you say.';
 
 describe('a product Olumi reads over a part with no level is not declared, and its figures are asked once', () => {
   it('ROW 1 (run 0 as served): neither product is carried; ONE question names the share and the rate; each refusal is said', async () => {
@@ -106,7 +107,7 @@ describe('a product Olumi reads over a part with no level is not declared, and i
     expect(carriers(graph)).toEqual([]);
     const o = out as { open_questions?: string[]; not_represented?: string[] };
     expect(o.open_questions?.filter((q) => q.includes('What do you expect'))).toEqual([
-      'What do you expect "GCP workload share" to be? "GCP workload share" is 0 today, so Olumi adds up their effects on "Monthly spend" instead of multiplying them: treat the comparison as a rough approximation until you say.',
+      'What do you expect ‘GCP workload share’ to be? ‘GCP workload share’ is 0 today, so Olumi adds up their effects on ‘Monthly spend’ instead of multiplying them: treat the comparison as a rough approximation until you say.',
     ]);
     expect((o.not_represented ?? []).filter((l) => l.includes('multiplied together, but'))).toEqual([
       'Olumi read "Migrated monthly spend" as "AWS workload spend" and "GCP workload share" multiplied together, but "GCP workload share" is 0 today, so that was not used and nothing about it is assumed.',
@@ -120,6 +121,20 @@ describe('a product Olumi reads over a part with no level is not declared, and i
     const { graph, out } = await build(wire);
     expect(carriers(graph)).toEqual([]);
     expect((out as { open_questions?: string[] }).open_questions?.filter((q) => q.includes('What do you expect'))).toHaveLength(1);
+  });
+
+  it('ROW 4 (the REAL drafter, Paul\'s cut-costs brief — Baseline v1 corpus `cloud-2`): spend × share × saving, the share 0 today → refused, asked once', async () => {
+    const corpus = JSON.parse(readFileSync(new URL('./fixtures/baseline-v1-medium-drafts-20260928.json', import.meta.url), 'utf8')) as {
+      briefs: Record<string, string>; drafts: Record<string, { brief: string; output_text: string }>;
+    };
+    const wire = JSON.parse(corpus.drafts['cloud-2']!.output_text) as Record<string, unknown>;
+    expect(wire.identities).toEqual([{ outcome: 'Monthly cloud-cost reduction', operation: 'product',
+      factors: ['Pre-migration monthly spend', 'GCP workload share', 'GCP unit-cost saving'], provenance: 'ai_proposed' }]);
+    const { graph, out } = await build(wire, corpus.briefs.cloud!, false);
+    expect(carriers(graph)).toEqual([]);
+    expect((out as { open_questions?: string[] }).open_questions?.filter((q) => q.includes('What do you expect'))).toEqual([
+      'What do you expect ‘GCP workload share’ to be? ‘GCP workload share’ is 0 today, so Olumi adds up their effects on ‘Monthly spend’ instead of multiplying them: treat the comparison as a rough approximation until you say.',
+    ]);
   });
 
   it('CONTROL (every part has a level): both products are carried and nothing is asked', async () => {
