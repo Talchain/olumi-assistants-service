@@ -1817,6 +1817,7 @@ export async function buildModelFromBrief(
         .map((l) => l.after)
         .filter((a): a is string => typeof a === 'string'),
       // A goal read as a two-part product: an extra direct parent re-pointed or taken out (`product-goal-extra-parent.ts`).
+      ...admitted.loss.filter((l) => /\.rate_operand\./.test(l.field_path)).map((l) => l.reason),
       ...admitted.loss.filter((l) => /\.extra_parent\./.test(l.field_path)).map((l) => l.reason),
       ...unattachedLimitLines(candidate, admitted.loss),
       ...preparation.additions_without_total.map(sayAdditionWithoutTotal),
