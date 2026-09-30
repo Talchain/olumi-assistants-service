@@ -162,6 +162,7 @@ import { unitFamilyOf } from '../../routing/value-unit-resolution.js';
 import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
 import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
+import { optionNameAliases } from '../option-name-truth.js';
 import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, statingSentenceOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { figureInUserUnits, linkEffectReadingOf, readingOfLinkEffectApproval } from '../approval-chips.js';
@@ -1231,6 +1232,7 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
   const chancePermitted = current && goalChance === undefined
     && claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission }, { requested: true }).leader_may_be_named === true;
   const compared = rec(rec(g.analysis_result)?.enrichment)?.option_comparison;
+  const optionNames = optionNameAliases(g.raw);
   const decisions = Array.isArray(certainty?.options) ? certainty.options : [];
   const byId = new Map(decisions.flatMap((value) => {
     const row = rec(value);
@@ -1244,6 +1246,7 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
     const decision = byId.get(id);
     return [{ option_id: id,
       ...(typeof label === 'string' ? { option_label: label } : {}),
+      ...(optionNames.get(id)?.raw === label ? { display_label: optionNames.get(id)!.display } : {}),
       ...(goalChance === undefined && rec(row?.outcome) !== undefined ? { outcome: row!.outcome } : {}),
       ...(chancePermitted && typeof row?.probability_of_goal === 'number' && row.probability_of_goal > 0 && row.probability_of_goal < 1
         ? { probability_of_goal: row.probability_of_goal } : {}),
@@ -2554,6 +2557,7 @@ export function createAgentCapabilities(
     async getCanonicalState(ctx: AgentToolContext): Promise<ToolResult> {
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const optionNames = optionNameAliases(g.raw);
       return {
         ok: true,
         mutated: false,
@@ -2562,7 +2566,9 @@ export function createAgentCapabilities(
         entities: g.nodes.map((n) => {
           // What each option already sets, as stored (RCA D1): quote these, never your own earlier arguments.
           const levels = projectOptionLevels(n, byIdOf(g));
-          return levels.length > 0 ? { ...projectEntity(n), levels } : projectEntity(n);
+          const alias = optionNames.get(n.id);
+          const entity = { ...projectEntity(n), ...(alias === undefined ? {} : { display_label: alias.display }) };
+          return levels.length > 0 ? { ...entity, levels } : entity;
         }),
         // ⛔ No `existing_links`: it was `links[].from -> to` again, 1.4–1.6k chars of every given state (PJ-C1, #70 5859578339).
         // Derived by traversal of the persisted graph — facts, not estimates,
