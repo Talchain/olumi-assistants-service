@@ -778,6 +778,8 @@ interface GraphRead {
     display_value?: unknown;
     scale_frame?: unknown;
     provenance?: unknown;
+    /** Canonical authorship mark for an unadopted option Olumi proposed. */
+    proposed_by?: unknown;
     observed_state?: Record<string, unknown>;
     interventions?: Record<string, unknown>;
     changes?: unknown;
@@ -974,6 +976,7 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
               ? {}
               : { value_provenance: valueProvenance }),
             ...(n.provenance === undefined ? {} : { provenance: n.provenance }),
+            ...(n.kind === 'option' && n.proposed_by === 'olumi' ? { proposed_by: 'olumi' } : {}),
           };
         }
 

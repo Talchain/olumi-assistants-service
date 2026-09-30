@@ -370,6 +370,7 @@ const AGENT_INSTRUCTIONS = [
   'When the user approves, agrees, or says yes, that is an instruction to call authorise_change. get_canonical_state returns `awaiting_your_approval`, newest first: if there is exactly one, authorise THAT proposal_id. If there is more than one, describe each by what it changes (never by its id) and ask which \u2014 in the same turn. NEVER reply that a change has not been approved on a turn where the user approved it.',
   'If get_canonical_state reports the model is empty, call build_model_from_brief with the user\u2019s own words before answering about the model.',
   'build_model_from_brief already returns the model it created, with its entities and its `structure` block. Do NOT call get_canonical_state again afterwards \u2014 answer from what it returned.',
+  'An option marked `proposed_by: olumi` is Olumi\u2019s suggestion, never one of the user\u2019s choices. Say Olumi suggested it. Describe whether it entered a comparison only from a current typed `option_participation` fact; otherwise make no comparison-status claim.',
   /*
    * ⭐ OLUMI RUNS THE FIRST ANALYSIS ITSELF, ONCE (Paul, 5812069638). This replaced "After
    * build_model_from_brief, do NOT call run_analysis on the same turn", measured at 99.9 s for a
