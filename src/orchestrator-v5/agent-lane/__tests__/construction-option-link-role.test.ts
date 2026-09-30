@@ -43,6 +43,13 @@ const sharedWordOnly = (m: Rec) => {
   m.links.push({ from: 'Price-driven churn', to: 'MRR', direction: 'negative', provenance: 'ai_proposed' });
   m.links.push({ from: 'Raise price to £59', to: 'Price-driven churn', direction: 'positive', provenance: 'explicit' });
 };
+// P0 PARTNER CR 5909944908, H1–H3: the brief names no new subscribers in the £59 option's clause.
+const NEW_SUBS = 'Monthly new Pro subscribers';
+const linkToNewSubs = (m: Rec) => { m.links.push({ from: 'Raise price to £59', to: NEW_SUBS, direction: 'negative', provenance: 'explicit' }); };
+const olumiLevelOnNewSubs = (m: Rec) => {
+  for (const o of m.options) if (PRICE_59.test(o.label)) o.interventions.push({ factor_label: NEW_SUBS, value: 80, value_kind: 'absolute', unit: 'subscribers per month', provenance: 'ai_proposed' });
+};
+const changesNewSubs = (m: Rec) => { for (const o of m.options) if (PRICE_59.test(o.label)) o.changes = [...(o.changes ?? []), NEW_SUBS]; };
 const linkToPrice = (m: Rec) => { m.links.push({ from: 'Raise price to £59', to: 'Pro plan monthly price', direction: 'positive', provenance: 'explicit' }); };
 const limitAsAction = (m: Rec) => {
   for (const o of m.options) if (PRICE_59.test(o.label)) o.interventions.push({ factor_label: 'Monthly churn', value: 5, value_kind: 'absolute', unit: '%', provenance: 'explicit' });
@@ -67,6 +74,8 @@ const option59 = (g: Rec): Rec => { const o = nodes(g).find((n) => n.kind === 'o
 const churnId = (g: Rec): string => { const c = nodes(g).find((n) => n.kind === 'factor' && /churn/i.test(String(n.label))); expect(c).toBeDefined(); return c!.id; };
 const priceAction = (g: Rec) => Object.entries(option59(g).interventions ?? {}).find(([t]) => /price/i.test(t));
 const priceId = (g: Rec): string => { const p = nodes(g).find((n) => n.kind === 'factor' && /price/i.test(String(n.label))); expect(p).toBeDefined(); return p!.id; };
+const userLinksToNewSubs = (g: Rec) => { const t = nodes(g).find((n) => n.label === NEW_SUBS); expect(t).toBeDefined();
+  return (g.edges ?? []).filter((e: Rec) => e.from === option59(g).id && e.to === t!.id && USER.has(String(e.provenance?.source))); };
 const linkToPriceSource = (g: Rec) => (g.edges ?? []).filter((e: Rec) => e.from === option59(g).id && e.to === priceId(g)).map((e: Rec) => e.provenance?.source);
 const userLinksToChurn = (g: Rec) => (g.edges ?? []).filter((e: Rec) => e.from === option59(g).id && e.to === churnId(g) && USER.has(String(e.provenance?.source)));
 const userActionsOnChurn = (g: Rec) => nodes(g).filter((n) => n.kind === 'option').flatMap((n) =>
@@ -104,6 +113,21 @@ describe('an option link or action the brief does not give is never the user\'s'
     const target = nodes(g).find((n) => /price-driven/i.test(String(n.label)));
     expect(target).toBeDefined();
     expect((g.edges ?? []).filter((e: Rec) => e.from === option59(g).id && e.to === target!.id && USER.has(String(e.provenance?.source)))).toEqual([]);
+  });
+
+  it('H1 (the served mechanism): a drafted "explicit" £59 → new subscribers link, the level-gap retry answering with an OLUMI level, is not the user\'s', async () => {
+    const g = await register([plant(linkToNewSubs), plant((m) => { linkToNewSubs(m); olumiLevelOnNewSubs(m); })]);
+    expect(userLinksToNewSubs(g)).toEqual([]);
+  });
+
+  it('H2: the drafter lists new subscribers in the £59 option\'s `changes`, with an "explicit" link: not the user\'s', async () => {
+    const g = await register([plant((m) => { changesNewSubs(m); linkToNewSubs(m); })]);
+    expect(userLinksToNewSubs(g)).toEqual([]);
+  });
+
+  it('H3: an Olumi level on new subscribers in the first answer, with an "explicit" link: not the user\'s', async () => {
+    const g = await register([plant((m) => { olumiLevelOnNewSubs(m); linkToNewSubs(m); })]);
+    expect(userLinksToNewSubs(g)).toEqual([]);
   });
 
   it('CONTROL — an "explicit" link from the £59 option to the price it sets stays the user\'s', async () => {
