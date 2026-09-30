@@ -3703,14 +3703,35 @@ function admitOnce(
    * canonical structural values, which is all the validator checks.
    */
   const USER_AUTHORED_EDGE_SOURCES = new Set(['brief_extraction', 'user_specified']);
+  /**
+   * ⛔ …AND ONLY THE OPTION'S OWN USER-STAMPED ACTION PUTS THE USER'S NAME ON ITS LINK (AIQ 5909030106 / 5909528911,
+   * DL 5909532986; MG SUCCESSOR root cause 5909516196). A link's `explicit` becomes `brief_extraction` for ANY link
+   * (`admit-candidate.ts`), so the drafter's word alone made "Raise price to £59 → Monthly churn" the user's on Paul's
+   * brief, whose only action is the price rise (P0's counterexample on the served control; the level-gap retry kept it
+   * whether it repeated the link, failed, or answered with the churn LIMIT as the option's action). An option → X link
+   * is the user's only when the brief's own words for that option name X (AIQ 5909754019 (1)), and admission has ONE
+   * reliable witness of that: the option's USER-STAMPED LEVEL on X ("Raise to £59" → the price). Everything else the
+   * drafter supplies (a `changes` entry, an Olumi level, a restated link) is its word, not the brief's, and no lexical
+   * test tells "£59 with AI release" → AI feature availability from "Raise price" → "Price-driven churn". So it fails
+   * CLOSED to Olumi's, which the user can confirm (P0 PARTNER CR 5909944908: H1 the level-gap retry's Olumi level,
+   * H2 a drafted `changes` entry, H3 an Olumi level in the first answer, each with a drafted `explicit` link, all became
+   * the user's under a "the user's option acts on X" rule). An under-claim is honest; a false "yours" is the defect.
+   */
+  const userActsOn = (optionId: string, factorId: string): boolean =>
+    USER_AUTHORED_EDGE_SOURCES.has(String(interventionsByOption.get(optionId)?.[factorId]?.source ?? ''));
   for (const t of topologyEdges) {
-    if (!duplicatePairs.has(`${t.from}::${t.to}`)) continue;
+    if (!duplicatePairs.has(`${t.from}::${t.to}`) || !userActsOn(t.from, t.to)) continue;
     const userStated = linkResult.edges.find(
       (e) => e.from === t.from && e.to === t.to && USER_AUTHORED_EDGE_SOURCES.has(String(e.provenance?.source ?? '')),
     );
     if (userStated?.provenance !== undefined) t.provenance = { source: userStated.provenance.source };
   }
   const causalEdges = linkResult.edges.filter((e) => !duplicatePairs.has(`${e.from}::${e.to}`));
+  for (const e of causalEdges) {
+    if (optionIdSet.has(e.from) && USER_AUTHORED_EDGE_SOURCES.has(String(e.provenance?.source ?? '')) && !userActsOn(e.from, e.to)) {
+      e.provenance = { ...e.provenance, source: 'cee_hypothesis' };
+    }
+  }
 
   /**
    * ⛔ AN OPTION LINKED STRAIGHT TO A RISK MAKES THE WHOLE MODEL UNANALYSABLE —

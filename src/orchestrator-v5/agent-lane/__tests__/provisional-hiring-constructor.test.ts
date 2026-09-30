@@ -280,7 +280,7 @@ describe('provisional hiring construction uses real admission and registration p
     expect(graph?.edges.find((e) => e.from === 'hire_two_developers' && e.to === 'onboarding_disruption')).toBeUndefined();
   });
 
-  it('RC fix (2), joint RED: the live hiring capture plus ONE user-stated option -> risk link builds first time and keeps the user edge', async () => {
+  it('RC fix (2), joint RED: the live hiring capture plus ONE drafted "explicit" option -> risk link builds first time, and the link is Olumi\'s', async () => {
     const live = JSON.parse(readFileSync(new URL('./fixtures/live-hiring-envelope-candidate-20260923.json', import.meta.url), 'utf8')).candidate as CandidateModel;
     // A link with NO mechanism in the capture ("Maintain Current Staffing" acts only on
     // "Existing team continuity", which never reaches "Hiring delay"), so only the
@@ -293,7 +293,10 @@ describe('provisional hiring construction uses real admission and registration p
     expect(prepareProvisionalCandidate(withUserLink).level_gaps.length).toBeGreaterThan(0);
     expect(calls).toBe(2);
     const userEdge = graph?.edges.find((e) => e.from === 'maintain_current_staffing' && e.to === 'hiring_delay');
-    expect(userEdge?.provenance).toMatchObject({ source: 'brief_extraction' });
+    // Re-recorded (AIQ 5909754019 (2), CEE #2355): "Maintain Current Staffing" is Olumi's option and the brief ("Should I
+    // hire a Tech lead or two developers…") has no clause naming hiring delay, so the drafter's `explicit` alone never
+    // makes this link the user's. It was `brief_extraction` before #2355.
+    expect(userEdge?.provenance).toMatchObject({ source: 'cee_hypothesis' });
     expect(userEdge?.effect_direction).toBe('negative');
     expect(prepareProvisionalCandidate(withUserLink).mechanism_issues).toEqual([]);
   });

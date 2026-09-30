@@ -334,12 +334,15 @@ describe('CONTRAST — nothing else moves, and nothing of the user’s is droppe
     expect(createHash('sha256').update(canon({ ...readBack, nodes: readBack.nodes.map(withoutG1) })).digest('hex')).toBe(ACYCLIC_BODY_SHA256_AT_BASE);
   });
 
-  it('a self-link the USER stated is never dropped: kept, and said as theirs', async () => {
+  // Re-recorded (CEE #2355; AIQ 5909754019 (2), P0 PARTNER CR 5909944908): a drafted `explicit` self-link with no
+  // figure of the user's behind it rests only on the drafter's word, so it is Olumi's link and is left out like one. The
+  // row below (the self-link carrying the USER's own figure) is the one the user owns, and it is still never dropped.
+  it('a drafted "explicit" self-link with no figure of the user\'s is Olumi\'s: left out, and said as Olumi\'s', async () => {
     const links = [...SERVED_LINKS, { ...L('Advertising investment', 'Advertising investment', 'positive'), provenance: 'explicit' as const }];
     const { out, graph } = await build(servedCandidate({ links }));
-    expect(loopWithheld(out)).toEqual([]);
-    expect(graph.edges.find((e) => e.from === ADVERTISING && e.to === ADVERTISING)?.provenance?.source).toBe('brief_extraction');
-    expect(loopLines(out).some((s) => s.startsWith('You linked "Advertising investment" to itself.'))).toBe(true);
+    expect(loopWithheld(out)).toEqual([SELF]);
+    expect(graph.edges.find((e) => e.from === ADVERTISING && e.to === ADVERTISING)).toBeUndefined();
+    expect(loopLines(out).some((s) => s.includes("it was Olumi's reading, not something you said"))).toBe(true);
   });
 
   it('a self-link carrying the USER’s own figure is never dropped: the figure stays, and nothing says it was Olumi’s', async () => {
