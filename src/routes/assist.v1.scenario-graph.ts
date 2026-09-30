@@ -296,18 +296,39 @@ function wantsConversationTurns(body: unknown): boolean {
 }
 
 /**
- * The scenario's turns, OLDEST first, at most {@link CONVERSATION_TURNS_CAP}, each reduced to its id, time and the two
- * stored texts. `readRecent` answers newest first and already leaves out claim rows; a turn with no text on either side
- * is not a message and is left out. Never throws: a failed read is `null` and the graph read stands.
+ * ⛔ ONLY WHAT THE USER SAW (Canvas #75 5910906799; root cause MG 5910983526; DL 5911089211; AIQ 5911161828).
+ *
+ * `v5_conversation_turns` holds more than the conversation. The Agent's tools reach the product through in-process
+ * turns (`/orchestrate/v2/turn`), and each commits its own row: served MRR `3b6369b0` 01:44:03 stored the MODEL's tool
+ * reason as `user_message` ("The user asked to run the analysis after confirming how MRR is calculated.") and the
+ * HANDLER's text as `assistant_message` ("… scored highest in 100% of runs"). The user saw neither: they typed "Run the
+ * analysis" and read the Agent's answer, which the Agent route writes as its OWN row. Restoring every row put words in
+ * the user's mouth and showed text they never read.
+ *
+ * The rows the user saw are the Agent route's answer rows, and every one of them carries the route's own request
+ * hash: `agent_turn:` (`agentTurnRequestHash`, `agent-v1-turn.ts`). The turn executor's rows carry `sha256:`, a
+ * registration `graph_registration:`. So the restore keeps `agent_turn:` rows only. That is a marker already stored
+ * on every row, so rows written before this change are dropped too. A board edit forwarded from the canvas is left
+ * out as well: its narration was shown when it happened, and a restore omits it rather than risk text the user never
+ * saw.
+ */
+export const AGENT_ANSWER_REQUEST_HASH_PREFIX = "agent_turn:";
+
+/**
+ * The scenario's turns, OLDEST first, from the last {@link CONVERSATION_TURNS_CAP} rows, each reduced to its id, time
+ * and the two stored texts. `readRecent` answers newest first; only the Agent's answer rows are kept (above), and a turn
+ * with no text on either side (the Agent's claim row) is not a message and is left out. Never throws: a failed read is
+ * `null` and the graph read stands.
  */
 async function readConversationTurns(
-  store: { readRecent(scenarioId: string, limit?: number): Promise<readonly { turn_id: string; created_at: string; user_message?: string | null; assistant_message?: string | null }[]> },
+  store: { readRecent(scenarioId: string, limit?: number): Promise<readonly { turn_id: string; created_at: string; request_hash?: string; user_message?: string | null; assistant_message?: string | null }[]> },
   scenarioId: string,
   requestId: string,
 ): Promise<ConversationTurnRead[] | null> {
   try {
     const rows = await store.readRecent(scenarioId, CONVERSATION_TURNS_CAP);
     return [...rows].reverse()
+      .filter((r) => typeof r.request_hash === "string" && r.request_hash.startsWith(AGENT_ANSWER_REQUEST_HASH_PREFIX))
       .map((r) => ({
         turn_id: r.turn_id,
         created_at: r.created_at,
