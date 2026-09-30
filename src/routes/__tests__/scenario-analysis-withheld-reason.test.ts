@@ -54,11 +54,11 @@ const RUN_AT = '2026-09-24T17:00:00.000Z';
 const RUN_ROW = 'run-fact-row';
 
 
-function runFact(opts: { mayName: boolean; auto: boolean; state?: 'not_applicable' | 'evaluated_infeasible' }) {
+function runFact(opts: { mayName: boolean; auto: boolean; state?: 'not_applicable' | 'evaluated_infeasible'; status?: 'completed' | 'partial'; at?: string }) {
   return RunAnalysisHandlerFactSchema.parse({
     fact_type: 'run_analysis', fact_version: 1, noop: false,
     result: {
-      scenario_id: SCENARIO, computed_at: RUN_AT, graph_hash_at_run: HASH,
+      scenario_id: SCENARIO, computed_at: opts.at ?? RUN_AT, graph_hash_at_run: HASH,
       leading_option_id: 'option-a', summary: 'Option A leads on the current model.',
       win_probabilities: { 'option-a': 0.65, 'option-b': 0.35 },
       constraint_verdict: {
@@ -66,7 +66,7 @@ function runFact(opts: { mayName: boolean; auto: boolean; state?: 'not_applicabl
         constraint_verdict_state: opts.state ?? (opts.mayName ? 'evaluated_feasible' : 'evaluated_infeasible'),
       },
       enrichment: {
-        analysis_status: 'completed',
+        analysis_status: opts.status ?? 'completed',
         robustness: { level: 'strong', near_tie: { is_tie: false } },
         ...(opts.auto ? { run_provenance: { initiated_by: 'auto_post_draft' } } : {}),
       },
@@ -74,10 +74,11 @@ function runFact(opts: { mayName: boolean; auto: boolean; state?: 'not_applicabl
   });
 }
 
-async function reloadWith(fact: ReturnType<typeof runFact>, id: string) {
+async function reloadWith(fact: ReturnType<typeof runFact> | readonly ReturnType<typeof runFact>[], id: string) {
+  const facts = Array.isArray(fact) ? fact : [fact];
   readScenarioRunAnalysisFactsFor.mockResolvedValue({
-    facts: [{ fact, fact_row_id: RUN_ROW, fact_created_at: RUN_AT }],
-    total_count: 1,
+    facts: facts.map((item, index) => ({ fact: item, fact_row_id: `${RUN_ROW}-${index}`, fact_created_at: item.result.computed_at })),
+    total_count: facts.length,
   });
   readRecent.mockResolvedValue([]);
   readFactsFor.mockResolvedValue([]);
@@ -110,6 +111,22 @@ describe('the reload names the cause of a withheld leader that it can prove', ()
     expect(result.analysis_state?.leader_claim).toMatchObject({ permitted: false, withheld_reason: 'analysis_leader_withheld' });
     const said = agentNoLeaderSentence(result.analysis_state?.leader_claim.withheld_reason, undefined);
     expect(said).not.toMatch(/limit|run the analysis again/i);
+  });
+
+  it('a newer partial limit-withheld Run cannot borrow an older no-limit cause', async () => {
+    const older = runFact({ mayName: false, auto: false, state: 'not_applicable' });
+    const newer = runFact({ mayName: false, auto: false, state: 'evaluated_infeasible', status: 'partial', at: '2026-09-24T18:00:00.000Z' });
+    const result = await reloadWith([newer, older], 'w-newer-limit');
+    expect(result.analysis_result, 'older successful Run remains displayable').not.toBeNull();
+    expect(result.analysis_state?.leader_claim.withheld_reason).toBe('constraint_verdict_withheld');
+  });
+
+  it('a newer partial no-limit Run keeps its own generic cause even when the older displayed Run had a limit', async () => {
+    const older = runFact({ mayName: false, auto: false, state: 'evaluated_infeasible' });
+    const newer = runFact({ mayName: false, auto: false, state: 'not_applicable', status: 'partial', at: '2026-09-24T18:00:00.000Z' });
+    const result = await reloadWith([newer, older], 'w-newer-no-limit');
+    expect(result.analysis_result, 'older successful Run remains displayable').not.toBeNull();
+    expect(result.analysis_state?.leader_claim.withheld_reason).toBe('analysis_leader_withheld');
   });
 
   it('CONTROL: an automatic run whose constraint verdict ALSO withholds names the real limit', async () => {

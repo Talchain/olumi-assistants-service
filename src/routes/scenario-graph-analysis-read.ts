@@ -350,6 +350,9 @@ export async function readScenarioAnalysis(
     const newerClaimWithholds = fact !== null && claimBearing !== null && claimBearing.fact !== fact
       && claimBearing.fact.fact_type === 'run_analysis'
       && !readMayNameLeadingOptionFromResult((claimBearing.fact as RunAnalysisHandlerFact).result);
+    // The claim-bearing Run can be newer than the completed Run whose figures
+    // are displayed. Any cause for its refusal must come from that Run too.
+    const claimFact = newerClaimWithholds ? claimBearing!.fact as RunAnalysisHandlerFact : fact;
 
     // ⭐ (B) THE ONE ADMISSION VERDICT — the SAME authority and the SAME
     // threading the turn replies use (`route-v2.ts` passes
@@ -423,25 +426,25 @@ export async function readScenarioAnalysis(
         // 5843934816): `currentGraphHash` is this route's own freshness hash of `params.graph`, the value it
         // compared with the fact's `graph_hash_at_run`; the cause is refused unless the two are equal.
         ...(() => {
-          const c46 = fact !== null
+          const c46 = claimFact !== null
             ? nonlinearIdentityLeaderClaimCause({
               graph: params.graph,
               graphHash: currentGraphHash,
-              result: fact.result,
-              requested: wasAnalysisRequestedByUser(fact),
+              result: claimFact.result,
+              requested: wasAnalysisRequestedByUser(claimFact),
             })
             : null;
           return {
-            withheldBecauseUnrequested: (fact !== null && leaderWithheldOnlyBecauseUnrequested(fact)) || c46?.withheldBecauseUnrequested === true,
+            withheldBecauseUnrequested: (claimFact !== null && leaderWithheldOnlyBecauseUnrequested(claimFact)) || c46?.withheldBecauseUnrequested === true,
             withheldBecauseNonlinearIdentity: c46?.withheldBecauseNonlinearIdentity === true,
-            withheldWithoutConstraintCause: fact !== null && leaderWithheldWithoutConstraintCause(fact.result),
+            withheldWithoutConstraintCause: claimFact !== null && leaderWithheldWithoutConstraintCause(claimFact.result),
             // F-LIMIT: judged on the SAME fact the permission above was read from (null when out of date), against the
             // limits the user ratified on this graph.
             ...(() => {
               // N1: never a limit on a node whose P the additive model gives under a nonlinear identity.
               const distrusted = nodesUnderANonlinearIdentity(params.graph);
-              const limit = fact !== null
-                ? deriveEveryOptionLimitVerdict(fact.result,
+              const limit = claimFact !== null
+                ? deriveEveryOptionLimitVerdict(claimFact.result,
                   readRatifiedConstraints(params.graph).filter((c) => c.node_id == null || !distrusted.has(c.node_id)))
                 : null;
               return limit === null ? {} : { everyOptionLimit: limit.kind };
