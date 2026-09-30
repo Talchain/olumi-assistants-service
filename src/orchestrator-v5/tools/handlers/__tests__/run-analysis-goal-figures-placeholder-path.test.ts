@@ -21,7 +21,11 @@ import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
 import { GOAL_FIGURES_PLACEHOLDER_PATH } from '../../../../orchestrator/context/option-result-source.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
 import { goalChanceWithheldForAgent, PLACEHOLDER_PATH_NOTE } from '../../../agent-lane/goal-chance-withheld.js';
-import { placeholderGoalPaths } from '../../../agent-lane/goal-certainty.js';
+import { placeholderGoalPaths, placeholderGoalWarning } from '../../../agent-lane/goal-certainty.js';
+import { buildAnalysisResultBlock } from '../../../compose.js';
+import { composeAnalysisStateV1, readRawRobustnessFromResponseBody } from '../../../compose/analysis-state-v1.js';
+import { mayPresentLeaderClaimForFact } from '../../../compose/unrequested-analysis-confinement.js';
+import { claimPermissionsFrom } from '../../../agent-lane/first-analysis.js';
 import type { HandlerInvocation } from '../../registry.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
@@ -62,7 +66,26 @@ async function runOn(graph: Json, body: Json = F.plot_body): Promise<Json> {
   const fact = outcome.handler_facts[0]!;
   if (fact.fact_type !== 'run_analysis') throw new Error(`wrong fact_type ${fact.fact_type}`);
   expect(RunAnalysisResultSchema.safeParse(fact.result).success).toBe(true);
+  lastFact = fact;
   return fact.result as Json;
+}
+let lastFact: unknown;
+
+const CANONICAL_FRESH = {
+  status: 'ready', freshness: 'fresh', freshness_reason: 'hash_match', selected_fact_index: 0, computed_at: '2026-09-30T01:48:05.000Z',
+  graph_hash_at_run: 'h1', current_graph_hash: 'h1', blockers: [], model_adjustments: [], goal_node_id: 'monthly_cloud_spend', degraded_fact_status: null,
+  contradictions: [], usableForProse: true, usableForChips: true, usableForFollowupContext: true, requiresRerun: false, blockedUnusable: false,
+} as never;
+/** The leader permission every consumer obeys (the cards, the egress guard, the Agent), composed as the read route composes it. */
+function leaderClaimOf(fact: unknown): { claim: Json; mayBeNamed: boolean } {
+  const block = buildAnalysisResultBlock(fact as never);
+  const state = composeAnalysisStateV1({
+    canonical: CANONICAL_FRESH,
+    mayNameLeadingOption: mayPresentLeaderClaimForFact(fact as never),
+    rawRobustness: readRawRobustnessFromResponseBody({ blocks: [block] }),
+  } as never)!;
+  const perms = claimPermissionsFrom(state, { analysis_admission: { permitted_analysis_mode: 'comparative_leader' } }, { requested: true });
+  return { claim: (state as Json).leader_claim, mayBeNamed: perms.leader_may_be_named };
 }
 
 /** Every option-result entry for `id`, in every carrier the readers use. */
@@ -117,6 +140,23 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
     expect(r).toHaveProperty('leading_option_id', null);
   });
 
+  it('RED (AIQ 5902834053): the leader permission every consumer obeys is withheld, by name', async () => {
+    await runOn(F.graph);
+    const { claim, mayBeNamed } = leaderClaimOf(lastFact);
+    expect(claim.permitted).toBe(false);
+    expect(typeof claim.withheld_reason).toBe('string');
+    expect(claim.withheld_reason).not.toBe('');
+    expect(mayBeNamed).toBe(false);
+  });
+
+  it('ASK CONTROL: with the downtime level gone too, nothing is asked; both links are still named', () => {
+    const g = clone(F.graph);
+    delete (g.nodes as Json[]).find((n) => n.id === 'migration_downtime')!.observed_state;
+    const w = placeholderGoalWarning(g, placeholderGoalPaths(g, [REMAIN, SWITCH, PHASE]), GOAL_FIGURES_PLACEHOLDER_PATH);
+    expect(w.message).toContain('Olumi hasn’t sized how ‘Monthly GCP cost saving’ and ‘Migration downtime’ move ‘Monthly cloud spend’');
+    expect(w.message).not.toContain('Give a figure');
+  });
+
   it('CONTROL (R3 row): the status quo moves nothing, so its earned 0 stays', async () => {
     const r = await runOn(F.graph);
     const env = r.enrichment ?? r;
@@ -132,7 +172,10 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
     expect(w[0]!.message.startsWith('Not shown. ')).toBe(true);
     expect(w[0]!.message.length).toBeLessThanOrEqual(400);
     expect(w[0]!.message).toContain('Olumi hasn’t sized how ‘Monthly GCP cost saving’ and ‘Migration downtime’ move ‘Monthly cloud spend’');
-    expect(w[0]!.message).toContain('Give a figure for each link');
+    // The saving holds no level, so its size alone would add to EVERY option ("Stay on AWS" too): named, not asked.
+    // Migration downtime holds one (weeks), so that link is the one asked for.
+    expect(w[0]!.message).toContain('Give a figure for how ‘Migration downtime’ moves ‘Monthly cloud spend’ and Olumi will use it.');
+    expect(w[0]!.message).not.toContain('Give a figure for how ‘Monthly GCP cost saving’');
     const chance = goalChanceWithheldForAgent({ enrichment: env });
     expect(chance).toMatchObject({ withheld: true, note: PLACEHOLDER_PATH_NOTE });
     expect(chance!.option_ids!.slice().sort()).toEqual([PHASE, SWITCH]);

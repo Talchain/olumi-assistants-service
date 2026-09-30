@@ -442,16 +442,22 @@ export function placeholderGoalWarning(
     return isRec(id) && Array.isArray(id.factor_ids) && id.factor_ids.includes(l.from);
   };
   const links = [...new Map(paths.flatMap((p) => p.links).map((l) => [`${l.from}->${l.to}`, l] as const)).values()];
-  const asked = links.filter((l) => !cardSized(l));
+  const named = links.filter((l) => !cardSized(l));
+  // ⛔ ASK ONLY FOR A SIZE THAT CAN MAKE THE FIGURE RIGHT (AIQ 5902834053; MG successor 5902809244): a link from a node
+  // that holds no level would add the same amount to EVERY option once sized ("Stay on AWS" would save too), so it is
+  // named but not asked; its figures stay withheld until the model gives that node a level.
+  const asked = named.filter((l) => levelOf(byId.get(l.from)).value !== undefined);
   const byTarget = new Map<string, string[]>();
-  for (const l of asked) byTarget.set(l.to, [...(byTarget.get(l.to) ?? []), l.from]);
+  for (const l of named) byTarget.set(l.to, [...(byTarget.get(l.to) ?? []), l.from]);
   const phrases = [...byTarget].slice(0, 2).map(([to, froms]) =>
     `${list(froms.slice(0, 3).map(label))}${froms.length > 3 ? ' and others' : ''} ${froms.length === 1 ? 'moves' : 'move'} ${label(to)}`);
   const options = paths.map((p) => label(p.option_id));
   const opts = options.length > 3 ? `${list(options.slice(0, 2))} and ${options.length - 2} more options` : list(options);
   const verb = options.length === 1 ? 'is' : 'are';
   const sized = phrases.length === 0 ? '' : `Olumi hasn’t sized how ${phrases.join(', or how ')}${byTarget.size > 2 ? ', and more' : ''}, so t`;
-  const ask = asked.length === 0 ? '' : asked.length === 1 ? ' Give a figure for that link and Olumi will use it.' : ' Give a figure for each link and Olumi will use them.';
+  const ask = asked.length === 0 ? ''
+    : asked.length === named.length ? (asked.length === 1 ? ' Give a figure for that link and Olumi will use it.' : ' Give a figure for each link and Olumi will use them.')
+      : ` Give a figure for how ${list(asked.slice(0, 2).map((l) => `${label(l.from)} moves ${label(l.to)}`))} and Olumi will use it.`;
   const message = `Not shown. ${sized === '' ? 'T' : sized}his run can’t say how likely ${opts} ${verb} to reach the goal, or which option does best.${ask}`;
   return {
     code, message: message.length <= 400 ? message : `Not shown. This run can’t say how likely ${opts} ${verb} to reach the goal: a link on the way is not sized.${ask}`,
