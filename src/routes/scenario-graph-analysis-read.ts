@@ -101,7 +101,7 @@ import {
   loadScenarioAnalysisFactsForRead,
 } from '../orchestrator-v5/build-turn-context.js';
 import { buildAnalysisResultBlock } from '../orchestrator-v5/compose.js';
-import { attachComputedAt, type AnalysisReadyPayload } from '../orchestrator-v5/compose/analysis-ready-emit.js';
+import { attachComputedAt } from '../orchestrator-v5/compose/analysis-ready-emit.js';
 import {
   composeAnalysisStateV1,
   readRawRobustnessFromResponseBody,
@@ -148,8 +148,6 @@ export interface ScenarioAnalysisRead {
    * already believed standing.
    */
   readonly analysis_state: AnalysisStateV1 | null;
-  /** Existing freshness text carrier, present for the goal-snapshot stale boundary. */
-  readonly analysis_ready?: AnalysisReadyPayload;
   /**
    * The `analysis_result` block for the fact the verdict selected, present ONLY
    * on a fresh graph-hash verdict with no conflicting run identity. Legacy
@@ -476,6 +474,9 @@ export async function readScenarioAnalysis(
         ? projectCurrentRead({ analysisState: null })
         : projectCurrentRead({
             analysisState, derivation, analysisResult: boundResult,
+            ...(analysisReady !== undefined && (derivation.reason === 'goal_unit_changed'
+              || derivation.reason === 'goal_snapshot_unverified')
+              ? { analysisReady: attachComputedAt(analysisReady, derivation) } : {}),
             figures: projectSelectedRunFigures({
               scenarioId: params.scenarioId,
               runState: analysisState.run_state,
@@ -489,9 +490,6 @@ export async function readScenarioAnalysis(
             }),
           }),
       analysis_state: analysisState,
-      ...(analysisReady !== undefined && (derivation.reason === 'goal_unit_changed'
-        || derivation.reason === 'goal_snapshot_unverified')
-        ? { analysis_ready: attachComputedAt(analysisReady, derivation) } : {}),
       analysis_result: boundResult,
       // R3-9: every answered read carries it, from the same facts as the writer; never gated on freshness.
       analysis_identity_run_use: identityRunUseWire(facts),

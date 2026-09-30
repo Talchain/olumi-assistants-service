@@ -890,7 +890,8 @@ describe('SC-24 future goal-unit snapshot joins the cold read', () => {
       const stale = (await read(app)).json();
       expect(stale.analysis_state.run_state.kind).toBe('complete_stale');
       expect(stale.analysis_result).toBeNull();
-      expect(stale.analysis_ready).toMatchObject({ freshness: 'stale',
+      expect(stale).not.toHaveProperty('analysis_ready');
+      expect((stale.current_read as { analysis_ready?: unknown }).analysis_ready).toMatchObject({ freshness: 'stale',
         freshness_reason: 'your goal’s unit changed', computed_at: '2026-08-17T09:15:50.000Z' });
       (saved.result as Record<string, unknown>).input_snapshot = { goal: { node_id: 'goal_growth', unit: 'USD/month' } };
       (saved.result as Record<string, unknown>).computed_at = '2026-08-17T09:16:50.000Z';

@@ -1,6 +1,7 @@
 import type { AnalysisStateV1, OlumiResponse } from '@talchain/schemas/boundary';
 import type { FreshnessDerivation } from '../orchestrator-v5/context/freshness.js';
 import type { SelectedRunFigure } from './selected-run-figures.js';
+import type { AnalysisReadyPayload } from '../orchestrator-v5/compose/analysis-ready-emit.js';
 
 type ResultBlock = OlumiResponse['blocks'][number];
 type RunHashes = Pick<FreshnessDerivation, 'graph_hash_at_run' | 'current_graph_hash'>;
@@ -17,6 +18,8 @@ type RunHashes = Pick<FreshnessDerivation, 'graph_hash_at_run' | 'current_graph_
  * admission record's wider digest.
  */
 export interface CurrentReadProjection {
+  /** Readiness evidence belongs to this selected Run, never a second top-level authority. */
+  readonly analysis_ready?: AnalysisReadyPayload;
   readonly run_state: AnalysisStateV1['run_state'] | null;
   readonly computed_against_hash: string | null;
   readonly current_analysis_hash: string | null;
@@ -29,6 +32,7 @@ export interface CurrentReadProjection {
 export type CurrentReadInput =
   | { readonly analysisState: null; readonly derivation?: null; readonly analysisResult?: null }
   | { readonly analysisState: AnalysisStateV1; readonly derivation: RunHashes; readonly analysisResult: ResultBlock | null;
+      readonly analysisReady?: AnalysisReadyPayload;
       readonly figures?: readonly SelectedRunFigure[] };
 
 export function projectCurrentRead(input: CurrentReadInput): CurrentReadProjection {
@@ -37,6 +41,7 @@ export function projectCurrentRead(input: CurrentReadInput): CurrentReadProjecti
   }
 
   return {
+    ...(input.analysisReady === undefined ? {} : { analysis_ready: input.analysisReady }),
     run_state: input.analysisState.run_state,
     computed_against_hash: input.derivation.graph_hash_at_run,
     current_analysis_hash: input.derivation.current_graph_hash,

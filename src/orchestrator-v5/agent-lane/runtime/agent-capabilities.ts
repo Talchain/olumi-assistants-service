@@ -1635,7 +1635,10 @@ export function createAgentCapabilities(
       nodes: (g.nodes as GraphRead['nodes']) ?? [],
       edges: (g.edges as GraphRead['edges']) ?? [],
       analysis_state: r.json.analysis_state,
-      ...(r.json.analysis_ready !== undefined ? { analysis_ready: r.json.analysis_ready } : {}),
+      ...(() => {
+        const readiness = (r.json.current_read as { analysis_ready?: unknown } | undefined)?.analysis_ready;
+        return readiness === undefined ? {} : { analysis_ready: readiness };
+      })(),
       ...(r.json.analysis_admission !== undefined && r.json.analysis_admission !== null ? { analysis_admission: r.json.analysis_admission } : {}),
       raw: g,
       ...(notModelled !== undefined ? { not_modelled: notModelled } : {}),
