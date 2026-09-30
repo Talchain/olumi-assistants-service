@@ -469,14 +469,21 @@ export function placeholderGoalWarning(
   const verb = options.length === 1 ? 'is' : 'are';
   const sized = phrases.length === 0 ? '' : `Olumi hasn’t sized how ${phrases.join(', or how ')}${byTarget.size > 2 ? ', and more' : ''}, so t`;
   const ask = asked.length === 0 ? ''
-    : asked.length === named.length ? (asked.length === 1 ? ' Give a figure for that link and Olumi will use it.' : ' Give a figure for each link and Olumi will use them.')
-      : ` Give a figure for how ${list(asked.slice(0, 2).map((l) => `${label(l.from)} moves ${label(l.to)}`))} and Olumi will use it.`;
+    : ` Give a figure for how ${list(asked.slice(0, 2).map((l) => `${label(l.from)} moves ${label(l.to)}`))} and Olumi will use it.`;
   const guess = guessed.length === 0 ? ''
     : ` Olumi only guessed that ${list(guessed.slice(0, 2).map((l) => `${label(l.from)} changes ${label(l.to)}`))}, so you aren’t asked `
       + `to size ${guessed.length === 1 ? 'that link' : 'those links'}.`;
   const message = `Not shown. ${sized === '' ? 'T' : sized}his run can’t say how likely ${opts} ${verb} to reach the goal, or which option does best.${ask}${guess}`;
+  const compactLabel = (id: string): string => {
+    const value = text(byId.get(id)?.label) ?? id;
+    return `‘${value.length <= 48 ? value : `${value.slice(0, 47).trimEnd()}…`}’`;
+  };
+  const fallbackAsk = asked.length === 0 ? ''
+    : ` Give a figure for how ${compactLabel(asked[0]!.from)} moves ${compactLabel(asked[0]!.to)} and Olumi will use it.`;
+  const fallbackGuess = guessed.length === 0 ? '' : ' Olumi only guessed another link; you aren’t asked to size it.';
   return {
-    code, message: message.length <= 400 ? message : `Not shown. This run can’t say how likely ${opts} ${verb} to reach the goal: a link on the way is not sized.${ask}${guess}`,
+    code, message: message.length <= 400 ? message
+      : `Not shown. This run can’t say how likely these options are to reach the goal: a link on the way is not sized.${fallbackAsk}${fallbackGuess}`,
     severity: 'warning',
     node_ids: [...new Set(links.flatMap((l) => [l.from, l.to]))],
     option_ids: paths.map((p) => p.option_id),

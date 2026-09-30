@@ -42,6 +42,90 @@ describe('the no-leader sentence never asks for a rerun that cannot help', () =>
     expect(agentNoLeaderSentence('constraint_verdict_withheld', analysisReady, ['CONSTRAINT_LEVEL_DRAWS_OUT_OF_DOMAIN'])).toContain('set one of them yourself, then run the analysis again');
   });
 
+  it('CO-HELD: the served (S) warning names the unsized link and removes the futile admission-only rerun', () => {
+    const analysisReady = { analysis_admission: { permitted_analysis_mode: 'quantified_provisional', reasons: [{ field: 'permitted_analysis_mode', code: 'CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED' }] } };
+    const graph = {
+      nodes: [{ id: 'saving', label: 'Expected GCP-related monthly saving' }, { id: 'costs', label: 'Costs' }],
+      edges: [{ from: 'saving', to: 'costs', provenance: { magnitude: 'olumi_placeholder' } }],
+    };
+    const blocks = [{ type: 'analysis_result', enrichment: { inference_warnings: [{
+      code: 'GOAL_FIGURES_PLACEHOLDER_PATH', node_ids: ['saving', 'costs'], option_ids: ['switch'],
+      message: 'Not shown. Give a figure for that link and Olumi will use it.',
+    }] } }];
+    const out = enforceAgentLaneLeaderClaimsAtWire(
+      {
+        assistant_text: 'Switch to GCP is the front-runner under these assumptions. The model has an unsized link.',
+        blocks, suggested_actions: [],
+        analysis_state: { leader_claim: { permitted: false, withheld_reason: 'separation_unavailable' } },
+      } as unknown as OlumiResponse,
+      { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'separation_unavailable', graph, analysisReady } as never,
+    );
+    expect(out.response.assistant_text).toContain('Olumi has not sized how ‘Expected GCP-related monthly saving’ moves ‘Costs’');
+    expect(out.response.assistant_text).toContain('every estimate this comparison rests on is still Olumi’s');
+    expect(out.response.assistant_text).toContain('give a figure for how ‘Expected GCP-related monthly saving’ moves ‘Costs’');
+    expect(out.response.assistant_text).not.toContain('set one of them yourself, then run the analysis again');
+    const again = enforceAgentLaneLeaderClaimsAtWire(out.response, {
+      requestId: 't2', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'separation_unavailable', graph, analysisReady,
+    } as never);
+    expect(again.response.assistant_text).toBe(out.response.assistant_text);
+  });
+
+  it('CO-HELD: unread goal product does not prescribe a value-and-rerun loop', () => {
+    const analysisReady = { analysis_admission: { permitted_analysis_mode: 'comparative_leader', reasons: [{ field: 'permitted_analysis_mode', code: 'READY_TO_COMPARE' }] } };
+    const blocks = [{ type: 'analysis_result', enrichment: { inference_warnings: [{ code: 'GOAL_FIGURES_PRODUCT_NOT_READ' }] } }];
+    const out = enforceAgentLaneLeaderClaimsAtWire(
+      {
+        assistant_text: 'Raise the price leads the options. The product has not been confirmed.', blocks, suggested_actions: [],
+        analysis_state: { leader_claim: { permitted: false, withheld_reason: 'separation_unavailable' } },
+      } as unknown as OlumiResponse,
+      { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'separation_unavailable', graph: { nodes: [], edges: [] }, analysisReady } as never,
+    );
+    expect(out.response.assistant_text).toContain('Olumi has not read your goal as the product of your own figures');
+    expect(out.response.assistant_text).not.toContain('set one of them yourself, then run the analysis again');
+    expect(out.response.assistant_text).not.toContain('ask me to run the analysis');
+    expect(agentNoLeaderSentence('separation_unavailable', analysisReady)).toContain('ask me to run the analysis');
+  });
+
+  it('keeps one complete closing across a second wire pass when a factor label contains ranking punctuation', () => {
+    const analysisReady = { analysis_admission: { permitted_analysis_mode: 'quantified_provisional', reasons: [{ field: 'permitted_analysis_mode', code: 'CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED' }] } };
+    const graph = { nodes: [
+      { id: 'saving', kind: 'factor', label: 'A. Switch to GCP is the front-runner' },
+      { id: 'costs', kind: 'goal', label: 'Costs' },
+    ], edges: [{ from: 'saving', to: 'costs' }] };
+    const blocks = [{ type: 'analysis_result', enrichment: { inference_warnings: [{
+      code: 'GOAL_FIGURES_PLACEHOLDER_PATH', node_ids: ['saving', 'costs'],
+      message: 'Give a figure for that link and Olumi will use it.',
+    }] } }];
+    const opts = { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false,
+      leaderClaimWithheldReason: 'separation_unavailable', graph, analysisReady } as never;
+    const first = enforceAgentLaneLeaderClaimsAtWire({
+      assistant_text: 'Continue with AWS is the front-runner. Model caveats remain.', blocks, suggested_actions: [],
+      analysis_state: { leader_claim: { permitted: false, withheld_reason: 'separation_unavailable' } },
+    } as unknown as OlumiResponse, opts);
+    expect(first.response.assistant_text).toContain('Olumi has not sized how ‘A. Switch to GCP is the front-runner’ moves ‘Costs’');
+    const second = enforceAgentLaneLeaderClaimsAtWire(first.response, opts);
+    expect(second.response.assistant_text).toBe(first.response.assistant_text);
+  });
+
+  it('does not use an old Run’s goal-figure warning as the cause after a model edit', () => {
+    const analysisReady = { analysis_admission: { permitted_analysis_mode: 'comparative_leader', reasons: [] } };
+    const graph = { nodes: [{ id: 'saving', label: 'Saving' }, { id: 'costs', label: 'Costs' }], edges: [{ from: 'saving', to: 'costs' }] };
+    for (const code of ['GOAL_FIGURES_PRODUCT_NOT_READ', 'GOAL_FIGURES_PLACEHOLDER_PATH']) {
+      const blocks = [{ type: 'analysis_result', enrichment: { inference_warnings: [{ code, node_ids: ['saving', 'costs'], message: 'Give a figure for that link and Olumi will use it.' }] } }];
+      const out = enforceAgentLaneLeaderClaimsAtWire({
+        assistant_text: 'Switch to GCP is the front-runner. Model caveats remain.', blocks, suggested_actions: [],
+        analysis_state: { leader_claim: { permitted: false, withheld_reason: 'analysis_out_of_date' } },
+      } as unknown as OlumiResponse, {
+        requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false,
+        leaderClaimWithheldReason: 'analysis_out_of_date', graph, analysisReady,
+      } as never);
+      expect(out.response.assistant_text, code).toContain('worked out before your latest change');
+      expect(out.response.assistant_text, code).toContain('run the analysis again');
+      expect(out.response.assistant_text, code).not.toContain('Olumi has not sized how');
+      expect(out.response.assistant_text, code).not.toContain('Olumi has not read your goal');
+    }
+  });
+
   it('RED at the wire: the enforcer reads the typed cause from the response’s own blocks', () => {
     const out = enforceAgentLaneLeaderClaimsAtWire(
       {
