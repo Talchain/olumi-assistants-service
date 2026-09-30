@@ -93,8 +93,19 @@ export const PROPORTION_UNIT_TOKENS: ReadonlySet<string> = new Set(['scale', 'un
  */
 function statesShareOrUnitRange(unit: string, value: number | undefined): boolean {
   if (value !== undefined && (value < 0 || value > 1)) return false;
-  if (/%|percent/.test(unit) || /\b0\s*\/\s*1\b|\bbinary\b|\binactive\b|\bon\s*\/\s*off\b/.test(unit)) return false;
-  return /(?:^|[^\d.])0\s*[-\u2013]\s*1(?![\d.])/.test(unit) || /\b(?:share|fraction|proportion)\b/.test(unit);
+  if (/%|percent/.test(unit)) return false;
+  // A switch beats a range: `binary (0-1)`, `on/off (0–1)`, `0/1`, `yes/no (0 or 1)` are 0 OR 1, never a share.
+  if (/\b0\s*\/\s*1\b|\bbinary\b|\binactive\b|\bon\s*\/\s*off\b|\byes\s*\/\s*no\b/.test(unit)) return false;
+  // A written 0–1 range: `0-1`, `0–1`, `0 to 1`, `[0, 1]` — never `0-10`, `0-100` or `0–1,000`.
+  if (/(?:^|[^\d.,])0\s*(?:[-\u2013]|to)\s*1(?![\d.]|,\d)/.test(unit) || /\[\s*0\s*,\s*1\s*\]/.test(unit)) return true;
+  // Or a HEAD noun share / fraction / proportion: the word before "of", else the last word, once any bracket is
+  // dropped. `£ per share` (a rate per share), `share price (£)`, `shares outstanding` and `fractional FTE` are not.
+  const core = unit.replace(/\([^)]*\)|\[[^\]]*\]/g, ' ').trim();
+  if (/\bper\b/.test(core)) return false;
+  const words = core.split(/[^a-z]+/).filter((w) => w !== '');
+  const of = words.indexOf('of');
+  const head = of > 0 ? words[of - 1] : words[words.length - 1];
+  return head === 'share' || head === 'fraction' || head === 'proportion';
 }
 export function isProportionScaledFactor(f: { unit: unknown; cap: number | undefined; value: number | undefined; raw_value: number | undefined }): boolean {
   const unit = typeof f.unit === 'string' ? f.unit.trim().toLowerCase() : '';
