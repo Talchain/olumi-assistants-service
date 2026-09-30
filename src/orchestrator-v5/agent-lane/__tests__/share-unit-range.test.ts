@@ -18,6 +18,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { ProposalStore } from '../proposal.js';
 import { isProportionScaledFactor } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { approvalChipsFor } from '../approval-chips.js';
+import type { ToolResult } from '../runtime/agent-tools.js';
 
 type Json = Record<string, any>;
 const R2 = JSON.parse(readFileSync(new URL('./fixtures/served-share-unit-r2-20260930.json', import.meta.url), 'utf8')) as { sentence: string; graph: Json };
@@ -32,7 +33,7 @@ async function propose(value: number, unit: string, said = R2.sentence) {
     { assumptions: [{ factor_label: LABEL, value, unit, basis: "the team's quote", revise: true }] } as never) as Json;
   const op = r.proposal_id ? (store.get(r.proposal_id)!.operations[0] as Json).value : null;
   const chips = r.proposal_id ? approvalChipsFor([{ name: 'propose_assumptions', ok: true, mutated: false, proposal_id: r.proposal_id }],
-    (id) => ({ proposal: store.get(id), result: id === r.proposal_id ? r : undefined })) : [];
+    (id) => ({ proposal: store.get(id), result: id === r.proposal_id ? (r as ToolResult) : undefined })) : [];
   return { r, op, chip: chips[0] as Json | undefined };
 }
 
