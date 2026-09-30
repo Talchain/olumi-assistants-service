@@ -36,7 +36,8 @@ export type ExtraParentOfProductGoal =
       readonly amount: number; readonly per: number; readonly converted: number; readonly rateLevel: number;
       readonly goalUnit: string; readonly fromUnit: string; readonly volumeUnit: string; readonly rateUnit: string }
   | { readonly kind: 'rerouted_unsized'; readonly from: string; readonly goal: string; readonly rate: string; readonly volume: string }
-  | { readonly kind: 'dropped_already_carried'; readonly from: string; readonly goal: string; readonly rate: string; readonly volume: string; readonly via: readonly string[] };
+  | { readonly kind: 'dropped_already_carried'; readonly from: string; readonly goal: string; readonly rate: string; readonly volume: string;
+      readonly via: readonly string[] };
 
 const key = (s: string): string => s.trim().toLowerCase();
 const CODES = new Set(Object.values(CURRENCY_SYMBOL_TO_CODE).map((c) => c.toUpperCase()));
@@ -46,11 +47,22 @@ const isMoney = (unit: string | null | undefined): boolean => {
   return head !== '' && (CODES.has(head.toUpperCase()) || Object.prototype.hasOwnProperty.call(CURRENCY_SYMBOL_TO_CODE, head[0]!));
 };
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+/**
+ * A risk the USER named (AIQ 5906624217 row 2, R3 5906615257): stated (`explicit` → `from_brief`), or every word of its
+ * label is written in the brief ("we're worried about backlash from our customers"). Deliberately BROAD: it decides what
+ * is never removed, so any doubt (no brief, no word to check) reads as the user's.
+ */
+const usersRisk = (r: { readonly label: string; readonly provenance?: string }, brief: string | undefined): boolean => {
+  if (r.provenance === 'explicit' || typeof brief !== 'string') return true;
+  const words = r.label.toLowerCase().match(/[a-z0-9]{3,}/g) ?? [];
+  const text = brief.toLowerCase();
+  return words.length === 0 || words.every((w) => text.includes(w));
+};
 /** A money unit written in whole units: its currency token without the magnitude ("£k/month" → "£/month"). */
 const wholeUnit = (unit: string, display: string | undefined): string =>
   display === undefined ? unit : unit.replace(/[^\s/]+/, (t) => (t.toLowerCase().startsWith(display.toLowerCase()) ? display : t));
 
-export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M): { model: M; found: ExtraParentOfProductGoal[] } {
+export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M, brief?: string): { model: M; found: ExtraParentOfProductGoal[] } {
   const goal = key(model.goal.metric);
   const ident = (model.identities ?? []).find((i) => i.operation === 'product' && key(i.outcome) === goal && i.factors.length === 2);
   if (ident === undefined) return { model, found: [] };
@@ -114,14 +126,18 @@ export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M)
     if (risk && reactsToRate && reaches(l.from, l) === undefined && l.effect_provenance == null && !finite(l.effect_amount)
       && rate !== undefined && volume !== undefined && !isMoney(volume.unit)) {
       const via = rateRoutesToVolume(l.from);
-      // ⛔ R3 5906615257: only OLUMI'S risk is dropped. A risk the user named (`explicit` → `from_brief`) is their concept:
-      // never removed, even with no link out, so it is left exactly as drafted (no card).
-      if (via.length > 0 && (model.risks ?? []).some((r) => key(r.label) === key(l.from) && r.provenance === 'explicit')) { links.push(l); continue; }
+      // ⛔ R3 5906615257 / AIQ 5906624217 row 2: only OLUMI'S risk is dropped. A risk the user named is their concern:
+      // never removed, even with no link out, so it is left exactly as drafted (no card), a conservative under-claim.
+      if (via.length > 0 && (model.risks ?? []).some((r) => key(r.label) === key(l.from) && usersRisk(r, brief))) { links.push(l); continue; }
+      // ⛔ A RISK LEFT WITH NO LINK OUT IS NOT KEPT "INFORMATIONAL" (R3 5906615257, AIQ 5906624217 accepted): admission's
+      // risk repair re-links it to the goal (a third parent again, no card), and readiness withholds anything with no
+      // path to the goal. So the risk goes WITH its link, and that is said. A risk with another link out is left exactly
+      // as drafted (no card): that link either dead-ends (readiness withholds the node anyway, "ask what it affects") or
+      // reaches the goal through another parent (no card either way), so dropping this one alone claims nothing true.
+      const onlyLinkOut = !model.links.some((c) => c !== l && key(c.from) === key(l.from));
+      if (via.length > 0 && !onlyLinkOut) { links.push(l); continue; }
       if (via.length > 0) {
-        // ⛔ A RISK LEFT WITH NO LINK OUT IS NOT KEPT "INFORMATIONAL": admission's risk repair re-links it to the goal
-        // (a third parent again, no card), and readiness withholds anything with no path to the goal. So when this was
-        // its only link out, the risk goes with it, and its one cause (the price) links to nothing new.
-        if (!model.links.some((c) => c !== l && key(c.from) === key(l.from))) dropped.add(key(l.from));
+        dropped.add(key(l.from));
         found.push({ kind: 'dropped_already_carried', from: l.from, goal: model.goal.metric, rate: rate.label, volume: volume.label, via });
         continue;
       }
@@ -164,8 +180,9 @@ export function sayExtraParentOfProductGoal(f: ExtraParentOfProductGoal): string
   // AIQ 5906371639's words: the move is said; nothing is sized.
   if (f.kind === 'dropped_already_carried') {
     const list = f.via.map((v) => `‘${v}’`).join(' and ');
-    return `I had ‘${f.from}’ moving ‘${f.goal}’ directly; with ‘${f.goal}’ read as ‘${f.rate}’ × ‘${f.volume}’, the price's effect on `
-      + `‘${f.volume}’ is already in the model through ${list}, so I haven't added it again.`;
+    // AIQ 5906624217: the rate by its own name (never "the price"), and a removed risk is said, or the user looks for it.
+    return `I had ‘${f.from}’ moving ‘${f.goal}’ directly; with ‘${f.goal}’ read as ‘${f.rate}’ × ‘${f.volume}’, the effect of ‘${f.rate}’ on `
+      + `‘${f.volume}’ is already in the model through ${list}, so I haven't added it again, and I've taken ‘${f.from}’ out of the model.`;
   }
   if (f.kind === 'rerouted_unsized') {
     return `I had ‘${f.from}’ moving ‘${f.goal}’ directly; with ‘${f.goal}’ read as ‘${f.rate}’ × ‘${f.volume}’ it now moves ‘${f.volume}’.`;

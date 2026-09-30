@@ -28,7 +28,7 @@ function m9(edit: (c: Json) => void = () => {}): CandidateModel {
   edit(c);
   return c as unknown as CandidateModel;
 }
-async function build(model: CandidateModel): Promise<{ graph: Graph; out: Json }> {
+async function build(model: CandidateModel, brief: string = BRIEF): Promise<{ graph: Graph; out: Json }> {
   expect(strict(model), JSON.stringify(strict.errors)).toBe(true);
   let graph: unknown = null;
   const call = (async () => ({ text: JSON.stringify(model) })) as unknown as CallStructuredModel;
@@ -36,7 +36,7 @@ async function build(model: CandidateModel): Promise<{ graph: Graph; out: Json }
     if (path.endsWith('/graph/register')) { graph = structuredClone((body as { graph: unknown }).graph); return { status: 200, json: { model_version: { version_number: 1 } } }; }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief('b3d11a92-0000-4000-8000-000000000001', BRIEF, d, call) as Json;
+  const out = await buildModelFromBrief('b3d11a92-0000-4000-8000-000000000001', brief, d, call) as Json;
   expect(out.ok, JSON.stringify(out).slice(0, 400)).toBe(true);
   return { graph: graph as Graph, out };
 }
@@ -53,7 +53,7 @@ describe('Olumi’s risk straight into MRR = price × subscribers moves it throu
     expect(edge(graph, 'Customer backlash', 'Paying subscribers')).toBe(false);
     // Left with no link out, admission would re-link it to MRR (risk repair); it goes, and the line names it.
     expect(idOf(graph, 'Customer backlash')).toBeUndefined();
-    expect(JSON.stringify(out)).toContain('I had ‘Customer backlash’ moving ‘MRR’ directly; with ‘MRR’ read as ‘Pro plan monthly price’ × ‘Paying subscribers’, the price\'s effect on ‘Paying subscribers’ is already in the model through ‘Monthly churn’, so I haven\'t added it again.');
+    expect(JSON.stringify(out)).toContain('I had ‘Customer backlash’ moving ‘MRR’ directly; with ‘MRR’ read as ‘Pro plan monthly price’ × ‘Paying subscribers’, the effect of ‘Pro plan monthly price’ on ‘Paying subscribers’ is already in the model through ‘Monthly churn’, so I haven\'t added it again, and I\'ve taken ‘Customer backlash’ out of the model.');
     expect(proposeProductIdentity(graph)).not.toBeNull();
   });
 
@@ -69,6 +69,23 @@ describe('Olumi’s risk straight into MRR = price × subscribers moves it throu
     const { graph } = await build(m9((c) => { c.risks.find((r: Json) => r.label === 'Customer backlash').provenance = 'explicit'; }));
     expect(edge(graph, 'Customer backlash', 'GOAL')).toBe(true);
     expect(idOf(graph, 'Customer backlash')).toBeDefined();
+    expect(proposeProductIdentity(graph)).toBeNull();
+  });
+
+  it('CONTROL (AIQ 5906624217 row 2): a risk whose words the BRIEF writes is the user’s — never removed, left as drafted, no card', async () => {
+    const { graph } = await build(m9(), `${BRIEF} We are worried about customer backlash.`);
+    expect(edge(graph, 'Customer backlash', 'GOAL')).toBe(true);
+    expect(idOf(graph, 'Customer backlash')).toBeDefined();
+    expect(proposeProductIdentity(graph)).toBeNull();
+  });
+
+  it('CONTROL: a risk with ANOTHER link out is left exactly as drafted — no card', async () => {
+    const { graph, out } = await build(m9((c) => {
+      c.outcomes = [...(c.outcomes ?? []), { label: 'Support ticket volume', provenance: 'ai_proposed' }];
+      c.links.push(link('Customer backlash', 'Support ticket volume', 'positive'));
+    }));
+    expect(edge(graph, 'Customer backlash', 'GOAL')).toBe(true);
+    expect(JSON.stringify(out)).not.toContain('out of the model');
     expect(proposeProductIdentity(graph)).toBeNull();
   });
 
