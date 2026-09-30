@@ -18,20 +18,30 @@
  *     written (AIQ amendment B). A comparison whose direction or concept cannot be read gives no credit (Olumi's, said).
  */
 import { unitPhraseHead } from './unit-conflict.js';
+import { isProportionScaledFactor } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 
-const SHARE_UNITS = new Set(['proportion', 'proportions', 'share', 'fraction', 'ratio']);
 const PERCENT_UNITS = new Set(['%', 'percent', 'percentage']);
+const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 
 export type ShareFrameReading =
   | { readonly kind: 'as_given' }
   | { readonly kind: 'converted'; readonly value: number; readonly unit: string }
   | { readonly kind: 'ambiguous'; readonly asPercent: number; readonly asShare: number };
 
-/** A figure the Agent gave in percent, read against a factor measured as a 0–1 share. */
-export function inShareFrame(value: number, unit: unknown, factorUnit: unknown): ShareFrameReading {
-  const head = (unitPhraseHead(factorUnit) ?? '').toLowerCase();
+/**
+ * Is this factor stored as a 0–1 proportion? The estate's ONE rule (`isProportionScaledFactor`, MG 5907385255): a cap of
+ * 1, or a proportion-class unit token that nothing contradicts (no cap, no recoverable frame). A token alone is not a
+ * range: `ratio` with cap 100 and raw 35 is an amount scale, where 25% → 0.25 would be a 100× corruption.
+ */
+export function isShareFactor(factorUnit: unknown, observed: unknown): boolean {
+  const os = (typeof observed === 'object' && observed !== null ? observed : {}) as { cap?: unknown; value?: unknown; raw_value?: unknown };
+  return isProportionScaledFactor({ unit: factorUnit, cap: num(os.cap), value: num(os.value), raw_value: num(os.raw_value) });
+}
+
+/** A figure the Agent gave in percent, read against a factor measured as a 0–1 share (`isShareFactor`). */
+export function inShareFrame(value: number, unit: unknown, factorUnit: unknown, observed: unknown): ShareFrameReading {
   const stated = (unitPhraseHead(unit) ?? '').toLowerCase();
-  if (!Number.isFinite(value) || !SHARE_UNITS.has(head) || !PERCENT_UNITS.has(stated)) return { kind: 'as_given' };
+  if (!Number.isFinite(value) || !PERCENT_UNITS.has(stated) || !isShareFactor(factorUnit, observed)) return { kind: 'as_given' };
   // Over 100% is no share at all: left as given (the existing checks and the writer decide, as today).
   if (value > 100) return { kind: 'as_given' };
   if (value <= 1) return { kind: 'ambiguous', asPercent: Number((value / 100).toPrecision(12)), asShare: value };

@@ -152,8 +152,8 @@ import { CANVAS_BAND_WORD, edgeBandFromMagnitude, EDGE_STRENGTH_MIDPOINTS } from
 import { runWithApprovedAdoption } from '../approved-adoption-context.js';
 import { runWithStatedLinkBand } from '../stated-link-band-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
-import { factorUnitOf, unitPhraseHead, unitsConflict } from '../unit-conflict.js';
-import { inShareFrame, relativeFigureAgainst } from '../relative-figure.js';
+import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
+import { inShareFrame, isShareFactor, relativeFigureAgainst } from '../relative-figure.js';
 import { newFactorScopeIn } from '../figure-scope.js';
 import { classifyUnitScaleClass } from '../../../cee/draft/records/unit-scale-class.js';
 import { unitFamilyOf } from '../../routing/value-unit-resolution.js';
@@ -3240,8 +3240,8 @@ export function createAgentCapabilities(
          * "%" figure of 1 or less is ambiguous (0.5% or 50%?) and asked; a figure the user compared the OTHER way from what
          * the factor measures ("AWS costs 25% more" against a GCP saving) is no figure for it by any author, and asked.
          */
-        const shareFactor = ['proportion', 'proportions', 'share', 'fraction', 'ratio'].includes((unitPhraseHead(nodeUnit) ?? '').toLowerCase());
-        const frame = inShareFrame(Number(a?.value), a?.unit, nodeUnit);
+        const shareFactor = isShareFactor(nodeUnit, node.observed_state);
+        const frame = inShareFrame(Number(a?.value), a?.unit, nodeUnit, node.observed_state);
         if (frame.kind === 'ambiguous') {
           scaleAmbiguous.push({ label: node.label, value: Number(a?.value), as_percent: frame.asPercent, as_share: frame.asShare });
           continue;

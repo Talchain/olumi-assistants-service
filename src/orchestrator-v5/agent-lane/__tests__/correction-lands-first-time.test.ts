@@ -73,4 +73,9 @@ describe('the user\'s "25% cheaper" lands first time, as theirs, in the factor\'
     const pct = await propose(EDIT, 25, '%', (g) => { Object.assign(g.nodes.find((n: Json) => n.id === 'gcp_saving_rate').observed_state, { unit: '%', value: 0.2, cap: 100, raw_value: 20 }); });
     expect(pct.op).toMatchObject({ value: 25, unit: '%' });
   });
+
+  it('CONTROL (MG 5907385255; the estate\'s isProportionScaledFactor): a proportion token a frame CONTRADICTS (cap 100, raw 35) is an amount scale — 25 is not read as 0.25', async () => {
+    const framed = await propose(EDIT, 25, '%', (g) => { Object.assign(g.nodes.find((n: Json) => n.id === 'gcp_saving_rate').observed_state, { unit: 'ratio', value: 0.35, cap: 100, raw_value: 35 }); });
+    expect(framed.op).toMatchObject({ value: 25, unit: '%' });
+  });
 });
