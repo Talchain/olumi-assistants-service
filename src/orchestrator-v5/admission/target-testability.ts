@@ -111,8 +111,26 @@ export function targetVerdictCapsOrdering(verdict: TargetTestability): boolean {
   return verdict.kind === 'not_testable' && verdict.failures.some((f) => CAPS_THE_ORDERING.has(f.code));
 }
 
-export function targetTestabilityOf(graph: unknown): TargetTestability {
-  if (!isRec(graph) || !Array.isArray(graph.nodes)) return { kind: 'no_goal' };
+/**
+ * The graph the Run computes on (P0 PARTNER #75 5916838445): a node the user kept out of the calculation
+ * (`analysis_participation: 'retained_excluded'`, the exact literal `run-analysis-participation-guard.ts` acts on) and
+ * every edge touching it are handed to PLoT absent, so they are never on the goal's path here either. The goal itself
+ * is never dropped (the guard refuses that run instead).
+ */
+function asAnalysed(graph: Rec & { nodes: unknown[] }): Rec & { nodes: unknown[] } {
+  const out = new Set(graph.nodes.filter((n) => isRec(n) && n.analysis_participation === 'retained_excluded' && n.kind !== 'goal')
+    .map((n) => (n as Rec).id));
+  if (out.size === 0) return graph;
+  return {
+    ...graph,
+    nodes: graph.nodes.filter((n) => !(isRec(n) && out.has(n.id))),
+    edges: Array.isArray(graph.edges) ? graph.edges.filter((e) => !(isRec(e) && (out.has(e.from) || out.has(e.to)))) : graph.edges,
+  };
+}
+
+export function targetTestabilityOf(input: unknown): TargetTestability {
+  if (!isRec(input) || !Array.isArray(input.nodes)) return { kind: 'no_goal' };
+  const graph = asAnalysed(input as Rec & { nodes: unknown[] });
   const goal = graph.nodes.filter(isRec).find((n) => n.kind === 'goal' && typeof n.id === 'string');
   if (goal === undefined) return { kind: 'no_goal' };
   const goalId = goal.id as string;
