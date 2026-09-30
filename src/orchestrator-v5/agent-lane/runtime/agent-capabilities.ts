@@ -3090,7 +3090,7 @@ export function createAgentCapabilities(
       /**
        * ⭐ THE GOAL'S LEVEL TODAY, WHEN THE USER STATED IT BESIDE THE TARGET — on THIS card, written on THIS approval
        * (AIQ #75 5913873948 row G6, 5913897396, 5913952911; DL 5913935708). R3's run: "We have secured £0 so far and need
-       * at least £1 million" gave a card for the target only and the reply "I'll then record the current £0 level", which
+       * at least £1m" gave a card for the target only and the reply "I'll then record the current £0 level", which
        * nothing ever recorded. A stated level (0 included) is the user's figure: the level door's own words rule
        * (`statedGoalLevelInUsersWords`), against the unit the target is written in. It is framed against the target
        * only once the target is written (the apply branch), by the level door itself. The sentence it was written in
@@ -3110,7 +3110,7 @@ export function createAgentCapabilities(
         /**
          * ⛔ BOUND TO THE GOAL, IN THE TARGET'S OWN STATEMENT (AIQ CHANGES_REQUIRED on #2373; the #2275 authorship-door
          * class). Paul's answer holds three £ amounts — "about £180k in the bank … roughly £45k a month … secured £0 so far
-         * and need at least £1 million" — and each passed the words rule, so only the model's choice kept cash in the bank
+         * and need at least £1m" — and each passed the words rule, so only the model's choice kept cash in the bank
          * from being stored as his funding secured. The level must be written (a) in the SAME sentence as the target
          * figure, and (b) about this goal, strictly (`figureTheUserWroteFor`, the target's own scope). Every miss refuses
          * the card: the Agent offers the target alone, with no promise.

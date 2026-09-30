@@ -410,7 +410,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'wrote it, in their units (60000, with the unit £, for £60k), and whether they said at least or at most. Never use this '
       + 'for a figure or a direction the user did not state: if they have not given both in their own words, ask first — '
       + 'a figure or direction they did not state is refused. If the user ALSO stated the goal’s level today (for example "we have secured '
-      + '£0 so far and need at least £1 million"), pass it as current_level: both go on ONE card and are written on ONE approval. '
+      + '£0 so far and need at least £1m"), pass it as current_level: both go on ONE card and are written on ONE approval. '
       + 'Never promise to record today’s level later: without current_level nothing records it.',
     parameters: obj({
       constraint_type: { type: 'string', enum: ['at_least', 'at_most'], description: 'at_least when the user said the goal must reach at least the figure; at_most when they said it must stay at or under it.' },
