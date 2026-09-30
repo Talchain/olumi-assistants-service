@@ -54,7 +54,7 @@ const RUN_AT = '2026-09-24T17:00:00.000Z';
 const RUN_ROW = 'run-fact-row';
 
 
-function runFact(opts: { mayName: boolean; auto: boolean; state?: 'not_applicable' | 'evaluated_infeasible'; status?: 'completed' | 'partial'; at?: string }) {
+function runFact(opts: { mayName: boolean; auto: boolean; state?: 'not_applicable' | 'evaluated_feasible' | 'evaluated_infeasible'; status?: 'completed' | 'partial'; at?: string }) {
   return RunAnalysisHandlerFactSchema.parse({
     fact_type: 'run_analysis', fact_version: 1, noop: false,
     result: {
@@ -111,6 +111,12 @@ describe('the reload names the cause of a withheld leader that it can prove', ()
     expect(result.analysis_state?.leader_claim).toMatchObject({ permitted: false, withheld_reason: 'analysis_leader_withheld' });
     const said = agentNoLeaderSentence(result.analysis_state?.leader_claim.withheld_reason, undefined);
     expect(said).not.toMatch(/limit|run the analysis again/i);
+  });
+
+  it('a met limit cannot be named as the cause of a provisional leader withhold on cold read', async () => {
+    const result = await reloadWith(runFact({ mayName: false, auto: false, state: 'evaluated_feasible' }), 'w-met-limit');
+    expect(result.analysis_state?.leader_claim).toMatchObject({ permitted: false, withheld_reason: 'analysis_leader_withheld' });
+    expect(agentNoLeaderSentence(result.analysis_state?.leader_claim.withheld_reason, undefined)).not.toMatch(/limit|run the analysis again/i);
   });
 
   it('a newer partial limit-withheld Run cannot borrow an older no-limit cause', async () => {

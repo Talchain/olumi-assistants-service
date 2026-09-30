@@ -1041,6 +1041,26 @@ describe('run_analysis handler — PLoT payload construction', () => {
     expect(readMayNameLeadingOptionFromResult(fact.result)).toBe(true);
   });
 
+  it.each([
+    ['served W3', '../../../agent-lane/__tests__/fixtures/served-w3-520aab46-cold-read-f074916.json', ['raise_to_59', 'keep_49_price']],
+    ['served cut-costs', './fixtures/served-cut-costs-15f48f0b-graph.json', ['keep_aws', 'switch_to_gcp']],
+  ])('submits only the two user options from the %s graph to PLoT', async (_name, path, expectedIds) => {
+    const source = JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8')) as { graph?: unknown; nodes?: unknown[]; edges?: unknown[] };
+    const graph = (source.graph ?? source) as { nodes: Array<Record<string, unknown>>; edges: unknown[] };
+    const options = graph.nodes.filter((node) => node.kind === 'option');
+    const goal = graph.nodes.find((node) => node.kind === 'goal');
+    const plotClient = makePlotClient(happyFixture as unknown as V2RunResponseEnvelope);
+    const handler = createRunAnalysisHandler({
+      plotClient,
+      scenarioReader: makeScenarioReader(makeScenarioSnapshot({
+        graph, rawPersistedGraph: graph, options, goal_node_id: goal?.id as string,
+      })),
+    });
+    await handler(makeInvocation());
+    const payload = (plotClient.run as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect((payload.options as Array<{ option_id?: string; id?: string }>).map((option) => option.option_id ?? option.id)).toEqual(expectedIds);
+  });
+
   it('keeps an Olumi suggestion provisional when fewer than two user options remain, without a permitted leader', async () => {
     const plotClient = makePlotClient(happyFixture as unknown as V2RunResponseEnvelope);
     const handler = createRunAnalysisHandler({

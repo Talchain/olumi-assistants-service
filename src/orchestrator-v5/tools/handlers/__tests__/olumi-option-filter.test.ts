@@ -37,6 +37,18 @@ describe('filterOlumiProposedOptions', () => {
     expect(filtered.keptOlumiProvisional).toBe(false);
   });
 
+  it('the served cut-costs held baseline and user migration remain the submitted comparison', () => {
+    const graph = JSON.parse(readFileSync(new URL(
+      './fixtures/served-cut-costs-15f48f0b-graph.json', import.meta.url,
+    ), 'utf8')) as { nodes: Rec[]; edges: Rec[] };
+    const options = graph.nodes.filter((n) => n.kind === 'option');
+    const gate = gateAnalysableOptions({ options, graph, rawPersistedGraph: graph, scaleNetEnabled: true });
+    expect(gate.held.map((h) => h.option_id)).toEqual(['keep_aws']);
+    const filtered = filterOlumiProposedOptions({ submitted: gate.options, graph });
+    expect(filtered.options.map((o) => o.option_id ?? o.id)).toEqual(['keep_aws', 'switch_to_gcp']);
+    expect(filtered.keptOlumiProvisional).toBe(false);
+  });
+
   it('the status quo is the user\'s option: it counts towards the 2', () => {
     const r = filterOlumiProposedOptions({
       submitted: [opt('status_quo'), opt('raise_59', 2), opt('phased', 3)],

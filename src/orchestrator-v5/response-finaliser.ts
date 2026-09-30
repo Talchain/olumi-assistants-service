@@ -641,7 +641,8 @@ function attachAnalysisState(
     // The caller supplies this beside its permission from ONE selected
     // scenario fact. The hot window can hold a different, older run.
     withheldWithoutConstraintCause: ctx.mayNameLeadingOption === false
-      && ctx.claimConstraintVerdictState === 'not_applicable',
+      && (ctx.claimConstraintVerdictState === 'not_applicable'
+        || ctx.claimConstraintVerdictState === 'evaluated_feasible'),
     // F-LIMIT: every option breaks the same limit on the run fact this claim BINDS — and only when that is ALSO the
     // fact the entitlement is read from (`selectClaimBearingRunAnalysisFact`, which counts a partial run). When the two
     // differ (#1876: a newer partial run carries the refusal), this finaliser cannot know the cause, so today's stands.

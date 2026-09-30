@@ -52,7 +52,7 @@ const SCENARIO = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const GRAPH = { nodes: [{ id: 'goal', kind: 'goal', label: 'Goal', goal_threshold: 0.7 }], edges: [] };
 const HASH = computeAnalysisAffectingGraphHash(GRAPH as never)!;
 
-function runFact(opts: { at: string; mayName: boolean; auto: boolean; status: 'completed' | 'partial'; state?: 'not_applicable' }) {
+function runFact(opts: { at: string; mayName: boolean; auto: boolean; status: 'completed' | 'partial'; state?: 'not_applicable' | 'evaluated_feasible' }) {
   return RunAnalysisHandlerFactSchema.parse({
     fact_type: 'run_analysis', fact_version: 1, noop: false,
     result: {
@@ -117,6 +117,14 @@ describe('the finaliser binds a withheld leader\'s cause to the refusal, never t
     const olderNoLimit = runFact({ at: '2026-09-25T01:00:00.000Z', mayName: false, auto: false, status: 'completed', state: 'not_applicable' });
     const newerLimitVerdict = finalise([olderNoLimit], false, { claimConstraintVerdictState: 'evaluated_infeasible' });
     expect(newerLimitVerdict.analysis_state?.leader_claim.withheld_reason).toBe('constraint_verdict_withheld');
+  });
+
+  it('a met limit does not become the cause of a provisional leader withhold on the turn', () => {
+    const B = runFact({ at: '2026-09-25T02:00:00.000Z', mayName: false, auto: false, status: 'completed', state: 'evaluated_feasible' });
+    const out = finalise([A, B], false, { claimConstraintVerdictState: 'evaluated_feasible' });
+    expect(out.analysis_state?.leader_claim).toMatchObject({ permitted: false, withheld_reason: 'analysis_leader_withheld' });
+    const unmet = finalise([A, B], false, { claimConstraintVerdictState: 'evaluated_infeasible' });
+    expect(unmet.analysis_state?.leader_claim.withheld_reason).toBe('constraint_verdict_withheld');
   });
 
   it('RED B — this turn\'s own run refused, but the finaliser was handed the pre-handler window [A]', () => {
