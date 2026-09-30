@@ -61,6 +61,32 @@ describe('figures from one selected saved Run', () => {
     expect(projectSelectedRunFigures({ ...input(), selectedGoal: readSelectedGoalFigureContext(graph, 'mrr') })).toEqual([]);
   });
 
+  it('retains the same Run attestation after public transport removes its unearned chance', () => {
+    const currentResult = structuredClone(served.current_result);
+    delete (currentResult.enrichment.option_comparison[0]! as { probability_of_goal?: number }).probability_of_goal;
+    expect(projectSelectedRunFigures({ ...input(), currentResult: currentResult as unknown as OlumiResponse['blocks'][number] }))
+      .toEqual(projectSelectedRunFigures(input()));
+  });
+
+  it('withholds an absent-chance conditional with duplicate stored decisions', () => {
+    const currentResult = structuredClone(served.current_result);
+    delete (currentResult.enrichment.option_comparison[0]! as { probability_of_goal?: number }).probability_of_goal;
+    const duplicated = { ...served.selected_fact, goal_certainty: [
+      ...served.selected_fact.goal_certainty, served.selected_fact.goal_certainty[0],
+    ] };
+    expect(projectSelectedRunFigures({ ...input(), selectedFact: duplicated,
+      currentResult: currentResult as unknown as OlumiResponse['blocks'][number] })).toEqual([]);
+  });
+
+  it.each(['goal_probability', 'goalProbability'])('withholds a contrary %s transport alias', (alias) => {
+    const currentResult = structuredClone(served.current_result);
+    const option = currentResult.enrichment.option_comparison[0]! as Record<string, unknown>;
+    delete option.probability_of_goal;
+    option[alias] = 0;
+    expect(projectSelectedRunFigures({ ...input(),
+      currentResult: currentResult as unknown as OlumiResponse['blocks'][number] })).toEqual([]);
+  });
+
   it('withholds figures without a hash-bound goal unit or an explicit level frame', () => {
     const graph = structuredClone(served.selected_goal);
     delete (graph.nodes[0]!.observed_state as { unit?: string }).unit;

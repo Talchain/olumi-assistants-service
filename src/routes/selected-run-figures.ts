@@ -107,6 +107,8 @@ export function projectSelectedRunFigures(input: SelectedRunFiguresInput): Selec
 
   const decisions = readStoredGoalCertainty(input.selectedFact.goal_certainty);
   const certaintyByOption = new Map((decisions ?? []).map((decision) => [decision.option_id, decision] as const));
+  const duplicatedOptions = new Set((decisions ?? []).filter((decision, index, all) =>
+    all.findIndex((other) => other.option_id === decision.option_id) !== index).map((decision) => decision.option_id));
   const figures: SelectedRunFigure[] = [];
   for (const raw of compared) {
     const option = rec(raw);
@@ -120,10 +122,14 @@ export function projectSelectedRunFigures(input: SelectedRunFiguresInput): Selec
     const may_name_as_leader = input.leaderClaimPermitted && block.leading_option_id === option_id;
     const certainty = certaintyByOption.get(option_id);
     const breakEven = rec(certainty?.break_even);
+    const chances = [option.probability_of_goal, option.goal_probability, option.goalProbability]
+      .filter((value) => value !== undefined);
     // The stored `say` and operand establish what the conditional value means.
-    // A missing or mismatched decision cannot license it; the raw P(goal)=1
-    // never becomes a probability figure when `earned` is false.
-    if (certainty?.earned !== false || certainty.probability_of_goal !== option.probability_of_goal
+    // Public transport removes an unearned exact chance. Its absence does not
+    // erase this same Run's stored conditional attestation; a present contrary
+    // chance or an ambiguous decision still cannot license the figure.
+    if (certainty?.earned !== false || duplicatedOptions.has(option_id)
+      || chances.some((value) => value !== certainty.probability_of_goal)
       || breakEven?.kind !== 'product' || !finite(breakEven.projected_if_held)
       || typeof breakEven.operand_id !== 'string' || breakEven.operand_id.length === 0
       || typeof certainty.say !== 'string' || certainty.say.trim() === '') continue;
