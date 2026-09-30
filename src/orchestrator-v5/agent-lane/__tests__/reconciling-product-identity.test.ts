@@ -283,7 +283,7 @@ describe('a goal whose stated level reconciles with its two stated parts is decl
     const ENG = 'We have 3 engineers and a £25,000 budget per engineer. MRR is £75,000 and we want MRR above £85k.';
     const on = { declared: (await registeredGoal(declared, PAUL)).graph, engineers: (await registeredGoal(engineers, ENG)).graph, mint: (await registeredGoal(paulDraft(), PAUL)).graph };
     vi.resetModules();
-    vi.doMock('../reconciling-product.js', () => ({ withReconcilingProductIdentity: (c: unknown) => c, unconfirmGoalProducts: (c: unknown) => ({ model: c, dropped: [] }), droppedGoalProductLine: () => '' }));
+    vi.doMock('../reconciling-product.js', () => ({ withReconcilingProductIdentity: (c: unknown) => c, unconfirmGoalProducts: (c: unknown) => ({ model: c, dropped: [] }), droppedGoalProductLine: () => '', withoutGapResidual: () => null, gapResidualLine: () => '' }));
     try {
       const off = (await import('../runtime/build-model.js')).buildModelFromBrief;
       expect((await registeredGoal(declared, PAUL, off)).graph).toStrictEqual(on.declared);

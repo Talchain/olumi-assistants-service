@@ -105,7 +105,9 @@ describe('a goal the brief reconciles as price × subscribers is read as one whe
     const { graph } = await build(draft((c) => {
       noIdentity(c);
       c.links = c.links.filter((l: Json) => !(l.from === 'Monthly churn' && l.to === 'Monthly recurring revenue'));
-      c.factors.push({ label: 'Other plan revenue', role: 'observable', baseline_known: false, baseline_value: 1500, unit: 'GBP/month', provenance: 'ai_proposed', plausible_max: 20000 });
+      // Not the gap (£75,000 − £49 × 1,500 = £1,500): a gap-sized Olumi residual is taken out and said instead
+      // (`construction-gap-residual-goal-addend.test.ts`, AIQ 5904406904 / DL 5904403673). Any other money addend keeps the refusal.
+      c.factors.push({ label: 'Other plan revenue', role: 'observable', baseline_known: false, baseline_value: 6000, unit: 'GBP/month', provenance: 'ai_proposed', plausible_max: 20000 });
       c.links.push(link('Other plan revenue', 'Monthly recurring revenue', 'positive', 1, 1, 'ai_proposed'));
     }));
     expect(goalIdentity(graph)).toBeUndefined();
