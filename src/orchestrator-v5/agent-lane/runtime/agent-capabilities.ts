@@ -3165,7 +3165,7 @@ export function createAgentCapabilities(
       const occupied: { label: string; current_value: number }[] = [];
       const unitMismatch: { label: string; value: unknown; unit: string; factor_unit: string }[] = [];
       const seen = new Set<string>();
-      const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number; userWrote: boolean }[] = [];
+      const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number; userWrote: boolean; quote?: string; asPercent?: true }[] = [];
 
       for (const a of input) {
         const requested = String(a?.factor_label ?? '');
@@ -3223,14 +3223,36 @@ export function createAgentCapabilities(
         if (!Number.isFinite(Number(a?.value))) { unresolved.push(node.label); continue; }
         if (seen.has(node.id)) continue;
         seen.add(node.id);
+        // ⛔ A revision is the user's only when they WROTE the figure (`stated-by-user.ts`); else it is Olumi's. Its owner is
+        // read the add-factor door's way (`newFactorScopeIn`: rivals + strict): under the plain reading, served journey E's
+        // "Senior engineers cost £120k a year each and juniors £65k a year each" was Olumi's for both salaries (5d73351, 2/2).
+        const ownerScope = newFactorScopeIn(g, node.label, String(a?.unit ?? nodeUnit ?? ''), []);
+        const writtenAbout = figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text, ownerScope);
+        // ⛔ HUMAN CONTROL IS THE PROVENANCE GATE, here too (the DL's ruling on #2235 for the add-factor door; AIQ #75
+        // 5902528686). Served cut-costs (DL alt-B r0/r1, CEE 1f9d769): "Our team's quote shows GCP would be about 25% cheaper
+        // than AWS for our workload." revised the discount factor to 0.25, the user's exact figure, and stored it as
+        // `user_assumption` ("Olumi's suggestion the user accepted"), replied "recorded as Olumi's assumption": word proximity
+        // read "AWS … workload" after the comparative as another quantity's. A revision the user asked for, whose figure is
+        // the ONE written in this message, is theirs when the approval shows the pairing with their own sentence, verbatim:
+        // their Yes makes it theirs (AIQ 5902884139). A figure Olumi worked out from it (£112.50 per point) is not written,
+        // so it stays Olumi's.
+        // ONE figure written and ONE value proposed: no swap among the user's figures is possible, and the card shows the
+        // one pairing. With two figures or more the strict matcher decides, as before (journey E's salaries: a swap is
+        // never theirs, `revise-door-same-matcher`).
+        const soleFigure = input.length === 1 && figuresWrittenIn(ctx.user_text) === 1;
+        // And nothing BESIDE the figure names another quantity (`nearOnly`): "Keep salary spend under £400k" is the limit's,
+        // "our MRR is £12,000" is MRR's, never a revised salary or price, card or not.
+        const quote = !writtenAbout && soleFigure && typeof existing === 'number'
+          && figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text, { ...ownerScope, nearOnly: true })
+          ? quoteOfFigure(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text) : null;
         adopted.push({
           id: node.id, label: node.label,
           value: Number(a.value), unit: String(a?.unit ?? ''), basis: String(a?.basis ?? ''),
           ...(typeof existing === 'number' ? { replaces: existing } : {}),
-          // ⛔ A revision is the user's only when they WROTE the figure (`stated-by-user.ts`); else it is Olumi's. Its owner is
-          // read the add-factor door's way (`newFactorScopeIn`: rivals + strict): under the plain reading, served journey E's
-          // "Senior engineers cost £120k a year each and juniors £65k a year each" was Olumi's for both salaries (5d73351, 2/2).
-          userWrote: figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text, newFactorScopeIn(g, node.label, String(a?.unit ?? nodeUnit ?? ''), [])),
+          userWrote: writtenAbout || quote !== null,
+          ...(quote !== null ? { quote } : {}),
+          // A 0–1 share the user wrote as a percentage ("25%" for 0.25) is shown in their units: "15% → 25%" (AIQ 5902884139).
+          ...(quote !== null && Math.abs(Number(a.value)) <= 1 && figureTheUserWrote(Number(a.value) * 100, '%', ctx.user_text) ? { asPercent: true as const } : {}),
         });
       }
 
@@ -3271,10 +3293,14 @@ export function createAgentCapabilities(
       const notWritten = revisions.filter((a) => !a.userWrote);
       const said = (value: number, unit: string) => sayFigureExactly(value, unit) ?? `${value}${unit !== '' ? ' ' + unit : ''}`;
       const withUnit = (a: { value: number; unit: string }) => said(a.value, a.unit);
-      const describe = (a: { label: string; value: number; unit: string; replaces?: number }) =>
+      const pct = (v: number): string => `${Number((v * 100).toPrecision(6))}%`;
+      const describe = (a: { label: string; value: number; unit: string; replaces?: number; quote?: string; asPercent?: true }) =>
         typeof a.replaces === 'number'
-          // The replaced figure is not written: an inexact one is said "about", rounded (DL #2227 follow-up A).
-          ? `${a.label}: ${sayFigureRead(a.replaces, a.unit)} \u2192 ${withUnit(a)}`
+          // The replaced figure is not written: an inexact one is said "about", rounded (DL #2227 follow-up A). A pairing the
+          // approval confirms is shown with the user's own sentence (above), in the units they wrote.
+          ? a.quote !== undefined
+            ? `${a.label}: ${a.asPercent ? `${pct(a.replaces)} \u2192 ${pct(a.value)}` : `${sayFigureRead(a.replaces, a.unit)} \u2192 ${withUnit(a)}`} (your figure, in your words: "${a.quote}")`
+            : `${a.label}: ${sayFigureRead(a.replaces, a.unit)} \u2192 ${withUnit(a)}`
           : `${a.label} = ${withUnit(a)}`;
       const heading =
         revisions.length === 0

@@ -379,6 +379,14 @@ export interface EntityScope {
    */
   readonly rivals?: readonly string[];
   /**
+   * ⛔ NEAR ONLY — opt-in, passed only by the revise door's displayed-pairing path (AIQ #75 5902884139). When a
+   * comparator ("than", "versus", "vs", "compared") opens the words after the figure, the last rule (the nearest label word
+   * AFTER it, beyond the two words beside it) is not read: served cut-costs' "about 25% cheaper than AWS for our workload"
+   * names what the figure is compared WITH, not whose it is. Without a comparator it is read as always ("3% for our
+   * enterprise customers" is Enterprise churn's; R3 CR on #2330). Every other door keeps its reading byte for byte.
+   */
+  readonly nearOnly?: boolean;
+  /**
    * ⛔ THE STRICT READING — opt-in, passed only by the add-factor door, whose figure lands as the user's own on a factor
    * that did not exist (DL ruling on the #2235 re-review, 13:07Z 28 Sep). Every other door keeps its reading byte for byte.
    * Journey E's own typed clarification, "Record them as annual salaries: £120,000 per senior engineer and £65,000 per
@@ -523,7 +531,11 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
       const near = firstMention(rightAfter) ?? firstMention([...left].reverse().slice(0, 2));
       return near === 'target';
     }
-    const about = firstMention(rightAfter) ?? firstMention([...left].reverse()) ?? firstMention(afterRate.slice(rightAfter.length));
+    // `nearOnly` skips the far words ONLY when a comparator opens them (R3 CR on #2330): "25% cheaper THAN AWS for our
+    // workload" names what the figure is compared with; "3% for our enterprise customers" still names its owner.
+    const comparatorOpens = afterRate.slice(0, rightAfter.length + 1).some((w) => /^(?:than|versus|vs|compared)$/.test(w));
+    const about = firstMention(rightAfter) ?? firstMention([...left].reverse())
+      ?? (scope.nearOnly === true && comparatorOpens ? null : firstMention(afterRate.slice(rightAfter.length)));
     // ⛔ STRICT, FAIL CLOSED (DL ruling (b)): among two figures or more, one no label word attributes is nobody's, never
     // "the user's, for any target" — that fallthrough let a SWAP through the door. The user is asked.
     if (about === null) return !(strict && severalFigures);
