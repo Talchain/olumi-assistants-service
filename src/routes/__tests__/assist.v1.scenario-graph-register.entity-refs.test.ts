@@ -156,7 +156,7 @@ describe("register — stable entity refs", () => {
     expect(res.statusCode).toBe(200);
     const stored = writtenGraph() as unknown as Json;
     const refs = Object.values(refsOf(stored));
-    expect(refs.every((r) => typeof r === "string" && /^(OC|G|O|F|R|D|A)[1-9][0-9]*$/.test(r as string))).toBe(true);
+    expect(refs.every((r) => typeof r === "string" && /^(OC|G|O|F|R|D|A)[1-9][0-9]{0,8}$/.test(r as string))).toBe(true);
     expect(new Set(refs).size).toBe(refs.length);
     expect(stored.ref_high_water).toBeDefined();
     expect(res.json().graph_identity_hash.value).toBe(computeGraphIdentityHash(stored as never)?.value);
@@ -171,6 +171,23 @@ describe("register — stable entity refs", () => {
     expect(res.statusCode).toBe(200);
     expect(Object.values(refsOf(writtenGraph() as unknown as Json)).every((r) => r === undefined)).toBe(true);
     expect(writtenGraph()).toEqual(projectGraphForPersistence(IMPORTED, {}));
+    await app.close();
+  });
+
+  it("RED (PR Review CR 1): client refs on nodes a PRE-REFS base held — valid or wrong-kind — are removed; the stored bytes equal the ref-less write", async () => {
+    const withClientRefs = {
+      ...IMPORTED,
+      nodes: (IMPORTED.nodes as Json[]).map((n, i) => ({ ...n, ref: i % 2 === 0 ? "O9" : "F7" })),
+      ref_high_water: { O: 9, F: 7 },
+    };
+    const app = await buildApp();                        // default: the scenario holds SERVER_PRE_IMPORT (no refs)
+    const res = await post(app, SCENARIO, { graph: withClientRefs });
+    expect(res.statusCode, res.body).toBe(200);
+    const stored = writtenGraph() as unknown as Json;
+    expect(Object.values(refsOf(stored)).every((r) => r === undefined)).toBe(true);
+    expect(stored.ref_high_water).toBeUndefined();
+    expect(stored).toEqual(projectGraphForPersistence(IMPORTED, {}));
+    expect(res.json().graph_identity_hash.value).toBe(computeGraphIdentityHash(projectGraphForPersistence(IMPORTED, {}) as never)?.value);
     await app.close();
   });
 

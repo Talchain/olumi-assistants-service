@@ -22,9 +22,12 @@
  * 3. A new number is 1 + the max of: both high-waters and every valid ref in base and incoming. So a deleted O2 stays
  *    retired (the next option is O3), and a lowered counter on the incoming graph cannot pull numbers back.
  * 4. A ref whose prefix does not match the node's kind (an option holding `F1`), or that is malformed, is replaced.
- * 5. NO BACKFILL: a node the base already held WITHOUT a ref stays ref-less. Only new entities (and every entity of
- *    a first construction) are issued refs, so an unchanged write to a pre-refs graph is byte-identical: no spurious
- *    version, no identity change. Backfilling older scenarios is a separate, explicit step.
+ * 5. NO BACKFILL, AND THE BASE DECIDES: a node the base already held WITHOUT a ref stays ref-less — whatever ref the
+ *    incoming graph puts on it (valid, wrong-kind or malformed) is removed and never raises the counter (PR Review CR
+ *    on #2357). Only new entities (and every entity of a first construction) are issued refs, so an unchanged write to
+ *    a pre-refs graph is byte-identical: no spurious version, no identity change. Backfilling is a separate step.
+ * 7. BOUNDED: a ref's number and every counter are safe integers ≤ {@link MAX_REF_NUMBER}; anything larger is not a
+ *    ref (and not a counter), so no issued ref is `OInfinity` or a rounded repeat. Past the bound, no ref is issued.
  * 6. AN UNKNOWN BASE ASSIGNS NOTHING. `base === undefined` means the writer could not read what it replaces (e.g. a
  *    failed read), so neither carry-forward nor "is this entity new?" can be decided: the graph passes through
  *    unchanged. A first construction passes `null` (known: nothing there).
@@ -46,7 +49,10 @@ type Kind = keyof typeof REF_PREFIX_BY_KIND;
 type Prefix = (typeof REF_PREFIX_BY_KIND)[Kind];
 export type RefHighWater = Partial<Record<Prefix, number>>;
 
-const REF_PATTERN = /^(OC|G|O|F|R|D|A)([1-9][0-9]*)$/;
+/** The largest ref number (nine digits): far above any real model, far below `Number.MAX_SAFE_INTEGER`. */
+export const MAX_REF_NUMBER = 999_999_999;
+const REF_PATTERN = /^(OC|G|O|F|R|D|A)([1-9][0-9]{0,8})$/;
+const boundedCount = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) > 0 && (v as number) <= MAX_REF_NUMBER;
 
 type NodeLike = { id?: unknown; kind?: unknown; ref?: unknown } & Record<string, unknown>;
 type GraphLike = { nodes?: unknown; ref_high_water?: unknown } & Record<string, unknown>;
@@ -79,7 +85,7 @@ function highWaterOf(graph: unknown): RefHighWater {
   if (hw && typeof hw === 'object' && !Array.isArray(hw)) {
     for (const prefix of Object.values(REF_PREFIX_BY_KIND)) {
       const v = (hw as Record<string, unknown>)[prefix];
-      if (Number.isInteger(v) && (v as number) > 0) out[prefix] = v as number;
+      if (boundedCount(v)) out[prefix] = v;
     }
   }
   return out;
@@ -128,8 +134,6 @@ export function assignEntityRefs<G>(graph: G, base: unknown): EntityRefAssignmen
     const ref = typeof b.id === 'string' ? refFor(b, b.ref) : null;
     if (ref !== null && !baseRefById.has(b.id as string)) baseRefById.set(b.id as string, ref);
   }
-  const hw = combinedHighWater(base, graph);
-
   // Pass 1 — claims. The base holder of a ref claims it first, so a later copy cannot take it.
   const claimed = new Set<string>();
   const chosen: (string | null)[] = nodes.map(() => null);
@@ -142,12 +146,22 @@ export function assignEntityRefs<G>(graph: G, base: unknown): EntityRefAssignmen
   for (const i of order) {
     const n = nodes[i]!;
     const fromBase = typeof n.id === 'string' ? refFor(n, baseRefById.get(n.id)) : null;
-    const candidate = fromBase ?? refFor(n, n.ref);
+    // Rule 5: the base decides for an entity it already holds. A ref-less legacy node takes no incoming ref.
+    const legacy = typeof n.id === 'string' && baseIds.has(n.id) && fromBase === null;
+    const candidate = fromBase ?? (legacy ? null : refFor(n, n.ref));
     if (candidate !== null && !claimed.has(candidate)) {
       claimed.add(candidate);
       chosen[i] = candidate;
       if (fromBase !== null && n.ref !== fromBase) carried.push({ id: n.id as string, ref: fromBase });
     }
+  }
+
+  // The counter: everything the BASE ever issued, and every ref this write keeps. The incoming graph's own counter and
+  // any ref it carries that is not kept (a legacy node's, a copy's) never raise it (rule 5).
+  const hw = combinedHighWater(base);
+  for (const ref of chosen) {
+    const p = ref === null ? null : parseEntityRef(ref);
+    if (p !== null && (hw[p.prefix] ?? 0) < p.n) hw[p.prefix] = p.n;
   }
 
   // Pass 2 — issue new numbers above the high-water, in array order.
@@ -158,16 +172,29 @@ export function assignEntityRefs<G>(graph: G, base: unknown): EntityRefAssignmen
     const prefix = prefixOf(n.kind);
     if (prefix === null) return; // an unknown kind gets no ref (never guess one)
     const next = (hw[prefix] ?? 0) + 1;
+    if (next > MAX_REF_NUMBER) return; // rule 7: never an unbounded or repeated number
     hw[prefix] = next;
     chosen[i] = `${prefix}${next}`;
     assigned.push({ id: typeof n.id === 'string' ? n.id : String(i), ref: chosen[i]! });
   });
 
-  const nodesChanged = nodes.some((n, i) => chosen[i] !== null && n.ref !== chosen[i]);
+  // A node keeps exactly the ref chosen for it; a node with none carries no `ref` key at all (rule 5 / rule 4).
+  const wrong = (n: NodeLike, i: number) => (chosen[i] !== null ? n.ref !== chosen[i] : Object.hasOwn(n, 'ref'));
+  const nodesChanged = nodes.some(wrong);
   const hwChanged = !sameHighWater(highWaterOf(graph), hw);
   if (!nodesChanged && !hwChanged) return { graph, assigned, carried };
 
-  const nextNodes = nodes.map((n, i) => (chosen[i] !== null && n.ref !== chosen[i] ? { ...n, ref: chosen[i] } : n));
+  const nextNodes = nodes.map((n, i) => {
+    if (!wrong(n, i)) return n;
+    if (chosen[i] !== null) return { ...n, ref: chosen[i] };
+    const { ref: _dropped, ...rest } = n;
+    return rest;
+  });
+  // A graph whose counter would be empty carries none (a legacy graph stays as it was).
+  if (Object.keys(hw).length === 0) {
+    const { ref_high_water: _noCounter, ...withoutCounter } = graph as GraphLike;
+    return { graph: { ...withoutCounter, nodes: nextNodes } as G, assigned, carried };
+  }
   return { graph: { ...(graph as object), nodes: nextNodes, ref_high_water: hw } as G, assigned, carried };
 }
 

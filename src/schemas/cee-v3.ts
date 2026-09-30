@@ -199,7 +199,7 @@ export const NodeV3 = z.object({
    * (`orchestrator-v5/graph/entity-refs.ts`). Assigned by the graph writers before they hash; a malformed value is
    * dropped here and re-issued there, never a reason to refuse a graph.
    */
-  ref: z.string().regex(/^(OC|G|O|F|R|D|A)[1-9][0-9]*$/).optional().catch(undefined),
+  ref: z.string().regex(/^(OC|G|O|F|R|D|A)[1-9][0-9]{0,8}$/).optional().catch(undefined),
   /** Quantitative data for factor nodes */
   observed_state: ObservedStateV3.optional(),
   /** Factor category (V12.4+): controllable, observable, external - only for factor nodes */
@@ -974,7 +974,7 @@ export const GraphV3 = z.object({
    * The highest stable entity ref number ever issued per prefix (`entity-refs.ts`), so a retired ref is never
    * reissued. A counter, not content: excluded from the identity hash and absent from the analysis projection.
    */
-  ref_high_water: z.record(z.string(), z.number().int().nonnegative()).optional().catch(undefined),
+  ref_high_water: z.record(z.string(), z.number().int().nonnegative().max(999_999_999)).optional().catch(undefined),
 });
 export type GraphV3T = z.infer<typeof GraphV3>;
 

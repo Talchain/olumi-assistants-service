@@ -7,7 +7,7 @@
  * restored version's identity.
  */
 import { describe, it, expect } from 'vitest';
-import { assignEntityRefs, raiseRefHighWaterForRestore, REF_PREFIX_BY_KIND } from '../entity-refs.js';
+import { assignEntityRefs, parseEntityRef, raiseRefHighWaterForRestore, REF_PREFIX_BY_KIND } from '../entity-refs.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 
@@ -145,5 +145,59 @@ describe('hash pins (AIQ 5909608045)', () => {
   it('`ref_high_water` is NOT identity: changing only the counter leaves the identity hash alone', () => {
     expect(computeGraphIdentityHash({ ...v1, ref_high_water: { O: 99 } } as never)?.value)
       .toBe(computeGraphIdentityHash(v1 as never)?.value);
+  });
+});
+
+/**
+ * PR Review CR on #2357 @ `37ad639b` (5911749449): (1) the BASE is authoritative for whether an entity it already holds
+ * has a ref — a client-supplied ref on a legacy (ref-less) node must not be honoured, raise the counter, or change the
+ * stored identity; (2) accepted refs and counters are bounded to safe integers, so no issued ref is `OInfinity` or a
+ * rounded repeat.
+ */
+describe('the base decides for an entity it already holds (PR Review CR 1)', () => {
+  it('RED: a legacy node the base held ref-less keeps no ref when the client sends a valid one, and the counter does not move', () => {
+    const incoming = { ...FIRST, nodes: (FIRST.nodes as Json[]).map((n) => (n.id === 'opt_raise' ? { ...n, ref: 'O9' } : n)) };
+    const out = assignEntityRefs(incoming, FIRST).graph as Json;
+    expect(refs(out).opt_raise).toBeUndefined();
+    expect(out.ref_high_water).toBeUndefined();
+    expect(computeGraphIdentityHash(out as never)?.value).toBe(computeGraphIdentityHash(FIRST as never)?.value);
+  });
+
+  it('RED: a wrong-kind ref the client puts on a legacy node is removed, not left behind', () => {
+    const incoming = { ...FIRST, nodes: (FIRST.nodes as Json[]).map((n) => (n.id === 'opt_raise' ? { ...n, ref: 'F1' } : n)) };
+    const out = assignEntityRefs(incoming, FIRST).graph as Json;
+    expect(Object.hasOwn((out.nodes as Json[]).find((n) => n.id === 'opt_raise')!, 'ref')).toBe(false);
+    expect(computeGraphIdentityHash(out as never)?.value).toBe(computeGraphIdentityHash(FIRST as never)?.value);
+  });
+
+  it('a NEW entity beside those legacy nodes still gets the next number, unaffected by the refused O9', () => {
+    const incoming = { ...FIRST, nodes: [...(FIRST.nodes as Json[]).map((n) => (n.id === 'opt_raise' ? { ...n, ref: 'O9' } : n)), node('opt_pilot', 'option')] };
+    const out = assignEntityRefs(incoming, FIRST).graph as Json;
+    expect(refs(out).opt_pilot).toBe('O1');
+    expect(out.ref_high_water).toEqual({ O: 1 });
+  });
+
+  it('CONTROL: an unchanged write to the legacy graph is still the SAME object', () => {
+    expect(assignEntityRefs(FIRST, FIRST).graph).toBe(FIRST);
+  });
+});
+
+describe('refs and counters are bounded to safe integers (PR Review CR 2)', () => {
+  it('RED: an oversized incoming ref is refused; the new same-kind entity gets a well-formed unique ref', () => {
+    const huge = `O${'9'.repeat(400)}`;
+    const out = assignEntityRefs(g([node('opt_a', 'option', { ref: huge }), node('opt_b', 'option')]), null).graph as Json;
+    const r = refs(out);
+    expect(r.opt_a).toMatch(/^O[1-9][0-9]{0,8}$/);
+    expect(r.opt_b).toMatch(/^O[1-9][0-9]{0,8}$/);
+    expect(r.opt_a).not.toBe(r.opt_b);
+    expect(Number.isSafeInteger(out.ref_high_water.O)).toBe(true);
+  });
+
+  it('RED: an unsafe counter in the base cannot push the next ref past the bound', () => {
+    const base = { ...(assignEntityRefs(FIRST, null).graph as Json), ref_high_water: { O: 1e300 } };
+    const out = assignEntityRefs({ ...base, nodes: [...(base.nodes as Json[]), node('opt_new', 'option')] }, base).graph as Json;
+    expect(refs(out).opt_new).toMatch(/^O[1-9][0-9]{0,8}$/);
+    expect(parseEntityRef(`O${'1'.repeat(10)}`)).toBeNull();
+    expect(parseEntityRef('O999999999')).toEqual({ prefix: 'O', n: 999999999 });
   });
 });
