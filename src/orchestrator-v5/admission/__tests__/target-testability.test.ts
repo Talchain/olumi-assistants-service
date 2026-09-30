@@ -14,6 +14,8 @@ import { resolveAnalysisAdmission, analysisReadyPermitsLeaderNaming, permittedAn
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { agentLaneLeaderWithheld } from '../../agent-lane/withheld-leader-fail-closed.js';
 import { claimPermissionsFrom } from '../../agent-lane/first-analysis.js';
+import { readinessViewOf } from '../../agent-lane/readiness-view.js';
+import { postWriteReadinessLine } from '../../../routes/agent-v1-turn.js';
 
 type Json = Record<string, any>;
 const FIX = JSON.parse(readFileSync(new URL('./fixtures/target-testability-20260930.json', import.meta.url), 'utf8')) as { paul: Json; mrr: Json; n1: Json };
@@ -99,5 +101,27 @@ describe('every leader rail reads the capped mode (P0 PARTNER 5913561360), by ex
     expect(mode === 'quantified_provisional' || mode === 'comparative_leader').toBe(true);
     expect(agentLaneLeaderWithheld({ mayNameLeadingOption: true, analysisReady: mrr, separationEstablished: true })).toBe(false);
     expect(claimPermissionsFrom(separatedClaim, mrr, { requested: true }).leader_may_be_named).toBe(true);
+  });
+});
+
+/**
+ * AIQ #75 5913873948 row 3: after Paul's target card the Agent said "recording the stated £1m minimum target … would let
+ * a later run test goal attainment", which is false (the verdict is `not_testable`). The verdict is now in the Agent's
+ * typed input (`readiness`, the view `get_canonical_state` and the turn's readback carry) and in the post-write line.
+ */
+describe('the Agent reads it before any Run, and the post-write line says it', () => {
+  it('RED: the readiness view the Agent reads carries AIQ\'s sentence on Paul\'s graph', () => {
+    expect(readinessViewOf(FIX.paul).target_not_testable).toBe(notTargetTestableSentence(FIX.paul, targetTestabilityOf(FIX.paul)));
+  });
+
+  it('RED: after a write on Paul\'s graph, "can run now" never stands alone', () => {
+    const line = postWriteReadinessLine(FIX.paul, { status: 'ready', may_run: true })!;
+    expect(line.startsWith('The analysis can run now.')).toBe(true);
+    expect(line).toContain("can't yet test them against your target (at least £1,200,000)");
+  });
+
+  it('CONTROL: MRR (today\'s level stated) — no such field, and the line is unchanged', () => {
+    expect(readinessViewOf(FIX.mrr)).not.toHaveProperty('target_not_testable');
+    expect(postWriteReadinessLine(FIX.mrr, { status: 'ready', may_run: true })).not.toContain("can't yet test");
   });
 });
