@@ -43,6 +43,8 @@ import happyFixture from '../../../../../tests/fixtures/plot/v2-run-golden-happy
 import minimalFixture from '../../../../../tests/fixtures/plot/v2-run-golden-minimal.json' with { type: 'json' };
 import largerFixture from '../../../../../tests/fixtures/plot/v2-run-golden-larger.json' with { type: 'json' };
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
+import { composeAnalysisStateV1 } from '../../../compose/analysis-state-v1.js';
+import { claimPermissionsFrom } from '../../../agent-lane/first-analysis.js';
 
 // ---------------------------------------------------------------------------
 // Test harness
@@ -1029,6 +1031,26 @@ describe('run_analysis handler — PLoT payload construction', () => {
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
     expect(readMayNameLeadingOptionFromResult(fact.result)).toBe(false);
+    const canonical = {
+      status: 'complete', freshness: 'fresh', computed_at: fact.result.computed_at,
+      selected_fact_index: 0, usableForProse: true, usableForChips: true,
+      usableForFollowupContext: true, requiresRerun: false, blockedUnusable: false,
+      contradictions: [],
+    } as never;
+    const compose = (mayNameLeadingOption: boolean) => composeAnalysisStateV1({
+      canonical,
+      mayNameLeadingOption,
+      rawRobustness: { level: 'high', near_tie: { is_tie: false } },
+    } as never);
+    // A separable, current run WOULD permit a leader without the producer's
+    // remove-only provisional verdict. The same run must withhold on both the
+    // UI claim and the Agent's permission after that verdict is applied.
+    expect(compose(true)?.leader_claim.permitted).toBe(true);
+    const state = compose(readMayNameLeadingOptionFromResult(fact.result));
+    expect(state?.leader_claim.permitted).toBe(false);
+    expect(claimPermissionsFrom(state, {
+      analysis_admission: { permitted_analysis_mode: 'comparative_leader' },
+    }, { requested: true }).leader_may_be_named).toBe(false);
   });
 
   it('continues to submit an unmarked third option as an ordinary user option', async () => {
