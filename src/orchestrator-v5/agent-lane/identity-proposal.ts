@@ -162,6 +162,15 @@ function reading(goal: Rec2, goalLabel: string, o: { value: number; unit: string
   return { rate: c.rate === p.id ? p : q, count: c.rate === p.id ? q : p, code: c.code };
 }
 
+/**
+ * "£49 × 1,500", with "(your “<figure>”)" after the operand read at today's level — the rate's or the count's, whichever
+ * carries it (AIQ 5905014617: never the price's label on the subscribers' 1,500).
+ */
+function todaysFigures(r: { readonly rate: Level; readonly count: Level }, money: (v: number) => string): string {
+  const yours = (l: Level): string => (l.today !== undefined ? ` (your “${l.today}”)` : '');
+  return `${money(r.rate.value)}${yours(r.rate)} × ${sayFigure(r.count.value, '')}${yours(r.count)}`;
+}
+
 /** One of the two parents is the user's stated factor, the other an operand read at today's level (`todaysOperand`). */
 function usersFactorBesideTodaysOperand(ids: readonly string[], byId: Map<string, Rec2>, edges: readonly Rec2[]): [Level, Level] | null {
   if (ids.length !== 2) return null;
@@ -189,7 +198,7 @@ function proposeOnGoal(graph: unknown): IdentityProposal | null {
   if (r === null) return null;
   const money = (v: number): string => sayFigure(v, r.code);
   const today = r.count.today ?? r.rate.today;
-  const figures = `${money(r.rate.value)} × ${sayFigure(r.count.value, '')}${today !== undefined ? ` (your “${today}”)` : ''}`;
+  const figures = todaysFigures(r, money);
   // AIQ 5904696715: an operand read at today's level is Olumi's outcome, not the user's, so the reading is not "your" one.
   const words = `Is “${goalLabel}” ${today !== undefined ? '' : 'your '}“${r.rate.label}” × “${r.count.label}”? `
     + `${today !== undefined ? 'Today that is ' : ''}${figures} = ${money(r.rate.value * r.count.value)}, close to your ${money(o.value)}. `
@@ -268,7 +277,7 @@ function proposeOnCarrier(graph: unknown): IdentityProposal | null {
     const money = (v: number): string => sayFigure(v, r.code);
     const made = r.rate.value * r.count.value;
     const today = r.count.today ?? r.rate.today;
-    const figures = `${money(r.rate.value)} × ${sayFigure(r.count.value, '')}${today !== undefined ? ` (your “${today}”)` : ''}`;
+    const figures = todaysFigures(r, money);
     const words = `Is “${carrierLabel}” ${today !== undefined ? '' : 'your '}“${r.rate.label}” × “${r.count.label}”? `
       + `${today !== undefined ? 'Today that is ' : ''}${figures} = ${money(made)}${besideTheCarrier(others, byId, goalMoney, r.code, made, o.value, goalLabel)} `
       + `If yes, Olumi will calculate “${carrierLabel}” that way, and you can run the analysis again.`;

@@ -57,6 +57,19 @@ describe('a product over an unlevelled operand gets the card, on the user’s TO
     expect(card.words).toMatch(/^Is “[^”]+” your “[^”]+” × “[^”]+”\? £49 × 1,500 = £73,500, close to your £75,000\. If yes, /);
   });
 
+  it('the note goes with the operand read at today’s level — the RATE here, never pinned on the count (AIQ 5905014617)', () => {
+    const x: Graph = structuredClone(M2);
+    x.nodes.push({ id: 'price_at_12_months', kind: 'outcome', label: 'Pro plan price at 12 months' });
+    x.edges = x.edges.filter((e) => !(e.from === 'pro_plan_price' && e.to === 'mrr'));
+    x.edges.push({ from: 'pro_plan_price', to: 'price_at_12_months', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive', provenance: { source: 'cee_hypothesis' } });
+    x.edges.push({ from: 'price_at_12_months', to: 'mrr', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive', provenance: { source: 'cee_hypothesis' } });
+    goalOf(x).nonlinear_identity = { operation: 'product', factor_ids: ['price_at_12_months', 'paying_subscribers'], stated_in_brief: false };
+    const card = proposeProductIdentity(x);
+    expect(card).not.toBeNull();
+    expect(card!.factor_ids).toEqual(['price_at_12_months', 'paying_subscribers']);
+    expect(card!.words).toContain('Today that is £49 (your “Pro plan price”) × 1,500 = £73,500, close to your £75,000.');
+  });
+
   it('CONTROL: an operand holding Olumi’s own level is not read as today’s user figure — no card', () => {
     expect(proposeProductIdentity(g((x) => { node(x, 'paying_subscribers_at_12_months').observed_state = { raw_value: 1450, value: 0.145, unit: 'subscribers', source: 'cee_inference' }; }))).toBeNull();
   });
