@@ -40,7 +40,9 @@ import { factorUnitOf, unitPhraseFamily } from './unit-conflict.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import { bindOptionLabelToBrief, bindingEarnsBriefClaim } from '../../cee/provenance/brief-binding.js';
-import { sizeLink, type LinkSizing, type MagnitudeNode } from '../../cee/magnitude/link-effect.js';
+import { sizeLink, type LinkSizing, type MagnitudeNode, type StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
+/** A4: the link a written range must be about — its source (the countable), the source's unit, every other quantity. */
+export type SizeRangeScope = { readonly source: string; readonly sourceUnit: unknown; readonly others: readonly string[] };
 import type { BriefGoalLevel } from './unplaced-goal-level.js';
 import { goalLevelSentence } from '../goal-target/goal-level-reading.js';
 import {
@@ -2877,12 +2879,18 @@ export function admitCandidateModel(
    * condition: "Our burn is £30,000 a month" is not £30,000 per conversation). Absent ⇒ never (fail closed).
    */
   sizeWritten: (value: number, unit: unknown, scope: { target: readonly string[]; others: readonly string[] }) => boolean = () => false,
+  /**
+   * ⭐ A4 (R3 C1/C2 5918513716; AIQ 5919953251): the range the brief writes this LINK's size as one end of, in one span
+   * about the link's source (`writtenRangeFor`, injected for the same reason). The size is then said with its range, as a
+   * bound. Absent ⇒ none (the size reads as before).
+   */
+  sizeRangeEnd: (value: number, unit: unknown, scope: SizeRangeScope) => StatedRangeEnd | null = () => null,
 ): AdmittedModel {
   candidateModel = withQuantityFrames(candidateModel);
   const declared = new Set(candidateModel.options
     .filter((o) => readIsBaseline({ ...(typeof o.is_status_quo === 'boolean' ? { is_baseline: o.is_status_quo } : {}) }) === true)
     .map((o) => canonicalLabel(o.label)));
-  const first = admitOnce(candidateModel, widened, brief, goalLevelStated, targetFigureWrittenAgain, goalLevelFromBrief, sizeWritten);
+  const first = admitOnce(candidateModel, widened, brief, goalLevelStated, targetFigureWrittenAgain, goalLevelFromBrief, sizeWritten, sizeRangeEnd);
   const verdict = judgeOptionIdentity(first, declared);
   // Never withhold a name another entity shares: removing its links would take that entity's with it.
   const otherNames = new Set([
@@ -2908,6 +2916,7 @@ export function admitCandidateModel(
     targetFigureWrittenAgain,
     goalLevelFromBrief,
     sizeWritten,
+    sizeRangeEnd,
   );
   const options_withheld: WithheldOption[] = withheld.map((w) => ({
     option: w.option, like: w.like, reason: 'option_indistinct', sentence: indistinctStep(w.option, w.like),
@@ -2936,6 +2945,7 @@ function admitOnce(
   targetFigureWrittenAgain: (value: number, unit: unknown) => boolean,
   goalLevelFromBrief: (candidate: CandidateModel) => BriefGoalLevel | null,
   sizeWritten: (value: number, unit: unknown, scope: { target: readonly string[]; others: readonly string[] }) => boolean,
+  sizeRangeEnd: (value: number, unit: unknown, scope: SizeRangeScope) => StatedRangeEnd | null,
 ): AdmittedModel {
   const { model: restatedModel, restated: restatedChanges } = restateSignedPercentChanges(candidateModel);
   // ⛔ A two-part product goal's rate is the user's own price when Olumi's rate only passes it on (shape 2,
@@ -3681,11 +3691,20 @@ function admitOnce(
         others: quantityLabels.filter((q) => q !== source.label && q !== target.label),
       });
     const user_stated = l.provenance_source === 'user_specified' || (taggedTheirs && written);
+    // A4: a size the brief writes only as one END of a range is said with that range (a user's own edit never is).
+    const range = user_stated && l.provenance_source !== 'user_specified'
+      ? sizeRangeEnd(Math.abs(l.effect_amount as number), levelUnit, {
+        source: source.label,
+        sourceUnit: source.unit,
+        others: quantityLabels.filter((q) => q !== source.label),
+      })
+      : null;
     sizing.set(`${l.from}::${l.to}`, sizeLink({
       direction: l.direction,
       effect_amount: l.effect_amount,
       effect_per_source_change: l.effect_per_source_change,
       user_stated,
+      ...(range !== null ? { stated_range: range } : {}),
     }, source, target));
   }
 

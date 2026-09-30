@@ -799,6 +799,26 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
       "not read as its warrant. It is a DURATION, not a level of the goal metric: " +
       "out of the analysis hash and outside `carriesValue` / `NODE_QUANTITY_FIELDS`.",
   },
+  // ── UNWARRANTED, ADJUDICATED: a link size's written range (declared 30 Sep 2026, A4, CEE #2409) ──────────
+  {
+    id: "unwarranted:cee.EdgeV3::provenance.natural_effect.stated_range.low",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — its warrant is inherited from the object it sits in, by its one writer's rule. `stated_range` lives " +
+      "INSIDE `natural_effect`: `low` and `high` are in `natural_effect.amount_unit` (the size's own unit, in the size's " +
+      "own scale), and `amount` equals one of them by construction (`end`). Its SOURCE is `text` — the range exactly " +
+      "as the user wrote it — and its authorship is `provenance.magnitude: 'user_stated'`: admission writes it ONLY " +
+      "on the user's own size, and only when ONE written span about this link's source carries the range " +
+      "(`writtenRangeFor`, stated-by-user.ts). It is a WORDS field (what the reply and the card say beside the " +
+      "amount), never an analysis input: out of the analysis hash (graph-hash.ts picks natural_effect fields by name).",
+  },
+  {
+    id: "unwarranted:cee.EdgeV3::provenance.natural_effect.stated_range.high",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — the same warrant as its `low` sibling (settled together): in `natural_effect.amount_unit`, sourced by " +
+      "`text`, written only on the user's own size by `writtenRangeFor`, and never an analysis input.",
+  },
 ];
 
 // ============================================================================
