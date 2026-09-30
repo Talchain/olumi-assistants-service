@@ -286,6 +286,10 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
         issue(intervention.entity_ref, 'intervention_source_is_limit',
           `Does "${node.label}" change "${target.label}", or is this only its stated limit?`); continue;
       }
+      if (intervention.quantity_ref === null && /[.!?]\s+\S/.test(source.source.quote)) {
+        issue(intervention.entity_ref, 'intervention_clause_ambiguous',
+          `Which single stated action changes "${target.label}" under "${node.label}"?`); continue;
+      }
       // Qualitative interventions need an affirmative action in their own
       // bound clause; a shared noun in a broad option quote is not enough.
       if (intervention.quantity_ref === null && !/\b(?:add|adopt|build|change|cut|decrease|deploy|hire|increase|introduce|launch|lower|move|raise|reduce|remove|replace|shift|start|stop|switch|use)\b/i.test(source.source.quote)) {
