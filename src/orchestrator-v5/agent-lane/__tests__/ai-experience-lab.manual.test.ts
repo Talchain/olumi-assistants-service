@@ -98,6 +98,7 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
     sendTurn(o: Record<string, unknown>): Promise<Record<string, unknown> & { http: number; response?: unknown }>;
     cardsAllowed(rb: Readback): boolean; withheldReason(rb: Readback): string | null; sameModel(a: Readback, b: Readback): boolean;
     parseAccountFile(text: string): Record<string, string>;
+    chipPressFor(offered: unknown[], press: unknown): { ok: true; message: string; chip: Record<string, unknown> } | { ok: false; reason: string };
     accountTokenSource(account: Record<string, string>, o: { fetchImpl: typeof fetch }): () => Promise<string>;
     editedSinceConstruction(rb: Readback): boolean;
   };
@@ -112,14 +113,8 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
   const fresh = new Set<string>();
   // The chips the served Agent offered in its LAST reply, per fresh session. A chip press is forwarded only when its id
   // is one of these, so the Lab can carry an approval but never mint one (R3 5909786171: J4 needs the approve chip).
-  const offered = new Map<string, Map<string, Record<string, unknown>>>();
-  const recordOffered = (sid: string, actions: unknown) => {
-    const m = new Map<string, Record<string, unknown>>();
-    for (const a of Array.isArray(actions) ? actions : []) {
-      if (a && typeof a === 'object' && typeof (a as { id?: unknown }).id === 'string') m.set((a as { id: string }).id, a as Record<string, unknown>);
-    }
-    offered.set(sid, m);
-  };
+  const offered = new Map<string, unknown[]>();
+  const recordOffered = (sid: string, actions: unknown) => { offered.set(sid, Array.isArray(actions) ? actions : []); };
   // Build's guard (scripts/ai-experience-lab/canonical-m1-guard.mjs) is the ONE binding rule for M2 (Build 5908596263).
   const guard = await import(pathToFileURL(resolve('scripts/ai-experience-lab/canonical-m1-guard.mjs')).href) as {
     bindCanonicalM1(o: Record<string, unknown>): { accepted: boolean; withheld_reason?: string; binding?: Record<string, unknown> };
@@ -322,13 +317,17 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
     const body = req.body as { session_id?: string; message?: string; chip?: { id?: unknown } };
     const sid = body?.session_id;
     if (sid && await attachFresh(sid)) {
-      // A chip press: only a chip the Agent offered in its last reply for THIS session; its own label is the message.
+      // A card press: derived ENTIRELY from the Agent's last offer for THIS session (`chipPressFor`): its own words,
+      // never a caller's. A stale id, or a message that differs from the card's, is refused.
       let chip: Record<string, unknown> | undefined;
       if (body.chip !== undefined) {
-        const id = body.chip && typeof body.chip === 'object' ? body.chip.id : undefined;
-        chip = typeof id === 'string' ? offered.get(sid)?.get(id) : undefined;
-        if (chip === undefined) return reply.code(409).send({ error: 'That button is no longer on offer. Ask again to get a fresh one.' });
-        if (typeof body.message !== 'string' || !body.message.trim()) body.message = typeof chip.label === 'string' ? chip.label : String(id);
+        const press = seam.chipPressFor(offered.get(sid) ?? [], body);
+        if (!press.ok) {
+          return reply.code(409).send({ withheld_reason: press.reason, error: press.reason === 'message_differs_from_card'
+            ? "That button's words can't be changed. Press it as offered." : 'That button is no longer on offer. Ask again to get a fresh one.' });
+        }
+        chip = press.chip;
+        body.message = press.message;
       }
       if (typeof body.message !== 'string' || !body.message.trim() || body.message.length > 12000) {
         return reply.code(400).send({ error: 'Enter a message (maximum 12,000 characters).' });

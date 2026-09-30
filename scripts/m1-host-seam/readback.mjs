@@ -82,7 +82,7 @@ export async function sendTurn(opts) {
   const t = await post(ctx, '/agent/v1/turn', {
     scenario_id: opts.scenarioId, turn_id: randomUUID(), kind: 'message', message: opts.message,
     ...(first ? { stage: 'frame', turn_class: 'frame', source: 'composer' } : {}),
-    ...(opts.chip ? { chip: opts.chip } : {}),
+    ...(opts.chip ? { chip: opts.chip, source: 'chip' } : {}),
   }, opts.timeoutMs ?? 300000);
   return {
     scenario_id: opts.scenarioId,
@@ -233,4 +233,28 @@ export function editedSinceConstruction(rb) {
   const c = rb?.construction, mv = rb?.model_version;
   return typeof c?.version_id === 'string' && Number.isInteger(c?.sequence)
     && Number.isInteger(mv?.sequence) && mv.sequence > c.sequence;
+}
+
+/**
+ * A card press, derived ENTIRELY from what the Agent offered (Build 5910076244, AIQ 5909797932). The pressed id must
+ * be one of the LAST reply's `suggested_actions`; the message sent is that card's OWN `message` (the exact reading the
+ * user is approving; the route binds these words to the approval), never its label and never a caller's text. A caller
+ * message that differs is refused, since it would change what the user authorised. The chip carries only the fields
+ * the served UI sends (`id`, `action_type`, `intent`, `parameters`; `buildPayload.ts`).
+ */
+export function chipPressFor(offeredActions, press) {
+  const id = press && typeof press === 'object' ? press.chip?.id ?? press.id : undefined;
+  if (typeof id !== 'string' || id.length === 0) return { ok: false, reason: 'no_chip_id' };
+  const action = (Array.isArray(offeredActions) ? offeredActions : []).find((a) => a && a.id === id);
+  if (action === undefined) return { ok: false, reason: 'not_on_offer' };
+  const message = typeof action.message === 'string' && action.message.trim() ? action.message
+    : typeof action.label === 'string' && action.label.trim() ? action.label : null;
+  if (message === null) return { ok: false, reason: 'card_has_no_words' };
+  const callerMessage = press.message;
+  if (callerMessage !== undefined && callerMessage !== null && callerMessage !== message) {
+    return { ok: false, reason: 'message_differs_from_card' };
+  }
+  const chip = { id };
+  for (const k of ['action_type', 'intent', 'parameters']) if (action[k] !== undefined) chip[k] = action[k];
+  return { ok: true, message, chip };
 }
