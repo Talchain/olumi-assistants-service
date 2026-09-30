@@ -131,7 +131,10 @@ export type RunDeltaDisclosureReason =
   /** The composer found the two runs are demonstrably different subjects. */
   | 'run_identity_conflict'
   /** A newer degraded Run supersedes the older successful pair. */
-  | 'newer_run_degraded';
+  | 'newer_run_degraded'
+  /** Selected goal-unit snapshot cannot attest the comparison as current. */
+  | 'goal_unit_changed'
+  | 'goal_snapshot_unverified';
 
 // ─── Mechanism A: type brand ──────────────────────────────────────────────
 
@@ -461,12 +464,16 @@ export function finaliseV5Response(
   // have an unparseable graph, so that a freshness-only carrier must be
   // synthesised?"* — and it is inert under supersession anyway (it requires
   // `'unknown'`; supersession requires `'none'`).
+  const exitFreshnessForStamp = exitDerivationFor(ctx);
+  const freshnessForStamp = ctx.analysisStateFreshness ?? ctx.freshness
+    ?? (exitFreshnessForStamp?.reason === 'goal_unit_changed' || exitFreshnessForStamp?.reason === 'goal_snapshot_unverified'
+      ? exitFreshnessForStamp : undefined);
   const stamped: OlumiResponse = payloadForStamp
     ? {
         ...scrubbed,
         analysis_ready: attachComputedAt(
           payloadForStamp,
-          ctx.analysisStateFreshness ?? ctx.freshness,
+          freshnessForStamp,
         ),
       }
     : { ...scrubbed };
@@ -674,7 +681,7 @@ function attachAnalysisState(
   if (analysisState === undefined) return response;
   return {
     ...response,
-    blocks: projectAnalysisBlocksForRunBinding(response.blocks, analysisState),
+    blocks: projectAnalysisBlocksForRunBinding(response.blocks, analysisState, canonical.freshness_reason),
     analysis_state: analysisState,
   };
 }
@@ -853,6 +860,13 @@ function attachRunDelta(
     }
     return out;
   };
+
+  const freshnessReason = (ctx.analysisStateCanonical ?? ctx.canonicalState)?.freshness_reason
+    ?? (ctx.analysisStateFreshness ?? ctx.freshness)?.reason ?? exitDerivationFor(ctx)?.reason;
+  if (freshnessReason === 'goal_unit_changed' || freshnessReason === 'goal_snapshot_unverified') {
+    const { run_delta: _unitUnboundDelta, ...withoutDelta } = response;
+    return disclose('skipped', freshnessReason, withoutDelta as OlumiResponse);
+  }
 
   // Read the composer's identity verdict. An unbound pair must not add a new
   // comparative delta after the analysis block has been confined.

@@ -888,3 +888,35 @@ describe("0.63.0 — `analysis_goal_certainty` is the selected Run's stored arra
     expect(readStoredGoalCertainty(body.analysis_goal_certainty)).toEqual(body.analysis_goal_certainty);
   });
 });
+
+
+describe('SC-24 future goal-unit snapshot joins the cold read', () => {
+  it('same-hash unit edit stales with a readable reason; rerun snapshot restores current results', async () => {
+    const withUnit = (unit: string) => ({ ...GRAPH, goal_node_id: 'goal_growth',
+      nodes: GRAPH.nodes.map((node) => node.id === 'goal_growth' ? { ...node, goal_threshold_unit: unit } : node),
+    });
+    const before = withUnit('GBP/month');
+    const after = withUnit('USD/month');
+    const hash = computeAnalysisAffectingGraphHash(after)!;
+    expect(computeAnalysisAffectingGraphHash(before)).toBe(hash);
+    loadGraphAndBriefText.mockResolvedValue({ graph: after, briefText: BRIEF });
+    const saved = runAnalysisFact({ graphHash: hash, mayName: true });
+    (saved.result as Record<string, unknown>).input_snapshot = { goal: { node_id: 'goal_growth', unit: 'GBP/month' } };
+    readFactsFor.mockResolvedValue([saved]);
+    const app = await buildApp();
+    try {
+      const stale = (await read(app)).json();
+      expect(stale.analysis_state.run_state.kind).toBe('complete_stale');
+      expect(stale.analysis_result).toBeNull();
+      expect(stale).not.toHaveProperty('analysis_ready');
+      expect((stale.current_read as { analysis_ready?: unknown }).analysis_ready).toMatchObject({ freshness: 'stale',
+        freshness_reason: 'your goal’s unit changed', computed_at: '2026-08-17T09:15:50.000Z' });
+      (saved.result as Record<string, unknown>).input_snapshot = { goal: { node_id: 'goal_growth', unit: 'USD/month' } };
+      (saved.result as Record<string, unknown>).computed_at = '2026-08-17T09:16:50.000Z';
+      const rerun = (await read(app)).json();
+      expect(rerun.analysis_state.run_state.kind).toBe('complete_current');
+      expect(rerun.analysis_result).not.toBeNull();
+      expect(rerun.analysis_state.run_state.computed_at).toBe('2026-08-17T09:16:50.000Z');
+    } finally { await app.close(); }
+  });
+});

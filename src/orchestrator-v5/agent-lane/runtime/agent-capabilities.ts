@@ -828,8 +828,10 @@ interface GraphRead {
     defaulted?: unknown;
   }[];
   readonly analysis_state: unknown;
+  /** Existing cold-read freshness text, projected to AI context without a second derivation. */
+  readonly analysis_ready?: unknown;
   /**
-   * The read's own `analysis_admission` (top level on the graph read, which carries no `analysis_ready`): its
+   * The read's own `analysis_admission` (top level on the graph read, whose admission remains separate from freshness): its
    * `permitted_analysis_mode` is the mode half of the selected Run's leader permission (`claimPermissionsFrom`).
    */
   readonly analysis_admission?: unknown;
@@ -1033,7 +1035,7 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
  * constant 0.8 on every headroom-derived cap), limits from `goal_constraints` as stored, link strength and
  * provenance as stored. Readiness is `readinessViewOf` — the route's own admission verdict, in plain words.
  */
-function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'analysis_state'>): Record<string, unknown> {
+function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'analysis_state' | 'analysis_ready'>): Record<string, unknown> {
   const str = (v: unknown): v is string => typeof v === 'string' && v !== '';
   const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
   const labelOf = new Map(g.nodes.map((n) => [n.id, n.label] as const));
@@ -1127,7 +1129,7 @@ function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'ana
     ...(limits.length > 0 ? { limits } : {}),
     links,
     readiness: readinessViewOf(g.raw),
-    ...(earlierAnalysisOf(g.analysis_state) ?? {}),
+    ...(earlierAnalysisOf(g.analysis_state, g.analysis_ready) ?? {}),
   };
 }
 
@@ -1272,9 +1274,13 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
   } };
 }
 
-function earlierAnalysisOf(state: unknown): { analysis: Record<string, unknown> } | undefined {
+function earlierAnalysisOf(state: unknown, analysisReady?: unknown): { analysis: Record<string, unknown> } | undefined {
   if (state === null || typeof state !== 'object') return undefined;
-  const { readiness: _placeholder, ...rest } = state as Record<string, unknown>;
+  const { readiness: _placeholder, ...stateRest } = state as Record<string, unknown>;
+  const ready = analysisReady !== null && typeof analysisReady === 'object'
+    ? analysisReady as Record<string, unknown> : null;
+  const rest: Record<string, unknown> = { ...stateRest, ...(ready?.freshness === 'stale' && typeof ready.freshness_reason === 'string'
+    ? { freshness_reason: ready.freshness_reason } : {}) };
   // The read retains the older successful Run's lifecycle when a newer
   // degraded Run supersedes it. Do not echo `complete_current` to the Agent:
   // the old result is absent and the canonical verdict requires a rerun.
@@ -1629,6 +1635,10 @@ export function createAgentCapabilities(
       nodes: (g.nodes as GraphRead['nodes']) ?? [],
       edges: (g.edges as GraphRead['edges']) ?? [],
       analysis_state: r.json.analysis_state,
+      ...(() => {
+        const readiness = (r.json.current_read as { analysis_ready?: unknown } | undefined)?.analysis_ready;
+        return readiness === undefined ? {} : { analysis_ready: readiness };
+      })(),
       ...(r.json.analysis_admission !== undefined && r.json.analysis_admission !== null ? { analysis_admission: r.json.analysis_admission } : {}),
       raw: g,
       ...(notModelled !== undefined ? { not_modelled: notModelled } : {}),

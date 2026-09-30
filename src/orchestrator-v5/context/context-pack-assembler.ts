@@ -1695,6 +1695,7 @@ function deriveContextPackAnalysisState(
   const canonical = selectCanonicalAnalysisState({
     priorFacts: input.priorFacts,
     currentGraphHash,
+    currentGraph: rawGraph,
     // Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD): keep the
     // diagnostic / coaching-pack canonical state consistent with the wire
     // verdict. Same raw graph the hash is derived from. undefined when off.
@@ -1848,7 +1849,8 @@ export function assembleContextPackWithSummary(
   // AND-gates that against each run's own persisted verdict, so this can only
   // ever withhold a leader id, never promote one.
   const runDeltaBuild =
-    input.priorFacts === undefined
+    input.priorFacts === undefined || analysisStateSummary?.freshness_reason === 'goal_unit_changed'
+      || analysisStateSummary?.freshness_reason === 'goal_snapshot_unverified'
       ? null
       : buildRunDelta({
           priorFacts: input.priorFacts,
