@@ -65,6 +65,27 @@ describe('the correction names the part still holding the user\'s earlier £45,0
     expect(r.note).not.toContain('THEIR figure from the brief');
   });
 
+  // R3 CR 5903120325 / AIQ 5903126944: a RATIFIED source is Olumi's number the user endorsed, never theirs.
+  for (const source of ['user_confirmed', 'user_assumption']) {
+    it(`CONTROL (${source}: Olumi's number the user ratified): the part is not called the user's`, async () => {
+      const g = clone(F.graph);
+      (g.nodes as Json[]).find((n) => n.id === 'aws_monthly_cost_at_full_workload')!.observed_state.source = source;
+      const r = await propose(g);
+      expect(r.ok, JSON.stringify(r)).toBe(true);
+      expect(r.public_label).not.toContain('still holds your earlier');
+      expect(r.note).not.toContain('THEIR figure');
+    });
+  }
+
+  it('a part the user typed in chat (user_override) is theirs, but not "from the brief"', async () => {
+    const g = clone(F.graph);
+    (g.nodes as Json[]).find((n) => n.id === 'aws_monthly_cost_at_full_workload')!.observed_state.source = 'user_override';
+    const r = await propose(g);
+    expect(r.public_label).toContain('"AWS monthly cost at full workload" still holds your earlier');
+    expect(r.note).toContain('that is THEIR figure, never a value Olumi supplied');
+    expect(r.note).not.toContain('from the brief');
+  });
+
   it('the goal unit spelled "GBP per month" still names the "£/month" part (one unit, two spellings)', async () => {
     const g = clone(F.graph);
     const goal = (g.nodes as Json[]).find((n) => n.kind === 'goal')!;

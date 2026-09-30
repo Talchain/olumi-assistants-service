@@ -556,18 +556,20 @@ function writtenIn(text: string, raw: number): { written: string; quote: string 
  * Served cut-costs on `f074916` (scenario 2d85ed7f): the brief's "£45k" was the goal's level AND "AWS monthly cost at full
  * workload" (`brief_extraction`), which both GCP options also set at £45k. The user's "£50k, not £45k" corrected the goal
  * alone, so the model held £50k today against £45k on the component, and the reply called that £45k "supplied by Olumi".
- * Every non-goal node that holds the goal's earlier figure as the USER's (the same amount in the goal's unit, a brief or
- * user source; the unit by `unitComparisonKey`, so "GBP per month" is "£/month"), with the options that set it there. Named on the approval, never changed by it: whether that part moves
- * too is the user's call. Pure.
+ * Every non-goal node that holds the goal's earlier figure as the USER's (the same amount in the goal's unit, a source
+ * `classifyValueSource` rules `user_stated`; the unit by `unitComparisonKey`, so "GBP per month" is "£/month"), with the
+ * options that set it there. Named on the approval, never changed by it: whether that part moves too is the user's call.
+ * ⛔ A RATIFIED source (`user_confirmed`, `user_assumption`) is Olumi's number the user endorsed, never theirs (R3 CR
+ * 5903120325; AIQ 5903126944): calling it "THEIR figure" is false authorship the other way round. Pure.
  */
 function nodesHoldingEarlierFigure(
   g: GoalLevelRead,
   goalId: string,
   earlier: number,
   goalUnit: string | undefined,
-): { label: string; options: string[] }[] {
+): { label: string; options: string[]; fromBrief: boolean }[] {
   if (goalUnit === undefined) return [];
-  const users = (source: unknown): boolean => source === 'brief_extraction' || (typeof source === 'string' && source.startsWith('user'));
+  const users = (source: unknown): boolean => classifyValueSource(source) === 'user_stated';
   const rawNodes = Array.isArray((g.raw as { nodes?: unknown }).nodes) ? (g.raw as { nodes: Record<string, unknown>[] }).nodes : [];
   const options = rawNodes.filter((n) => n?.kind === 'option');
   return g.nodes
@@ -576,6 +578,7 @@ function nodesHoldingEarlierFigure(
       && typeof n.observed_state?.unit === 'string' && unitComparisonKey(n.observed_state.unit) === unitComparisonKey(goalUnit))
     .map((n) => ({
       label: n.label,
+      fromBrief: n.observed_state?.source === 'brief_extraction',
       options: options.filter((o) => {
         const iv = (o.interventions ?? {}) as Record<string, unknown>;
         const set = iv[n.id] as { raw_value?: unknown } | undefined;
@@ -585,15 +588,16 @@ function nodesHoldingEarlierFigure(
 }
 
 /** The words for `nodesHoldingEarlierFigure`: one clause for the approval, one instruction for the Agent. */
-function sayEarlierFigureHeld(held: readonly { label: string; options: string[] }[], earlier: string): { label: string; note: string } | null {
+function sayEarlierFigureHeld(held: readonly { label: string; options: string[]; fromBrief: boolean }[], earlier: string): { label: string; note: string } | null {
   if (held.length === 0) return null;
   const names = held.map((h) => `"${h.label}"`).join(' and ');
   const setBy = [...new Set(held.flatMap((h) => h.options))];
   const options = setBy.length === 0 ? '' : ` (${setBy.map((o) => `"${o}"`).join(' and ')} ${setBy.length === 1 ? 'sets it' : 'set it'} there too)`;
   return {
     label: `. ${names} still ${held.length === 1 ? 'holds' : 'hold'} your earlier ${earlier}${options}; this does not change ${held.length === 1 ? 'it' : 'them'}`,
-    note: `. Say plainly that ${names} still ${held.length === 1 ? 'holds' : 'hold'} their earlier ${earlier}${options}: that is THEIR figure `
-      + `from the brief, never a value Olumi supplied, and this approval does not change it; ask whether it should change too`,
+    // "from the brief" only when every part's figure came from it (R3 nit 5903120325): a `user_override` was typed in chat.
+    note: `. Say plainly that ${names} still ${held.length === 1 ? 'holds' : 'hold'} their earlier ${earlier}${options}: that is THEIR figure`
+      + `${held.every((h) => h.fromBrief) ? ' from the brief' : ''}, never a value Olumi supplied, and this approval does not change it; ask whether it should change too`,
   };
 }
 
