@@ -94,6 +94,8 @@ vi.mock('../../orchestrator-v5/session/index.js', async (importOriginal) => ({
 import scenarioGraphRoute from '../assist.v1.scenario-graph.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../orchestrator-v5/build-turn-context.js';
 import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js';
+import { computeExpectedGraphCasHashes } from '../../orchestrator-v5/context/graph-cas-conflict.js';
+import { applyOlumiOptionAdoption } from '../../orchestrator-v5/system-events/olumi-option-adoption.js';
 import { GraphStateIngressSchema } from '../../orchestrator-v5/boundary/request-extensions.js';
 import { canonicaliseForAnalysis } from '../../orchestrator-v5/tools/handlers/analysis-ready-core.js';
 import type { SessionStore } from '../../orchestrator-v5/session/store.js';
@@ -336,6 +338,30 @@ describe('CS-AN-2 — the reload judges freshness with the hash the run stamped'
 
     expect(runStateOf(body)?.kind).toBe('complete_stale');
     expect(body.analysis_result, 'a stale run must not be served as the current result').toBeNull();
+  });
+
+  it('ADOPTION: an approved Olumi option makes the old Run stale on a cold analysis read', async () => {
+    const before = makeBase();
+    const option = (before.nodes as Dict[]).find((n) => n.id === 'opt_hybrid')!;
+    option.proposed_by = 'olumi';
+    (option.interventions as Dict).fac_annual_cost = { value: 0.8, source: 'cee_hypothesis' };
+    const runHash = await runStampFor(before);
+    seed(before, runHash);
+    expect(runStateOf(await reload())?.kind).toBe('complete_current');
+
+    const cas = computeExpectedGraphCasHashes(before);
+    const adopted = applyOlumiOptionAdoption(before, {
+      option_id: 'opt_hybrid', expected_label: 'Hybrid',
+      expected_interventions: option.interventions as Dict,
+      base_graph_hash: cas.expectedGraphAnalysisHash!,
+      expected_graph_identity_hash: cas.expectedGraphIdentityHash!,
+    });
+    expect(adopted.kind, JSON.stringify(adopted)).toBe('mutated');
+    if (adopted.kind !== 'mutated') return;
+    seed(adopted.graph, runHash);
+    const reopened = await reload();
+    expect(runStateOf(reopened)?.kind).toBe('complete_stale');
+    expect(reopened.analysis_result).toBeNull();
   });
 
   it('FALSE-CURRENT CLOSED (P3): raw hash === stamp but canonical !== stamp reloads as complete_stale with NO result', async () => {
