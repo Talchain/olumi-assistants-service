@@ -143,7 +143,14 @@ describe('approved Olumi option joins Run, stored fact and cold read', () => {
     expect(reopened.analysis_state?.run_state.kind).toBe('complete_current');
     expect(reopened.analysis_result).toMatchObject({
       computed_against_hash: second.result.graph_hash_at_run,
+      leading_option_id: null,
+      enrichment: {
+        inference_warnings: [{ code: 'GOAL_FIGURES_PRODUCT_NOT_READ' }],
+      },
     });
+    expect((reopened.analysis_result as Rec).win_probabilities).toBeUndefined();
+    expect((reopened.analysis_result as Rec).enrichment.results.map((r: Rec) => r.option_id))
+      .toContain(option.id);
     expect(first.result.graph_hash_at_run).not.toBe(second.result.graph_hash_at_run);
   });
 });
