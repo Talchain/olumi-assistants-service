@@ -1559,7 +1559,8 @@ export async function buildModelFromBrief(
   // ⭐ THE MAGNITUDE CONTRACT (D5–D8): a size Olumi set aside, a user's size that cannot hold, or a placeholder sized to
   // the target's range is ASKED where the user always sees it — ahead of the drafter's own questions, and behind
   // every question placed below. Admission writes each as a `.magnitude_question` ledger entry (`admit-candidate.ts`).
-  openQuestions.unshift(...admitted.loss.filter((l) => /\.magnitude_question$/.test(l.field_path)).map((l) => l.reason));
+  // An Olumi LEVEL equal to the gap to the user's target is asked in the same slot (`.target_level_question`).
+  openQuestions.unshift(...admitted.loss.filter((l) => /\.(magnitude|target_level)_question$/.test(l.field_path)).map((l) => l.reason));
   // ⭐ DL ruling #72 5863840239 (ii), condition 2: today's level of a quantity the user limits, when the model holds none
   // of theirs, is ASKED — typed (`level_asks`) and said here: behind the scope, deadline, withheld-option and C46
   // product questions (C46's required row keeps its reply slot), ahead of the magnitude and drafter's own — on journey C

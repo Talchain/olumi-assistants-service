@@ -18,6 +18,7 @@
 
 import { REPAIR_CODES, type RepairEntry, type GoalThresholdFrameType, type QuantityFrameType } from '@talchain/schemas';
 import { oneRoutePerEffect } from './one-route-per-effect.js';
+import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { isChangeFrame } from './limit-frame.js';
 import {
   CEE_GOAL_THRESHOLD_FRAME,
@@ -3568,6 +3569,63 @@ function admitOnce(
     if (n.goal_threshold_frame === 'change_rel') return Math.abs(raw * today);
     return Math.abs(raw - today);
   };
+  /**
+   * ⛔ THE TARGET IS NOT A LEVEL EITHER (MG handover §8 item 2.1; R3 #75 5902892629 r1; AIQ 5902905975: circular, UNEARNED).
+   * Served cut-costs: the drafter gave "Saving at full GCP migration" an Olumi level of £9,000 a month (`f95ea20`: 20% of
+   * £45,000, exactly the GAP to the user's target), and "GCP monthly cost at full workload" £36,000 (`f074916`, scenario
+   * 2d85ed7f: exactly the TARGET, £45,000 × 0.8), which both GCP options then set. A level Olumi derived from the user's
+   * target, then used to score reaching that target, makes the chance circular. #2321's rule for a link size
+   * (`target_sized`), for a level: Olumi's own level (`cee_inference`) in the goal's own unit (`unitComparisonKey`, so
+   * "GBP per month" is "£/month") within 1% of the gap or the target is set aside — the node keeps its frame
+   * (`scale_frame`), so nothing blocks the Run — with every option's Olumi level carrying the same figure on it, and asked
+   * once (`.target_level_question`, routed to `open_questions` by `build-model.ts`). A figure the user gave is never
+   * touched. Before sizing, so no link is sized from it either.
+   */
+  const goalNode = nodes.find((n) => n.kind === 'goal');
+  const gap = goalNode === undefined ? undefined : goalGap(goalNode);
+  const targetLevel = ((): number | undefined => {
+    const raw = goalNode?.goal_threshold_raw;
+    const today = goalNode?.observed_state?.raw_value;
+    if (typeof raw !== 'number' || !Number.isFinite(raw)) return undefined;
+    if (goalNode!.goal_threshold_frame === 'change_rel') return typeof today === 'number' && Number.isFinite(today) ? today * (1 + raw) : undefined;
+    if (goalNode!.goal_threshold_frame === 'change_abs' || goalNode!.goal_threshold_frame === 'delta') {
+      return typeof today === 'number' && Number.isFinite(today) ? today + raw : undefined;
+    }
+    return raw;
+  })();
+  const goalUnitKey = unitComparisonKey(goalNode?.observed_state?.unit ?? goalNode?.goal_threshold_unit);
+  const near = (x: number, y: number | undefined): boolean => y !== undefined && y > 0 && Math.abs(x - y) <= 0.01 * y;
+  if (goalUnitKey !== undefined && (gap !== undefined || targetLevel !== undefined)) {
+    for (const n of nodes) {
+      const os = n.observed_state;
+      if (n === goalNode || os === undefined || os.source !== 'cee_inference') continue;
+      const raw = typeof os.raw_value === 'number' ? os.raw_value : os.value;
+      const unit = os.unit ?? unitById.get(n.id);
+      if (!Number.isFinite(raw) || unitComparisonKey(unit) !== goalUnitKey) continue;
+      const which = near(raw, gap) ? 'the gap to your target' : near(raw, targetLevel) ? 'your target itself' : null;
+      if (which === null) continue;
+      const frame = typeof os.cap === 'number' ? os.cap : n.scale_frame;
+      delete n.observed_state;
+      if (typeof frame === 'number' && n.scale_frame === undefined) n.scale_frame = frame;
+      // The options' own Olumi levels carrying the same figure on it go with it (served: both GCP options set £36,000).
+      const setBy: string[] = [];
+      for (const o of nodes) {
+        const level = o.kind === 'option' ? (o.interventions as Record<string, ConstructedLevel> | undefined)?.[n.id] : undefined;
+        if (level === undefined || level.source === 'brief_extraction' || typeof level.raw_value !== 'number' || !near(level.raw_value, raw)) continue;
+        delete (o.interventions as Record<string, ConstructedLevel>)[n.id];
+        setBy.push(o.label);
+      }
+      loss.push({
+        field_path: `nodes[${n.id}].observed_state.target_level_question`,
+        before: raw,
+        after: null,
+        reason: `Olumi estimated "${n.label}" at ${raw} ${unit}${setBy.length > 0 ? ` (and ${setBy.map((l) => `"${l}"`).join(' and ')} set it there)` : ''}, `
+          + `which is exactly ${which}. A target is what you want, not evidence of where a figure stands, so it was not used. `
+          + `What figure should Olumi use for "${n.label}"?`,
+        severity: 'warn',
+      } as RepairEntry);
+    }
+  }
   const magnitudeNodeById = new Map<string, MagnitudeNode>(nodes.map((n) => [n.id, {
     label: n.label,
     kind: n.kind,
