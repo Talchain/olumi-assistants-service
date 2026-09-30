@@ -83,6 +83,10 @@
       "skip": 1,
       "reason": "Skipped: v0 /assist/draft-graph route archived — returns 410 Gone. Tests should target /assist/v1/draft-graph"
     },
+    "tests/integration/olumi-adoption-local-db.test.ts": {
+      "runIf": 1,
+      "reason": "Opt-in signed-in integration witness against an isolated local PostgREST and CEE; requires local test JWT, database, and real PLoT. It must not run against shared staging. Deterministic adoption route and writer controls run in the required suite."
+    },
     "tests/integration/prompts.repository.test.ts": {
       "skipIf": 1,
       "reason": "Env-gated: PostgreSQL repository suite runs only when PROMPTS_POSTGRES_URL is set (describe.skipIf); external-dependent, excluded from the required gate."
