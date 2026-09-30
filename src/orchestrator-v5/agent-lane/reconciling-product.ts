@@ -233,7 +233,7 @@ export interface GapResidual {
 }
 
 /** The residual must BE the brief's own gap, to rounding: 0.5% of the goal's level (£375 on £75k). */
-const GAP_ROUNDING = 0.005;
+export const GAP_ROUNDING = 0.005;
 
 /**
  * ⛔ OLUMI'S GAP RESIDUAL IS NOT A REVENUE STREAM (R3 5904253749, served `ef042ce` m0 `c8108752`; AIQ 5904262145 +

@@ -20,7 +20,7 @@
  *  · the units compose as a money rate × a count into the goal's money per period (`unitsCompose`, one source with the
  *    mint), with or without the per-item denominator: the drafter's typed unit licenses nothing (AIQ 5891286280).
  */
-import { RECONCILIATION_TOLERANCE, readMoneyTotal, unitsCompose } from './reconciling-product.js';
+import { GAP_ROUNDING, RECONCILIATION_TOLERANCE, readMoneyTotal, unitsCompose } from './reconciling-product.js';
 import { sayFigure } from './say-figure.js';
 import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
@@ -211,6 +211,18 @@ function proposeOnGoal(graph: unknown): IdentityProposal | null {
 }
 
 /**
+ * Olumi's gap plug beside a carrier, read on the stored graph exactly as `withoutGapResidual` reads it on a draft: money in
+ * the goal's own terms that is NOT the user's, sized to the gap within 0.5% of the goal's level, with no cause of its own
+ * and its only link into the goal.
+ */
+function gapPlugBeside(id: string, byId: Map<string, Rec>, edges: readonly Rec[], goalMoney: { code: string; period: 'month' | 'year' } | null, gap: number, o: number): boolean {
+  const p = otherParent(byId.get(id), goalMoney);
+  if (!p.inGoalTerms || p.users || p.figure === null) return false;
+  if (Math.abs(p.figure - gap) > GAP_ROUNDING * Math.abs(o)) return false;
+  return !edges.some((e) => e.to === id) && edges.filter((e) => e.from === id).length === 1;
+}
+
+/**
  * ⛔ AIQ 5892754930 (3): a Yes makes the goal this carrier PLUS the goal's other parents, so the card names the first of
  * them (and how many more) and whose figure it is, from the graph. "That gives your £75,000" only where the figures add
  * up to the goal within ISL's 5%; otherwise the card says the goal also adds them, and claims no sum.
@@ -273,9 +285,14 @@ function proposeOnCarrier(graph: unknown): IdentityProposal | null {
     // wrong, so the card would endorse a wrong structure. The carrier stays withheld (PLoT #420's no-card words).
     const others = parentIds.filter((p) => p !== id);
     if (others.some((pid) => { const p = otherParent(byId.get(pid), goalMoney); return p.money && !p.inGoalTerms; })) continue;
+    const made = r.rate.value * r.count.value;
+    // ⛔ AIQ 5905919190 (rule 5904836575): NO CARD BESIDE OLUMI'S GAP PLUG. On a graph built before #2343's construction
+    // drop, Olumi's money parent sized to close the gap (o − a·b, as `withoutGapResidual` reads it) would be said to
+    // "give your £75,000", which is circular, and a Yes would build the plug into the goal. The user's own figure of that
+    // size, or an Olumi addend of any other size, keeps today's card (P0 PARTNER 5905933422 R2/R3).
+    if (others.some((pid) => gapPlugBeside(pid, byId, edges, goalMoney, o.value - made, o.value))) continue;
     const carrierLabel = text(carrier.label) ?? id;
     const money = (v: number): string => sayFigure(v, r.code);
-    const made = r.rate.value * r.count.value;
     const today = r.count.today ?? r.rate.today;
     const figures = todaysFigures(r, money);
     const words = `Is “${carrierLabel}” ${today !== undefined ? '' : 'your '}“${r.rate.label}” × “${r.count.label}”? `

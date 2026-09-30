@@ -80,6 +80,21 @@ describe('Olumi’s gap residual beside a carrier is taken out and said; the car
     expect(labelsInto(after, goalOf(after).id)).toEqual(['Pro subscription MRR at month 12']);
   });
 
+  // The carrier over the user's TWO own levels + Olumi's plug is NOT this rule's: MG's class-2 fold (goal-product-carrier.ts,
+  // AIQ 5888943993 (1)) already folds that carrier into the goal and leaves the plug out, in its own words. This row guards
+  // that the two never both act, and that the shape still reaches a card (the carrier card refuses beside a plug).
+  it('the carrier over the user\u2019s TWO own levels + the plug: class 2 folds it, says so, and the card applies', async () => {
+    const { graph, out } = await build(m8((c) => {
+      c.identities = [{ outcome: 'Pro subscription MRR at month 12', operation: 'product', factors: ['Pro plan price', 'Current paying subscribers'], provenance: 'ai_proposed' }];
+      c.links = c.links.filter((l: Json) => !(l.from === 'Paying subscribers at month 12' && l.to === 'Pro subscription MRR at month 12'));
+      c.links.push({ from: 'Current paying subscribers', to: 'Pro subscription MRR at month 12', direction: 'positive', provenance: 'ai_proposed', effect_amount: 49, effect_per_source_change: 1, effect_provenance: 'ai_proposed' });
+    }));
+    expect(residualNode(graph)).toBeUndefined();
+    expect(JSON.stringify(out)).toContain('‘Other MRR’ was Olumi\'s addition, and your figures don\'t need it');
+    expect(JSON.stringify(out)).not.toContain('Its size was my guess');
+    expect(proposeProductIdentity(graph)).not.toBeNull();
+  });
+
   it('CONTROL: an Olumi addend beside the carrier that is NOT the gap stays', async () => {
     const { graph } = await build(m8((c) => { c.factors.find((f: Json) => f.label === 'Other MRR').baseline_value = 6000; }));
     expect(residualNode(graph)).toBeDefined();
