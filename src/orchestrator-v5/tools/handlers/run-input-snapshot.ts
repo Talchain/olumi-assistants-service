@@ -114,8 +114,11 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
         };
 
   // ── options and their settings ─────────────────────────────────────────
+  // An option PLoT was sent with no id cannot be diffed against another Run: record no snapshot rather than invent an
+  // id (`option_0` would read as a real option, and a reorder would diff as a change).
+  if (input.submittedOptions.some((opt) => optionIdOf(opt) === undefined)) return null;
   const options = input.submittedOptions.map((opt, i) => {
-    const optionId = optionIdOf(opt) ?? `option_${i}`;
+    const optionId = optionIdOf(opt)!;
     const wire = input.wirePerOption[i] ?? {};
     const raws = input.rawObjectsPerOption[i] ?? {};
     const held = input.heldFactorIdsByOptionId.get(optionId);
@@ -151,7 +154,8 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
     const os = isRec(n.observed_state) ? n.observed_state : null;
     if (id === undefined || os === null || id === goalId) return [];
     const encoded = finite(os.value);
-    const raw = finite(os.raw_value) ?? encoded;
+    // The AUTHORED figure only: a normalised `value` is never recorded as the user's raw (contract header).
+    const raw = finite(os.raw_value) ?? text(os.display_value);
     if (raw === undefined && encoded === undefined) return [];
     return [{
       factor_id: id,
