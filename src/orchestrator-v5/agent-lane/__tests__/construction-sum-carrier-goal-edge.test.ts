@@ -142,7 +142,13 @@ describe('R3-2b — levers PLUS an option edge into the tally: the operands are 
     expect(sumsOf(graph.nodes)).toEqual([]);
     expect(out.sum_identities).toBeUndefined();
     expect(out.pure_limits).toBeUndefined();
-    expect(pairs(graph.edges)).toEqual(pairs(S.graph.edges));
+    // RE-PINNED, ONE EDGE (MG successor, CEE #2326; AIQ #75 5902306402): "Features + Pro price rise" set the LIMITED
+    // "Total initiative spend" at Olumi's £20,000 (exactly the £20k limit) while its own lever "New-feature rollout share"
+    // (a %, not an addend) feeds it. That Olumi level is now dropped (`option-level-over-own-levers.ts`), so its option →
+    // tally edge goes; "Additional advertising"'s same-unit £ lever keeps R3-2b's shape. Every other served edge is pinned.
+    const features = String(S.graph.nodes.find((n: Json) => n.kind === 'option' && n.label === 'Features + Pro price rise')!.id);
+    expect(pairs(graph.edges)).toEqual(pairs(S.graph.edges).filter((p) => p !== `${features}::total_initiative_spend`));
+    expect(pairs(S.graph.edges)).toContain(`${features}::total_initiative_spend`);
   });
   it('⭐ the served R3-2a tally with ONE option also setting it (an option edge into it): no mint', async () => {
     const R = C.risk;

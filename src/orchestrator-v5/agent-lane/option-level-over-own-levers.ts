@@ -13,7 +13,12 @@
  *
  * NARROW ON PURPOSE (0-LLM corpus, R3 `wires-spike-97`): the unrestricted rule hit 54 non-E option levels, e.g. an option
  * that funds a release AND sets "New feature rollout" = 1. Only a node a user limit names is touched; a level the user
- * stated (`explicit`) is never dropped; a lever must be an intervention with a level on the SAME option. Pure.
+ * stated (`explicit`) is never dropped; a lever must be an intervention with a level on the SAME option.
+ *
+ * ⛔ SAME-UNIT LEVERS ARE LEFT ALONE (DL parity-lock rows, `construction-sum-carrier-goal-edge.test.ts` R3-2b): when every
+ * lever feeding the node is in the node's OWN unit (£ spends into a £ total), the node is R3-2's sum tally, and R3-2b
+ * deliberately does not mint while an option also sets it. Changing that is a journey-C budget-meaning change, routed
+ * separately. Only cross-unit levers are this guard's (headcount → £ salary spend; a retention switch → churn %). Pure.
  */
 
 export interface OptionLevelOverOwnLevers {
@@ -27,6 +32,7 @@ export interface OptionLevelOverOwnLevers {
 interface Intervention { readonly factor_label: string; readonly value: number; readonly provenance: string }
 interface ModelShape {
   readonly options: readonly { readonly label: string; readonly interventions?: readonly Intervention[] }[];
+  readonly factors?: readonly { readonly label: string; readonly unit: string | null }[];
   readonly links?: readonly { readonly from: string; readonly to: string }[];
   readonly constraints?: readonly { readonly metric: string }[];
 }
@@ -46,6 +52,8 @@ export function dropOptionLevelsOverOwnLevers<M extends ModelShape>(model: M): {
     }
     return out;
   };
+  const unitOf = new Map((model.factors ?? []).map((f) => [key(f.label), typeof f.unit === 'string' && f.unit.trim() !== '' ? key(f.unit) : undefined]));
+  const sameUnit = (a: string, b: string): boolean => unitOf.get(key(a)) !== undefined && unitOf.get(key(a)) === unitOf.get(key(b));
   const dropped: OptionLevelOverOwnLevers[] = [];
   const options = model.options.map((o) => {
     const ivs = o.interventions ?? [];
@@ -54,7 +62,7 @@ export function dropOptionLevelsOverOwnLevers<M extends ModelShape>(model: M): {
       if (iv.provenance === 'explicit' || !limited.has(key(iv.factor_label))) continue;
       const up = upstreamOf(key(iv.factor_label));
       const via = ivs.filter((p) => p !== iv && up.has(key(p.factor_label))).map((p) => p.factor_label);
-      if (via.length === 0) continue;
+      if (via.length === 0 || via.every((v) => sameUnit(v, iv.factor_label))) continue;
       drop.add(iv);
       dropped.push({ option: o.label, factor: iv.factor_label, value: iv.value, via });
     }

@@ -129,6 +129,12 @@ describe('the guard itself: narrow on purpose (0-LLM corpus: 54 unrestricted non
     expect(r.dropped).toEqual([]);
     expect(dropOptionLevelsOverOwnLevers(model([lever, olumiTotal], { limit: null })).dropped).toEqual([]);
   });
+  it('CONTROL: same-unit levers (£ spends into a £ total: R3-2\'s sum tally, R3-2b\'s domain) are left alone', () => {
+    const m = { ...model([lever, olumiTotal]), factors: [{ label: 'Lever', unit: 'GBP' }, { label: 'Total', unit: 'GBP' }] };
+    expect(dropOptionLevelsOverOwnLevers(m).dropped).toEqual([]);
+    const cross = { ...model([lever, olumiTotal]), factors: [{ label: 'Lever', unit: 'engineers' }, { label: 'Total', unit: 'GBP/year' }] };
+    expect(dropOptionLevelsOverOwnLevers(cross).dropped).toHaveLength(1);
+  });
   it('CONTROL: a level the user stated is never dropped', () => {
     expect(dropOptionLevelsOverOwnLevers(model([lever, { ...olumiTotal, provenance: 'explicit' }])).dropped).toEqual([]);
   });
