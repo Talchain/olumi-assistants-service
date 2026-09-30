@@ -5582,6 +5582,16 @@ export function createAgentCapabilities(
               detail: `"${suggested.label}" is already Olumi's suggestion. Adoption keeps its existing links and levels; nothing was prepared with additional edits. Propose its participation alone, then edit its effects separately.` };
           }
           const expectedInterventions = structuredClone(suggested.interventions ?? {});
+          // This narrow card speaks numeric levels. A category or switch is
+          // stored in `raw_value` with a numeric encoding for analysis; showing
+          // that encoding as the user's reading would approve a different idea.
+          if (Object.values(expectedInterventions).some((cell) => cell !== null && typeof cell === 'object'
+            && Object.hasOwn(cell, 'raw_value')
+            && (typeof (cell as { raw_value?: unknown }).raw_value !== 'number'
+              || !Number.isFinite((cell as { raw_value: number }).raw_value)))) {
+            return { ok: false, mutated: false, refusal: 'non_numeric_stored_level',
+              detail: `"${suggested.label}" has a category or switch that this approval card cannot show accurately. Nothing was prepared; review that option before including it.` };
+          }
           // The Run and canonical Agent reader use the normalized value in the
           // factor's frame. A stale raw display value cannot be the consent
           // reading for a different figure the Run would actually compare.
@@ -5609,12 +5619,15 @@ export function createAgentCapabilities(
             const unitValue = typeof level.unit === 'string' && level.unit.trim() !== ''
               ? level.unit.trim() : factor?.observed_state?.unit;
             const unit = (storedRaw !== null || frame !== null) && typeof unitValue === 'string' && unitValue !== ''
-              ? ` ${unitValue}` : '';
+              ? unitValue.replace(/(\bper\s+\w+)\s+per\s+(month|year|week|day)$/i, '$1 / $2') : '';
             const scaleNote = storedRaw === null && frame === null && normalized !== null ? ' (normalized scale; no user-facing unit verified)' : '';
             const source = level.source === 'cee_hypothesis' ? "Olumi's suggested estimate"
               : level.source === 'user_specified' ? 'set by you'
                 : level.source === 'brief_extraction' ? 'from your original brief' : 'source not recorded';
-            return `${String(factor?.label ?? factorId)}: ${typeof figure === 'number' ? `${figure}${unit}${scaleNote}` : 'no level set'} (${source})`;
+            const saidFigure = typeof figure === 'number'
+              ? (sayFigureExactly(figure, unit) ?? `${figure}${unit !== '' ? ` ${unit}` : ''}`) + scaleNote
+              : 'no level set';
+            return `${String(factor?.label ?? factorId)}: ${saidFigure} (${source})`;
           });
           const reading = `Add Olumi's suggestion "${suggested.label}" to your comparison with its existing levels: ${levelWords.length > 0 ? levelWords.join('; ') : 'none set'}.`;
           const approvalMessage = `Yes, add Olumi's suggestion "${suggested.label}" to my comparison with the levels shown.`;

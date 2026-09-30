@@ -746,7 +746,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(inner, 'no write or held proposal').toEqual([]);
     const approve = approveChipOf(turnResult);
     expect(approve?.message).toContain('Olumi\'s suggestion');
-    expect(approve?.detail).toContain("Price: 54 GBP (Olumi's suggested estimate)");
+    expect(approve?.detail).toContain("Price: £54 (Olumi's suggested estimate)");
     expect(graphNow().nodes.find((node) => node.id === 'opt_b')).toMatchObject({ proposed_by: 'olumi' });
 
     const before = structuredClone(graphNow());
@@ -861,7 +861,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const graph = seedGraph(3);
     graphOf.set(SCENARIO, { ...graph, nodes: graph.nodes.map((node) => node.id === 'opt_b'
       ? { ...node, proposed_by: 'olumi', interventions: {
-        fac_price: { value: 0.295, raw_value: 59, unit: 'GBP', source: 'cee_hypothesis' },
+        fac_price: { value: 0.295, raw_value: 59, unit: 'GBP per subscriber per month', source: 'cee_hypothesis' },
         fac_1: { value: 0.02, raw_value: 4, unit: 'units', source: 'brief_extraction' },
         fac_2: { value: 0.025, raw_value: 5, unit: 'units', source: 'user_specified' },
       } }
@@ -872,7 +872,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     ];
     const result = await turn({ message: 'Please add "Raise to £59" as one of my options.' });
     const detail = approveChipOf(result)?.detail;
-    expect(detail).toContain("Price: 59 GBP (Olumi's suggested estimate)");
+    expect(detail).toContain("Price: £59 per subscriber / month (Olumi's suggested estimate)");
     expect(detail).toContain('Factor 1: 4 units (from your original brief)');
     expect(detail).toContain('Factor 2: 5 units (set by you)');
   }, 120_000);
@@ -891,7 +891,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const approve = approveChipOf(offered);
     expect(approve, 'the finalised response keeps the approval button').toBeDefined();
     expect(approve?.label).toBe('Add this suggestion to my comparison');
-    expect(approve?.detail).toContain("Price: 57 GBP (Olumi's suggested estimate)");
+    expect(approve?.detail).toContain("Price: £57 (Olumi's suggested estimate)");
     expect(graphNow().nodes.find((node) => node.id === 'opt_b')?.analysis_participation).toBeUndefined();
   }, 120_000);
 
@@ -910,6 +910,22 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
       .toMatchObject({ ok: false, mutated: false, refusal: 'inconsistent_stored_level' });
     expect(approveChipOf(result)).toBeUndefined();
     expect(graphNow().nodes.find((node) => node.id === 'opt_b')?.analysis_participation).toBeUndefined();
+  }, 120_000);
+
+  it('does not show a numeric consent reading for a categorical stored level', async () => {
+    const graph = seedGraph();
+    graphOf.set(SCENARIO, { ...graph, nodes: graph.nodes.map((node) => node.id === 'opt_b'
+      ? { ...node, label: 'UK launch', proposed_by: 'olumi',
+        interventions: { fac_price: { value: 1, raw_value: 'UK', source: 'cee_hypothesis' } } }
+      : node) });
+    script = [
+      () => fnCall('propose_new_option', { label: 'UK launch', acts_on: [], rationale: 'Please add your suggestion.' }),
+      () => say('That categorical level needs a clear reading first.'),
+    ];
+    const result = await turn({ message: 'Please add "UK launch" as one of my options.' });
+    expect(result._agent.tool_calls.find((call) => call.name === 'propose_new_option'))
+      .toMatchObject({ ok: false, mutated: false, refusal: 'non_numeric_stored_level' });
+    expect(approveChipOf(result)).toBeUndefined();
   }, 120_000);
 
   it('[q5] RED (DL #70 5846812818, served F4/F4e): TWO options in one request, one a twin of "Raise to £59" → the valid one is still proposed as ONE change with ONE chip, the twin is named as not added, and approving adds only the valid one', async () => {
