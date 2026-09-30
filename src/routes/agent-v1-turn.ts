@@ -36,10 +36,11 @@ import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
+import { runAsAgentSubturn } from '../orchestrator-v5/session/agent-subturn-context.js';
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { collectTurnReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
 import { withCurrentGraphHash } from '../orchestrator-v5/agent-lane/analysis-freshness-stamp.js';
-import { BOARD_EDIT_PREFIX, HistoryStore, dropSupersededPairs, historyFromDurableTurns, needsDurableSeed, pruneSupersededToolOutputs } from '../orchestrator-v5/agent-lane/history-store.js';
+import { BOARD_EDIT_PREFIX, DURABLE_SEED_ROWS_READ, HistoryStore, dropSupersededPairs, historyFromDurableTurns, needsDurableSeed, pruneSupersededToolOutputs } from '../orchestrator-v5/agent-lane/history-store.js';
 import { contextBindingSecret, issueContextPacket } from '../orchestrator-v5/agent-lane/runtime/request-assembly.js';
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
@@ -1541,9 +1542,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
 
     const dispatchLedger: DispatchTiming[] = [];
-    const dispatch = timedDispatch(dispatchFor(
+    // Every in-process call the Agent makes for this turn is a SUB-TURN: a turn row it commits keeps no conversation
+    // text, because the user never saw it (`agent-subturn-context.ts`, #75 5910983526). This route's own claim and
+    // answer rows are written outside it, and the board-edit forward above uses its own, unmarked dispatch.
+    const internal = dispatchFor(
       typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
-    ), dispatchLedger, scenarioId);
+    );
+    const dispatch = timedDispatch(
+      (path, body) => runAsAgentSubturn(scenarioId, () => internal(path, body)),
+      dispatchLedger, scenarioId);
     /**
      * ⭐ PJ-C1 LATENCY (#72 5861769155): the turn's read cache is made HERE, and its first graph read starts at once,
      * so that ~1 s read runs beside the pending/committed-turn reads and the turn claim below instead of after them
@@ -1840,7 +1847,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const held = histories.get(sessionId);
     if (needsDurableSeed(held) && typeof store.readRecent === 'function') {
       try {
-        const durable = historyFromDurableTurns(await store.readRecent(scenarioId));
+        const durable = historyFromDurableTurns(await store.readRecent(scenarioId, DURABLE_SEED_ROWS_READ));
         if (durable.length > 0) histories.set(sessionId, [...durable, ...held]);
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: durable conversation could not be read — continuing without it');

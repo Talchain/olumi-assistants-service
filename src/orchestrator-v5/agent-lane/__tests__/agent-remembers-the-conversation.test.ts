@@ -12,9 +12,12 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 
 const EARLIER = [
-  // `readRecent` returns newest first.
-  { turn_id: 't2', turn_class: 'frame', created_at: '2026-09-23T10:02:00Z', user_message: 'Yes, use those.', assistant_message: 'Saved as version 2. In the current model, Hire Two Developers leads.' },
-  { turn_id: 't1', turn_class: 'frame', created_at: '2026-09-23T10:00:00Z', user_message: 'Should I hire a Tech lead or two developers? Our budget is fixed at £180k.', assistant_message: 'Here is a starting model with two options.' },
+  // `readRecent` returns newest first. Each is the Agent route's own answer row, so it carries the route's request hash
+  // (`agent_turn:`), as every stored Agent answer row does (CURRENT-READ-v1 row 5; sub-turn rows are `sha256:`).
+  { turn_id: 't2', turn_class: 'direct_answer', request_hash: `agent_turn:${'2'.repeat(64)}`, created_at: '2026-09-23T10:02:00Z', user_message: 'Yes, use those.', assistant_message: 'Saved as version 2. In the current model, Hire Two Developers leads.' },
+  // CONTRAST (DL 5912285829): an Agent sub-turn row the user never saw (the turn executor's `sha256:` hash) is dropped.
+  { turn_id: 's1', turn_class: 'handler', request_hash: `sha256:${'5'.repeat(32)}`, created_at: '2026-09-23T10:01:00Z', user_message: 'the user pressed Run', assistant_message: 'Hire Two Developers scored highest in 100% of runs.' },
+  { turn_id: 't1', turn_class: 'direct_answer', request_hash: `agent_turn:${'1'.repeat(64)}`, created_at: '2026-09-23T10:00:00Z', user_message: 'Should I hire a Tech lead or two developers? Our budget is fixed at £180k.', assistant_message: 'Here is a starting model with two options.' },
 ];
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
@@ -58,6 +61,7 @@ describe('after a restart, the Agent still knows the conversation the user can s
     sent.length = 0;
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'What did I say the budget was?' } });
     expect(r.statusCode).toBe(200);
+    expect(JSON.stringify(sent[0]), 'the sub-turn row is not the conversation').not.toMatch(/the user pressed Run|100% of runs/);
     expect(texts(sent[0])).toEqual([
       'user: Should I hire a Tech lead or two developers? Our budget is fixed at £180k.',
       'assistant: Here is a starting model with two options.',

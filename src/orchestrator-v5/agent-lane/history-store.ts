@@ -17,6 +17,7 @@
  * orphan a `function_call_output`, which the API rejects. So the trim only ever
  * cuts at the start of a user message — a point where nothing is half-finished.
  */
+import { isAgentAnswerRow } from '../session/conversation-as-seen.js';
 
 const DEFAULT_MAX_SESSIONS = 200;
 /**
@@ -308,12 +309,22 @@ export function dropDanglingCalls(items: readonly unknown[]): unknown[] {
  * proposal is not revived (the proposal store is in-process too, so
  * `get_canonical_state` truthfully shows nothing awaiting approval).
  */
+/** The Agent turns a reseed restores (newest), counted after sub-turn and claim rows are dropped. */
+export const DURABLE_SEED_TURNS = 20;
+/** The raw rows a reseed reads so that {@link DURABLE_SEED_TURNS} answer rows survive the drop (claim + sub-turns). */
+export const DURABLE_SEED_ROWS_READ = 100;
+
 export function historyFromDurableTurns(
-  turns: readonly { user_message?: string | null; assistant_message?: string | null }[],
+  turns: readonly { request_hash?: string | null; user_message?: string | null; assistant_message?: string | null }[],
 ): unknown[] {
   const items: unknown[] = [];
-  // `readRecent` returns newest first.
-  for (const t of [...turns].reverse()) {
+  // `readRecent` returns newest first. ⛔ Only the Agent's OWN answer rows: an internal sub-turn's row carries the
+  // model's tool reason as `user_message` and a handler's text the user never read (served MRR `3b6369b0`), so seeding
+  // from every row told the Agent the user said words they never said (#75 5910983526, 5911326118).
+  const seen = [...turns].reverse()
+    .filter((t) => isAgentAnswerRow(t) && (!!t.user_message?.trim() || !!t.assistant_message?.trim()))
+    .slice(-DURABLE_SEED_TURNS); // the cap counts AFTER the drop (CURRENT-READ-v1 row 5)
+  for (const t of seen) {
     if (typeof t.user_message === 'string' && t.user_message.trim().length > 0) {
       items.push({ role: 'user', content: [{ type: 'input_text', text: t.user_message }] });
     }
