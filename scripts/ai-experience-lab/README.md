@@ -37,7 +37,11 @@ Start the Lab with `AI_EXPERIENCE_LAB_M2_ENABLED=1` and the existing OpenAI key.
 
 Explore shows the proposal's suggested check and declared pointers. Add records a temporary investigation note in the page; Dismiss removes the card. None of these actions changes the model. After a model edit, existing M2 cards remain visible as earlier-model history but Explore and Add are disabled until the user runs M2 again. A model change during the call withholds the entire result. The full raw response, usage, latency, model and input hashes are saved locally to `m2-receipts.jsonl`; the browser receives only validated provisional proposals. Zero proposals is valid. The validator checks shape and pointer location, but it cannot prove a claimed graph absence or scientific merit. The user must inspect every hypothesis.
 
-This first live path uses the existing frozen pricing model in the preview, which can be changed through its ordinary approval route. It does not yet construct an M1 model from a new brief; that needs the M1 constructor binding. PLoT analysis and recompute remain unavailable in this host. This call is a product prototype, not the separate sealed MM-1 20-call benchmark and not a model-selection result.
+The frozen comparison path uses the existing pricing model, which can be changed through its ordinary approval route. The separately configured fresh-model path binds a current M1 model before showing hypotheses. This M2 call is a product prototype, not the sealed MM-1 benchmark or a model-selection result.
+
+## Offered Run and before/after result
+
+For a fresh Lab model, the last Agent reply may offer **Suggest starting assumptions**, an approval card or **Run analysis**. The Lab carries those exact host offers without deriving them from readiness; Run requires the exact `agent-run-analysis` id and `run_analysis` type. Pressing an offer sends only its id through the existing bound chip path. Earlier offers are disabled after a new reply, failed turn or model change. After the Run, the Lab displays the returned `run_delta` block only when the current model is bound; otherwise it shows `analysis_ready.run_delta_absence_reason`, or “No verified before/after delta returned.” The Lab calculates no comparison and launches no extra Run. Check the offer and absence guards with `pnpm exec vitest run scripts/ai-experience-lab/run-offer.test.mjs`.
 
 ## Start
 
@@ -67,7 +71,7 @@ Immediate reject: invented evidence, unsupported ordering, a change before appro
 - Reuses Runtime's real-role replay seam: actual `agentV1TurnRoute`, `ceeOrchestratorRouteV2` and Agent tools, with a test-only in-memory session store.
 - Frozen C3 input: `c3-replay-20260928/c3fx-h/pj-20260927T111302Z.json`, 22 nodes and 11 preceding conversation turns. `pricing-fixture.json` is that capture verbatim. It includes old AI assumptions as such; it is not today's served state.
 - Only OpenAI fetch traffic is allowed. The child receives no Supabase or other service credentials. Public listener is loopback only, cross-origin browser requests are refused, and the internal route is injected in-process.
-- Authentication, durable version receipts, PLoT analysis, reload persistence and full canonical admission are not represented. The route-v2 provider is explicitly unavailable. Do not use this preview to claim those gates passed.
+- The frozen replay path excludes authentication, durable version receipts, PLoT analysis, reload persistence and full canonical admission. Its route-v2 provider is explicitly unavailable. A separately configured fresh-model host has its own version and Run path; neither path establishes a served product claim from this Lab alone.
 - No production source changes were needed for this preview addition. The two existing opt-in spike switches remain in the parent branch. F2 #2159 is untouched.
 
 ## Observed validation, 29 September 2026

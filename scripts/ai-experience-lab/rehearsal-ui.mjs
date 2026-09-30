@@ -208,3 +208,23 @@ export function mountSecondViewIllustration({ add }) {
     if (!root.hidden) render();
   };
 }
+
+/** The Lab carries only these exact actions from the host's latest turn; it derives no offer. */
+export function visibleLabActions(actions) {
+  return (Array.isArray(actions) ? actions : []).filter(action =>
+    action && typeof action === 'object' && typeof action.label === 'string' && action.label.trim() &&
+    ((typeof action.id === 'string' && action.id.startsWith('agent-approve-proposal:') ||
+      action.id === 'agent-suggest-starting-assumptions' || action.id === 'agent-suggest-what-it-needs') &&
+      typeof action.message === 'string' && action.message.trim() ||
+      action.id === 'agent-run-analysis' && action.action_type === 'run_analysis'));
+}
+
+/** The server owns delta pairing; the Lab only displays the returned block or its stated absence. */
+export function runDeltaForDisplay(response, bound) {
+  const reason = response?.analysis_ready?.run_delta_absence_reason;
+  if (bound && !(typeof reason === 'string' && reason.trim()) &&
+      response && Object.hasOwn(response, 'run_delta') && response.run_delta !== null && response.run_delta !== undefined) {
+    return { kind: 'delta', value: response.run_delta };
+  }
+  return { kind: 'absence', value: typeof reason === 'string' && reason.trim() ? reason : 'No verified before/after delta returned' };
+}
