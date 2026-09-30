@@ -144,8 +144,20 @@ async function build(wire: Record<string, unknown>): Promise<Graph> {
   };
   const out = await buildModelFromBrief(SCENARIO, BRIEF, dispatch, call);
   expect(out.ok, JSON.stringify(out)).toBe(true);
-  return registered as Graph;
+  return sizedForC46(registered as Graph);
 }
+
+/**
+ * These rows pin C46's SIGN rule, not sizing. Their drafted links are unsized (`olumi_placeholder`), which (S) (#2329,
+ * `placeholderGoalPaths`) now withholds before any leader is chosen; marked sized here so the rows keep testing C46.
+ * (S) itself is pinned in `run-analysis-goal-figures-placeholder-path.test.ts`.
+ */
+function sizedForC46<G>(g: G): G {
+  const copy = JSON.parse(JSON.stringify(g)) as { edges?: { provenance?: { magnitude?: unknown } }[] };
+  for (const e of copy.edges ?? []) if (e.provenance?.magnitude === 'olumi_placeholder') e.provenance.magnitude = 'olumi_estimate';
+  return copy as G;
+}
+
 
 /**
  * The persisted fact the real handler writes, PLoT faked with £59 first at 0.94 — plus, when given, batch 7's top-level

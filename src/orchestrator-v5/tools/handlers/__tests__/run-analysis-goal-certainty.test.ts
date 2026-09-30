@@ -85,16 +85,18 @@ beforeEach(() => {
 });
 
 describe('0.63.0 at the call site: the Run stores its own goal certainty', () => {
-  it('⭐ the stored array is the producer\'s decision on the STORED graph the Run\'s hash binds and the Run\'s own body — one per 0/1 option', async () => {
+  it('⭐ the stored array is the producer\'s decision on the STORED graph the Run\'s hash binds and the Run\'s own body — one per 0/1 option it still shows', async () => {
     const result = await storedRun(plotResponse);
     const { goalCertaintyOfStoredResult } = await vi.importActual<typeof import('../../../agent-lane/goal-certainty.js')>(
       '../../../agent-lane/goal-certainty.js',
     );
     // Bound to the Run: the hash beside it is the stored graph's, and the decision is recomputed here from that graph.
     expect(result.graph_hash_at_run).toBe(computeAnalysisAffectingGraphHash(input.graph as never));
-    expect(result.goal_certainty).toEqual(goalCertaintyOfStoredResult(input.graph, { enrichment: plotResponse }));
-    expect((result.goal_certainty as Json[]).map((d) => d.option_id).sort()).toEqual([...OPTIONS].sort());
-    for (const d of result.goal_certainty as Json[]) expect(d.probability_of_goal).toBe(0);
+    // ⛔ (S) (DL #75 5902570568): both price options reach MRR through an `olumi_placeholder`, so their goal figures are
+    // withheld at the source and no certainty is decided for them. The status quo moves nothing and keeps its earned 0.
+    expect(result.goal_certainty).toEqual(goalCertaintyOfStoredResult(input.graph, { enrichment: plotResponse })
+      .filter((d) => d.option_id === OPTIONS[0]));
+    expect(result.goal_certainty).toEqual([{ option_id: OPTIONS[0], probability_of_goal: 0, earned: true }]);
   });
 
   it('RECORDED EMPTY (Runtime 5883189956): a completed Run with no option at 0 or 1 stores `[]`, not absence', async () => {

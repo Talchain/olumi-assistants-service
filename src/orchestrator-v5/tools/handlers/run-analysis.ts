@@ -44,6 +44,8 @@ import { collectUnvaluedFactorIds } from '../../coaching/unvalued-factor-ids.js'
 import { IDENTITY_NOT_EVALUATED_CODE, composeIdentityNotEvaluatedAsk } from '../../coaching/identity-not-evaluated-ask.js';
 import { RunAnalysisArgsSchema, RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { recordGoalCertainty } from './run-goal-certainty.js';
+import { placeholderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
+import { GOAL_FIGURES_PLACEHOLDER_PATH, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 import type {
   RunAnalysisArgs,
   RunAnalysisHandlerFact,
@@ -53,6 +55,7 @@ import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import {
   collectLeaderEstimatedTargetIds,
   collectLimitLevelOwners,
+  withholdOptionGoalFigures,
   withholdOptionLimitScores,
   deriveConstraintVerdict,
   readRatifiedConstraints,
@@ -1767,6 +1770,38 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         },
         'run_analysis: a limit\'s P is withheld for the options that move its target through an unsized Olumi link',
       );
+    }
+
+    // ⛔ (S) THE GOAL'S CHANCE, PER OPTION (DL #75 5902570568; AIQ 5902548598): an option whose path into the goal runs
+    // through an `olumi_placeholder` has its goal figures withheld HERE, before any reader, and every win share and the
+    // leader with them (`withholdOptionGoalFigures`). A run PLoT already withheld (#416 / #422) says its own reason.
+    const envelope = response as Record<string, unknown>;
+    if (!runWithheldGoalFigures(envelope)) {
+      const scoredIds = [...new Set(readOptionResultSources(envelope).flat().map((r) => (typeof r.option_id === 'string' ? r.option_id : r.id))
+        .filter((id): id is string => typeof id === 'string' && id !== ''))];
+      const evaluations = Array.isArray(envelope.identity_evaluations) ? envelope.identity_evaluations : undefined;
+      const scored = new Map(finalWireOptions.flatMap((o) => {
+        const rec = o as Record<string, unknown>;
+        const id = typeof rec.option_id === 'string' ? rec.option_id : typeof rec.id === 'string' ? rec.id : undefined;
+        const iv = rec.interventions !== null && typeof rec.interventions === 'object' && !Array.isArray(rec.interventions)
+          ? rec.interventions as Record<string, unknown> : undefined;
+        return id !== undefined && iv !== undefined ? [[id, iv] as const] : [];
+      }));
+      const goalPaths = placeholderGoalPaths(graphForAnalysis, scoredIds, evaluations, scored);
+      if (goalPaths.length > 0) {
+        response = withholdOptionGoalFigures(response, new Set(goalPaths.map((p) => p.option_id)),
+          placeholderGoalWarning(graphForAnalysis, goalPaths, GOAL_FIGURES_PLACEHOLDER_PATH));
+        log.info(
+          {
+            event: 'run_analysis.goal_figures_withheld_for_placeholder_paths',
+            request_id: invocation.requestId,
+            scenario_id: args.scenario_id,
+            // Redacted: ids only.
+            withheld: goalPaths.map((p) => ({ option_id: p.option_id, links: p.links.length })),
+          },
+          'run_analysis: goal figures withheld for the options an unsized Olumi link moves',
+        );
+      }
     }
 
     const analysisStatus = readAnalysisStatus(response);

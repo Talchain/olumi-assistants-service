@@ -66,10 +66,19 @@ export const GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED = 'GOAL_PROBABILITY_IDENTIT
  */
 export const GOAL_FIGURES_USER_EFFECT_CLAMPED = 'GOAL_FIGURES_USER_EFFECT_CLAMPED';
 
+/**
+ * CEE's code for a run whose goal figures it withheld because an option's path into the goal runs through a link nobody
+ * sized (DL #75 5902570568 (S); AIQ 5902548598). Written by `run_analysis` (`withholdOptionGoalFigures`), never by
+ * PLoT; it names the options in `option_ids` and the unsized links in `node_ids`. An option with no such path (the
+ * status quo) keeps its chance, so unlike #416 it is PER OPTION; the win shares and the leader go with it.
+ */
+export const GOAL_FIGURES_PLACEHOLDER_PATH = 'GOAL_FIGURES_PLACEHOLDER_PATH';
+
 /** Every typed code that means "the run withheld its per-option goal figures" (AIQ 5893824972: a code SET, PLoT's words). */
 export const GOAL_FIGURES_WITHHELD_CODES: ReadonlySet<string> = new Set([
   GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
   GOAL_FIGURES_USER_EFFECT_CLAMPED,
+  GOAL_FIGURES_PLACEHOLDER_PATH,
 ]);
 
 function readRecord(value: unknown): Record<string, unknown> | null {

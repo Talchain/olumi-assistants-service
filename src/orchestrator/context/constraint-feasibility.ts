@@ -221,6 +221,81 @@ export function withholdOptionLimitScores<E>(envelope: E, byLimit: ReadonlyMap<s
   return out as E;
 }
 
+/** The outcome figures that are claims about the goal (PLoT #416's "centre and spread"); the sample counts stay. */
+const GOAL_OUTCOME_FIGURES = ['mean', 'std', 'p10', 'p50', 'p90'] as const;
+
+/**
+ * Leader and flip facts computed from the same comparison as the withheld figures (PLoT #416's list, R3 5888737291):
+ * which option does best when, how close it is, and what would flip it. Withheld with them.
+ */
+const COMPARISON_DERIVED_KEYS = ['flip_thresholds', 'conditional_winners', 'p_win_sensitivity', 'factor_evppi', 'decision_evpi'] as const;
+const BRIEF_LEADER_KEYS = ['headline', 'headline_banded', 'robustness', 'robustness_caveat', 'what_would_change'] as const;
+const SUMMARY_LEADER_KEYS = ['goal_fit', 'win_probability', 'leading_option', 'robustness_band'] as const;
+
+/**
+ * ⛔ (S) THE GOAL FIGURES AN UNSIZED LINK MOVES ARE WITHHELD AT THE SOURCE (DL #75 5902570568; AIQ 5902548598). For each
+ * option in `withheld` (`placeholderGoalPaths`), in EVERY option-result carrier (the `withholdOptionLimitScores` set):
+ * `probability_of_goal`, `probability_of_joint_goal`, the outcome's centre and spread, and `downside`. An option not in
+ * it keeps its chance (the status quo's earned 0). A share of runs in which an option did best is a comparison with every
+ * other option, so EVERY option's `win_probability` (and the brief's `rank`) goes, and with it the leader and every fact
+ * built on it: PLoT's brief summary, headline, crown and tipping points, `robustness` to PLoT's own empty shape (its
+ * display verdict then reads `not_assessed`). `warning` is appended to `inference_warnings`, the carrier every reader of
+ * a withheld run keys on (`GOAL_FIGURES_WITHHELD_CODES`). Returns `envelope` itself when nothing is withheld. Pure.
+ */
+export function withholdOptionGoalFigures<E>(envelope: E, withheld: ReadonlySet<string>, warning: Record<string, unknown>): E {
+  if (withheld.size === 0 || envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
+  const stripEntry = (entry: unknown): unknown => {
+    const r = readRecord(entry);
+    if (r === null) return entry;
+    const out: Record<string, unknown> = { ...r };
+    delete out.win_probability;
+    delete out.rank;
+    const id = optionIdOf(r);
+    if (id !== undefined && withheld.has(id)) {
+      delete out.probability_of_goal;
+      delete out.probability_of_joint_goal;
+      delete out.downside;
+      const outcome = readRecord(r.outcome);
+      if (outcome !== null) {
+        const kept: Record<string, unknown> = { ...outcome };
+        for (const k of GOAL_OUTCOME_FIGURES) delete kept[k];
+        out.outcome = kept;
+      }
+    }
+    return out;
+  };
+  const strip = (v: unknown): unknown => (Array.isArray(v) ? v.map(stripEntry) : v);
+  const env = envelope as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...env };
+  if ('option_comparison' in env) out.option_comparison = strip(env.option_comparison);
+  if (Array.isArray(env.results)) out.results = strip(env.results);
+  else {
+    const nested = readRecord(env.results);
+    if (nested !== null) {
+      const n: Record<string, unknown> = { ...nested };
+      for (const k of ['option_comparison', 'options', 'option_results'] as const) if (k in nested) n[k] = strip(nested[k]);
+      out.results = n;
+    }
+  }
+  const brief = readRecord(env.decision_brief);
+  if (brief !== null) {
+    const b: Record<string, unknown> = { ...brief };
+    if ('options' in brief) b.options = strip(brief.options);
+    for (const k of BRIEF_LEADER_KEYS) delete b[k];
+    const summary = readRecord(brief.analysis_summary);
+    if (summary !== null) {
+      const s: Record<string, unknown> = { ...summary };
+      for (const k of SUMMARY_LEADER_KEYS) delete s[k];
+      b.analysis_summary = s;
+    }
+    out.decision_brief = b;
+  }
+  for (const k of COMPARISON_DERIVED_KEYS) delete out[k];
+  if (readRecord(env.robustness) !== null) out.robustness = { fragile_edges: [], robust_edges: [] };
+  out.inference_warnings = [...(Array.isArray(env.inference_warnings) ? env.inference_warnings : []), warning];
+  return out as E;
+}
+
 /**
  * Find the option-result entry for `winnerOptionId` across every option-result
  * source (current-first precedence — the same reader every winner surface
