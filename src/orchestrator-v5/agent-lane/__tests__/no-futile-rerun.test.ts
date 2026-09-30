@@ -42,6 +42,40 @@ describe('the no-leader sentence never asks for a rerun that cannot help', () =>
     expect(agentNoLeaderSentence('constraint_verdict_withheld', analysisReady, ['CONSTRAINT_LEVEL_DRAWS_OUT_OF_DOMAIN'])).toContain('set one of them yourself, then run the analysis again');
   });
 
+  it('CO-HELD: the served (S) warning names the unsized link and removes the futile admission-only rerun', () => {
+    const analysisReady = { analysis_admission: { permitted_analysis_mode: 'quantified_provisional', reasons: [{ field: 'permitted_analysis_mode', code: 'CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED' }] } };
+    const graph = {
+      nodes: [{ id: 'saving', label: 'Expected GCP-related monthly saving' }, { id: 'costs', label: 'Costs' }],
+      edges: [{ from: 'saving', to: 'costs', provenance: { magnitude: 'olumi_placeholder' } }],
+    };
+    const blocks = [{ type: 'analysis_result', enrichment: { inference_warnings: [{ code: 'GOAL_FIGURES_PLACEHOLDER_PATH', node_ids: ['saving', 'costs'], option_ids: ['switch'] }] } }];
+    const out = enforceAgentLaneLeaderClaimsAtWire(
+      {
+        assistant_text: 'Switch to GCP is the front-runner under these assumptions. The model has an unsized link.',
+        blocks, suggested_actions: [],
+        analysis_state: { leader_claim: { permitted: false, withheld_reason: 'separation_unavailable' } },
+      } as unknown as OlumiResponse,
+      { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'separation_unavailable', graph, analysisReady } as never,
+    );
+    expect(out.response.assistant_text).toContain('Olumi has not sized how ‘Expected GCP-related monthly saving’ moves ‘Costs’');
+    expect(out.response.assistant_text).toContain('every estimate this comparison rests on is still Olumi’s');
+    expect(out.response.assistant_text).not.toContain('set one of them yourself, then run the analysis again');
+  });
+
+  it('CO-HELD: unread goal product does not prescribe a value-and-rerun loop', () => {
+    const analysisReady = { analysis_admission: { permitted_analysis_mode: 'quantified_provisional', reasons: [{ field: 'permitted_analysis_mode', code: 'CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED' }] } };
+    const blocks = [{ type: 'analysis_result', enrichment: { inference_warnings: [{ code: 'GOAL_FIGURES_PRODUCT_NOT_READ' }] } }];
+    const out = enforceAgentLaneLeaderClaimsAtWire(
+      {
+        assistant_text: 'Raise the price leads the options. The product has not been confirmed.', blocks, suggested_actions: [],
+        analysis_state: { leader_claim: { permitted: false, withheld_reason: 'separation_unavailable' } },
+      } as unknown as OlumiResponse,
+      { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'separation_unavailable', graph: { nodes: [], edges: [] }, analysisReady } as never,
+    );
+    expect(out.response.assistant_text).toContain('goal’s product has not been confirmed');
+    expect(out.response.assistant_text).not.toContain('set one of them yourself, then run the analysis again');
+  });
+
   it('RED at the wire: the enforcer reads the typed cause from the response’s own blocks', () => {
     const out = enforceAgentLaneLeaderClaimsAtWire(
       {

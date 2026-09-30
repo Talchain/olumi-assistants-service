@@ -469,8 +469,7 @@ export function placeholderGoalWarning(
   const verb = options.length === 1 ? 'is' : 'are';
   const sized = phrases.length === 0 ? '' : `Olumi hasn’t sized how ${phrases.join(', or how ')}${byTarget.size > 2 ? ', and more' : ''}, so t`;
   const ask = asked.length === 0 ? ''
-    : asked.length === named.length ? (asked.length === 1 ? ' Give a figure for that link and Olumi will use it.' : ' Give a figure for each link and Olumi will use them.')
-      : ` Give a figure for how ${list(asked.slice(0, 2).map((l) => `${label(l.from)} moves ${label(l.to)}`))} and Olumi will use it.`;
+    : ` Give a figure for how ${list(asked.slice(0, 2).map((l) => `${label(l.from)} moves ${label(l.to)}`))} and Olumi will use it.`;
   const guess = guessed.length === 0 ? ''
     : ` Olumi only guessed that ${list(guessed.slice(0, 2).map((l) => `${label(l.from)} changes ${label(l.to)}`))}, so you aren’t asked `
       + `to size ${guessed.length === 1 ? 'that link' : 'those links'}.`;

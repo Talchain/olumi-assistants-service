@@ -1052,6 +1052,41 @@ export function limitCauseCodesOf(blocks: unknown): readonly string[] {
   return warnings.map((w) => (w as { code?: unknown } | null)?.code).filter((c): c is string => typeof c === 'string');
 }
 
+type GoalFigureCoHold = { readonly why: string; readonly action?: string };
+
+/** The run's own goal-figure warning, kept separate from decision-brief limit warnings. */
+function goalFigureCoHoldOf(blocks: unknown, graph: unknown): GoalFigureCoHold | undefined {
+  if (!Array.isArray(blocks)) return undefined;
+  const result = blocks.find((b) => (b as { type?: unknown } | null)?.type === 'analysis_result') as
+    { enrichment?: { inference_warnings?: unknown }; inference_warnings?: unknown } | undefined;
+  const warnings = result?.enrichment?.inference_warnings ?? result?.inference_warnings;
+  if (!Array.isArray(warnings)) return undefined;
+  const codes = warnings.filter((w): w is { code: string; node_ids?: unknown; message?: unknown } =>
+    typeof (w as { code?: unknown } | null)?.code === 'string');
+  if (codes.some((w) => w.code === 'GOAL_FIGURES_PRODUCT_NOT_READ')) {
+    return { why: 'the goal’s product has not been confirmed, so its figures cannot yet support a comparison' };
+  }
+  const warning = codes.find((w) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH');
+  if (warning === undefined) return undefined;
+  const ids = new Set(Array.isArray(warning.node_ids) ? warning.node_ids.filter((id): id is string => typeof id === 'string') : []);
+  const g = graph as { nodes?: unknown; edges?: unknown } | null;
+  const nodes = Array.isArray(g?.nodes) ? g.nodes as Array<{ id?: unknown; label?: unknown }> : [];
+  const edges = Array.isArray(g?.edges) ? g.edges as Array<{ from?: unknown; to?: unknown }> : [];
+  const matches = edges.filter((e) => typeof e.from === 'string' && typeof e.to === 'string' && ids.has(e.from) && ids.has(e.to));
+  if (matches.length !== 1) return { why: 'Olumi has not sized a link on the way to your goal, so its figures cannot yet support a comparison' };
+  const label = (id: unknown): string => {
+    const value = nodes.find((n) => n.id === id)?.label;
+    return `‘${typeof value === 'string' && value.trim() !== '' ? value.trim() : String(id)}’`;
+  };
+  const link = `how ${label(matches[0]!.from)} moves ${label(matches[0]!.to)}`;
+  return {
+    why: `Olumi has not sized ${link}, so its figures cannot yet support a comparison`,
+    // Only the producer's own warning can attest that asking for this size is an available next step.
+    action: typeof warning.message === 'string' && warning.message.includes('Give a figure for')
+      ? `give a figure for ${link} and Olumi will use it` : undefined,
+  };
+}
+
 /** Keyed by the admission's `permitted_analysis_mode` reason code, when the claim itself did not withhold. */
 const BY_ADMISSION_REASON: Readonly<Record<string, string>> = {
   CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED:
@@ -1152,26 +1187,30 @@ function admissionClause(analysisReady: unknown): string | undefined {
  */
 export function agentNoLeaderSentence(
   withheldReason: string | undefined, analysisReady: unknown, limitCauseCodes: readonly string[] = [], limitVerdicts?: StoredLimitVerdicts,
-  limitAskIds?: ReadonlySet<string>, separation?: string,
+  limitAskIds?: ReadonlySet<string>, separation?: string, goalFigureCoHold?: GoalFigureCoHold,
 ): string {
-  return sentence(agentNoLeaderClause(withheldReason, analysisReady, limitCauseCodes, limitVerdicts, limitAskIds, separation));
+  return sentence(agentNoLeaderClause(withheldReason, analysisReady, limitCauseCodes, limitVerdicts, limitAskIds, separation, goalFigureCoHold));
 }
 
 /** The clause `agentNoLeaderSentence` closes on — the why and its one next action — chosen by the SAME rule. */
 function agentNoLeaderClause(
   withheldReason: string | undefined, analysisReady: unknown, limitCauseCodes: readonly string[] = [], limitVerdicts?: StoredLimitVerdicts,
-  limitAskIds?: ReadonlySet<string>, separation?: string,
+  limitAskIds?: ReadonlySet<string>, separation?: string, goalFigureCoHold?: GoalFigureCoHold,
 ): string {
-  const clause = singleCauseClause(withheldReason, analysisReady, limitCauseCodes, limitVerdicts, limitAskIds);
+  const clause = singleCauseClause(withheldReason, analysisReady, limitCauseCodes, limitVerdicts, limitAskIds, goalFigureCoHold);
   return separation === SEPARATION_NEAR_TIE || withheldReason === WITHHELD_NEAR_TIE ? withNearTie(clause) : clause;
 }
 
 /** The one cause the precedence rule picks: the admission first, then the typed claim reason, then "not recorded". */
 function singleCauseClause(
   withheldReason: string | undefined, analysisReady: unknown, limitCauseCodes: readonly string[] = [], limitVerdicts?: StoredLimitVerdicts,
-  limitAskIds?: ReadonlySet<string>,
+  limitAskIds?: ReadonlySet<string>, goalFigureCoHold?: GoalFigureCoHold,
 ): string {
   const admission = admissionClause(analysisReady);
+  if (admission !== undefined && goalFigureCoHold !== undefined) {
+    const why = admission.split(';')[0]!.trim();
+    return `${why}, and ${goalFigureCoHold.why}${goalFigureCoHold.action === undefined ? '' : `; ${goalFigureCoHold.action}`}`;
+  }
   if (admission !== undefined) return admission;
   if (withheldReason === WITHHELD_CONSTRAINT_VERDICT) {
     const cause = limitCauseCodes.find((c) => BY_CONSTRAINT_CODE[c] !== undefined);
@@ -1585,7 +1624,7 @@ export function enforceAgentLaneLeaderClaimsAtWire(
         const closing = noResult
           ? sentence(REASON_NOT_RECORDED)
           : agentNoLeaderSentence(withheldReason, opts.analysisReady, limitCauseCodesOf((response as { blocks?: unknown }).blocks), opts.limitVerdicts, opts.limitAskIds,
-            separationOf((response as { analysis_state?: unknown }).analysis_state));
+            separationOf((response as { analysis_state?: unknown }).analysis_state), goalFigureCoHoldOf((response as { blocks?: unknown }).blocks, opts.graph));
         const body = projected.text.trimEnd();
         const alreadySaid = closing === PRODUCT_IDENTITY_SENTENCE && replyAlreadySaysProductReason(body, opts.graph);
         next = { ...response, assistant_text: body.length === 0 ? closing : opts.sayWhyWithheld === false || noResult || alreadySaid ? body : `${body}\n\n${closing}` } as OlumiResponse;
