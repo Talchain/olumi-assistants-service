@@ -57,6 +57,7 @@ import {
   LEADER_CLAIM_REASON_KINDS,
   SEPARATION_SEPARATED,
   WITHHELD_CONSTRAINT_VERDICT,
+  WITHHELD_LEADER_CAUSE_UNRECORDED,
   WITHHELD_NEAR_TIE,
   WITHHELD_SEPARATION_UNAVAILABLE,
   WITHHELD_RUN_IDENTITY_UNCONFIRMED,
@@ -254,7 +255,8 @@ describe('S6 — separation_unavailable is NOT EVALUATED, not WITHHELD', () => {
       // The known codes, so a silent SHRINK is caught as well as a growth.
       expect(new Set(minted)).toEqual(
         new Set([
-          WITHHELD_CONSTRAINT_VERDICT, WITHHELD_NEAR_TIE, WITHHELD_SEPARATION_UNAVAILABLE,
+          WITHHELD_CONSTRAINT_VERDICT, WITHHELD_LEADER_CAUSE_UNRECORDED,
+          WITHHELD_NEAR_TIE, WITHHELD_SEPARATION_UNAVAILABLE,
           WITHHELD_RUN_IDENTITY_UNCONFIRMED, WITHHELD_RUN_IDENTITY_CONFLICT,
           // 2026-09-25: the automatic first pass's cause, named apart from a real
           // constraint verdict (#63 5825404689).
