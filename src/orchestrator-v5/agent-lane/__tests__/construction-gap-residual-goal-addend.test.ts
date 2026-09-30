@@ -83,7 +83,7 @@ describe('Olumi’s gap residual beside the user’s price × subscribers is tak
     const { graph } = await build(m0());
     const card = proposeProductIdentity(graph)!;
     const r = applyIdentityConfirmEdit({ persistedGraph: graph, outcome_id: card.outcome_id, factor_ids: card.factor_ids, words: card.words,
-      expected_graph_hash: computeAnalysisAffectingGraphHash(graph as never), reading_token: identityConfirmReadingToken(card) });
+      expected_graph_hash: computeAnalysisAffectingGraphHash(graph as never) ?? '', reading_token: identityConfirmReadingToken(card) });
     expect(r.kind).toBe('mutated');
     const after = (r as { mutatedGraph: { nodes: Json[]; edges: Json[] } }).mutatedGraph;
     expect(goalOf(after).nonlinear_identity).toMatchObject({ operation: 'product', stated_in_brief: true });
