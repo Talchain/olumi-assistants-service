@@ -125,6 +125,7 @@ import { validateEnrichmentShadow } from './enrichment-validation.js';
 import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js';
 import { guardAnalysisParticipation } from './run-analysis-participation-guard.js';
 import { filterOlumiProposedOptions } from './olumi-option-filter.js';
+import { buildRunInputSnapshot, runIdFor } from './run-input-snapshot.js';
 import {
   carryLevelLimitBaselines,
   carryLimitTargetCaps,
@@ -1168,6 +1169,44 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       }
     }
     const runComputedAt = new Date().toISOString();
+
+    // --- 3.9. SC-24: record what this Run is SENT, and its execution identity ----------------------------------
+    // Captured here — after the last write to `plotPayload` and before dispatch — from the request's own values, so
+    // a later "what changed between two Runs" diffs two real inputs (schemas 0.67.0 `input_snapshot`, `run_id`).
+    // `input_snapshot.goal` is the ONE Run-attested goal unit P0 SHARED DATA's currentness gate reads.
+    // A snapshot the contract refuses is dropped, never allowed to fail the Run: its delta says `not_recorded`.
+    const runId = runIdFor({
+      scenarioId: args.scenario_id,
+      turnId: invocation.payload.turn_id,
+      graphHashAtRun,
+    });
+    const submittedIds = new Set(
+      submittedOptions.map((o) => (typeof o.option_id === 'string' ? o.option_id : typeof o.id === 'string' ? o.id : null)),
+    );
+    const olumiExcluded = (gate.options as ReadonlyArray<Record<string, unknown>>).flatMap((o) => {
+      const id = typeof o.option_id === 'string' ? o.option_id : typeof o.id === 'string' ? o.id : null;
+      return id !== null && !submittedIds.has(id)
+        ? [{ option_id: id, label: typeof o.label === 'string' ? o.label : null, reason: 'olumi_proposed' as const }]
+        : [];
+    });
+    const inputSnapshot = buildRunInputSnapshot({
+      submittedOptions: submittedOptions as ReadonlyArray<Record<string, unknown>>,
+      rawObjectsPerOption,
+      wirePerOption: requestProjection.perOption as ReadonlyArray<Readonly<Record<string, number>>>,
+      heldFactorIdsByOptionId: scaffoldedFactorIdsByOptionId,
+      optionsNotSent: [
+        ...gate.excluded.map((e) => ({ option_id: e.option_id, label: e.label, reason: 'not_analysable' as const })),
+        ...olumiExcluded,
+      ],
+      wireGraph: plotPayload.graph,
+      plotPayload,
+    });
+    if (inputSnapshot === null) {
+      log.warn(
+        { event: 'run_analysis.input_snapshot_not_recorded', request_id: invocation.requestId, scenario_id: args.scenario_id },
+        'Run input snapshot refused by the contract; this Run records no inputs',
+      );
+    }
 
     // --- 4. Invoke PLoT ---------------------------------------------------
     let response: V2RunResponseEnvelope;
@@ -2632,6 +2671,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         ...(graphHashAtRun !== null ? { graph_hash_at_run: graphHashAtRun } : {}),
         ...(goalCertainty.recorded ? { goal_certainty: goalCertainty.decisions } : {}),
         computed_at: runComputedAt,
+        // SC-24 (schemas 0.67.0): the Run's execution identity and the input it was sent (3.9 above).
+        run_id: runId,
+        ...(inputSnapshot !== null ? { input_snapshot: inputSnapshot } : {}),
         // T1 claim safety, LAYER 2 — "may a leading option be named" is a FACT
         // ABOUT THIS ANALYSIS, so it is persisted WITH the analysis facts and
         // read back on every path that rebuilds from them, rather than

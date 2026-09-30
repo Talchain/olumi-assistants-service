@@ -46,7 +46,7 @@
  * four off the persisted envelopes and compares them.
  */
 
-import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import { RunInputSnapshotSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
 import {
   RunDeltaSchema,
   type RunDelta,
@@ -71,6 +71,7 @@ import { projectRunFact, selectTwoNewestRunAnalysisFacts } from './compare-runs.
 // noise?" would be free to drift, and the prose one would drift silently
 // (CLAUDE.md trap #12). Behaviour here is unchanged by the move.
 import { noiseVerdictForProportions } from './win-probability-noise-band.js';
+import { diffRunInputSnapshots } from './run-input-changes.js';
 
 /**
  * Why no delta was produced. A DISCRIMINATED reason rather than a bare `null`,
@@ -107,7 +108,12 @@ export type RunDeltaRefusal =
    * #1857, B5) — so there is no honest `run_delta` for this pair. Ordinary absence,
    * not a producer defect.
    */
-  | 'unrequested_run_in_pair';
+  | 'unrequested_run_in_pair'
+  /**
+   * SC-24: both ends carry the SAME `run_id` — one Run re-delivered (a replayed turn re-executed), never two
+   * intentional Runs. Comparing a Run with itself would present a replay as a change; ordinary absence.
+   */
+  | 'same_run_replayed';
 
 export type BuildRunDeltaResult =
   | { readonly kind: 'ok'; readonly delta: RunDelta }
@@ -435,6 +441,43 @@ function identityBoundWinProbabilities(
 }
 
 /**
+ * SC-24 (schemas 0.67.0) — the pair's endpoints and its exact input changes, read off the two facts' own
+ * `run_id` / `input_snapshot` (what each Run was SENT; `run-analysis.ts` §3.9).
+ *   - `compared`: both Runs recorded their inputs → `input_coverage: 'complete'` + the diff (possibly `[]`).
+ *   - `not_recorded`: an end predates snapshots → the coverage says so and NO list travels (never an empty diff).
+ *   - `same_run`: both ends are one Run re-delivered → no delta at all.
+ */
+type PairInputs =
+  | { readonly kind: 'same_run' }
+  | { readonly kind: 'compared' | 'not_recorded'; readonly members: Pick<RunDelta, 'endpoints' | 'input_coverage' | 'input_changes'> };
+
+function readRunInputs(fact: HandlerFact): { runId: string | null; computedAt: string | null; snapshot: ReturnType<typeof RunInputSnapshotSchema.parse> | null } {
+  const result = (fact as { result?: unknown }).result as Record<string, unknown> | undefined;
+  const runId = typeof result?.run_id === 'string' && result.run_id.length > 0 ? result.run_id : null;
+  const computedAt = typeof result?.computed_at === 'string' ? result.computed_at : null;
+  const parsed = RunInputSnapshotSchema.safeParse(result?.input_snapshot);
+  return { runId, computedAt, snapshot: parsed.success ? parsed.data : null };
+}
+
+function pairInputs(prior: HandlerFact, current: HandlerFact): PairInputs {
+  const p = readRunInputs(prior);
+  const c = readRunInputs(current);
+  if (p.runId !== null && p.runId === c.runId) return { kind: 'same_run' };
+  const endpoint = (e: typeof p) => ({
+    run_id: e.runId as string,
+    ...(e.computedAt !== null && !Number.isNaN(Date.parse(e.computedAt)) ? { computed_at: e.computedAt } : {}),
+  });
+  const endpoints = p.runId !== null && c.runId !== null ? { endpoints: { prior: endpoint(p), current: endpoint(c) } } : {};
+  if (p.snapshot !== null && c.snapshot !== null && 'endpoints' in endpoints) {
+    return {
+      kind: 'compared',
+      members: { ...endpoints, input_coverage: 'complete', input_changes: diffRunInputSnapshots(p.snapshot, c.snapshot) },
+    };
+  }
+  return { kind: 'not_recorded', members: { ...endpoints, input_coverage: 'not_recorded' } };
+}
+
+/**
  * The wire block, or a discriminated refusal.
  *
  * `mayNameLeadingOption` is the TURN's permission and is the OUTER CONJUNCT
@@ -477,10 +520,18 @@ export function buildRunDelta(input: {
     n_equal: priorEchoes.nSamples === currentEchoes.nSamples,
   } as const;
 
-  const attributionCase = classifyAttribution(pairProvenance);
-  if (attributionCase === null) {
+  const inputs = pairInputs(pair.prior, pair.current);
+  if (inputs.kind === 'same_run') return { kind: 'none', reason: 'same_run_replayed' };
+
+  // SC-24: a pair the §b table names no case for (builds unverifiable, nothing else diverged) used to emit NOTHING,
+  // so a true £59 → £60 input change showed nothing. When both Runs recorded their inputs, the pair is emitted as
+  // `C5_unattributed` — no causal reading, no magnitude — so the input rows can travel. Without recorded inputs there
+  // is still nothing honest to show, and the old refusal stands.
+  const classified = classifyAttribution(pairProvenance);
+  if (classified === null && inputs.kind !== 'compared') {
     return { kind: 'none', reason: 'no_honest_attribution_case' };
   }
+  const attributionCase: RunDeltaAttributionCaseLiteral = classified ?? 'C5_unattributed';
 
   // ── Leader ────────────────────────────────────────────────────────────────
   // An id travels ONLY when this turn AND that run's own persisted verdict both
@@ -568,6 +619,8 @@ export function buildRunDelta(input: {
     // absence is the ONLY way that field can say "underivable". This field has
     // no such protection, which is exactly why the discipline lives in the cage.
     ...RUN_DELTA_FLIP_THRESHOLDS_NOT_COMPUTED,
+    // SC-24: which two Runs, and what differed in their inputs — independent of the attribution case above.
+    ...inputs.members,
   };
 
   // ⭐ THE CONTRACT CHECKS THIS PRODUCER, NOT THE OTHER WAY ROUND.

@@ -93,7 +93,9 @@
  */
 
 import type { OlumiResponse } from '@talchain/schemas/boundary';
-import type { AnalysisStateV1 } from '@talchain/schemas/boundary';
+import type { AnalysisStateV1, RunDelta } from '@talchain/schemas/boundary';
+import { buildRunDelta } from '../orchestrator-v5/coaching/build-run-delta.js';
+import { selectTwoNewestRunAnalysisFacts } from '../orchestrator-v5/coaching/compare-runs.js';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
@@ -206,6 +208,14 @@ export interface ScenarioAnalysisRead {
    * not answer; a consumer reads absent as unknown and refuses a definitional link, as the writer would with no Run.
    */
   readonly analysis_identity_run_use?: IdentityRunUseWire | null;
+  /**
+   * SC-24: the SAME `run_delta` the turn that completed the displayed Run carried — the pair and its exact input
+   * changes — so a cold reload shows the same A/B comparison. Rebuilt by the one producer (`buildRunDelta`) over the
+   * facts this read already holds; there is no second stored comparison. Present only under `analysis_result`'s own
+   * gates, only when the displayed Run is the newer end of the pair, and only when no newer Run withholds its claim.
+   * ABSENT = no delta for this Run (not a rerun, legacy pair, or a refusal) — never "nothing changed".
+   */
+  readonly run_delta?: RunDelta;
 }
 
 /** `IdentityRunUse` on the wire: the carriers the last successful Run WITHDREW, sorted. */
@@ -512,6 +522,18 @@ export async function readScenarioAnalysis(
             ...(Array.isArray((fact.result.enrichment as { identity_evaluations?: unknown } | undefined)?.identity_evaluations)
               ? { analysis_identity_evaluated_node_ids: [...evaluatedIdentityNodeIds(fact.result.enrichment)] }
               : {}),
+            // SC-24: the displayed Run's comparison with the Run before it — the same producer and permission the
+            // turn used. Only when the displayed fact IS the pair's newer end, and no newer Run withholds its claim.
+            ...(() => {
+              if (newerClaimWithholds) return {};
+              const pair = selectTwoNewestRunAnalysisFacts(facts);
+              if (pair === null || pair.current !== fact) return {};
+              const built = buildRunDelta({
+                priorFacts: facts,
+                mayNameLeadingOption: mayPresentLeaderClaimForFact(fact),
+              });
+              return built.kind === 'ok' ? { run_delta: built.delta } : {};
+            })(),
           }
         : {}),
     };

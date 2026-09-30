@@ -735,6 +735,9 @@ export default async function route(app: FastifyInstance) {
         ...(analysis.analysis_identity_run_use !== undefined
           ? { analysis_identity_run_use: analysis.analysis_identity_run_use }
           : {}),
+        // SC-24: the displayed Run's comparison with the Run before it — the turn's own producer, same gates as
+        // `analysis_result`; absent = no delta for this Run. See `ScenarioAnalysisRead.run_delta`.
+        ...(analysis.run_delta !== undefined ? { run_delta: analysis.run_delta } : {}),
         /**
          * ⭐ MAY A RUN BE ADMITTED RIGHT NOW — the question `analysis_state`
          * does not answer. It reports whether a FACT HAS LANDED for this graph;
