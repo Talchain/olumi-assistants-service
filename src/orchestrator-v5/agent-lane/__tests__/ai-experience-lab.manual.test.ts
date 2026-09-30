@@ -110,6 +110,16 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
     : undefined;
   const host = { base: ceeBase, assistKey, bearer, fetchImpl: network };
   const fresh = new Set<string>();
+  // The chips the served Agent offered in its LAST reply, per fresh session. A chip press is forwarded only when its id
+  // is one of these, so the Lab can carry an approval but never mint one (R3 5909786171: J4 needs the approve chip).
+  const offered = new Map<string, Map<string, Record<string, unknown>>>();
+  const recordOffered = (sid: string, actions: unknown) => {
+    const m = new Map<string, Record<string, unknown>>();
+    for (const a of Array.isArray(actions) ? actions : []) {
+      if (a && typeof a === 'object' && typeof (a as { id?: unknown }).id === 'string') m.set((a as { id: string }).id, a as Record<string, unknown>);
+    }
+    offered.set(sid, m);
+  };
   // Build's guard (scripts/ai-experience-lab/canonical-m1-guard.mjs) is the ONE binding rule for M2 (Build 5908596263).
   const guard = await import(pathToFileURL(resolve('scripts/ai-experience-lab/canonical-m1-guard.mjs')).href) as {
     bindCanonicalM1(o: Record<string, unknown>): { accepted: boolean; withheld_reason?: string; binding?: Record<string, unknown> };
@@ -194,6 +204,7 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
       try {
         const turn = await seam.buildFromBrief({ ...host, brief: body.brief.trim() });
         fresh.add(turn.scenario_id);
+        recordOffered(turn.scenario_id, (turn as { suggested_actions?: unknown }).suggested_actions);
         const rb = await readFresh(turn.scenario_id);
         const { response: _response, ...turnView } = turn;
         return { mode: 'fresh', ...view(rb), turn: turnView };
@@ -308,16 +319,25 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
     } finally { busy = false; }
   });
   app.post('/lab/turn', async (req, reply) => {
-    const body = req.body as { session_id?: string; message?: string };
+    const body = req.body as { session_id?: string; message?: string; chip?: { id?: unknown } };
     const sid = body?.session_id;
     if (sid && await attachFresh(sid)) {
+      // A chip press: only a chip the Agent offered in its last reply for THIS session; its own label is the message.
+      let chip: Record<string, unknown> | undefined;
+      if (body.chip !== undefined) {
+        const id = body.chip && typeof body.chip === 'object' ? body.chip.id : undefined;
+        chip = typeof id === 'string' ? offered.get(sid)?.get(id) : undefined;
+        if (chip === undefined) return reply.code(409).send({ error: 'That button is no longer on offer. Ask again to get a fresh one.' });
+        if (typeof body.message !== 'string' || !body.message.trim()) body.message = typeof chip.label === 'string' ? chip.label : String(id);
+      }
       if (typeof body.message !== 'string' || !body.message.trim() || body.message.length > 12000) {
         return reply.code(400).send({ error: 'Enter a message (maximum 12,000 characters).' });
       }
       if (busy) return reply.code(409).send({ error: 'One lab turn is already running. Please wait.' });
       busy = true; const start = Date.now();
       try {
-        const turn = await seam.sendTurn({ ...host, scenarioId: sid, message: body.message });
+        const turn = await seam.sendTurn({ ...host, scenarioId: sid, message: body.message, ...(chip ? { chip } : {}) });
+        recordOffered(sid, (turn as { suggested_actions?: unknown }).suggested_actions);
         const rb = await readFresh(sid);
         const receipt = { timestamp: new Date().toISOString(), head, source_hash, session_id: sid, mode: 'fresh',
           status: turn.http, latency_ms: Date.now() - start, message: body.message, response: turn.response };
