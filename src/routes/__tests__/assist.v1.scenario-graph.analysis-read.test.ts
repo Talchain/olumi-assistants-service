@@ -786,3 +786,73 @@ describe("0.63.0 — `analysis_goal_certainty` is the selected Run's stored arra
     expect(readStoredGoalCertainty(body.analysis_goal_certainty)).toEqual(body.analysis_goal_certainty);
   });
 });
+
+/**
+ * SC-24 part 2 (lease DL #75 5915191128): a COLD RELOAD carries the same run-over-run delta the turn wire does.
+ *   pair:      two real Runs (Run A before an edit, Run B after) → `run_delta` present, exactly what the turn builder
+ *              makes from the same facts, and valid against the pinned contract;
+ *   one Run:   nothing to compare → absent (never an empty delta);
+ *   shadowed:  a newer degraded Run → absent, through the ONE predicate the turn finaliser uses.
+ */
+describe("SC-24 — the cold graph read carries run_delta", () => {
+  function runFact(opts: { hash: string; seed: string; computedAt: string; hire: number; status?: string }): Record<string, unknown> {
+    const f = runAnalysisFact({ graphHash: opts.hash, mayName: true }) as { result: Record<string, unknown> };
+    const enrichment = f.result.enrichment as Record<string, unknown>;
+    return {
+      ...f,
+      turn_id: `turn_${opts.seed}`,
+      result: {
+        ...f.result,
+        computed_at: opts.computedAt,
+        win_probabilities: { opt_hire: opts.hire, opt_hold: 1 - opts.hire },
+        enrichment: {
+          ...enrichment,
+          analysis_status: opts.status ?? "ok",
+          meta: { seed_used: opts.seed, n_samples: 10_000 },
+          option_comparison: [
+            { option_id: "opt_hire", option_label: "Hire a marketing manager", win_probability: opts.hire, outcome_mean: 0.55 },
+            { option_id: "opt_hold", option_label: "Hold headcount", win_probability: 1 - opts.hire, outcome_mean: 0.41 },
+          ],
+        },
+      },
+    };
+  }
+  const RUN_A = runFact({ hash: PRE_EDIT_GRAPH_HASH, seed: "111", computedAt: "2026-08-17T09:00:00.000Z", hire: 0.62 });
+  const RUN_B = runFact({ hash: GRAPH_HASH, seed: "222", computedAt: "2026-08-17T10:00:00.000Z", hire: 0.71 });
+
+  it("two Runs → run_delta, exactly the turn builder's, valid against the contract", async () => {
+    const { buildRunDelta } = await import("../../orchestrator-v5/coaching/build-run-delta.js");
+    const { RunDeltaSchema } = await import("@talchain/schemas/boundary");
+    readFactsFor.mockResolvedValue([RUN_B, RUN_A]);
+    const body = (await read(await buildApp())).json() as Record<string, unknown>;
+    expect(body.run_delta, "a cold reload must carry the pair the user ran").toBeDefined();
+    expect(RunDeltaSchema.safeParse(body.run_delta).success).toBe(true);
+    const turn = buildRunDelta({ priorFacts: [RUN_B, RUN_A] as never, mayNameLeadingOption: true });
+    expect(turn.kind).toBe("ok");
+    expect(body.run_delta).toEqual(JSON.parse(JSON.stringify((turn as { delta: unknown }).delta)));
+  });
+
+  it("one Run → no run_delta (nothing to compare is absence, not an empty delta)", async () => {
+    readFactsFor.mockResolvedValue([RUN_B]);
+    const body = (await read(await buildApp())).json() as Record<string, unknown>;
+    expect(body).not.toHaveProperty("run_delta");
+  });
+
+  it("a newer DEGRADED Run shadows the pair → no run_delta on the read either (precondition: the contradiction is raised)", async () => {
+    const RUN_C = runFact({ hash: GRAPH_HASH, seed: "333", computedAt: "2026-08-17T11:00:00.000Z", hire: 0.5, status: "degraded" });
+    readFactsFor.mockResolvedValue([RUN_C, RUN_B, RUN_A]);
+    const body = (await read(await buildApp())).json() as Record<string, unknown>;
+    expect((body.analysis_state as { contradictions: string[] }).contradictions, "precondition: the degraded-newer contradiction").toContain("fact_status_success_but_degraded_newer");
+    expect(body).not.toHaveProperty("run_delta");
+  });
+
+  it("the skip predicate is the turn finaliser's: identity unconfirmed / conflict and a newer degraded Run", async () => {
+    const { runDeltaSkipReason } = await import("../../orchestrator-v5/coaching/build-run-delta.js");
+    const { WITHHELD_RUN_IDENTITY_UNCONFIRMED, WITHHELD_RUN_IDENTITY_CONFLICT } = await import("../../orchestrator-v5/compose/analysis-state-v1.js");
+    expect(runDeltaSkipReason({ leader_claim: { withheld_reason: WITHHELD_RUN_IDENTITY_UNCONFIRMED }, contradictions: [] })).toBe("run_identity_unconfirmed");
+    expect(runDeltaSkipReason({ leader_claim: { withheld_reason: WITHHELD_RUN_IDENTITY_CONFLICT }, contradictions: [] })).toBe("run_identity_conflict");
+    expect(runDeltaSkipReason({ leader_claim: null, contradictions: ["fact_status_success_but_degraded_newer"] })).toBe("newer_run_degraded");
+    expect(runDeltaSkipReason({ leader_claim: { withheld_reason: "other" }, contradictions: [] })).toBeNull();
+    expect(runDeltaSkipReason(null)).toBeNull();
+  });
+});

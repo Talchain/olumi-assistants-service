@@ -133,6 +133,8 @@ import { isScenarioAnalysisReasoningAuthority } from '../orchestrator-v5/context
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
 import { log } from '../utils/telemetry.js';
+import type { RunDelta } from '@talchain/schemas/boundary';
+import { buildRunDelta, runDeltaSkipReason } from '../orchestrator-v5/coaching/build-run-delta.js';
 
 /** The additive half of the scenario-graph read's 200 body. */
 export interface ScenarioAnalysisRead {
@@ -200,6 +202,12 @@ export interface ScenarioAnalysisRead {
    * not answer; a consumer reads absent as unknown and refuses a definitional link, as the writer would with no Run.
    */
   readonly analysis_identity_run_use?: IdentityRunUseWire | null;
+  /**
+   * SC-24 part 2: the SAME run-over-run delta the turn wire carries, so a cold reload shows the Run A → Run B pair.
+   * Absent when there is no honest pair (fewer than two Runs, an unbound pair, a newer degraded Run — the one shared
+   * predicate `runDeltaSkipReason`, and `buildRunDelta`'s own refusals).
+   */
+  readonly run_delta?: RunDelta;
 }
 
 /** `IdentityRunUse` on the wire: the carriers the last successful Run WITHDREW, sorted. */
@@ -377,6 +385,8 @@ export async function readScenarioAnalysis(
       );
     }
 
+    // ONE permission for the verdict and the delta, so the two can never disagree inside this read.
+    const mayNameLeadingOption = fact !== null ? mayPresentLeaderClaimForFact(fact) && !newerClaimWithholds : false;
     const analysisState =
       composeAnalysisStateV1({
         // ⭐ THE FACT-BASED CANONICAL STATE (Canonical ruling, 28 Sep): the SAME function a turn uses, over the SAME
@@ -416,7 +426,7 @@ export async function readScenarioAnalysis(
         // grants the UI permission to name one. Same fact, same second, two
         // answers. The shared admission is the fix; copying the conjunction here
         // would have been the mirror.
-        mayNameLeadingOption: fact !== null ? mayPresentLeaderClaimForFact(fact) && !newerClaimWithholds : false,
+        mayNameLeadingOption,
         // WHY it is withheld, when the fact can prove it: its own constraint verdict
         // permitted a leader and nobody asked for this run (the automatic first
         // pass). Otherwise the constraint token stands (#63 5825404689).
@@ -465,6 +475,13 @@ export async function readScenarioAnalysis(
       analysis_result: boundResult,
       // R3-9: every answered read carries it, from the same facts as the writer; never gated on freshness.
       analysis_identity_run_use: identityRunUseWire(facts),
+      // SC-24 part 2: run-over-run, from the same facts, never gated on freshness (a stale pair is still the pair the
+      // user ran); withheld on exactly the states the turn finaliser withholds it on.
+      ...(() => {
+        if (runDeltaSkipReason(analysisState) !== null) return {};
+        const built = buildRunDelta({ priorFacts: facts, mayNameLeadingOption });
+        return built.kind === 'ok' ? { run_delta: built.delta } : {};
+      })(),
       // Gated on the DELIVERED block, not only the fact: a run-binding that withholds
       // `analysis_result` withholds this too, so it ships exactly when that block does.
       ...(fact !== null && boundResult !== null

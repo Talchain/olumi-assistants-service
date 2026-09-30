@@ -95,13 +95,11 @@ import {
   NO_ANALYSIS_CONTEXT_DERIVATION,
   readRawRobustnessFromResponseBody,
   projectAnalysisBlocksForRunBinding,
-  WITHHELD_RUN_IDENTITY_UNCONFIRMED,
-  WITHHELD_RUN_IDENTITY_CONFLICT,
 } from './compose/analysis-state-v1.js';
 import { sanitiseEnrichment } from './compose/sanitise-enrichment.js';
 import { projectEvidenceAssessment } from './compose/project-evidence-assessment.js';
 import { canonicalStateFromFreshness } from './context/canonical-analysis-state.js';
-import { buildRunDelta, type RunDeltaRefusal } from './coaching/build-run-delta.js';
+import { buildRunDelta, runDeltaSkipReason, type RunDeltaRefusal } from './coaching/build-run-delta.js';
 import { selectClaimBearingRunAnalysisFact, selectRunAnalysisFact } from './context/freshness.js';
 import { deriveEveryOptionLimitVerdict, readRatifiedConstraints, type ConstraintVerdictState } from '../orchestrator/context/constraint-feasibility.js';
 import { nodesUnderANonlinearIdentity } from './agent-lane/admit-model.js';
@@ -856,23 +854,14 @@ function attachRunDelta(
 
   // Read the composer's identity verdict. An unbound pair must not add a new
   // comparative delta after the analysis block has been confined.
-  const bindingReason = response.analysis_state?.leader_claim.withheld_reason;
-  if (bindingReason === WITHHELD_RUN_IDENTITY_UNCONFIRMED || bindingReason === WITHHELD_RUN_IDENTITY_CONFLICT) {
-    const { run_delta: _unboundDelta, ...withoutDelta } = response;
-    return disclose(
-      'skipped',
-      bindingReason === WITHHELD_RUN_IDENTITY_UNCONFIRMED
-        ? 'run_identity_unconfirmed'
-        : 'run_identity_conflict',
-      withoutDelta as OlumiResponse,
-    );
-  }
   // C2: the delta builder selects successful Runs. A newer partial Run can
   // supersede both without appearing in that pair, so their old comparison
-  // must not be presented as the current turn's change.
-  if (response.analysis_state?.contradictions.includes('fact_status_success_but_degraded_newer')) {
-    const { run_delta: _shadowedDelta, ...withoutDelta } = response;
-    return disclose('skipped', 'newer_run_degraded', withoutDelta as OlumiResponse);
+  // must not be presented as the current turn's change. Both skips are ONE
+  // predicate shared with the cold graph read (`runDeltaSkipReason`).
+  const skip = runDeltaSkipReason(response.analysis_state);
+  if (skip !== null) {
+    const { run_delta: _skippedDelta, ...withoutDelta } = response;
+    return disclose('skipped', skip, withoutDelta as OlumiResponse);
   }
   if (ctx.priorFacts === undefined) return disclose('skipped', 'prior_facts_absent', response);
   const built = buildRunDelta({

@@ -727,6 +727,8 @@ export default async function route(app: FastifyInstance) {
         ...(analysis.analysis_identity_run_use !== undefined
           ? { analysis_identity_run_use: analysis.analysis_identity_run_use }
           : {}),
+        // SC-24 part 2: the turn wire's run-over-run delta, so a cold reload shows the Run A → Run B pair; absent = no honest pair.
+        ...(analysis.run_delta !== undefined ? { run_delta: analysis.run_delta } : {}),
         /**
          * ⭐ MAY A RUN BE ADMITTED RIGHT NOW — the question `analysis_state`
          * does not answer. It reports whether a FACT HAS LANDED for this graph;

@@ -61,6 +61,7 @@ import {
   winnerOptionResultSource,
 } from '../../orchestrator/context/option-result-source.js';
 import { RUN_DELTA_FLIP_THRESHOLDS_NOT_COMPUTED } from '../compose/claim-safety-cage.js';
+import { WITHHELD_RUN_IDENTITY_CONFLICT, WITHHELD_RUN_IDENTITY_UNCONFIRMED } from '../compose/analysis-state-v1.js';
 import { mayPresentComparedRunLeader, mayPresentComparedRunVerdicts } from './compared-run-leader.js';
 
 import { projectRunFact, selectTwoNewestRunAnalysisFacts } from './compare-runs.js';
@@ -580,4 +581,24 @@ export function buildRunDelta(input: {
   const parsed = RunDeltaSchema.safeParse(candidate);
   if (!parsed.success) return { kind: 'none', reason: 'refused_by_contract' };
   return { kind: 'ok', delta: parsed.data };
+}
+
+/** Why no comparative delta may be added at all, whoever carries it. */
+export type RunDeltaSkipReason = 'run_identity_unconfirmed' | 'run_identity_conflict' | 'newer_run_degraded';
+
+/**
+ * ONE LIST, TWO CARRIERS (SC-24 part 2). The turn finaliser and the cold graph read both stamp `run_delta`, so the
+ * states in which neither may add one live here, once — a second copy of these predicates on the read path would be
+ * free to drift from the turn's (the mirror this estate pays for most often).
+ *   - an unbound Run pair: the composer confined the analysis block, so a new comparison must not reappear;
+ *   - a newer degraded Run: the builder selects successful Runs, so their old comparison is no longer the latest.
+ */
+export function runDeltaSkipReason(
+  state: { readonly leader_claim?: { readonly withheld_reason?: unknown } | null; readonly contradictions?: readonly string[] } | null | undefined,
+): RunDeltaSkipReason | null {
+  const bindingReason = state?.leader_claim?.withheld_reason;
+  if (bindingReason === WITHHELD_RUN_IDENTITY_UNCONFIRMED) return 'run_identity_unconfirmed';
+  if (bindingReason === WITHHELD_RUN_IDENTITY_CONFLICT) return 'run_identity_conflict';
+  if (state?.contradictions?.includes('fact_status_success_but_degraded_newer') === true) return 'newer_run_degraded';
+  return null;
 }
