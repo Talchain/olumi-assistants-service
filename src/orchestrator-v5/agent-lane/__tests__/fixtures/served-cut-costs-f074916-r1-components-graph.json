@@ -1,0 +1,637 @@
+{
+ "_provenance": {
+  "source": "R3 successor 996ec64d Train 2 witness t2-f074916-0218Z cc50k r1 (scenario 2d85ed7f), served CEE f074916; graph = 02-read-after-brief",
+  "edit": "Actually our monthly cloud spend is £50k, not £45k."
+ },
+ "graph": {
+  "edges": [
+   {
+    "to": "stay_on_aws",
+    "from": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "full_gcp_migration",
+    "from": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "phased_gcp_migration",
+    "from": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "aws_workload_fraction",
+    "from": "full_gcp_migration",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "gcp_workload_fraction",
+    "from": "full_gcp_migration",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "aws_monthly_cost_at_full_workload",
+    "from": "full_gcp_migration",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "gcp_monthly_cost_at_full_workload",
+    "from": "full_gcp_migration",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "migration_wave_fraction",
+    "from": "full_gcp_migration",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "aws_workload_fraction",
+    "from": "phased_gcp_migration",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "gcp_workload_fraction",
+    "from": "phased_gcp_migration",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "aws_monthly_cost_at_full_workload",
+    "from": "phased_gcp_migration",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "gcp_monthly_cost_at_full_workload",
+    "from": "phased_gcp_migration",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "migration_wave_fraction",
+    "from": "phased_gcp_migration",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "aws_workload_fraction",
+    "from": "stay_on_aws",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "gcp_workload_fraction",
+    "from": "stay_on_aws",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "aws_monthly_cost_at_full_workload",
+    "from": "stay_on_aws",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "gcp_monthly_cost_at_full_workload",
+    "from": "stay_on_aws",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "migration_wave_fraction",
+    "from": "stay_on_aws",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "aws_monthly_spend",
+    "from": "aws_workload_fraction",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "aws_monthly_spend",
+    "from": "aws_monthly_cost_at_full_workload",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "gcp_monthly_spend",
+    "from": "gcp_workload_fraction",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "gcp_monthly_spend",
+    "from": "gcp_monthly_cost_at_full_workload",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "monthly_spend",
+    "from": "aws_monthly_spend",
+    "strength": {
+     "std": 0.1,
+     "mean": 0.2
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "monthly_spend",
+    "from": "gcp_monthly_spend",
+    "strength": {
+     "std": 0.1,
+     "mean": 0.2
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "migration_downtime_risk",
+    "from": "migration_wave_fraction",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "monthly_spend",
+    "from": "migration_downtime_risk",
+    "strength": {
+     "std": 0.1,
+     "mean": 0.2
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   }
+  ],
+  "nodes": [
+   {
+    "id": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+    "kind": "decision",
+    "label": "Should we switch our cloud…",
+    "provenance": "from_brief",
+    "description": "Should we switch our cloud provider from AWS to GCP?"
+   },
+   {
+    "id": "monthly_spend",
+    "kind": "goal",
+    "label": "Monthly spend",
+    "provenance": "from_brief",
+    "goal_threshold": -0.2,
+    "observed_state": {
+     "cap": 56250,
+     "unit": "£/month",
+     "value": 0.8,
+     "source": "cee_inference",
+     "baseline": 0.8,
+     "raw_value": 45000
+    },
+    "goal_level_reading": {
+     "lead": "Olumi reads your ‘£45k’ (‘Monthly spend is £45k’) as today's level of ‘Monthly spend’",
+     "bound": "<=",
+     "level": 45000,
+     "quote": "Monthly spend is £45k",
+     "level_unit": "£/month"
+    },
+    "goal_sense_reading": {
+     "basis": "typed_change_sign",
+     "sense": "minimise",
+     "words": "Olumi reads ‘Monthly spend’ as a target to bring it DOWN by at least 20% from today.",
+     "threshold": -0.2,
+     "threshold_frame": "change_rel"
+    },
+    "goal_threshold_cap": 56250,
+    "goal_threshold_raw": -0.2,
+    "goal_threshold_unit": "£/month",
+    "goal_threshold_frame": "change_rel",
+    "goal_threshold_cap_provenance": "target_derived_headroom"
+   },
+   {
+    "id": "stay_on_aws",
+    "kind": "option",
+    "label": "Stay on AWS",
+    "provenance": "ai_inferred",
+    "is_baseline": true
+   },
+   {
+    "id": "full_gcp_migration",
+    "kind": "option",
+    "label": "Full GCP Migration",
+    "provenance": "ai_inferred",
+    "interventions": {
+     "aws_workload_fraction": {
+      "value": 0,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "aws_workload_fraction",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "gcp_workload_fraction": {
+      "value": 1,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "gcp_workload_fraction",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "migration_wave_fraction": {
+      "value": 1,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "migration_wave_fraction",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "aws_monthly_cost_at_full_workload": {
+      "unit": "£/month",
+      "value": 0.45,
+      "source": "brief_extraction",
+      "raw_value": 45000,
+      "target_match": {
+       "node_id": "aws_monthly_cost_at_full_workload",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "gcp_monthly_cost_at_full_workload": {
+      "unit": "£/month",
+      "value": 0.36,
+      "source": "cee_hypothesis",
+      "raw_value": 36000,
+      "target_match": {
+       "node_id": "gcp_monthly_cost_at_full_workload",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "phased_gcp_migration",
+    "kind": "option",
+    "label": "Phased GCP Migration",
+    "provenance": "ai_inferred",
+    "interventions": {
+     "aws_workload_fraction": {
+      "value": 0.5,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "aws_workload_fraction",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "gcp_workload_fraction": {
+      "value": 0.5,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "gcp_workload_fraction",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "migration_wave_fraction": {
+      "value": 0.5,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "migration_wave_fraction",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "aws_monthly_cost_at_full_workload": {
+      "unit": "£/month",
+      "value": 0.45,
+      "source": "brief_extraction",
+      "raw_value": 45000,
+      "target_match": {
+       "node_id": "aws_monthly_cost_at_full_workload",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "gcp_monthly_cost_at_full_workload": {
+      "unit": "£/month",
+      "value": 0.36,
+      "source": "cee_hypothesis",
+      "raw_value": 36000,
+      "target_match": {
+       "node_id": "gcp_monthly_cost_at_full_workload",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "aws_workload_fraction",
+    "kind": "factor",
+    "label": "AWS workload fraction",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "observed_state": {
+     "unit": "fraction",
+     "value": 1,
+     "source": "cee_inference"
+    }
+   },
+   {
+    "id": "gcp_workload_fraction",
+    "kind": "factor",
+    "label": "GCP workload fraction",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "observed_state": {
+     "unit": "fraction",
+     "value": 0,
+     "source": "cee_inference"
+    }
+   },
+   {
+    "id": "aws_monthly_cost_at_full_workload",
+    "kind": "factor",
+    "label": "AWS monthly cost at full workload",
+    "category": "observable",
+    "provenance": "from_brief",
+    "observed_state": {
+     "cap": 100000,
+     "unit": "£/month",
+     "value": 0.45,
+     "source": "brief_extraction",
+     "raw_value": 45000,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "gcp_monthly_cost_at_full_workload",
+    "kind": "factor",
+    "label": "GCP monthly cost at full workload",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "scale_frame": 100000,
+    "observed_state": {
+     "unit": "£/month",
+     "value": 0.36,
+     "source": "cee_inference",
+     "raw_value": 36000,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "migration_wave_fraction",
+    "kind": "factor",
+    "label": "Migration wave fraction",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "observed_state": {
+     "unit": "fraction",
+     "value": 0,
+     "source": "cee_inference"
+    }
+   },
+   {
+    "id": "aws_monthly_spend",
+    "kind": "outcome",
+    "label": "AWS monthly spend",
+    "provenance": "ai_inferred",
+    "nonlinear_identity": {
+     "operation": "product",
+     "factor_ids": [
+      "aws_workload_fraction",
+      "aws_monthly_cost_at_full_workload"
+     ],
+     "stated_in_brief": false
+    }
+   },
+   {
+    "id": "gcp_monthly_spend",
+    "kind": "outcome",
+    "label": "GCP monthly spend",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "migration_downtime_risk",
+    "kind": "outcome",
+    "label": "Migration downtime risk",
+    "provenance": "from_brief"
+   }
+  ],
+  "goal_constraints": [
+   {
+    "unit": "weeks",
+    "label": "Migration downtime risk",
+    "value": 2,
+    "node_id": "migration_downtime_risk",
+    "operator": "<=",
+    "provenance": "explicit",
+    "value_frame": "level",
+    "constraint_id": "agent-lane:migration_downtime_risk:<="
+   }
+  ]
+ }
+}
