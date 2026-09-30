@@ -107,7 +107,7 @@ describe('m1: after the Yes, the Run is not blocked for want of a frame (served 
     expect(r.kind, JSON.stringify(r)).toBe('mutated');
     return { card, after: (r as { mutatedGraph: Graph }).mutatedGraph };
   };
-  const codes = (x: Graph) => ((assessCanonicalAnalysisReadiness(x) as { issues?: { code: string }[] }).issues ?? []).map((i) => i.code);
+  const codes = (x: Graph) => assessCanonicalAnalysisReadiness(x).issues.map((i) => i.code);
 
   it('RED (v2, R3 CR 5908327529 + AIQ 5908364515): m1 → Yes → the operand takes its cause\'s range AND the card\'s TODAY level, the user\'s own stamp', () => {
     const { card, after } = yes(M1);
