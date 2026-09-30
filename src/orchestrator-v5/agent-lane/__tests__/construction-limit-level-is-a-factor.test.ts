@@ -272,7 +272,8 @@ describe('CONTROLS — what the rule must leave alone', () => {
       { metric: 'MRR', operator: '<=', value: 50, unit: '%', provenance: 'explicit', frame: 'level' },
       { metric: 'Price sensitivity', operator: '<=', value: 50, unit: '%', provenance: 'explicit', frame: 'level' },
     ] }));
-    expect(byId(graph, 'mrr')).toStrictEqual(asServedNow(byId(SERVED_OUTCOME, 'mrr')));
+    // Read back in the served form (0.67.0's goal `unit_reading` postdates this capture; `one-form-levels.ts`).
+    expect(byId(asServedBeforeOneForm(graph, SERVED_OUTCOME), 'mrr')).toStrictEqual(asServedNow(byId(SERVED_OUTCOME, 'mrr')));
     expect(byId(graph, 'price_sensitivity')).toStrictEqual(byId(SERVED_OUTCOME, 'price_sensitivity'));
     expect(graph.goal_constraints?.map((c) => c.node_id).sort()).toEqual(['monthly_churn', 'mrr', 'price_sensitivity']);
     expect(byId(graph, 'monthly_churn')?.kind, 'the churn limit alone still converts its node').toBe('factor');

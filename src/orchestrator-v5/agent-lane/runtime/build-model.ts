@@ -58,6 +58,7 @@ import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } fr
 import { refitFramesForStatedEffects } from '../refit-frames.js';
 import { creditStatedFactorLevels, figureTheUserWrote, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
+import { goalUnitReading } from '../goal-unit-reading.js';
 import { findStatedAmounts } from '../../../cee/provenance/stated-amounts.js';
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
@@ -1621,8 +1622,14 @@ export async function buildModelFromBrief(
    */
   const deadlineWords = statedGoal.horizon.status === 'unresolved' ? statedGoal.horizon.wording.trim() : '';
   const deadlineHeld = deadlineWords !== '' && deadlineWords.length <= 60;
-  const goalNodes = deadlineHeld
-    ? statedGoal.nodes.map((n) => (n.kind === 'goal' ? { ...n, goal_deadline_as_stated: deadlineWords } : n))
+  // ⭐ 0.67.0 `unit_reading` (PTL A; AIQ 5914471584): the goal's unit, said with its author — Olumi's reading unless the
+  // brief writes the goal's own target in it. A reading, never a figure (`goal-unit-reading.ts`).
+  // ONE authority for the goal node (P0 PARTNER CR on #2381): `user_stated` only where the node holds its target as the user's.
+  const unitReading = goalUnitReading(candidate.goal, brief, statedGoal.held.target);
+  const goalNodes = deadlineHeld || unitReading !== undefined
+    ? statedGoal.nodes.map((n) => (n.kind === 'goal'
+      ? { ...n, ...(deadlineHeld ? { goal_deadline_as_stated: deadlineWords } : {}), ...(unitReading !== undefined ? { unit_reading: unitReading } : {}) }
+      : n))
     : statedGoal.nodes;
 
   const parked = (candidate as { unknowns?: unknown }).unknowns;
