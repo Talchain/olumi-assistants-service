@@ -337,6 +337,11 @@ export function normaliseGraphForIdentity(
   if (isIdentityEmpty(graph)) return null;
 
   const stripped = stripTransientDeep(graph) as Record<string, unknown>;
+  // `ref_high_water` (stable entity refs, `graph/entity-refs.ts`) is a COUNTER, not content: the highest ref number ever
+  // issued per prefix. Keeping it out lets a restore raise it (so a retired ref is never reissued) while the restored
+  // bytes still bind to the restored version's identity. `node.ref` itself stays IN identity, like `label`. Excluding a
+  // key no persisted graph held before this change moves no existing hash, so IDENTITY_NORMALISER_VERSION stands.
+  delete stripped.ref_high_water;
 
   if (Array.isArray(stripped.nodes)) {
     stripped.nodes = sortByIdThenSerialised(stripped.nodes);
