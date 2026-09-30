@@ -65,6 +65,7 @@ import {
 } from '../../schemas/assist.js';
 import { normaliseBriefText } from '../session/normalise-brief-text.js';
 import type { SessionTurnWithContent } from '../session/conversation-content.js';
+import { conversationAsSeen } from '../session/conversation-as-seen.js';
 
 export type ExplicitGenerateBriefSource =
   | 'message'
@@ -143,8 +144,9 @@ export function assembleExplicitGenerateBrief(
     return { brief: capToDraftMax(persisted), source: 'persisted_brief' };
   }
 
-  // Source 4 — most recent brief-shaped USER turn.
-  for (const turn of input.recentTurns) {
+  // Source 4 — most recent brief-shaped USER turn, of the turns the user SAW: an Agent sub-turn's `user_message` is the
+  // model's own tool reason, never the user's words (`conversation-as-seen.ts`; #75 5910983526, 5911326118).
+  for (const turn of conversationAsSeen(input.recentTurns)) {
     const userMessage = normaliseBriefText(turn.user_message ?? null).value ?? '';
     if (usableLength(userMessage) && DRAFT_GRAPH_DECISION_BRIEF_REGEX.test(userMessage)) {
       return { brief: capToDraftMax(userMessage), source: 'recent_turn' };

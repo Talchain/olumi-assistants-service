@@ -15,7 +15,7 @@
  */
 
 import { goalChanceWithheldForAgent, type GoalChanceWithheld } from '../goal-chance-withheld.js';
-import { certainOptionRows, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
+import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -1140,10 +1140,11 @@ function proposalNoteFor(usersCount: number, total: number): string {
   }
   if (usersCount === total) {
     return 'Nothing has changed. Show the user each value as the figure the user gave: it will be saved as the ' +
-      `user's own figure, so never call it an assumption or say it is not a measurement, ${ask}`;
+      "user's own figure, so never call it Olumi's estimate or an assumption, or say it is not a measurement (an " +
+      `"about" in their words does not make it Olumi's), ${ask}`;
   }
   return 'Nothing has changed. Show the user each value and what it rests on. A value marked your_figure is the ' +
-    "user's own figure and will be saved as theirs: never call it an assumption. Say plainly that the other values " +
+    "user's own figure and will be saved as theirs: never call it Olumi's estimate or an assumption. Say plainly that the other values " +
     `are assumptions to adopt or correct and NOT measurements, ${ask}`;
 }
 
@@ -3337,12 +3338,17 @@ export function createAgentCapabilities(
         // ONE figure written and ONE value proposed: no swap among the user's figures is possible, and the card shows the
         // one pairing. With two figures or more the strict matcher decides, as before (journey E's salaries: a swap is
         // never theirs, `revise-door-same-matcher`).
-        const soleFigure = input.length === 1 && figuresWrittenIn(ctx.user_text) === 1;
+        // ⛔ "ONE WRITTEN IN THIS MESSAGE" MEANS THIS MESSAGE (MG SUCCESSOR #75 5911974162; served #2359 row on 660befa4):
+        // counted over the session's typed words, the brief's own figures (£45k, 20%, 2 weeks) made every later revision
+        // Olumi's, and so did the user's "Yes, use 25%." (their 25% written twice). The route binds THIS turn's typed
+        // message (`user_turn_text`, never a chip's text); with none, the session's words are read exactly as before.
+        const turnWords = ctx.user_turn_text ?? ctx.user_text;
+        const soleFigure = input.length === 1 && figuresWrittenIn(turnWords) === 1;
         // And nothing BESIDE the figure names another quantity (`nearOnly`): "Keep salary spend under £400k" is the limit's,
         // "our MRR is £12,000" is MRR's, never a revised salary or price, card or not.
         const quote = readable && !writtenAbout && soleFigure && typeof existing === 'number'
-          && figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text, { ...ownerScope, nearOnly: true })
-          ? quoteOfFigure(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text) : null;
+          && figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, turnWords, { ...ownerScope, nearOnly: true })
+          ? quoteOfFigure(Number(a.value), a?.unit ?? nodeUnit, turnWords) : null;
         adopted.push({
           id: node.id, label: node.label,
           value: Number(a.value), unit: String(a?.unit ?? ''), basis: String(a?.basis ?? ''),
@@ -3350,7 +3356,7 @@ export function createAgentCapabilities(
           userWrote: writtenAbout || quote !== null,
           ...(quote !== null ? { quote } : {}),
           // A 0–1 share the user wrote as a percentage ("25%" for 0.25) is shown in their units: "15% → 25%" (AIQ 5902884139).
-          ...(quote !== null && Math.abs(Number(a.value)) <= 1 && figureTheUserWrote(Number(a.value) * 100, '%', ctx.user_text) ? { asPercent: true as const } : {}),
+          ...(quote !== null && Math.abs(Number(a.value)) <= 1 && figureTheUserWrote(Number(a.value) * 100, '%', turnWords) ? { asPercent: true as const } : {}),
         });
       }
 
@@ -6952,7 +6958,7 @@ export function createAgentCapabilities(
       // said as a certainty only when THIS Run's own stored decision earns it — attributed by its run-fact identity.
       // One graph read (the one above when made); a Run that cannot be bound is said as unchecked (`goal-certainty-for-agent.ts`).
       let goalCertainty: Record<string, unknown> | undefined;
-      if (certainOptionRows(result).length > 0) {
+      if (hasGoalCertaintyCandidates(result)) {
         if (postRunRead === undefined) {
           try { postRunRead = await readGraph(ctx.scenario_id); } catch { postRunRead = null; }
         }

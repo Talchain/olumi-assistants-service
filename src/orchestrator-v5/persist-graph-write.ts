@@ -115,6 +115,7 @@ import {
   PersistedGraphInvariantError,
 } from './persisted-graph-invariants.js';
 import type { SessionAppendOutcome, SessionStore, SessionTurnWrite } from './session/store.js';
+import { withoutAgentSubturnText } from './session/agent-subturn-context.js';
 
 export interface CheckedGraphAppendParams {
   /** The write, already projected and hashed by the caller. */
@@ -352,6 +353,7 @@ export async function appendCheckedGraphWrite(
     source,
   });
 
-  // Nothing mutates the graph between the check above and this line.
-  return await store.append(write);
+  // Nothing mutates the graph between the check above and this line. A row written inside one of the Agent's own
+  // dispatches is stored without conversation text: the user never saw it (`agent-subturn-context.ts`, #75 5910983526).
+  return await store.append(withoutAgentSubturnText(write));
 }

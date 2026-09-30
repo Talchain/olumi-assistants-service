@@ -17,9 +17,12 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 
 const DURABLE = [
-  // `readRecent` returns newest first.
-  { id: 'r2', turn_id: 't2', turn_class: 'frame', created_at: '2026-09-23T10:02:00Z', user_message: 'Yes, use those.', assistant_message: 'Saved as version 2.' },
-  { id: 'r1', turn_id: 't1', turn_class: 'frame', created_at: '2026-09-23T10:00:00Z', user_message: 'Should I hire a Tech lead or two developers? Our budget is fixed at £180k.', assistant_message: 'Here is a starting model.' },
+  // `readRecent` returns newest first. Each is the Agent route's own answer row, so it carries the route's request hash
+  // (`agent_turn:`), as every stored Agent answer row does (CURRENT-READ-v1 row 5; sub-turn rows are `sha256:`).
+  { id: 'r2', turn_id: 't2', turn_class: 'direct_answer', request_hash: `agent_turn:${'2'.repeat(64)}`, created_at: '2026-09-23T10:02:00Z', user_message: 'Yes, use those.', assistant_message: 'Saved as version 2.' },
+  // CONTRAST (DL 5912285829): an Agent sub-turn row the user never saw (the turn executor's `sha256:` hash) is dropped.
+  { id: 'rs', turn_id: 's1', turn_class: 'handler', request_hash: `sha256:${'5'.repeat(32)}`, created_at: '2026-09-23T10:01:00Z', user_message: 'the user pressed Run', assistant_message: 'Hire Two Developers scored highest in 100% of runs.' },
+  { id: 'r1', turn_id: 't1', turn_class: 'direct_answer', request_hash: `agent_turn:${'1'.repeat(64)}`, created_at: '2026-09-23T10:00:00Z', user_message: 'Should I hire a Tech lead or two developers? Our budget is fixed at £180k.', assistant_message: 'Here is a starting model.' },
 ];
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
@@ -70,6 +73,7 @@ describe('a board edit made first after a restart', () => {
     const durable = texts.findIndex((t) => t.includes('Our budget is fixed at £180k'));
     const note = texts.findIndex((t) => t.startsWith(prefix));
     expect(durable, 'the durable conversation was seeded').toBeGreaterThanOrEqual(0);
+    expect(texts.join('\n'), 'the sub-turn row is not the conversation').not.toMatch(/the user pressed Run|100% of runs/);
     expect(note, 'the board-edit note is kept').toBeGreaterThan(durable);
     expect(texts.at(-1)).toBe('How much did my change matter?');
   });
