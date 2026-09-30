@@ -65,6 +65,13 @@ describe('Olumi’s risk straight into MRR = price × subscribers moves it throu
     expect(proposeProductIdentity(graph)).not.toBeNull();
   });
 
+  it('CONTROL (R3 5906615257): a risk the USER named (from_brief) is never removed — left as drafted, no card', async () => {
+    const { graph } = await build(m9((c) => { c.risks.find((r: Json) => r.label === 'Customer backlash').provenance = 'explicit'; }));
+    expect(edge(graph, 'Customer backlash', 'GOAL')).toBe(true);
+    expect(idOf(graph, 'Customer backlash')).toBeDefined();
+    expect(proposeProductIdentity(graph)).toBeNull();
+  });
+
   it('CONTROL: a link the USER sized is theirs — left as drafted, no card', async () => {
     const { graph } = await build(m9((c) => { Object.assign(c.links.find((l: Json) => l.from === 'Customer backlash' && l.to === 'MRR'), { effect_amount: -500, effect_per_source_change: 1, effect_provenance: 'explicit' }); }));
     expect(edge(graph, 'Customer backlash', 'GOAL')).toBe(true);

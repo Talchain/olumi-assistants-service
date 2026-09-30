@@ -27,7 +27,7 @@ interface ModelShape {
   readonly goal: { readonly metric: string; readonly unit?: string | null };
   readonly factors: readonly { readonly label: string; readonly unit: string | null; readonly baseline_known: boolean; readonly baseline_value: number | null }[];
   readonly links: readonly Link[];
-  readonly risks?: readonly { readonly label: string }[];
+  readonly risks?: readonly { readonly label: string; readonly provenance?: string }[];
   readonly identities?: readonly { readonly outcome: string; readonly operation: string; readonly factors: readonly string[] }[];
 }
 
@@ -114,6 +114,9 @@ export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M)
     if (risk && reactsToRate && reaches(l.from, l) === undefined && l.effect_provenance == null && !finite(l.effect_amount)
       && rate !== undefined && volume !== undefined && !isMoney(volume.unit)) {
       const via = rateRoutesToVolume(l.from);
+      // ⛔ R3 5906615257: only OLUMI'S risk is dropped. A risk the user named (`explicit` → `from_brief`) is their concept:
+      // never removed, even with no link out, so it is left exactly as drafted (no card).
+      if (via.length > 0 && (model.risks ?? []).some((r) => key(r.label) === key(l.from) && r.provenance === 'explicit')) { links.push(l); continue; }
       if (via.length > 0) {
         // ⛔ A RISK LEFT WITH NO LINK OUT IS NOT KEPT "INFORMATIONAL": admission's risk repair re-links it to the goal
         // (a third parent again, no card), and readiness withholds anything with no path to the goal. So when this was
