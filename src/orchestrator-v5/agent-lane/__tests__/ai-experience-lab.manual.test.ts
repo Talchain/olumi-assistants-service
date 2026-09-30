@@ -149,6 +149,9 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
   }
   app.get('/lab/status', async () => ({ status: 'ISOLATED_MANUAL_PREVIEW', head, source_hash, arms, fixture: fixture.run,
     persistence: 'disposable_in_memory', external_analysis: 'unavailable', m2_available: m2Enabled,
+    // `fresh_available`: the authentic CEE host path is configured (Build 5908534036). Signed out, a fresh model still
+    // opens but reads `guest_no_version`, and M2 is withheld.
+    fresh_available: typeof assistKey === 'string' && assistKey.length > 0,
     fresh: { host: ceeBase, available: typeof assistKey === 'string' && assistKey.length > 0, signed_in: bearer !== undefined } }));
   app.get('/lab/session/:id', async (req, reply) => {
     const sid = (req.params as { id: string }).id;
