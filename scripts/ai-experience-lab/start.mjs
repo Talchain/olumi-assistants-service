@@ -18,6 +18,7 @@ const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: '
 const files = ['src/orchestrator-v5/agent-lane/__tests__/ai-experience-lab.manual.test.ts',
   'scripts/ai-experience-lab/index.html', 'scripts/ai-experience-lab/pricing-fixture.json', 'scripts/ai-experience-lab/start.mjs',
   'scripts/ai-experience-lab/rehearsal.json', 'scripts/ai-experience-lab/rehearsal.mjs', 'scripts/ai-experience-lab/rehearsal-ui.mjs',
+  'scripts/ai-experience-lab/regions-cases.json',
   'scripts/ai-experience-lab/m2-runner.mjs',
   'scripts/ai-experience-lab/pinned-runtime/artefact-runtime/canonical.ts',
   'scripts/ai-experience-lab/pinned-runtime/artefact-runtime/evals/mm-1/package.ts',

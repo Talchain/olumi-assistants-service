@@ -5,8 +5,9 @@
 :root{font-family:system-ui,sans-serif;color:#202b29;background:#f5f6f2}*{box-sizing:border-box}body{max-width:1000px;margin:auto;padding:28px}header{border-bottom:1px solid #d7dfd9;padding-bottom:18px}h1{font-size:26px;margin:8px 0}p{line-height:1.5}.tag{font-size:12px;letter-spacing:.1em;color:#436a59}.note{color:#54615b;font-size:14px}button,select,textarea{font:inherit;border:1px solid #bccbc1;border-radius:8px;padding:10px;background:white}button{cursor:pointer;background:#285d4c;color:white}button:disabled{opacity:.5;cursor:wait}select{min-width:270px}.toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:20px 0}article{white-space:pre-wrap;line-height:1.55;border-radius:10px;padding:16px 20px;margin:14px 0;background:white;border:1px solid #e0e5df}article.user{background:#e5eee6}article .label{display:block;font-size:12px;font-weight:650;margin-bottom:8px;color:#506d5d}.metrics{font-size:12px;color:#50645a;margin-top:12px;white-space:normal}textarea{width:100%;min-height:100px;resize:vertical}form button{margin-top:10px}details{background:#edf1eb;padding:12px;margin:12px 0;border-radius:8px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}.error{color:#993d35}#chat:empty::after{content:"Choose a prompt below, or write your own question about the seeded model.";display:block;padding:25px 0;color:#66766a}.quick button{background:white;color:#285d4c;font-size:13px}.quick{display:flex;flex-wrap:wrap;gap:7px}.head{font-family:monospace;font-size:12px}summary{cursor:pointer}
 </style>
 <header><div class="tag">OLUMI / DISPOSABLE LAB</div><h1>Explore a frozen pricing example</h1><p class="note">This preview starts from one recorded pricing brief and model, with four model/coaching combinations. It uses real AI for new questions and hypotheses, but cannot construct a model from your own brief yet. Changes stay in this process; analysis and production saving are unavailable.</p><div id="identity" class="head">Connecting…</div></header>
-<div class="toolbar"><button id="rehearsal-toggle" type="button">Open recorded reasoning walkthrough</button></div>
+<div class="toolbar"><button id="rehearsal-toggle" type="button">Open recorded reasoning walkthrough</button><button id="regions-toggle" type="button">Open frozen R3-B science cases</button></div>
 <section id="rehearsal" hidden aria-live="polite"></section>
+<section id="regions" hidden aria-live="polite"></section>
 <section id="live">
 <div class="toolbar"><label for="arm">Comparison</label><select id="arm"><option value="A">A · Terra + coaching</option><option value="baseline">Baseline · Terra</option><option value="B">B · Luna</option><option value="C">C · Luna + coaching</option></select><button id="reset">Reset to identical starting state</button></div>
 <details><summary>Starting brief and frozen context</summary><p id="brief"></p><details><summary>Earlier conversation</summary><pre id="history"></pre></details><details><summary>Model snapshot</summary><pre id="graph"></pre></details></details>
@@ -17,7 +18,7 @@
 </section>
 <p id="error" class="error" role="alert"></p>
 <script type="module">
-import { mountRehearsal } from "/lab/rehearsal-ui.mjs";
+import { mountRehearsal, mountFrozenRegions } from "/lab/rehearsal-ui.mjs";
 const $=id=>document.getElementById(id);let session=null,busy=false;
 async function call(path,body){const r=await fetch(path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});const x=await r.json();if(!r.ok)throw new Error(x.error||JSON.stringify(x));return x}
 function lock(value){busy=value;for(const id of ['send','reset','arm','widen'])$(id).disabled=value;$('progress').textContent=value?' Thinking…':''}
@@ -39,4 +40,5 @@ const dismiss=document.createElement('button');dismiss.type='button';dismiss.tex
 $('reset').onclick=reset;$('arm').onchange=reset;document.querySelectorAll('.quick button').forEach(b=>b.onclick=()=>{$('message').value=b.textContent;$('message').focus()});
 call('/lab/status').then(s=>{$('identity').textContent='Branch build '+s.head.slice(0,12)+' · process-only storage';$('widen').hidden=!s.m2_available;return reset()}).catch(e=>{$('error').textContent=e.message});
 mountRehearsal({add,call});
+mountFrozenRegions({add,call});
 </script></html>

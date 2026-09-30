@@ -10,6 +10,12 @@ Try **Explore → Add to investigation notes → Review recorded change → Appl
 
 This is interaction and consumer evidence only. It does not generate a fresh M2 proposal, calculate Regions, run PLoT, or write a real model. The challenge/exploration and rerun are recorded Olumi outputs. The capture lacks governed threshold status, so the UI explicitly withholds a numerical flip point and any no-effect claim. The historical receipt is labelled historical, never returned as a new save. Notes are transient, and page reload restarts the walkthrough.
 
+## Frozen R3-B science cases
+
+**Open frozen R3-B science cases** displays two byte-pinned outputs from `Inference-Service-Layer@cef7f7c66f1653d5006194f297fbb1eda6c14392/experiments/sci_regions_v1/lab/cases.json` in the existing article UI. This is a separate frozen graph (`pj-20260927T180910Z-A`), not the live £100k comparison or the recorded £20k walkthrough. The first case shows the source's exploratory hard-constraint churn boundary for £59 with feature release. The second says the new-customer/grandfathering threshold is unavailable because intervention levels are missing. It never turns missing effect into zero effect or a winner claim.
+
+The existing Lab read-only JSON endpoint carries the original case bytes. The browser checks their exact SHA-256 and graph, mapping and evaluator identities before showing either case. A mismatch withholds both. The detail panels show fixed assumptions and provenance. No analysis, recalculation, live model join, saving or provider call occurs. Run `pnpm exec vitest run scripts/ai-experience-lab/regions.test.mjs` for pinned-source parity and mismatch checks. Regenerating `rehearsal.json` without reattaching the pinned cases fails closed until this check is restored. Science owns interpretation of the underlying evaluator; this Lab only consumes its typed outputs.
+
 Rebuild from a read-only archive of the pinned Science commit:
 
 ```sh
