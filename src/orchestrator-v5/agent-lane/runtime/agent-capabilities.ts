@@ -6056,8 +6056,8 @@ export function createAgentCapabilities(
           not_added_note: `${notAdded.map((n) => n.olumi_suggestion
             ? `"${n.option}" is NOT in this change: "${n.same_levels_as}" is ${OLUMI_SUGGESTION_NOT_ADOPTABLE}`
             : `"${n.option}" is NOT in this change: it would set exactly the same levels as "${n.same_levels_as}", so the analysis could not tell the two apart`).join('; ')}. `
-            + 'For an ordinary twin, ask what makes it different; for Olumi\'s marked suggestion, say adoption is unavailable. '
-            + 'Never promise to add it later: it is added only by a new proposal the user approves.',
+            + 'For an ordinary twin, ask what makes it different; a distinct option requires a new proposal and approval. '
+            + 'For Olumi\'s marked suggestion, adoption is unavailable. Never promise to add it later.',
         } : {}),
         ...(keptFactors.length > 0 ? {
           new_factors: keptFactors.map((f) => ({

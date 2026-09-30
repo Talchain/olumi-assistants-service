@@ -769,6 +769,32 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(graphNow().edges.some((e) => e.from === 'dec_x' && e.to === newOption()!.id), 'linked from the decision').toBe(true);
   }, 120_000);
 
+  it('a batch can prepare the distinct option without promising adoption of a marked Olumi twin', async () => {
+    const graph = seedGraph();
+    graphOf.set(SCENARIO, { ...graph, nodes: graph.nodes.map((node) => node.id === 'opt_b'
+      ? { ...node, proposed_by: 'olumi' }
+      : node) });
+    let toolOutput: { ok?: boolean; not_added_note?: string; option?: { label?: string } } = {};
+    script = [
+      () => fnCall('propose_new_option', { options: [
+        { label: 'Test £59 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 59, unit: 'GBP' } }] },
+        { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }] },
+      ], rationale: 'The user asked for both.' }),
+      (body) => {
+        const out = (body['input'] as { type?: string; output?: string }[]).find((i) => i.type === 'function_call_output');
+        toolOutput = JSON.parse(String(out?.output ?? '{}')) as typeof toolOutput;
+        return say("The £59 one is Olumi's suggestion and cannot be adopted yet. I can prepare the distinct £54 option for approval.");
+      },
+    ];
+    const turnResult = await turn({ message: 'Add both the £59 suggestion and a new £54 option.' });
+    expect(toolOutput.ok).toBe(true);
+    expect(toolOutput.option?.label).toBe('Test £54 at release');
+    expect(toolOutput.not_added_note).toContain("Olumi's suggestion, not compared as yours");
+    expect(toolOutput.not_added_note).toContain('adoption is unavailable');
+    expect(toolOutput.not_added_note).not.toContain('it is added only by a new proposal');
+    expect(approveChipOf(turnResult)).toBeDefined();
+  }, 120_000);
+
   it('[q6] RED (DL #70 5846924842, served BF5): the user gives a level for an option NOT linked to Price → ONE proposal carries the link and the level → one click → the REAL product adds the link and records the level (never "once approved, I can record…")', async () => {
     const g = seedGraph();
     g.nodes.push({ id: 'opt_c', kind: 'option', label: 'Cohort test' } as never);
