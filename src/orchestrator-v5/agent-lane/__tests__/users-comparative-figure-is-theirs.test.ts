@@ -55,8 +55,8 @@ describe('the user\'s own comparative figure is theirs, on an approval that show
       expect(authorOf(store, r.proposal_id, id)).toBe('user_stated');
       expect(r.assumptions).toEqual([expect.objectContaining({ factor: label, your_figure: true })]);
       expect(r.note).not.toMatch(ASSUMPTION_WORDS);
-      // The approval shows the pairing with the user's own sentence, verbatim.
-      expect(r.public_label).toContain(`(your figure, in your words: "${EDIT}")`);
+      // The approval shows the factor, before → after in the user's units, and their own sentence, verbatim (AIQ 5902884139).
+      expect(r.public_label).toContain(`${label}: ${rep === 'r0' ? '15%' : '20%'} \u2192 25% (your figure, in your words: "${EDIT}")`);
     });
   }
 
@@ -73,6 +73,14 @@ describe('the user\'s own comparative figure is theirs, on an approval that show
     const { caps, store } = setup(F.r0);
     const r = await caps.proposeAssumptions(ctxSaying('Set the GCP unit-cost discount to 25%.'), { assumptions: [{ factor_label: 'GCP unit-cost discount', value: 0.25, unit: 'share', basis: 'the user', revise: true }] }) as R;
     expect(authorOf(store, r.proposal_id, 'gcp_unit_cost_discount')).toBe('user_stated');
+    expect(r.public_label).not.toContain('in your words');
+  });
+
+  it('CONTROL: two figures written → the strict matcher decides, as before (no pairing credited by the card)', async () => {
+    const { caps, store } = setup(F.r0);
+    const r = await caps.proposeAssumptions(ctxSaying("Our team's quote shows GCP would be about 25% cheaper than AWS, and we'd move 60% of workloads."),
+      { assumptions: [{ factor_label: 'GCP unit-cost discount', value: 0.25, unit: 'share', basis: 'the quote', revise: true }] }) as R;
+    expect(authorOf(store, r.proposal_id, 'gcp_unit_cost_discount')).toBe('model_proposed');
     expect(r.public_label).not.toContain('in your words');
   });
 

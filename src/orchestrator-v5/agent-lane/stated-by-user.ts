@@ -379,6 +379,14 @@ export interface EntityScope {
    */
   readonly rivals?: readonly string[];
   /**
+   * ⛔ NEAR ONLY — opt-in, passed only by the revise door's displayed-pairing path (AIQ #75 5902884139). The last rule
+   * (the nearest label word AFTER the figure, beyond the two words beside it) is not read, so a figure nothing beside it
+   * attributes is nobody's else. Served cut-costs: in "about 25% cheaper than AWS for our workload" the comparator after
+   * "than" named another quantity; it says what the figure is compared WITH, not whose it is. The approval card then
+   * shows the user's sentence. Every other door keeps its reading byte for byte.
+   */
+  readonly nearOnly?: boolean;
+  /**
    * ⛔ THE STRICT READING — opt-in, passed only by the add-factor door, whose figure lands as the user's own on a factor
    * that did not exist (DL ruling on the #2235 re-review, 13:07Z 28 Sep). Every other door keeps its reading byte for byte.
    * Journey E's own typed clarification, "Record them as annual salaries: £120,000 per senior engineer and £65,000 per
@@ -523,7 +531,8 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
       const near = firstMention(rightAfter) ?? firstMention([...left].reverse().slice(0, 2));
       return near === 'target';
     }
-    const about = firstMention(rightAfter) ?? firstMention([...left].reverse()) ?? firstMention(afterRate.slice(rightAfter.length));
+    const about = firstMention(rightAfter) ?? firstMention([...left].reverse())
+      ?? (scope.nearOnly === true ? null : firstMention(afterRate.slice(rightAfter.length)));
     // ⛔ STRICT, FAIL CLOSED (DL ruling (b)): among two figures or more, one no label word attributes is nobody's, never
     // "the user's, for any target" — that fallthrough let a SWAP through the door. The user is asked.
     if (about === null) return !(strict && severalFigures);
