@@ -44,6 +44,20 @@ vi.mock('../../../agent-lane/goal-certainty.js', async (importOriginal) => {
 type Json = Record<string, any>;
 const DIR = 'tests/fixtures/cross-service/b5-per-limit';
 const input = JSON.parse(readFileSync(`${DIR}/17d1cd3a.graph.json`, 'utf8')) as { graph: Json; brief_text: string };
+/**
+ * …with NO stated target, so DECISION-REPRESENTATION row 4 (#2371) has no subject: Paul's 17d1 MRR target can't be tested
+ * yet (placeholders on the goal's path), and row 4 then withholds EVERY option's chance, the status quo's earned 0 too
+ * (AIQ #2371 5915342964: nothing left showing). These rows pin where the Run stores its certainty, not row 4. Only the
+ * goal's raw target and its own limit row go (the C46 specs' shared pattern).
+ */
+function withoutTarget<G>(graph: G): G {
+  const c = structuredClone(graph) as unknown as { nodes: Record<string, unknown>[]; goal_constraints?: { node_id?: unknown }[] };
+  const goals = new Set(c.nodes.filter((n) => n.kind === 'goal').map((n) => n.id));
+  for (const n of c.nodes) if (n.kind === 'goal') delete n.goal_threshold_raw;
+  if (Array.isArray(c.goal_constraints)) c.goal_constraints = c.goal_constraints.filter((r) => !goals.has(r.node_id));
+  return c as unknown as G;
+}
+input.graph = withoutTarget(input.graph);
 const plotResponse = JSON.parse(readFileSync(`${DIR}/17d1cd3a.plot-response.json`, 'utf8')) as Json;
 
 const SCENARIO = 'a295e4a1-97b5-46c8-987a-513232e5dba4';
