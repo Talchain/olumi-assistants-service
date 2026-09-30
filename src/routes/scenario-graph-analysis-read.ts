@@ -134,6 +134,7 @@ import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
 import { log } from '../utils/telemetry.js';
 import { projectCurrentRead, type CurrentReadProjection } from './current-read-projection.js';
+import { projectSelectedRunFigures } from './selected-run-figures.js';
 
 /** The additive half of the scenario-graph read's 200 body. */
 export interface ScenarioAnalysisRead {
@@ -467,7 +468,15 @@ export async function readScenarioAnalysis(
     return {
       current_read: analysisState === null
         ? projectCurrentRead({ analysisState: null })
-        : projectCurrentRead({ analysisState, derivation, analysisResult: boundResult }),
+        : projectCurrentRead({
+            analysisState, derivation, analysisResult: boundResult,
+            figures: projectSelectedRunFigures({
+              scenarioId: params.scenarioId,
+              runState: analysisState.run_state,
+              currentResult: boundResult,
+              selectedFact: fact?.result ?? null,
+            }),
+          }),
       analysis_state: analysisState,
       analysis_result: boundResult,
       // R3-9: every answered read carries it, from the same facts as the writer; never gated on freshness.

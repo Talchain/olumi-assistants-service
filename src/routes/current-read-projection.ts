@@ -1,5 +1,6 @@
 import type { AnalysisStateV1, OlumiResponse } from '@talchain/schemas/boundary';
 import type { FreshnessDerivation } from '../orchestrator-v5/context/freshness.js';
+import type { SelectedRunFigure } from './selected-run-figures.js';
 
 type ResultBlock = OlumiResponse['blocks'][number];
 type RunHashes = Pick<FreshnessDerivation, 'graph_hash_at_run' | 'current_graph_hash'>;
@@ -20,15 +21,18 @@ export interface CurrentReadProjection {
   readonly current_analysis_hash: string | null;
   /** The existing reader's current block, never an older Run's figures. */
   readonly result: ResultBlock | null;
+  /** Measures attested by that same selected Run, never by a historical copy. */
+  readonly figures: readonly SelectedRunFigure[];
 }
 
 export type CurrentReadInput =
   | { readonly analysisState: null; readonly derivation?: null; readonly analysisResult?: null }
-  | { readonly analysisState: AnalysisStateV1; readonly derivation: RunHashes; readonly analysisResult: ResultBlock | null };
+  | { readonly analysisState: AnalysisStateV1; readonly derivation: RunHashes; readonly analysisResult: ResultBlock | null;
+      readonly figures?: readonly SelectedRunFigure[] };
 
 export function projectCurrentRead(input: CurrentReadInput): CurrentReadProjection {
   if (input.analysisState === null) {
-    return { run_state: null, computed_against_hash: null, current_analysis_hash: null, result: null };
+    return { run_state: null, computed_against_hash: null, current_analysis_hash: null, result: null, figures: [] };
   }
 
   return {
@@ -39,5 +43,7 @@ export function projectCurrentRead(input: CurrentReadInput): CurrentReadProjecti
     // accidentally handed this projection an old block. The selector owns the
     // state; this guard only enforces what its verdict permits to be shown.
     result: input.analysisState.run_state.kind === 'complete_current' ? input.analysisResult : null,
+    figures: input.analysisState.run_state.kind === 'complete_current' && input.analysisResult !== null
+      ? input.figures ?? [] : [],
   };
 }

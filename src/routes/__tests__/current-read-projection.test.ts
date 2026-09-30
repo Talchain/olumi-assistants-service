@@ -23,6 +23,7 @@ describe('the internal current-read producer projection', () => {
     expect(read.result).toBe(result);
     expect(read.computed_against_hash).toBe(runHash);
     expect(read.current_analysis_hash).toBe(runHash);
+    expect(read.figures).toEqual([]);
   });
 
   it('keeps the stale reason and both canonical hashes but never an earlier figure', () => {
@@ -50,7 +51,7 @@ describe('the internal current-read producer projection', () => {
     expect(never.run_state).toEqual({ kind: 'never_run' });
     expect(never.current_analysis_hash).toBe(currentHash);
     expect(never.result).toBeNull();
-    expect(unreadable).toEqual({ run_state: null, computed_against_hash: null, current_analysis_hash: null, result: null });
+    expect(unreadable).toEqual({ run_state: null, computed_against_hash: null, current_analysis_hash: null, result: null, figures: [] });
   });
 
   it('preserves the selector\'s degraded reason without laundering a prior result', () => {
