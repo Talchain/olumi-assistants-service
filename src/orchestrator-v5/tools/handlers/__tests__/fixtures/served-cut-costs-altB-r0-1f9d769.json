@@ -1,0 +1,1229 @@
+{
+ "_provenance": {
+  "source": "DL cc-journey alt-B r0 (scenario 714abc5c), served CEE 1f9d769 / PLoT af4cd56; graph = 02-read-after-brief; plot_body = 03-run1 analysis_result.enrichment (PLoT /v2/run body as CEE kept it)",
+  "brief_text": "Should we switch our cloud provider from AWS to GCP? Monthly spend is £45k; we want to cut costs by 20% without more than 2 weeks of migration downtime risk.",
+  "analysis_status": "restored to 'computed': PLoT's /v2/run body carries it; CEE's UI keep-list drops it from the stored enrichment"
+ },
+ "graph": {
+  "edges": [
+   {
+    "to": "remain_on_aws",
+    "from": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "switch_fully_to_gcp",
+    "from": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "phase_50_to_gcp",
+    "from": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "gcp_workload_share",
+    "from": "switch_fully_to_gcp",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "gcp_workload_share",
+    "from": "phase_50_to_gcp",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "gcp_workload_share",
+    "from": "remain_on_aws",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "monthly_gcp_cost_saving",
+    "from": "gcp_workload_share",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "monthly_gcp_cost_saving",
+    "from": "current_aws_equivalent_workload_cost",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "monthly_gcp_cost_saving",
+    "from": "gcp_unit_cost_discount",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "monthly_cloud_spend",
+    "from": "monthly_gcp_cost_saving",
+    "strength": {
+     "std": 0.1,
+     "mean": -0.2
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "migration_downtime",
+    "from": "gcp_workload_share",
+    "strength": {
+     "std": 0.08333333333333333,
+     "mean": 0.16666666666666666
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 2,
+      "amount_unit": "weeks",
+      "strength_mean": 0.16666666666666666,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "share"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "migration_downtime",
+    "from": "migration_downtime_per_full_migration",
+    "strength": {
+     "std": 0.5,
+     "mean": 1
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "weeks",
+      "strength_mean": 1,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "weeks"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "monthly_cloud_spend",
+    "from": "migration_downtime",
+    "strength": {
+     "std": 0.1,
+     "mean": 0.2
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   }
+  ],
+  "nodes": [
+   {
+    "id": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+    "kind": "decision",
+    "label": "Should we switch our cloud…",
+    "provenance": "from_brief",
+    "description": "Should we switch our cloud provider from AWS to GCP?"
+   },
+   {
+    "id": "monthly_cloud_spend",
+    "kind": "goal",
+    "label": "Monthly cloud spend",
+    "provenance": "from_brief",
+    "goal_threshold": -0.2,
+    "observed_state": {
+     "cap": 56250,
+     "unit": "£/month",
+     "value": 0.8,
+     "source": "brief_extraction",
+     "baseline": 0.8,
+     "raw_value": 45000
+    },
+    "goal_sense_reading": {
+     "basis": "typed_change_sign",
+     "sense": "minimise",
+     "words": "Olumi reads ‘Monthly cloud spend’ as a target to bring it DOWN by at least 20% from today.",
+     "threshold": -0.2,
+     "threshold_frame": "change_rel"
+    },
+    "goal_threshold_cap": 56250,
+    "goal_threshold_raw": -0.2,
+    "goal_threshold_unit": "£/month",
+    "goal_threshold_frame": "change_rel",
+    "goal_threshold_cap_provenance": "target_derived_headroom"
+   },
+   {
+    "id": "remain_on_aws",
+    "kind": "option",
+    "label": "Remain on AWS",
+    "provenance": "ai_inferred",
+    "is_baseline": true
+   },
+   {
+    "id": "switch_fully_to_gcp",
+    "kind": "option",
+    "label": "Switch fully to GCP",
+    "provenance": "from_brief",
+    "interventions": {
+     "gcp_workload_share": {
+      "value": 1,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "gcp_workload_share",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "phase_50_to_gcp",
+    "kind": "option",
+    "label": "Phase 50% to GCP",
+    "provenance": "ai_inferred",
+    "proposed_by": "olumi",
+    "interventions": {
+     "gcp_workload_share": {
+      "value": 0.5,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "gcp_workload_share",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "gcp_workload_share",
+    "kind": "factor",
+    "label": "GCP workload share",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "observed_state": {
+     "unit": "share",
+     "value": 0,
+     "source": "cee_inference"
+    }
+   },
+   {
+    "id": "current_aws_equivalent_workload_cost",
+    "kind": "factor",
+    "label": "Current AWS-equivalent workload…",
+    "category": "observable",
+    "provenance": "from_brief",
+    "description": "Current AWS-equivalent workload cost",
+    "observed_state": {
+     "cap": 200000,
+     "unit": "£/month",
+     "value": 0.225,
+     "source": "brief_extraction",
+     "raw_value": 45000,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "gcp_unit_cost_discount",
+    "kind": "factor",
+    "label": "GCP unit-cost discount",
+    "category": "external",
+    "provenance": "ai_inferred",
+    "observed_state": {
+     "unit": "share",
+     "value": 0.15,
+     "source": "cee_inference",
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "migration_downtime_per_full_migration",
+    "kind": "factor",
+    "label": "Migration downtime per full…",
+    "category": "observable",
+    "provenance": "ai_inferred",
+    "description": "Migration downtime per full migration",
+    "scale_frame": 12,
+    "observed_state": {
+     "unit": "weeks",
+     "value": 0.16666666666666666,
+     "source": "cee_inference",
+     "raw_value": 2,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "migration_downtime",
+    "kind": "factor",
+    "label": "Migration downtime",
+    "category": "observable",
+    "provenance": "ai_inferred",
+    "observed_state": {
+     "cap": 12,
+     "unit": "weeks",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "monthly_gcp_cost_saving",
+    "kind": "outcome",
+    "label": "Monthly GCP cost saving",
+    "provenance": "ai_inferred"
+   }
+  ],
+  "goal_constraints": [
+   {
+    "unit": "weeks",
+    "label": "Migration downtime",
+    "value": 2,
+    "node_id": "migration_downtime",
+    "operator": "<=",
+    "provenance": "explicit",
+    "value_frame": "level",
+    "constraint_id": "agent-lane:migration_downtime:<="
+   }
+  ]
+ },
+ "plot_body": {
+  "analysis_status": "computed",
+  "option_comparison": [
+   {
+    "id": "remain_on_aws",
+    "label": "Remain on AWS",
+    "status": "computed",
+    "outcome": {
+     "p10": 0.8,
+     "p50": 0.8,
+     "p90": 0.8,
+     "std": 1.1102230246251565e-16,
+     "mean": 0.8000000000000002,
+     "n_samples": 10000,
+     "validity_ratio": 1,
+     "n_valid_samples": 10000,
+     "percentiles_source": "samples"
+    },
+    "downside": {
+     "p05": 0.8,
+     "cvar_10": 0.8000000000000002,
+     "expected_regret": 0.009538375004396108
+    },
+    "option_id": "remain_on_aws",
+    "option_label": "Remain on AWS",
+    "win_probability": 0.32203333333333833,
+    "constraint_margins": [
+     {
+      "constraint_id": "agent-lane:migration_downtime:<="
+     }
+    ],
+    "probability_of_goal": 0,
+    "constraint_probabilities": {
+     "agent-lane:migration_downtime:<=": 1
+    },
+    "probability_of_joint_goal": 1,
+    "constraints_decision_grade": true
+   },
+   {
+    "id": "switch_fully_to_gcp",
+    "label": "Switch fully to GCP",
+    "status": "computed",
+    "outcome": {
+     "p10": 0.6591717798545429,
+     "p50": 0.768861217169913,
+     "p90": 0.8392079163307011,
+     "std": 0.0710762990959373,
+     "mean": 0.75766228009118,
+     "n_samples": 10000,
+     "validity_ratio": 1,
+     "n_valid_samples": 10000,
+     "percentiles_source": "samples"
+    },
+    "downside": {
+     "p05": 0.6299463373182447,
+     "cvar_10": 0.6212694042801407,
+     "expected_regret": 0.05187609491321621
+    },
+    "option_id": "switch_fully_to_gcp",
+    "option_label": "Switch fully to GCP",
+    "win_probability": 0.6345333333333238,
+    "constraint_margins": [
+     {
+      "constraint_id": "agent-lane:migration_downtime:<=",
+      "near_miss_fraction": 0.15861027190332327,
+      "failure_margin_median": 0.6653843610957113
+     }
+    ],
+    "probability_of_goal": 0.0617,
+    "constraint_probabilities": {
+     "agent-lane:migration_downtime:<=": 0.6028
+    },
+    "probability_of_joint_goal": 0.6028,
+    "constraints_decision_grade": true
+   },
+   {
+    "id": "phase_50_to_gcp",
+    "label": "Phase 50% to GCP",
+    "status": "computed",
+    "outcome": {
+     "p10": 0.7295858899272715,
+     "p50": 0.7844306085849565,
+     "p90": 0.8196039581653506,
+     "std": 0.03553814954796865,
+     "mean": 0.7788311400455901,
+     "n_samples": 10000,
+     "validity_ratio": 1,
+     "n_valid_samples": 10000,
+     "percentiles_source": "samples"
+    },
+    "downside": {
+     "p05": 0.7149731686591224,
+     "cvar_10": 0.7106347021400703,
+     "expected_regret": 0.030707234958806156
+    },
+    "option_id": "phase_50_to_gcp",
+    "option_label": "Phase 50% to GCP",
+    "win_probability": 0.04343333333333261,
+    "constraint_margins": [
+     {
+      "constraint_id": "agent-lane:migration_downtime:<=",
+      "near_miss_fraction": 0.6802030456852792,
+      "failure_margin_median": 0.12254069011222946
+     }
+    ],
+    "probability_of_goal": 0.0004,
+    "constraint_probabilities": {
+     "agent-lane:migration_downtime:<=": 0.9803
+    },
+    "probability_of_joint_goal": 0.9803,
+    "constraints_decision_grade": true
+   }
+  ],
+  "factor_sensitivity": [
+   {
+    "source": "graph",
+    "direction": "positive",
+    "factor_id": "migration_downtime",
+    "confidence": 0.45,
+    "elasticity": 1,
+    "evpi_method": "heuristic",
+    "driver_label": "biggest",
+    "factor_label": "Migration downtime",
+    "value_source": "cee_inference",
+    "evidence_hint": false,
+    "influence_rank": 1,
+    "rank_flip_rate": 0,
+    "importance_rank": 1,
+    "influence_basis": "isl_structural",
+    "influence_score": 1,
+    "importance_basis": "isl_structural",
+    "confidence_source": "plot_unified_from_isl_bootstrap",
+    "sensitivity_score": 0.2,
+    "flip_risk_category": "correlated",
+    "value_of_information": 0.006,
+    "attribution_stability": "negligible",
+    "confidence_components": {
+     "sampling_stability": 0,
+     "structural_certainty": 0.8
+    },
+    "confidence_provenance": {
+     "input_quality": "standard",
+     "is_provisional": true,
+     "formula_version": "plot_unified_v3",
+     "calibration_status": "provisional_pending_pilot_calibration",
+     "computation_source": "plot_unified_from_isl_bootstrap"
+    },
+    "evpi_percentage_points": 0.2
+   },
+   {
+    "source": "graph",
+    "direction": "positive",
+    "factor_id": "migration_downtime_per_full_migration",
+    "confidence": 0.4198,
+    "elasticity": 1,
+    "evpi_method": "heuristic",
+    "driver_label": "strong",
+    "factor_label": "Migration downtime per full…",
+    "value_source": "cee_inference",
+    "evidence_hint": false,
+    "influence_rank": 2,
+    "rank_flip_rate": 0.4,
+    "importance_rank": 2,
+    "influence_basis": "isl_structural",
+    "influence_score": 0.8,
+    "importance_basis": "isl_structural",
+    "confidence_source": "plot_unified_from_isl_bootstrap",
+    "sensitivity_score": 0.2,
+    "flip_risk_category": "correlated",
+    "value_of_information": 0,
+    "attribution_stability": "low",
+    "confidence_components": {
+     "sampling_stability": 0.25,
+     "structural_certainty": 0.5
+    },
+    "confidence_provenance": {
+     "input_quality": "standard",
+     "is_provisional": true,
+     "formula_version": "plot_unified_v3",
+     "calibration_status": "provisional_pending_pilot_calibration",
+     "computation_source": "plot_unified_from_isl_bootstrap"
+    },
+    "value_extraction_type": "inferred",
+    "evpi_percentage_points": 0
+   },
+   {
+    "source": "graph",
+    "direction": "negative",
+    "factor_id": "current_aws_equivalent_workload_cost",
+    "confidence": 0.4233,
+    "elasticity": 0.5,
+    "evpi_method": "heuristic",
+    "driver_label": "moderate",
+    "factor_label": "Current AWS-equivalent workload…",
+    "value_source": "brief_extraction",
+    "evidence_hint": false,
+    "influence_rank": 3,
+    "rank_flip_rate": 0.05,
+    "importance_rank": 3,
+    "influence_basis": "isl_structural",
+    "influence_score": 0.4,
+    "importance_basis": "isl_structural",
+    "confidence_source": "plot_unified_from_isl_bootstrap",
+    "sensitivity_score": -0.1,
+    "flip_risk_category": "correlated",
+    "value_of_information": 0,
+    "attribution_stability": "low",
+    "confidence_components": {
+     "sampling_stability": 0.25,
+     "structural_certainty": 0.5
+    },
+    "confidence_provenance": {
+     "input_quality": "standard",
+     "is_provisional": true,
+     "formula_version": "plot_unified_v3",
+     "calibration_status": "provisional_pending_pilot_calibration",
+     "computation_source": "plot_unified_from_isl_bootstrap"
+    },
+    "evpi_percentage_points": 0
+   },
+   {
+    "source": "graph",
+    "direction": "negative",
+    "factor_id": "gcp_unit_cost_discount",
+    "confidence": 0.42674999999999996,
+    "elasticity": 0.5,
+    "evpi_method": "heuristic",
+    "driver_label": "moderate",
+    "factor_label": "GCP unit-cost discount",
+    "value_source": "cee_inference",
+    "evidence_hint": false,
+    "influence_rank": 4,
+    "rank_flip_rate": 0.05,
+    "importance_rank": 4,
+    "influence_basis": "isl_structural",
+    "influence_score": 0.4,
+    "importance_basis": "isl_structural",
+    "confidence_source": "plot_unified_from_isl_bootstrap",
+    "sensitivity_score": -0.1,
+    "flip_risk_category": "correlated",
+    "value_of_information": 0,
+    "attribution_stability": "low",
+    "confidence_components": {
+     "sampling_stability": 0.25,
+     "structural_certainty": 0.5
+    },
+    "confidence_provenance": {
+     "input_quality": "standard",
+     "is_provisional": true,
+     "formula_version": "plot_unified_v3",
+     "calibration_status": "provisional_pending_pilot_calibration",
+     "computation_source": "plot_unified_from_isl_bootstrap"
+    },
+    "value_extraction_type": "inferred",
+    "evpi_percentage_points": 0
+   },
+   {
+    "source": "graph",
+    "direction": "negative",
+    "factor_id": "gcp_workload_share",
+    "confidence": 0.3,
+    "elasticity": 0,
+    "zero_reason": "intervention_override",
+    "driver_label": "moderate",
+    "factor_label": "GCP workload share",
+    "value_source": "cee_inference",
+    "influence_rank": 5,
+    "rank_flip_rate": 0.35,
+    "importance_rank": 5,
+    "influence_basis": "isl_structural",
+    "influence_score": 0.2666666666666667,
+    "importance_basis": "isl_structural",
+    "confidence_source": "plot_unified_from_isl_bootstrap",
+    "sensitivity_score": 0,
+    "flip_risk_category": "isolated",
+    "value_of_information": 0,
+    "attribution_stability": "negligible",
+    "confidence_components": {
+     "sampling_stability": 0,
+     "structural_certainty": 0.5
+    },
+    "confidence_provenance": {
+     "input_quality": "standard",
+     "is_provisional": true,
+     "formula_version": "plot_unified_v3",
+     "calibration_status": "provisional_pending_pilot_calibration",
+     "computation_source": "plot_unified_from_isl_bootstrap"
+    },
+    "range_derivation_source": "default"
+   }
+  ],
+  "robustness": {
+   "level": "low",
+   "near_tie": {
+    "gap": 0.3124999999999855,
+    "is_tie": false,
+    "threshold": 0.1,
+    "top_option_id": "switch_fully_to_gcp",
+    "tied_option_ids": [
+     "switch_fully_to_gcp"
+    ],
+    "second_option_id": "remain_on_aws"
+   },
+   "is_robust": false,
+   "confidence": 0.6345333333333238,
+   "robust_edges": [],
+   "fragile_edges": [
+    {
+     "to_id": "monthly_gcp_cost_saving",
+     "edge_id": "gcp_workload_share->monthly_gcp_cost_saving",
+     "from_id": "gcp_workload_share",
+     "visible": true,
+     "severity": "error",
+     "to_label": "Monthly GCP cost saving",
+     "from_label": "GCP workload share",
+     "switch_probability": 0.6336,
+     "alternative_winner_id": "remain_on_aws",
+     "alternative_winner_label": "Remain on AWS",
+     "marginal_switch_probability": 0.17
+    },
+    {
+     "to_id": "monthly_gcp_cost_saving",
+     "edge_id": "current_aws_equivalent_workload_cost->monthly_gcp_cost_saving",
+     "from_id": "current_aws_equivalent_workload_cost",
+     "visible": true,
+     "severity": "warning",
+     "to_label": "Monthly GCP cost saving",
+     "from_label": "Current AWS-equivalent workload…",
+     "switch_probability": 0.3244,
+     "alternative_winner_id": "remain_on_aws",
+     "alternative_winner_label": "Remain on AWS",
+     "marginal_switch_probability": 0
+    },
+    {
+     "to_id": "monthly_gcp_cost_saving",
+     "edge_id": "gcp_unit_cost_discount->monthly_gcp_cost_saving",
+     "from_id": "gcp_unit_cost_discount",
+     "visible": true,
+     "severity": "warning",
+     "to_label": "Monthly GCP cost saving",
+     "from_label": "GCP unit-cost discount",
+     "switch_probability": 0.318,
+     "alternative_winner_id": "remain_on_aws",
+     "alternative_winner_label": "Remain on AWS",
+     "marginal_switch_probability": 0
+    },
+    {
+     "to_id": "migration_downtime",
+     "edge_id": "migration_downtime_per_full_migration->migration_downtime",
+     "from_id": "migration_downtime_per_full_migration",
+     "visible": true,
+     "severity": "warning",
+     "to_label": "Migration downtime",
+     "from_label": "Migration downtime per full…",
+     "switch_probability": 0.3168,
+     "alternative_winner_id": "remain_on_aws",
+     "alternative_winner_label": "Remain on AWS",
+     "marginal_switch_probability": 0
+    },
+    {
+     "to_id": "migration_downtime",
+     "edge_id": "gcp_workload_share->migration_downtime",
+     "from_id": "gcp_workload_share",
+     "visible": false,
+     "severity": "warning",
+     "to_label": "Migration downtime",
+     "from_label": "GCP workload share",
+     "switch_probability": 0.1452,
+     "alternative_winner_id": "remain_on_aws",
+     "alternative_winner_label": "Remain on AWS",
+     "marginal_switch_probability": 0.01
+    },
+    {
+     "to_id": "monthly_cloud_spend",
+     "edge_id": "migration_downtime->monthly_cloud_spend",
+     "from_id": "migration_downtime",
+     "visible": false,
+     "severity": "warning",
+     "to_label": "Monthly cloud spend",
+     "from_label": "Migration downtime",
+     "switch_probability": 0.1424,
+     "alternative_winner_id": "remain_on_aws",
+     "alternative_winner_label": "Remain on AWS",
+     "marginal_switch_probability": 0
+    },
+    {
+     "to_id": "monthly_cloud_spend",
+     "edge_id": "monthly_gcp_cost_saving->monthly_cloud_spend",
+     "from_id": "monthly_gcp_cost_saving",
+     "visible": false,
+     "severity": "warning",
+     "to_label": "Monthly cloud spend",
+     "from_label": "Monthly GCP cost saving",
+     "switch_probability": 0.1384,
+     "alternative_winner_id": "remain_on_aws",
+     "alternative_winner_label": "Remain on AWS",
+     "marginal_switch_probability": 0.27
+    }
+   ],
+   "display_verdict": "fragile",
+   "confidence_basis": "recommendation_stability_uncalibrated",
+   "recommended_option_id": "switch_fully_to_gcp",
+   "display_verdict_reason": "small changes to your assumptions could change which option is most likely to achieve your goal",
+   "recommended_option_label": "Switch fully to GCP",
+   "recommended_option_compliance": "uncertain",
+   "recommended_option_compliance_reason": "this option met your limits in some scenarios but not others"
+  },
+  "option_comparison_status": "computed",
+  "conditional_probabilities": [],
+  "edge_e_values": [
+   {
+    "to_id": "monthly_gcp_cost_saving",
+    "e_value": 1,
+    "edge_id": "gcp_workload_share::monthly_gcp_cost_saving",
+    "from_id": "gcp_workload_share",
+    "to_label": "Monthly GCP cost saving",
+    "flip_mean": 0.166667,
+    "stability": {
+     "n_seeds": 10,
+     "band_max": 0.464722,
+     "band_min": -1e-06,
+     "band_width": 0.464723,
+     "band_median": -1e-06,
+     "n_seeds_flipped": 8,
+     "seed_flip_means": [
+      -1e-06,
+      0.043651,
+      null,
+      -1e-06,
+      -1e-06,
+      null,
+      0.464722,
+      -1e-06,
+      0.36193,
+      -1e-06
+     ]
+    },
+    "from_label": "GCP workload share",
+    "current_mean": 0.5,
+    "flip_direction": "decrease"
+   },
+   {
+    "to_id": "monthly_cloud_spend",
+    "e_value": 1,
+    "edge_id": "monthly_gcp_cost_saving::monthly_cloud_spend",
+    "from_id": "monthly_gcp_cost_saving",
+    "to_label": "Monthly cloud spend",
+    "flip_mean": -0.066666,
+    "stability": {
+     "n_seeds": 10,
+     "band_max": 0,
+     "band_min": -0.113021,
+     "band_width": 0.113021,
+     "band_median": -0.0073,
+     "n_seeds_flipped": 8,
+     "seed_flip_means": [
+      0,
+      -0.014599,
+      -0.060886,
+      0,
+      0,
+      -0.069897,
+      -0.113021,
+      0,
+      null,
+      null
+     ]
+    },
+    "from_label": "Monthly GCP cost saving",
+    "current_mean": -0.2,
+    "flip_direction": "increase"
+   },
+   {
+    "to_id": "migration_downtime",
+    "e_value": 3,
+    "edge_id": "gcp_workload_share::migration_downtime",
+    "from_id": "gcp_workload_share",
+    "to_label": "Migration downtime",
+    "flip_mean": 0.5,
+    "stability": {
+     "n_seeds": 10,
+     "band_max": 0.974223,
+     "band_min": 0,
+     "band_width": 0.974223,
+     "band_median": 0.321287,
+     "n_seeds_flipped": 7,
+     "seed_flip_means": [
+      null,
+      0.701404,
+      0.067829,
+      null,
+      0.974223,
+      0.061033,
+      0.321287,
+      0.580927,
+      0,
+      null
+     ]
+    },
+    "from_label": "GCP workload share",
+    "current_mean": 0.16666666666666666,
+    "flip_direction": "increase"
+   },
+   {
+    "to_id": "monthly_cloud_spend",
+    "e_value": 3,
+    "edge_id": "migration_downtime::monthly_cloud_spend",
+    "from_id": "migration_downtime",
+    "to_label": "Monthly cloud spend",
+    "flip_mean": 0.600001,
+    "stability": {
+     "n_seeds": 10,
+     "band_max": 0.397177,
+     "band_min": 0,
+     "band_width": 0.397177,
+     "band_median": 0.07016,
+     "n_seeds_flipped": 5,
+     "seed_flip_means": [
+      null,
+      null,
+      0.07016,
+      null,
+      null,
+      0.180003,
+      0.397177,
+      null,
+      0,
+      0
+     ]
+    },
+    "from_label": "Migration downtime",
+    "current_mean": 0.2,
+    "flip_direction": "increase"
+   }
+  ],
+  "inference_warnings": [
+   {
+    "code": "ZERO_FACTOR_HELD_EXACT",
+    "message": "Olumi holds the starting level of \"Migration downtime\" at 0 weeks exactly; the options still move it.",
+    "severity": "info",
+    "node_label": "Migration downtime"
+   },
+   {
+    "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+    "message": "3 edge E-value entries were omitted from edge_e_values: 3 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+    "severity": "info"
+   }
+  ],
+  "confidence_tier": "fair",
+  "flip_thresholds": [
+   {
+    "unit": "share",
+    "direction": "increase",
+    "factor_id": "gcp_workload_share",
+    "flip_value": 0.5,
+    "flip_reason": "found",
+    "probes_used": 0,
+    "factor_label": "GCP workload share",
+    "current_value": 0,
+    "iterations_used": 0,
+    "alternative_winner_id": "phase_50_to_gcp",
+    "alternative_winner_label": "Phase 50% to GCP"
+   },
+   {
+    "unit": "£/month",
+    "factor_id": "current_aws_equivalent_workload_cost",
+    "flip_value": null,
+    "flip_reason": "structurally_invariant",
+    "probes_used": 0,
+    "value_scale": "display",
+    "factor_label": "Current AWS-equivalent workload…",
+    "current_value": 45000,
+    "current_display": "45000 £/month",
+    "iterations_used": 0,
+    "no_flip_in_range": true,
+    "alternative_winner_id": null,
+    "alternative_winner_label": null
+   },
+   {
+    "unit": "share",
+    "factor_id": "gcp_unit_cost_discount",
+    "flip_value": null,
+    "flip_reason": "structurally_invariant",
+    "probes_used": 0,
+    "factor_label": "GCP unit-cost discount",
+    "current_value": 0.15,
+    "iterations_used": 0,
+    "no_flip_in_range": true,
+    "alternative_winner_id": null,
+    "alternative_winner_label": null
+   },
+   {
+    "unit": "weeks",
+    "factor_id": "migration_downtime_per_full_migration",
+    "flip_value": null,
+    "flip_reason": "structurally_invariant",
+    "probes_used": 0,
+    "value_scale": "normalised",
+    "factor_label": "Migration downtime per full…",
+    "current_value": 0.16666666666666666,
+    "iterations_used": 0,
+    "no_flip_in_range": true,
+    "alternative_winner_id": null,
+    "alternative_winner_label": null
+   }
+  ],
+  "decision_brief": {
+   "options": [
+    {
+     "rank": 1,
+     "label": "Switch fully to GCP",
+     "option_id": "switch_fully_to_gcp",
+     "win_probability": 0.6345333333333238
+    },
+    {
+     "rank": 2,
+     "label": "Remain on AWS",
+     "option_id": "remain_on_aws",
+     "win_probability": 0.32203333333333833
+    },
+    {
+     "rank": 3,
+     "label": "Phase 50% to GCP",
+     "option_id": "phase_50_to_gcp",
+     "win_probability": 0.04343333333333261
+    }
+   ],
+   "version": "1",
+   "brief_id": "7d6a7419-0f67-4eff-8f20-98719fab2de7",
+   "headline": "Switch fully to GCP currently leads by 31 points, but the model is not yet strong enough for an unqualified decision. Treat this as a provisional lead until the fragile assumptions are checked. Validate the fragile assumptions before treating this as a decision.",
+   "warnings": [
+    {
+     "code": "M2_UNAVAILABLE",
+     "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+     "severity": "warning"
+    }
+   ],
+   "created_at": "2026-09-30T01:48:10.959Z",
+   "robustness": "fragile",
+   "top_drivers": [
+    {
+     "direction": "positive",
+     "sensitivity": 1,
+     "factor_label": "Migration downtime"
+    },
+    {
+     "direction": "positive",
+     "sensitivity": 1,
+     "factor_label": "Migration downtime per full…"
+    },
+    {
+     "direction": "negative",
+     "sensitivity": 0.5,
+     "factor_label": "Current AWS-equivalent workload…"
+    },
+    {
+     "direction": "negative",
+     "sensitivity": 0.5,
+     "factor_label": "GCP unit-cost discount"
+    }
+   ],
+   "warning_codes": [],
+   "headline_banded": {
+    "band": "slightly_ahead",
+    "text": "Switch fully to GCP is slightly ahead.",
+    "doctrine": "provisional_doctrine_v0",
+    "leader_label": "Switch fully to GCP",
+    "runner_up_label": "Remain on AWS",
+    "leader_option_id": "switch_fully_to_gcp",
+    "robustness_gated": true,
+    "runner_up_option_id": "remain_on_aws",
+    "win_probability_gap": 0.3124999999999855
+   },
+   "key_assumptions": [
+    "Migration downtime",
+    "Migration downtime per full…",
+    "Current AWS-equivalent workload…"
+   ],
+   "analysis_summary": {
+    "goal_fit": 0.0617,
+    "leading_option": "Switch fully to GCP",
+    "robustness_band": "fragile",
+    "win_probability": 0.6345333333333238
+   },
+   "robustness_caveat": {
+    "text": "This run was fragile under the changes we tested. Small changes to your assumptions could change which option is most likely to achieve your goal.",
+    "basis": "is_robust",
+    "doctrine": "provisional_doctrine_v0",
+    "flip_evidence": {
+     "text": "Changing at least one tested factor on its own could change which option is most likely to achieve your goal. The other factors we could test could not.",
+     "status": "partial_no_effect"
+    }
+   },
+   "what_would_change": [
+    "Current AWS-equivalent workload… → Monthly GCP cost saving",
+    "GCP unit-cost discount → Monthly GCP cost saving",
+    "Migration downtime per full… → Migration downtime",
+    "Migration downtime → Monthly cloud spend",
+    "Monthly GCP cost saving → Monthly cloud spend"
+   ],
+   "defaulted_assumptions": []
+  },
+  "factor_evppi": [
+   {
+    "evppi": 0,
+    "units": "outcome",
+    "method": "regression_evppi_v1",
+    "status": "below_resolution",
+    "evppi_raw": 0,
+    "factor_id": "current_aws_equivalent_workload_cost",
+    "n_samples": 10000,
+    "clamped_low": false,
+    "noise_floor": 0,
+    "clamped_high": false,
+    "status_reason": "at_or_below_noise_floor",
+    "regression_degree": 4,
+    "correlation_active": false,
+    "baseline_max_expected_utility": -0.002325,
+    "conditional_max_expected_utility": -0.002325
+   },
+   {
+    "evppi": 0,
+    "units": "outcome",
+    "method": "regression_evppi_v1",
+    "status": "below_resolution",
+    "evppi_raw": 0,
+    "factor_id": "gcp_unit_cost_discount",
+    "n_samples": 10000,
+    "clamped_low": true,
+    "noise_floor": 2e-06,
+    "clamped_high": false,
+    "status_reason": "at_or_below_noise_floor",
+    "regression_degree": 4,
+    "correlation_active": false,
+    "baseline_max_expected_utility": -0.002325,
+    "conditional_max_expected_utility": -0.002325
+   },
+   {
+    "evppi": 0,
+    "units": "outcome",
+    "method": "regression_evppi_v1",
+    "status": "below_resolution",
+    "evppi_raw": 0,
+    "factor_id": "migration_downtime_per_full_migration",
+    "n_samples": 10000,
+    "clamped_low": true,
+    "noise_floor": 1e-06,
+    "clamped_high": false,
+    "status_reason": "at_or_below_noise_floor",
+    "regression_degree": 4,
+    "correlation_active": false,
+    "baseline_max_expected_utility": -0.002325,
+    "conditional_max_expected_utility": -0.002325
+   },
+   {
+    "evppi": 0,
+    "units": "outcome",
+    "method": "regression_evppi_v1",
+    "status": "below_resolution",
+    "evppi_raw": 0,
+    "factor_id": "migration_downtime",
+    "n_samples": 10000,
+    "clamped_low": false,
+    "noise_floor": 0,
+    "clamped_high": false,
+    "status_reason": "at_or_below_noise_floor",
+    "regression_degree": 0,
+    "correlation_active": false,
+    "baseline_max_expected_utility": -0.002325,
+    "conditional_max_expected_utility": -0.002325
+   }
+  ],
+  "decision_evpi": 0.009538375004396108,
+  "p_win_sensitivity": [
+   {
+    "method": "p_win_delta_at_mean_v1",
+    "status": "below_resolution",
+    "clamped": false,
+    "factor_id": "current_aws_equivalent_workload_cost",
+    "n_samples": 2000,
+    "metric_type": "p_joint_goal",
+    "noise_floor": 0.03099,
+    "p_win_delta": 0.0215,
+    "current_metric": 0.607,
+    "perfect_metric": 0.6285,
+    "labelling_doctrine": "provisional_doctrine_v0",
+    "noise_floor_method": "z95_worst_case_bernoulli_diff",
+    "p_win_delta_percentage_points": 2.15
+   },
+   {
+    "method": "p_win_delta_at_mean_v1",
+    "status": "below_resolution",
+    "clamped": false,
+    "factor_id": "migration_downtime_per_full_migration",
+    "n_samples": 2000,
+    "metric_type": "p_joint_goal",
+    "noise_floor": 0.03099,
+    "p_win_delta": 0.0005,
+    "current_metric": 0.607,
+    "perfect_metric": 0.6075,
+    "labelling_doctrine": "provisional_doctrine_v0",
+    "noise_floor_method": "z95_worst_case_bernoulli_diff",
+    "p_win_delta_percentage_points": 0.05
+   },
+   {
+    "method": "p_win_delta_at_mean_v1",
+    "status": "below_resolution",
+    "clamped": true,
+    "factor_id": "gcp_workload_share",
+    "n_samples": 2000,
+    "metric_type": "p_joint_goal",
+    "noise_floor": 0.03099,
+    "p_win_delta": 0,
+    "current_metric": 0.607,
+    "perfect_metric": 0.5975,
+    "labelling_doctrine": "provisional_doctrine_v0",
+    "noise_floor_method": "z95_worst_case_bernoulli_diff",
+    "p_win_delta_percentage_points": 0
+   },
+   {
+    "method": "p_win_delta_at_mean_v1",
+    "status": "below_resolution",
+    "clamped": true,
+    "factor_id": "gcp_unit_cost_discount",
+    "n_samples": 2000,
+    "metric_type": "p_joint_goal",
+    "noise_floor": 0.03099,
+    "p_win_delta": 0,
+    "current_metric": 0.607,
+    "perfect_metric": 0.6025,
+    "labelling_doctrine": "provisional_doctrine_v0",
+    "noise_floor_method": "z95_worst_case_bernoulli_diff",
+    "p_win_delta_percentage_points": 0
+   },
+   {
+    "method": "p_win_delta_at_mean_v1",
+    "status": "below_resolution",
+    "clamped": true,
+    "factor_id": "migration_downtime",
+    "n_samples": 2000,
+    "metric_type": "p_joint_goal",
+    "noise_floor": 0.03099,
+    "p_win_delta": 0,
+    "current_metric": 0.607,
+    "perfect_metric": 0.6055,
+    "labelling_doctrine": "provisional_doctrine_v0",
+    "noise_floor_method": "z95_worst_case_bernoulli_diff",
+    "p_win_delta_percentage_points": 0
+   }
+  ],
+  "conditional_winners": []
+ }
+}

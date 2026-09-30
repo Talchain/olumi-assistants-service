@@ -12,6 +12,7 @@
  */
 
 import {
+  GOAL_FIGURES_PLACEHOLDER_PATH,
   GOAL_FIGURES_USER_EFFECT_CLAMPED,
   GOAL_FIGURES_WITHHELD_CODES,
   GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
@@ -25,6 +26,8 @@ export interface GoalChanceWithheld {
   readonly say: string;
   readonly node_ids: readonly string[];
   readonly note: string;
+  /** (S) only: the options whose chance was withheld. Absent = every option (#416 / #422). */
+  readonly option_ids?: readonly string[];
 }
 
 // AIQ 5887096626: the one register ("reaches the target in N% of model runs", 5885116642).
@@ -37,6 +40,16 @@ export const GOAL_CHANCE_WITHHELD_NOTE =
   + 'or percentage of reaching the goal for any option, never say an option is more or less likely to reach it, and never quote an '
   + 'option’s estimated value for the goal itself as a result: those come from the same calculation. Say `say` once, as written, '
   + 'when you describe the run. Other results of this run may be described as they are.';
+
+/**
+ * ⛔ (S) (DL #75 5902570568): the chance is withheld only for the options a placeholder path moves (the status quo keeps
+ * its earned figure), and the share of runs each option did best is withheld for every option.
+ */
+export const PLACEHOLDER_PATH_NOTE =
+  'This run withheld the chance of reaching the goal for the options in `option_ids`, and for EVERY option the share of runs '
+  + 'in which it did best: they move with a link Olumi has not sized. Never state, estimate, rank or compare those figures, never '
+  + 'quote those options’ estimated value for the goal itself, and never name a leading option. Say `say` once, as written, when '
+  + 'you describe the run: it names the link and asks for its size. Other results of this run may be described as they are.';
 
 const recordOf = (v: unknown): Record<string, unknown> | undefined =>
   (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined);
@@ -54,6 +67,13 @@ export function goalChanceWithheldForAgent(result: unknown): GoalChanceWithheld 
     .map(recordOf)
     .filter((w): w is Record<string, unknown> => w !== undefined && typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code));
   if (warnings.length === 0) return undefined;
+  // (S) speaks alone: CEE writes it only on a run PLoT did not already withhold (`run-analysis.ts`).
+  if (warnings.every((w) => w.code === GOAL_FIGURES_PLACEHOLDER_PATH)) {
+    const w = warnings[0]!;
+    const words = typeof w.message === 'string' ? w.message.replace(UI_OPENING, '').trim() : '';
+    const ids = (key: string): string[] => (Array.isArray(w[key]) ? (w[key] as unknown[]).filter((id): id is string => typeof id === 'string') : []);
+    return { withheld: true, say: words === '' ? OPENING : words, node_ids: ids('node_ids'), note: PLACEHOLDER_PATH_NOTE, option_ids: ids('option_ids') };
+  }
   // One reason per cause, identity first (unchanged when it is alone), then PLoT #422's cut link — each in PLoT's words.
   const reasonFor = (code: string): string => {
     const words = warnings.filter((w) => w.code === code)

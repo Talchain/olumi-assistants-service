@@ -328,3 +328,132 @@ function sayUnearned(
   const pct = Math.round(be.fraction! * 1000) / 10;
   return `${holds} ${outcome} ${change} ${verb} more than about ${pct}% of ${part}${count}. ${unsized}`;
 }
+
+/** The sizer's mark for a link it could not size (the magnitude contract). */
+const PLACEHOLDER_MAGNITUDE = 'olumi_placeholder';
+
+/** One option whose goal figures move with a link nobody sized, and every such link on its paths into the goal. */
+export interface PlaceholderGoalPath {
+  readonly option_id: string;
+  /** The unsized links (`from` → `to`), in walk order, deduplicated. Never empty. */
+  readonly links: ReadonlyArray<{ readonly from: string; readonly to: string }>;
+}
+
+/**
+ * ⛔ (S) AN OPTION'S GOAL FIGURES ARE NOT EARNED WHILE ANY PATH FROM WHAT IT MOVES INTO THE GOAL RUNS THROUGH A LINK
+ * NOBODY SIZED (DL #75 5902570568; AIQ 5902548598: the ANY-path rule #2323 ships for limits, 5900908629).
+ *
+ * Served cut-costs on `1f9d769` (10 of 15 drafts, MG 5902531777): the goal card read "Chance 8%" for "Switch fully to
+ * GCP" (R3 5902550605) through a savings → spend link that is an `olumi_placeholder`. That figure moves with Olumi's
+ * unsized coefficient, not with anything the user said; their "GCP ~25% cheaper" could not move it.
+ *
+ * THE LINK: one the sizer marked `olumi_placeholder` (AIQ's words, R3's R-PH checker), unless the user stated its strength
+ * or it is an operand INTO an identity THIS run evaluated (exact: the goal-certainty rule's `exact`). NOT R-c's broader
+ * "not sized" test: a structural link the sizer never marked (no `magnitude`) is not a placeholder here. Measured: R-c's
+ * test withholds the DL's signed-in MRR card journey (`520aab46`, churn → paying subscribers carries no magnitude), whose
+ * price options must keep their chance (DL 5902570568's positive control). So the MRR card's confirmed
+ * `price × subscribers` keeps every figure, and a pre-card MRR run, whose last link into the goal is a placeholder,
+ * withholds every mover (AIQ 5902606752: intended). A factor set at the level it already holds moves nothing, so an option
+ * with no move (the status quo) keeps its figures (R3 5902591666). Pure.
+ */
+export function placeholderGoalPaths(
+  graph: unknown,
+  optionIds: readonly string[],
+  identityEvaluations?: ReadonlyArray<unknown>,
+  /** The interventions PLoT scored, by option id (the run's final wire options); else the option node's own. */
+  scoredInterventions?: ReadonlyMap<string, Record<string, unknown>>,
+): PlaceholderGoalPath[] {
+  if (!isRec(graph) || !Array.isArray(graph.nodes)) return [];
+  const nodes = graph.nodes.filter(isRec);
+  const edges = Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const byId = new Map(nodes.map((n) => [n.id, n] as const));
+  const goal = nodes.find((n) => n.kind === 'goal');
+  if (goal === undefined || typeof goal.id !== 'string') return [];
+  const evaluated = new Set((identityEvaluations ?? []).filter(isRec)
+    .filter((e) => e.evaluated === true && typeof e.node_id === 'string').map((e) => e.node_id as string));
+  const placeholder = (e: Rec): boolean => {
+    const p = isRec(e.provenance) ? e.provenance : undefined;
+    if (p?.magnitude !== PLACEHOLDER_MAGNITUDE || p.source === 'user_specified') return false;
+    const to = byId.get(e.to);
+    const id = isRec(to?.nonlinear_identity) && evaluated.has(String(to!.id)) ? to!.nonlinear_identity : undefined;
+    return !(Array.isArray(id?.factor_ids) && id!.factor_ids.includes(e.from));
+  };
+  const walkable = (id: unknown): boolean => {
+    const k = byId.get(id)?.kind;
+    return k !== undefined && k !== 'option' && k !== 'decision';
+  };
+  // Every node with a path to the goal (options and the decision aside): a link lies on a path into the goal only
+  // when it points at one of these, or at the goal.
+  const reachesGoal = new Set<unknown>([goal.id]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const e of edges) {
+      if (reachesGoal.has(e.to) && !reachesGoal.has(e.from) && walkable(e.from)) { reachesGoal.add(e.from); grew = true; }
+    }
+  }
+  const out: PlaceholderGoalPath[] = [];
+  for (const optionId of optionIds) {
+    const option = byId.get(optionId);
+    const iv = scoredInterventions?.get(optionId) ?? (option !== undefined ? mergeInterventionSourceObjects(option) : undefined);
+    if (iv === undefined) continue;
+    // A factor set at the level it holds moves nothing; an unknown move is read as a move (fail closed).
+    const moved = Object.entries(iv).flatMap(([factorId, set]) => {
+      if (!byId.has(factorId) || !reachesGoal.has(factorId)) return [];
+      const now = levelOf(byId.get(factorId)).value;
+      const to = interventionLevel(set).value;
+      return now !== undefined && to !== undefined && to === now ? [] : [factorId];
+    });
+    const links: { from: string; to: string }[] = [];
+    const seen = new Set<unknown>(moved);
+    const queue: unknown[] = [...moved];
+    while (queue.length > 0) {
+      const at = queue.shift();
+      for (const e of edges) {
+        if (e.from !== at || !reachesGoal.has(e.to) || typeof e.to !== 'string' || typeof e.from !== 'string') continue;
+        if (placeholder(e) && !links.some((l) => l.from === e.from && l.to === e.to)) links.push({ from: e.from, to: e.to });
+        if (e.to !== goal.id && !seen.has(e.to)) { seen.add(e.to); queue.push(e.to); }
+      }
+    }
+    if (links.length > 0) out.push({ option_id: optionId, links });
+  }
+  return out;
+}
+
+/**
+ * The ONE typed warning for (S) (`GOAL_FIGURES_PLACEHOLDER_PATH`): which options, which links, and the words, in the
+ * UI's "Not shown." register (≤ 400 characters). The ask names the links to size: the writer is `propose_link_effect`
+ * (AIQ 5902548598). A placeholder INTO an identity the goal declares but this run did not evaluate is sized by the
+ * user's Yes on the confirm card, so it gets no link-size ask of its own: one route, not two (AIQ 5902606752).
+ */
+export function placeholderGoalWarning(
+  graph: unknown,
+  paths: readonly PlaceholderGoalPath[],
+  code: string,
+): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[] } {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const byId = new Map(nodes.map((n) => [n.id, n] as const));
+  const label = (id: unknown): string => `‘${text(byId.get(id)?.label) ?? String(id)}’`;
+  const list = (xs: readonly string[]): string => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+  const cardSized = (l: { from: string; to: string }): boolean => {
+    const id = byId.get(l.to)?.nonlinear_identity;
+    return isRec(id) && Array.isArray(id.factor_ids) && id.factor_ids.includes(l.from);
+  };
+  const links = [...new Map(paths.flatMap((p) => p.links).map((l) => [`${l.from}->${l.to}`, l] as const)).values()];
+  const asked = links.filter((l) => !cardSized(l));
+  const byTarget = new Map<string, string[]>();
+  for (const l of asked) byTarget.set(l.to, [...(byTarget.get(l.to) ?? []), l.from]);
+  const phrases = [...byTarget].slice(0, 2).map(([to, froms]) =>
+    `${list(froms.slice(0, 3).map(label))}${froms.length > 3 ? ' and others' : ''} ${froms.length === 1 ? 'moves' : 'move'} ${label(to)}`);
+  const options = paths.map((p) => label(p.option_id));
+  const opts = options.length > 3 ? `${list(options.slice(0, 2))} and ${options.length - 2} more options` : list(options);
+  const verb = options.length === 1 ? 'is' : 'are';
+  const sized = phrases.length === 0 ? '' : `Olumi hasn’t sized how ${phrases.join(', or how ')}${byTarget.size > 2 ? ', and more' : ''}, so t`;
+  const ask = asked.length === 0 ? '' : asked.length === 1 ? ' Give a figure for that link and Olumi will use it.' : ' Give a figure for each link and Olumi will use them.';
+  const message = `Not shown. ${sized === '' ? 'T' : sized}his run can’t say how likely ${opts} ${verb} to reach the goal, or which option does best.${ask}`;
+  return {
+    code, message: message.length <= 400 ? message : `Not shown. This run can’t say how likely ${opts} ${verb} to reach the goal: a link on the way is not sized.${ask}`,
+    severity: 'warning',
+    node_ids: [...new Set(links.flatMap((l) => [l.from, l.to]))],
+    option_ids: paths.map((p) => p.option_id),
+  };
+}
