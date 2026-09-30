@@ -19,6 +19,7 @@ import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import type { ToolResult } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
+import { figureTheUserWroteFor } from '../stated-by-user.js';
 
 type Json = Record<string, any>;
 const F = JSON.parse(readFileSync(new URL('./fixtures/served-cut-costs-altB-before-edit-1f9d769.json', import.meta.url), 'utf8')) as {
@@ -90,5 +91,15 @@ describe('the user\'s own comparative figure is theirs, on an approval that show
     const { caps, store } = setup(g);
     const r = await caps.proposeAssumptions(ctxSaying(EDIT), { assumptions: [{ factor_label: 'GCP unit-cost discount', value: 0.25, unit: 'share', basis: 'the quote' }] }) as R;
     expect(authorOf(store, r.proposal_id, 'gcp_unit_cost_discount')).toBe('model_proposed');
+  });
+});
+
+describe('nearOnly skips the far words only after a comparator (R3 CR on #2330)', () => {
+  const scope = { target: ['SMB churn'], others: ['Enterprise churn'], rivals: ['Enterprise churn'], strict: true } as const;
+  it('ADV-1: "3% for our enterprise customers" is Enterprise churn\'s, never SMB churn\'s, even near-only', () => {
+    expect(figureTheUserWroteFor(3, '%', 'Churn is 3% for our enterprise customers.', { ...scope, nearOnly: true })).toBe(false);
+  });
+  it('ADV-2: "3% lower than for enterprise accounts" names the comparator, so it is SMB churn\'s near-only', () => {
+    expect(figureTheUserWroteFor(3, '%', 'Our churn is 3% lower than for enterprise accounts.', { ...scope, nearOnly: true })).toBe(true);
   });
 });
