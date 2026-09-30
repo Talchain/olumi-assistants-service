@@ -18,6 +18,7 @@
 
 import { REPAIR_CODES, type RepairEntry, type GoalThresholdFrameType, type QuantityFrameType } from '@talchain/schemas';
 import { rerouteExtraParentsOfProductGoal, sayExtraParentOfProductGoal } from './product-goal-extra-parent.js';
+import { foldPassThroughRateOntoUsersPrice, sayRateOperandIsUsersPrice } from './product-goal-rate-operand.js';
 import { oneRoutePerEffect } from './one-route-per-effect.js';
 import { isChangeFrame } from './limit-frame.js';
 import {
@@ -2892,9 +2893,12 @@ function admitOnce(
   goalLevelFromBrief: (candidate: CandidateModel) => BriefGoalLevel | null,
 ): AdmittedModel {
   const { model: restatedModel, restated: restatedChanges } = restateSignedPercentChanges(candidateModel);
-  // ⛔ A goal read as a two-part product gets no third direct parent: re-pointed through the volume operand, or a double
-  // route taken out (`product-goal-extra-parent.ts`, R3 5902616543).
-  const { model, found: extraParentsOfProductGoal } = rerouteExtraParentsOfProductGoal(restatedModel);
+  // ⛔ A two-part product goal's rate is the user's own price when Olumi's rate only passes it on (shape 2,
+  // `product-goal-rate-operand.ts`, DL 5902949807) — first, so the parts below are the user's.
+  const { model: foldedModel, found: rateOperandFolds } = foldPassThroughRateOntoUsersPrice(restatedModel);
+  // ⛔ A goal read as a two-part product gets no third direct parent: a non-money factor's Olumi-sized link is re-pointed
+  // through the volume operand; an addend is left as drafted (`product-goal-extra-parent.ts`, R3 5902616543, C46 rule 7).
+  const { model, found: extraParentsOfProductGoal } = rerouteExtraParentsOfProductGoal(foldedModel);
 
   /**
    * The scale frame for each factor, keyed by LABEL because it must be known
@@ -3419,6 +3423,15 @@ function admitOnce(
         `"${w.label}" was given a range of 0 to ${w.stated}, but "${w.option}" sets it to ${w.value}, so the range ` +
         `is now 0 to ${w.frame} and every figure for it is read against that one range. A range is a unit of ` +
         'measurement, not a forecast or a limit; no figure was changed.',
+      severity: 'warn',
+    } as RepairEntry);
+  }
+  for (const f of rateOperandFolds) {
+    loss.push({
+      field_path: `nodes[${ids.get(f.goal) ?? f.goal}].rate_operand.${f.rate}`,
+      before: f.rate,
+      after: ids.get(f.price) ?? f.price,
+      reason: sayRateOperandIsUsersPrice(f),
       severity: 'warn',
     } as RepairEntry);
   }
