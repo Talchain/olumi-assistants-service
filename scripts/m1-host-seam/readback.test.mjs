@@ -14,7 +14,7 @@ const V1 = { version_id: 'v-1', sequence: 1, full_hash: ID, analysis_affecting_h
 test('bound: the current version carries the graph identity', () => {
   const r = bindingOf({ graphRead: graphRead(), versionsRead: versionsRead([V1]), signedIn: true });
   assert.equal(r.version_binding, 'bound');
-  assert.deepEqual(r.model_version, V1);
+  assert.deepEqual(r.model_version, { ...V1, creation: null });
 });
 
 test('served guest (c379bbb3 on 1bfa429): graph present, versions empty → guest_no_version, never bound', () => {
@@ -99,4 +99,35 @@ test('withheldReason: every non-bound model says why; a bound model says nothing
   assert.match(withheldReason({ ...base, version_binding: 'guest_no_version' }), /not tied to a saved version/);
   assert.match(withheldReason({ ...base, version_binding: 'mismatch' }), /different model/);
   assert.match(withheldReason(null), /not tied to a saved version/);
+});
+
+test('constructionSourceTurnId equals the product rule (registrationTurnId ∘ constructionOperationId) — drift pin', async () => {
+  const { constructionSourceTurnId } = await import('./readback.mjs');
+  const { constructionOperationId } = await import('../../src/orchestrator-v5/agent-lane/runtime/build-model.ts');
+  const { registrationTurnId } = await import('../../src/orchestrator-v5/graph-registration/registration-identity.ts');
+  for (const [sid, brief] of [['b52e5c53-2ff4-4b31-bf74-9ac581c70e55', 'Our Pro plan is £49 per month.'], ['s', ''], ['x', 'ünïcödé — "quotes"\nnew line']]) {
+    assert.equal(constructionSourceTurnId(sid, brief), registrationTurnId(sid, constructionOperationId(sid, brief)));
+  }
+  assert.notEqual(constructionSourceTurnId('s', 'a'), constructionSourceTurnId('s', 'b'));
+}, 120000);
+
+test('readback names the construction version and whether it is still current; raw payloads kept', async () => {
+  const { constructionSourceTurnId } = await import('./readback.mjs');
+  const sid = '22222222-2222-4222-8222-222222222222';
+  const stid = constructionSourceTurnId(sid, 'the brief');
+  const built = { ...V1, creation: { kind: 'initial', mutation_id: 'm', source_turn_id: stid } };
+  const later = { version_id: 'v-2', sequence: 2, full_hash: ID, analysis_affecting_hash: 'e'.repeat(64), creation: { kind: 'committed_mutation', source_turn_id: 'other' } };
+  const routes = (vs, cur) => ({
+    '/healthz': { http: 200, json: { build: 'x' } },
+    [`/assist/v1/scenarios/${sid}/graph`]: graphRead(),
+    [`/assist/v1/scenarios/${sid}/versions`]: versionsRead(vs, cur),
+  });
+  const a = await readback({ base: 'https://c', assistKey: 'k', bearer: 't', scenarioId: sid, fetchImpl: fakeFetch(routes([built], 'v-1'), []) });
+  assert.deepEqual(a.construction, { source_turn_id: stid, version_id: 'v-1', sequence: 1, is_current: true });
+  assert.equal(a.raw.versions.versions.length, 1);
+  assert.equal(a.raw.graph_read.brief_text, 'the brief');
+  const b = await readback({ base: 'https://c', assistKey: 'k', bearer: 't', scenarioId: sid, fetchImpl: fakeFetch(routes([later, built], 'v-2'), []) });
+  assert.equal(b.construction.version_id, 'v-1');
+  assert.equal(b.construction.is_current, false);
+  assert.equal(b.model_version.version_id, 'v-2');
 });

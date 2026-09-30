@@ -15,10 +15,28 @@
  *
  * Credentials are passed in, never read from argv, never logged, never written to the readback.
  */
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 
 export const READBACK_SCHEMA = 'm1_host_readback.v1';
 export const BINDINGS = Object.freeze(['bound', 'guest_no_version', 'mismatch', 'missing']);
+
+function uuidOfSha(input) {
+  const b = Buffer.from(createHash('sha256').update(input).digest().subarray(0, 16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const x = b.toString('hex');
+  return `${x.slice(0, 8)}-${x.slice(8, 12)}-${x.slice(12, 16)}-${x.slice(16, 20)}-${x.slice(20)}`;
+}
+
+/**
+ * The `creation.source_turn_id` a construction's version carries: `registrationTurnId(sid,
+ * constructionOperationId(sid, brief))`, the rule `findConstructionVersion` (build-model.ts) reads by. Copied because
+ * the Lab launcher runs plain node; `readback.test.mjs` pins it to the TS originals so a drift turns it red.
+ */
+export function constructionSourceTurnId(scenarioId, brief) {
+  const operationId = uuidOfSha(`agent_construction:${scenarioId}:${brief}`);
+  return `graph_registration:${uuidOfSha(`graph_registration:${scenarioId}:${operationId}`)}`;
+}
 
 function headers({ assistKey, bearer }) {
   const h = { 'content-type': 'application/json' };
@@ -74,6 +92,7 @@ export function bindingOf({ graphRead, versionsRead, signedIn }) {
   const model_version = {
     version_id: cur.version_id, sequence: cur.sequence ?? null,
     full_hash: cur.full_hash ?? null, analysis_affecting_hash: cur.analysis_affecting_hash ?? null,
+    creation: cur.creation ?? null,
   };
   return { version_binding: cur.full_hash === identity ? 'bound' : 'mismatch', model_version };
 }
@@ -92,6 +111,10 @@ export async function readback(opts) {
   const versionsRead = await post(ctx, `/assist/v1/scenarios/${sid}/versions`, {}, opts.timeoutMs ?? 60000);
   const g = graphRead.http === 200 ? graphRead.json : null;
   const { version_binding, model_version } = bindingOf({ graphRead, versionsRead, signedIn: Boolean(ctx.bearer) });
+  const briefText = typeof g?.brief_text === 'string' ? g.brief_text : null;
+  const sourceTurnId = briefText === null ? null : constructionSourceTurnId(sid, briefText);
+  const versions = versionsRead.http === 200 && Array.isArray(versionsRead.json?.versions) ? versionsRead.json.versions : [];
+  const built = sourceTurnId === null ? null : versions.find((x) => x?.creation?.source_turn_id === sourceTurnId) ?? null;
   return {
     schema: READBACK_SCHEMA,
     cee_build,
@@ -99,11 +122,19 @@ export async function readback(opts) {
     signed_in: Boolean(ctx.bearer),
     http: { graph: graphRead.http, versions: versionsRead.http },
     graph: g?.graph_present === true ? g.graph ?? null : null,
-    brief_text: typeof g?.brief_text === 'string' ? g.brief_text : null,
+    brief_text: briefText,
     graph_identity_hash: g?.graph_identity_hash ?? null,
     graph_hash: g?.graph_hash ?? null,
     model_version,
     version_binding,
+    // The version the brief's construction became (null: guest, not found, or the brief was not built by the Agent).
+    construction: {
+      source_turn_id: sourceTurnId,
+      version_id: built?.version_id ?? null,
+      sequence: built?.sequence ?? null,
+      is_current: built !== null && built.version_id === model_version?.version_id,
+    },
+    raw: { graph_read: graphRead.json, versions: versionsRead.json },
   };
 }
 
