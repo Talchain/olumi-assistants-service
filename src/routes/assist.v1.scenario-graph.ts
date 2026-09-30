@@ -600,6 +600,10 @@ export default async function route(app: FastifyInstance) {
         graph: graphPresent ? graph : null,
         requestId,
       });
+      // The selected block already has one public carrier, `analysis_result`.
+      // The current-read sidecar exposes its bounded identity and typed figures
+      // without a second copy of raw enrichment/probability fields.
+      const { result: _selectedBlock, ...currentReadWire } = analysis.current_read;
 
       // ── 6. THE CONVERSATION, OPT-IN (DL lease #75 5907582591; Canvas 5907308286) ──
       //
@@ -702,6 +706,10 @@ export default async function route(app: FastifyInstance) {
         // questions).
         analysis_state: analysis.analysis_state,
         analysis_result: analysis.analysis_result,
+        // CURRENT-READ-v1: one selected Run's canonical freshness and typed
+        // figures. The raw graph_hash above remains the edit/CAS token; the
+        // projection's hashes are the analysis selector's separate domain.
+        current_read: currentReadWire,
         // The selected fact's own constraint verdict state — present exactly when
         // `analysis_result` is (same fact, same gate). See `ScenarioAnalysisRead`.
         ...(analysis.analysis_constraint_verdict_state !== undefined
