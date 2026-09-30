@@ -857,8 +857,11 @@ interface GraphRead {
 // given a display name derived from the new intervention level.
 function optionNameAliasesForCurrentRun(g: GraphRead): ReturnType<typeof optionNameAliases> {
   const kind = (g.analysis_state as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind;
-  const resultHash = (g.analysis_result as { computed_against_hash?: unknown } | undefined)?.computed_against_hash;
-  return kind === 'complete_current' && resultHash === g.graph_hash ? optionNameAliases(g.raw) : new Map();
+  // The graph read has already checked the Run against the canonical analysis
+  // projection. Its graph_hash is the raw edit/CAS base, which can differ on a
+  // repaired-shape graph. Only the read's current verdict plus selected result
+  // licenses an alias; stale and unreadable reads never name an old Run's level.
+  return kind === 'complete_current' && g.analysis_result !== undefined ? optionNameAliases(g.raw) : new Map();
 }
 
 const norm = (s: unknown): string => String(s ?? '').toLowerCase().replace(/…$/, '').trim();
