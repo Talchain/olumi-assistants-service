@@ -32,6 +32,7 @@ import { verifyAdminKey } from '../middleware/admin-auth.js';
 import {
   probeStatusPrompts,
   resetPromptsReadyCache,
+  warmPromptReadinessSnapshot,
   type PromptKeyStatus,
 } from '../prompts/readiness.js';
 import { buildPromptEstateInventory } from '../prompts/inventory.js';
@@ -163,8 +164,10 @@ export async function adminPromptStatusRoutes(app: FastifyInstance): Promise<voi
       // warm failure is non-fatal — defaults still resolve.
     }
 
-    // 5. /healthz cache: drop so the next probe re-evaluates.
+    // 5. Refresh the process-local health snapshot now. The load balancer
+    // never probes the prompt store, including immediately after promotion.
     resetPromptsReadyCache();
+    await warmPromptReadinessSnapshot('reload');
 
     // 6. Post-reload detail — same vocabulary as /status.
     const keys = await buildKeyRows('reload');
