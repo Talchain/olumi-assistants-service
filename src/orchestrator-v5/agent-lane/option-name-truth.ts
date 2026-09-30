@@ -59,9 +59,18 @@ export function optionNameAliases(graph: unknown): ReadonlyMap<string, OptionNam
     // finer precision: rounding would make a new claim about the run's input.
     if (Math.abs(current * 100 - Math.round(current * 100)) > 0.000001) continue;
     const figures = [...label.matchAll(/\d[\d,]*(?:\.\d+)?/g)];
-    const price = [...label.matchAll(/£\s*(\d[\d,]*(?:\.\d+)?)(?![\dA-Za-z])/g)];
-    if (figures.length !== 1 || price.length !== 1) continue;
-    const named = Number(price[0]![1]!.replaceAll(',', ''));
+    const prices = [...label.matchAll(/£\s*(\d[\d,]*(?:\.\d+)?)(?![\dA-Za-z])/g)];
+    // A single price is a target. For the witnessed "from £49 to £59" name,
+    // only the second price is the target: £49 is the baseline, kept verbatim.
+    // Any other two-figure shape is ambiguous and gets no alias.
+    let named: number;
+    if (figures.length === 1 && prices.length === 1) {
+      named = Number(prices[0]![1]!.replaceAll(',', ''));
+    } else if (figures.length === 2 && prices.length === 2) {
+      const fromTo = label.match(/\bfrom\s+£\s*(\d[\d,]*(?:\.\d+)?)\s+to\s+£\s*(\d[\d,]*(?:\.\d+)?)(?![\dA-Za-z])/i);
+      if (fromTo === null || fromTo[1] !== prices[0]![1] || fromTo[2] !== prices[1]![1]) continue;
+      named = Number(fromTo[2]!.replaceAll(',', ''));
+    } else continue;
     if (!Number.isFinite(named) || Math.abs(named - current) < 0.005) continue;
     const shown = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 2 }).format(current);
     const period = cellPeriod ?? factorPeriod;

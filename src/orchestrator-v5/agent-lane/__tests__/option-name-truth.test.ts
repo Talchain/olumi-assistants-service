@@ -20,6 +20,14 @@ describe('Agent result option names are bound to the current stored level', () =
     expect(optionNameAliases(graph('Raise to £59', 59)).size).toBe(0);
   });
 
+  it('qualifies the witnessed two-price label by its target, keeping the baseline in the name', () => {
+    expect(optionNameAliases(graph('Raise Pro plan price from £49 to £59')).get('raise')).toEqual({
+      raw: 'Raise Pro plan price from £49 to £59',
+      display: 'Raise Pro plan price from £49 to £59 (set to £60/month)',
+    });
+    expect(optionNameAliases(graph('Raise Pro plan price from £49 to £60')).size).toBe(0);
+  });
+
   it('qualifies result rows and leader claims, without changing the quoted brief or raw graph', () => {
     const g = graph();
     const aliases = optionNameAliases(g);
@@ -34,6 +42,7 @@ describe('Agent result option names are bound to the current stored level', () =
   it('underclaims ambiguous labels, units and inconsistent stored figures', () => {
     expect(optionNameAliases(graph('Raise £59 or £69')).size).toBe(0);
     expect(optionNameAliases(graph('Raise £59 in 2027')).size).toBe(0);
+    expect(optionNameAliases(graph('Compare £49 and £59')).size).toBe(0);
     expect(optionNameAliases(graph('Raise to £59', 60, 'users/month')).size).toBe(0);
     const inconsistent = graph();
     inconsistent.nodes[1]!.interventions.price.raw_value = 61;

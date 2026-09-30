@@ -6,10 +6,10 @@ const HASH = 'aaaacccc00001111';
 const graph = { nodes: [
   { id: 'goal', kind: 'goal', label: 'MRR' },
   { id: 'price', kind: 'factor', label: 'Pro plan price', observed_state: { cap: 200, unit: '£ per subscriber per month', value: 0.245, raw_value: 49 } },
-  { id: 'raise', kind: 'option', label: 'Raise to £59', interventions: { price: { value: 0.3, raw_value: 60, unit: '£ per subscriber per month' } } },
+  { id: 'raise', kind: 'option', label: 'Raise Pro plan price from £49 to £59', interventions: { price: { value: 0.3, raw_value: 60, unit: '£ per subscriber per month' } } },
 ], edges: [] };
 const result = { type: 'analysis_result', computed_against_hash: HASH, leading_option_id: 'raise', summary: 'Synthetic result',
-  enrichment: { option_comparison: [{ option_id: 'raise', option_label: 'Raise to £59', win_probability: 0.99 }] } };
+  enrichment: { option_comparison: [{ option_id: 'raise', option_label: 'Raise Pro plan price from £49 to £59', win_probability: 0.99 }] } };
 const state = { run_state: { kind: 'complete_current', computed_at: '2026-09-30T09:00:00.000Z', graph_hash_at_run: HASH },
   leader_claim: { permitted: true, separation: 'separated' } };
 const writes: string[] = [];
@@ -35,7 +35,7 @@ describe('Agent Run result names a changed option level without renaming the gra
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: string }) => {
       modelRequests.push(JSON.parse(String(init?.body ?? '{}')));
       return new Response(JSON.stringify({ output: [
-        { type: 'message', content: [{ type: 'output_text', text: 'Raise to £59: 99% in this model.' }] },
+        { type: 'message', content: [{ type: 'output_text', text: 'Raise Pro plan price from £49 to £59: 99% in this model.' }] },
       ] }), { status: 200 });
     }));
     vi.resetModules();
@@ -59,10 +59,10 @@ describe('Agent Run result names a changed option level without renaming the gra
     } });
     expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
     const body = r.json() as { assistant_text: string; blocks: { enrichment?: { option_comparison?: { option_label: string }[] } }[] };
-    expect(body.assistant_text).toContain('Raise to £59 (set to £60/month): 99%');
-    expect(JSON.stringify(modelRequests)).toContain('Raise to £59 (set to £60/month)');
-    expect(writes.at(-1)).toContain('Raise to £59 (set to £60/month): 99%');
-    expect(body.blocks[0]?.enrichment?.option_comparison?.[0]?.option_label).toBe('Raise to £59');
-    expect(graph.nodes[2]!.label).toBe('Raise to £59');
+    expect(body.assistant_text).toContain('Raise Pro plan price from £49 to £59 (set to £60/month): 99%');
+    expect(JSON.stringify(modelRequests)).toContain('Raise Pro plan price from £49 to £59 (set to £60/month)');
+    expect(writes.at(-1)).toContain('Raise Pro plan price from £49 to £59 (set to £60/month): 99%');
+    expect(body.blocks[0]?.enrichment?.option_comparison?.[0]?.option_label).toBe('Raise Pro plan price from £49 to £59');
+    expect(graph.nodes[2]!.label).toBe('Raise Pro plan price from £49 to £59');
   });
 });
