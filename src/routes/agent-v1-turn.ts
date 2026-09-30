@@ -1973,8 +1973,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * is given exactly what the user is shown — and nothing when it does not bind.
          */
         const bound = runDeltaBoundToReadback(lastRun, { scenarioId, graphHash: st.graphHash, analysisState: st.analysisState, analysisResult: st.analysisResult });
+        // The graph read already compares the Run's canonical analysis hash to the
+        // canonical graph projection. Its wire graph_hash is the raw edit/CAS
+        // base and can differ after shape repair (CS-AN-2). Require that read's
+        // current verdict AND its selected result before naming this Run's level.
         const current = (st.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current'
-          && (st.analysisResult as { computed_against_hash?: unknown } | undefined)?.computed_against_hash === st.graphHash;
+          && st.analysisResult !== undefined;
         const optionDisplayNames = current ? [...optionNameAliases(st.graph).values()].map((a) => a.display) : [];
         canonicalAfterRun = {
           ...(st.analysisState !== undefined ? { analysis_state: st.analysisState } : {}),

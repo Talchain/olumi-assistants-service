@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { repairedOptionNameRead } from './fixtures/repaired-option-name.js';
 
 const SCENARIO = '7d18dd9a-5929-4b6e-8ca4-462a11489257';
 const HASH = 'aaaacccc00001111';
@@ -15,7 +16,14 @@ const state = { run_state: { kind: 'complete_current', computed_at: '2026-09-30T
   leader_claim: { permitted: true, separation: 'separated' } };
 const writes: string[] = [];
 const modelRequests: unknown[] = [];
+const latestRunContext = (): Record<string, unknown> | undefined => {
+  const request = modelRequests.at(-1) as { input?: { type?: string; output?: string }[] } | undefined;
+  const output = request?.input?.filter((item) => item.type === 'function_call_output').at(-1)?.output;
+  return output === undefined ? undefined : JSON.parse(output) as Record<string, unknown>;
+};
 let modelText = `${HUMAN_LABEL} (set to £60/month): 99% in this model.`;
+let readBody: Record<string, unknown> = { graph, graph_hash: HASH, analysis_result: result,
+  analysis_state: state, analysis_ready: { status: 'ready', options: [], blockers: [] } };
 const rows = new Map<string, { id: string; request_hash: string; assistant_message: string | null }>();
 const store = { ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_sid: string, turnId: string) => rows.get(turnId) ?? null),
@@ -46,9 +54,8 @@ describe('Agent Run result names a changed option level without renaming the gra
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
     app.post('/orchestrate/v2/turn', async () => ({ response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [],
-      graph_hash: HASH, blocks: [result], analysis_ready: { status: 'ready', options: [], blockers: [] }, analysis_state: state }));
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph, graph_hash: HASH, analysis_result: result,
-      analysis_state: state, analysis_ready: { status: 'ready', options: [], blockers: [] } }));
+      graph_hash: readBody.graph_hash, blocks: [readBody.analysis_result], analysis_ready: readBody.analysis_ready, analysis_state: readBody.analysis_state }));
+    app.post('/assist/v1/scenarios/:id/graph', async () => readBody);
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
@@ -67,6 +74,54 @@ describe('Agent Run result names a changed option level without renaming the gra
     expect(writes.at(-1)).toContain(`${HUMAN_LABEL} (set to £60/month): 99%`);
     expect(body.blocks[0]?.enrichment?.option_comparison?.[0]?.option_label).toBe(HUMAN_LABEL);
     expect(graph.nodes[2]!.label).toBe(HUMAN_LABEL);
+  });
+
+  it('gives the interpreter the current Run name despite repaired-shape raw CAS and canonical Run hash divergence', async () => {
+    const repaired = repairedOptionNameRead();
+    const before = modelRequests.length;
+    readBody = { graph: repaired.graph, graph_hash: repaired.graphHash, analysis_result: repaired.result,
+      analysis_state: repaired.state, analysis_ready: { status: 'ready', options: [], blockers: [] } };
+    modelText = 'Spend £110,000 (set to £120,000): current model result.';
+    try {
+      expect(repaired.graphHash).not.toBe(repaired.runHash);
+      const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+        kind: 'message', scenario_id: SCENARIO, message: 'Run analysis.', source: 'chip_click',
+        chip: { action_type: 'run_analysis' }, turn_id: '4382b44d-7672-4c9d-9f2b-2b76a2662340',
+      } });
+      expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
+      expect(modelRequests.length).toBeGreaterThan(before);
+      expect(latestRunContext()?.canonical_state).toMatchObject({
+        option_display_names: ['Spend £110,000 (set to £120,000)'],
+      });
+      expect((r.json() as { assistant_text: string }).assistant_text).toContain(modelText);
+      expect((readBody.analysis_result as typeof repaired.result).enrichment.option_comparison[0]!.option_label).toBe('Spend £110,000');
+    } finally {
+      readBody = { graph, graph_hash: HASH, analysis_result: result, analysis_state: state,
+        analysis_ready: { status: 'ready', options: [], blockers: [] } };
+      modelText = `${HUMAN_LABEL} (set to £60/month): 99% in this model.`;
+    }
+  });
+
+  it.each(['complete_stale', 'unknown_degraded'])('%s repaired-shape read withholds the interpreter display name', async (kind) => {
+    const repaired = repairedOptionNameRead();
+    const before = modelRequests.length;
+    readBody = { graph: repaired.graph, graph_hash: repaired.graphHash, analysis_result: repaired.result,
+      analysis_state: { run_state: { kind, graph_hash_at_run: repaired.runHash } },
+      analysis_ready: { status: 'ready', options: [], blockers: [] } };
+    modelText = 'The last Run cannot describe this model.';
+    try {
+      const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+        kind: 'message', scenario_id: SCENARIO, message: 'Run analysis.', source: 'chip_click',
+        chip: { action_type: 'run_analysis' }, turn_id: `4382b44d-7672-4c9d-9f2b-2b76a266${kind === 'complete_stale' ? '2341' : '2342'}`,
+      } });
+      expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
+      expect(modelRequests.length).toBeGreaterThan(before);
+      expect(latestRunContext()?.canonical_state).not.toHaveProperty('option_display_names');
+    } finally {
+      readBody = { graph, graph_hash: HASH, analysis_result: result, analysis_state: state,
+        analysis_ready: { status: 'ready', options: [], blockers: [] } };
+      modelText = `${HUMAN_LABEL} (set to £60/month): 99% in this model.`;
+    }
   });
 
   const historicalClaims = [
