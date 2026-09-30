@@ -5,13 +5,21 @@
     "kind": "complete_current",
     "computed_at": "2026-09-30T11:02:22.019Z"
   },
+  "selected_goal": {
+    "nodes": [{
+      "id": "mrr", "kind": "goal", "goal_threshold_frame": "level",
+      "goal_threshold_unit": "£/month", "observed_state": { "unit": "£/month" }
+    }]
+  },
   "current_result": {
     "type": "analysis_result",
     "computed_against_hash": "e7d843f951477155",
+    "leading_option_id": "raise_pro_price_to_59",
     "enrichment": {
       "option_comparison": [
         {
           "option_id": "raise_pro_price_to_59",
+          "status": "computed",
           "outcome": {
             "mean": 90993.23628890762
           },

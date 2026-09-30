@@ -10,17 +10,60 @@ const finite = (value: unknown): value is number => typeof value === 'number' &&
 /** Only measures attested by the selected result and its stored certainty row. */
 export interface SelectedRunFigure {
   readonly option_id: string;
+  readonly goal_node_id: string;
   readonly value: number;
-  /** The result's unit comes from the selected model goal; the condition's operand is never a unit. */
+  /** The goal's observed unit is in the canonical Run hash; the condition's operand is never a unit. */
+  readonly unit: string;
+  readonly goal_frame: 'level';
   readonly measure: 'mean' | 'projected_if_held';
   readonly run_hash: string;
   readonly computed_at: string;
   readonly condition?: { readonly kind: 'if_held'; readonly operand_id: string };
+  /** Permissions for THIS option and THIS measure, not a licence to extrapolate from it. */
+  readonly claim_permissions: {
+    readonly may_present_value: true;
+    readonly may_name_as_leader: boolean;
+    readonly may_present_without_if_held: boolean;
+    readonly may_claim_goal_certainty: false;
+  };
+  /** The producer's exact conditional wording, when recorded. Never reconstructed from the number. */
+  readonly attested_copy?: string;
+}
+
+export interface SelectedGoalFigureContext {
+  readonly goal_node_id: string;
+  readonly unit: string;
+  readonly goal_frame: 'level';
+}
+
+/**
+ * Read the selected goal from the graph the canonical currentness verdict used.
+ * `observed_state.unit` is in the Run hash. `goal_threshold_unit` is not, so
+ * both must agree before the latter may label a Run figure. An edit to only
+ * the threshold unit then withholds the figure; an edit to both units stales
+ * the Run via the hashed observed unit. Change/delta frames need their own
+ * result semantics and remain outside this level-figure slice.
+ */
+export function readSelectedGoalFigureContext(graph: unknown, goalNodeId: unknown): SelectedGoalFigureContext | null {
+  if (typeof goalNodeId !== 'string' || goalNodeId.length === 0) return null;
+  const nodes = rec(graph)?.nodes;
+  if (!Array.isArray(nodes)) return null;
+  const matches = nodes.filter((node) => rec(node)?.id === goalNodeId && rec(node)?.kind === 'goal');
+  if (matches.length !== 1) return null;
+  const goal = rec(matches[0])!;
+  const observedUnit = rec(goal.observed_state)?.unit;
+  const thresholdUnit = goal.goal_threshold_unit;
+  if (goal.goal_threshold_frame !== 'level' || typeof observedUnit !== 'string' || observedUnit.trim() === ''
+    || typeof thresholdUnit !== 'string' || thresholdUnit.trim() === '' || thresholdUnit !== observedUnit) return null;
+  return { goal_node_id: goalNodeId, unit: observedUnit, goal_frame: 'level' };
 }
 
 export interface SelectedRunFiguresInput {
   readonly scenarioId: string;
   readonly runState: AnalysisStateV1['run_state'] | null;
+  /** Read from the same current graph as `runState`, and only when its unit is hash-bound. */
+  readonly selectedGoal: SelectedGoalFigureContext | null;
+  readonly leaderClaimPermitted: boolean;
   /** The claim-gated block that `readScenarioAnalysis` actually delivered. */
   readonly currentResult: ResultBlock | null;
   /** The SAME selected fact's stored metadata and goal-certainty decision. */
@@ -36,16 +79,16 @@ export interface SelectedRunFiguresInput {
  * `outcome.mean` is a simulated mean; `break_even.projected_if_held` is a
  * conditional projection. This pure read labels only existing producer facts.
  * It never recalculates a result, recovers a suppressed block, or converts a
- * stored probability into a user-facing claim. The selected model's goal unit
- * must accompany any eventual display; the subscriber break-even is not a
- * unit for these monthly MRR values.
+ * stored probability into a user-facing claim. The selected goal's hash-bound
+ * unit and level frame accompany each value; the subscriber break-even is not
+ * a unit for these monthly MRR values.
  */
 export function projectSelectedRunFigures(input: SelectedRunFiguresInput): SelectedRunFigure[] {
   const block = rec(input.currentResult);
   const enrichment = rec(block?.enrichment);
   const compared = enrichment?.option_comparison;
   if (input.runState?.kind !== 'complete_current' || block?.type !== 'analysis_result'
-    || input.selectedFact === null || !Array.isArray(compared)) return [];
+    || input.selectedFact === null || input.selectedGoal === null || !Array.isArray(compared)) return [];
 
   // A graph hash alone does not identify a Run: two executions of the same
   // graph can have different computed_at. Reuse the estate's exact tuple gate.
@@ -65,10 +108,22 @@ export function projectSelectedRunFigures(input: SelectedRunFiguresInput): Selec
   const figures: SelectedRunFigure[] = [];
   for (const raw of compared) {
     const option = rec(raw);
-    if (option === null || typeof option.option_id !== 'string' || option.option_id.length === 0) continue;
+    if (option === null || option.status !== 'computed'
+      || typeof option.option_id !== 'string' || option.option_id.length === 0) continue;
     const option_id = option.option_id;
     const mean = rec(option?.outcome)?.mean;
-    if (finite(mean)) figures.push({ option_id, value: mean, measure: 'mean', run_hash, computed_at });
+    const common = {
+      option_id, goal_node_id: input.selectedGoal.goal_node_id, unit: input.selectedGoal.unit,
+      goal_frame: input.selectedGoal.goal_frame, run_hash, computed_at,
+    };
+    const may_name_as_leader = input.leaderClaimPermitted && block.leading_option_id === option_id;
+    if (finite(mean)) figures.push({
+      ...common, value: mean, measure: 'mean',
+      claim_permissions: {
+        may_present_value: true, may_name_as_leader, may_present_without_if_held: true,
+        may_claim_goal_certainty: false,
+      },
+    });
 
     const certainty = certaintyByOption.get(option_id);
     const breakEven = rec(certainty?.break_even);
@@ -80,8 +135,13 @@ export function projectSelectedRunFigures(input: SelectedRunFiguresInput): Selec
       || typeof breakEven.operand_id !== 'string' || breakEven.operand_id.length === 0
       || typeof certainty.say !== 'string' || certainty.say.trim() === '') continue;
     figures.push({
-      option_id, value: breakEven.projected_if_held, measure: 'projected_if_held', run_hash, computed_at,
+      ...common, value: breakEven.projected_if_held, measure: 'projected_if_held',
       condition: { kind: 'if_held', operand_id: breakEven.operand_id },
+      claim_permissions: {
+        may_present_value: true, may_name_as_leader, may_present_without_if_held: false,
+        may_claim_goal_certainty: false,
+      },
+      attested_copy: certainty.say,
     });
   }
   return figures;

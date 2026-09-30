@@ -134,7 +134,7 @@ import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
 import { log } from '../utils/telemetry.js';
 import { projectCurrentRead, type CurrentReadProjection } from './current-read-projection.js';
-import { projectSelectedRunFigures } from './selected-run-figures.js';
+import { projectSelectedRunFigures, readSelectedGoalFigureContext } from './selected-run-figures.js';
 
 /** The additive half of the scenario-graph read's 200 body. */
 export interface ScenarioAnalysisRead {
@@ -473,6 +473,8 @@ export async function readScenarioAnalysis(
             figures: projectSelectedRunFigures({
               scenarioId: params.scenarioId,
               runState: analysisState.run_state,
+              selectedGoal: readSelectedGoalFigureContext(params.graph, analysisReady?.goal_node_id),
+              leaderClaimPermitted: analysisState.leader_claim.permitted,
               currentResult: boundResult,
               selectedFact: fact?.result ?? null,
             }),

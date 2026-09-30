@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { AnalysisStateV1, OlumiResponse } from '@talchain/schemas/boundary';
 import served from './fixtures/r8r9-run2-figures.json';
-import { projectSelectedRunFigures, type SelectedRunFiguresInput } from '../selected-run-figures.js';
+import { projectSelectedRunFigures, readSelectedGoalFigureContext, type SelectedRunFiguresInput } from '../selected-run-figures.js';
 
 const input = (): SelectedRunFiguresInput => ({
   scenarioId: served.scenario_id,
   runState: served.run_state as AnalysisStateV1['run_state'],
+  selectedGoal: readSelectedGoalFigureContext(served.selected_goal, 'mrr'),
+  leaderClaimPermitted: true,
   currentResult: served.current_result as unknown as OlumiResponse['blocks'][number],
   selectedFact: served.selected_fact,
 });
@@ -15,12 +17,46 @@ describe('figures from one selected saved Run', () => {
     const figures = projectSelectedRunFigures(input());
     expect(figures).toEqual([
       { option_id: 'raise_pro_price_to_59', value: 90993.23628890762, measure: 'mean',
-        run_hash: 'e7d843f951477155', computed_at: '2026-09-30T11:02:22.019Z' },
-      { option_id: 'raise_pro_price_to_59', value: 91836.73469387756, measure: 'projected_if_held',
+        goal_node_id: 'mrr', unit: '£/month', goal_frame: 'level',
         run_hash: 'e7d843f951477155', computed_at: '2026-09-30T11:02:22.019Z',
-        condition: { kind: 'if_held', operand_id: 'paying_subscribers' } },
+        claim_permissions: { may_present_value: true, may_name_as_leader: true,
+          may_present_without_if_held: true, may_claim_goal_certainty: false } },
+      { option_id: 'raise_pro_price_to_59', value: 91836.73469387756, measure: 'projected_if_held',
+        goal_node_id: 'mrr', unit: '£/month', goal_frame: 'level',
+        run_hash: 'e7d843f951477155', computed_at: '2026-09-30T11:02:22.019Z',
+        condition: { kind: 'if_held', operand_id: 'paying_subscribers' },
+        claim_permissions: { may_present_value: true, may_name_as_leader: true,
+          may_present_without_if_held: false, may_claim_goal_certainty: false },
+        attested_copy: served.selected_fact.goal_certainty[0].say },
     ]);
     expect(figures).not.toContainEqual(expect.objectContaining({ measure: 'probability', value: 1 }));
+  });
+
+  it('withholds both figures on a unit-only edit that the Run hash does not detect', () => {
+    const graph = structuredClone(served.selected_goal);
+    graph.nodes[0]!.goal_threshold_unit = 'USD/month';
+    expect(readSelectedGoalFigureContext(graph, 'mrr')).toBeNull();
+    expect(projectSelectedRunFigures({ ...input(), selectedGoal: readSelectedGoalFigureContext(graph, 'mrr') })).toEqual([]);
+  });
+
+  it('withholds figures without a hash-bound goal unit or an explicit level frame', () => {
+    const graph = structuredClone(served.selected_goal);
+    delete (graph.nodes[0]!.observed_state as { unit?: string }).unit;
+    expect(readSelectedGoalFigureContext(graph, 'mrr')).toBeNull();
+    graph.nodes[0]!.observed_state.unit = '£/month';
+    graph.nodes[0]!.goal_threshold_frame = 'delta';
+    expect(readSelectedGoalFigureContext(graph, 'mrr')).toBeNull();
+  });
+
+  it('leader permission never turns a non-leading option into a leader claim', () => {
+    const figures = projectSelectedRunFigures({ ...input(), leaderClaimPermitted: false });
+    expect(figures.every((figure) => figure.claim_permissions.may_name_as_leader === false)).toBe(true);
+  });
+
+  it('does not present a non-computed option as a selected Run figure', () => {
+    const currentResult = structuredClone(served.current_result);
+    currentResult.enrichment.option_comparison[0]!.status = 'excluded';
+    expect(projectSelectedRunFigures({ ...input(), currentResult: currentResult as unknown as OlumiResponse['blocks'][number] })).toEqual([]);
   });
 
   it.each([
