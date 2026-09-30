@@ -152,20 +152,34 @@ const NO: Composition = { kind: 'no' };
 function twoUserPartsBesideRepointable(candidate: CandidateModel, metric: string, sources: readonly string[]): string[] | null {
   const factor = (label: string) => candidate.factors.find((f) => f.label === label);
   const users = sources.filter((s) => { const f = factor(s); return f !== undefined && f.baseline_known === true && f.provenance === 'explicit' && stated(f.baseline_value); });
-  if (users.length !== 2) return null;
+  // A brief that also states a third parent's level ("churn is 3.5%") has three of the user's figures among the parents
+  // (P0 PARTNER 5904117525): the product is the ONE pair of them that reconciles with the goal and whose units compose.
+  let pair: string[] = users;
+  if (users.length > 2) {
+    const o = candidate.goal.baseline_value;
+    const pairs: string[][] = [];
+    for (let i = 0; i < users.length; i += 1) for (let j = i + 1; j < users.length; j += 1) {
+      const a = factor(users[i]!)!; const b = factor(users[j]!)!;
+      if (!stated(o) || Math.abs(o - (a.baseline_value as number) * (b.baseline_value as number)) > RECONCILIATION_TOLERANCE * Math.abs(o)) continue;
+      if (unitsCompose(candidate.goal.unit, metric, a, b).kind !== 'no') pairs.push([users[i]!, users[j]!]);
+    }
+    if (pairs.length !== 1) return null;
+    pair = pairs[0]!;
+  }
+  if (pair.length !== 2) return null;
   const reaches = (from: string, skip: unknown): boolean => {
     const seen = new Set([from]); const queue = [from];
     while (queue.length > 0) {
       const at = queue.shift()!;
       for (const l of candidate.links) {
         if (l === skip || l.from !== at || l.to === metric) continue;
-        if (users.includes(l.to)) return true;
+        if (pair.includes(l.to)) return true;
         if (!seen.has(l.to)) { seen.add(l.to); queue.push(l.to); }
       }
     }
     return false;
   };
-  for (const s of sources.filter((x) => !users.includes(x))) {
+  for (const s of sources.filter((x) => !pair.includes(x))) {
     const f = factor(s);
     const links = candidate.links.filter((l) => l.from === s && l.to === metric);
     if (f === undefined || links.length !== 1 || readCurrencyUnitWithQualifiers(f.unit).kind === 'currency') return null;
@@ -173,7 +187,7 @@ function twoUserPartsBesideRepointable(candidate: CandidateModel, metric: string
     if (l.provenance === 'explicit' || l.effect_provenance == null || l.effect_provenance === 'explicit') return null;
     if (!stated(l.effect_amount ?? null) || !stated(l.effect_per_source_change ?? null) || reaches(s, l)) return null;
   }
-  return users;
+  return pair;
 }
 
 /**
