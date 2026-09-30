@@ -1812,6 +1812,13 @@ export async function runTurnExecutor(
           // current call site does (the wrapper's server-read derivation is
           // the single trusted source on this path).
           ...(expectedGraphCasHashes ?? {}),
+          // ⭐ STABLE REFS (DL CR B1 on #2357): the graph this write replaces, for the ref allocator only — the same trusted
+          // server read the CAS derivation uses, so no executor graph write costs a second read. A DEFAULT (before
+          // `...commitMeta`); unset on a degraded or unknown read, where the commit's own read decides (`refBaseFor`).
+          ...(meta.graph === undefined ? {}
+            : resolvedCanonicalGraphForCommit ? { refBaseGraph: resolvedCanonicalGraphForCommit.graph ?? null }
+              : context.persistedGraphRead?.status === 'ok_present' ? { refBaseGraph: context.persistedGraphRead.graph }
+                : context.persistedGraphRead?.status === 'ok_absent' ? { refBaseGraph: null } : {}),
           // V5 Signature Loop — carry forward the prior turn's pendings by default
           // so a non-consuming turn does not wipe a live proposal (behaviour #2).
           // Placed BEFORE `...meta` so a call site can still override it; the

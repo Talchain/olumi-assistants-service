@@ -288,7 +288,9 @@ describe('configure-option apply chain (served-prompt op shapes, scenario A)', (
       expect(rows).toHaveLength(index + 3);
       store = freshStore();
       const cold = await store.loadGraph(scenarioId);
-      expect(cold).toEqual(projected);
+      // The edit path rebuilt the graph without the ref counter; the commit carries the base's forward (#2357 B1), so
+      // the stored bytes are the projection plus that counter, never a lowered one.
+      expect(cold).toEqual({ ...projected, ref_high_water: (before as { ref_high_water?: unknown }).ref_high_water });
       expect(readCommittedOptionEffect(cold, answer.pair.optionId, answer.pair.factorId)).toBe(value);
       expect(readCommittedOptionEffect(cold, 'opt_acquire', 'fac_setup_cost')).toBe(0.2);
       const coldPending = await store.readMostRecentPendingActions(scenarioId);

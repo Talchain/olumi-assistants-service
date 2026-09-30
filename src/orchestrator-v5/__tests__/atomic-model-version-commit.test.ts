@@ -833,7 +833,8 @@ describe("V5ModelVersionCommitted — a committed version is observable", () => 
     // precondition rather than asserting it away with `!`: if the fixture ever
     // stopped hashing, a bare `!` would make this test fail on a confusing
     // line instead of saying what actually broke.
-    const fullHash = computeGraphIdentityHash(GRAPH as never);
+    // The event describes the STORED bytes (which now carry stable entity refs), not the incoming graph.
+    const fullHash = computeGraphIdentityHash(writes[0]!.graph as never);
     expect(fullHash).not.toBeNull();
     const full = fullHash!.value;
     expect(full.startsWith(prefix)).toBe(true);
