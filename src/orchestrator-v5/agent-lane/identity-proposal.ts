@@ -253,7 +253,8 @@ function proposeOnCarrier(graph: unknown): IdentityProposal | null {
     const carrierParents = [...new Set(edges.filter((e) => e.to === id && typeof e.from === 'string').map((e) => e.from as string))]
       .filter((pid) => { const k = byId.get(pid)?.kind; return k !== 'option' && k !== 'decision'; });
     if (carrierParents.length !== 2 || !product.every((f) => carrierParents.includes(f))) continue;
-    const parts = usersFactors(carrierParents, byId);
+    // The carrier always holds Olumi's stored reading here, so an unlevelled operand may be read at today's level (m8).
+    const parts = usersFactors(carrierParents, byId) ?? usersFactorBesideTodaysOperand(carrierParents, byId, edges);
     if (parts === null) continue;
     const r = reading(goal, goalLabel, o, parts[0], parts[1]);
     if (r === null) continue;
@@ -265,8 +266,10 @@ function proposeOnCarrier(graph: unknown): IdentityProposal | null {
     const carrierLabel = text(carrier.label) ?? id;
     const money = (v: number): string => sayFigure(v, r.code);
     const made = r.rate.value * r.count.value;
+    const today = r.count.today ?? r.rate.today;
+    const figures = `${money(r.rate.value)} × ${sayFigure(r.count.value, '')}${today !== undefined ? ` (your “${today}”)` : ''}`;
     const words = `Is “${carrierLabel}” your “${r.rate.label}” × “${r.count.label}”? `
-      + `${money(r.rate.value)} × ${sayFigure(r.count.value, '')} = ${money(made)}${besideTheCarrier(others, byId, goalMoney, r.code, made, o.value, goalLabel)} `
+      + `${today !== undefined ? 'Today that is ' : ''}${figures} = ${money(made)}${besideTheCarrier(others, byId, goalMoney, r.code, made, o.value, goalLabel)} `
       + `If yes, Olumi will calculate “${carrierLabel}” that way, and you can run the analysis again.`;
     if (words.length > CARD_WORDS_MAX) continue;
     found.push({ outcome_id: id, operation: 'product', factor_ids: [r.rate.id, r.count.id], words });
