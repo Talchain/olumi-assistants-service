@@ -274,6 +274,29 @@ describe('SC-24 · diffRunInputSnapshots', () => {
     ], mayNameLeadingOption: true });
     expect(authored.kind === 'ok' && [authored.delta.input_coverage, authored.delta.input_changes?.[0]?.before, authored.delta.input_changes?.[0]?.after])
       .toEqual(['complete', { raw: 59, unit: 'GBP' }, { raw: 60, unit: 'GBP' }]);
+
+    // P0 SHARED DATA 5918159419: the SAME authored figure on both ends but a different number SENT (option £59 both
+    // ends, 0.4 → 0.5 dispatched; factor 3.7% both ends, 0.037 → 0.041) is no row and partial — never "complete".
+    const sentOnly = (optEncoded: number, facEncoded: number) => snap({
+      options: [
+        { option_id: 'opt-a', label: 'Raise price', settings: [{ factor_id: 'fac_price', label: 'Pro price', raw: 59, unit: 'GBP', encoded: optEncoded }] },
+        { option_id: 'opt-b', label: 'Hold', is_baseline: true, settings: [{ factor_id: 'fac_price', label: 'Pro price', raw: 49, unit: 'GBP', encoded: 49, held: true }] },
+      ],
+      factors: [{ factor_id: 'fac_churn', label: 'Monthly churn', raw: 3.7, unit: '%', encoded: facEncoded, source: 'user_override' }],
+    });
+    for (const [a, b] of [[sentOnly(0.4, 0.037), sentOnly(0.5, 0.037)], [sentOnly(0.4, 0.037), sentOnly(0.4, 0.041)]] as const) {
+      const out = buildRunDelta({ priorFacts: [
+        fact({ seed: '8', hash: 'h-b', at: T2, runId: 'run-b', snapshot: b }),
+        fact({ seed: '7', hash: 'h-a', at: T1, runId: 'run-a', snapshot: a }),
+      ], mayNameLeadingOption: true });
+      expect(out.kind === 'ok' ? [out.delta.input_coverage, out.delta.input_changes] : out).toEqual(['partial', []]);
+    }
+    // Control: identical inputs stay complete with [].
+    const same = buildRunDelta({ priorFacts: [
+      fact({ seed: '8', hash: 'h-b', at: T2, runId: 'run-b', snapshot: sentOnly(0.4, 0.037) }),
+      fact({ seed: '7', hash: 'h-a', at: T1, runId: 'run-a', snapshot: sentOnly(0.4, 0.037) }),
+    ], mayNameLeadingOption: true });
+    expect(same.kind === 'ok' ? [same.delta.input_coverage, same.delta.input_changes] : same).toEqual(['complete', []]);
   });
 
   it('L: a link\'s spread or existence probability changed → partial, not "complete, nothing changed"; identical stays complete', () => {

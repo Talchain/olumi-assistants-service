@@ -145,7 +145,6 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
           ...(text(o.unit, 64) !== undefined ? { unit: text(o.unit, 64) } : {}),
           encoded,
           ...(held?.has(factorId) ? { held: true as const } : {}),
-          ...(text(o.kind, 32) !== undefined ? { kind: text(o.kind, 32) } : {}),
         }];
       });
     return {

@@ -15,7 +15,8 @@
  *     engine numbers — mean, spread, existence probability — a goal/limit frame, a baseline flag, a limit's node) is
  *     NOT a row: it makes the diff
  *     INCOMPLETE, and the delta says `input_coverage: 'partial'` — never "complete" over a change it could not show.
- *   - A label-only difference is never a row; a unit or kind difference is.
+ *   - A label-only difference is never a row; a unit difference is. (0.68 carries no `kind` on a Run setting or row.)
+ *   - Equal authored figures whose SENT number differs (£59 both ends, 0.4 → 0.5 dispatched) is unexpressed → partial.
  *   - A status-quo setting CEE HELD at the factor's current value on BOTH Runs is not an option edit — the factor-value
  *     row already says what moved.
  *   - Nothing here computes a delta: rows carry both ends, and a consumer shows before → after.
@@ -30,9 +31,9 @@ type Row = RunDeltaInputChange;
 const valueOf = (raw: number | string | boolean | undefined, unit: string | undefined): Value | null =>
   raw === undefined ? null : unit !== undefined ? { raw, unit } : { raw };
 
-type Sent = { raw?: number | string | boolean; unit?: string; encoded?: number; kind?: string };
+type Sent = { raw?: number | string | boolean; unit?: string; encoded?: number };
 const sameSent = (a: Sent, b: Sent): boolean =>
-  a.raw === b.raw && a.unit === b.unit && a.encoded === b.encoded && a.kind === b.kind;
+  a.raw === b.raw && a.unit === b.unit && a.encoded === b.encoded;
 
 /**
  * The two ends as AUTHORED values, or `'unexpressed'` when the ends differ in what was sent but at least one end has
@@ -40,7 +41,12 @@ const sameSent = (a: Sent, b: Sent): boolean =>
  */
 function authoredPair(a: Sent | undefined, b: Sent | undefined): [Value | null, Value | null] | 'unexpressed' {
   if (a !== undefined && b !== undefined) {
-    if (a.raw !== undefined && b.raw !== undefined) return [valueOf(a.raw, a.unit), valueOf(b.raw, b.unit)];
+    if (a.raw !== undefined && b.raw !== undefined) {
+      // The same authored figure on both ends but a different number SENT: no honest row states that (P0 SHARED DATA
+      // 5918159419) — unexpressed, so the pair is partial.
+      if (a.raw === b.raw && a.unit === b.unit && a.encoded !== b.encoded) return 'unexpressed';
+      return [valueOf(a.raw, a.unit), valueOf(b.raw, b.unit)];
+    }
     return sameSent(a, b) ? [null, null] : 'unexpressed';
   }
   const one = a ?? b;
@@ -52,19 +58,15 @@ function authoredPair(a: Sent | undefined, b: Sent | undefined): [Value | null, 
 const same = (a: Value | null, b: Value | null): boolean =>
   a === null || b === null ? a === b : a.raw === b.raw && a.unit === b.unit;
 
-function changeRow(base: Omit<Row, 'before' | 'after' | 'change'>, before: Value | null, after: Value | null, kinds?: { before?: string; after?: string }): Row | null {
-  const kindBefore = kinds?.before;
-  const kindAfter = kinds?.after;
+function changeRow(base: Omit<Row, 'before' | 'after' | 'change'>, before: Value | null, after: Value | null): Row | null {
   if (before === null && after === null) return null;
   const change = before === null ? 'added' : after === null ? 'removed' : 'changed';
-  if (change === 'changed' && same(before, after) && kindBefore === kindAfter) return null;
+  if (change === 'changed' && same(before, after)) return null;
   return {
     ...base,
     before,
     after,
     change,
-    ...(kindBefore !== undefined ? { kind_before: kindBefore } : {}),
-    ...(kindAfter !== undefined ? { kind_after: kindAfter } : {}),
   } as Row;
 }
 
@@ -87,9 +89,9 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
   const push = (r: Row | null) => {
     if (r !== null) rows.push(r);
   };
-  const pushPair = (base: Omit<Row, 'before' | 'after' | 'change'>, pair: ReturnType<typeof authoredPair>, kinds?: { before?: string; after?: string }) => {
+  const pushPair = (base: Omit<Row, 'before' | 'after' | 'change'>, pair: ReturnType<typeof authoredPair>) => {
     if (pair === 'unexpressed') { complete = false; return; }
-    push(changeRow(base, pair[0], pair[1], kinds));
+    push(changeRow(base, pair[0], pair[1]));
   };
 
   // ── option settings, for options on both Runs ─────────────────────────────
@@ -108,7 +110,6 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
       pushPair(
         { entity_kind: 'option_setting', entity_id: factorId, option_id: optionId, field: 'value', ...labels(ps?.label, cs?.label) },
         authoredPair(ps, cs),
-        { before: ps?.kind, after: cs?.kind },
       );
     }
     if ((p.is_baseline === true) !== (c.is_baseline === true)) complete = false;
