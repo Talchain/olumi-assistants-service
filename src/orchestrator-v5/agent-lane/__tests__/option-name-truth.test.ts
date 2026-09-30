@@ -36,7 +36,7 @@ describe('Agent result option names are bound to the current stored level', () =
     expect(optionNameAliases(graph('Compare £49 and £59')).size).toBe(0);
     expect(optionNameAliases(graph('Raise to £59', 60, 'users/month')).size).toBe(0);
     const inconsistent = graph();
-    inconsistent.nodes[1]!.interventions.price!.raw_value = 61;
+    inconsistent.nodes[1]!.interventions!.price!.raw_value = 61;
     expect(optionNameAliases(inconsistent).size).toBe(0);
     const duplicate = graph();
     duplicate.nodes.push({ ...duplicate.nodes[1]!, id: 'raise-again' });
