@@ -160,7 +160,9 @@ const ANALYSIS_READY = { status: 'ready' as const, goal_node_id: 'mrr', options:
 
 /** The V5 finaliser on a turn exit, exactly as the conventional route hands it the turn_executor context. */
 function finalise(graph: Graph, window: readonly RunAnalysisHandlerFact[], shown: RunAnalysisHandlerFact, mayNameLeadingOption: boolean, extra: Record<string, unknown> = {}) {
-  const freshness = deriveAnalysisFreshness(window, deriveDecisionContextGraphHash(graph), undefined, { priorFactsReadOk: true });
+  // The production call sites pass the graph as proof (#2377): a Run carrying a goal snapshot is current only when the
+  // graph's goal unit is shown to match it — omitting it read every snapshotted Run as `goal_snapshot_unverified`.
+  const freshness = deriveAnalysisFreshness(window, deriveDecisionContextGraphHash(graph), undefined, { priorFactsReadOk: true, currentGraph: graph });
   const response = composeDirectAnswerResponse({
     assistant_text: 'Here is where the analysis stands.', stage: 'analyse', answerKind: 'substantive',
     blocks: [buildAnalysisResultBlock(shown, ANALYSIS_READY as never)],

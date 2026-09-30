@@ -9,6 +9,7 @@
  * v4), and `projectNode` iterates it, so the vendor pin alone makes the hash see the marker.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import type { GraphV3T } from '../../../schemas/cee-v3.js';
 import { computeAnalysisAffectingGraphHash } from '../graph-hash.js';
 import { CANONICAL_GRAPH_HASH_NESTED_PROJECTION, CANONICAL_GRAPH_HASH_PROJECTION_VERSION } from '@talchain/schemas/boundary';
@@ -48,8 +49,8 @@ const marked = () => {
 const UNMARKED_HASH_UNDER_V3 = '362137a00c45afb4';
 
 describe('0.64.0 — `proposed_by` enters the analysis revision (projection v4)', () => {
-  it('PRECONDITION: this build hashes the v4 vocabulary, whose node fields end with `proposed_by`', () => {
-    expect(CANONICAL_GRAPH_HASH_PROJECTION_VERSION).toBe(4);
+  it('PRECONDITION: the vendored vocabulary is v5 (v4 + intervention `range`, hashed by CEE once TEMPORAL #2382 lands), whose node fields still end with `proposed_by`', () => {
+    expect(CANONICAL_GRAPH_HASH_PROJECTION_VERSION).toBe(5);
     const fields: readonly string[] = CANONICAL_GRAPH_HASH_NESTED_PROJECTION.node.fields;
     expect(fields[fields.length - 1]).toBe('proposed_by');
   });
@@ -79,5 +80,29 @@ describe('0.64.0 — `proposed_by` enters the analysis revision (projection v4)'
     const display = marked();
     display.nodes = display.nodes.map((n) => (n.id === 'mod_54' ? { ...n, provenance: { source: 'ai_proposed' }, origin: 'ai' } : n));
     expect(hashOf(display)).toBe(hashOf(marked()));
+  });
+});
+
+/**
+ * 0.68.0 vendor (projection v5 = v4 + intervention `range`, TEMPORAL 0.66): landing it must not stale a saved Run. The
+ * served c96fc4bb graph (no ranges) hashed `e47035a047b57bc1` under the 0.64.0 build (CEE staging `5113d8cd`, projection
+ * v4) — measured 30 Sep with `computeAnalysisAffectingGraphHash` in both trees, as were 3 served cold reads (all equal).
+ * CEE's `projectIntervention` hand-lists its fields; `range` joins it in TEMPORAL #2382, which carries its own row.
+ */
+const SERVED_C96_HASH_UNDER_V4 = 'e47035a047b57bc1';
+const servedC96 = (): Rec => (JSON.parse(readFileSync(new URL('../../agent-lane/__tests__/fixtures/served-c96fc4bb-registered-graph-77afc7b.json', import.meta.url), 'utf8')) as { graph: Rec }).graph;
+
+describe('0.68.0 vendor — a served graph hashes exactly as it did under 0.64.0 (no mass stale)', () => {
+  it('CONTROL: the served c96fc4bb graph keeps its v4 hash', () => {
+    expect(hashOf(servedC96())).toBe(SERVED_C96_HASH_UNDER_V4);
+  });
+
+  it('POSITIVE: the same graph with one option\'s stated £59 moved to £60 hashes differently (the probe sees a hashed intervention field)', () => {
+    const g = servedC96() as { nodes: Rec[] };
+    const option = g.nodes.find((n) => n.id === 'raise_price_to_59')!;
+    const iv = (option.interventions as Rec).pro_plan_price as Rec;
+    expect(iv.raw_value).toBe(59);
+    (option.interventions as Rec).pro_plan_price = { ...iv, raw_value: 60 };
+    expect(hashOf(g)).not.toBe(SERVED_C96_HASH_UNDER_V4);
   });
 });

@@ -348,6 +348,38 @@
                           "level",
                           "change"
                         ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "pattern": "^(OC|G|O|F|R|D|A)[1-9][0-9]{0,8}$"
+                      },
+                      "unit_reading": {
+                        "type": "object",
+                        "properties": {
+                          "unit": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 40
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "olumi_reading",
+                              "user_stated"
+                            ]
+                          },
+                          "source_quote": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          }
+                        },
+                        "required": [
+                          "unit",
+                          "source",
+                          "source_quote"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -424,6 +456,14 @@
                       "exists_probability"
                     ],
                     "additionalProperties": true
+                  }
+                },
+                "ref_high_water": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 999999999
                   }
                 }
               },
