@@ -16,6 +16,7 @@ import { agentLaneLeaderWithheld } from '../../agent-lane/withheld-leader-fail-c
 import { claimPermissionsFrom } from '../../agent-lane/first-analysis.js';
 import { readinessViewOf } from '../../agent-lane/readiness-view.js';
 import { postWriteReadinessLine } from '../../../routes/agent-v1-turn.js';
+import { guardAnalysisParticipation } from '../../tools/handlers/run-analysis-participation-guard.js';
 
 type Json = Record<string, any>;
 const RAW = JSON.parse(readFileSync(new URL('./fixtures/target-testability-20260930.json', import.meta.url), 'utf8')) as { paul: Json; mrr: Json; n1: Json; cc: Json };
@@ -114,6 +115,37 @@ describe('the verdict (0 LLM)', () => {
  */
 describe('R3\'s m1: after the identity card\'s Yes, Olumi\'s price → churn guess still caps it; the user\'s own size lifts it', () => {
   const M1 = JSON.parse(readFileSync(new URL('./fixtures/r3-mrr-m1-card-yes-20260930.json', import.meta.url), 'utf8')).graph as Json;
+
+  /**
+   * P0 PARTNER #75 5916838445 (MG #2385 keeps drafted risks, some kept out of the calculation): a risk on the price's way
+   * to MRR, on Olumi's links. Kept out (`retained_excluded`), the run guard hands PLoT the model without it, so it can
+   * never be why the target is untestable; kept in, it is exactly that.
+   */
+  const withRisk = (g: Json, participation?: 'retained_excluded'): Json => {
+    const c = structuredClone(g);
+    c.nodes.push({ id: 'price_backlash_risk', kind: 'risk', label: 'Price backlash', ...(participation ? { analysis_participation: participation } : {}) });
+    c.edges.push({ from: 'pro_plan_price', to: 'price_backlash_risk', strength: { mean: 0.3, std: 0.1 }, defaulted: true, provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } });
+    c.edges.push({ from: 'price_backlash_risk', to: 'mrr', strength: { mean: -0.2, std: 0.1 }, defaulted: true, provenance: { source: 'cee_hypothesis' } });
+    return c;
+  };
+
+  it('RED (P0 PARTNER 5916838445): the route sized by the user + a KEPT-OUT risk on Olumi\'s links → the same verdict as without the risk', () => {
+    const sized = userSized(M1);
+    expect(targetTestabilityOf(sized).kind).not.toBe('not_testable');
+    expect(targetTestabilityOf(withRisk(sized, 'retained_excluded'))).toEqual(targetTestabilityOf(sized));
+  });
+
+  it('CONTROL: the same risk KEPT IN → not testable, naming the price (its Olumi link is on the goal\'s path)', () => {
+    const v = targetTestabilityOf(withRisk(userSized(M1)));
+    expect(v.kind).toBe('not_testable');
+    expect(v.kind === 'not_testable' && v.failures.map((f) => f.lever)).toEqual([expect.stringMatching(/price/i)]);
+  });
+
+  it('BOUND to the run guard: the verdict on the stored graph equals the verdict on the graph the guard hands PLoT', () => {
+    for (const g of [withRisk(userSized(M1), 'retained_excluded'), withRisk(M1, 'retained_excluded')]) {
+      expect(targetTestabilityOf(g)).toEqual(targetTestabilityOf(guardAnalysisParticipation(g, { goalNodeId: 'mrr' }).graph));
+    }
+  });
   it('RED: m1 as served → not testable, (c), naming the price', () => {
     const v = targetTestabilityOf(M1);
     expect(v.kind === 'not_testable' && v.failures).toEqual([{ precondition: 'P5', case: 'c', code: 'goal_path_unsized', lever: expect.stringMatching(/price/i) }]);
