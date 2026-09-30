@@ -20,7 +20,7 @@
  *  · the units compose as a money rate × a count into the goal's money per period (`unitsCompose`, one source with the
  *    mint), with or without the per-item denominator: the drafter's typed unit licenses nothing (AIQ 5891286280).
  */
-import { GAP_ROUNDING, RECONCILIATION_TOLERANCE, readMoneyTotal, unitsCompose } from './reconciling-product.js';
+import { GAP_ROUNDING, RECONCILIATION_TOLERANCE, readMoneyTotal, sameUnit, unitsCompose } from './reconciling-product.js';
 import { sayFigure } from './say-figure.js';
 import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
@@ -138,7 +138,6 @@ function todaysOperand(id: string, byId: Map<string, Rec2>, edges: readonly Rec2
   const n = byId.get(id);
   if (n === undefined || (n.kind !== 'outcome' && n.kind !== 'factor') || carriesIdentity(n)) return null;
   const os = isRec(n.observed_state) ? n.observed_state : undefined;
-  if (typeof os?.raw_value === 'number') return null;
   const causes = [...new Set(edges.filter((e) => e.to === id && typeof e.from === 'string').map((e) => e.from as string))]
     .filter((c) => { const k = byId.get(c)?.kind; return k !== 'option' && k !== 'decision'; });
   const levelled = causes.flatMap((c) => {
@@ -149,6 +148,13 @@ function todaysOperand(id: string, byId: Map<string, Rec2>, edges: readonly Rec2
   if (levelled.length !== 1) return null;
   const { f, level } = levelled[0]!;
   if (f.kind !== 'factor' || carriesIdentity(f)) return null;
+  // ⛔ AIQ 5906371639 (R3 share-build `bdc4ff54`): a level of its OWN is Olumi's projection, so no card — EXCEPT an Olumi
+  // level that is an EXACT copy of that one user-levelled cause (1,500 = the user's "Current paying subscribers"). The card
+  // still credits the user's cause, never this node; its own level stays Olumi's and a Yes does not re-author it.
+  // ⛔ AIQ 5906521706 (P0 PARTNER row E): an exact copy is the same figure in the SAME UNIT. 1,500 "customers" beside the
+  // user's 1,500 "subscribers" may count another population (free or non-Pro), so the value match proves nothing: no card.
+  if (typeof os?.raw_value === 'number' && (classifyValueSource(os.source) === 'user_stated' || os.raw_value !== level.value
+    || !sameUnit(os.unit, level.unit))) return null;
   return { id, label: text(n.label) ?? id, ...level, today: text(f.label) ?? String(f.id) };
 }
 

@@ -143,6 +143,24 @@ export function unitsCompose(goalUnit: unknown, goalLabel: string, a: { unit: un
   return confirm;
 }
 
+/**
+ * Two units naming the same quantity as `unitsCompose` reads them (AIQ 5906521706, P0 PARTNER row E): the same count noun
+ * ("subscribers" = "subscriber"; never "customers"), or the same money (currency, period and denominator). A unit neither
+ * reads is compared word for word; no unit on either side is never the same.
+ */
+export function sameUnit(a: unknown, b: unknown): boolean {
+  const ca = readCount(a); const cb = readCount(b);
+  if (ca !== null || cb !== null) return ca !== null && cb !== null && ca.join(' ') === cb.join(' ');
+  const ma = readMoney(a, ''); const mb = readMoney(b, '');
+  if (ma !== null || mb !== null) {
+    return ma !== null && mb !== null && ma.code === mb.code && ma.period === mb.period && ma.mixed === mb.mixed
+      && (ma.per ?? []).join(' ') === (mb.per ?? []).join(' ');
+  }
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const wa = words(a).join(' ');
+  return wa !== '' && wa === words(b).join(' ');
+}
+
 export type Composition =
   | { readonly kind: 'proof' | 'confirm'; readonly rate: string; readonly count: string; readonly code: string }
   | { readonly kind: 'no' };

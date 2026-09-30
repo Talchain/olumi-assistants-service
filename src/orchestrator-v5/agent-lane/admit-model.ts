@@ -2899,7 +2899,7 @@ function admitOnce(
   const { model: foldedModel, found: rateOperandFolds } = foldPassThroughRateOntoUsersPrice(restatedModel);
   // ⛔ A goal read as a two-part product gets no third direct parent: a non-money factor's Olumi-sized link is re-pointed
   // through the volume operand; an addend is left as drafted (`product-goal-extra-parent.ts`, R3 5902616543, C46 rule 7).
-  const { model, found: extraParentsOfProductGoal } = rerouteExtraParentsOfProductGoal(foldedModel);
+  const { model, found: extraParentsOfProductGoal } = rerouteExtraParentsOfProductGoal(foldedModel, brief);
 
   /**
    * The scale frame for each factor, keyed by LABEL because it must be known
