@@ -2416,11 +2416,28 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // Fed from the RAW PERSISTED GRAPH (goal label + option interventions) and
     // the SAME `resultRecords` every other seam on this path reads, so the
     // sentence can never describe a different run than the summary it rides on.
+    // 0.63.0 (DL 5883197828): the Run's own goal certainty, decided once from the stored graph this Run's hash binds
+    // and its own PLoT body. Every consumer reads this array; none recomputes it. Not recorded ⇒ absent, never a failed Run.
+    const goalCertainty = recordGoalCertainty(snapshot.rawPersistedGraph, response, graphHashAtRun);
+    if (!goalCertainty.recorded && goalCertainty.reason !== 'no_run_hash') {
+      log.warn(
+        {
+          event: 'v5.run_analysis.goal_certainty_not_recorded',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          reason: goalCertainty.reason,
+          ...(goalCertainty.detail !== undefined ? { detail: goalCertainty.detail } : {}),
+        },
+        'run_analysis — goal certainty not recorded on the Run (absent = not recorded; the Run itself stands)',
+      );
+    }
+
     const objectiveContradictionDisclosure = composeObjectiveContradictionDisclosure(
       snapshot.rawPersistedGraph,
       resultRecords,
       headline !== null,
       goalFrame,
+      { goalCertainty: goalCertainty.recorded ? goalCertainty.decisions : undefined },
     );
     // ⭐ THE UNSET-OPTION-EFFECT DISCLOSURE, LAST OF THE FIVE.
     //
@@ -2560,22 +2577,6 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         has_fragility: headlineDescriptor.has_fragility,
         margin_bucket: headlineDescriptor.margin_bucket ?? 'unknown',
       });
-    }
-
-    // 0.63.0 (DL 5883197828): the Run's own goal certainty, decided once from the stored graph this Run's hash binds
-    // and its own PLoT body. Every consumer reads this array; none recomputes it. Not recorded ⇒ absent, never a failed Run.
-    const goalCertainty = recordGoalCertainty(snapshot.rawPersistedGraph, response, graphHashAtRun);
-    if (!goalCertainty.recorded && goalCertainty.reason !== 'no_run_hash') {
-      log.warn(
-        {
-          event: 'v5.run_analysis.goal_certainty_not_recorded',
-          request_id: invocation.requestId,
-          scenario_id: args.scenario_id,
-          reason: goalCertainty.reason,
-          ...(goalCertainty.detail !== undefined ? { detail: goalCertainty.detail } : {}),
-        },
-        'run_analysis — goal certainty not recorded on the Run (absent = not recorded; the Run itself stands)',
-      );
     }
 
     const leaderPermission = applyNonlinearIdentityToLeaderPermission(
