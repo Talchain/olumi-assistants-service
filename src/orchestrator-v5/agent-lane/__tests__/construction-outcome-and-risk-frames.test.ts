@@ -16,6 +16,7 @@ import { Ajv } from 'ajv';
 import { buildCandidateSchema, buildModelFromBrief, strictForTheDrafter, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { targetTestabilityOf } from '../../admission/target-testability.js';
 
 type Edge = Record<string, unknown> & { from: string; to: string; strength: { mean: number; std: number }; provenance?: { magnitude?: string } };
 type Graph = { nodes: (Record<string, unknown> & { id: string; kind: string })[]; edges: Edge[] };
@@ -82,7 +83,7 @@ function funding(conversationsToFunding: { amount: number; per: number; by: Prov
 
 const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
 
-async function build(wire: Record<string, unknown>): Promise<{ graph: Graph; out: Record<string, unknown> }> {
+async function build(wire: Record<string, unknown>, brief: string = BRIEF): Promise<{ graph: Graph; out: Record<string, unknown> }> {
   expect(strict(wire), JSON.stringify(strict.errors)).toBe(true);
   let body: unknown = null;
   const call = (async () => ({ text: JSON.stringify(wire) })) as unknown as CallStructuredModel;
@@ -93,7 +94,7 @@ async function build(wire: Record<string, unknown>): Promise<{ graph: Graph; out
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief('77787778-7778-4777-8777-777877787778', BRIEF, d, call) as Record<string, unknown>;
+  const out = await buildModelFromBrief('77787778-7778-4777-8777-777877787778', brief, d, call) as Record<string, unknown>;
   expect(out.ok, JSON.stringify(out)).toBe(true);
   return { graph: GraphV3.parse(body) as unknown as Graph, out };
 }
@@ -123,6 +124,8 @@ describe('a quantity outcome and a risk exposure carry a frame, so sizes through
     expect(e, JSON.stringify(graph.edges.map((x) => `${x.from}->${x.to}`))).toBeDefined();
     expect(e!.provenance?.magnitude).toBe('olumi_estimate');
     expect(e!.provenance?.natural_effect?.amount_unit).toBe('£');
+    // P0 PARTNER #2383 5916670543: the size's own words keep the source's unit (`unitById` over outcomes and risks).
+    expect((e!.provenance?.natural_effect as { per_source_change_unit?: string } | undefined)?.per_source_change_unit).toBe('conversations');
     expect((graph.nodes.find((n) => n.id === CONV) as Record<string, unknown>).scale_frame).toBe(20);
   });
 
@@ -143,6 +146,7 @@ describe('a quantity outcome and a risk exposure carry a frame, so sizes through
     const e = edge(graph, 'funding_lost_to_distraction', GOAL);
     expect(e, JSON.stringify(graph.edges.map((x) => `${x.from}->${x.to}`))).toBeDefined();
     expect(e!.provenance?.natural_effect?.amount_unit).toBe('£');
+    expect(e!.provenance?.magnitude).toBe('olumi_estimate'); // AIQ #2383 5916497454: authorship is what binds it
   });
 });
 
@@ -214,5 +218,58 @@ describe('strict only at the OpenAI boundary: a candidate recorded before the fr
     const nodes = (a.graph as { nodes: Record<string, unknown>[] }).nodes.filter((n) => n.kind === 'risk' || n.kind === 'outcome');
     expect(nodes.length).toBeGreaterThanOrEqual(1);
     for (const n of nodes) expect(n.scale_frame, String(n.id)).toBeUndefined();
+  });
+});
+
+/**
+ * ⭐ THE SEAM WITH DR ROW 4 (#2371; P0 PARTNER #2383 5916670543 item 2, AIQ 5916497454 item 1). With the frames, a £ size
+ * on the outcome → goal link converts; whose size it is decides whether it can lift the goal. Olumi's (inferred) or a
+ * size tagged `explicit` that the brief never writes stays Olumi's guess, so DR row 4 names the lever; the same size the
+ * brief WRITES is the user's, and the lever is no longer named. The risk is left out so the outcome link is the only one.
+ */
+describe('the frames meet DR row 4: only a size the brief writes lifts the lever (#2371 seam)', () => {
+  const only = (by: Prov) => {
+    const wire = funding({ amount: 30000, per: 1, by }) as Record<string, any>;
+    return {
+      ...wire,
+      goal: { ...wire.goal, target_stated: true, value: 1200000, unit: '£', operator: '>=' },
+      outcomes: wire.outcomes.map((o: Record<string, unknown>) => ({ ...o, unit: 'conversations', plausible_max: 20 })),
+      risks: [],
+      links: wire.links.filter((l: { from: string; to: string }) => l.from !== 'Fundraising distraction' && l.to !== 'Fundraising distraction'),
+    };
+  };
+  // What DR row 4's `olumiGuess` reads on the edge: an `olumi_*` magnitude or `defaulted: true` is Olumi's guess.
+  const guess = (e: E | undefined) => /^olumi_/.test(String(e?.provenance?.magnitude)) || (e as { defaulted?: boolean } | undefined)?.defaulted === true;
+
+  it.each([
+    ['Olumi\'s (inferred)', 'ai_proposed' as Prov],
+    ['tagged explicit, written nowhere', 'explicit' as Prov],
+  ])('RED: %s £30,000 per conversation → the goal link is Olumi\'s guess to DR row 4, and the goal is not testable', async (_n, by) => {
+    const { graph } = await build(only(by));
+    const e = edge(graph, CONV, GOAL);
+    expect(e!.provenance?.natural_effect?.amount_unit).toBe('£');
+    expect(e!.provenance?.magnitude).toBe('olumi_estimate');
+    expect(guess(e)).toBe(true);
+    expect(targetTestabilityOf(graph).kind).toBe('not_testable');
+  });
+
+  // ⛔ P0 PARTNER's HARD condition on #2389: the written figure must be ABOUT THIS LINK (strict, scoped to its two ends).
+  it('RED (P0 PARTNER #2389): "Our burn is £30,000 a month" writes £30,000, but not per conversation → Olumi\'s estimate', async () => {
+    const { graph } = await build(only('explicit'), `${BRIEF} Our burn is £30,000 a month.`);
+    expect(edge(graph, CONV, GOAL)!.provenance?.magnitude).toBe('olumi_estimate');
+  });
+
+  it('CONTROL (P0 PARTNER #2389): "Each qualified investor conversation brings about £30,000 towards securing funding" → the user\'s', async () => {
+    const { graph } = await build(only('explicit'), `${BRIEF} Each qualified investor conversation brings about £30,000 towards securing funding.`);
+    expect(edge(graph, CONV, GOAL)!.provenance?.magnitude).toBe('user_stated');
+  });
+
+  // ⚠ SEAM (reported to DR row 4's owner): this edge also carries `defaulted: true` (its spread is projected), which
+  // `olumiGuess` counts as a guess unless the source is `user_specified`. The author of the SIZE is decided here.
+  it('CONTROL: the same £30,000 the brief WRITES is the user\'s size (`user_stated`, £)', async () => {
+    const { graph } = await build(only('explicit'), `${BRIEF} Each qualified conversation brings in £30,000.`);
+    const e = edge(graph, CONV, GOAL);
+    expect(e!.provenance?.magnitude).toBe('user_stated');
+    expect(e!.provenance?.natural_effect?.amount_unit).toBe('£');
   });
 });

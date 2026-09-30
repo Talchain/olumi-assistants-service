@@ -86,7 +86,7 @@ function funding(conversationsToFunding: { amount: number; per: number; by: Prov
 
 const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
 
-async function build(wire: Record<string, unknown>): Promise<{ graph: Graph; out: Record<string, unknown> }> {
+async function build(wire: Record<string, unknown>, brief: string = BRIEF): Promise<{ graph: Graph; out: Record<string, unknown> }> {
   expect(strict(wire), JSON.stringify(strict.errors)).toBe(true);
   let body: unknown = null;
   const call = (async () => ({ text: JSON.stringify(wire) })) as unknown as CallStructuredModel;
@@ -97,7 +97,7 @@ async function build(wire: Record<string, unknown>): Promise<{ graph: Graph; out
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief('75757575-7575-4757-8757-757575757575', BRIEF, d, call) as Record<string, unknown>;
+  const out = await buildModelFromBrief('75757575-7575-4757-8757-757575757575', brief, d, call) as Record<string, unknown>;
   expect(out.ok, JSON.stringify(out)).toBe(true);
   return { graph: GraphV3.parse(body) as unknown as Graph, out };
 }
@@ -132,8 +132,14 @@ describe("Olumi's £75,000 per conversation, which no edge carries, reaches the 
     expect(qs).toContain(DRAFTER_RUNWAY);                             // CONTROL: an unrelated drafter question stays
   });
 
-  it('CONTROL: the same size stated by the USER is not typed as Olumi\'s set-aside guess', async () => {
+  it('RED (AIQ #2383): £75,000 tagged explicit but written nowhere in the brief is Olumi\'s guess, set aside exactly as one', async () => {
     const { out } = await build(funding({ amount: 75000, per: 1, by: 'explicit' }));
+    expect(out.set_aside_estimates).toEqual([expect.objectContaining({ to: 'securing_funding' })]);
+  });
+
+  // The user's own size is theirs only where the brief WRITES it (AIQ #2383 5916497454).
+  it('CONTROL: the same size stated by the USER is not typed as Olumi\'s set-aside guess', async () => {
+    const { out } = await build(funding({ amount: 75000, per: 1, by: 'explicit' }), `${BRIEF} Each qualified conversation brings in £75,000.`);
     expect(out.set_aside_estimates).toBeUndefined();
     expect(strings(out.not_represented).some((s) => s.startsWith("Olumi's guess, set aside"))).toBe(false);
     expect(strings(out.open_questions).some((q) => q.startsWith("Olumi's starting guess"))).toBe(false);

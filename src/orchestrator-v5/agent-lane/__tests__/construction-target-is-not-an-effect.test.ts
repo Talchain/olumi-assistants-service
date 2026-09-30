@@ -39,7 +39,7 @@ function cut(effect: { amount: number; per: number; provenance?: 'ai_proposed' |
   };
 }
 
-async function build(wire: Rec): Promise<{ graph: { nodes: Rec[]; edges: Rec[] }; out: Rec }> {
+async function build(wire: Rec, brief: string = BRIEF): Promise<{ graph: { nodes: Rec[]; edges: Rec[] }; out: Rec }> {
   expect(strict(wire), JSON.stringify(strict.errors)).toBe(true);
   let registered: unknown = null;
   const call = (async () => ({ text: JSON.stringify(wire) })) as unknown as CallStructuredModel;
@@ -50,7 +50,7 @@ async function build(wire: Rec): Promise<{ graph: { nodes: Rec[]; edges: Rec[] }
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief(SCENARIO, BRIEF, dispatch, call) as Rec;
+  const out = await buildModelFromBrief(SCENARIO, brief, dispatch, call) as Rec;
   expect(out.ok, JSON.stringify(out).slice(0, 400)).toBe(true);
   return { graph: registered as { nodes: Rec[]; edges: Rec[] }, out };
 }
@@ -92,9 +92,14 @@ describe('an Olumi estimate sized FROM the user\'s target is set aside and asked
     expect(asked(out)).toEqual([]);
   });
 
-  it('CONTROL (the user\'s own size): "−£9,000 per 100%" stated by the user is kept as theirs', async () => {
+  // ⛔ SUPERSEDED "the user's own size is kept as theirs" (AIQ #2383 5916497454): this brief never writes £9,000, so a size
+  // the drafter tagged `explicit` is Olumi's, sized FROM the target, and is set aside and asked exactly as ROW 1. (A brief
+  // that did write it would hold a second £ amount, and the goal's today level is then not read: `briefGoalLevel`'s
+  // one-amount rule. The user's own written size is kept as theirs in `construction-magnitude-contract` R4 and
+  // `construction-set-aside-estimate-is-not-an-input`'s CONTROL.)
+  it('RED (AIQ #2383): "−£9,000 per 100%" tagged explicit but written nowhere is Olumi\'s: the placeholder stands in, and it is asked', async () => {
     const { graph, out } = await build(cut({ amount: -9000, per: 100, provenance: 'explicit' }));
-    expect(magnitudeOf(goalEdge(graph))).toBe('user_stated');
-    expect(asked(out)).toEqual([]);
+    expect(magnitudeOf(goalEdge(graph))).toBe('olumi_placeholder');
+    expect(asked(out)).toHaveLength(1);
   });
 });
