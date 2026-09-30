@@ -174,7 +174,11 @@ export async function commitOlumiOptionAdoptionInProcess(
     return {
       status: 'committed',
       graph_hash: applied.graph_hash,
-      ...(committed.modelVersionReceipt !== null ? { model_version_receipt: committed.modelVersionReceipt } : {}),
+      // The atomic store carrier has `version_number`; Agent consumers parse the
+      // public receipt's `sequence`. Use the committed response's attached
+      // receipt, and leave it absent if attachment could not be verified.
+      ...(committed.response.model_version_receipt !== undefined
+        ? { model_version_receipt: committed.response.model_version_receipt } : {}),
     };
   } catch (err) {
     if (err instanceof GraphStaleWriteError) return { status: 'stale' };
