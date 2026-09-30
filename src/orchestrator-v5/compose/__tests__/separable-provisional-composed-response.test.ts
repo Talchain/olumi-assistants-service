@@ -111,10 +111,12 @@ function readLeadingOptionId(response: OlumiResponse): unknown {
   return block?.leading_option_id;
 }
 
+/** The real producer always ships its semantic cause; the caveat's first sentence is read from it (Canvas #13). */
+const ALL_MACHINE = [{ field: 'semantic_quality_sufficient', code: 'CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED' }];
 function readiness(mode: string | null): unknown {
   return mode === null
     ? {}
-    : { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: mode } };
+    : { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: mode, ...(mode === 'quantified_provisional' ? { reasons: ALL_MACHINE } : {}) } };
 }
 
 const BASE = {

@@ -302,7 +302,9 @@ describe('review of #1871 — the classifier in both directions', () => {
 });
 
 describe('review of #1871 — withheld is exactly the shared gate’s withhold arm', () => {
-  const ready = (mode: string) => ({ analysis_admission: { structurally_analysable: true, permitted_analysis_mode: mode, reasons: [] } });
+  // The real producer always ships its semantic cause; the caveat's first sentence is read from it (Canvas #13).
+  const ALL_MACHINE = [{ field: 'semantic_quality_sufficient', code: 'CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED' }];
+  const ready = (mode: string) => ({ analysis_admission: { structurally_analysable: true, permitted_analysis_mode: mode, reasons: mode === 'quantified_provisional' ? ALL_MACHINE : [] } });
   const reply = 'Raise Pro to £59 at release is ahead on MRR. Monthly churn is assumed at 3%.';
   const gate = (o: { permitted: boolean; separated: boolean; mode: string; reason?: string }) => enforceAgentLaneLeaderClaimsAtWire(
     { assistant_text: reply, blocks: [], suggested_actions: [], analysis_state: { leader_claim: { permitted: o.permitted, ...(o.separated ? { separation: 'separated' } : {}), ...(o.reason ? { withheld_reason: o.reason } : {}) } } } as unknown as OlumiResponse,
