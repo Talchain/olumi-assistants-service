@@ -167,6 +167,18 @@ const OPS: readonly { op: ArithmeticOp; f: (a: number, b: number) => number }[] 
  * is one) says so. `labelled: false` is for the meaning pass to read — a proposal value stated as fact.
  */
 const PROPOSAL_LABEL = /\b(?:propos|illustrativ|assum|estimat|suggest|starting (?:point|level|value)|olumi[’']s|not (?:a )?measure)/i;
+/** The figure's sentence, or the list lead-in ("…assumptions, not measurements:") of the bullet it sits in, says so. */
+function proposalLabelled(text: string, index: number): boolean {
+  const s = sentenceAround(text, index);
+  if (PROPOSAL_LABEL.test(text.slice(s.start, s.end))) return true;
+  const before = text.slice(0, s.start).split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  for (let i = before.length - 1; i >= 0; i -= 1) {
+    const line = before[i]!;
+    if (line.endsWith(":")) return PROPOSAL_LABEL.test(line);
+    if (!/^([-*•]|\d+[.)])\s/.test(line)) return false; // left the list without meeting its lead-in
+  }
+  return false;
+}
 const COUNT_WORDS: Readonly<Record<string, number>> = { two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
 const HALF_CUE = /\b(?:half|halves|50\s*\/\s*50|50-50|split (?:it )?(?:evenly|equally))\b/i;
 
@@ -228,11 +240,10 @@ export function screenFigureProvenance(input: FigureProvenanceInput): FigureProv
     if (u !== undefined) return { source: "user" };
     const g = graph.find((f) => f.value === a.magnitude);
     if (g !== undefined) return { source: "graph", node_id: g.node_id, field: g.field };
-    const p = proposed.find((x) => x.amount.kind === a.kind && x.amount.magnitude === a.magnitude);
-    if (p !== undefined) {
-      const s = sentenceAround(text, a.index);
-      return { source: "proposal", proposal_id: p.proposal_id, labelled: PROPOSAL_LABEL.test(text.slice(s.start, s.end)) };
-    }
+    // Tool arguments carry units in their own field (`"value":12,"unit":"%"`), so a plain proposal number binds a
+    // figure of the same magnitude whatever its written kind (served Terra PC01, gate run 2).
+    const p = proposed.find((x) => (x.amount.kind === a.kind || x.amount.kind === "plain") && x.amount.magnitude === a.magnitude);
+    if (p !== undefined) return { source: "proposal", proposal_id: p.proposal_id, labelled: proposalLabelled(text, a.index) };
     const r = run.find((f) => near(f.value));
     if (r !== undefined) return { source: "run", option_id: r.option_id ?? null, measure: r.measure, run_hash: r.run_hash };
     if (a.kind !== "plain") {

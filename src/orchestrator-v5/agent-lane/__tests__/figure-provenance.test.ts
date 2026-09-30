@@ -76,6 +76,14 @@ describe('screenFigureProvenance', () => {
     expect(lits(without.no_source)).toContain('15%');
   });
 
+  it('proposal arguments carry units apart: served Terra\'s 12% / 2.5% bind to its own proposal, labelled by the list lead-in', () => {
+    const t = q1['PC01-gate-served-r2'];
+    const s = screenFigureProvenance({ text: t.reply, userTexts: t.user_texts, graph: t.graph, proposals: t.proposals });
+    expect(s.unbound).toEqual([]);
+    expect(of(s.figures, '12%')).toMatchObject({ source: 'proposal', labelled: true });
+    expect(of(s.figures, '2.5%')).toMatchObject({ source: 'proposal', labelled: true });
+  });
+
   it('engine: the served Run summary\'s "51%" binds to the supplied win share, and is unbound without it', () => {
     const text = String(paul.answer.analysis_result.summary);
     const withEngine = screenFigureProvenance({ text, userTexts: [], graph: paul.answer.graph, analysisResult: paul.answer.analysis_result });
