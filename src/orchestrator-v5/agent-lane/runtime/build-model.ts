@@ -64,6 +64,46 @@ import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
 
 /** The construction contract: the banked schema plus typed interventions. */
+/**
+ * An outcome's or a risk's quantity frame, as the drafter states it. A risk that bears on a MONEY goal is drafted as its
+ * money EXPOSURE (R3 5916156932 PoC shortcut), so its link to the goal is money to money and can be sized.
+ */
+const QUANTITY_FRAME = {
+  unit: { anyOf: [{ type: 'string' }, { type: 'null' }], description:
+    'For an outcome that is a QUANTITY (a count such as "qualified conversations", an amount of money): its unit. A risk that '
+    + 'bears on a money goal is drafted as its money EXPOSURE (for example "Funding lost to distraction"), with the money unit. '
+    + 'null for an outcome or risk that is not a quantity.' },
+  plausible_max: { anyOf: [{ type: 'number' }, { type: 'null' }], description:
+    'With a unit: a SCALE for it, exactly as for a factor \u2014 a round number comfortably above anything realistic. null with no unit.' },
+} as const;
+
+/**
+ * ⭐ STRICT ONLY AT THE OPENAI BOUNDARY (DL #75 5916270318, option D). OpenAI's strict json_schema needs every property in
+ * `required`. The candidate contract (`buildCandidateSchema`) lets an outcome or a risk omit its frame, so a candidate
+ * recorded before the frames existed still validates, and admission reads an absent frame as null (`withQuantityFrames`);
+ * what is SENT requires every property, each missing key appended in order. Every other object already requires all of its keys, so only the outcome and risk frames change.
+ */
+export function strictForTheDrafter(schema: Record<string, unknown>): Record<string, unknown> {
+  const walk = (s: unknown): unknown => {
+    if (Array.isArray(s)) return s.map(walk);
+    if (s === null || typeof s !== 'object') return s;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(s as Record<string, unknown>)) {
+      out[k] = k === 'properties' && v !== null && typeof v === 'object' && !Array.isArray(v)
+        ? Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([name, sub]) => [name, walk(sub)]))
+        : walk(v);
+    }
+    const properties = out['properties'];
+    if (out['type'] === 'object' && properties !== null && typeof properties === 'object' && !Array.isArray(properties)) {
+      const required = Array.isArray(out['required']) ? [...(out['required'] as string[])] : [];
+      for (const name of Object.keys(properties)) if (!required.includes(name)) required.push(name);
+      out['required'] = required;
+    }
+    return out;
+  };
+  return walk(schema) as Record<string, unknown>;
+}
+
 export function buildCandidateSchema(): Record<string, unknown> {
   const provenance = { type: 'string', enum: ['explicit', 'inferred', 'ai_proposed'] };
   const obj = (properties: Record<string, unknown>, required: string[]) => ({
@@ -170,8 +210,12 @@ export function buildCandidateSchema(): Record<string, unknown> {
       plausible_max: { type: 'number',
         description: 'REQUIRED, and NEVER null. The top of the range this factor could plausibly take, in its own unit \u2014 the SCALE it is read against, not a prediction. A percentage or a score out of 100: 100. A count, an amount or a price: a round number comfortably above anything realistic (a \u00a349 price might use 200; 300 subscribers might use 2000). Something ALREADY between 0 and 1: exactly 1. Every factor gets one, with or without a baseline today \u2014 a value adopted later is read against this same range.' },
     }, ['label', 'role', 'baseline_known', 'baseline_value', 'unit', 'provenance', 'plausible_max']) },
-    risks: { type: 'array', items: obj({ label: { type: 'string' }, provenance }, ['label', 'provenance']) },
-    outcomes: { type: 'array', items: obj({ label: { type: 'string' }, provenance }, ['label', 'provenance']) },
+    // ⭐ THE FRAME A FACTOR HAS (DL #75 5916155976 (a); R3 5916156932 (b)): without `unit` + `plausible_max` no size into or
+    // out of an outcome or a risk can be read, so a goal they feed could never be sized in its own unit.
+    // ⛔ OPTIONAL HERE, REQUIRED ONLY WHERE IT IS SENT (DL 5916270318, option D): a candidate recorded before the frames
+    // existed still validates against this contract, and `strictForTheDrafter` requires both keys of the drafter itself.
+    risks: { type: 'array', items: obj({ label: { type: 'string' }, provenance, ...QUANTITY_FRAME }, ['label', 'provenance']) },
+    outcomes: { type: 'array', items: obj({ label: { type: 'string' }, provenance, ...QUANTITY_FRAME }, ['label', 'provenance']) },
     links: { type: 'array', description:
       'Causal links, stated as hypotheses. Every factor you keep needs at least one link FROM it toward the goal metric (directly, or via a kept outcome that links to the goal). Never link an option directly to a risk \u2014 link the option to the factor it changes and the factor to the risk, because a bare option-to-risk link cannot be analysed.',
       items: obj({
@@ -1207,7 +1251,7 @@ export async function buildModelFromBrief(
       input: brief,
       max_output_tokens: budget.max_output_tokens,
       reasoning_effort: budget.reasoning_effort,
-      schema: buildCandidateSchema(),
+      schema: strictForTheDrafter(buildCandidateSchema()),
     });
     if (out.status === 'incomplete') cutOff = out.incomplete_reason ?? 'unspecified';
     if (out.text.length === 0) {
@@ -1367,7 +1411,7 @@ export async function buildModelFromBrief(
           : `${brief}\n\nYour previous model, to shrink: ${JSON.stringify(firstCandidate)}`,
         max_output_tokens: budget.max_output_tokens,
         reasoning_effort: budget.reasoning_effort,
-        schema: retrySchemaPinningGoal(candidate.goal, candidate.decision_question),
+        schema: strictForTheDrafter(retrySchemaPinningGoal(candidate.goal, candidate.decision_question)),
       });
       if (retry.text.length > 0) {
         const retryApart = keepOptionsAndQuantitiesApart(JSON.parse(retry.text) as CandidateModel);
