@@ -396,12 +396,15 @@ export function placeholderGoalPaths(
     const option = byId.get(optionId);
     const iv = scoredInterventions?.get(optionId) ?? (option !== undefined ? mergeInterventionSourceObjects(option) : undefined);
     if (iv === undefined) continue;
-    // A factor set at the level it holds moves nothing; an unknown move is read as a move (fail closed).
+    // A factor set at the level it holds moves nothing; an unknown move is read as a move (fail closed). The wire carries
+    // a level in the node's model scale or in the user's units (the egress denormalises capped factors: the scaffolded
+    // status quo "Keep £49" arrives as 49 beside a held 0.245), so it is the held level in EITHER scale.
     const moved = Object.entries(iv).flatMap(([factorId, set]) => {
       if (!byId.has(factorId) || !reachesGoal.has(factorId)) return [];
-      const now = levelOf(byId.get(factorId)).value;
-      const to = interventionLevel(set).value;
-      return now !== undefined && to !== undefined && to === now ? [] : [factorId];
+      const held = levelOf(byId.get(factorId));
+      const to = interventionLevel(set);
+      const same = (a: number | undefined, b: number | undefined): boolean => a !== undefined && b !== undefined && a === b;
+      return same(to.value, held.value) || same(to.raw, held.raw) || same(to.value, held.raw) ? [] : [factorId];
     });
     const links: { from: string; to: string }[] = [];
     const seen = new Set<unknown>(moved);
