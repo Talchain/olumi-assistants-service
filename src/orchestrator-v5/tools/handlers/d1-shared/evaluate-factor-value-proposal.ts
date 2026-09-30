@@ -83,8 +83,22 @@ export type FactorValueOperator = 'set' | 'increase' | 'decrease' | 'multiply';
  * (`agent-lane/relative-figure.ts`, a percent read in a share factor's frame) uses this rule, never a copy.
  */
 export const PROPORTION_UNIT_TOKENS: ReadonlySet<string> = new Set(['scale', 'unit_interval', 'ratio', 'proportion']);
+/**
+ * ⛔ A UNIT THAT STATES A SHARE OR A 0–1 RANGE (MG SUCCESSOR #75 5910272624; R3 candidate-2 witness, served CEE 2cd7823).
+ * The served drafter writes 0–1 quantities as `share (0-1)`, `fraction of workloads`, `adoption fraction (0-1)`, `0-1`, …:
+ * 16 of 18 uncapped 0–1 factors in 75 served drafts, none of them in the closed tokens above, so the user's "25%" on
+ * "GCP unit-cost saving" (`share (0-1)`, 0.2) was carded "0.2% → 25%" and the write refused it. Still CLOSED: a head word
+ * `share` / `fraction` / `proportion` (never `shares`, a count), or a written `0-1` range; never a `0/1` switch, and never
+ * a unit carrying `%` / `percent` ("market share %" holds 23, not 0.23). And a value outside [0, 1] contradicts it.
+ */
+function statesShareOrUnitRange(unit: string, value: number | undefined): boolean {
+  if (value !== undefined && (value < 0 || value > 1)) return false;
+  if (/%|percent/.test(unit) || /\b0\s*\/\s*1\b|\bbinary\b|\binactive\b|\bon\s*\/\s*off\b/.test(unit)) return false;
+  return /(?:^|[^\d.])0\s*[-\u2013]\s*1(?![\d.])/.test(unit) || /\b(?:share|fraction|proportion)\b/.test(unit);
+}
 export function isProportionScaledFactor(f: { unit: unknown; cap: number | undefined; value: number | undefined; raw_value: number | undefined }): boolean {
-  const isProportionUnit = typeof f.unit === 'string' && PROPORTION_UNIT_TOKENS.has(f.unit.trim().toLowerCase());
+  const unit = typeof f.unit === 'string' ? f.unit.trim().toLowerCase() : '';
+  const isProportionUnit = PROPORTION_UNIT_TOKENS.has(unit) || (unit !== '' && statesShareOrUnitRange(unit, f.value));
   return f.cap === 1 || (isProportionUnit && f.cap === undefined && recoverScaleFrame({ value: f.value, raw_value: f.raw_value }) === undefined);
 }
 
