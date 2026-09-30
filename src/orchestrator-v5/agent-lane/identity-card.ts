@@ -74,6 +74,28 @@ export function identityCardToIssue(
     || (r as Hinted | null | undefined)?.first_analysis?.identity_card?.available === true);
 }
 
+/**
+ * ⛔ NO CARD, NO BUTTON — SO A TURN THAT ASKS FOR THE READING RE-OFFERS IT (R3 H witness 5910559613, served CEE 950177e,
+ * 2/2 signed-in): after the draft turn's card, a typed "Run the analysis." got "Is MRR your price × subscribers? … If yes,
+ * Olumi will calculate MRR that way" with NO tool call and `suggested_actions: []`. A typed yes cannot write (a reading is
+ * the user's only on its displayed card), so the user had nothing to press. `identityCardToIssue` keys on a Run's
+ * result, and there was no Run. So the route re-offers the SAME card (the same stored words, the same id: it writes
+ * nothing) on any turn that wrote nothing, offered no other proposal, and was not a chip's fast path, while the STORED
+ * model still holds an unconfirmed reading its writer can record.
+ */
+export function identityCardToReoffer(p: {
+  readonly toolCalls: readonly { readonly name: string }[];
+  readonly mutated: boolean;
+  readonly fastPath: string | undefined;
+  /** Whether this turn already offers a proposal (`proposalsAwaitingApproval`): one approval carries one change. */
+  readonly proposalOffered: boolean;
+  /** The STORED model holds an unconfirmed reading its writer can record (`proposeProductIdentity` + writable base). */
+  readonly readingWaiting: boolean;
+}): boolean {
+  if (p.fastPath !== undefined || p.mutated || p.proposalOffered || !p.readingWaiting) return false;
+  return !p.toolCalls.some((c) => c.name === 'propose_identity' || c.name === 'authorise_change');
+}
+
 type IdentityRefusalCode = 'reading_not_confirmed' | 'superseded' | 'not_admissible' | 'carrier_conflict' | 'already_carried' | string;
 
 /** Plain words for a door refusal (`identity_<code>`, Canonical 5888513620). Never the code itself. */
