@@ -240,7 +240,8 @@ describe('the fixture IS the served model (fidelity, not a self-authored stand-i
     });
     // G1 (#2140, landed after this capture) stamps the goal's held attributes. They are NAMED here and subtracted, never
     // hidden: the rest of every node must still equal the served model byte for byte.
-    const added = addedGoalKeys(body.nodes, servedNodes);
+    // 0.67.0's goal `unit_reading` also postdates this capture: read back in the served form first (`one-form-levels.ts`).
+    const added = addedGoalKeys(asServedBeforeOneForm(body, SERVED.draft_graph).nodes, servedNodes);
     expect(added.length).toBeGreaterThan(0); // G1 did stamp this brief's goal (a vacuous subtraction is a failure)
     expect(added.every((k) => (G1_GOAL_FIELDS as readonly string[]).includes(k)), added.join(',')).toBe(true);
     // P2 A5 (#2139), landed after this capture too: option levels are read back in the served short form, on the SERVED
@@ -330,7 +331,9 @@ describe('CONTRAST — nothing else moves, and nothing of the user’s is droppe
     // members P2 A5 (#2139) adds to an option level, read back to the served short form. This draft has no served graph
     // of its own, so the frames are read off the body; that is sound HERE because the factor nodes carrying those frames
     // are inside the same digest, so a wrong frame, figure or unit still moves it.
-    const readBack = asServedBeforeOneForm(body, body);
+    // 0.67.0's goal `unit_reading` postdates the digest too: the stand-in "served" graph is the body without it, so the
+    // helper removes it only in the writer's closed shape; every frame is still read off the same factor nodes.
+    const readBack = asServedBeforeOneForm(body, { ...body, nodes: (body.nodes as Record<string, unknown>[]).map(({ unit_reading: _r, ...n }) => n) });
     expect(createHash('sha256').update(canon({ ...readBack, nodes: readBack.nodes.map(withoutG1) })).digest('hex')).toBe(ACYCLIC_BODY_SHA256_AT_BASE);
   });
 

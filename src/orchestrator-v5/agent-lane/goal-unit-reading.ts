@@ -2,8 +2,7 @@
  * ⭐ THE GOAL'S UNIT, AS A READING WITH ITS AUTHOR (`@talchain/schemas` 0.67.0 `NodeV3Schema.unit_reading`, MG; PTL A;
  * proposal P0 SHARED DATA #75 5914707462; meaning AIQ 5914471584 / 5914731075).
  *
- * Paul's funding brief never states a funding target, but it speaks of "investment firms that do deals between £1-2
- * million", so Olumi reads the funding goal in GBP. Until 0.67.0 nothing could say that the unit is OLUMI'S reading and
+ * Paul's funding brief never states a funding target, but it speaks of "investment firms that do deals between £1-2m", so Olumi reads the funding goal in GBP. Until 0.67.0 nothing could say that the unit is OLUMI'S reading and
  * not a figure the user gave, so a goal typed in £ read as the user's own unit.
  *
  * - `user_stated`: the brief writes the goal's own target in that currency ("MRR above £85k") — the quote is that amount.
@@ -25,7 +24,7 @@ const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.m
 
 /**
  * The brief's own sentence around a written amount, verbatim: an exact span that says what the amount is about. The
- * bare match is not enough — "deals between £1-2 million" is read as "£1" (the range reader's known fragment), which
+ * bare match is not enough — "deals between £1-2m" is read as "£1" (the range reader's known fragment), which
  * grounds nothing a person could check.
  */
 function sentenceAround(text: string, index: number, length: number): string {

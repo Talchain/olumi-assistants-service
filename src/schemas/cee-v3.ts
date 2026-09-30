@@ -253,7 +253,7 @@ export const NodeV3 = z.object({
   quantity_frame: QuantityFrame.optional().catch(undefined),
   /**
    * ⭐ WHICH UNIT THIS QUANTITY IS READ IN, AND WHO READ IT (`@talchain/schemas` 0.67.0 `NodeV3Schema.unit_reading`, MG;
-   * PTL A — Paul's funding goal read in GBP from "deals between £1-2 million"; P0 SHARED DATA 5914707462, AIQ 5914471584).
+   * PTL A — Paul's funding goal read in GBP from "deals between £1-2m"; P0 SHARED DATA 5914707462, AIQ 5914471584).
    * A READING, never a figure: no value, level, target or cap, and on its own it never makes a goal target-testable.
    * Declared because `NodeV3` strips undeclared keys: without it a construction writer's reading would be lost on the
    * register write. Out of the analysis hash (its allow-list), in the identity hash like any node content. A malformed
