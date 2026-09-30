@@ -12,8 +12,7 @@
  * non-options carry no `levels`; and the prompt tells the Agent to quote stored levels and not re-propose them.
  */
 import { describe, it, expect } from 'vitest';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
+import { HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
 import { createAgentCapabilities, projectOptionLevels, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 
@@ -95,7 +94,7 @@ describe('get_canonical_state shows each option’s stored levels (RCA D1)', () 
 
 describe('the build prompt quotes stored levels and asks only for missing ones', () => {
   it('RED: the instructions carry the rule, and no longer ask for "the level each option sets" on every pair', () => {
-    const src = fs.readFileSync(path.resolve(__dirname, '../../../routes/agent-v1-turn.ts'), 'utf8');
+    const src = HOST_TOOL_CONTRACT;
     expect(src).toContain('get_canonical_state lists the levels each option already sets (`levels`): quote those as stored, and never propose again a level that is already stored unless the user asks to change it.');
     expect(src).toContain('a level for each option and factor that has none yet');
     expect(src).not.toContain('and the level each option sets, in the user');

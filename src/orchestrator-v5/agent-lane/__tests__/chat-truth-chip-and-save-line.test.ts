@@ -373,14 +373,16 @@ describe('the real route: build + proposal in one turn', () => {
   });
 
   /* ── 3. FIDELITY: in the prompt the Agent is actually sent ── */
-  it('RED: the instructions sent to the model carry the bundled-figure rule', async () => {
+  it('RED: the instructions sent to the model carry the selected coach’s bundled-figure rule', async () => {
     script = [say('Hello.')];
     await turn();
     const instructions = String(modelBodies[0]?.['instructions'] ?? '');
     expect(instructions, 'control: the captured text is the Agent prompt').toContain('call propose_starting_point ONCE');
+    // KEEP/DROP 5916040206; owner ruling #75 5916835372 and final DL 5916845565:
+    // selected v0.2 restates old #32, so bind the captured wire to its exact wording.
     expect(instructions).toContain(
-      'When a figure the user gives bundles a one-off cost with a recurring one (a salary that includes a recruitment fee, say) or two different quantities, '
-      + 'ask which part is which before you propose it, and never record the bundle as the recurring figure.',
+      'If one user figure bundles different quantities or time bases, such as a one-off cost plus a recurring cost, '
+      + 'ask one clarifying question before proposing or recording it.',
     );
   });
 });

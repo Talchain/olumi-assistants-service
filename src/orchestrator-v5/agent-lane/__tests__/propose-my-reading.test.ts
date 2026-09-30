@@ -18,12 +18,12 @@
  * Every event the Agent sends is parsed by the REAL boundary schema (`OrchestratorTurnPayloadSchema`).
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { OrchestratorTurnPayloadSchema } from '@talchain/schemas/boundary';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { AGENT_TOOLS } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
 import { APPROVAL_LABEL_MAX, approvalChipsFor } from '../approval-chips.js';
+import { HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-4466554400c3';
 // Paul's own words, verbatim from the served transcript of 27 Sep.
@@ -267,10 +267,9 @@ describe('the Agent is told how to propose its reading, and when to ask', () => 
     }
   });
 
-  it('the route\'s instructions: propose a reading with from_words; ask only when the words fit two bands or name none; never re-ask an answered question', () => {
-    const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    expect(route).toContain('propose your reading with `from_words`');
-    expect(route).toMatch(/Ask only when their words fit two bands equally \(for example \\u201cfairly strong\\u201d, between moderate and strong\) or name no strength at all/);
-    expect(route).toMatch(/never ask again a question the user has already answered/);
+  it('the host tool contract: propose a reading with from_words; ask only when the words fit two bands or name none; never re-ask an answered question', () => {
+    expect(HOST_TOOL_CONTRACT).toContain('propose your reading with `from_words`');
+    expect(HOST_TOOL_CONTRACT).toMatch(/Ask only when their words fit two bands equally \(for example “fairly strong”, between moderate and strong\) or name no strength at all/);
+    expect(HOST_TOOL_CONTRACT).toMatch(/never ask again a question the user has already answered/);
   });
 });
