@@ -79,7 +79,7 @@ function funding(conversationsToFunding: { amount: number; per: number; by: Prov
 
 const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
 
-async function build(wire: Record<string, unknown>): Promise<{ graph: Graph; out: Record<string, unknown> }> {
+async function build(wire: Record<string, unknown>, brief: string = BRIEF): Promise<{ graph: Graph; out: Record<string, unknown> }> {
   expect(strict(wire), JSON.stringify(strict.errors)).toBe(true);
   let body: unknown = null;
   const call = (async () => ({ text: JSON.stringify(wire) })) as unknown as CallStructuredModel;
@@ -90,7 +90,7 @@ async function build(wire: Record<string, unknown>): Promise<{ graph: Graph; out
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief('76767676-7676-4767-8767-767676767676', BRIEF, d, call) as Record<string, unknown>;
+  const out = await buildModelFromBrief('76767676-7676-4767-8767-767676767676', brief, d, call) as Record<string, unknown>;
   expect(out.ok, JSON.stringify(out)).toBe(true);
   return { graph: GraphV3.parse(body) as unknown as Graph, out };
 }
@@ -106,6 +106,20 @@ describe("the funding goal's unit is Olumi's reading, quoting the brief's senten
       source_quote: "We've been focused on investment firms that do deals between £1-2 million, mostly based in the UK",
     });
     expect(BRIEF).toContain((goalOf(graph).unit_reading as { source_quote: string }).source_quote);
+  });
+
+  // ⛔ ONE AUTHORITY FOR THE NODE (P0 PARTNER CR on #2381 @ 65d0d911, measured): the brief writes £85k, but a goal the
+  // drafter marked `inferred` holds no user target (`threshold_source` absent), so its unit is Olumi's reading too.
+  it.each([
+    ['explicit', 'user_stated'],
+    ['inferred', 'olumi_reading'],
+  ] as const)('RED: target written in the brief, drafter goal %s → the node\'s own target authority decides: %s', async (prov, source) => {
+    const brief = 'We need to raise at least £85k within 2 months.';
+    const wire = funding(OLUMIS_75K);
+    const { graph } = await build({ ...wire, goal: { ...wire.goal, target_stated: true, value: 85000, provenance: prov } }, brief);
+    const goal = goalOf(graph);
+    expect(goal.threshold_source === 'brief_extraction').toBe(prov === 'explicit');
+    expect(goal.unit_reading).toEqual({ unit: 'GBP', source, source_quote: 'We need to raise at least £85k within 2 months' });
   });
 
   it('CONTROL: the same brief with a goal whose unit is not money gets no reading (unattested)', async () => {

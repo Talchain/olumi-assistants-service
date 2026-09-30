@@ -5,7 +5,10 @@
  * Paul's funding brief never states a funding target, but it speaks of "investment firms that do deals between £1-2m", so Olumi reads the funding goal in GBP. Until 0.67.0 nothing could say that the unit is OLUMI'S reading and
  * not a figure the user gave, so a goal typed in £ read as the user's own unit.
  *
- * - `user_stated`: the brief writes the goal's own target in that currency ("MRR above £85k") — the quote is that amount.
+ * - `user_stated`: the goal node HOLDS the target as the user's (`holdStatedGoalAttributes`, `held.target`: drafted `explicit`
+ *   and written in the brief) AND the brief writes it in that currency ("MRR above £85k") — the quote is its sentence. ONE
+ *   authority for the node (P0 PARTNER CR on #2381 @ 65d0d911): a target the node does not hold as the user's never
+ *   makes its unit the user's.
  * - `olumi_reading`: the brief writes amounts in that currency, but not the goal's target — the quote is the first one.
  * - nothing: the goal's unit is not money, or the brief writes no amount in it (no span can ground a reading).
  *
@@ -40,6 +43,8 @@ function sentenceAround(text: string, index: number, length: number): string {
 export function goalUnitReading(
   goal: { readonly unit?: unknown; readonly value?: unknown; readonly target_stated?: unknown } | null | undefined,
   brief: string,
+  /** `held.target` from `holdStatedGoalAttributes`: the node holds its target as the user's. Absent ⇒ not (fail closed). */
+  heldTarget = false,
 ): GoalUnitReading | undefined {
   const unit = typeof goal?.unit === 'string' ? goal.unit.trim() : '';
   if (unit === '') return undefined;
@@ -48,7 +53,7 @@ export function goalUnitReading(
   const code = read.currencyCode;
   const written = findStatedAmounts(brief).filter((a) => a.kind === 'currency' && a.currencyCode === code && a.matchedText.trim() !== '');
   if (written.length === 0) return undefined;
-  const target = goal?.target_stated === true && typeof goal.value === 'number' && Number.isFinite(goal.value)
+  const target = heldTarget && goal?.target_stated === true && typeof goal.value === 'number' && Number.isFinite(goal.value)
     ? written.find((a) => same(a.magnitude, (goal.value as number) * (read.multiplier ?? 1)))
     : undefined;
   const quote = (a: (typeof written)[number]): string => sentenceAround(brief, a.index, a.matchedText.length);

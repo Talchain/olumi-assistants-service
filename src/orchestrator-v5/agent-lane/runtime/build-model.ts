@@ -1580,7 +1580,8 @@ export async function buildModelFromBrief(
   const deadlineHeld = deadlineWords !== '' && deadlineWords.length <= 60;
   // ⭐ 0.67.0 `unit_reading` (PTL A; AIQ 5914471584): the goal's unit, said with its author — Olumi's reading unless the
   // brief writes the goal's own target in it. A reading, never a figure (`goal-unit-reading.ts`).
-  const unitReading = goalUnitReading(candidate.goal, brief);
+  // ONE authority for the goal node (P0 PARTNER CR on #2381): `user_stated` only where the node holds its target as the user's.
+  const unitReading = goalUnitReading(candidate.goal, brief, statedGoal.held.target);
   const goalNodes = deadlineHeld || unitReading !== undefined
     ? statedGoal.nodes.map((n) => (n.kind === 'goal'
       ? { ...n, ...(deadlineHeld ? { goal_deadline_as_stated: deadlineWords } : {}), ...(unitReading !== undefined ? { unit_reading: unitReading } : {}) }
