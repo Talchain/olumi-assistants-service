@@ -7,7 +7,7 @@ type Rec = Record<string, unknown>;
 const rec = (value: unknown): Rec | null => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Rec : null;
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 
-/** Only measures attested by the selected result and its stored certainty row. */
+/** Only conditional projections attested by the selected Run's stored certainty row. */
 export interface SelectedRunFigure {
   readonly option_id: string;
   readonly goal_node_id: string;
@@ -15,19 +15,19 @@ export interface SelectedRunFigure {
   /** The goal's observed unit is in the canonical Run hash; the condition's operand is never a unit. */
   readonly unit: string;
   readonly goal_frame: 'level';
-  readonly measure: 'mean' | 'projected_if_held';
+  readonly measure: 'projected_if_held';
   readonly run_hash: string;
   readonly computed_at: string;
-  readonly condition?: { readonly kind: 'if_held'; readonly operand_id: string };
+  readonly condition: { readonly kind: 'if_held'; readonly operand_id: string };
   /** Permissions for THIS option and THIS measure, not a licence to extrapolate from it. */
   readonly claim_permissions: {
     readonly may_present_value: true;
     readonly may_name_as_leader: boolean;
-    readonly may_present_without_if_held: boolean;
+    readonly may_present_without_if_held: false;
     readonly may_claim_goal_certainty: false;
   };
-  /** The producer's exact conditional wording, when recorded. Never reconstructed from the number. */
-  readonly attested_copy?: string;
+  /** The producer's exact conditional wording. Never reconstructed from the number. */
+  readonly attested_copy: string;
 }
 
 export interface SelectedGoalFigureContext {
@@ -75,9 +75,11 @@ export interface SelectedRunFiguresInput {
 }
 
 /**
- * The two MRR figures in a Run are different measures, not conflicting answers:
- * `outcome.mean` is a simulated mean; `break_even.projected_if_held` is a
- * conditional projection. This pure read labels only existing producer facts.
+ * `break_even.projected_if_held` is a conditional projection with stored
+ * wording. `outcome.mean` has no typed scale/unit proof in today's producer
+ * contract: it may be a normalized score even when the goal's unit is currency.
+ * No mean is therefore emitted, regardless of magnitude or goal metadata.
+ * This pure read labels only existing attested conditional producer facts.
  * It never recalculates a result, recovers a suppressed block, or converts a
  * stored probability into a user-facing claim. The selected goal's hash-bound
  * unit and level frame accompany each value; the subscriber break-even is not
@@ -111,20 +113,11 @@ export function projectSelectedRunFigures(input: SelectedRunFiguresInput): Selec
     if (option === null || option.status !== 'computed'
       || typeof option.option_id !== 'string' || option.option_id.length === 0) continue;
     const option_id = option.option_id;
-    const mean = rec(option?.outcome)?.mean;
     const common = {
       option_id, goal_node_id: input.selectedGoal.goal_node_id, unit: input.selectedGoal.unit,
       goal_frame: input.selectedGoal.goal_frame, run_hash, computed_at,
     };
     const may_name_as_leader = input.leaderClaimPermitted && block.leading_option_id === option_id;
-    if (finite(mean)) figures.push({
-      ...common, value: mean, measure: 'mean',
-      claim_permissions: {
-        may_present_value: true, may_name_as_leader, may_present_without_if_held: true,
-        may_claim_goal_certainty: false,
-      },
-    });
-
     const certainty = certaintyByOption.get(option_id);
     const breakEven = rec(certainty?.break_even);
     // The stored `say` and operand establish what the conditional value means.

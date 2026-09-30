@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { AnalysisStateV1, OlumiResponse } from '@talchain/schemas/boundary';
 import served from './fixtures/r8r9-run2-figures.json';
+import limitsEstimate from '../../orchestrator-v5/agent-lane/__tests__/fixtures/pj-c10-063347Z-limits-estimate-only.json';
+import nextMove from '../../orchestrator-v5/coaching/__tests__/fixtures/paul-run-08bf9a1f-next-move.json';
+import provisionalLeader from '../../orchestrator-v5/admission/__tests__/fixtures/served-provisional-leader.bc09bb1.json';
 import { projectSelectedRunFigures, readSelectedGoalFigureContext, type SelectedRunFiguresInput } from '../selected-run-figures.js';
 
 const input = (): SelectedRunFiguresInput => ({
@@ -13,14 +16,33 @@ const input = (): SelectedRunFiguresInput => ({
 });
 
 describe('figures from one selected saved Run', () => {
-  it('keeps the served mean and conditional projection as different measures on the same Run', () => {
+  it.each([
+    ['C10 limits estimate', limitsEstimate.graph, limitsEstimate.analysis_state, limitsEstimate.analysis_result, 0.7568403768808017],
+    ['Paul next move', nextMove.draft_graph, nextMove.analysis_state, nextMove.analysis_result, 0.17343337714669882],
+    ['provisional leader', provisionalLeader.draft_graph, provisionalLeader.analysis_state, provisionalLeader.analysis_result_block, 0.11554022571459747],
+  ] as const)('withholds the normalized outcome mean in served %s rather than labelling it as currency',
+    (_label, graph, state, result, firstMean) => {
+      const selectedGoal = readSelectedGoalFigureContext(graph, graph.nodes.find((node) => node.kind === 'goal')!.id);
+      // These served goals pass the existing unit/frame gate. That is not
+      // evidence that their outcome scores are expressed in the goal's unit.
+      expect(selectedGoal).not.toBeNull();
+      expect(result.enrichment.option_comparison[0]!.outcome.mean).toBe(firstMean);
+      expect(projectSelectedRunFigures({
+        scenarioId: 'served-scale-regression',
+        runState: state.run_state as AnalysisStateV1['run_state'],
+        selectedGoal,
+        leaderClaimPermitted: state.leader_claim.permitted,
+        currentResult: result as unknown as OlumiResponse['blocks'][number],
+        selectedFact: {
+          graph_hash_at_run: result.computed_against_hash,
+          computed_at: state.run_state.computed_at,
+        },
+      })).toEqual([]);
+    });
+
+  it('keeps the attested conditional projection on its selected Run and withholds the untyped mean', () => {
     const figures = projectSelectedRunFigures(input());
     expect(figures).toEqual([
-      { option_id: 'raise_pro_price_to_59', value: 90993.23628890762, measure: 'mean',
-        goal_node_id: 'mrr', unit: '£/month', goal_frame: 'level',
-        run_hash: 'e7d843f951477155', computed_at: '2026-09-30T11:02:22.019Z',
-        claim_permissions: { may_present_value: true, may_name_as_leader: true,
-          may_present_without_if_held: true, may_claim_goal_certainty: false } },
       { option_id: 'raise_pro_price_to_59', value: 91836.73469387756, measure: 'projected_if_held',
         goal_node_id: 'mrr', unit: '£/month', goal_frame: 'level',
         run_hash: 'e7d843f951477155', computed_at: '2026-09-30T11:02:22.019Z',
@@ -32,7 +54,7 @@ describe('figures from one selected saved Run', () => {
     expect(figures).not.toContainEqual(expect.objectContaining({ measure: 'probability', value: 1 }));
   });
 
-  it('withholds both figures on a unit-only edit that the Run hash does not detect', () => {
+  it('withholds the conditional figure on a unit-only edit that the Run hash does not detect', () => {
     const graph = structuredClone(served.selected_goal);
     graph.nodes[0]!.goal_threshold_unit = 'USD/month';
     expect(readSelectedGoalFigureContext(graph, 'mrr')).toBeNull();
@@ -81,10 +103,10 @@ describe('figures from one selected saved Run', () => {
 
   it('withholds a conditional value when its stored certainty decision is missing or disagrees', () => {
     const missing = { ...served.selected_fact, goal_certainty: undefined };
-    expect(projectSelectedRunFigures({ ...input(), selectedFact: missing }).map((f) => f.measure)).toEqual(['mean']);
+    expect(projectSelectedRunFigures({ ...input(), selectedFact: missing })).toEqual([]);
     const contradicted = { ...served.selected_fact, goal_certainty: [
       { ...served.selected_fact.goal_certainty[0], probability_of_goal: 0 },
     ] };
-    expect(projectSelectedRunFigures({ ...input(), selectedFact: contradicted }).map((f) => f.measure)).toEqual(['mean']);
+    expect(projectSelectedRunFigures({ ...input(), selectedFact: contradicted })).toEqual([]);
   });
 });

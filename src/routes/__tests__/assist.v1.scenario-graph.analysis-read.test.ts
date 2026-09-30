@@ -411,7 +411,7 @@ describe("CURRENT-READ-v1 — the selected Run reaches a cold graph read", () =>
     return fact;
   };
 
-  it("serves the selected block and distinct mean/conditional figures after a cold read", async () => {
+  it("serves the selected block and attested conditional figure after a cold read, withholding the untyped mean", async () => {
     readFactsFor.mockResolvedValue([withFigures(FIGURE_GRAPH_HASH)]);
     const body = (await read(await buildApp())).json() as Record<string, unknown>;
     const current = body.current_read as Record<string, unknown>;
@@ -421,15 +421,14 @@ describe("CURRENT-READ-v1 — the selected Run reaches a cold graph read", () =>
     expect(current.computed_against_hash).toBe(FIGURE_GRAPH_HASH);
     expect(current.current_analysis_hash).toBe(FIGURE_GRAPH_HASH);
     expect(current.figures).toMatchObject([
-      { option_id: "opt_hire", value: 90, measure: "mean", run_hash: FIGURE_GRAPH_HASH,
-        computed_at: "2026-08-17T09:15:50.000Z" },
       { option_id: "opt_hire", value: 92, measure: "projected_if_held", run_hash: FIGURE_GRAPH_HASH,
         computed_at: "2026-08-17T09:15:50.000Z", condition: { kind: "if_held", operand_id: "fac_market" } },
     ]);
-    expect((current.figures as Array<{ measure: string }>).every((figure) => figure.measure !== "probability")).toBe(true);
+    expect(current.figures).toHaveLength(1);
+    expect((current.figures as Array<{ measure: string }>).every((figure) => figure.measure === "projected_if_held")).toBe(true);
   });
 
-  it("withdraws both figures on an edited graph, then serves only the rerun on the next cold read", async () => {
+  it("withdraws the conditional figure on an edited graph, then serves only the rerun on the next cold read", async () => {
     const app = await buildApp();
     readFactsFor.mockResolvedValue([withFigures(PRE_EDIT_FIGURE_GRAPH_HASH)]);
     const stale = (await read(app)).json() as Record<string, unknown>;
@@ -444,7 +443,7 @@ describe("CURRENT-READ-v1 — the selected Run reaches a cold graph read", () =>
     readFactsFor.mockResolvedValue([withFigures(FIGURE_GRAPH_HASH)]);
     const rerun = (await read(app)).json() as Record<string, unknown>;
     expect(rerun.current_read).toMatchObject({ run_state: { kind: "complete_current" } });
-    expect((rerun.current_read as { figures: unknown[] }).figures).toHaveLength(2);
+    expect((rerun.current_read as { figures: unknown[] }).figures).toHaveLength(1);
     expect(rerun.current_read).not.toHaveProperty("result");
   });
 
