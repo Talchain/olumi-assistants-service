@@ -318,9 +318,11 @@ export interface HandlerInvocation {
    */
   readonly statedConstraintOperator?: import('../agent-lane/admit-constraint.js').CandidateOperator;
   /**
-   * ⭐ DR row 1 (DL #75 5918381864; AIQ 5918365996; R3 5918409192): set ONLY by the user's APPROVED goal target card
-   * (`goal-target-edit.ts`). The comparator of the goal's own target row is then held on the goal node too
-   * (`goal_direction`): one statement, one carrier. Absent (every other caller): the goal's direction is untouched.
+   * ⭐ DR row 1 (DL #75 5918381864; AIQ 5918365996; R3 5918409192): set ONLY by the two doors where the user states
+   * the goal's target on a displayed control: the APPROVED goal target card (`goal-target-edit.ts`) and the Canvas
+   * success-target control's typed chip (`turn-executor.ts` typed-chip route); `route-v2-goal-target-edit`'s parity test
+   * binds the two. The comparator of the goal's own target row is then held on the goal node too (`goal_direction`):
+   * one statement, one carrier. Absent (the language router, pending actions, the limit door): untouched.
    */
   readonly holdsGoalDirection?: true;
   /**

@@ -137,6 +137,37 @@ describe('DR row 1: the approved card holds the goal\'s direction on the goal no
     expect(resolveGoalDirection(out, GOAL)).toEqual(resolveGoalDirection(without, GOAL));
   });
 
+  it('CODEX 5918898090 / AIQ 5919045720 (a ceiling contradicts the floor): "at most £1.4m" approved after a £1.2m floor → the floor\'s `>=` is gone', async () => {
+    const floor = GraphV3.parse(await card(graphWith(), 'at_least', 1_200_000));
+    expect(goalOf(floor).goal_direction, 'PRECONDITION: the floor held').toBe('>=');
+    const out = await card(floor, 'at_most', 1_400_000);
+    expect(goalOf(out).goal_direction).toBeUndefined();
+    expect(out.goal_constraints).toEqual(expect.arrayContaining([expect.objectContaining({ node_id: GOAL, operator: '<=', value: 1_400_000 })]));
+    // The threshold channel carries floors only (route-v2-goal-target-edit (c)): the ceiling stamps nothing, so no
+    // ceiling number can be scored as a floor; the Run re-reads the changed direction (the analysis hash moves).
+    expect(goalOf(out).goal_threshold_raw).toBe(goalOf(floor).goal_threshold_raw);
+    expect(computeAnalysisAffectingGraphHash(out as never)).not.toBe(computeAnalysisAffectingGraphHash(floor as never));
+  });
+
+  it('CONTROL: a ceiling card on a goal holding no direction writes none (as before)', async () => {
+    const out = await card(graphWith(), 'at_most', 1_400_000);
+    expect(goalOf(out).goal_direction).toBeUndefined();
+  });
+
+  it('CODEX (C2/C3 control): a prior strict `>` then the plain "at least" card → `>=`, scored non-strictly (the card\'s words replace)', async () => {
+    const graph = graphWith();
+    const strict = await applyConstraintEditThroughAddConstraint({
+      payload: { scenario_id: SCENARIO, turn_id: 'turn-dr1-strict0', stage: 'frame' } as never,
+      requestId: 'req-dr1-strict0', persistedGraph: graph, graph, priorFacts: [], targetId: GOAL, constraintType: 'at_least',
+      rawValue: 1_200_000, unit: '£', statedConstraintOperator: '>', holdsGoalDirection: true, eventName: 'goal_target_edit', logBase: {},
+    }) as { kind: string; mutatedGraph?: Json };
+    expect(goalOf(strict.mutatedGraph).goal_direction, 'PRECONDITION: strict held').toBe('>');
+    const out = await card(GraphV3.parse(strict.mutatedGraph), 'at_least', 1_200_000);
+    expect(goalOf(out).goal_direction).toBe('>=');
+    expect(resolveGoalThresholdStrict(out, GOAL)).toBe(false);
+    expect(out.goal_constraints.find((c: Json) => c.node_id === GOAL && c.operator === '>=')).not.toHaveProperty('operator_as_stated');
+  });
+
   it('R3 C4 (goal only): a limit on another node, through the same handler, leaves the goal\'s direction AND target untouched', async () => {
     const before = graphWith({ goal_threshold_raw: 1_500_000, goal_threshold_unit: '£', goal_threshold_cap: 1_875_000, goal_threshold: 0.8, goal_threshold_frame: 'level' });
     const out = await notTheCard(before, 'f-budget', 'at_most', 50_000, '£');

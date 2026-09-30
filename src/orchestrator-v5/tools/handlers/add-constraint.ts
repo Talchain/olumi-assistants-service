@@ -871,8 +871,10 @@ export function createAddConstraintHandler(): HandlerFn {
       // figure keeps it ("under 5%"). Only a TYPED comparator the caller relays (`statedConstraintOperator`, the Agent's
       // limit door) restates it: strict sets it, non-strict clears it. Read through `statedOperatorOf`, and written only
       // as the strict twin of THIS row's operator, so a contradicting stamp is never carried or minted.
+      // DR row 1 (CODEX CEE BUDDY 5918898090): the approved goal card's comparator is the words it DISPLAYED ("at least"),
+      // a statement rather than an omission, so it never inherits a strict comparator from the row it replaces.
       const statedOperator = invocation.statedConstraintOperator
-        ?? (frameCarrier === undefined ? undefined : statedOperatorOf(frameCarrier));
+        ?? (frameCarrier === undefined || invocation.holdsGoalDirection === true ? undefined : statedOperatorOf(frameCarrier));
       const operatorAsStated =
         statedOperator === '<' && operator === '<=' ? ('<' as const)
           : statedOperator === '>' && operator === '>=' ? ('>' as const)
@@ -1040,7 +1042,14 @@ export function createAddConstraintHandler(): HandlerFn {
       // a no-op: it commits the comparator and moves the analysis hash. Only the card sets the side-band.
       const cardGoalDirection = ownsGoalThresholdChannel && invocation.holdsGoalDirection === true
         ? (operatorAsStated ?? operator) : undefined;
-      const directionDisagrees = cardGoalDirection !== undefined && targetNode.goal_direction !== cardGoalDirection;
+      // ⛔ An approved CEILING on the goal (CODEX CEE BUDDY 5918898090; DL 5918915292; AIQ 5919045720) contradicts any
+      // floor held before, so that direction goes (C3: the latest statement replaces). It is not held as `<=`: the
+      // goal's threshold channel carries floors only ("at most stamps nothing"), and a ceiling stamped there is sent no
+      // direction unless proven, so PLoT would score P(goal ≥ ceiling) under "at most" (measured, MG SUCCESSOR 30 Sep).
+      const cardClearsGoalDirection = targetNode.kind === 'goal' && invocation.holdsGoalDirection === true
+        && (operator === '<=' || operator === '<');
+      const directionDisagrees = (cardGoalDirection !== undefined && targetNode.goal_direction !== cardGoalDirection)
+        || (cardClearsGoalDirection && targetNode.goal_direction !== undefined && targetNode.goal_direction !== null);
       const rowValueUnchanged =
         !directionDisagrees &&
         existing !== undefined &&
@@ -1373,6 +1382,10 @@ export function createAddConstraintHandler(): HandlerFn {
               ? list
               : [...list, constraintParse.data];
         clone.goal_constraints = next;
+        if (cardClearsGoalDirection) {
+          const goalNode = clone.nodes.find((n) => n.id === targetId);
+          if (goalNode !== undefined) delete (goalNode as { goal_direction?: unknown }).goal_direction;
+        }
         if (stampGoalThreshold) {
           const goalNode = clone.nodes.find((n) => n.id === targetId);
           if (goalNode) {
