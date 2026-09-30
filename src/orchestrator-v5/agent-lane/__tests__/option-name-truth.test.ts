@@ -26,6 +26,8 @@ describe('Agent result option names are bound to the current stored level', () =
       display: 'Raise Pro plan price from £49 to £59 (set to £60/month)',
     });
     expect(optionNameAliases(graph('Raise Pro plan price from £49 to £60')).size).toBe(0);
+    expect(optionNameAliases(graph('Raise Pro plan price from £49 to £59/month', 60, '£/month')).get('raise')?.display)
+      .toBe('Raise Pro plan price from £49 to £59/month (set to £60/month)');
   });
 
   it('qualifies result rows and leader claims, without changing the quoted brief or raw graph', () => {
