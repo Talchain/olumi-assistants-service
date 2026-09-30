@@ -1,5 +1,7 @@
 /**
- * SC-24 — "previous Run vs this Run" carries WHAT THE USER CHANGED, in their units (schemas 0.67.0).
+ * SC-24 — "previous Run vs this Run" carries what differed in the inputs between the two Runs, in the authored units
+ * (schemas 0.67.0). A row has NO author — an input can differ because the user edited it or because an Olumi proposal
+ * was approved — so no reader may render it as "you changed" (AIQ binding rule, schemas #76 5916401270).
  *
  * Design SC-24 v2 (programme-docs #84 5914416431); lease DL #75 5914474485; one Run-unit carrier AIQ 5912905493 /
  * P0 SHARED DATA 5914750268.
@@ -13,6 +15,8 @@
  *   E  a unit-only goal edit (£ → USD) is its own row — AIQ 5912905493's case.
  *   F  status-quo values CEE held on both Runs are not option edits; the factor row says what moved.
  *   G  a label-only rename is not an input change.
+ *   H  (AIQ F1 on #2378) a Run whose leader claim is withheld ships NO win shares on the pair — they would name the
+ *      withheld leader by arithmetic; a pair entitled on both ends keeps them (control).
  */
 import { describe, expect, it } from 'vitest';
 import { RunDeltaSchema } from '@talchain/schemas/boundary';
@@ -20,6 +24,7 @@ import type { HandlerFact, RunInputSnapshot } from '@talchain/schemas/orchestrat
 
 import { buildRunDelta } from '../build-run-delta.js';
 import { diffRunInputSnapshots } from '../run-input-changes.js';
+import { PRESENT_PAIR, runAnalysisFact } from '../../context/__tests__/run-delta-fixtures.js';
 
 const snap = (over: Partial<RunInputSnapshot> = {}, price = 59): RunInputSnapshot => ({
   snapshot_version: 1,
@@ -175,5 +180,30 @@ describe('SC-24 · diffRunInputSnapshots', () => {
       links: [{ from: 'fac_price', to: 'fac_churn', mean: 0.6 }],
     }, 60);
     expect(diffRunInputSnapshots(snap(), next).map((r) => r.entity_kind)).toEqual(['option_setting', 'factor_value', 'goal', 'link']);
+  });
+
+  it('H: a withheld leader on either Run ships no win shares on the pair; both entitled keeps them (AIQ F1)', () => {
+    const withheldCurrent = [
+      runAnalysisFact([{ id: 'opt-a', win: 0.45 }, { id: 'opt-b', win: 0.55 }], '222', 'hash-b', '2026-06-07T00:00:00.000Z', false),
+      runAnalysisFact([{ id: 'opt-a', win: 0.62 }, { id: 'opt-b', win: 0.38 }], '111', 'hash-a', '2026-06-06T00:00:00.000Z', true),
+    ];
+    const withheldPrior = [
+      runAnalysisFact([{ id: 'opt-a', win: 0.45 }, { id: 'opt-b', win: 0.55 }], '222', 'hash-b', '2026-06-07T00:00:00.000Z', true),
+      runAnalysisFact([{ id: 'opt-a', win: 0.62 }, { id: 'opt-b', win: 0.38 }], '111', 'hash-a', '2026-06-06T00:00:00.000Z', false),
+    ];
+    for (const facts of [withheldCurrent, withheldPrior]) {
+      const built = buildRunDelta({ priorFacts: facts, mayNameLeadingOption: true });
+      expect(built.kind).toBe('ok');
+      if (built.kind !== 'ok') return;
+      expect(built.delta.win_probabilities).toEqual([]);
+      expect(built.delta.leader.changed).toBe(false);
+    }
+    // The turn itself unentitled: same authority, no shares.
+    const turnWithheld = buildRunDelta({ priorFacts: PRESENT_PAIR, mayNameLeadingOption: false });
+    expect(turnWithheld.kind === 'ok' ? turnWithheld.delta.win_probabilities : null).toEqual([]);
+    // Control: both Runs and the turn entitled keep the shares.
+    const control = buildRunDelta({ priorFacts: PRESENT_PAIR, mayNameLeadingOption: true });
+    expect(control.kind === 'ok' ? control.delta.win_probabilities.map((w) => [w.option_id, w.prior, w.current]) : null)
+      .toEqual([['opt-a', 0.62, 0.45], ['opt-b', 0.38, 0.55]]);
   });
 });

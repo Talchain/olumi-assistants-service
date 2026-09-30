@@ -1859,8 +1859,13 @@ export function assembleContextPackWithSummary(
   // change that removes the field fails to compile here.
   const runDeltaForPack: ContextPackRunDelta | null = (() => {
     if (runDeltaBuild === null || runDeltaBuild.kind !== 'ok') return null;
-    const { flip_thresholds: _flipThresholdsNotComputed, ...rest } = runDeltaBuild.delta;
-    void _flipThresholdsNotComputed;
+    // SC-24's pair members stay OFF the prompt too (see `ContextPackRunDeltaSchema`): an input row has no author.
+    const {
+      flip_thresholds: _flipThresholdsNotComputed,
+      endpoints: _endpoints, input_coverage: _inputCoverage, input_changes: _inputChanges,
+      ...rest
+    } = runDeltaBuild.delta;
+    void _flipThresholdsNotComputed; void _endpoints; void _inputCoverage; void _inputChanges;
     return rest;
   })();
   // Plain/direct arrays predate the durable carrier. They may still provide a

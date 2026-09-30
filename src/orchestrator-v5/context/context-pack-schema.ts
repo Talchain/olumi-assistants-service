@@ -732,6 +732,13 @@ export const ContextPackFactorValuesSchema = z
  * (Consumption of the constant is also pinned to exactly ONE call site by
  * `tests/contract/run-delta-flip-thresholds-single-site.guard.test.ts`, so this
  * module must never import it.)
+ *
+ * ⛔ SC-24's `endpoints` / `input_coverage` / `input_changes` ARE ABSENT TOO — a claim-safety omission, not an
+ * oversight. An `input_changes` row carries NO AUTHOR: between two Runs an input differs because the user edited it OR
+ * because an Olumi proposal was approved or re-drafted, so a model handed these rows says "you changed …" and asserts
+ * authorship nothing recorded (AIQ binding rule, schemas #76 5916401270). They serve the wire and the cold read for the
+ * SC-24 consumer, which says "Changed between the Runs". Projecting them here waits for per-end provenance
+ * (`source_before` / `source_after`) and its own review.
  */
 export const ContextPackRunDeltaSchema = z
   .object({
@@ -756,7 +763,7 @@ export const ContextPackRunDeltaSchema = z
  * schema above and this type ever disagree about the shape, the assignment
  * stops compiling instead of drifting quietly.
  */
-export type ContextPackRunDelta = Omit<RunDelta, 'flip_thresholds'>;
+export type ContextPackRunDelta = Omit<RunDelta, 'flip_thresholds' | 'endpoints' | 'input_coverage' | 'input_changes'>;
 
 export const ContextPackGoalTargetSchema = z.discriminatedUnion('status', [
   z
