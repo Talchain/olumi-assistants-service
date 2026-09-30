@@ -977,16 +977,16 @@ export function collectLeaderEstimatedTargetIds(
  * ⭐ B5 (a) — WHOSE FIGURE an `estimate_only` limit was checked against (DL CR on #2146 5859853452; AI Quality
  * 5859849355 (a)). One code could not tell the user's own assumption from Olumi's estimate, which is either a
  * misattribution or a wrong pass downstream.
- *   · `level_user_assumption`: the level is `user_assumption` — Olumi's proposed figure the user ACCEPTED (its one
- *     live writer is the approved adoption, `approved-adoption-context.ts`). Accepted, never authored: the limit stays
- *     `estimate_only` and its words say "a figure you accepted" (`limit-checks.ts`), never "yours" (52f8cd, #75
- *     5921124922; AIQ 5921018606);
+ *   · `level_user_assumption`: the level is `user_assumption` — the user's declared guess, or Olumi's proposed figure
+ *     the user ACCEPTED (the approved adoption writes the same literal plus `reviewed_by_user`,
+ *     `isAcceptedOlumiEstimate`). Either way accepted, never stated: the limit stays `estimate_only` and its words say
+ *     "a figure you accepted as an assumption" (`limit-checks.ts`), never "yours" (52f8cd; AIQ 5921018606);
  *   · `level_olumi_estimate`: Olumi's (`cee_hypothesis`, `cee_inference`, a `user_confirmed` estimate the user only
  *     endorsed: "the number is still ours", `obligation-provenance.ts`), a repair's, or no readable owner.
  */
 export type EstimateOnlyReason = 'level_user_assumption' | 'level_olumi_estimate';
 
-/** The contract literal for Olumi's figure the user accepted as an assumption (0.55 `OBSERVED_STATE_SOURCE_LITERALS`). */
+/** The contract literal for a figure the user accepted as an assumption — their own or Olumi's (0.55 `OBSERVED_STATE_SOURCE_LITERALS`). */
 const USER_ASSUMPTION_SOURCE: KnownObservedStateSourceLiteral = 'user_assumption';
 
 /**

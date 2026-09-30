@@ -11,7 +11,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { createAgentCapabilities, projectEntity, type InternalDispatch } from '../runtime/agent-capabilities.js';
-import { valueSourceAuthorship } from '../../../cee/transforms/provenance-display.js';
+import { observedValueAuthorship, valueSourceAuthorship } from '../../../cee/transforms/provenance-display.js';
 import { ProposalStore } from '../proposal.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { runWithApprovedAdoption } from '../approved-adoption-context.js';
@@ -154,7 +154,9 @@ describe('an accepted Olumi figure keeps Olumi as its origin and records the acc
   it('RED: every reader of whose number it is says Olumi\'s — the display map and what the Agent is given', async () => {
     const { p } = await adoptValuesOnly();
     const node = p.byId().coordination_load;
-    expect(valueSourceAuthorship(node.observed_state?.source)).toEqual({ source: 'assumption', provenance: 'ai_inferred' });
+    expect(observedValueAuthorship(node.observed_state)).toEqual({ source: 'assumption', provenance: 'ai_inferred' });
+    // …and it is the stored REVIEW that says so: the bare literal alone is the user's declared guess (DL CR 5921764485).
+    expect(valueSourceAuthorship(node.observed_state?.source)).toEqual({ source: 'user', provenance: 'user_set' });
     const seen = projectEntity(node as never);
     expect(seen.provenance).toBe('ai_inferred');
     expect(seen.value_provenance).toEqual({ source: 'user_assumption', reviewed_by_user: 'confirm' });
@@ -172,7 +174,7 @@ describe('an accepted Olumi figure keeps Olumi as its origin and records the acc
     expect(typed.observed_state?.source).toBe('user_override');
     expect(typed.provenance).toBe('user_set');
     expect(typed.observed_state).not.toHaveProperty('reviewed_by_user');
-    expect(valueSourceAuthorship(typed.observed_state?.source)).toEqual({ source: 'user', provenance: 'user_set' });
+    expect(observedValueAuthorship(typed.observed_state)).toEqual({ source: 'user', provenance: 'user_set' });
   });
 
   it('CONTROL: a revision the USER named inside a proposal is theirs, with no acceptance review (the RED rows are not vacuous)', async () => {

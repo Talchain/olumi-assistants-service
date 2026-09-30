@@ -85,12 +85,29 @@ describe('B5-1 at the call site: the stored verdict on Paul\'s 17d1 run', () => 
     expect(v.per_limit).toEqual([{ constraint_id: CHURN, state: 'unscored', reason: 'limit_rests_on_olumi_guess' }]);
     expect(v.joint).toMatchObject({ state: 'withheld' });
   });
-  // ⭐ DECLARED VERDICT MOVE (52f8cd #75 5921065216; AIQ ACK 5921073461; MG SUCCESSOR row 5921141702): `user_assumption`
-  // is Olumi's figure the user ACCEPTED — its one live writer is the approved adoption — so B6 reads a limit resting on it
-  // exactly as it reads Olumi's own 3 % above: accepting is not authoring. It used to be credited as the user's.
-  it('DERIVED (churn\'s level Olumi\'s, ACCEPTED by the user): still Olumi\'s for the limit — withheld, limit_rests_on_olumi_guess', async () => {
+  it('DERIVED (churn\'s level marked as the user\'s assumption): the call site names it THEIRS, level_user_assumption', async () => {
     const graph = withSizedChurnLink(input.graph);
     (graph.nodes as Json[]).find((n) => n.id === 'monthly_churn')!.observed_state.source = 'user_assumption';
+    const v = await storedVerdict(graph);
+    expect(v.per_limit).toEqual([{ constraint_id: CHURN, state: 'estimate_only', reason: 'level_user_assumption' }]);
+    expect(v.joint).toEqual({ state: 'estimate_only' });
+  });
+  // ⭐ ORIGIN ≠ ACCEPTANCE (52f8cd; DL CR on #2412 5921764485; R3 5921833180). The literal has two writers: the user
+  // marking a figure as their assumption, and the approved adoption of Olumi's figure, which also records the approval as
+  // `reviewed_by_user`. B6 credits the first and withholds on the second — the figure's origin decides, never the literal.
+  it('NEGATIVE (the brief\'s own figure, marked as the user\'s assumption — no review): still THEIRS, level_user_assumption', async () => {
+    const graph = withSizedChurnLink(input.graph);
+    const obs = (graph.nodes as Json[]).find((n) => n.id === 'monthly_churn')!.observed_state;
+    Object.assign(obs, { source: 'user_assumption', extractionType: 'explicit' });
+    expect(obs).not.toHaveProperty('reviewed_by_user');
+    const v = await storedVerdict(graph);
+    expect(v.per_limit).toEqual([{ constraint_id: CHURN, state: 'estimate_only', reason: 'level_user_assumption' }]);
+    expect(v.joint).toEqual({ state: 'estimate_only' });
+  });
+  it('RED (the approved adoption: Olumi\'s 3 % stamped user_assumption + reviewed_by_user confirm): Olumi\'s, accepted — withheld, limit_rests_on_olumi_guess', async () => {
+    const graph = withSizedChurnLink(input.graph);
+    Object.assign((graph.nodes as Json[]).find((n) => n.id === 'monthly_churn')!.observed_state,
+      { source: 'user_assumption', reviewed_by_user: { intent: 'confirm', at: '2026-09-30T23:00:00.000Z' } });
     const v = await storedVerdict(graph);
     expect(v.per_limit).toEqual([{ constraint_id: CHURN, state: 'unscored', reason: 'limit_rests_on_olumi_guess' }]);
     expect(v.joint).toMatchObject({ state: 'withheld' });

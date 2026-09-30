@@ -737,12 +737,12 @@ const USER_WRITE_RECEIPT: Readonly<
   user: true, // Model-tab factor-value edits
   user_edited: true, // OutputsDock transition bridge
   user_calibration: true, // inspector calibration
-  // Olumi's proposed figure, which the user ACCEPTED (the literal's one live
-  // writer is the approved adoption, `approved-adoption-context.ts`; 52f8cd,
-  // #75 5921124922). Accepted, not authored — but acceptance is a human act on
-  // the value, exactly as `user_confirmed` ("confirm as is") above, so it stays
-  // a receipt here. Whose NUMBER it is is answered elsewhere
-  // (`provenance-display.ts`: Olumi's; `observed_state.reviewed_by_user`: accepted).
+  // The user's declared guess, or Olumi's proposed figure the user ACCEPTED
+  // (the approved adoption writes this literal plus `reviewed_by_user`; 52f8cd,
+  // #75 5921124922). Either is a human act on the value, exactly as
+  // `user_confirmed` ("confirm as is") above, so it stays a receipt here. Whose
+  // NUMBER it is is answered elsewhere (`provenance-display.ts`
+  // `observedValueAuthorship`: the adopted pair is Olumi's).
   //
   // ⚠ DELIBERATE, NAMED (trap 21), and RE-RULED 20 Sep 2026.
   // `graph-readiness/obligation-provenance.ts` now calls this `user_ratified`

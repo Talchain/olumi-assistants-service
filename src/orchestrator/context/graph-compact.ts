@@ -17,7 +17,7 @@ import { qualitativeBand } from '../../cee/factor-extraction/display-value.js';
 import { DEFAULT_EXISTS_PROBABILITY } from "./constants.js";
 import { isLegalStructuralEdge } from "../../cee/utils/structural-edge-classifier.js";
 import {
-  valueSourceAuthorship,
+  observedValueAuthorship,
   type ProvenanceDisplay,
   type ValueSourceDisplay,
 } from "../../cee/transforms/provenance-display.js";
@@ -887,7 +887,7 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
         // values the raw is fully recoverable from `provenance` + the mapping
         // table, so emitting it would just burn LLM context tokens.
         const et = obsState.extractionType;
-        const authored = valueSourceAuthorship(obsState.source);
+        const authored = observedValueAuthorship(obsState);
         // ⭐⭐ A LIMIT IS NOT A LEVEL THE USER STATED — AND SAYING SO IS THE
         // ROLE'S JOB, NOT THE AUTHORSHIP FIELD'S.
         //

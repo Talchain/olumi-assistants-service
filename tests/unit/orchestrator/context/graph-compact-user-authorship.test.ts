@@ -413,9 +413,9 @@ describe('the unverified authority surface is pinned as an explicit set', () => 
    * the unverified surface grew, which is the blindness being closed.
    */
   it('⭐ the KNOWN-UNPINNED set is EXACTLY the user_set literals no CEE writer stamps', () => {
-    // `user_assumption` left: it is Olumi's figure, adopted, and no longer projects `user_set` (52f8cd #75 5921124922).
     expect([...UNVERIFIED_USER_AUTHORSHIP_LITERALS].sort()).toEqual([
       'user',
+      'user_assumption',
       'user_calibration',
       'user_confirmed',
       'user_edited',
