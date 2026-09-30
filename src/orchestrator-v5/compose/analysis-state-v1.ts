@@ -1089,20 +1089,23 @@ export function composeAnalysisStateV1(
 }
 
 /**
- * The analysis block follows the composed binding verdict. Conflicting facts
- * cannot supply a result for this run. Unconfirmed legacy binding retains its
- * available figures but cannot supply a leader designation. The fact remains
- * intact in both cases. This does not police other response prose or coaching.
+ * The analysis block follows the composed binding and claim verdicts. A
+ * conflicting fact cannot supply a result. A newer degraded Run that withholds
+ * the claim makes an older completed result historical, so it cannot supply current figures.
+ * Ordinary withheld claims retain computed facts without a leader designation.
+ * The persisted facts remain intact. This does not police other response prose.
  */
 export function projectAnalysisBlocksForRunBinding(
   blocks: OlumiResponse['blocks'],
   state: AnalysisStateV1,
 ): OlumiResponse['blocks'] {
   const reason = state.leader_claim.withheld_reason;
-  if (reason === WITHHELD_RUN_IDENTITY_CONFLICT) {
+  if (reason === WITHHELD_RUN_IDENTITY_CONFLICT
+    || (state.leader_claim.permitted === false
+      && state.contradictions.includes('fact_status_success_but_degraded_newer'))) {
     return blocks.filter((block) => block.type !== 'analysis_result');
   }
-  if (reason !== WITHHELD_RUN_IDENTITY_UNCONFIRMED) return blocks;
+  if (state.leader_claim.permitted !== false && reason !== WITHHELD_RUN_IDENTITY_UNCONFIRMED) return blocks;
   return blocks.map((block) => {
     if (block.type !== 'analysis_result') return block;
     return {

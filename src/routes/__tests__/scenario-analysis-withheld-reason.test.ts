@@ -117,7 +117,8 @@ describe('the reload names the cause of a withheld leader that it can prove', ()
     const older = runFact({ mayName: false, auto: false, state: 'not_applicable' });
     const newer = runFact({ mayName: false, auto: false, state: 'evaluated_infeasible', status: 'partial', at: '2026-09-24T18:00:00.000Z' });
     const result = await reloadWith([newer, older], 'w-newer-limit');
-    expect(result.analysis_result, 'older successful Run remains displayable').not.toBeNull();
+    expect(result.analysis_state?.contradictions).toContain('fact_status_success_but_degraded_newer');
+    expect(result.analysis_result).toBeNull();
     expect(result.analysis_state?.leader_claim.withheld_reason).toBe('constraint_verdict_withheld');
   });
 
@@ -125,8 +126,19 @@ describe('the reload names the cause of a withheld leader that it can prove', ()
     const older = runFact({ mayName: false, auto: false, state: 'evaluated_infeasible' });
     const newer = runFact({ mayName: false, auto: false, state: 'not_applicable', status: 'partial', at: '2026-09-24T18:00:00.000Z' });
     const result = await reloadWith([newer, older], 'w-newer-no-limit');
-    expect(result.analysis_result, 'older successful Run remains displayable').not.toBeNull();
+    expect(result.analysis_state?.contradictions).toContain('fact_status_success_but_degraded_newer');
+    expect(result.analysis_result).toBeNull();
     expect(result.analysis_state?.leader_claim.withheld_reason).toBe('analysis_leader_withheld');
+  });
+
+  it('a newer partial withhold does not let an older permitted Run carry a current leader in the result block', async () => {
+    const older = runFact({ mayName: true, auto: false });
+    const newer = runFact({ mayName: false, auto: false, state: 'not_applicable', status: 'partial', at: '2026-09-24T18:00:00.000Z' });
+    const result = await reloadWith([newer, older], 'w-newer-shadow');
+    expect(result.analysis_state?.leader_claim.permitted).toBe(false);
+    expect(result.analysis_state?.contradictions).toContain('fact_status_success_but_degraded_newer');
+    expect(result.analysis_result).toBeNull();
+    expect(result.analysis_constraint_verdict_state, 'no old selected-Run sidecar reaches the Agent read').toBeUndefined();
   });
 
   it('CONTROL: an automatic run whose constraint verdict ALSO withholds names the real limit', async () => {

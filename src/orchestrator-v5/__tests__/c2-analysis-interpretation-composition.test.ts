@@ -7,7 +7,7 @@ import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import { finaliseV5Response } from '../response-finaliser.js';
 import { buildAnalysisResultBlock } from '../compose.js';
 import { deriveAnalysisFreshness } from '../context/freshness.js';
-import { canonicalStateFromFreshness } from '../context/canonical-analysis-state.js';
+import { canonicalStateFromFreshness, selectCanonicalAnalysisState } from '../context/canonical-analysis-state.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { runAnalysisFact } from '../context/__tests__/run-delta-fixtures.js';
@@ -175,6 +175,28 @@ describe('C2 binding at the reached finaliser/composer seam', () => {
     expect(out.analysis_state?.leader_claim.permitted).toBe(false);
     expect(out.analysis_state?.leader_claim.separation).toBe('near_tie');
     expect(out.blocks[0]).toMatchObject({ leading_option_id: null, win_probabilities: { 'option-a': 0.65 } });
+  });
+
+  it('C2 turn wire: a newer partial withholding Run does not let an older permitted Run name a leader', () => {
+    const older = fact();
+    const newer = fact({
+      computed_at: NEXT_TIME,
+      constraint_verdict: { may_name_leading_option: false, constraint_verdict_state: 'not_applicable' },
+      enrichment: { analysis_status: 'partial', robustness: { level: 'strong', near_tie: { is_tie: false } } },
+    });
+    const out = finaliseV5Response(response(older), {
+      scenarioId: SCENARIO,
+      priorFacts: [newer, older],
+      freshness: deriveAnalysisFreshness([older], HASH),
+      canonicalState: selectCanonicalAnalysisState({ priorFacts: [newer, older], currentGraphHash: HASH }),
+      mayNameLeadingOption: false,
+      claimConstraintVerdictState: 'not_applicable',
+    });
+    expect(OlumiResponseSchema.safeParse(out).success).toBe(true);
+    expect(out.analysis_state?.leader_claim.permitted).toBe(false);
+    expect(out.analysis_state?.requires_rerun).toBe(true);
+    expect(out.analysis_state?.contradictions).toContain('fact_status_success_but_degraded_newer');
+    expect(out.blocks).toEqual([]);
   });
 
   it('keeps true no-run and no-fact-context compatibility paths distinct', () => {
